@@ -34,7 +34,6 @@ import {
 import { TABLE_HEADER_CELL_SX } from '../utils/table-header-style';
 import { ClippedUrl } from '@/components/ui/clipped-url';
 
-const COLUMN_COUNT = 9;
 /** Width of one nesting level, and of the guide line drawn at that level. */
 const INDENT_PX = 16;
 
@@ -402,11 +401,30 @@ export function SamplerTable({
 
       const isParallel = section.controller === 'parallel';
       const bandColor = colorByBand.get(section) ?? KIND_COLORS.other;
-      const saved = isParallel ? savedLabel(section) : null;
       const descendants = sectionSamples(section);
       // Read off any member: a run is written by one listener version, so every request in it
       // carries the same metadata shape.
       const planPathOnly = descendants[0]?.chain_source === 'plan';
+      // A parallel group is the only band with a duration of its own, and only when the rollup
+      // measured one. Without it there is nothing to put in the response-time columns, so the
+      // band falls back to exactly what a loop or a conditional shows: counts, and dashes where
+      // no number exists. Spanning those columns with a sentence instead left the row unaligned
+      // with every other row in the table and buried the counts, which are still real.
+      const timings = isParallel ? section.stats : null;
+      const note = timings
+        ? savedLabel(section)
+        : isParallel
+          ? planPathOnly
+            ? 'No per-execution timings in this run'
+            : 'Timings appear once the run is analysed'
+          : null;
+      // Two different absences. Saying "not yet" about a permanent one is a lie the reader would
+      // act on, by re-analysing a run that can never produce the number.
+      const noteHelp = timings
+        ? 'The requests below ran at the same time, so their response times overlap. This is what the same work would have cost one after another, and how much the concurrency saved.'
+        : planPathOnly
+          ? "A group's duration is measured per execution, which needs the load test tool to mark which requests belonged to the same concurrent pass. This run records where each request sits in the test plan instead, so the grouping is accurate but the timings cannot be recovered \u2014 not by re-analysing, and not by a later release."
+          : "A group's duration is measured across its executions once the run is analysed, so it is not available while a test is still running. For a run analysed before this was recorded, re-evaluating the run fills it in.";
 
       return [
         <TableRow key={`${key}-band`} sx={{ backgroundColor: alpha(bandColor, 0.07) }}>
@@ -427,7 +445,7 @@ export function SamplerTable({
                   arrow
                   placement="top"
                   title={
-                    isParallel
+                    timings
                       ? KIND_HELP[section.controller]
                       : // Stated rather than left to inference: with a band nested inside another,
                         // "150" on the outer one is not any single thing the reader can point at.
@@ -444,17 +462,13 @@ export function SamplerTable({
                     </Typography>
                   </Box>
                 </Tooltip>
-                {saved && (
-                  <Tooltip
-                    arrow
-                    placement="bottom-start"
-                    title="The requests below ran at the same time, so their response times overlap. This is what the same work would have cost one after another, and how much the concurrency saved."
-                  >
+                {note && (
+                  <Tooltip arrow placement="bottom-start" title={noteHelp}>
                     <Typography
                       variant="caption"
                       sx={{ display: 'block', mt: 0.25, color: 'text.secondary', cursor: 'help' }}
                     >
-                      {saved}
+                      {note}
                     </Typography>
                   </Tooltip>
                 )}
@@ -462,50 +476,30 @@ export function SamplerTable({
             </Box>
           </TableCell>
 
-          {isParallel && section.stats ? (
+          {timings ? (
             <>
               <GroupStatCell
-                value={section.stats.avg_elapsed}
-                tooltip={`The group\u2019s own elapsed time, averaged over ${section.stats.executions} executions. Measured per execution as last finish minus first start, so it is not the sum of the rows below.`}
+                value={timings.avg_elapsed}
+                tooltip={`The group\u2019s own elapsed time, averaged over ${timings.executions} executions. Measured per execution as last finish minus first start, so it is not the sum of the rows below.`}
               />
-              <GroupStatCell value={section.stats.p95_elapsed} executions={section.stats.executions} />
-              <GroupStatCell value={section.stats.p99_elapsed} executions={section.stats.executions} />
-              <CountCell value={section.stats.passed_count} tone="passed" />
-              <CountCell value={section.stats.failed_count} tone="failed" />
+              <GroupStatCell value={timings.p95_elapsed} executions={timings.executions} />
+              <GroupStatCell value={timings.p99_elapsed} executions={timings.executions} />
+              {/* Executions, matching the elapsed columns beside them — not request counts. */}
+              <CountCell value={timings.passed_count} tone="passed" />
+              <CountCell value={timings.failed_count} tone="failed" />
               {/* A group has no Apdex: the threshold is configured per transaction and per
                   request, and a group's duration is neither. */}
               <TableCell align="right" sx={{ color: 'text.disabled' }}>—</TableCell>
               <TableCell align="right" sx={{ color: 'text.disabled' }}>—</TableCell>
               <TableCell align="center" />
             </>
-          ) : isParallel ? (
-            <TableCell colSpan={COLUMN_COUNT - 1} sx={{ color: 'text.disabled' }}>
-              {/* Two different absences, and saying "not yet" about a permanent one is a lie the
-                  reader would act on by re-analysing a run that can never produce the number.
-                  Measuring a pass needs to know which requests shared it; plan-path metadata is
-                  a fixed address in the test plan and records no such identity. */}
-              <Tooltip
-                arrow
-                placement="top"
-                title={
-                  planPathOnly
-                    ? "A group's duration is measured per execution, which needs the load test tool to mark which requests belonged to the same concurrent pass. This run's metadata records where each request sits in the test plan instead, so the grouping below is accurate but the timings cannot be recovered — not by re-analysing, and not by a later release."
-                    : "A group's duration is measured across its executions once the run is analysed, so it is not available while a test is still running. For a run analysed before this was recorded, re-evaluating the run fills it in."
-                }
-              >
-                <Typography variant="caption" sx={{ cursor: 'help' }}>
-                  {planPathOnly
-                    ? 'Ran concurrently — this run records no per-execution timings'
-                    : 'Timings appear once the run is analysed'}
-                </Typography>
-              </Tooltip>
-            </TableCell>
           ) : (
             <>
-              {/* A loop or a conditional has no measured duration of its own — nothing times it
-                  the way the rollup times a parallel pass — so the response-time columns stay
-                  empty rather than carrying a number nothing produced. The counts are real: they
-                  are the sum of the requests below, and they are the whole point of the band. */}
+              {/* Every band without a measured duration renders the same way, whether it is a
+                  loop that never had one or a parallel group whose run does not record one.
+                  Passed and failed are the only columns left that carry a real number: they are
+                  the requests below, summed. Everything else stays a dash rather than showing a
+                  figure nothing produced. */}
               <TableCell align="right" sx={{ color: 'text.disabled' }}>—</TableCell>
               <TableCell align="right" sx={{ color: 'text.disabled' }}>—</TableCell>
               <TableCell align="right" sx={{ color: 'text.disabled' }}>—</TableCell>

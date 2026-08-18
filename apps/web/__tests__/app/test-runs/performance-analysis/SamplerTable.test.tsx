@@ -400,7 +400,7 @@ describe('SamplerTable plan-path runs', () => {
     ]);
 
     expect(screen.queryByText(/Timings appear once the run is analysed/)).not.toBeInTheDocument();
-    expect(screen.getByText(/no per-execution timings/)).toBeInTheDocument();
+    expect(screen.getByText(/No per-execution timings/)).toBeInTheDocument();
   });
 
   it('still bands the group, because the grouping itself is accurate', () => {
@@ -421,7 +421,7 @@ describe('SamplerTable plan-path runs', () => {
     ]);
 
     expect(screen.getByText(/Timings appear once the run is analysed/)).toBeInTheDocument();
-    expect(screen.queryByText(/no per-execution timings/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No per-execution timings/)).not.toBeInTheDocument();
   });
 
   it('shows the timings when a historical run has them, whatever the wording elsewhere', () => {
@@ -432,7 +432,7 @@ describe('SamplerTable plan-path runs', () => {
     ]);
 
     expect(screen.getByText('156.00')).toBeInTheDocument();
-    expect(screen.queryByText(/no per-execution timings/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No per-execution timings/)).not.toBeInTheDocument();
   });
 
   it('renders a plan-path parallel band with no chain_source as merely unanalysed', () => {
@@ -454,5 +454,81 @@ describe('SamplerTable plan-path runs', () => {
     ]);
 
     expect(screen.getAllByText('Loop')).toHaveLength(2);
+  });
+});
+
+describe('SamplerTable band without measured timings', () => {
+  it('fills the only columns it honestly can: passed and failed', () => {
+    // Answering the obvious question about a timing-less parallel band. The response-time and
+    // Apdex columns have no number behind them, but the counts below are real.
+    const { container } = renderTable([
+      sampler('a', { parallel_group: 'PG1', chain_source: 'plan', passed_count: 40, failed_count: 2 }),
+      sampler('b', { parallel_group: 'PG1', chain_source: 'plan', passed_count: 20, failed_count: 1 }),
+    ]);
+
+    const bandRow = Array.from(container.querySelectorAll('tbody tr')).find((r) =>
+      (r.textContent ?? '').includes('Parallel group'),
+    )!;
+    const cells = Array.from(bandRow.querySelectorAll('th,td')).map((c) => c.textContent?.trim());
+
+    // name | avg | p95 | p99 | passed | failed | threshold | apdex | actions
+    expect(cells).toHaveLength(9);
+    expect(cells[1]).toBe('—');
+    expect(cells[2]).toBe('—');
+    expect(cells[3]).toBe('—');
+    expect(cells[4]).toBe('60');
+    expect(cells[5]).toBe('3');
+    expect(cells[6]).toBe('—');
+    expect(cells[7]).toBe('—');
+  });
+
+  it('keeps the band aligned with every other row rather than spanning the table', () => {
+    // A sentence stretched across the numeric columns left the row out of step with the rest of
+    // the table and hid the counts.
+    const { container } = renderTable([
+      sampler('a', { parallel_group: 'PG1', chain_source: 'plan' }),
+      sampler('b', { parallel_group: 'PG1', chain_source: 'plan' }),
+    ]);
+
+    for (const row of Array.from(container.querySelectorAll('tbody tr'))) {
+      const spans = Array.from(row.querySelectorAll('th,td')).map((c) =>
+        Number(c.getAttribute('colspan') ?? 1),
+      );
+      expect(spans.every((n) => n === 1)).toBe(true);
+      expect(row.querySelectorAll('th,td')).toHaveLength(9);
+    }
+  });
+
+  it('reports executions, not request counts, when the timings do exist', () => {
+    // The two are different things; the counts must agree with the columns beside them.
+    const stats = groupStats({ executions: 40, passed_count: 39, failed_count: 1 });
+    const { container } = renderTable([
+      sampler('a', { parallel_group: 'PG1', parallel_group_stats: stats, passed_count: 500 }),
+      sampler('b', { parallel_group: 'PG1', parallel_group_stats: stats, passed_count: 500 }),
+    ]);
+
+    const bandRow = Array.from(container.querySelectorAll('tbody tr')).find((r) =>
+      (r.textContent ?? '').includes('Parallel group'),
+    )!;
+    const cells = Array.from(bandRow.querySelectorAll('th,td')).map((c) => c.textContent?.trim());
+    expect(cells[4]).toBe('39');
+    expect(cells[5]).toBe('1');
+  });
+
+  it('a loop band and a timing-less parallel band render the same shape', () => {
+    const { container } = renderTable([
+      sampler('a', { parent_controllers: [threadGroup, forEach('L1')] }),
+      sampler('b', { parallel_group: 'PG1', chain_source: 'plan' }),
+      sampler('c', { parallel_group: 'PG1', chain_source: 'plan' }),
+    ]);
+
+    const shapeOf = (label: string) => {
+      const row = Array.from(container.querySelectorAll('tbody tr')).find((r) =>
+        (r.textContent ?? '').includes(label),
+      )!;
+      return Array.from(row.querySelectorAll('th,td')).map((c) => c.textContent?.trim() === '—');
+    };
+
+    expect(shapeOf('Parallel group')).toEqual(shapeOf('Loop'));
   });
 });
