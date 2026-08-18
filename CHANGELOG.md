@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.65.0] - 2026-08-18
+
+### Fixed
+- **A CI pipeline's API key can read back the test run it just created.** An API key's
+  organization membership was being resolved through the same row-level security policy that
+  the answer feeds — the key had to already be in an organization to prove it was in that
+  organization. Depending on which code path asked first, the same key could be a member for
+  one request and a stranger for the next, and the result was cached either way. A pipeline
+  could drive a test run to completion and then get a 404 asking for its own result, so the
+  run reported as no verdict and a full test cycle was lost. Membership is now resolved the
+  same way for every caller, independent of the policy it is used to evaluate.
+- **A test run whose system is hidden from you is no longer readable.** Access to a run is
+  checked through its system under test, but if that system was filtered out for the caller
+  the check was skipped and the run was returned with no organization or team check at all.
+  It now refuses, like every other denial.
+- **Related test runs no longer skip the access check.** Asking for a run's related runs
+  without naming a system, environment and workload took a shortcut that looked the run up by
+  id and ran no check at all, then listed up to fifty of its siblings. It now applies the same
+  check as every other way of reading a run.
+- **Asking for another organization's test runs by id no longer works.** The `organizationId`
+  query parameter was trusted as given, so naming an organization you do not belong to
+  returned its runs instead of yours. It can now only narrow what you may already see.
+  Administrators are unaffected.
+
+### Changed
+- **A refused test run says why in the server log.** Five different reasons — the run is not
+  visible, its system is not visible, the system has no organization, you are not in that
+  organization, or the system is restricted to a team you are not in — all still return the
+  same 404, so no caller learns whether a run exists. They are now distinguishable in the
+  log, turning what was an open-ended investigation into a single line. An ordinary missing
+  or mistyped run id logs at debug instead, so routine misses stay out of the denial signal.
+
 ## [0.2.64.0] - 2026-08-18
 
 ### Added

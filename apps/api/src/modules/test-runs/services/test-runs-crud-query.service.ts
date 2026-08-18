@@ -25,8 +25,9 @@ import { AuthorizationService } from '../../../common/services/authorization.ser
  *   `getAccessibleTeams` themselves. The parent uses `withOrgFilter` /
  *   `withTeamFilter` to compute these once.
  * - Per-resource methods (`findByTestRunId`, `findOne`, `getTestRunByTestRunId`)
- *   still call `isOrganizationMember` / `canViewTeamResources` directly because
- *   those are individual-resource lookups, not list filters.
+ *   delegate to the private `denialReason()` helper, which calls
+ *   `isOrganizationMember` / `canViewTeamResources` — those are individual-resource
+ *   lookups, not list filters, so they cannot use the list-filter helpers above.
  * - TestRun entity does not have organization_id; access is checked via the
  *   joined SystemUnderTest's `organization_id` / `team_id`.
  */
@@ -504,6 +505,69 @@ export class TestRunsCrudQueryService {
   }
 
   /**
+   * Strip CR/LF from a caller-supplied id before it reaches a log line.
+   *
+   * testRunId is a raw path parameter and Express percent-decodes path
+   * segments, so an unsanitized `%0A` would let an authenticated caller forge
+   * extra lines in the denial stream — the one stream that is supposed to be
+   * the trustworthy record of why access was refused.
+   */
+  private forLog(value: string): string {
+    return value.replace(/[\r\n]/g, '');
+  }
+
+  /**
+   * Resolve why a caller may not read a test run, or null if they may.
+   *
+   * All five denials (invisible row, invisible system, org-less system,
+   * non-member, team restriction)
+   * surface to the caller as an indistinguishable refusal by design — a 404 from
+   * findByTestRunId/findOne, `null` from getTestRunByTestRunId — because a caller
+   * must not learn a run exists. That makes the log the only place the causes are
+   * distinguishable, so callers MUST log the returned reason before refusing.
+   */
+  private async denialReason(
+    entity: TestRunEntity,
+    userId: string,
+    isAdmin: boolean
+  ): Promise<string | null> {
+    if (isAdmin) {
+      return null;
+    }
+
+    // Fail closed when the relation is missing. system_under_test_id is NOT
+    // NULL, so a null here never means "this run has no system" — it means the
+    // LEFT JOIN produced nothing, which under RLS is a legitimate denial
+    // (systems_under_test has its own can_access_resource policy and can be
+    // filtered out for a run the caller *can* see, e.g. one visible via its own
+    // created_by). Treating that as "allowed" would skip every org and team
+    // check below.
+    if (!entity.systemUnderTest) {
+      return 'system under test not visible (RLS-filtered or dangling FK)';
+    }
+
+    const sut = entity.systemUnderTest;
+
+    if (!sut.organization_id) {
+      return `system under test '${this.forLog(sut.name)}' (${sut.id}) has no organization_id`;
+    }
+
+    const isMember = await this.authzService.isOrganizationMember(userId, sut.organization_id);
+    if (!isMember) {
+      return `user is not a member of organization ${sut.organization_id}`;
+    }
+
+    if (sut.team_id) {
+      const teamAccess = await this.authzService.canViewTeamResources(userId, sut.team_id);
+      if (!teamAccess.allowed) {
+        return `user lacks access to team ${sut.team_id}: ${teamAccess.reason}`;
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Find a test run by its testRunId.
    *
    * @param testRunId - The test run identifier
@@ -520,32 +584,14 @@ export class TestRunsCrudQueryService {
       });
 
       if (!testRunEntity) {
+        this.logger.debug(`Test run ${this.forLog(testRunId)} not returned for user ${this.forLog(userId)}: no visible row (RLS-filtered or nonexistent)`);
         throw new ResourceNotFoundException('TestRun', testRunId);
       }
 
-      // Check organization-based access via systems_under_test
-      if (!isAdmin && testRunEntity.systemUnderTest) {
-        const systemOrgId = testRunEntity.systemUnderTest.organization_id;
-
-        // Systems without organization_id only accessible to global admins
-        if (!systemOrgId) {
-          throw new ResourceNotFoundException('TestRun', testRunId);
-        }
-
-        // Check if user is a member of the system's organization
-        const isMember = await this.authzService.isOrganizationMember(userId, systemOrgId);
-        if (!isMember) {
-          throw new ResourceNotFoundException('TestRun', testRunId);
-        }
-
-        // Check team-level restriction
-        const sut = testRunEntity.systemUnderTest;
-        if (sut.team_id) {
-          const teamAccess = await this.authzService.canViewTeamResources(userId, sut.team_id);
-          if (!teamAccess.allowed) {
-            throw new ResourceNotFoundException('TestRun', testRunId);
-          }
-        }
+      const denial = await this.denialReason(testRunEntity, userId, isAdmin);
+      if (denial) {
+        this.logger.warn(`Test run ${this.forLog(testRunId)} denied for user ${this.forLog(userId)}: ${denial}`);
+        throw new ResourceNotFoundException('TestRun', testRunId);
       }
 
       const testRun = this.mapper.mapEntityToTestRun(testRunEntity);
@@ -586,32 +632,14 @@ export class TestRunsCrudQueryService {
       });
 
       if (!testRunEntity) {
+        this.logger.debug(`Test run ${this.forLog(id)} not returned for user ${this.forLog(userId)}: no visible row (RLS-filtered or nonexistent)`);
         throw new ResourceNotFoundException('TestRun', id);
       }
 
-      // Check organization-based access via systems_under_test
-      if (!isAdmin && testRunEntity.systemUnderTest) {
-        const systemOrgId = testRunEntity.systemUnderTest.organization_id;
-
-        // Systems without organization_id only accessible to global admins
-        if (!systemOrgId) {
-          throw new ResourceNotFoundException('TestRun', id);
-        }
-
-        // Check if user is a member of the system's organization
-        const isMember = await this.authzService.isOrganizationMember(userId, systemOrgId);
-        if (!isMember) {
-          throw new ResourceNotFoundException('TestRun', id);
-        }
-
-        // Check team-level restriction
-        const sut = testRunEntity.systemUnderTest;
-        if (sut.team_id) {
-          const teamAccess = await this.authzService.canViewTeamResources(userId, sut.team_id);
-          if (!teamAccess.allowed) {
-            throw new ResourceNotFoundException('TestRun', id);
-          }
-        }
+      const denial = await this.denialReason(testRunEntity, userId, isAdmin);
+      if (denial) {
+        this.logger.warn(`Test run ${this.forLog(id)} denied for user ${this.forLog(userId)}: ${denial}`);
+        throw new ResourceNotFoundException('TestRun', id);
       }
 
       const testRun = this.mapper.mapEntityToTestRun(testRunEntity);
@@ -652,32 +680,14 @@ export class TestRunsCrudQueryService {
       });
 
       if (!testRunEntity) {
+        this.logger.debug(`Test run ${this.forLog(testRunId)} not returned for user ${this.forLog(userId)}: no visible row (RLS-filtered or nonexistent)`);
         return null;
       }
 
-      // Check organization-based access via systems_under_test
-      if (!isAdmin && testRunEntity.systemUnderTest) {
-        const systemOrgId = testRunEntity.systemUnderTest.organization_id;
-
-        // Systems without organization_id only accessible to global admins
-        if (!systemOrgId) {
-          return null;
-        }
-
-        // Check if user is a member of the system's organization
-        const isMember = await this.authzService.isOrganizationMember(userId, systemOrgId);
-        if (!isMember) {
-          return null;
-        }
-
-        // Check team-level restriction
-        const sut = testRunEntity.systemUnderTest;
-        if (sut.team_id) {
-          const teamAccess = await this.authzService.canViewTeamResources(userId, sut.team_id);
-          if (!teamAccess.allowed) {
-            return null;
-          }
-        }
+      const denial = await this.denialReason(testRunEntity, userId, isAdmin);
+      if (denial) {
+        this.logger.warn(`Test run ${this.forLog(testRunId)} denied for user ${this.forLog(userId)}: ${denial}`);
+        return null;
       }
 
       const testRun = this.mapper.mapEntityToTestRun(testRunEntity);
@@ -795,6 +805,7 @@ export class TestRunsCrudQueryService {
    */
   async getRelatedTestRuns(
     testRunId: string,
+    userId: string,
     isAdmin: boolean,
     organizationIds: string[],
     userTeamIds: string[],
@@ -822,16 +833,27 @@ export class TestRunsCrudQueryService {
           relations: ['systemUnderTest', 'systemUnderTest.pyroscopeInstance']
         });
 
-        if (testRunEntity) {
-          currentTestRun = this.mapper.mapEntityToTestRun(testRunEntity);
+        if (!testRunEntity) {
+          this.logger.debug(`Test run ${this.forLog(testRunId)} not returned for user ${this.forLog(userId)}: no visible row (RLS-filtered or nonexistent)`);
+          throw new ResourceNotFoundException('Test run', testRunId);
         }
+
+        // This branch resolves the run by id alone, so it must run the same
+        // per-resource guard the other lookups do. Without it, omitting the
+        // system/environment/workload query parameters skipped every
+        // organization and team check and returned the run's siblings.
+        const denial = await this.denialReason(testRunEntity, userId, isAdmin);
+        if (denial) {
+          this.logger.warn(`Test run ${this.forLog(testRunId)} denied for user ${this.forLog(userId)}: ${denial}`);
+          throw new ResourceNotFoundException('Test run', testRunId);
+        }
+
+        currentTestRun = this.mapper.mapEntityToTestRun(testRunEntity);
       }
 
       if (!currentTestRun) {
         throw new ResourceNotFoundException('Test run', testRunId);
       }
-
-      // NOTE: Organization filtering will be added here when TestRun entity has organization_id
 
       const relatedTestRunEntities = await withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')

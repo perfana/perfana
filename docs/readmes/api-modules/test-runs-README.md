@@ -64,8 +64,10 @@ Domain module for the full lifecycle of a performance test run — from init thr
 
 ## Notes
 
-- All routes require JWT bearer auth via the global `JwtAuthGuard` except explicit `@Public()` endpoints.
-- `@UserCtx()` injects `{ userId, roles, organizationId, organizations }` from the JWT; services use this for row-level access control.
+- All routes are protected by the global `KeycloakEnhancedAuthGuard` (Keycloak JWT *or* API key) except explicit `@Public()` endpoints.
+- `@UserCtx()` injects `{ userId, roles, organizationId, organizations }`. Use `ctx.userId` and `ctx.roles` only — `ctx.organizations` is JWT-only and is often `[]`. Services resolve organizations themselves via `AuthorizationService.getAccessibleOrganizations(userId)`.
+- Authorization splits two shapes. List methods in `services/test-runs-crud-query.service.ts` use `withOrgFilter` / `withTeamFilter`. Per-resource methods (`findByTestRunId`, `findOne`, `getTestRunByTestRunId`) delegate to the private `denialReason()` helper, which checks `isOrganizationMember` / `canViewTeamResources` against the joined `SystemUnderTest`. `denialReason()` fails closed: a missing `systemUnderTest` relation is a denial, not a skip.
+- All five denial causes return an indistinguishable refusal to the caller (404, or `null` from `getTestRunByTestRunId`) so nobody learns whether a run exists. The server log is the only place they are distinguishable, so a new caller of `denialReason()` must log the returned reason before refusing, and must pass caller-supplied ids through `forLog()` to keep CR/LF out of the denial stream.
 - The `POST /test` endpoint carries `@ThrottleConfig(200, 60000)` — 200 requests per minute — to protect against CI storms.
 - Several Metrics endpoints are Phase 3 stubs: they accept requests and return 400 with a descriptive message rather than 501, so the Swagger UI remains usable.
 - The four-controller split keeps files small; `TestRunsService` is the single DI injection point so controllers never import sub-services directly.

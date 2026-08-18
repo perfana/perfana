@@ -29,18 +29,21 @@ Organization
 ## Organization Scoping
 
 ### API Layer
-- Every request must include `X-Organization-Id` header
-- `DatabaseSessionMiddleware` validates membership and sets PostgreSQL session variables
-- All queries automatically filtered by organization
+- The caller's accessible organizations are resolved server-side from `AuthorizationService.getAccessibleOrganizations(userId)` — there is no client-supplied organization header
+- `RlsTransactionInterceptor` opens a per-request transaction and sets the RLS context on it
+- Queries routed through `withRequestEm()` are filtered by organization at the database level
 
 ### Database Layer (Row-Level Security)
-PostgreSQL session variables set per request:
+Per request, inside the transaction:
 ```sql
-SET LOCAL app.current_organization_id = '<org_id>';
-SET LOCAL app.current_user_id = '<user_id>';
+SET LOCAL ROLE perfana_app;
+SELECT set_config('app.current_user_id',            '<user_id>',        true);
+SELECT set_config('app.current_user_organizations', '["<org_id>", ...]', true);
+SELECT set_config('app.current_user_teams',         '["<team_id>", ...]', true);
+SELECT set_config('app.current_user_roles',         '["<role>", ...]',  true);
 ```
 
-RLS policies enforce data isolation at the database level.
+RLS policies (`can_access_resource` / `can_modify_resource` / `is_global_admin`) read those GUCs to enforce data isolation at the database level.
 
 ### Frontend Layer
 - `OrganizationContext` manages org selection
@@ -81,6 +84,8 @@ API keys are scoped to a single organization:
 - Created with `organization_id` association
 - Requests with API keys automatically use the key's organization
 - No org switching available for API key auth
+
+That organization is resolved by reading the `api_keys` row on the **plain pooled connection, deliberately outside RLS** — the result *becomes* `app.current_user_organizations`, so it cannot be read through a policy that consumes it. `api_keys` is `FORCE ROW LEVEL SECURITY`, so the read works only while the API's login role bypasses RLS (`rolsuper`/`rolbypassrls`). Under a role without the bypass, every API key silently loses organization access. See [[RBAC]] §1.
 
 ## Profile Filtering
 
