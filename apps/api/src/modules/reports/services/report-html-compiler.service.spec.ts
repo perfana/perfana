@@ -886,3 +886,48 @@ describe('ReportHtmlCompilerService', () => {
     });
   });
 });
+
+describe('ReportHtmlCompilerService A4 layout', () => {
+  // The report is a document. On a wide monitor it used to stretch to the full window, so lines
+  // ran past any comfortable reading length and tables sprawled into a shape the PDF never has.
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('holds the report to A4 width on screen', () => {
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Page Header'));
+
+    expect(screenBlock).toMatch(/max-width:\s*210mm/);
+    expect(screenBlock).toMatch(/margin-left:\s*auto/);
+    expect(screenBlock).toMatch(/margin-right:\s*auto/);
+  });
+
+  it('uses the same side margin the PDF does, so the column matches what prints', () => {
+    // pdf.service.ts insets 15mm left and right of a 210mm page: a 180mm text column.
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Page Header'));
+
+    expect(screenBlock).toMatch(/padding:\s*20mm\s+15mm/);
+  });
+
+  it('scopes the constraint to screen, so print is not inset twice', () => {
+    // Puppeteer's page box already sets the printed width, and the print block zeroes padding.
+    const out = html();
+
+    expect(out.indexOf('@media screen')).toBeGreaterThan(-1);
+    // Anchor on the section marker: the screen block's own comment mentions "@media print".
+    const printBlock = out.slice(out.indexOf('/* Print Styles */'));
+    expect(printBlock).toMatch(/padding:\s*0/);
+    expect(printBlock).not.toMatch(/max-width:\s*210mm/);
+  });
+
+  it('paints the page background so the centred column is not a grey stripe', () => {
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Page Header'));
+
+    expect(screenBlock).toMatch(/html\s*\{[^}]*background-color/);
+  });
+});
