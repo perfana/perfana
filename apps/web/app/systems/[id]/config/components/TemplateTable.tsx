@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import {
   Box,
   Table,
@@ -17,6 +20,8 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   ContentCopy as CopyIcon,
+  Tag as IdIcon,
+  Check as CheckIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
   Description as DescriptionIcon,
@@ -48,6 +53,21 @@ export default function TemplateTable({
   onSelectAll,
   onSelectOne,
 }: TemplateTableProps) {
+  // Which row most recently had its id copied, so the button can confirm it happened. Clipboard
+  // writes are silent otherwise and the user has no way to tell the click registered.
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      window.setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000);
+    } catch {
+      // Clipboard access can be refused (insecure origin, permissions). Selecting the text is
+      // then the fallback, so leave the icon unchanged rather than claiming a copy happened.
+    }
+  };
+
   const getFilteredTemplates = () => {
     let filtered = templates;
 
@@ -223,6 +243,22 @@ export default function TemplateTable({
                     sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}
                     onClick={(e) => e.stopPropagation()}
                   >
+                    {/* The uuid is what POST /reports/generate takes as template_id. A pipeline
+                        cannot read it off this screen any other way, and template_name only
+                        works while the name is unique in the scope. */}
+                    <Tooltip title={copiedId === template.id ? 'Template ID copied' : 'Copy template ID'}>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleCopyId(template.id)}
+                        aria-label={`Copy template ID for ${template.name}`}
+                      >
+                        {copiedId === template.id ? (
+                          <CheckIcon fontSize="small" color="success" />
+                        ) : (
+                          <IdIcon fontSize="small" />
+                        )}
+                      </IconButton>
+                    </Tooltip>
                     {!template.is_default && (
                       <Tooltip title="Set as default">
                         <IconButton
