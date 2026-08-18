@@ -662,6 +662,8 @@ describe('ReportGenerationService', () => {
         getManyAndCount: jest.fn().mockResolvedValue([mockReports, 2]),
       };
       reportRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+      // The human id has to resolve to a uuid before any report query can run.
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
 
       // Act
       const result = await service.findByTestRunId('test-run-id', { roles: ['admin'] });
@@ -693,6 +695,7 @@ describe('ReportGenerationService', () => {
         getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
       };
       reportRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
 
       // Act
       await service.findByTestRunId('test-run-id', options);
@@ -708,6 +711,7 @@ describe('ReportGenerationService', () => {
 
     it('should return empty list when no reports exist', async () => {
       // Arrange - uses the default mock from beforeEach which returns [[], 0]
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
 
       // Act
       const result = await service.findByTestRunId('test-run-id');
@@ -715,6 +719,74 @@ describe('ReportGenerationService', () => {
       // Assert
       expect(result.items).toEqual([]);
       expect(result.total).toBe(0);
+    });
+
+    it('queries reports by the test run uuid, never the human id', async () => {
+      // generated_reports.test_run_id is a uuid column. Handing it "EA-acc-loadtest-00020" is
+      // not a miss that returns nothing, it is a 22P02 from Postgres surfacing as a 500.
+      const mockQueryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      reportRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+
+      await service.findByTestRunId('EA-acc-loadtest-00020', { roles: ['admin'] });
+
+      expect(testRunRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { testRunId: 'EA-acc-loadtest-00020' } }),
+      );
+      const [predicate, params] = mockQueryBuilder.where.mock.calls[0];
+      expect(predicate).not.toMatch(/OR/);
+      expect(Object.values(params as Record<string, unknown>)).toEqual([
+        '123e4567-e89b-12d3-a456-426614174001',
+      ]);
+    });
+
+    it('takes a uuid as given, without a lookup', async () => {
+      const mockQueryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      reportRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+
+      await service.findByTestRunId('123e4567-e89b-12d3-a456-426614174001', { roles: ['admin'] });
+
+      expect(testRunRepo.findOne).not.toHaveBeenCalled();
+      const [, params] = mockQueryBuilder.where.mock.calls[0];
+      expect(Object.values(params as Record<string, unknown>)).toEqual([
+        '123e4567-e89b-12d3-a456-426614174001',
+      ]);
+    });
+
+    it('wraps a failure of the new test run lookup in DatabaseException', async () => {
+      // resolveTestRunUuid runs inside the same try as the report query, so a database failure
+      // there must surface the same way rather than as an unhandled rejection.
+      testRunRepo.findOne.mockRejectedValue(new Error('connection reset'));
+
+      await expect(
+        service.findByTestRunId('EA-acc-loadtest-00020', { roles: ['admin'] }),
+      ).rejects.toThrow(DatabaseException);
+    });
+
+    it('returns an empty list, not an error, for a test run that does not exist', async () => {
+      // The UI shows "no reports" for a run it cannot find, matching getSummary.
+      testRunRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.findByTestRunId('no-such-run', { roles: ['admin'] });
+
+      expect(result).toEqual({ items: [], total: 0, offset: 0, limit: 10 });
+      expect(reportRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 
@@ -773,6 +845,60 @@ describe('ReportGenerationService', () => {
       expect(result.pendingReports).toBe(0);
       expect(result.failedReports).toBe(0);
       expect(result.latestReport).toBeUndefined();
+    });
+
+    it('returns an empty summary for a test run that does not exist', async () => {
+      // Same posture as findByTestRunId: the UI shows zeroes for a run it cannot find.
+      const mockQueryBuilder = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+
+      const result = await service.getSummary('no-such-run', 'test-user', ['admin']);
+
+      expect(result.totalReports).toBe(0);
+      expect(result.latestReport).toBeUndefined();
+      expect(reportRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('matches on the column the id actually is, never both in one predicate', async () => {
+      // `tr.id = :x OR tr.test_run_id = :x` sends ONE parameter, which Postgres types as uuid
+      // from the first branch — so a human id fails to parse before the second is reached, and
+      // a CAST there is too late. pg_prepared_statements reports {uuid} for exactly that shape.
+      const mockQueryBuilder = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(createMockTestRun()),
+      };
+      (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      reportRepo.find.mockResolvedValue([]);
+
+      await service.getSummary('EA-acc-loadtest-00020', 'test-user', ['admin']);
+
+      const [predicate] = mockQueryBuilder.where.mock.calls[0];
+      expect(predicate).toBe('tr.test_run_id = :testRunId');
+      expect(predicate).not.toMatch(/OR/);
+      expect(predicate).not.toMatch(/CAST/);
+    });
+
+    it('matches on the uuid column when handed a uuid', async () => {
+      const mockQueryBuilder = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(createMockTestRun()),
+      };
+      (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      reportRepo.find.mockResolvedValue([]);
+
+      await service.getSummary('123e4567-e89b-12d3-a456-426614174001', 'test-user', ['admin']);
+
+      const [predicate] = mockQueryBuilder.where.mock.calls[0];
+      expect(predicate).toBe('tr.id = :testRunId');
     });
   });
 
