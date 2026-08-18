@@ -88,6 +88,46 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
+### Fail fast when the API's DB role cannot bypass RLS
+
+**Priority:** P2
+**Origin:** Red team review during /ship on `fix/api-key-authz-rls-and-denial-logging` (2026-08-18).
+**Why:** `AuthorizationService` resolves an API key's organization by reading
+`api_keys` on the pooled connection, deliberately outside RLS (the read is an
+*input* to the RLS context, so scoping it is circular). `api_keys` is FORCE ROW
+LEVEL SECURITY, so that read only returns rows because the API's login role is
+`rolsuper`/`rolbypassrls`. Deploy the API under a least-privilege role — the
+stated point of `perfana_app`, or an RDS master user, which is not BYPASSRLS —
+and both api-key branches return zero rows. Every API key silently loses all
+organization access, and it surfaces as the misleading denial
+"user is not a member of organization X". The dependency is documented in a
+comment but nothing enforces it.
+**What:** On boot, assert the configured `DB_USERNAME` has `rolsuper` OR
+`rolbypassrls` and fail with an explicit message naming this constraint, rather
+than degrading into blanket api-key 404s at runtime.
+**Where to start:** `apps/api/src/common/services/authorization.service.ts`
+(comment above the api-key branch in `isOrganizationMember` states the
+invariant); query `pg_roles` for the connected user during the existing startup
+checks.
+
+---
+
+### Live-DB RLS regression test for API-key organization resolution
+
+**Priority:** P3
+**Origin:** /ship coverage audit on `fix/api-key-authz-rls-and-denial-logging` (2026-08-18).
+**Why:** The unit guards added in that PR pin *which repository* the api-key
+lookups use (they fail if either reverts to `withRequestEm`), but not the
+*policy outcome*. Nothing proves end-to-end that an RLS-scoped read actually
+starves an API-key caller, which is the behavior the whole fix turns on.
+**What:** A test in `apps/api/src/test/rls/` that seeds an API key plus a test
+run in its organization, drives a request through `RlsTransactionInterceptor`,
+and asserts the key reads its own run — and that the scoped variant does not.
+**Where to start:** `apps/api/src/test/rls/rls-test-harness.ts` already sets the
+four GUCs; needs Phase 5b migrations applied to the target database.
+
+---
+
 ## Grafana dashboards
 
 ### Surface failed background dashboard deletions in the UI
