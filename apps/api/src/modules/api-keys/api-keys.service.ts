@@ -286,6 +286,12 @@ export class ApiKeysService {
       // Invalidate cache before deletion
       await this.apiKeyCacheService.invalidateKey(apiKey.description);
       await this.apiKeyCacheService.invalidateAllValidationResults();
+      // AuthorizationService caches org/team membership under the api-key:<id>
+      // principal for AUTH_CACHE_TTL_SECONDS. Authentication rejects a deleted
+      // key before authorization is consulted, so this is belt-and-braces
+      // today — but it is the invalidation a future revoke flag or org-move
+      // would depend on, and it is cheaper to wire now than to remember later.
+      await this.authzService.invalidateUserCache(`api-key:${id}`);
 
       this.auditService.logDelete(apiKey as unknown as OwnedResource);
       await this.apiKeyRepository.delete(id);
