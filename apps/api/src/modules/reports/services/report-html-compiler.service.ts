@@ -591,7 +591,10 @@ export class ReportHtmlCompilerService {
        this a long unbreakable cell (the UNACCEPTABLE apdex pill) sets a min-content
        width wider than the page and Chrome silently clips the trailing columns.
        Headers keep normal wrapping so they break on spaces, not mid-word. */
-    .data-table td {
+    .data-table td,
+    .data-table th {
+      /* th too: a header like "TRANSACTION NAME" is what sets a column's floor, and under fixed
+         layout an unbreakable one would push its neighbours to nothing. */
       overflow-wrap: anywhere;
     }
 
@@ -732,6 +735,19 @@ export class ReportHtmlCompilerService {
          ends the cover. */
       .cover-page {
         min-height: 257mm;
+      }
+
+      /* Some tables are genuinely wider than a page — the regressions list and the
+         per-transaction Apdex breakdown carry more columns than 180mm holds. Before the column
+         was constrained they simply used the whole window; now they would run out of their card
+         and off the page.
+
+         They scroll inside their own section instead. Forcing them to fit was tried and is
+         worse: table-layout:fixed gives every column an equal share, which squashed the
+         per-transaction tables until the text overlapped. Print is untouched — this is a screen
+         affordance, and paper has no scrollbar. */
+      section {
+        overflow-x: auto;
       }
     }
 

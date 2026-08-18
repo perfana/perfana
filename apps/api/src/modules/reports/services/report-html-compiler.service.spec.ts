@@ -963,3 +963,28 @@ describe('ReportHtmlCompilerService cover page height', () => {
     expect(beforeScreen).toMatch(/\.cover-page\s*\{[^}]*min-height:\s*100vh/);
   });
 });
+
+describe('ReportHtmlCompilerService wide tables', () => {
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('keeps a too-wide table inside its section on screen', () => {
+    // The regressions list and per-transaction Apdex breakdown carry more columns than 180mm
+    // holds. Unconstrained they ran out of their card and off the page.
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/section\s*\{[^}]*overflow-x:\s*auto/);
+  });
+
+  it('does not force columns to equal shares', () => {
+    // table-layout:fixed was tried: it squashed the per-transaction tables until the text
+    // overlapped, and the widest table still did not fit.
+    // A declaration at the start of a line — the rejected approach is still named in a
+    // comment, which is the point of the comment.
+    expect(html()).not.toMatch(/^\s*table-layout:\s*fixed/m);
+  });
+});
