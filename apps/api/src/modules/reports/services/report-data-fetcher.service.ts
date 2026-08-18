@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
+import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { percentDiff } from '../renderers/comparison-bands';
@@ -1351,10 +1352,6 @@ export class ReportDataFetcherService {
   }
 
   /**
-   * Get AWR data for a test run
-   * Fetches AWR reports and their analysis insights
-   */
-  /**
    * The run immediately before this one in the same system, environment and workload, or null
    * when there is none.
    *
@@ -1386,26 +1383,11 @@ export class ReportDataFetcherService {
       .getOne();
   }
 
-  /**
-   * The DB uuid for a test run named either way, or null if there is no such run.
-   *
-   * Mirrors the resolver in ReportGenerationService: a uuid-shaped id is tried as the uuid
-   * first and then as a name, because a run may legitimately be named after a build guid.
-   * Separate statements rather than one `id = :x OR test_run_id = :x`, whose single parameter
-   * Postgres types as uuid from the first comparison so a human id never reaches the second.
-   */
-  private async resolveTestRunUuid(testRunId: string): Promise<string | null> {
-    const em = withRequestEm(this.testRunRepo);
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(testRunId)) {
-      const byUuid = await em.findOne({ where: { id: testRunId }, select: ['id'] });
-      if (byUuid) {
-        return byUuid.id;
-      }
-    }
-    const byName = await em.findOne({ where: { testRunId }, select: ['id'] });
-    return byName?.id ?? null;
-  }
 
+  /**
+   * Get AWR data for a test run
+   * Fetches AWR reports and their analysis insights
+   */
   async getAwrData(testRunId: string): Promise<AwrData | null> {
     try {
       // awr_reports.test_run_id is a uuid foreign key onto test_runs(id) — the ONLY table this
@@ -1418,7 +1400,7 @@ export class ReportDataFetcherService {
       // loudly. Resolving here rather than at the one call site keeps the renderers uniform:
       // they all pass testRun.testRunId, and none of them has to know which tables are keyed
       // which way.
-      const testRunUuid = await this.resolveTestRunUuid(testRunId);
+      const testRunUuid = await resolveTestRunUuid(this.testRunRepo, testRunId);
       if (!testRunUuid) {
         return null;
       }

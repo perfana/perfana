@@ -35,7 +35,8 @@ import {
  * the day after it is chosen — every nightly report keeps comparing against the same old run.
  * Storing this instead makes each report resolve its own predecessor at render time.
  */
-export const PREVIOUS_RUN_BASELINE = 'previous';
+import { PREVIOUS_RUN_BASELINE } from '@perfana/shared/types';
+export { PREVIOUS_RUN_BASELINE };
 
 /** The only metric keys the baseline-run comparison understands. */
 const ALLOWED_BASELINE_METRICS = ['avg', 'p90', 'p95', 'p99'] as const;

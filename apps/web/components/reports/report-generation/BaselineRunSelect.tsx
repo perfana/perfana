@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react';
 import { Autocomplete, Box, TextField, Typography } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
+import { PREVIOUS_RUN_BASELINE } from '@perfana/shared/types';
 
 export interface BaselineCandidate {
   test_run_id: string;
@@ -34,10 +35,13 @@ const formatCandidateTime = (c: BaselineCandidate): string =>
   });
 
 /**
- * The value stored when the baseline should follow the run being reported on. Kept in step with
- * PREVIOUS_RUN_BASELINE in the API's comparisons renderer, which resolves it per report.
+ * The value stored when the baseline should follow the run being reported on.
+ *
+ * Re-exported from @perfana/shared/types so the builder and the API's comparisons renderer
+ * cannot drift: a rename is now a compile error rather than a template that silently stops
+ * resolving a previous run.
  */
-export const PREVIOUS_RUN_BASELINE = 'previous';
+export { PREVIOUS_RUN_BASELINE };
 
 const getCandidateDisplayText = (c: BaselineCandidate): string =>
   // The synthetic "previous" entry has no run behind it, so it has no timestamp to format.

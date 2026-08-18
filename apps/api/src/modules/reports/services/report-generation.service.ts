@@ -12,6 +12,7 @@ import {
   SystemUnderTest,
 } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
+import { findTestRunByEitherId } from './resolve-test-run';
 import {
   ResourceNotFoundException,
   DatabaseException,
@@ -25,14 +26,6 @@ import { ReportGenerationValidatorService } from './report-generation-validator.
 import { ReportUtilsService } from './report-utils.service';
 import { ReportHtmlCompilerService } from './report-html-compiler.service';
 
-/**
- * Matches a DB uuid, as opposed to the human test run id ("EA-acc-loadtest-00020").
- *
- * Both reach these endpoints: the uuid from links the UI builds itself, the human id from a URL
- * a person or a CI/CD pipeline assembled — that id is the only one they know, because it is what
- * they handed the load test tool.
- */
-const TEST_RUN_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ==================== Interfaces ====================
 
@@ -119,7 +112,15 @@ export interface HtmlGenerationResult {
  * does not exist are deliberately indistinguishable — the difference would tell an outsider
  * whether a given run exists.
  */
-const EMPTY_REPORT_SUMMARY: ReportSummaryResponse = {
+/**
+ * The "nothing to report" response.
+ *
+ * A factory, not a shared constant: three paths in getSummary return this, and a single
+ * module-level object would be handed out by reference. One caller mutating the response —
+ * an interceptor enriching the body, a test, a later `summary.totalReports++` — would
+ * corrupt every subsequent empty summary for the life of the process.
+ */
+const emptyReportSummary = (): ReportSummaryResponse => ({
   totalReports: 0,
   completedReports: 0,
   pendingReports: 0,
@@ -127,7 +128,7 @@ const EMPTY_REPORT_SUMMARY: ReportSummaryResponse = {
   latestReport: undefined,
   totalDownloads: 0,
   totalShareViews: 0,
-};
+});
 
 // ==================== Service ====================
 
@@ -206,15 +207,7 @@ export class ReportGenerationService {
     testRunId: string,
     options: Omit<FindOneOptions<TestRun>, 'where'> = {},
   ): Promise<TestRun | null> {
-    const em = withRequestEm(this.testRunRepo);
-    if (TEST_RUN_UUID_RE.test(testRunId)) {
-      const byUuid = await em.findOne({ ...options, where: { id: testRunId } });
-      if (byUuid) {
-        return byUuid;
-      }
-      // Shaped like a uuid but no row has it as an id — fall through and try it as a name.
-    }
-    return em.findOne({ ...options, where: { testRunId } });
+    return findTestRunByEitherId(this.testRunRepo, testRunId, options);
   }
 
   /**
@@ -703,7 +696,7 @@ export class ReportGenerationService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
       if (orgIds !== null && orgIds.length === 0) {
         this.logger.debug('User has no organization memberships, returning empty report summary');
-        return EMPTY_REPORT_SUMMARY;
+        return emptyReportSummary();
       }
 
       // Resolve the id through the one resolver, then fetch by uuid with the org filter intact.
@@ -711,7 +704,7 @@ export class ReportGenerationService {
       // sut.organization_id predicate — so sharing the resolver cannot quietly widen access.
       const testRunUuid = await this.resolveTestRunUuid(testRunId);
       if (!testRunUuid) {
-        return EMPTY_REPORT_SUMMARY;
+        return emptyReportSummary();
       }
 
       const testRunQuery = withRequestEm(this.testRunRepo)
@@ -730,7 +723,7 @@ export class ReportGenerationService {
       if (!testRun) {
         // If test run not found or not accessible, return empty summary instead of throwing
         // This allows the UI to display "0 reports" instead of an error
-        return EMPTY_REPORT_SUMMARY;
+        return emptyReportSummary();
       }
 
       const reports = await this.reportRepo.find({
