@@ -62,13 +62,15 @@ const makeApdexTransactionRow = (overrides: Record<string, string> = {}) => ({
 
 describe('ReportDataFetcherService', () => {
   let service: ReportDataFetcherService;
-  let testRunRepo: jest.Mocked<Pick<Repository<TestRun>, 'query'>>;
+  let testRunRepo: jest.Mocked<Pick<Repository<TestRun>, 'query' | 'findOne'>>;
   let authzService: jest.Mocked<Pick<AuthorizationService, 'isGlobalAdmin' | 'getAccessibleOrganizations'>>;
   let dataSource: { query: jest.Mock };
 
   beforeEach(async () => {
     testRunRepo = {
       query: jest.fn(),
+      // getAwrData resolves the human test run id to a uuid before querying awr_reports.
+      findOne: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-0000-0000-0000-000000000001' }),
     };
 
     authzService = {
@@ -1142,5 +1144,68 @@ describe('ReportDataFetcherService', () => {
       expect(sql).toContain('organization_id IN');
       expect(sql).toContain('organization_id IS NULL');
     });
+  });
+});
+
+describe('ReportDataFetcherService getAwrData id resolution', () => {
+  // awr_reports.test_run_id is a uuid FK onto test_runs(id) — the only table this service reads
+  // that is keyed that way. Every renderer passes the human test run id, so handing it straight
+  // through was a 22P02, swallowed by the catch as a warning, leaving the AWR section silently
+  // empty in every generated report.
+  let service: ReportDataFetcherService;
+  let testRunRepo: { query: jest.Mock; findOne: jest.Mock };
+  let dataSource: { query: jest.Mock };
+
+  const RUN_UUID = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+  beforeEach(async () => {
+    testRunRepo = { query: jest.fn(), findOne: jest.fn().mockResolvedValue({ id: RUN_UUID }) };
+    dataSource = { query: jest.fn().mockResolvedValue([]) };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ReportDataFetcherService,
+        { provide: getRepositoryToken(TestRun), useValue: testRunRepo },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            isGlobalAdmin: jest.fn().mockReturnValue(true),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+          },
+        },
+        { provide: DataSource, useValue: dataSource },
+      ],
+    }).compile();
+
+    service = module.get(ReportDataFetcherService);
+  });
+
+  it('queries awr_reports by the uuid, never the human id', async () => {
+    await service.getAwrData('EA-acc-loadtest-00020');
+
+    expect(testRunRepo.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { testRunId: 'EA-acc-loadtest-00020' } }),
+    );
+    const [sql, params] = dataSource.query.mock.calls[0];
+    expect(String(sql)).toMatch(/FROM awr_reports/);
+    expect(params).toEqual([RUN_UUID]);
+  });
+
+  it('returns null for a run that does not exist rather than querying', async () => {
+    testRunRepo.findOne.mockResolvedValue(null);
+
+    const result = await service.getAwrData('no-such-run');
+
+    expect(result).toBeNull();
+    expect(dataSource.query).not.toHaveBeenCalled();
+  });
+
+  it('takes a uuid straight through when it matches a run', async () => {
+    testRunRepo.findOne.mockResolvedValue({ id: RUN_UUID });
+
+    await service.getAwrData(RUN_UUID);
+
+    const [, params] = dataSource.query.mock.calls[0];
+    expect(params).toEqual([RUN_UUID]);
   });
 });

@@ -1354,8 +1354,42 @@ export class ReportDataFetcherService {
    * Get AWR data for a test run
    * Fetches AWR reports and their analysis insights
    */
+  /**
+   * The DB uuid for a test run named either way, or null if there is no such run.
+   *
+   * Mirrors the resolver in ReportGenerationService: a uuid-shaped id is tried as the uuid
+   * first and then as a name, because a run may legitimately be named after a build guid.
+   * Separate statements rather than one `id = :x OR test_run_id = :x`, whose single parameter
+   * Postgres types as uuid from the first comparison so a human id never reaches the second.
+   */
+  private async resolveTestRunUuid(testRunId: string): Promise<string | null> {
+    const em = withRequestEm(this.testRunRepo);
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(testRunId)) {
+      const byUuid = await em.findOne({ where: { id: testRunId }, select: ['id'] });
+      if (byUuid) {
+        return byUuid.id;
+      }
+    }
+    const byName = await em.findOne({ where: { testRunId }, select: ['id'] });
+    return byName?.id ?? null;
+  }
+
   async getAwrData(testRunId: string): Promise<AwrData | null> {
     try {
+      // awr_reports.test_run_id is a uuid foreign key onto test_runs(id) — the ONLY table this
+      // service reads that is keyed that way. transactions, requests_raw, ds_metrics, the
+      // rollups and the rest are all keyed by the human test run id, which is what every
+      // renderer passes and what this method is therefore handed.
+      //
+      // Sending the human id to a uuid column is a 22P02, and the catch below turns that into a
+      // warning, so the AWR section came out empty in every generated report instead of failing
+      // loudly. Resolving here rather than at the one call site keeps the renderers uniform:
+      // they all pass testRun.testRunId, and none of them has to know which tables are keyed
+      // which way.
+      const testRunUuid = await this.resolveTestRunUuid(testRunId);
+      if (!testRunUuid) {
+        return null;
+      }
       const reportRows: Array<{
         id: string;
         db_name: string | null;
@@ -1380,7 +1414,7 @@ export class ReportDataFetcherService {
          FROM awr_reports
          WHERE test_run_id = $1 AND parse_status = 'completed'
          ORDER BY begin_time ASC`,
-        [testRunId],
+        [testRunUuid],
       );
 
       if (reportRows.length === 0) return null;
