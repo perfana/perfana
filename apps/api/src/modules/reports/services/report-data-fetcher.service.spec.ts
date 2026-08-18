@@ -1208,6 +1208,45 @@ describe('ReportDataFetcherService getAwrData id resolution', () => {
     const [, params] = dataSource.query.mock.calls[0];
     expect(params).toEqual([RUN_UUID]);
   });
+
+  it('falls back to the name column for a run NAMED with a uuid', async () => {
+    // A pipeline naming its run after a build guid. The shape says uuid, but the value lives in
+    // test_run_id; trusting the shape returned no AWR data at all for those runs.
+    const NAMED_LIKE_A_UUID = '123e4567-e89b-12d3-a456-426614174000';
+    testRunRepo.findOne
+      .mockResolvedValueOnce(null) // no row has it as an id
+      .mockResolvedValueOnce({ id: RUN_UUID }); // but one is named it
+
+    await service.getAwrData(NAMED_LIKE_A_UUID);
+
+    expect(testRunRepo.findOne).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ where: { testRunId: NAMED_LIKE_A_UUID } }),
+    );
+    const [, params] = dataSource.query.mock.calls[0];
+    expect(params).toEqual([RUN_UUID]);
+  });
+
+  it('costs a single lookup for a human id', async () => {
+    // Only the ambiguous, uuid-shaped case pays for a second query.
+    await service.getAwrData('EA-acc-loadtest-00020');
+
+    expect(testRunRepo.findOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps returning null when the run resolves but has no completed AWR report', async () => {
+    // Resolution succeeding is not the same as there being anything to render.
+    dataSource.query.mockResolvedValue([]);
+
+    expect(await service.getAwrData('EA-acc-loadtest-00020')).toBeNull();
+  });
+
+  it('swallows a failed lookup rather than failing the whole report', async () => {
+    // Every renderer calls this; one unavailable section must not take the report with it.
+    testRunRepo.findOne.mockRejectedValue(new Error('connection terminated'));
+
+    expect(await service.getAwrData('EA-acc-loadtest-00020')).toBeNull();
+  });
 });
 
 describe('ReportDataFetcherService getPreviousTestRun', () => {

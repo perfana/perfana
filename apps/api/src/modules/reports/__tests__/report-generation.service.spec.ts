@@ -1029,6 +1029,28 @@ describe('ReportGenerationService', () => {
       expect(predicate).not.toMatch(/CAST/);
     });
 
+    it('answers an unknown run with an empty summary, without reaching the org query', async () => {
+      // The resolver comes first now, so a run that does not exist stops there. A caller cannot
+      // tell that apart from a run they may not see — which is the point: the difference would
+      // tell an outsider whether a given run exists.
+      const mockQueryBuilder = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn(),
+      };
+      (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      testRunRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getSummary('no-such-run', 'test-user', ['admin']);
+
+      expect(result).toEqual(
+        expect.objectContaining({ totalReports: 0, latestReport: undefined }),
+      );
+      expect(mockQueryBuilder.getOne).not.toHaveBeenCalled();
+      expect(reportRepo.find).not.toHaveBeenCalled();
+    });
+
     it('keeps the organization filter on the fetch after resolving', async () => {
       // Sharing the resolver must not widen access: a run outside the caller's orgs still has
       // to fall out of the org-filtered query.

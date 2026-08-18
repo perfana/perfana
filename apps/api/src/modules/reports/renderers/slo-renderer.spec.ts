@@ -232,4 +232,14 @@ describe('SloRenderer', () => {
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
   });
+  it('gives the summary-card grid columns a zero floor', async () => {
+    // Same blowout as the Apdex cards: repeat(3, 1fr) floors each column at its content width,
+    // so one long count pushed the row wider than the page.
+    dataFetcher.getSloCheckResults.mockResolvedValue([makeSloResult()]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+    expect(html).not.toContain('grid-template-columns: repeat(3, 1fr)');
+  });
 });

@@ -581,4 +581,24 @@ describe('ComparisonsRenderer previous-run baseline', () => {
 
     expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(expect.anything(), undefined);
   });
+  it('resolves "previous" in baseline_run mode too', async () => {
+    // The renderer has two entry branches and both take a baseline id; a fix applied to one and
+    // not the other leaves half the section pinned to an ageing run.
+    await renderer.renderComparisonsSection(
+      { ...makeSection(), config: { comparisonMode: 'baseline_run', baselineTestRunId: 'previous' } } as never,
+      makeTestRun(),
+    );
+
+    expect(dataFetcher.getPreviousTestRun).toHaveBeenCalled();
+    const [, baselineId] = dataFetcher.getBaselineRunComparison.mock.calls[0]!;
+    expect(baselineId).toBe('EA-acc-loadtest-00019');
+  });
+
+  it('treats a non-string baseline as no baseline at all', async () => {
+    // Template configs are free-form JSON; a number or null must not reach the query.
+    await renderer.renderComparisonsSection(sectionWith(null), makeTestRun());
+
+    expect(dataFetcher.getPreviousTestRun).not.toHaveBeenCalled();
+    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(expect.anything(), undefined);
+  });
 });

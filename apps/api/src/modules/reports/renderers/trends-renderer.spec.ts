@@ -316,4 +316,16 @@ describe('TrendsRenderer', () => {
       expect(html).not.toContain('#ff9800');
     });
   });
+  describe('trend card grid', () => {
+    it('gives the four trend-card columns a zero floor', async () => {
+      // repeat(4, 1fr) floors each column at its content width, so one long value widened the
+      // row past the page and the trailing card was clipped out of the PDF.
+      dataFetcher.getTrendsData.mockResolvedValue(makeTrendsData());
+
+      const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
+      expect(html).not.toContain('grid-template-columns: repeat(4, 1fr)');
+    });
+  });
 });
