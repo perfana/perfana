@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.7] - 2026-08-18
+
+### Fixed
+- **The Oracle AWR section is no longer silently empty in generated reports.** Every report section is looked up by the test run id you gave the load test tool, but the AWR data alone is stored against Perfana's internal identifier. Asking for it by the wrong one failed, and because that failure was only logged as a warning the report was produced with the section blank rather than reporting a problem. It is now looked up correctly.
+- **Ad-hoc report generation accepts the test run id a pipeline actually has.** It insisted on the internal identifier and rejected the readable one outright, even though the rest of the endpoint handled either. Generating from a template already accepted both.
+
+### Changed
+- The API documentation now shows a readable test run id in its examples rather than an internal identifier, which had been steering people towards the one their pipeline does not have.
+
 ## [0.2.63.6] - 2026-08-18
 
 ### Fixed
