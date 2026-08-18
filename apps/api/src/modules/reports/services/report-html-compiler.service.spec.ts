@@ -898,7 +898,7 @@ describe('ReportHtmlCompilerService A4 layout', () => {
 
   it('holds the report to A4 width on screen', () => {
     const out = html();
-    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Page Header'));
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
 
     expect(screenBlock).toMatch(/max-width:\s*210mm/);
     expect(screenBlock).toMatch(/margin-left:\s*auto/);
@@ -908,7 +908,7 @@ describe('ReportHtmlCompilerService A4 layout', () => {
   it('uses the same side margin the PDF does, so the column matches what prints', () => {
     // pdf.service.ts insets 15mm left and right of a 210mm page: a 180mm text column.
     const out = html();
-    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Page Header'));
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
 
     expect(screenBlock).toMatch(/padding:\s*20mm\s+15mm/);
   });
@@ -926,8 +926,40 @@ describe('ReportHtmlCompilerService A4 layout', () => {
 
   it('paints the page background so the centred column is not a grey stripe', () => {
     const out = html();
-    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Page Header'));
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
 
     expect(screenBlock).toMatch(/html\s*\{[^}]*background-color/);
+  });
+});
+
+describe('ReportHtmlCompilerService cover page height', () => {
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('gives the cover a page height on screen, not the container height', () => {
+    // 100vh means "as tall as whatever this lands in", and the report renders inside an iframe:
+    // in a tall one the cover became screens of gradient with the title marooned in the middle.
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/\.cover-page\s*\{[^}]*min-height:\s*257mm/);
+  });
+
+  it('declares the screen overrides after the rules they override', () => {
+    // A media query adds no specificity, so source order decides. With the block above
+    // .cover-page, its 100vh won and the override silently did nothing.
+    const out = html();
+
+    expect(out.indexOf('.cover-page {')).toBeLessThan(out.indexOf('@media screen'));
+  });
+
+  it('leaves the printed cover on 100vh, where the container is the page box', () => {
+    const out = html();
+    const beforeScreen = out.slice(0, out.indexOf('@media screen'));
+
+    expect(beforeScreen).toMatch(/\.cover-page\s*\{[^}]*min-height:\s*100vh/);
   });
 });

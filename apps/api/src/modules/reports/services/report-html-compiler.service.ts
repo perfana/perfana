@@ -332,33 +332,6 @@ export class ReportHtmlCompilerService {
       font-size: 11pt;
     }
 
-    /* On screen the report is still an A4 document, so it is laid out as one instead of
-       stretching to whatever the window happens to be. On a wide monitor the full-bleed column
-       ran lines past any comfortable reading length and let tables sprawl into a shape the PDF
-       never has.
-
-       The measurements are the PDF's, not arbitrary: A4 is 210mm and pdf.service.ts insets
-       15mm left and right, so the printed text column is 180mm. Matching the padding to that
-       margin gives a 180mm column on screen too — the same line breaks, the same table widths,
-       so what is on screen is what comes out of the printer.
-
-       Screen only. In print Puppeteer's page box already sets the width, and the @media print
-       block below zeroes this padding; constraining it again would inset the content twice. */
-    @media screen {
-      /* The grey moves to the page itself, otherwise a centred body would paint a grey column
-         on a white surround rather than a document sitting on a background. */
-      html {
-        background-color: var(--bg-light);
-      }
-
-      body {
-        max-width: 210mm;
-        padding: 20mm 15mm;
-        margin-left: auto;
-        margin-right: auto;
-      }
-    }
-
     /* Page Header (appears on every page in print) */
     .page-header {
       display: flex;
@@ -721,6 +694,45 @@ export class ReportHtmlCompilerService {
     footer .footer-meta {
       font-size: 8pt;
       font-family: 'Courier New', monospace;
+    }
+
+    /* On screen the report is still an A4 document, so it is laid out as one instead of
+       stretching to whatever the window happens to be. On a wide monitor the full-bleed column
+       ran lines past any comfortable reading length and let tables sprawl into a shape the PDF
+       never has.
+
+       The measurements are the PDF's, not arbitrary: A4 is 210mm and pdf.service.ts insets
+       15mm left and right, so the printed text column is 180mm. Matching the padding to that
+       margin gives a 180mm column on screen too — the same line breaks, the same table widths,
+       so what is on screen is what comes out of the printer.
+
+       Screen only. In print Puppeteer's page box already sets the width, and the @media print
+       block below zeroes this padding; constraining it again would inset the content twice. */
+    @media screen {
+      /* The grey moves to the page itself, otherwise a centred body would paint a grey column
+         on a white surround rather than a document sitting on a background. */
+      html {
+        background-color: var(--bg-light);
+      }
+
+      body {
+        max-width: 210mm;
+        padding: 20mm 15mm;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      /* The cover is a page, so give it a page's height rather than the viewport's. 100vh means
+         "as tall as whatever container this lands in", and the report is rendered inside an
+         iframe: in a tall one the cover became a screen and a half of gradient with the title
+         marooned in the middle of it. 257mm is A4 minus the 20mm top and bottom the PDF insets,
+         so the cover on screen is the same page as the cover on paper.
+
+         Print keeps 100vh — there the container IS the page box, and page-break-after already
+         ends the cover. */
+      .cover-page {
+        min-height: 257mm;
+      }
     }
 
     /* Print Styles */
