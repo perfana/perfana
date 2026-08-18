@@ -495,7 +495,7 @@ export class ReportHtmlCompilerService {
     /* Info Grid (3-column layout for test run summary) */
     .info-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 24px;
       margin: 24px 0;
     }
@@ -591,10 +591,11 @@ export class ReportHtmlCompilerService {
        this a long unbreakable cell (the UNACCEPTABLE apdex pill) sets a min-content
        width wider than the page and Chrome silently clips the trailing columns.
        Headers keep normal wrapping so they break on spaces, not mid-word. */
-    .data-table td,
-    .data-table th {
-      /* th too: a header like "TRANSACTION NAME" is what sets a column's floor, and under fixed
-         layout an unbreakable one would push its neighbours to nothing. */
+    .data-table td {
+      /* Data cells only. Letting a HEADER break anywhere lets the browser shrink a column to
+         almost nothing, and "TRANSACTION NAME" came out as "TRANSACTI ON NAME" stacked over
+         three lines. A header should set the column's floor; it is the shortest honest width
+         that column can have. */
       overflow-wrap: anywhere;
     }
 
