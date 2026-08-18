@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query, BadRequestException, Logger } from '@nes
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { TestRunsService } from '../test-runs.service';
+import { parseTestRunIds } from './parse-test-run-ids';
 
 const ALLOWED_URL_METRICS = ['response_time', 'error_percentage', 'throughput', 'latency', 'connect_time'] as const;
 type UrlMetric = typeof ALLOWED_URL_METRICS[number];
@@ -52,11 +53,7 @@ export class TestRunsUrlMetricsController {
     if (!(ALLOWED_URL_METRICS as readonly string[]).includes(metric)) {
       throw new BadRequestException(`metric must be one of: ${ALLOWED_URL_METRICS.join(', ')}`);
     }
-    const testRunIds = (testRunIdsRaw ?? '')
-      .split(',')
-      .map(id => id.trim())
-      .filter(id => id.length > 0);
-    const ids = testRunIds.length > 0 ? testRunIds : [testRunId];
+    const ids = parseTestRunIds(testRunIdsRaw, testRunId);
     this.logger.debug('Getting URL metric statistics', { testRunId, metric, testRunIds: ids });
 
     return this.testRunsService.getUrlMetricStatistics(ids, ctx.userId, ctx.roles, metric as UrlMetric);

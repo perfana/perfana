@@ -2,20 +2,11 @@ import { Controller, Get, Param, Query, BadRequestException, Logger } from '@nes
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { TestRunsService } from '../test-runs.service';
+import { MAX_AGGREGATED_TEST_RUNS, parseTestRunIds } from './parse-test-run-ids';
 
 const ALLOWED_METRICS = ['transaction_response_time', 'request_response_time', 'error_percentage'] as const;
 const ALLOWED_STATS = ['avg', 'p50', 'p90', 'p95', 'p99', 'max'] as const;
 
-/**
- * Most runs a single request may aggregate.
- *
- * `testRunIds` arrives as an unbounded comma-separated string and every id costs an indexed
- * rollup read, so one request fans out in proportion to the list. Trends passes every run in the
- * selected range, which a wide range on a busy system makes arbitrarily long. The cap is far
- * above any range the UI builds — it exists so a hand-built URL cannot turn one request into
- * unbounded work.
- */
-const MAX_AGGREGATED_TEST_RUNS = 500;
 
 type AllowedMetric = typeof ALLOWED_METRICS[number];
 type AllowedStat = typeof ALLOWED_STATS[number];
@@ -69,7 +60,7 @@ export class TestRunsAggregatedTimeseriesController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter, or more than the maximum number of testRunIds' })
+  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter' })
   async getAggregatedMetricTimeseries(
     @Param('testRunId') testRunId: string,
     @Query('metric') metric: string,
@@ -143,20 +134,11 @@ export class TestRunsAggregatedTimeseriesController {
       throw new BadRequestException(`stat must be one of: ${ALLOWED_STATS.join(', ')} (required unless metric is error_percentage)`);
     }
 
-    const testRunIds = (testRunIdsRaw ?? '')
-      .split(',')
-      .map(id => id.trim())
-      .filter(id => id.length > 0);
-    if (testRunIds.length > MAX_AGGREGATED_TEST_RUNS) {
-      // Rejected rather than truncated: a silently shortened list would return an aggregate
-      // that looks complete but silently omits runs, which is worse than an error the caller
-      // can act on.
-      throw new BadRequestException(
-        `testRunIds accepts at most ${MAX_AGGREGATED_TEST_RUNS} runs (received ${testRunIds.length}); narrow the range and try again`,
-      );
-    }
-    // De-duplicated: a repeated id would be read, aggregated and returned once per occurrence.
-    const ids = testRunIds.length > 0 ? [...new Set(testRunIds)] : [testRunId];
+    // De-duplicate before measuring: a repeated id would be read, aggregated and returned once
+    // per occurrence, and the cap is meant to bound the work the server does — not the length
+    // of the string the caller happened to send. 600 entries naming 40 distinct runs is 40
+    // runs' worth of work and is allowed through.
+    const ids = parseTestRunIds(testRunIdsRaw, testRunId);
 
     return this.testRunsService.getAggregatedMetricStatistics(
       ids,
