@@ -769,6 +769,16 @@ describe('ReportGenerationService', () => {
       ]);
     });
 
+    it('wraps a failure of the new test run lookup in DatabaseException', async () => {
+      // resolveTestRunUuid runs inside the same try as the report query, so a database failure
+      // there must surface the same way rather than as an unhandled rejection.
+      testRunRepo.findOne.mockRejectedValue(new Error('connection reset'));
+
+      await expect(
+        service.findByTestRunId('EA-acc-loadtest-00020', { roles: ['admin'] }),
+      ).rejects.toThrow(DatabaseException);
+    });
+
     it('returns an empty list, not an error, for a test run that does not exist', async () => {
       // The UI shows "no reports" for a run it cannot find, matching getSummary.
       testRunRepo.findOne.mockResolvedValue(null);
@@ -835,6 +845,23 @@ describe('ReportGenerationService', () => {
       expect(result.pendingReports).toBe(0);
       expect(result.failedReports).toBe(0);
       expect(result.latestReport).toBeUndefined();
+    });
+
+    it('returns an empty summary for a test run that does not exist', async () => {
+      // Same posture as findByTestRunId: the UI shows zeroes for a run it cannot find.
+      const mockQueryBuilder = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+
+      const result = await service.getSummary('no-such-run', 'test-user', ['admin']);
+
+      expect(result.totalReports).toBe(0);
+      expect(result.latestReport).toBeUndefined();
+      expect(reportRepo.find).not.toHaveBeenCalled();
     });
 
     it('matches on the column the id actually is, never both in one predicate', async () => {
