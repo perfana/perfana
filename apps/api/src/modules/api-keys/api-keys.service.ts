@@ -283,18 +283,25 @@ export class ApiKeysService {
         );
       }
 
-      // Invalidate cache before deletion
+      // Invalidate before AND after the delete. Before, so no new request can
+      // warm a cache off the soon-to-be-dead row; after, because a request that
+      // authenticated concurrently with this one can re-populate both caches in
+      // the window between the first invalidation and the commit —
+      // validateApiKey serves from the description cache with no existence
+      // re-check, so a purely-before invalidation can leave a deleted key
+      // working for a full API_KEY_CACHE_TTL_SECONDS.
       await this.apiKeyCacheService.invalidateKey(apiKey.description);
       await this.apiKeyCacheService.invalidateAllValidationResults();
       // AuthorizationService caches org/team membership under the api-key:<id>
-      // principal for AUTH_CACHE_TTL_SECONDS. Authentication rejects a deleted
-      // key before authorization is consulted, so this is belt-and-braces
-      // today — but it is the invalidation a future revoke flag or org-move
-      // would depend on, and it is cheaper to wire now than to remember later.
+      // principal for AUTH_CACHE_TTL_SECONDS.
       await this.authzService.invalidateUserCache(`api-key:${id}`);
 
       this.auditService.logDelete(apiKey as unknown as OwnedResource);
       await this.apiKeyRepository.delete(id);
+
+      await this.apiKeyCacheService.invalidateKey(apiKey.description);
+      await this.apiKeyCacheService.invalidateAllValidationResults();
+      await this.authzService.invalidateUserCache(`api-key:${id}`);
       this.logger.log(`[deleteApiKey] API key ${id} deleted by user: ${userId}`);
     } catch (error) {
       if (
