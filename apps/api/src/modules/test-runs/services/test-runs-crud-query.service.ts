@@ -549,7 +549,7 @@ export class TestRunsCrudQueryService {
     const sut = entity.systemUnderTest;
 
     if (!sut.organization_id) {
-      return `system under test '${sut.name}' (${sut.id}) has no organization_id`;
+      return `system under test '${this.forLog(sut.name)}' (${sut.id}) has no organization_id`;
     }
 
     const isMember = await this.authzService.isOrganizationMember(userId, sut.organization_id);
@@ -584,13 +584,13 @@ export class TestRunsCrudQueryService {
       });
 
       if (!testRunEntity) {
-        this.logger.debug(`Test run ${this.forLog(testRunId)} not returned for user ${userId}: no visible row (RLS-filtered or nonexistent)`);
+        this.logger.debug(`Test run ${this.forLog(testRunId)} not returned for user ${this.forLog(userId)}: no visible row (RLS-filtered or nonexistent)`);
         throw new ResourceNotFoundException('TestRun', testRunId);
       }
 
       const denial = await this.denialReason(testRunEntity, userId, isAdmin);
       if (denial) {
-        this.logger.warn(`Test run ${this.forLog(testRunId)} denied for user ${userId}: ${denial}`);
+        this.logger.warn(`Test run ${this.forLog(testRunId)} denied for user ${this.forLog(userId)}: ${denial}`);
         throw new ResourceNotFoundException('TestRun', testRunId);
       }
 
@@ -632,13 +632,13 @@ export class TestRunsCrudQueryService {
       });
 
       if (!testRunEntity) {
-        this.logger.debug(`Test run ${this.forLog(id)} not returned for user ${userId}: no visible row (RLS-filtered or nonexistent)`);
+        this.logger.debug(`Test run ${this.forLog(id)} not returned for user ${this.forLog(userId)}: no visible row (RLS-filtered or nonexistent)`);
         throw new ResourceNotFoundException('TestRun', id);
       }
 
       const denial = await this.denialReason(testRunEntity, userId, isAdmin);
       if (denial) {
-        this.logger.warn(`Test run ${this.forLog(id)} denied for user ${userId}: ${denial}`);
+        this.logger.warn(`Test run ${this.forLog(id)} denied for user ${this.forLog(userId)}: ${denial}`);
         throw new ResourceNotFoundException('TestRun', id);
       }
 
@@ -680,13 +680,13 @@ export class TestRunsCrudQueryService {
       });
 
       if (!testRunEntity) {
-        this.logger.debug(`Test run ${this.forLog(testRunId)} not returned for user ${userId}: no visible row (RLS-filtered or nonexistent)`);
+        this.logger.debug(`Test run ${this.forLog(testRunId)} not returned for user ${this.forLog(userId)}: no visible row (RLS-filtered or nonexistent)`);
         return null;
       }
 
       const denial = await this.denialReason(testRunEntity, userId, isAdmin);
       if (denial) {
-        this.logger.warn(`Test run ${this.forLog(testRunId)} denied for user ${userId}: ${denial}`);
+        this.logger.warn(`Test run ${this.forLog(testRunId)} denied for user ${this.forLog(userId)}: ${denial}`);
         return null;
       }
 
@@ -805,6 +805,7 @@ export class TestRunsCrudQueryService {
    */
   async getRelatedTestRuns(
     testRunId: string,
+    userId: string,
     isAdmin: boolean,
     organizationIds: string[],
     userTeamIds: string[],
@@ -832,16 +833,27 @@ export class TestRunsCrudQueryService {
           relations: ['systemUnderTest', 'systemUnderTest.pyroscopeInstance']
         });
 
-        if (testRunEntity) {
-          currentTestRun = this.mapper.mapEntityToTestRun(testRunEntity);
+        if (!testRunEntity) {
+          this.logger.debug(`Test run ${this.forLog(testRunId)} not returned for user ${this.forLog(userId)}: no visible row (RLS-filtered or nonexistent)`);
+          throw new ResourceNotFoundException('Test run', testRunId);
         }
+
+        // This branch resolves the run by id alone, so it must run the same
+        // per-resource guard the other lookups do. Without it, omitting the
+        // system/environment/workload query parameters skipped every
+        // organization and team check and returned the run's siblings.
+        const denial = await this.denialReason(testRunEntity, userId, isAdmin);
+        if (denial) {
+          this.logger.warn(`Test run ${this.forLog(testRunId)} denied for user ${this.forLog(userId)}: ${denial}`);
+          throw new ResourceNotFoundException('Test run', testRunId);
+        }
+
+        currentTestRun = this.mapper.mapEntityToTestRun(testRunEntity);
       }
 
       if (!currentTestRun) {
         throw new ResourceNotFoundException('Test run', testRunId);
       }
-
-      // NOTE: Organization filtering will be added here when TestRun entity has organization_id
 
       const relatedTestRunEntities = await withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')

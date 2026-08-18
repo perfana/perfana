@@ -324,7 +324,9 @@ describe('TestRunsQueryService', () => {
 
         const result = await service.getRelatedTestRuns('PaymentService-production-loadTest-001', mockUserId, mockRoles);
 
-        expect(crudService.getRelatedTestRuns).toHaveBeenCalledWith('PaymentService-production-loadTest-001', true, [], [], undefined, undefined, undefined);
+        // userId is threaded through so the crud service can run the per-resource
+        // guard on the branch that resolves a run by id alone.
+        expect(crudService.getRelatedTestRuns).toHaveBeenCalledWith('PaymentService-production-loadTest-001', 'test-user-id', true, [], [], undefined, undefined, undefined);
         expect(result).toHaveLength(1);
       });
     });

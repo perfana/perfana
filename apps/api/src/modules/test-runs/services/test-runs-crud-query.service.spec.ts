@@ -1261,6 +1261,7 @@ describe('TestRunsCrudQueryService', () => {
 
       const result = await service.getRelatedTestRuns(
         entity.testRunId,
+        userId,
         true,
         [],
         [],
@@ -1281,7 +1282,7 @@ describe('TestRunsCrudQueryService', () => {
       testRunRepo.findOne.mockResolvedValue(entity);
       testRunQb.getMany.mockResolvedValue([]);
 
-      const result = await service.getRelatedTestRuns(entity.testRunId, true, [], []);
+      const result = await service.getRelatedTestRuns(entity.testRunId, userId, true, [], []);
 
       expect(result).toEqual([]);
       expect(testRunRepo.findOne).toHaveBeenCalledWith({
@@ -1294,8 +1295,27 @@ describe('TestRunsCrudQueryService', () => {
       testRunRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.getRelatedTestRuns('missing', true, [], []),
+        service.getRelatedTestRuns('missing', userId, true, [], []),
       ).rejects.toThrow(ResourceNotFoundException);
+    });
+
+    it('should deny a non-admin whose organization does not match, on the id-only branch', async () => {
+      // REGRESSION: omitting system/environment/workload takes the branch that
+      // resolves the run by id alone. It previously ran NO organization, team or
+      // admin check, so any authenticated principal could read another org's run
+      // and enumerate its siblings. It must apply the same guard as every other
+      // per-resource lookup.
+      const entity = createMockTestRunEntity();
+      testRunRepo.findOne.mockResolvedValue(entity);
+      authzService.isOrganizationMember.mockResolvedValue(false);
+
+      await expect(
+        service.getRelatedTestRuns(entity.testRunId, userId, false, [], []),
+      ).rejects.toThrow(ResourceNotFoundException);
+
+      expect(authzService.isOrganizationMember).toHaveBeenCalled();
+      // The sibling query must never run for a caller who cannot read the run.
+      expect(testRunQb.getMany).not.toHaveBeenCalled();
     });
 
     it('should map related entities to RelatedTestRun format', async () => {
@@ -1314,7 +1334,7 @@ describe('TestRunsCrudQueryService', () => {
       });
       testRunQb.getMany.mockResolvedValue([relatedEntity]);
 
-      const result = await service.getRelatedTestRuns(entity.testRunId, true, [], []);
+      const result = await service.getRelatedTestRuns(entity.testRunId, userId, true, [], []);
 
       expect(result[0]).toMatchObject({
         test_run_id: 'related-run-id',
