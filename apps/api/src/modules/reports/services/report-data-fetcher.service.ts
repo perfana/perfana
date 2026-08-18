@@ -1355,6 +1355,38 @@ export class ReportDataFetcherService {
    * Fetches AWR reports and their analysis insights
    */
   /**
+   * The run immediately before this one in the same system, environment and workload, or null
+   * when there is none.
+   *
+   * "Previous" is relative to the run being reported on, not simply the newest run there is.
+   * The two differ whenever a report is generated for an older run — backfilling, or re-running
+   * a report after the fact — where the newest run is *later* and comparing against it would
+   * read the change backwards.
+   *
+   * Scope and completed-only match the baseline dropdown in the UI (getBaselineCandidates), so
+   * "previous" resolves to the run a person would have picked from the top of that list.
+   */
+  async getPreviousTestRun(testRun: TestRun): Promise<TestRun | null> {
+    return withRequestEm(this.testRunRepo)
+      .createQueryBuilder('tr')
+      .where('tr.systemUnderTestId = :systemUnderTestId', {
+        systemUnderTestId: testRun.systemUnderTestId,
+      })
+      .andWhere('tr.testEnvironment = :testEnvironment', {
+        testEnvironment: testRun.testEnvironment,
+      })
+      .andWhere('tr.workload = :workload', { workload: testRun.workload })
+      .andWhere('tr.completed = :completed', { completed: true })
+      .andWhere('tr.id != :id', { id: testRun.id })
+      // Strictly earlier: ordering by start time alone would return a LATER run when the
+      // report is generated for anything but the newest.
+      .andWhere('tr.startTime < :startTime', { startTime: testRun.startTime })
+      .orderBy('tr.startTime', 'DESC')
+      .limit(1)
+      .getOne();
+  }
+
+  /**
    * The DB uuid for a test run named either way, or null if there is no such run.
    *
    * Mirrors the resolver in ReportGenerationService: a uuid-shaped id is tried as the uuid

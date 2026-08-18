@@ -1209,3 +1209,78 @@ describe('ReportDataFetcherService getAwrData id resolution', () => {
     expect(params).toEqual([RUN_UUID]);
   });
 });
+
+describe('ReportDataFetcherService getPreviousTestRun', () => {
+  let service: ReportDataFetcherService;
+  let qb: Record<string, jest.Mock>;
+
+  const testRun = {
+    id: 'run-2',
+    systemUnderTestId: 'sut-1',
+    testEnvironment: 'acc',
+    workload: 'loadTest',
+    startTime: new Date('2026-08-18T10:00:00Z'),
+  } as never;
+
+  beforeEach(async () => {
+    qb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({ testRunId: 'EA-acc-loadtest-00019' }),
+    };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ReportDataFetcherService,
+        {
+          provide: getRepositoryToken(TestRun),
+          useValue: { query: jest.fn(), findOne: jest.fn(), createQueryBuilder: () => qb },
+        },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            isGlobalAdmin: jest.fn().mockReturnValue(true),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+          },
+        },
+        { provide: DataSource, useValue: { query: jest.fn().mockResolvedValue([]) } },
+      ],
+    }).compile();
+    service = module.get(ReportDataFetcherService);
+  });
+
+  it('takes only runs that started BEFORE this one', async () => {
+    // Ordering by start time alone would hand back a LATER run whenever a report is generated
+    // for anything but the newest, reading the change backwards.
+    await service.getPreviousTestRun(testRun);
+
+    expect(qb.andWhere).toHaveBeenCalledWith('tr.startTime < :startTime', {
+      startTime: testRun.startTime,
+    });
+    expect(qb.orderBy).toHaveBeenCalledWith('tr.startTime', 'DESC');
+    expect(qb.limit).toHaveBeenCalledWith(1);
+  });
+
+  it('scopes to the same system, environment and workload, completed only', async () => {
+    // Same scope the baseline dropdown uses, so "previous" is the run a person would have picked.
+    await service.getPreviousTestRun(testRun);
+
+    const clauses = [...qb.where.mock.calls, ...qb.andWhere.mock.calls].map((c) => c[0]);
+    expect(clauses).toEqual(
+      expect.arrayContaining([
+        'tr.systemUnderTestId = :systemUnderTestId',
+        'tr.testEnvironment = :testEnvironment',
+        'tr.workload = :workload',
+        'tr.completed = :completed',
+        'tr.id != :id',
+      ]),
+    );
+  });
+
+  it('returns null when the run is the first in its scope', async () => {
+    qb.getOne.mockResolvedValue(null);
+
+    expect(await service.getPreviousTestRun(testRun)).toBeNull();
+  });
+});

@@ -27,6 +27,16 @@ import {
   statusPill,
 } from './report-style';
 
+/**
+ * The value a template stores when the baseline should follow the run being reported on rather
+ * than being pinned to one particular run.
+ *
+ * A template is written once and generated from for months, so a fixed baseline id goes stale
+ * the day after it is chosen — every nightly report keeps comparing against the same old run.
+ * Storing this instead makes each report resolve its own predecessor at render time.
+ */
+export const PREVIOUS_RUN_BASELINE = 'previous';
+
 /** The only metric keys the baseline-run comparison understands. */
 const ALLOWED_BASELINE_METRICS = ['avg', 'p90', 'p95', 'p99'] as const;
 type BaselineMetricKey = (typeof ALLOWED_BASELINE_METRICS)[number];
@@ -60,7 +70,7 @@ export class ComparisonsRenderer {
     if (config.comparisonMode === 'baseline_run') {
       return this.renderBaselineRun(section, testRun, userId, roles);
     }
-    const baselineTestRunId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
+    const baselineTestRunId = await this.resolveBaseline(config.baselineTestRunId, testRun);
     const title = section.title || 'Comparisons';
     const text = getSectionText(section);
 
@@ -103,6 +113,31 @@ export class ComparisonsRenderer {
     ];
   }
 
+  /**
+   * The baseline this report should compare against: whatever the template pinned, or the run
+   * before this one when the template said to follow along.
+   *
+   * Returns undefined when there is no predecessor — the first run in a system, environment and
+   * workload has nothing behind it, and the section then renders its existing empty state rather
+   * than comparing a run against itself.
+   */
+  private async resolveBaseline(
+    configured: unknown,
+    testRun: TestRun | null,
+  ): Promise<string | undefined> {
+    if (typeof configured !== 'string') {
+      return undefined;
+    }
+    if (configured !== PREVIOUS_RUN_BASELINE) {
+      return configured;
+    }
+    if (!testRun) {
+      return undefined;
+    }
+    const previous = await this.dataFetcher.getPreviousTestRun(testRun);
+    return previous?.testRunId ?? undefined;
+  }
+
   private async renderBaselineRun(
     section: ReportSectionConfig,
     testRun: TestRun | null,
@@ -133,7 +168,7 @@ export class ComparisonsRenderer {
         : DEFAULT_THRESHOLDS),
       minAbsolute: Number.isFinite(minAbsT) && minAbsT > 0 ? minAbsT : undefined,
     };
-    const baselineId = typeof config.baselineTestRunId === 'string' ? config.baselineTestRunId : undefined;
+    const baselineId = await this.resolveBaseline(config.baselineTestRunId, testRun);
     const dashboardMap = Array.isArray(config.dashboardMap)
       ? (config.dashboardMap as { current: string; baseline: string }[])
       : undefined;

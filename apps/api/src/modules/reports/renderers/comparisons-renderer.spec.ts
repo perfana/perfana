@@ -77,6 +77,7 @@ describe('ComparisonsRenderer', () => {
             getComparisonsData: jest.fn().mockResolvedValue(null),
             getBaselineRunComparison: jest.fn().mockResolvedValue(null),
             getAggregatedScalars: jest.fn(),
+            getPreviousTestRun: jest.fn().mockResolvedValue(null),
           },
         },
       ],
@@ -518,5 +519,66 @@ describe('ComparisonsRenderer', () => {
       expect(html).toContain('>150<');
       expect(html).toContain('vs 120');
     });
+  });
+});
+
+describe('ComparisonsRenderer previous-run baseline', () => {
+  // A template is generated from for months, so a pinned baseline id is stale the day after it
+  // is chosen and every nightly report keeps comparing against the same ageing run.
+  let renderer: ComparisonsRenderer;
+  let dataFetcher: jest.Mocked<ReportDataFetcherService>;
+
+  const sectionWith = (baselineTestRunId: unknown) =>
+    ({ ...makeSection(), config: { baselineTestRunId } }) as never;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ComparisonsRenderer,
+        ReportUtilsService,
+        {
+          provide: ReportDataFetcherService,
+          useValue: {
+            getComparisonsData: jest.fn().mockResolvedValue(null),
+            getBaselineRunComparison: jest.fn().mockResolvedValue(null),
+            getAggregatedScalars: jest.fn(),
+            getPreviousTestRun: jest
+              .fn()
+              .mockResolvedValue({ testRunId: 'EA-acc-loadtest-00019' }),
+          },
+        },
+      ],
+    }).compile();
+    renderer = module.get(ComparisonsRenderer);
+    dataFetcher = module.get(ReportDataFetcherService);
+  });
+
+  it('resolves "previous" against the run being reported on', async () => {
+    await renderer.renderComparisonsSection(sectionWith('previous'), makeTestRun());
+
+    expect(dataFetcher.getPreviousTestRun).toHaveBeenCalled();
+    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(
+      expect.anything(),
+      'EA-acc-loadtest-00019',
+    );
+  });
+
+  it('leaves a pinned baseline exactly as configured', async () => {
+    await renderer.renderComparisonsSection(sectionWith('EA-acc-loadtest-00001'), makeTestRun());
+
+    expect(dataFetcher.getPreviousTestRun).not.toHaveBeenCalled();
+    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(
+      expect.anything(),
+      'EA-acc-loadtest-00001',
+    );
+  });
+
+  it('compares against nothing when the run is the first in its scope', async () => {
+    // Rather than falling back to comparing a run against itself.
+    dataFetcher.getPreviousTestRun.mockResolvedValue(null);
+
+    await renderer.renderComparisonsSection(sectionWith('previous'), makeTestRun());
+
+    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(expect.anything(), undefined);
   });
 });
