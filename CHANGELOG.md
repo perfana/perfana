@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.10] - 2026-08-18
+
+### Fixed
+- **The report's cover no longer takes over the page.** The cover was told to be as tall as whatever it was displayed in, and a report is displayed inside a frame — so in a tall one it became several screens of empty space with the title stranded in the middle, and everything after it pushed far below the fold. The cover is now the height of a page, the same as when printed.
+
 ## [0.2.63.9] - 2026-08-18
 
 ### Added
