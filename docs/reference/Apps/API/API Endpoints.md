@@ -84,6 +84,17 @@ tags:
 | `GET` | `/api/test-runs/:id/timeseries` | Time series metrics |
 | `GET` | `/api/test-runs/:id/virtual-users` | Virtual user statistics |
 | `GET` | `/api/test-runs/:id/throughput` | Throughput metrics |
+| `GET` | `/api/test-runs/:id/aggregated-metric-timeseries` | Time series aggregated across runs (`?metric=&testRunIds=csv`) |
+| `GET` | `/api/test-runs/:id/aggregated-metric-statistic` | One statistic aggregated across runs (`?metric=&stat=&testRunIds=csv`) |
+| `GET` | `/api/test-runs/:id/url-metric-statistics` | Per-URL statistics across runs, for the Compare card (`?metric=&testRunIds=csv`) |
+| `GET` | `/api/test-runs/:id/url-distinct-names` | Distinct normalized URLs seen in the run |
+| `GET` | `/api/test-runs/:id/sampler-url-map` | Sampler name to normalized URL mapping |
+
+The endpoints taking `testRunIds` read it as a comma-separated list through one shared parser,
+`apps/api/src/modules/test-runs/controllers/parse-test-run-ids.ts`. Its `MAX_AGGREGATED_TEST_RUNS`
+is **500 distinct** runs per request, de-duplicated before the count is taken; omitted entirely
+means "just the run in the path". Oversized requests are rejected with 400 rather than truncated —
+a silently shortened list returns an aggregate that looks complete but omits runs.
 
 ### Apdex
 
@@ -146,6 +157,48 @@ tags:
 | `POST` | `/api/grafana-instances/test-connection` | Test connection |
 | `PATCH` | `/api/grafana-instances/:id` | Update instance |
 | `DELETE` | `/api/grafana-instances/:id` | Delete instance |
+
+## Reports
+
+Generation is queued on a worker; poll the download endpoint. Full pipeline recipe:
+[[Reports in CI-CD]].
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/reports` | List generated reports |
+| `GET` | `/api/reports/test-run/:testRunId` | Reports for a test run (accepts the human id or the UUID) |
+| `GET` | `/api/reports/test-run/:testRunId/summary` | Report counts for a test run |
+| `POST` | `/api/reports/generate` | Generate from a template (`template_id`, `template_name`, or the scope default) |
+| `POST` | `/api/reports/generate/ad-hoc` | Generate from inline sections (max 20, `name` required) |
+| `POST` | `/api/reports/preview-section` | Render one section for the builder preview |
+| `GET` | `/api/reports/:reportId` | Report metadata and status |
+| `DELETE` | `/api/reports/:reportId` | Delete report |
+| `POST` | `/api/reports/:reportId/pdf` | Queue PDF rendering |
+| `GET` | `/api/reports/:reportId/html/download` | Download HTML (202 while generating) |
+| `GET` | `/api/reports/:reportId/pdf/download` | Download PDF (auto-queues on first request) |
+| `POST` | `/api/reports/:reportId/retry` | Retry a failed generation |
+| `GET` | `/api/reports/:reportId/share` | Read share settings |
+| `PUT` | `/api/reports/:reportId/share` | Update share settings |
+| `GET` | `/api/reports/share/:shareId` | Public shared report |
+| `GET` | `/api/reports/share/:shareId/pdf` | Public shared PDF |
+
+### Report templates
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/report-templates` | List templates |
+| `GET` | `/api/report-templates/summaries` | Template summaries |
+| `GET` | `/api/report-templates/default` | Default template for a scope |
+| `POST` | `/api/report-templates` | Create template |
+| `POST` | `/api/report-templates/copy` | Copy a template into another scope |
+| `GET` | `/api/report-templates/:templateId` | Get template |
+| `PUT` | `/api/report-templates/:templateId` | Update template |
+| `DELETE` | `/api/report-templates/:templateId` | Delete template |
+| `POST` | `/api/report-templates/:templateId/duplicate` | Duplicate template |
+| `PUT` | `/api/report-templates/:templateId/set-default` | Make default for its scope (clears the flag on the others) |
+| `POST` | `/api/report-templates/:templateId/sections` | Append a section |
+| `DELETE` | `/api/report-templates/:templateId/sections/:sectionIndex` | Remove a section |
+| `PUT` | `/api/report-templates/:templateId/sections/reorder` | Reorder sections |
 
 ## Related
 

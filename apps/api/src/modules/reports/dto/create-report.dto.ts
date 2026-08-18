@@ -263,7 +263,9 @@ export class GenerateAdHocReportDto {
     description: `Section configurations for the report (1-${MAX_REPORT_SECTIONS} sections)`,
     type: [ReportSectionConfigDto],
     minItems: 1,
-    maxItems: 50,
+    // Swagger published 50 while the validator below rejected at 20, so /api/docs
+    // advertised a section count the endpoint refuses.
+    maxItems: MAX_REPORT_SECTIONS,
   })
   @IsArray()
   @ArrayMinSize(1, { message: 'At least one section is required' })

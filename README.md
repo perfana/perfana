@@ -85,7 +85,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system diagrams and data flo
 ```bash
 npm run dev           # Start all services
 npm run dev:api       # API only (port 3001)
-npm run dev:web       # Frontend only (port 4001)
+npm run dev:web       # Frontend only (port 4000)
 npm run test          # Run all tests
 npm run type-check    # TypeScript checking
 npm run lint          # Linting
@@ -102,8 +102,12 @@ AI agents: read [CLAUDE.md](CLAUDE.md) for comprehensive project context. Issues
 - [CLAUDE.md](CLAUDE.md) — Complete project guide (architecture, auth, conventions)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — System diagrams and data flow
 - [CONVENTIONS.md](CONVENTIONS.md) — Code patterns and naming rules
+- [docs/reference/](docs/reference/index.md) — Deep reference: ADAPT, RBAC, schema, features, CI/CD recipes
 - [apps/api/CODING_RULES.md](apps/api/CODING_RULES.md) — Backend standards
 - [apps/web/CODING_RULES.md](apps/web/CODING_RULES.md) — Frontend standards
+- [CHANGELOG.md](CHANGELOG.md) — What shipped in each release
+- [TODOS.md](TODOS.md) — Cross-PR backlog, with the context to pick an item up
+- [SECURITY.md](SECURITY.md) — Reporting a vulnerability
 
 ## License
 

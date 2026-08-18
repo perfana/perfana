@@ -42,6 +42,33 @@ async findById(id: string): Promise<TestRun> {
 }
 ```
 
+### A test run has two ids — never hand-roll the lookup
+
+`test_runs.id` is the internal uuid the UI puts in its links; `test_runs.test_run_id` is the
+readable id a person or CI/CD pipeline gave the load test tool. Endpoints get handed either one.
+
+The helpers live in `apps/api/src/modules/reports/services/resolve-test-run.ts` (not in
+`@perfana/shared`): `findTestRunByEitherId`, `resolveTestRunUuid`, and `TEST_RUN_UUID_RE` for the
+shape test itself.
+
+```typescript
+import { findTestRunByEitherId, resolveTestRunUuid } from '../../reports/services/resolve-test-run';
+
+const run = await findTestRunByEitherId(this.testRunRepo, testRunId);
+const uuid = await resolveTestRunUuid(this.testRunRepo, testRunId); // for uuid FKs, e.g. awr_reports
+```
+
+Two rules the helper exists to enforce:
+
+- **Never `WHERE id = :x OR test_run_id = :x`.** A repeated named parameter is sent once and
+  Postgres types it from the first comparison, so the uuid column types the parameter and a
+  readable id raises 22P02 instead of reaching the second half. Two statements, not one.
+- **A uuid-shaped value is still tried as a name** if no row has it as an id — nothing stops a
+  pipeline naming a run after a build guid.
+
+`ParseUUIDPipe` / `@IsUUID()` on a `test_run_id` is the same bug in DTO form: it rejects the only
+id a pipeline has before the service, which resolves either form, ever sees it.
+
 ## Worker Patterns
 
 Every job follows: **Job Handler → Pipeline Registry → Pipeline**

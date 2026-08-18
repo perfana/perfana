@@ -116,6 +116,7 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 ## Key Indexes
 
 - Composite index on `(system_under_test_id, test_environment, workload)` for test run lookups
+- `(system_under_test_id, test_environment, workload, start_time)` on `test_runs` — serves the "run immediately before this one" lookup a report's previous-run baseline needs. The `..., created_at` variant cannot: `created_at` is ingest order, not run order. The index does not cover the query's `completed = true` predicate, so Postgres still filters after the index scan; make it partial if that ever shows up in a plan
 - Time-based indexes on `ds_metrics` for time-series queries
 - `organization_id` on all tenant-scoped tables
 
