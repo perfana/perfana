@@ -44,6 +44,7 @@ describe('ReportGenerationService', () => {
   let reportRepo: jest.Mocked<Repository<GeneratedReport>>;
   let templateRepo: jest.Mocked<Repository<ReportTemplate>>;
   let testRunRepo: jest.Mocked<Repository<TestRun>>;
+  let authzService: jest.Mocked<AuthorizationService>;
   let auditService: jest.Mocked<AuditService>;
 
   // ==================== Mock Factories ====================
@@ -216,6 +217,7 @@ describe('ReportGenerationService', () => {
     reportRepo = module.get(getRepositoryToken(GeneratedReport));
     templateRepo = module.get(getRepositoryToken(ReportTemplate));
     testRunRepo = module.get(getRepositoryToken(TestRun));
+    authzService = module.get(AuthorizationService);
     auditService = module.get(AuditService);
   });
 
@@ -748,7 +750,7 @@ describe('ReportGenerationService', () => {
       ]);
     });
 
-    it('takes a uuid as given, without a lookup', async () => {
+    it('tries a uuid-shaped id against the uuid column first', async () => {
       const mockQueryBuilder = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
@@ -759,14 +761,72 @@ describe('ReportGenerationService', () => {
         getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
       };
       reportRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
 
       await service.findByTestRunId('123e4567-e89b-12d3-a456-426614174001', { roles: ['admin'] });
 
-      expect(testRunRepo.findOne).not.toHaveBeenCalled();
+      // First attempt is the uuid column, and it is the only one when it hits.
+      expect(testRunRepo.findOne).toHaveBeenCalledTimes(1);
+      expect(testRunRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: '123e4567-e89b-12d3-a456-426614174001' } }),
+      );
       const [, params] = mockQueryBuilder.where.mock.calls[0];
       expect(Object.values(params as Record<string, unknown>)).toEqual([
         '123e4567-e89b-12d3-a456-426614174001',
       ]);
+    });
+
+    it('falls back to the name column for a test run NAMED with a uuid', async () => {
+      // A pipeline using a build guid as its run name. Shape says uuid, but the value lives in
+      // test_run_id. Trusting the shape returned an empty list — a silent wrong answer.
+      const mockQueryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      reportRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+      const named = createMockTestRun({ id: 'aaaaaaaa-0000-0000-0000-000000000001' });
+      testRunRepo.findOne
+        .mockResolvedValueOnce(null)      // not a row id
+        .mockResolvedValueOnce(named);    // but it IS a run name
+
+      await service.findByTestRunId('123e4567-e89b-12d3-a456-426614174001', { roles: ['admin'] });
+
+      expect(testRunRepo.findOne).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ where: { testRunId: '123e4567-e89b-12d3-a456-426614174001' } }),
+      );
+      // Reports are then queried by the run's REAL uuid, not the id that came in.
+      const [, params] = mockQueryBuilder.where.mock.calls[0];
+      expect(Object.values(params as Record<string, unknown>)).toEqual([
+        'aaaaaaaa-0000-0000-0000-000000000001',
+      ]);
+    });
+
+    it('does not try the name column when a human id is handed in', async () => {
+      // Only the ambiguous (uuid-shaped) case costs a second lookup.
+      const mockQueryBuilder = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      reportRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder as any);
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+
+      await service.findByTestRunId('EA-acc-loadtest-00020', { roles: ['admin'] });
+
+      expect(testRunRepo.findOne).toHaveBeenCalledTimes(1);
+      expect(testRunRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { testRunId: 'EA-acc-loadtest-00020' } }),
+      );
     });
 
     it('wraps a failure of the new test run lookup in DatabaseException', async () => {
@@ -809,6 +869,7 @@ describe('ReportGenerationService', () => {
         getOne: jest.fn().mockResolvedValue(mockTestRun),
       };
       (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      testRunRepo.findOne.mockResolvedValue(mockTestRun);
       reportRepo.find.mockResolvedValue(mockReports);
 
       // Act
@@ -834,6 +895,7 @@ describe('ReportGenerationService', () => {
         getOne: jest.fn().mockResolvedValue(mockTestRun),
       };
       (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
       reportRepo.find.mockResolvedValue([]);
 
       // Act
@@ -875,14 +937,46 @@ describe('ReportGenerationService', () => {
         getOne: jest.fn().mockResolvedValue(createMockTestRun()),
       };
       (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
       reportRepo.find.mockResolvedValue([]);
 
       await service.getSummary('EA-acc-loadtest-00020', 'test-user', ['admin']);
 
+      // The column decision now lives in the shared resolver...
+      expect(testRunRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { testRunId: 'EA-acc-loadtest-00020' } }),
+      );
+      // ...and the org-filtered fetch runs against the uuid it returned, never both in one
+      // predicate. That is what makes sharing the resolver safe: the authorization query is
+      // untouched.
       const [predicate] = mockQueryBuilder.where.mock.calls[0];
-      expect(predicate).toBe('tr.test_run_id = :testRunId');
+      expect(predicate).toBe('tr.id = :testRunUuid');
       expect(predicate).not.toMatch(/OR/);
       expect(predicate).not.toMatch(/CAST/);
+    });
+
+    it('keeps the organization filter on the fetch after resolving', async () => {
+      // Sharing the resolver must not widen access: a run outside the caller's orgs still has
+      // to fall out of the org-filtered query.
+      const mockQueryBuilder = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
+      // The shared mock treats everyone as a global admin, which bypasses org filtering.
+      (authzService.isGlobalAdmin as jest.Mock).mockReturnValue(false);
+
+      const result = await service.getSummary('EA-acc-loadtest-00020', 'test-user', ['user']);
+
+      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
+        'sut.organization_id IN (:...orgIds)',
+        expect.anything(),
+      );
+      expect(result.totalReports).toBe(0);
+      expect(reportRepo.find).not.toHaveBeenCalled();
     });
 
     it('matches on the uuid column when handed a uuid', async () => {
@@ -893,12 +987,16 @@ describe('ReportGenerationService', () => {
         getOne: jest.fn().mockResolvedValue(createMockTestRun()),
       };
       (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      testRunRepo.findOne.mockResolvedValue(createMockTestRun());
       reportRepo.find.mockResolvedValue([]);
 
       await service.getSummary('123e4567-e89b-12d3-a456-426614174001', 'test-user', ['admin']);
 
+      expect(testRunRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: '123e4567-e89b-12d3-a456-426614174001' } }),
+      );
       const [predicate] = mockQueryBuilder.where.mock.calls[0];
-      expect(predicate).toBe('tr.id = :testRunId');
+      expect(predicate).toBe('tr.id = :testRunUuid');
     });
   });
 
@@ -1398,6 +1496,7 @@ describe('ReportGenerationService', () => {
         getOne: jest.fn().mockResolvedValue(mockTestRun),
       };
       (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      testRunRepo.findOne.mockResolvedValue(mockTestRun);
       reportRepo.find.mockResolvedValue(mockReports);
 
       // Act
@@ -1421,6 +1520,7 @@ describe('ReportGenerationService', () => {
         getOne: jest.fn().mockResolvedValue(mockTestRun),
       };
       (testRunRepo.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      testRunRepo.findOne.mockResolvedValue(mockTestRun);
       reportRepo.find.mockResolvedValue(mockReports);
 
       // Act

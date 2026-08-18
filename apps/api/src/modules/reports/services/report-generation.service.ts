@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { FindOneOptions, Repository, SelectQueryBuilder } from 'typeorm';
 import {
   GeneratedReport,
   ReportTemplate,
@@ -114,6 +114,21 @@ export interface HtmlGenerationResult {
   sectionCount: number;
 }
 
+/**
+ * What every "nothing to report" path returns. A test run the caller cannot see and one that
+ * does not exist are deliberately indistinguishable — the difference would tell an outsider
+ * whether a given run exists.
+ */
+const EMPTY_REPORT_SUMMARY: ReportSummaryResponse = {
+  totalReports: 0,
+  completedReports: 0,
+  pendingReports: 0,
+  failedReports: 0,
+  latestReport: undefined,
+  totalDownloads: 0,
+  totalShareViews: 0,
+};
+
 // ==================== Service ====================
 
 /**
@@ -166,27 +181,50 @@ export class ReportGenerationService {
   }
 
   /**
-   * The DB uuid for a test run identified either way, or null if there is no such run.
+   * Finds a test run by either form of id. The single place in this module that decides which
+   * column an identifier belongs to — every endpoint goes through it, so a new one cannot
+   * reintroduce the bug this replaced.
    *
-   * `generated_reports.test_run_id` is a uuid foreign key, but these endpoints are reached with
-   * whichever id the caller had. Handing the human id straight to a uuid column is not a miss
-   * that returns nothing — it is a 22P02 from Postgres, surfacing as a 500.
+   * A test run is addressable two ways: the DB uuid the UI puts in its own links, and the human
+   * id a person or a CI/CD pipeline knows because it is what they handed the load test tool.
    *
-   * Deliberately a lookup rather than one `tr.id = :x OR tr.test_run_id = :x` predicate. TypeORM
-   * sends a single parameter for a repeated name, Postgres infers its type from the first
-   * comparison it appears in — uuid — and the string then fails to parse before the second
-   * branch is ever reached. Casting on the second branch does not help: the inference has
-   * already happened. `SELECT parameter_types FROM pg_prepared_statements` shows `{uuid}` for
+   * A uuid-SHAPED id is tried as the uuid first and then as a human id, because a run may
+   * legitimately be *named* with a uuid — a pipeline using a build guid as its run name. Shape
+   * narrows the likely column; it does not prove which one holds the value. Trying only the
+   * shape-implied column returned an empty list for those runs: a silent wrong answer, worse
+   * than the loud error this path exists to prevent. The extra query only runs for a uuid-shaped
+   * id that matches no row, so the common paths still cost one lookup.
+   *
+   * Deliberately separate statements rather than one `id = :x OR test_run_id = :x` predicate.
+   * TypeORM sends a single parameter for a repeated name, Postgres infers its type from the
+   * first comparison it appears in — uuid — and a human id then fails to parse before the
+   * second branch is ever reached. Casting on the second branch does not help: the inference has
+   * already happened. `SELECT parameter_types FROM pg_prepared_statements` reports `{uuid}` for
    * exactly that shape.
    */
-  private async resolveTestRunUuid(testRunId: string): Promise<string | null> {
+  private async findTestRunByEitherId(
+    testRunId: string,
+    options: Omit<FindOneOptions<TestRun>, 'where'> = {},
+  ): Promise<TestRun | null> {
+    const em = withRequestEm(this.testRunRepo);
     if (TEST_RUN_UUID_RE.test(testRunId)) {
-      return testRunId;
+      const byUuid = await em.findOne({ ...options, where: { id: testRunId } });
+      if (byUuid) {
+        return byUuid;
+      }
+      // Shaped like a uuid but no row has it as an id — fall through and try it as a name.
     }
-    const testRun = await withRequestEm(this.testRunRepo).findOne({
-      where: { testRunId },
-      select: ['id'],
-    });
+    return em.findOne({ ...options, where: { testRunId } });
+  }
+
+  /**
+   * The DB uuid for a test run identified either way, or null if there is no such run.
+   *
+   * `generated_reports.test_run_id` is a uuid foreign key, so a human id handed to it is a 22P02
+   * from Postgres — a 500, not an empty result.
+   */
+  private async resolveTestRunUuid(testRunId: string): Promise<string | null> {
+    const testRun = await this.findTestRunByEitherId(testRunId, { select: ['id'] });
     return testRun?.id ?? null;
   }
 
@@ -199,10 +237,7 @@ export class ReportGenerationService {
     userId: string,
     roles: string[],
   ): Promise<{ accessible: boolean; testRun: TestRun | null }> {
-    // Accept either the DB uuid or the human test run id ("my-test-2026-07-31").
-    // CI/CD pipelines only know the latter — it's what they passed to the test tool.
-    const testRun = await withRequestEm(this.testRunRepo).findOne({
-      where: TEST_RUN_UUID_RE.test(testRunId) ? { id: testRunId } : { testRunId },
+    const testRun = await this.findTestRunByEitherId(testRunId, {
       relations: ['systemUnderTest', 'systemUnderTest.team'],
     });
 
@@ -663,29 +698,22 @@ export class ReportGenerationService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
       if (orgIds !== null && orgIds.length === 0) {
         this.logger.debug('User has no organization memberships, returning empty report summary');
-        return {
-          totalReports: 0,
-          completedReports: 0,
-          pendingReports: 0,
-          failedReports: 0,
-          latestReport: undefined,
-          totalDownloads: 0,
-          totalShareViews: 0,
-        };
+        return EMPTY_REPORT_SUMMARY;
       }
 
-      // Find the test run to get its uuid, from whichever form of id arrived. Matching on the
-      // right column rather than trying both in one predicate: an `id = :x OR test_run_id = :x`
-      // gets its parameter typed as uuid from the first branch, so a human id fails to parse
-      // before the second is reached, and a CAST there is too late to change it.
+      // Resolve the id through the one resolver, then fetch by uuid with the org filter intact.
+      // Splitting it this way keeps the authorization query exactly as it was — same join, same
+      // sut.organization_id predicate — so sharing the resolver cannot quietly widen access.
+      const testRunUuid = await this.resolveTestRunUuid(testRunId);
+      if (!testRunUuid) {
+        return EMPTY_REPORT_SUMMARY;
+      }
+
       const testRunQuery = withRequestEm(this.testRunRepo)
         .createQueryBuilder('tr')
         .leftJoin('tr.systemUnderTest', 'sut')
         .leftJoin('sut.team', 'team')
-        .where(
-          TEST_RUN_UUID_RE.test(testRunId) ? 'tr.id = :testRunId' : 'tr.test_run_id = :testRunId',
-          { testRunId },
-        );
+        .where('tr.id = :testRunUuid', { testRunUuid });
 
       // Apply organization filtering for non-admin users
       if (orgIds !== null) {
@@ -697,15 +725,7 @@ export class ReportGenerationService {
       if (!testRun) {
         // If test run not found or not accessible, return empty summary instead of throwing
         // This allows the UI to display "0 reports" instead of an error
-        return {
-          totalReports: 0,
-          completedReports: 0,
-          pendingReports: 0,
-          failedReports: 0,
-          latestReport: undefined,
-          totalDownloads: 0,
-          totalShareViews: 0,
-        };
+        return EMPTY_REPORT_SUMMARY;
       }
 
       const reports = await this.reportRepo.find({
