@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.5] - 2026-08-18
+
+### Fixed
+- **The report builder no longer invites you to drag sections that cannot be dragged.** Each section in the list carried a drag handle and the instruction "drag sections to the canvas", but dragging from that list was never wired up — only clicking worked, which the empty message a few centimetres away said instead. The handles and the contradictory instruction are gone; adding is a click, and dragging still reorders sections once they are in the report.
+- **The section limit is now enforced, not just displayed.** The builder showed a ceiling of 20 sections and let you sail past it.
+
+### Changed
+- **The report layout now keeps its space when the window is narrow.** The list of available sections held a fixed width, so everything a smaller window took came out of the layout — the half where sections are actually edited, and where a section's own settings appear. On a narrow window the list ended up wider than the layout it was feeding. The list now gives way first, and the layout keeps a usable minimum.
+- **The section list is compact and can be hidden.** One line per section instead of three, so all eleven are visible without scrolling, with each description on hover. Hiding the list hands its full width to the layout and replaces it with a searchable add-section menu.
+- **A new report offers a starting layout.** An empty report suggests "Executive summary" or "Full analysis" rather than only a blank area; either can be edited freely afterwards.
+- The section count is hidden until it approaches the limit, where it turns red.
+
 ## [0.2.63.4] - 2026-08-18
 
 ### Fixed
