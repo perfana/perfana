@@ -42,22 +42,14 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
+  Assignment as AssignmentIcon,
   Description as DescriptionIcon,
   Info as InfoIcon,
   DragIndicator as DragIcon,
   Delete as DeleteIcon,
-  TextFields as TextIcon,
-  Assignment as AssignmentIcon,
-  Speed as SpeedIcon,
-  TrendingUp as TrendingIcon,
-  CompareArrows as CompareIcon,
-  ShowChart as GraphIcon,
-  Warning as WarningIcon,
-  Storage as StorageIcon,
   Settings as SettingsIcon,
   ExpandMore as ExpandMoreIcon,
   Star as StarIcon,
-  FormatListNumbered as ListNumberedIcon,
 } from '@mui/icons-material';
 import {
   generateAdHocReport,
@@ -68,9 +60,10 @@ import {
   type ReportSectionConfig,
   type ReportSectionType,
   type ReportStyling,
-  REPORT_SECTION_TYPES,
   getSectionText,
 } from '@/lib/api/reports';
+import { SECTION_CONFIG } from './section-config';
+import { SectionPalette } from './SectionPalette';
 import {
   HeaderConfigForm,
   TextBlockConfigForm,
@@ -113,74 +106,34 @@ export interface GenerateReportDialogProps {
 
 // ==================== Section Configuration ====================
 
-const SECTION_CONFIG: Record<ReportSectionType, { icon: React.ReactNode; label: string; description: string; color: string }> = {
-  header: {
-    icon: <TextIcon />,
-    label: 'Header',
-    description: 'Section heading with configurable level (H1-H6)',
-    color: '#2196f3',
+
+/**
+ * Most sections one report may contain.
+ *
+ * The dialog displayed this ceiling but never enforced it, so the count could pass it and the
+ * label simply kept counting. Enforced here, and only shown once it is close enough to matter.
+ */
+const MAX_SECTIONS = 20;
+
+/** Below this many sections the count is noise, so the label stays hidden. */
+const SECTION_COUNT_VISIBLE_FROM = MAX_SECTIONS - 5;
+
+/**
+ * Layouts offered on the empty canvas. A blank page is the hardest place to start, and these are
+ * the two shapes almost every report takes; anything can be added or removed afterwards.
+ */
+const STARTER_LAYOUTS: ReadonlyArray<{ name: string; description: string; sections: ReportSectionType[] }> = [
+  {
+    name: 'Executive summary',
+    description: 'Did it pass, and what stands out',
+    sections: ['header', 'slo', 'apdex', 'regressions'],
   },
-  text_block: {
-    icon: <AssignmentIcon />,
-    label: 'Text Block',
-    description: 'Free-form text content with markdown support',
-    color: '#607d8b',
+  {
+    name: 'Full analysis',
+    description: 'The complete picture, section by section',
+    sections: ['header', 'slo', 'apdex', 'transaction_response_times', 'top_10_lists', 'regressions', 'trends'],
   },
-  slo: {
-    icon: <AssignmentIcon sx={{ transform: 'rotate(180deg)' }} />,
-    label: 'SLO Summary',
-    description: 'Service Level Objective results and compliance',
-    color: '#4caf50',
-  },
-  apdex: {
-    icon: <SpeedIcon />,
-    label: 'Apdex Scores',
-    description: 'Application Performance Index scores by transaction',
-    color: '#66bb6a',
-  },
-  transaction_response_times: {
-    icon: <TrendingIcon />,
-    label: 'Response Times',
-    description: 'Transaction response time metrics and percentiles',
-    color: '#2196f3',
-  },
-  regressions: {
-    icon: <WarningIcon />,
-    label: 'Performance Regressions',
-    description: 'Detected performance regressions and anomalies',
-    color: '#f44336',
-  },
-  awr: {
-    icon: <StorageIcon />,
-    label: 'AWR Analysis',
-    description: 'Automatic Workload Repository (Oracle) report',
-    color: '#9c27b0',
-  },
-  trends: {
-    icon: <TrendingIcon />,
-    label: 'Trend Charts',
-    description: 'Historical performance trends over multiple test runs',
-    color: '#ff9800',
-  },
-  comparisons: {
-    icon: <CompareIcon />,
-    label: 'Test Comparisons',
-    description: 'Side-by-side comparison with baseline test runs',
-    color: '#795548',
-  },
-  graphs: {
-    icon: <GraphIcon />,
-    label: 'Custom Graphs',
-    description: 'Performance metrics visualizations',
-    color: '#00bcd4',
-  },
-  top_10_lists: {
-    icon: <ListNumberedIcon />,
-    label: 'Top 10 Lists',
-    description: 'Ranked top-10 lists (slowest, throughput, impact, error rate) for transactions, requests, or URLs',
-    color: '#ff9800',
-  },
-};
+];
 
 // ==================== Main Component ====================
 
@@ -206,6 +159,8 @@ export function GenerateReportDialog({
 
   // Report builder state
   const [sections, setSections] = useState<ReportSectionConfig[]>(initialSections);
+  // Collapsing the catalogue hands its width to the canvas, for narrow windows and long reports.
+  const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -344,12 +299,26 @@ export function GenerateReportDialog({
 
   // Handle add section
   const handleAddSection = (type: ReportSectionType) => {
+    if (sections.length >= MAX_SECTIONS) {
+      return;
+    }
     const newSection: ReportSectionConfig = {
       type,
       order: sections.length,
       title: SECTION_CONFIG[type].label,
     };
     setSections([...sections, newSection]);
+  };
+
+  /** Fills an empty canvas with a starting shape the reader can then edit. */
+  const handleApplyStarterLayout = (types: readonly ReportSectionType[]) => {
+    setSections(
+      types.slice(0, MAX_SECTIONS).map((type, order) => ({
+        type,
+        order,
+        title: SECTION_CONFIG[type].label,
+      })),
+    );
   };
 
   // Handle template selection and loading
@@ -432,7 +401,6 @@ export function GenerateReportDialog({
   };
 
   // All section types are always available (can add multiple of same type)
-  const availableSections = REPORT_SECTION_TYPES;
 
   return (
     <Dialog
@@ -681,31 +649,20 @@ export function GenerateReportDialog({
         {/* Main Content - Report Builder */}
         {!showTemplateSelector && (
           <Box sx={{ display: 'flex', gap: 3, px: 3, py: 2, flex: 1, minHeight: 0 }}>
-            {/* Left Column: Available Sections */}
-            <Box sx={{ flex: '0 0 340px', display: 'flex', flexDirection: 'column' }}>
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-                  Available Sections
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Drag sections to the canvas to build your report
-                </Typography>
-              </Box>
-
-              <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1 }}>
-                {availableSections.map((type) => (
-                  <SectionCard
-                    key={type}
-                    type={type}
-                    onClick={() => handleAddSection(type)}
-                  />
-                ))}
-              </Box>
-            </Box>
+            {/* Left Column: the section catalogue, which yields space to the canvas */}
+            <SectionPalette
+              collapsed={paletteCollapsed}
+              onToggleCollapsed={() => setPaletteCollapsed((c) => !c)}
+              onAdd={handleAddSection}
+              disabled={sections.length >= MAX_SECTIONS}
+            />
 
             {/* Right Column: Report Layout */}
             {/* ponytail: minWidth:0 lets this flex child shrink; without it wide Selects overflow the dialog */}
-            <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            {/* minWidth is the point of this whole change: the editing surface never shrinks below
+                a usable width, so a narrow window costs the catalogue its space rather than the
+                forms the reader is actually filling in. */}
+            <Box sx={{ flex: '1 1 auto', minWidth: 380, display: 'flex', flexDirection: 'column' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
               <Box>
                 <Typography variant="subtitle1" fontWeight={600} gutterBottom>
@@ -715,9 +672,14 @@ export function GenerateReportDialog({
                   Drag to reorder sections
                 </Typography>
               </Box>
-              <Typography variant="body2" color="text.secondary">
-                {sections.length} sections / 20 max
-              </Typography>
+              {sections.length >= SECTION_COUNT_VISIBLE_FROM && (
+                <Typography
+                  variant="body2"
+                  color={sections.length >= MAX_SECTIONS ? 'error.main' : 'text.secondary'}
+                >
+                  {sections.length} / {MAX_SECTIONS} sections
+                </Typography>
+              )}
             </Box>
 
             <DndContext
@@ -761,9 +723,32 @@ export function GenerateReportDialog({
                         p: 4,
                       }}
                     >
-                      <Typography variant="body2" color="text.secondary">
-                        No sections added yet. Click sections from the left to add them.
-                      </Typography>
+                      <Box sx={{ textAlign: 'center', maxWidth: 420 }}>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          {paletteCollapsed
+                            ? 'No sections yet. Use + to add one, or start from a layout:'
+                            : 'No sections yet. Pick one from the left, or start from a layout:'}
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap', mt: 2 }}>
+                          {STARTER_LAYOUTS.map((layout) => (
+                            <Button
+                              key={layout.name}
+                              size="small"
+                              variant="outlined"
+                              onClick={() => handleApplyStarterLayout(layout.sections)}
+                            >
+                              <Box sx={{ textAlign: 'left' }}>
+                                <Typography variant="body2" fontWeight={600}>
+                                  {layout.name}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'none' }}>
+                                  {layout.description}
+                                </Typography>
+                              </Box>
+                            </Button>
+                          ))}
+                        </Box>
+                      </Box>
                     </Box>
                   )}
                 </Box>
@@ -824,62 +809,6 @@ export function GenerateReportDialog({
 }
 
 // ==================== Section Card (Available) ====================
-
-interface SectionCardProps {
-  type: ReportSectionType;
-  onClick: () => void;
-}
-
-function SectionCard({ type, onClick }: SectionCardProps) {
-  const config = SECTION_CONFIG[type];
-
-  return (
-    <Box
-      onClick={onClick}
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 1.5,
-        p: 2,
-        border: '1px solid',
-        borderColor: 'divider',
-        borderRadius: 2,
-        cursor: 'pointer',
-        bgcolor: 'background.paper',
-        transition: 'border-color 0.2s',
-        '&:hover': {
-          borderColor: 'text.primary',
-        },
-      }}
-    >
-      <DragIcon sx={{ color: 'text.secondary' }} />
-      <Box
-        sx={{
-          width: 40,
-          height: 40,
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          bgcolor: `${config.color}15`,
-          color: config.color,
-        }}
-      >
-        {config.icon}
-      </Box>
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography variant="body2" fontWeight={600} noWrap>
-          {config.label}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" noWrap>
-          {config.description}
-        </Typography>
-      </Box>
-    </Box>
-  );
-}
-
-// ==================== Layout Section Card ====================
 
 interface LayoutSectionCardProps {
   id: string;
