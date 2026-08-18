@@ -62,6 +62,7 @@ import {
   type ReportStyling,
   getSectionText,
 } from '@/lib/api/reports';
+import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
 import { SECTION_CONFIG } from './section-config';
 import { SectionPalette } from './SectionPalette';
 import {
@@ -107,13 +108,7 @@ export interface GenerateReportDialogProps {
 // ==================== Section Configuration ====================
 
 
-/**
- * Most sections one report may contain.
- *
- * The dialog displayed this ceiling but never enforced it, so the count could pass it and the
- * label simply kept counting. Enforced here, and only shown once it is close enough to matter.
- */
-const MAX_SECTIONS = 20;
+const MAX_SECTIONS = MAX_REPORT_SECTIONS;
 
 /** Below this many sections the count is noise, so the label stays hidden. */
 const SECTION_COUNT_VISIBLE_FROM = MAX_SECTIONS - 5;
@@ -183,6 +178,10 @@ export function GenerateReportDialog({
   );
   // One shared value when all baseline sections agree; undefined otherwise
   const sharedBaselineId = baselineIds.size === 1 ? [...baselineIds][0] : undefined;
+  // Unset baselines are filtered out of the set above, so "no shared value" covers two very
+  // different states: nobody has picked one yet (size 0), and they disagree (size > 1). Only
+  // the second is an override.
+  const baselinesDiffer = baselineIds.size > 1;
   const baselineCandidates = useBaselineCandidates(
     scope.systemId,
     testRunId,
@@ -400,7 +399,6 @@ export function GenerateReportDialog({
     }
   };
 
-  // All section types are always available (can add multiple of same type)
 
   return (
     <Dialog
@@ -512,7 +510,7 @@ export function GenerateReportDialog({
                 helperText={
                   sharedBaselineId
                     ? `Applied to all ${baselineSectionCount} comparison section${baselineSectionCount !== 1 ? 's' : ''}`
-                    : sharedBaselineId === undefined && baselineSectionCount > 1
+                    : baselinesDiffer
                       ? 'Sections currently use different baselines — selecting one here overrides them all'
                       : `Select from ${baselineCandidates.length} available test runs`
                 }
@@ -808,7 +806,7 @@ export function GenerateReportDialog({
   );
 }
 
-// ==================== Section Card (Available) ====================
+// ==================== Layout Section Card ====================
 
 interface LayoutSectionCardProps {
   id: string;

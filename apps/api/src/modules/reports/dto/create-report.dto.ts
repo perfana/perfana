@@ -15,6 +15,7 @@ import {
   IsObject,
   Matches,
 } from 'class-validator';
+import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { REPORT_DEFAULTS } from '@perfana/shared';
@@ -75,9 +76,19 @@ export class ReportSectionConfigDto {
   @Length(0, 255, { message: 'Title must not exceed 255 characters' })
   title?: string;
 
+  /**
+   * Section-specific configuration.
+   *
+   * Comparison sections additionally accept the reserved value `'previous'` for
+   * `baselineTestRunId` — see the Swagger description below.
+   */
   @ApiPropertyOptional({
-    description: 'Section-specific configuration options',
-    example: { includeChart: true, showFailedOnly: false },
+    description:
+      'Section-specific configuration options. Comparison sections additionally accept the ' +
+      "reserved value 'previous' for baselineTestRunId, which resolves per report to the run " +
+      'immediately before this one in the same system, environment and workload — so a template ' +
+      'compares each report against its own predecessor rather than a pinned run.',
+    example: { comparisonMode: 'baseline_run', baselineTestRunId: 'previous' },
   })
   @IsOptional()
   @IsObject()
@@ -249,14 +260,14 @@ export class GenerateAdHocReportDto {
   name!: string;
 
   @ApiProperty({
-    description: 'Section configurations for the report (1-50 sections)',
+    description: `Section configurations for the report (1-${MAX_REPORT_SECTIONS} sections)`,
     type: [ReportSectionConfigDto],
     minItems: 1,
     maxItems: 50,
   })
   @IsArray()
   @ArrayMinSize(1, { message: 'At least one section is required' })
-  @ArrayMaxSize(50, { message: 'Maximum 50 sections allowed' })
+  @ArrayMaxSize(MAX_REPORT_SECTIONS, { message: `Maximum ${MAX_REPORT_SECTIONS} sections allowed` })
   @ValidateNested({ each: true })
   @Type(() => ReportSectionConfigDto)
   sections!: ReportSectionConfigDto[];
@@ -475,11 +486,17 @@ export class ShareParamsDto {
  */
 export class PreviewSectionDto {
   @ApiPropertyOptional({
-    description: 'Test run UUID to generate preview for (optional, uses mock data if not provided)',
-    example: '123e4567-e89b-12d3-a456-426614174000',
+    // Either form: the human-readable run id a pipeline has, or the internal uuid.
+    // previewSection resolves both through isTestRunAccessible, so rejecting the human id
+    // here made preview the one report endpoint a pipeline could not call.
+    description:
+      'Test run to generate the preview for — the human-readable id or the internal uuid. ' +
+      'Optional; mock data is used when omitted.',
+    example: 'EA-acc-loadtest-00020',
   })
   @IsOptional()
-  @IsUUID('4', { message: 'Test run ID must be a valid UUID' })
+  @IsString()
+  @Length(1, 255)
   test_run_id?: string;
 
   @ApiProperty({

@@ -151,7 +151,16 @@ export function SectionPalette({ onAdd, collapsed, onToggleCollapsed, disabled }
         {REPORT_SECTION_TYPES.map((type) => {
           const config = SECTION_CONFIG[type];
           return (
-            <Tooltip key={type} title={config.description} placement="right" enterDelay={400}>
+            <Tooltip
+              key={type}
+              title={disabled ? 'Section limit reached' : config.description}
+              placement="right"
+              enterDelay={400}
+            >
+              {/* span: a disabled button fires no events, so the tooltip needs a live wrapper —
+                  same guard as the collapsed variant above. Without it the rows dim at the cap
+                  and nothing explains why. */}
+              <span style={{ display: 'block' }}>
               <Box
                 component="button"
                 type="button"
@@ -197,6 +206,7 @@ export function SectionPalette({ onAdd, collapsed, onToggleCollapsed, disabled }
                   {config.label}
                 </Typography>
               </Box>
+              </span>
             </Tooltip>
           );
         })}

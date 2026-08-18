@@ -790,6 +790,26 @@ export class ReportHtmlCompilerService {
         display: none;
       }
 
+      /* Restore the type that was already small before the zoom.
+
+         zoom scales everything, but it was added for the wide tables, and the whole report
+         pays for it: at 0.8 the uppercase table headers go 9pt -> 7.2pt and the footer
+         metadata 8pt -> 6.4pt, both at the edge of print legibility. Dividing by the zoom
+         puts them back at their intended physical size, so only the content that needed to
+         shrink actually does. Body text is unaffected: 11pt -> 8.8pt is still comfortable
+         and is what buys the tables their room. */
+      .data-table th {
+        font-size: 11.25pt; /* 9pt / 0.8 */
+      }
+
+      footer .footer-meta {
+        font-size: 10pt; /* 8pt / 0.8 */
+      }
+
+      footer .footer-tagline {
+        font-size: 11.25pt; /* 9pt / 0.8 */
+      }
+
       section {
         box-shadow: none;
         border: 1px solid var(--border-color);
