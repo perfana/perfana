@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.8] - 2026-08-18
+
+### Changed
+- **A report on screen is now laid out as the A4 document it is, rather than stretching to the width of the window.** On a wide monitor lines ran far past a comfortable reading length and tables spread into a shape the printed version never has. The column is now the same width as the PDF's — same line breaks, same tables — so what you read on screen is what comes out of the printer. Printing and PDF export are unchanged.
+
 ## [0.2.63.7] - 2026-08-18
 
 ### Fixed
