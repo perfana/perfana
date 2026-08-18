@@ -941,6 +941,40 @@ describe('ReportHtmlCompilerService screen measure', () => {
   });
 });
 
+describe('ReportHtmlCompilerService print scale', () => {
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('scales the printed page down, so wide tables fit the 180mm column', () => {
+    // Without this the regressions table runs off the right edge of the page and its Status
+    // column is simply gone — and paper has no scrollbar to recover it.
+    const out = html();
+    const printBlock = out.slice(out.indexOf('/* Print Styles */'));
+
+    expect(printBlock).toMatch(/zoom:\s*0\.8/);
+  });
+
+  it('scales with zoom, not transform, so pagination follows the scaled layout', () => {
+    // transform: scale paints smaller without relaying out, so page breaks would still fall at
+    // the unscaled positions and cut through rows.
+    const out = html();
+
+    // A declaration, not the prose: the CSS comment above zoom names transform: scale as the
+    // thing it is not.
+    expect(out).not.toMatch(/transform:\s*scale\([^)]*\)\s*;/);
+  });
+
+  it('leaves the screen measure unscaled', () => {
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).not.toMatch(/zoom:/);
+  });
+});
+
 describe('ReportHtmlCompilerService cover page height', () => {
   const html = () =>
     new ReportHtmlCompilerService(

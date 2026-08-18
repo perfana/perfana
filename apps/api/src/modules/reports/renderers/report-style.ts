@@ -128,7 +128,7 @@ export function statusFor(
 /** Generic colored pill. Label is uppercased with letter-spacing per rule 06. */
 export function pill(label: string, kind: PillKind): string {
   const { bg, fg } = PILL_FILLS[kind];
-  return `<span style="display:inline-block; padding:4px 11px; border-radius:999px; background:${bg}; color:${fg}; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">${escapeHtml(label)}</span>`;
+  return `<span style="display:inline-block; padding:4px 11px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">${escapeHtml(label)}</span>`;
 }
 
 /** Status pill for the five-state scale (rule 01 + 06). */
@@ -139,13 +139,13 @@ export function statusPill(status: ReportStatus): string {
 /** Summary chip (counts in section/group headers). Not uppercased. */
 export function chip(label: string, kind: PillKind): string {
   const { bg, fg } = PILL_FILLS[kind];
-  return `<span style="display:inline-block; padding:4px 11px; border-radius:999px; background:${bg}; color:${fg}; font-size:12px; font-weight:700;">${escapeHtml(label)}</span>`;
+  return `<span style="display:inline-block; padding:4px 11px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:12px; font-weight:700;">${escapeHtml(label)}</span>`;
 }
 
 /** Compact in-table marker chip (e.g. a CURRENT run marker) sized for table rows. */
 export function markerChip(label: string, kind: PillKind): string {
   const { bg, fg } = PILL_FILLS[kind];
-  return `<span style="display:inline-block; padding:2px 8px; border-radius:999px; background:${bg}; color:${fg}; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">${escapeHtml(label)}</span>`;
+  return `<span style="display:inline-block; padding:2px 8px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">${escapeHtml(label)}</span>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ export function deltaChip(
 ): string {
   const pct = toFiniteNumber(diffPercent);
   const chipStyle = (bg: string, fg: string, content: string): string =>
-    `<span style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:999px; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums; background:${bg}; color:${fg};">${content}</span>`;
+    `<span style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; border-radius:999px; overflow-wrap:normal; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums; background:${bg}; color:${fg};">${content}</span>`;
   if (pct == null || pct === 0) {
     return chipStyle(PILL_FILLS.neutral.bg, PILL_FILLS.neutral.fg, '—');
   }

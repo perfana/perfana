@@ -764,6 +764,23 @@ export class ReportHtmlCompilerService {
       body {
         padding: 0;
         background-color: var(--bg-color);
+
+        /* A4 minus the PDF's 15mm side margins is a 180mm text column, and the widest tables
+           need more than that: the regressions list lost its Status column off the right edge
+           of the page, where — unlike on screen — there is no scrollbar to recover it.
+
+           zoom, not a smaller font-size, because the renderers set ~87 font sizes inline and
+           an inline style beats any stylesheet rule; a .data-table font-size override
+           here was measured and changed nothing. zoom scales those inline values, and the
+           padding with them. Not transform: scale either — that paints smaller without
+           relaying out, so pagination would still break at the unscaled positions.
+
+           0.8 gives the content a 225mm column to lay out in. 0.85 also fits this report, with
+           about 15px to spare on the widest row; 0.8 leaves room for longer metric names in
+           other reports and is still comfortable to read (10pt body text prints at 8pt).
+
+           Screen is untouched: there the measure is 340mm and wide tables scroll. */
+        zoom: 0.8;
       }
 
       /* Chrome does not implement "position: running()", so this element never moved

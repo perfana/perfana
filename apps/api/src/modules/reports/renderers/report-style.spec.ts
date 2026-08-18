@@ -259,3 +259,18 @@ describe('report-style', () => {
     });
   });
 });
+
+describe('status pills in a table cell', () => {
+  // .data-table td sets overflow-wrap: anywhere so a long unbreakable value cannot push the
+  // trailing columns off the page. Pills inherit it, and "EXCELLENT" came out as "EXCELLEN T"
+  // stacked over two lines wherever the column was tight. A pill is a label, not prose: it
+  // breaks on spaces or not at all.
+  it.each([
+    ['statusPill', statusPill('regression')],
+    ['chip', chip('24 regressions', 'bad')],
+    ['markerChip', markerChip('current', 'info')],
+    ['deltaChip', deltaChip(12.5, 'higher-is-worse')],
+  ])('%s opts out of break-anywhere', (_name, markup) => {
+    expect(markup).toContain('overflow-wrap:normal');
+  });
+});
