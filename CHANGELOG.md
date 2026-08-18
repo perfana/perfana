@@ -4,6 +4,69 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.64.0] - 2026-08-18
+
+### Added
+- **A report template can follow the previous run as its baseline.** Comparison sections accept
+  the reserved value `previous` for their baseline, which resolves per report to the run
+  immediately before the reported one in the same system, environment and workload — so a saved
+  template compares each report against its own predecessor instead of a run pinned when the
+  template was written. Offered as "Previous run" at the top of the baseline picker, and
+  documented in Swagger for templates created through the API.
+- **The report builder's section list gives way to the canvas.** One line per section type, all
+  eleven visible without scrolling, descriptions on hover, and a collapse control that hands the
+  whole width to the layout you are editing. The list is searchable when collapsed. The previous
+  grip icons advertised a drag-to-canvas interaction that was never wired up, so anyone who tried
+  it concluded the dialog was broken; adding is a click. Dragging still reorders sections on the
+  canvas.
+- **Copy a report template's id from the system configuration screen.** A CI/CD pipeline calling
+  `/reports/generate` needs the template id and previously had no way to read it off the screen.
+- **Starter layouts for an empty report.** "Executive summary" and "Full analysis" fill the canvas
+  rather than leaving you to assemble a report from nothing.
+
+### Fixed
+- **Reports can be requested by the test run id a pipeline actually has.** Every reporting
+  endpoint now accepts either the human-readable run id or the internal uuid, resolved the same
+  way in one place. `GET /reports/test-run/{id}` previously returned a 500 for a human id, and
+  preview was still refusing one even though its own documented example used it.
+- **The AWR section is no longer silently empty.** `awr_reports.test_run_id` is a uuid foreign
+  key, unlike every other table the report fetcher reads, so passing the human id raised an
+  invalid-input error that was swallowed into a warning — the section came out blank in every
+  generated report instead of failing loudly.
+- **A test run whose name is itself uuid-shaped resolves correctly** rather than answering "not
+  found".
+- **Reports generated on the same day no longer collide.** An unnamed report was named after the
+  template and the date; it now carries the time as well.
+- **Wide tables stay inside the report.** The regressions list and the per-transaction Apdex
+  breakdown carry more columns than an A4 column holds. On screen the report is a fixed 340mm
+  measure — bounded, so a wide monitor no longer stretches lines past reading length — and wide
+  tables scroll within their section. In print the page is scaled so those columns fit, with
+  table headers and footer metadata held at their intended size.
+- **Metric cards and table headings no longer break up.** A long label could push the last card's
+  value off the edge, and a heading could break mid-word ("Transacti on Name"). Status pills no
+  longer split either ("EXCELLEN T").
+- **The cover page is a page.** It took its height from whatever container it landed in, so in a
+  tall iframe it became a screen and a half of gradient with the title marooned in the middle.
+- **The shared baseline control no longer claims sections disagree when no baseline is set.**
+- **The section list explains itself at the cap.** Every row dimmed with nothing to say why.
+
+### Changed
+- **`testRunIds` is bounded on both endpoints that accept it.** At most 500 distinct runs per
+  request, de-duplicated first so a repeat-heavy list is judged on the work it actually costs.
+  Oversized requests are rejected rather than truncated: a silently shortened list returns an
+  aggregate that looks complete but omits runs. The Compare card's URL-metric endpoint was
+  previously unbounded, which made the cap on its sibling avoidable.
+- **The previous-run baseline lookup is indexed.** Existing databases need
+  `1791000000000-AddTestRunStartTimeIndex` applied; new deploys get it from the schema.
+
+### Notes for API callers
+- A generated report's default `name` now includes a time component. Match on report id or
+  `created_at` rather than the name string.
+- An invalid `test_run_id` on `/reports/generate/ad-hoc` now returns 404 (run not found) instead
+  of 400 (not a uuid), matching `/reports/generate`.
+- A request naming more than 500 distinct `testRunIds` now returns 400.
+- The ad-hoc section cap is 20, down from 50, matching what the builder allows.
+
 ## [0.2.63.12] - 2026-08-18
 
 ### Fixed
