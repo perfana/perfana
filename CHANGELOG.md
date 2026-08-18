@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.9] - 2026-08-18
+
+### Added
+- **A report template can now compare each report against the run before it, instead of one fixed run.** Choosing a specific baseline made sense the day the template was written and was stale the day after: every nightly report kept comparing against the same ageing run. The baseline picker now offers "Previous run" at the top, and a template set that way resolves its own baseline each time a report is generated — no change to how the report is requested. "Previous" means the most recent completed run before this one in the same system, environment and workload, which is what the picker would have offered anyway. The first run in a scope has nothing behind it, so its comparison section stays empty rather than comparing the run against itself.
+
 ## [0.2.63.8] - 2026-08-18
 
 ### Changed
