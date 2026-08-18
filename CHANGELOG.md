@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.63.2] - 2026-08-18
+## [0.2.63.3] - 2026-08-18
 
 ### Fixed
 - **The reports list on a test run no longer fails when the page is opened by its test run name.** A test run can be addressed two ways: by the identifier you gave the load test tool ("EA-acc-loadtest-00020"), or by the internal one Perfana assigns it. Reports are stored against the internal one, and the list endpoint passed whichever it was handed straight to the database, so opening the page by name returned a server error and the reports tab stayed empty for a run that had reports. The name is now translated to the internal identifier first, and a run that does not exist reports no reports rather than an error.
