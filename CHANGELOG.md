@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.12] - 2026-08-18
+
+### Fixed
+- **Metric cards no longer have their figures cut off.** The rows of summary figures in Apdex, SLO and Trends were laid out so that a long label could force its card wider than the space available, pushing the last card's value off the edge. The cards now share the width they are given.
+- **Table headings read as words again.** A heading was allowed to break mid-word, so "Transaction Name" appeared as "Transacti on Name" stacked over three lines. Headings now set the narrowest sensible width for their column.
+
 ## [0.2.63.11] - 2026-08-18
 
 ### Fixed
