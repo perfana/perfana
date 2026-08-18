@@ -172,6 +172,45 @@ describe('TestRunsAggregatedTimeseriesController', () => {
       );
     });
 
+    it('rejects a testRunIds list longer than the cap', async () => {
+      // Unbounded, every id costs an indexed rollup read, so one request fans out with the list.
+      const tooMany = Array.from({ length: 501 }, (_, i) => `run-${i}`).join(',');
+
+      await expect(
+        controller.getAggregatedMetricStatistic('a', 'request_response_time', 'p90', tooMany, ctx),
+      ).rejects.toThrow('at most 500 runs');
+      expect(mockService.getAggregatedMetricStatistics).not.toHaveBeenCalled();
+    });
+
+    it('accepts a list exactly at the cap', async () => {
+      // Off-by-one guard: the limit is inclusive.
+      mockService.getAggregatedMetricStatistics.mockResolvedValue([]);
+      const atCap = Array.from({ length: 500 }, (_, i) => `run-${i}`).join(',');
+
+      await controller.getAggregatedMetricStatistic('a', 'request_response_time', 'p90', atCap, ctx);
+
+      expect(mockService.getAggregatedMetricStatistics).toHaveBeenCalled();
+    });
+
+    it('rejects rather than truncates, so no aggregate silently omits runs', async () => {
+      const tooMany = Array.from({ length: 600 }, (_, i) => `run-${i}`).join(',');
+
+      await expect(
+        controller.getAggregatedMetricStatistic('a', 'error_percentage', undefined as never, tooMany, ctx),
+      ).rejects.toThrow(/received 600/);
+    });
+
+    it('de-duplicates repeated ids', async () => {
+      // A repeated id would otherwise be read, aggregated and returned once per occurrence.
+      mockService.getAggregatedMetricStatistics.mockResolvedValue([]);
+
+      await controller.getAggregatedMetricStatistic('a', 'request_response_time', 'p90', 'a,b,a,b,a', ctx);
+
+      expect(mockService.getAggregatedMetricStatistics).toHaveBeenCalledWith(
+        ['a', 'b'], 'u1', ['user'], 'request_response_time', 'p90',
+      );
+    });
+
     it('rejects an unknown metric', async () => {
       await expect(
         controller.getAggregatedMetricStatistic('a', 'bogus', 'avg', 'a', ctx),

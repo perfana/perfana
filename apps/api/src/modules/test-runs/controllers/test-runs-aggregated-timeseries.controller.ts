@@ -6,6 +6,17 @@ import { TestRunsService } from '../test-runs.service';
 const ALLOWED_METRICS = ['transaction_response_time', 'request_response_time', 'error_percentage'] as const;
 const ALLOWED_STATS = ['avg', 'p50', 'p90', 'p95', 'p99', 'max'] as const;
 
+/**
+ * Most runs a single request may aggregate.
+ *
+ * `testRunIds` arrives as an unbounded comma-separated string and every id costs an indexed
+ * rollup read, so one request fans out in proportion to the list. Trends passes every run in the
+ * selected range, which a wide range on a busy system makes arbitrarily long. The cap is far
+ * above any range the UI builds — it exists so a hand-built URL cannot turn one request into
+ * unbounded work.
+ */
+const MAX_AGGREGATED_TEST_RUNS = 500;
+
 type AllowedMetric = typeof ALLOWED_METRICS[number];
 type AllowedStat = typeof ALLOWED_STATS[number];
 
@@ -58,7 +69,7 @@ export class TestRunsAggregatedTimeseriesController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter' })
+  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter, or more than the maximum number of testRunIds' })
   async getAggregatedMetricTimeseries(
     @Param('testRunId') testRunId: string,
     @Query('metric') metric: string,
@@ -98,7 +109,7 @@ export class TestRunsAggregatedTimeseriesController {
   @ApiParam({ name: 'testRunId', description: 'Anchor test run UUID or test_run_id string (org-access scope)', type: String })
   @ApiQuery({ name: 'metric', required: true, enum: ALLOWED_METRICS })
   @ApiQuery({ name: 'stat', required: false, enum: ALLOWED_STATS, description: 'Required for response-time metrics; ignored for error_percentage.' })
-  @ApiQuery({ name: 'testRunIds', required: false, type: String, description: 'Comma-separated test_run_id list to aggregate (defaults to the path run).' })
+  @ApiQuery({ name: 'testRunIds', required: false, type: String, description: `Comma-separated test_run_id list to aggregate (defaults to the path run). At most ${MAX_AGGREGATED_TEST_RUNS} runs; duplicates are ignored.` })
   @ApiResponse({
     status: 200,
     description:
@@ -117,7 +128,7 @@ export class TestRunsAggregatedTimeseriesController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter' })
+  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter, or more than the maximum number of testRunIds' })
   async getAggregatedMetricStatistic(
     @Param('testRunId') testRunId: string,
     @Query('metric') metric: string,
@@ -136,7 +147,16 @@ export class TestRunsAggregatedTimeseriesController {
       .split(',')
       .map(id => id.trim())
       .filter(id => id.length > 0);
-    const ids = testRunIds.length > 0 ? testRunIds : [testRunId];
+    if (testRunIds.length > MAX_AGGREGATED_TEST_RUNS) {
+      // Rejected rather than truncated: a silently shortened list would return an aggregate
+      // that looks complete but silently omits runs, which is worse than an error the caller
+      // can act on.
+      throw new BadRequestException(
+        `testRunIds accepts at most ${MAX_AGGREGATED_TEST_RUNS} runs (received ${testRunIds.length}); narrow the range and try again`,
+      );
+    }
+    // De-duplicated: a repeated id would be read, aggregated and returned once per occurrence.
+    const ids = testRunIds.length > 0 ? [...new Set(testRunIds)] : [testRunId];
 
     return this.testRunsService.getAggregatedMetricStatistics(
       ids,
