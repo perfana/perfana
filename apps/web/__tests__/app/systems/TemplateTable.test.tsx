@@ -55,25 +55,31 @@ describe('TemplateTable copy template ID', () => {
   });
 
   it('confirms the copy, since a clipboard write is otherwise silent', async () => {
+    // Assert the icon swap, not the button's presence: the aria-label is static
+    // (`Copy template ID for <name>`), so any assertion on the accessible name is true whether
+    // or not the confirmation exists, and passes with the whole feature deleted.
     renderTable();
+
+    expect(screen.getByTestId('TagIcon')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Copy template ID for Nightly regression'));
 
-    await screen.findByLabelText('Copy template ID for Nightly regression');
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Copy template ID/ })).toBeInTheDocument(),
-    );
+    expect(await screen.findByTestId('CheckIcon')).toBeInTheDocument();
   });
 
   it('does not claim success when the clipboard refuses', async () => {
     // Insecure origin or denied permission. Saying "copied" there would be a lie.
+    // 'Template ID copied' is only a Tooltip title, rendered on hover — asserting its absence
+    // is equally true on the success path, so the catch branch was effectively untested.
+    // The observable difference is the icon.
     writeText.mockRejectedValue(new Error('denied'));
     renderTable();
 
     fireEvent.click(screen.getByLabelText('Copy template ID for Nightly regression'));
 
     await waitFor(() => expect(writeText).toHaveBeenCalled());
-    expect(screen.queryByText('Template ID copied')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('CheckIcon')).not.toBeInTheDocument();
+    expect(screen.getByTestId('TagIcon')).toBeInTheDocument();
   });
 
   it('does not open the editor when copying', async () => {

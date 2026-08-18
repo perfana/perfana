@@ -962,9 +962,14 @@ describe('ReportHtmlCompilerService print scale', () => {
     // the unscaled positions and cut through rows.
     const out = html();
 
-    // A declaration, not the prose: the CSS comment above zoom names transform: scale as the
-    // thing it is not.
-    expect(out).not.toMatch(/transform:\s*scale\([^)]*\)\s*;/);
+    // Scoped to the print block, and only after proving the block was actually found: an
+    // unanchored slice that misses its marker is empty, and every not.toMatch over an empty
+    // string passes vacuously.
+    const printStart = out.indexOf('/* Print Styles */');
+    expect(printStart).toBeGreaterThan(-1);
+    const printBlock = out.slice(printStart);
+    expect(printBlock).toMatch(/zoom:\s*0\.8/);
+    expect(printBlock).not.toMatch(/transform:\s*scale\([^)]*\)\s*;/);
   });
 
   it('leaves the screen measure unscaled', () => {
@@ -1029,5 +1034,27 @@ describe('ReportHtmlCompilerService wide tables', () => {
     // A declaration at the start of a line — the rejected approach is still named in a
     // comment, which is the point of the comment.
     expect(html()).not.toMatch(/^\s*table-layout:\s*fixed/m);
+  });
+});
+
+describe('ReportHtmlCompilerService info grid', () => {
+  const html = () =>
+    new ReportHtmlCompilerService(
+      { getSectionTitle: (t: string) => t, escapeHtml: (v: string) => v } as never,
+      { render: jest.fn() } as never,
+    ).compileHtml('Report', '<section>x</section>', {} as never);
+
+  it('gives the summary grid columns a zero floor', () => {
+    // 1fr floors a column at its content width, so one unbreakable value (a long release name)
+    // widened the grid past the page and the trailing column was clipped out of the PDF.
+    expect(html()).toMatch(/\.info-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+  });
+
+  it('lets data cells break anywhere but leaves headers alone', () => {
+    // A header that breaks anywhere lets the browser shrink the column to almost nothing —
+    // "TRANSACTION NAME" came out as "TRANSACTI ON NAME" over three lines.
+    const out = html();
+    expect(out).toMatch(/\.data-table td\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    expect(out).not.toMatch(/\.data-table th\s*\{[^}]*overflow-wrap:\s*anywhere/);
   });
 });
