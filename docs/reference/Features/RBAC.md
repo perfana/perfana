@@ -33,6 +33,10 @@ Both flow through `KeycloakEnhancedAuthGuard` and produce a uniform `UserContext
 
 > ⚠️ `ctx.organizations` from `@UserCtx()` is JWT-only and often `[]`. Services MUST resolve organizations via `AuthorizationService.getAccessibleOrganizations(userId)`.
 
+For an API-key principal, `getAccessibleOrganizations` and `isOrganizationMember` fall back to the `organization_id` on the `api_keys` row itself when `organization_members` yields nothing. That fallback reads `api_keys` on the **plain pooled connection, deliberately outside RLS**: `RlsTransactionInterceptor` calls `getAccessibleOrganizations` to build `app.current_user_organizations`, so reading it through a policy that consumes that GUC would be circular. It is sound only because the `userId` passed is always the authenticated principal itself.
+
+> ⚠️ **Deployment constraint.** `api_keys` is `FORCE ROW LEVEL SECURITY`, so that unscoped read returns rows only because the API's login role is `rolsuper`/`rolbypassrls`. Deploy the API under a least-privilege role without the bypass and every API key silently loses all organization access — surfacing as the misleading denial `user is not a member of organization X`, not as a startup error.
+
 ---
 
 ## 2. Role hierarchy
@@ -285,7 +289,7 @@ Manual flush: `AuthorizationService.clearAllCaches()` (testing only — uses SCA
 | 3 | Service-layer authorization enforcement | ✅ Lint-enforced (allowlist empty) |
 | 4 | `organization_id` NOT NULL backfill | ✅ (2026-05-02) |
 | 5a | Audit logging | ✅ (2026-05-04) |
-| 5b | Postgres Row-Level Security | 🚧 Pending |
+| 5b | Postgres Row-Level Security | ✅ Shipped — `RlsTransactionInterceptor` + `withRequestEm()`; `.rls-em-migration-allowlist.json` empty; suite in `apps/api/src/test/rls/` runs in `npm run preflight` |
 
 See `CLAUDE.md` for the full burndown record and PR references.
 
