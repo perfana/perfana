@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.63.6] - 2026-08-18
+
+### Fixed
+- **Reports generated without a name no longer collide.** An unnamed report was named after its template plus the date, so a pipeline that generates nightly and again on demand on the same day produced several reports with identical names, indistinguishable in the list. The name now carries the time as well.
+
+### Added
+- **Report templates can have their id copied straight from the system's configuration screen.** The report generation endpoint accepts a template id, and until now there was no way to read one off the screen. The copy button confirms it worked, and stays quiet rather than claiming success when the browser refuses clipboard access.
+
 ## [0.2.63.5] - 2026-08-18
 
 ### Fixed
