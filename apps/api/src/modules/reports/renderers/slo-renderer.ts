@@ -88,7 +88,7 @@ export class SloRenderer {
         ${sectionText(text)}
 
         <!-- Summary Cards -->
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px;">
           ${statCard('Total Checks', formatInt(total))}
           ${statCard('Passed', `<span style="color: ${REPORT_COLORS.dot.good};">${formatInt(passed)}</span>`)}
           ${statCard('Failed', `<span style="color: ${failed > 0 ? REPORT_COLORS.dot.bad : REPORT_COLORS.dot.good};">${formatInt(failed)}</span>`)}

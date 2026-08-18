@@ -32,7 +32,7 @@ Three options, in order of precedence:
 
 | Field | Behaviour |
 |---|---|
-| `template_id` | Explicit template UUID. |
+| `template_id` | Explicit template UUID. Copy it from the report template list on the system's configuration screen — the copy button next to each template. |
 | `template_name` | Template with that name in the test run's system / environment / workload. Names are unique per scope, so this is an unambiguous key — and it's the one a pipeline can hard-code. |
 | *neither* | The **default template** for that scope. |
 
@@ -103,6 +103,26 @@ perfana-report:
   artifacts:
     paths: [report.html]
 ```
+
+## Without a template: `/reports/generate/ad-hoc`
+
+`POST /api/reports/generate/ad-hoc` takes the sections inline instead of a template id. It
+accepts the same two forms of `test_run_id` as `/reports/generate` — the human id or the UUID —
+and at most **20 sections** per report, the same ceiling the builder enforces. Over that, or an
+id that matches no run, and the call is refused (400 and 404 respectively). Unlike
+`/reports/generate`, `name` is required here.
+
+A comparison section can set `"baselineTestRunId": "previous"` to compare against the most recent
+completed run that started before this one in the same system / environment / workload, rather
+than pinning a run that ages. See [[Templates]].
+
+## Naming generated reports
+
+`/reports/generate` names an unnamed report after its template plus the date **and time** (UTC,
+`YYYY-MM-DD HH:MM:SS`), so a pipeline that generates nightly and again on demand on the same day
+no longer produces reports with identical names. Do not match on the name string from a pipeline —
+use the `report_id` the generate call returns, or `created_at`. The ad-hoc endpoint never
+auto-names: it requires `name`.
 
 ## PDF instead
 

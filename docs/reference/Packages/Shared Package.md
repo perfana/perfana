@@ -72,8 +72,12 @@ The `@perfana/shared` package is the central repository for domain models, types
 ### Test Run (`types/test-run.types.ts`)
 - `ActiveJobInfo`, `TestRunStatus`, `ConsolidatedResult`
 
+### Reports (`types/reports.types.ts`)
+- Report generation types — section types, statuses, defaults
+- `PREVIOUS_RUN_BASELINE` (`'previous'`) — reserved value for a comparison section's `baselineTestRunId`. The API resolves it in the comparisons renderer, the builder offers it as a synthetic option; declared once so a rename fails the build instead of silently no longer resolving. See [[Templates]]
+- `MAX_REPORT_SECTIONS` (`20`) — most sections one report may hold. The builder enforces it while composing, the ad-hoc generate DTO enforces it at the API boundary
+
 ### Other Types
-- `reports.types.ts` — Report generation types
 - `grafana.ts` — Grafana integration types
 - `database.types.ts` — Database-specific type mappings
 - `keycloak.types.ts` — SSO/identity provider types

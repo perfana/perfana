@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react';
 import { Autocomplete, Box, TextField, Typography } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
+import { PREVIOUS_RUN_BASELINE } from '@perfana/shared/types';
 
 export interface BaselineCandidate {
   test_run_id: string;
@@ -33,8 +34,20 @@ const formatCandidateTime = (c: BaselineCandidate): string =>
     minute: '2-digit',
   });
 
+/**
+ * The value stored when the baseline should follow the run being reported on.
+ *
+ * Re-exported from @perfana/shared/types so the builder and the API's comparisons renderer
+ * cannot drift: a rename is now a compile error rather than a template that silently stops
+ * resolving a previous run.
+ */
+export { PREVIOUS_RUN_BASELINE };
+
 const getCandidateDisplayText = (c: BaselineCandidate): string =>
-  `${c.test_run_id} - ${formatCandidateTime(c)}`;
+  // The synthetic "previous" entry has no run behind it, so it has no timestamp to format.
+  c.test_run_id === PREVIOUS_RUN_BASELINE
+    ? 'Previous run'
+    : `${c.test_run_id} - ${formatCandidateTime(c)}`;
 
 const getCandidateSecondaryInfo = (c: BaselineCandidate): string => {
   const parts = [`${c.test_environment} / ${c.workload}`];
@@ -74,6 +87,16 @@ export function useBaselineCandidates(
   return candidates;
 }
 
+/**
+ * A synthetic first option, because pinning a specific run is the wrong default for a template.
+ * A template is generated from for months; the run chosen today is stale tomorrow, and every
+ * nightly report then compares against the same ageing baseline. This one follows along.
+ */
+const PREVIOUS_RUN_OPTION: BaselineCandidate = {
+  test_run_id: PREVIOUS_RUN_BASELINE,
+  // The list renders these; a synthetic option has no real values to show.
+} as BaselineCandidate;
+
 interface BaselineRunSelectProps {
   candidates: BaselineCandidate[];
   value?: string; // baseline test_run_id
@@ -85,10 +108,14 @@ interface BaselineRunSelectProps {
 export function BaselineRunSelect({ candidates, value, onChange, label = 'Baseline Test Run', helperText }: BaselineRunSelectProps) {
   return (
     <Autocomplete
-      options={candidates}
+      options={[PREVIOUS_RUN_OPTION, ...candidates]}
       getOptionLabel={getCandidateDisplayText}
       isOptionEqualToValue={(option, v) => option.test_run_id === v.test_run_id}
-      value={candidates.find((c) => c.test_run_id === value) ?? null}
+      value={
+        value === PREVIOUS_RUN_BASELINE
+          ? PREVIOUS_RUN_OPTION
+          : (candidates.find((c) => c.test_run_id === value) ?? null)
+      }
       onChange={(_, newValue) => onChange(newValue)}
       size="small"
       renderInput={(params) => (
@@ -99,14 +126,30 @@ export function BaselineRunSelect({ candidates, value, onChange, label = 'Baseli
           fullWidth
           helperText={
             helperText ??
-            (value
-              ? `Comparing with: ${value}`
-              : `Select from ${candidates.length} available test runs`)
+            (value === PREVIOUS_RUN_BASELINE
+              ? 'Each report compares against the run before it'
+              : value
+                ? `Comparing with: ${value}`
+                : `Select from ${candidates.length} available test runs`)
           }
         />
       )}
       renderOption={(props, option) => {
         const { key, ...otherProps } = props;
+        if (option.test_run_id === PREVIOUS_RUN_BASELINE) {
+          return (
+            <Box component="li" key={key} {...otherProps}>
+              <Box sx={{ width: '100%' }}>
+                <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                  Previous run
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Resolved when each report is generated, so it never goes stale
+                </Typography>
+              </Box>
+            </Box>
+          );
+        }
         return (
           <Box component="li" key={key} {...otherProps}>
             <Box sx={{ width: '100%' }}>

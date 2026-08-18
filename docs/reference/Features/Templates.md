@@ -46,10 +46,23 @@ Accessible at `/settings/profiles`:
   - Deep links configuration tab
 
 ### Template Section Builder
-- Drag-and-drop section ordering
+- **Adding a section is a click** on the section list. Dragging reorders sections once they are on the canvas — it never added them, despite the grip icons the list used to carry
+- The section list is one line per type, so all eleven fit without scrolling; each description is on hover. Collapsing the list hands its full width to the canvas and replaces it with a searchable add-section menu
+- An empty report offers the **"Executive summary"** and **"Full analysis"** starter layouts rather than a blank canvas; both are freely editable afterwards
+- A report composed in the builder holds at most **20 sections** (`MAX_REPORT_SECTIONS` in [[Shared Package]]). The builder enforces the cap and the ad-hoc generate DTO enforces the same number at the API boundary, so the UI cannot offer what the API rejects. At the cap every row says why it is disabled. Templates saved through `POST /api/report-templates` are still capped at 50 sections by their own DTO — a separate, older limit
 - Configurable metric selections
 - Preview functionality for report sections
 - Collapsed section cards summarize their own configuration (header level and text, text-block content, response-time scenario, baseline-run dashboard/panel count) so multiple sections of the same type can be told apart without expanding them
+
+#### Comparison sections: pinned baseline or previous run
+
+A comparison section's `baselineTestRunId` takes either a specific run, or the reserved value
+`previous` (`PREVIOUS_RUN_BASELINE` in [[Shared Package]] — both sides must agree on the exact
+string, so it is declared once).
+
+- **A pinned run** made sense the day the template was written and ages from then on: every nightly report keeps comparing against the same run.
+- **`previous`** resolves per report to the most recent **completed** run that started strictly before the reported one, in the same system, environment and workload (ordered by `start_time`) — so a template compares each report against its own predecessor. Offered as "Previous run" at the top of the baseline picker, and documented in Swagger for templates created through the API.
+- The first run in a scope has nothing behind it, so its comparison section stays empty rather than comparing the run against itself.
 
 #### Text block sections
 

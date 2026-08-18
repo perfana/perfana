@@ -2,9 +2,11 @@ import { Controller, Get, Param, Query, BadRequestException, Logger } from '@nes
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { UserCtx, UserContext } from '../../../common/decorators/user-context.decorator';
 import { TestRunsService } from '../test-runs.service';
+import { MAX_AGGREGATED_TEST_RUNS, parseTestRunIds } from './parse-test-run-ids';
 
 const ALLOWED_METRICS = ['transaction_response_time', 'request_response_time', 'error_percentage'] as const;
 const ALLOWED_STATS = ['avg', 'p50', 'p90', 'p95', 'p99', 'max'] as const;
+
 
 type AllowedMetric = typeof ALLOWED_METRICS[number];
 type AllowedStat = typeof ALLOWED_STATS[number];
@@ -98,7 +100,7 @@ export class TestRunsAggregatedTimeseriesController {
   @ApiParam({ name: 'testRunId', description: 'Anchor test run UUID or test_run_id string (org-access scope)', type: String })
   @ApiQuery({ name: 'metric', required: true, enum: ALLOWED_METRICS })
   @ApiQuery({ name: 'stat', required: false, enum: ALLOWED_STATS, description: 'Required for response-time metrics; ignored for error_percentage.' })
-  @ApiQuery({ name: 'testRunIds', required: false, type: String, description: 'Comma-separated test_run_id list to aggregate (defaults to the path run).' })
+  @ApiQuery({ name: 'testRunIds', required: false, type: String, description: `Comma-separated test_run_id list to aggregate (defaults to the path run). At most ${MAX_AGGREGATED_TEST_RUNS} runs; duplicates are ignored.` })
   @ApiResponse({
     status: 200,
     description:
@@ -117,7 +119,7 @@ export class TestRunsAggregatedTimeseriesController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter' })
+  @ApiResponse({ status: 400, description: 'Invalid metric or stat parameter, or more than the maximum number of testRunIds' })
   async getAggregatedMetricStatistic(
     @Param('testRunId') testRunId: string,
     @Query('metric') metric: string,
@@ -132,11 +134,11 @@ export class TestRunsAggregatedTimeseriesController {
       throw new BadRequestException(`stat must be one of: ${ALLOWED_STATS.join(', ')} (required unless metric is error_percentage)`);
     }
 
-    const testRunIds = (testRunIdsRaw ?? '')
-      .split(',')
-      .map(id => id.trim())
-      .filter(id => id.length > 0);
-    const ids = testRunIds.length > 0 ? testRunIds : [testRunId];
+    // De-duplicate before measuring: a repeated id would be read, aggregated and returned once
+    // per occurrence, and the cap is meant to bound the work the server does — not the length
+    // of the string the caller happened to send. 600 entries naming 40 distinct runs is 40
+    // runs' worth of work and is allowed through.
+    const ids = parseTestRunIds(testRunIdsRaw, testRunId);
 
     return this.testRunsService.getAggregatedMetricStatistics(
       ids,

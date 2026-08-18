@@ -4,6 +4,135 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.64.0] - 2026-08-18
+
+### Added
+- **A report template can follow the previous run as its baseline.** Comparison sections accept
+  the reserved value `previous` for their baseline, which resolves per report to the most recent
+  completed run that started strictly before the reported one, in the same system, environment
+  and workload — so a saved
+  template compares each report against its own predecessor instead of a run pinned when the
+  template was written. Offered as "Previous run" at the top of the baseline picker, and
+  documented in Swagger for templates created through the API.
+- **The report builder's section list gives way to the canvas.** One line per section type, all
+  eleven visible without scrolling, descriptions on hover, and a collapse control that hands the
+  whole width to the layout you are editing. The list is searchable when collapsed. The previous
+  grip icons advertised a drag-to-canvas interaction that was never wired up, so anyone who tried
+  it concluded the dialog was broken; adding is a click. Dragging still reorders sections on the
+  canvas.
+- **Copy a report template's id from the system configuration screen.** A CI/CD pipeline calling
+  `/reports/generate` needs the template id and previously had no way to read it off the screen.
+- **Starter layouts for an empty report.** "Executive summary" and "Full analysis" fill the canvas
+  rather than leaving you to assemble a report from nothing.
+
+### Fixed
+- **Reports can be requested by the test run id a pipeline actually has.** Every reporting
+  endpoint now accepts either the human-readable run id or the internal uuid, resolved the same
+  way in one place. `GET /reports/test-run/{id}` previously returned a 500 for a human id, and
+  preview was still refusing one even though its own documented example used it.
+- **The AWR section is no longer silently empty.** `awr_reports.test_run_id` is a uuid foreign
+  key, unlike every other table the report fetcher reads, so passing the human id raised an
+  invalid-input error that was swallowed into a warning — the section came out blank in every
+  generated report instead of failing loudly.
+- **A test run whose name is itself uuid-shaped resolves correctly** rather than answering "not
+  found".
+- **Reports generated on the same day no longer collide.** An unnamed report was named after the
+  template and the date; it now carries the time as well.
+- **Wide tables stay inside the report.** The regressions list and the per-transaction Apdex
+  breakdown carry more columns than an A4 column holds. On screen the report is held to a fixed
+  340mm measure instead of stretching to the window, and a section scrolls horizontally when its
+  content is wider than that. In print the page is scaled so those columns fit, with table
+  headers and footer metadata held at their intended size. Running prose still sets to the full
+  340mm measure, which is wider than a comfortable line — capping it is tracked in TODOS.md.
+- **Metric cards and table headings no longer break up.** A long label could push the last card's
+  value off the edge, and a heading could break mid-word ("Transacti on Name"). Status pills no
+  longer split either ("EXCELLEN T").
+- **The cover page is a page.** It took its height from whatever container it landed in, so in a
+  tall iframe it became a screen and a half of gradient with the title marooned in the middle.
+- **The shared baseline control no longer claims sections disagree when no baseline is set.**
+- **The section list explains itself at the cap.** Every row dimmed with nothing to say why.
+
+### Changed
+- **`testRunIds` is bounded on both endpoints that accept it.** At most 500 distinct runs per
+  request, de-duplicated first so a repeat-heavy list is judged on the work it actually costs.
+  Oversized requests are rejected rather than truncated: a silently shortened list returns an
+  aggregate that looks complete but omits runs. The Compare card's URL-metric endpoint was
+  previously unbounded, which made the cap on its sibling avoidable.
+- **The previous-run baseline lookup is indexed.** Existing databases need
+  `1791000000000-AddTestRunStartTimeIndex` applied; new deploys get it from the schema.
+
+### Notes for API callers
+- A generated report's default `name` now includes a time component. Match on report id or
+  `created_at` rather than the name string.
+- An invalid `test_run_id` on `/reports/generate/ad-hoc` now returns 404 (run not found) instead
+  of 400 (not a uuid), matching `/reports/generate`.
+- A request naming more than 500 distinct `testRunIds` now returns 400.
+- The ad-hoc section cap is 20, down from 50, matching what the builder allows.
+
+## [0.2.63.12] - 2026-08-18
+
+### Fixed
+- **Metric cards no longer have their figures cut off.** The rows of summary figures in Apdex, SLO and Trends were laid out so that a long label could force its card wider than the space available, pushing the last card's value off the edge. The cards now share the width they are given.
+- **Table headings read as words again.** A heading was allowed to break mid-word, so "Transaction Name" appeared as "Transacti on Name" stacked over three lines. Headings now set the narrowest sensible width for their column.
+
+## [0.2.63.11] - 2026-08-18
+
+### Fixed
+- **Wide tables no longer run out of the report and off the page.** Holding the report to A4 width left the widest tables — the regressions list and the per-transaction Apdex breakdown — with less room than their columns need, so they spilled out of their section and past the edge of the document. They now scroll within their own section instead.
+
+## [0.2.63.10] - 2026-08-18
+
+### Fixed
+- **The report's cover no longer takes over the page.** The cover was told to be as tall as whatever it was displayed in, and a report is displayed inside a frame — so in a tall one it became several screens of empty space with the title stranded in the middle, and everything after it pushed far below the fold. The cover is now the height of a page, the same as when printed.
+
+## [0.2.63.9] - 2026-08-18
+
+### Added
+- **A report template can now compare each report against the run before it, instead of one fixed run.** Choosing a specific baseline made sense the day the template was written and was stale the day after: every nightly report kept comparing against the same ageing run. The baseline picker now offers "Previous run" at the top, and a template set that way resolves its own baseline each time a report is generated — no change to how the report is requested. "Previous" means the most recent completed run before this one in the same system, environment and workload, which is what the picker would have offered anyway. The first run in a scope has nothing behind it, so its comparison section stays empty rather than comparing the run against itself.
+
+## [0.2.63.8] - 2026-08-18
+
+### Changed
+- **A report on screen is now laid out as the A4 document it is, rather than stretching to the width of the window.** On a wide monitor lines ran far past a comfortable reading length and tables spread into a shape the printed version never has. The column is now the same width as the PDF's — same line breaks, same tables — so what you read on screen is what comes out of the printer. Printing and PDF export are unchanged.
+
+## [0.2.63.7] - 2026-08-18
+
+### Fixed
+- **The Oracle AWR section is no longer silently empty in generated reports.** Every report section is looked up by the test run id you gave the load test tool, but the AWR data alone is stored against Perfana's internal identifier. Asking for it by the wrong one failed, and because that failure was only logged as a warning the report was produced with the section blank rather than reporting a problem. It is now looked up correctly.
+- **Ad-hoc report generation accepts the test run id a pipeline actually has.** It insisted on the internal identifier and rejected the readable one outright, even though the rest of the endpoint handled either. Generating from a template already accepted both.
+
+### Changed
+- The API documentation now shows a readable test run id in its examples rather than an internal identifier, which had been steering people towards the one their pipeline does not have.
+
+## [0.2.63.6] - 2026-08-18
+
+### Fixed
+- **Reports generated without a name no longer collide.** An unnamed report was named after its template plus the date, so a pipeline that generates nightly and again on demand on the same day produced several reports with identical names, indistinguishable in the list. The name now carries the time as well.
+
+### Added
+- **Report templates can have their id copied straight from the system's configuration screen.** The report generation endpoint accepts a template id, and until now there was no way to read one off the screen. The copy button confirms it worked, and stays quiet rather than claiming success when the browser refuses clipboard access.
+
+## [0.2.63.5] - 2026-08-18
+
+### Fixed
+- **The report builder no longer invites you to drag sections that cannot be dragged.** Each section in the list carried a drag handle and the instruction "drag sections to the canvas", but dragging from that list was never wired up — only clicking worked, which the empty message a few centimetres away said instead. The handles and the contradictory instruction are gone; adding is a click, and dragging still reorders sections once they are in the report.
+- **The section limit is now enforced, not just displayed.** The builder showed a ceiling of 20 sections and let you sail past it.
+
+### Changed
+- **The report layout now keeps its space when the window is narrow.** The list of available sections held a fixed width, so everything a smaller window took came out of the layout — the half where sections are actually edited, and where a section's own settings appear. On a narrow window the list ended up wider than the layout it was feeding. The list now gives way first, and the layout keeps a usable minimum.
+- **The section list is compact and can be hidden.** One line per section instead of three, so all eleven are visible without scrolling, with each description on hover. Hiding the list hands its full width to the layout and replaces it with a searchable add-section menu.
+- **A new report offers a starting layout.** An empty report suggests "Executive summary" or "Full analysis" rather than only a blank area; either can be edited freely afterwards.
+- The section count is hidden until it approaches the limit, where it turns red.
+
+## [0.2.63.4] - 2026-08-18
+
+### Fixed
+- **Reports are now found for a test run whose name happens to look like an internal id.** Some pipelines name a run after a build guid, which has the same shape as the identifier Perfana assigns internally. Those runs were looked up in the wrong place and their reports quietly came back empty — no error, just nothing. An identifier of that shape is now checked against both, so the reports appear.
+
+### Changed
+- **The aggregate metric endpoint now has a documented ceiling on how many runs one request may combine.** The list of runs was read from the URL with no limit, so a hand-built request could ask for arbitrarily many at once. Over the limit the request is now refused with a message saying so, rather than quietly returning a partial answer, and a run named twice in the same request is counted once.
+- Every reporting endpoint now resolves a test run identifier the same way, in one place, so the class of bug fixed in 0.2.63.3 cannot come back through an endpoint added later. The shapes the report renderers consume moved into their own module, which is a sixth of what was the largest file in that area.
+
 ## [0.2.63.3] - 2026-08-18
 
 ### Fixed

@@ -673,3 +673,24 @@ export function getSectionTypeLabel(type: ReportSectionType): string {
 export function getReportStatusLabel(status: ReportStatus): string {
   return REPORT_STATUS_LABELS[status] ?? status;
 }
+
+/**
+ * Reserved value for a comparison section's `baselineTestRunId`.
+ *
+ * Resolved per report to the run immediately before the reported one in the same system,
+ * environment and workload, so a template compares each report against its own predecessor
+ * rather than a run pinned when the template was written.
+ *
+ * Shared because both sides must agree on the exact string: the API resolves it in the
+ * comparisons renderer, the builder offers it as a synthetic option. Declared twice, a rename
+ * on one side would silently stop resolving instead of failing the build.
+ */
+export const PREVIOUS_RUN_BASELINE = 'previous';
+
+/**
+ * Most sections one report may contain.
+ *
+ * The builder enforces this while composing, and the ad-hoc generate DTO enforces it at the
+ * API boundary. One number so the UI cannot offer what the API will reject.
+ */
+export const MAX_REPORT_SECTIONS = 20;

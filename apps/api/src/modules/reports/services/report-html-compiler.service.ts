@@ -495,7 +495,7 @@ export class ReportHtmlCompilerService {
     /* Info Grid (3-column layout for test run summary) */
     .info-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 24px;
       margin: 24px 0;
     }
@@ -592,6 +592,10 @@ export class ReportHtmlCompilerService {
        width wider than the page and Chrome silently clips the trailing columns.
        Headers keep normal wrapping so they break on spaces, not mid-word. */
     .data-table td {
+      /* Data cells only. Letting a HEADER break anywhere lets the browser shrink a column to
+         almost nothing, and "TRANSACTION NAME" came out as "TRANSACTI ON NAME" stacked over
+         three lines. A header should set the column's floor; it is the shortest honest width
+         that column can have. */
       overflow-wrap: anywhere;
     }
 
@@ -696,6 +700,63 @@ export class ReportHtmlCompilerService {
       font-family: 'Courier New', monospace;
     }
 
+    /* On screen the report is held to a fixed measure instead of stretching to whatever the
+       window happens to be: on a wide monitor the full-bleed column ran lines well past any
+       comfortable reading length.
+
+       340mm, not A4's 210mm. A4 was tried and is too narrow for this content — the regressions
+       table needs seven columns and at 210mm it lost Diff % and Status entirely, the Apdex
+       metric cards clipped their values, and headings broke mid-word. Measured against a real
+       report, everything fits from roughly 320mm; 340mm leaves the dashboard column two lines
+       instead of four. It is still bounded, which is the point: a 2560px monitor gives a
+       ~1285px column rather than a 2560px line.
+
+       The consequence, stated plainly: the screen no longer matches the PDF's line breaks. The
+       PDF is A4 and those wide tables are clipped there — which was true before any of this and
+       is a separate problem.
+
+       Screen only. In print Puppeteer's page box already sets the width, and the @media print
+       block below zeroes this padding; constraining it again would inset the content twice. */
+    @media screen {
+      /* The grey moves to the page itself, otherwise a centred body would paint a grey column
+         on a white surround rather than a document sitting on a background. */
+      html {
+        background-color: var(--bg-light);
+      }
+
+      body {
+        max-width: 340mm;
+        padding: 20mm 15mm;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      /* The cover is a page, so give it a page's height rather than the viewport's. 100vh means
+         "as tall as whatever container this lands in", and the report is rendered inside an
+         iframe: in a tall one the cover became a screen and a half of gradient with the title
+         marooned in the middle of it. 257mm is A4 minus the 20mm top and bottom the PDF insets,
+         so the cover on screen is the same page as the cover on paper.
+
+         Print keeps 100vh — there the container IS the page box, and page-break-after already
+         ends the cover. */
+      .cover-page {
+        min-height: 257mm;
+      }
+
+      /* Some tables are genuinely wider than a page — the regressions list and the
+         per-transaction Apdex breakdown carry more columns than 180mm holds. Before the column
+         was constrained they simply used the whole window; now they would run out of their card
+         and off the page.
+
+         They scroll inside their own section instead. Forcing them to fit was tried and is
+         worse: table-layout:fixed gives every column an equal share, which squashed the
+         per-transaction tables until the text overlapped. Print is untouched — this is a screen
+         affordance, and paper has no scrollbar. */
+      section {
+        overflow-x: auto;
+      }
+    }
+
     /* Print Styles */
     @media print {
       /* Puppeteer's pdfOptions.margin already insets the page box. Padding here stacks
@@ -703,6 +764,23 @@ export class ReportHtmlCompilerService {
       body {
         padding: 0;
         background-color: var(--bg-color);
+
+        /* A4 minus the PDF's 15mm side margins is a 180mm text column, and the widest tables
+           need more than that: the regressions list lost its Status column off the right edge
+           of the page, where — unlike on screen — there is no scrollbar to recover it.
+
+           zoom, not a smaller font-size, because the renderers set ~87 font sizes inline and
+           an inline style beats any stylesheet rule; a .data-table font-size override
+           here was measured and changed nothing. zoom scales those inline values, and the
+           padding with them. Not transform: scale either — that paints smaller without
+           relaying out, so pagination would still break at the unscaled positions.
+
+           0.8 gives the content a 225mm column to lay out in. 0.85 also fits this report, with
+           about 15px to spare on the widest row; 0.8 leaves room for longer metric names in
+           other reports and is still comfortable to read (10pt body text prints at 8pt).
+
+           Screen is untouched: there the measure is 340mm and wide tables scroll. */
+        zoom: 0.8;
       }
 
       /* Chrome does not implement "position: running()", so this element never moved
@@ -710,6 +788,26 @@ export class ReportHtmlCompilerService {
          header Puppeteer draws from headerTemplate. */
       .page-header {
         display: none;
+      }
+
+      /* Restore the type that was already small before the zoom.
+
+         zoom scales everything, but it was added for the wide tables, and the whole report
+         pays for it: at 0.8 the uppercase table headers go 9pt -> 7.2pt and the footer
+         metadata 8pt -> 6.4pt, both at the edge of print legibility. Dividing by the zoom
+         puts them back at their intended physical size, so only the content that needed to
+         shrink actually does. Body text is unaffected: 11pt -> 8.8pt is still comfortable
+         and is what buys the tables their room. */
+      .data-table th {
+        font-size: 11.25pt; /* 9pt / 0.8 */
+      }
+
+      footer .footer-meta {
+        font-size: 10pt; /* 8pt / 0.8 */
+      }
+
+      footer .footer-tagline {
+        font-size: 11.25pt; /* 9pt / 0.8 */
       }
 
       section {

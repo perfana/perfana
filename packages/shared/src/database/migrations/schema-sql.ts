@@ -5190,6 +5190,13 @@ CREATE INDEX idx_test_runs_system_env_workload_created ON public.test_runs USING
 
 
 --
+-- Name: idx_test_runs_system_env_workload_start; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_test_runs_system_env_workload_start ON public.test_runs USING btree (system_under_test_id, test_environment, workload, start_time);
+
+
+--
 -- Name: idx_test_runs_system_under_test_id; Type: INDEX; Schema: public; Owner: -
 --
 
