@@ -167,14 +167,15 @@ export class ReportStylingDto {
  * // Generate report from template:
  * // POST /api/reports/generate
  * // {
- * //   "test_run_id": "123e4567-e89b-12d3-a456-426614174000",
+ * //   "test_run_id": "EA-acc-loadtest-00020",
  * //   "template_id": "456e7890-e89b-12d3-a456-426614174000"
  * // }
  */
 export class GenerateReportFromTemplateDto {
   @ApiProperty({
-    description: 'Test run UUID, or the human test run id (what CI/CD pipelines know)',
-    example: '123e4567-e89b-12d3-a456-426614174000',
+    description:
+      'The test run id you gave the load test tool, or the internal UUID. Pipelines use the former — it is the only one they have.',
+    example: 'EA-acc-loadtest-00020',
   })
   @IsString()
   @Length(1, 255)
@@ -217,7 +218,7 @@ export class GenerateReportFromTemplateDto {
  * // Generate ad-hoc report:
  * // POST /api/reports/generate/ad-hoc
  * // {
- * //   "test_run_id": "123e4567-e89b-12d3-a456-426614174000",
+ * //   "test_run_id": "EA-acc-loadtest-00020",
  * //   "name": "Custom Performance Report",
  * //   "sections": [
  * //     { "type": "header", "order": 0, "title": "Performance Analysis" },
@@ -227,10 +228,15 @@ export class GenerateReportFromTemplateDto {
  */
 export class GenerateAdHocReportDto {
   @ApiProperty({
-    description: 'Test run UUID to generate report for',
-    example: '123e4567-e89b-12d3-a456-426614174000',
+    description:
+      'The test run id you gave the load test tool, or the internal UUID. Pipelines use the former — it is the only one they have.',
+    example: 'EA-acc-loadtest-00020',
   })
-  @IsUUID('4', { message: 'Test run ID must be a valid UUID' })
+  // Was @IsUUID, which rejected the human id before it reached the service — even though
+  // createAdHoc resolves either form through isTestRunAccessible, exactly as /generate does.
+  // A pipeline could therefore use one endpoint and not the other, for no reason.
+  @IsString()
+  @Length(1, 255)
   test_run_id!: string;
 
   @ApiProperty({
@@ -459,7 +465,7 @@ export class ShareParamsDto {
  * // Preview Apdex section:
  * // POST /api/reports/preview-section
  * // {
- * //   "test_run_id": "123e4567-e89b-12d3-a456-426614174000",
+ * //   "test_run_id": "EA-acc-loadtest-00020",
  * //   "section": {
  * //     "type": "apdex",
  * //     "order": 0,
