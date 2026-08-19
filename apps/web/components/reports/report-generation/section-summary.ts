@@ -48,11 +48,16 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
     }
     case 'comparisons': {
       const cfg = (section.config ?? {}) as ComparisonsConfig;
+      const dashboards = Array.isArray(cfg.dashboardLabels)
+        ? cfg.dashboardLabels
+        : cfg.dashboardLabel ? [cfg.dashboardLabel] : [];
       const panelCount = Array.isArray(cfg.panels) ? cfg.panels.length : 0;
+      const seriesCount = Array.isArray(cfg.series) ? cfg.series.length : 0;
       return [
         'Baseline run',
-        trim(cfg.dashboardLabel),
+        dashboards.length === 1 ? trim(dashboards[0]) : dashboards.length ? `${dashboards.length} dashboards` : null,
         panelCount ? `${panelCount} panel${panelCount === 1 ? '' : 's'}` : null,
+        seriesCount ? `${seriesCount} series` : null,
         text,
       ]
         .filter(Boolean)

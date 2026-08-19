@@ -1061,17 +1061,21 @@ export interface ComparisonsConfig {
   source?: 'performance-metrics' | 'grafana' | 'dynatrace';
   metrics?: ('avg' | 'p90' | 'p95' | 'p99')[];
   thresholds?: { good: number; warning: number; minAbsolute?: number };
-  // grafana/dynatrace only: scope the comparison to one dashboard and selected panels
+  // grafana/dynatrace only: scope the comparison to dashboards, their panels and their
+  // series. Each level left empty means "everything below the level above it".
+  dashboardLabels?: string[];
+  panels?: { id: number; title: string; dashboardLabel?: string }[];
+  series?: { dashboardLabel: string; panelId: number; metricName: string }[];
+  /** @deprecated single-dashboard key from before multi-select; read on load, never written */
   dashboardLabel?: string;
-  panels?: { id: number; title: string }[];
   // grafana/dynatrace only: pair current-run dashboards with differently named
   // dashboards from the baseline run's environment
   dashboardMap?: { current: string; baseline: string }[];
   includeAggregated?: boolean;
 }
 
-// Panel types the comparison can meaningfully diff (mirrors the compare card).
-const COMPARABLE_PANEL_TYPES = ['graph', 'timeseries', 'stat', 'singlestat', 'flamegraph'];
+type ComparisonPanelOption = { id: number; title: string; dashboardLabel: string; appDashboardId: string };
+type ComparisonSeriesOption = { metricName: string; panelId: number; panelTitle: string; dashboardLabel: string };
 
 interface ComparisonsConfigFormProps {
   config: ComparisonsConfig;
@@ -1086,15 +1090,27 @@ interface ComparisonsConfigFormProps {
 
 interface SourceDashboardOption {
   label: string;
-  uid?: string; // grafana only — needed to fetch the dashboard's panels
+  /** application_dashboards.id — the key both the panel and the series endpoints take */
+  appDashboardId?: string;
 }
 
 export function ComparisonsConfigForm({ config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload }: ComparisonsConfigFormProps) {
   const [sourceDashboards, setSourceDashboards] = useState<SourceDashboardOption[]>([]);
   const [baselineDashboards, setBaselineDashboards] = useState<SourceDashboardOption[]>([]);
-  const [sourcePanels, setSourcePanels] = useState<{ id: number; title: string }[]>([]);
+  const [panelOptions, setPanelOptions] = useState<ComparisonPanelOption[]>([]);
+  const [panelsLoading, setPanelsLoading] = useState(false);
+  const [seriesOptions, setSeriesOptions] = useState<ComparisonSeriesOption[]>([]);
+  const [seriesLoading, setSeriesLoading] = useState(false);
 
   const source = config.source ?? 'performance-metrics';
+  // Configs saved before multi-select carried one dashboard; read it as a list of one.
+  const selectedDashboards = config.dashboardLabels ?? (config.dashboardLabel ? [config.dashboardLabel] : []);
+  const selectedPanels = config.panels ?? [];
+  const selectedSeries = config.series ?? [];
+  const panelDashboard = (p: { dashboardLabel?: string }) => p.dashboardLabel ?? selectedDashboards[0] ?? '';
+  // Effects key off the selection contents, not the array identity onChange keeps recreating.
+  const dashboardsKey = selectedDashboards.join('\u0000');
+  const panelsKey = selectedPanels.map((p) => `${panelDashboard(p)}\u0000${p.id}`).join('|');
   const baselineCandidates = useBaselineCandidates(systemUnderTestId, testRunId, true);
   // The baseline run may live in a different environment/workload — its
   // dashboard list (for the mapping dropdowns) is fetched for THAT scope.
@@ -1110,11 +1126,11 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
       const params = new URLSearchParams({ systemId: systemUnderTestId, environment: testEnvironment });
       authenticatedFetch(`/grafana/application-dashboards?${params.toString()}`)
         .then((res) => (res.ok ? res.json() : undefined))
-        .then((data: { dashboard_label?: string; dashboard_uid?: string; source_type?: string }[] | undefined) => {
+        .then((data: { id?: string; dashboard_label?: string; source_type?: string }[] | undefined) => {
           if (!Array.isArray(data)) { setSourceDashboards([]); return; }
           setSourceDashboards(
             data.filter((d) => isGrafana(d) && d.dashboard_label)
-              .map((d) => ({ label: d.dashboard_label as string, uid: d.dashboard_uid })),
+              .map((d) => ({ label: d.dashboard_label as string, appDashboardId: d.id })),
           );
         })
         .catch(() => setSourceDashboards([]));
@@ -1138,11 +1154,11 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
       const params = new URLSearchParams({ systemId: systemUnderTestId, environment: baselineEnv });
       authenticatedFetch(`/grafana/application-dashboards?${params.toString()}`)
         .then((res) => (res.ok ? res.json() : undefined))
-        .then((data: { dashboard_label?: string; dashboard_uid?: string; source_type?: string }[] | undefined) => {
+        .then((data: { id?: string; dashboard_label?: string; source_type?: string }[] | undefined) => {
           if (!Array.isArray(data)) { setBaselineDashboards([]); return; }
           setBaselineDashboards(
             data.filter((d) => isGrafana(d) && d.dashboard_label)
-              .map((d) => ({ label: d.dashboard_label as string, uid: d.dashboard_uid })),
+              .map((d) => ({ label: d.dashboard_label as string, appDashboardId: d.id })),
           );
         })
         .catch(() => setBaselineDashboards([]));
@@ -1153,32 +1169,94 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
     }
   }, [source, systemUnderTestId, baselineEnv, baselineWorkload]);
 
-  // Load panels once a dashboard is selected
+  // Load the panels of every selected dashboard. Both sources answer from the stored
+  // statistics, so the list is exactly the panels that HAVE something to compare.
   useEffect(() => {
-    const dashboardLabel = config.dashboardLabel;
-    if (source === 'performance-metrics' || !dashboardLabel) {
-      setSourcePanels([]);
+    const labels = dashboardsKey ? dashboardsKey.split('\u0000') : [];
+    if (source === 'performance-metrics' || labels.length === 0) {
+      setPanelOptions([]);
       return;
     }
-    if (source === 'grafana') {
-      const uid = sourceDashboards.find((d) => d.label === dashboardLabel)?.uid;
-      if (!uid) { setSourcePanels([]); return; }
-      authenticatedFetch(`/grafana/dashboards?uid=${encodeURIComponent(uid)}`)
-        .then((res) => (res.ok ? res.json() : undefined))
-        .then((data: unknown) => {
-          const dashboard = Array.isArray(data) ? data[0] : data;
-          const panels = (dashboard as { panels?: { id: number; title: string; type: string }[] } | undefined)?.panels ?? [];
-          setSourcePanels(
-            panels.filter((p) => COMPARABLE_PANEL_TYPES.includes(p.type)).map((p) => ({ id: p.id, title: p.title })),
-          );
-        })
-        .catch(() => setSourcePanels([]));
-    } else if (systemUnderTestId && testEnvironment && workload) {
-      fetchDynatraceMetrics(systemUnderTestId, testEnvironment, workload, dashboardLabel)
-        .then((data) => setSourcePanels(data.map((m) => ({ id: m.panelId, title: m.panelTitle }))))
-        .catch(() => setSourcePanels([]));
+    let cancelled = false;
+    setPanelsLoading(true);
+    Promise.all(labels.map(async (label): Promise<ComparisonPanelOption[]> => {
+      if (source === 'dynatrace') {
+        if (!systemUnderTestId || !testEnvironment) return [];
+        const metrics = await fetchDynatraceMetrics(systemUnderTestId, testEnvironment, workload, label);
+        return metrics.map((m) => ({
+          id: m.panelId, title: m.panelTitle, dashboardLabel: label, appDashboardId: m.applicationDashboardId,
+        }));
+      }
+      const appDashboardId = sourceDashboards.find((d) => d.label === label)?.appDashboardId;
+      if (!appDashboardId) return [];
+      const res = await authenticatedFetch(
+        `/metrics/ds-metrics/panels-by-dashboard?applicationDashboardId=${encodeURIComponent(appDashboardId)}`,
+      );
+      if (!res.ok) return [];
+      const rows: { panel_id: number; panel_title: string }[] = await res.json();
+      return (Array.isArray(rows) ? rows : []).map((r) => ({
+        id: r.panel_id, title: r.panel_title, dashboardLabel: label, appDashboardId,
+      }));
+    }))
+      .then((lists) => { if (!cancelled) setPanelOptions(lists.flat()); })
+      .catch(() => { if (!cancelled) setPanelOptions([]); })
+      .finally(() => { if (!cancelled) setPanelsLoading(false); });
+    return () => { cancelled = true; };
+  }, [source, dashboardsKey, sourceDashboards, systemUnderTestId, testEnvironment, workload]);
+
+  // Load the series of every selected panel.
+  useEffect(() => {
+    if (source === 'performance-metrics' || !panelsKey) {
+      setSeriesOptions([]);
+      return;
     }
-  }, [source, config.dashboardLabel, sourceDashboards, systemUnderTestId, testEnvironment, workload]);
+    let cancelled = false;
+    setSeriesLoading(true);
+    Promise.all(selectedPanels.map(async (panel): Promise<ComparisonSeriesOption[]> => {
+      const dashboardLabel = panelDashboard(panel);
+      const option = panelOptions.find((o) => o.id === panel.id && o.dashboardLabel === dashboardLabel);
+      if (!option) return [];
+      const params = new URLSearchParams({
+        applicationDashboardId: option.appDashboardId,
+        panelId: String(panel.id),
+      });
+      const res = await authenticatedFetch(`/metrics/ds-metrics/distinct-names?${params.toString()}`);
+      if (!res.ok) return [];
+      const names: string[] = await res.json();
+      return (Array.isArray(names) ? names : []).map((metricName) => ({
+        metricName, panelId: panel.id, panelTitle: panel.title, dashboardLabel,
+      }));
+    }))
+      .then((lists) => { if (!cancelled) setSeriesOptions(lists.flat()); })
+      .catch(() => { if (!cancelled) setSeriesOptions([]); })
+      .finally(() => { if (!cancelled) setSeriesLoading(false); });
+    return () => { cancelled = true; };
+    // selectedPanels is read through panelsKey; panelOptions supplies the dashboard ids.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, panelsKey, panelOptions]);
+
+  // Dropping a dashboard has to drop the panels and series that hung off it, or the
+  // report silently keeps comparing a dashboard the form no longer shows.
+  const setDashboards = (labels: string[]) => {
+    const kept = new Set(labels);
+    const panels = selectedPanels.filter((p) => kept.has(panelDashboard(p)));
+    onChange({
+      ...config,
+      dashboardLabels: labels,
+      dashboardLabel: undefined,
+      panels,
+      series: selectedSeries.filter((sr) => kept.has(sr.dashboardLabel)),
+    });
+  };
+
+  const setPanels = (panels: { id: number; title: string; dashboardLabel?: string }[]) => {
+    const kept = new Set(panels.map((p) => `${panelDashboard(p)}\u0000${p.id}`));
+    onChange({
+      ...config,
+      panels,
+      series: selectedSeries.filter((sr) => kept.has(`${sr.dashboardLabel}\u0000${sr.panelId}`)),
+    });
+  };
 
   const metrics = config.metrics ?? ['avg', 'p95', 'p99'];
 
@@ -1216,8 +1294,10 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
             onChange({
               ...config,
               source: e.target.value as ComparisonsConfig['source'],
+              dashboardLabels: undefined,
               dashboardLabel: undefined,
               panels: undefined,
+              series: undefined,
               dashboardMap: undefined,
             })
           }
@@ -1228,53 +1308,142 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
         </Select>
       </FormControl>
 
-      {/* Dashboard → panel cascade (grafana/dynatrace only) */}
+      {/* Dashboards → panels → series cascade (grafana/dynatrace only).
+          Every level is multi-select with a select-all, and an empty level means
+          "everything under the level above": no panels picked compares the whole
+          dashboard, no series picked compares the whole panel. */}
       {source !== 'performance-metrics' && (
         <>
-          <Autocomplete
-            options={sourceDashboards}
-            getOptionLabel={(o) => o.label}
-            isOptionEqualToValue={(o, v) => o.label === v.label}
-            value={sourceDashboards.find((d) => d.label === config.dashboardLabel) ?? null}
-            onChange={(_, v) => onChange({ ...config, dashboardLabel: v?.label, panels: [] })}
-            size="small"
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Dashboard"
-                variant="outlined"
-                fullWidth
-                helperText={
-                  config.dashboardLabel
-                    ? undefined
-                    : `Select a dashboard first (${sourceDashboards.length} available)`
-                }
-              />
-            )}
-          />
-          <Autocomplete
-            multiple
-            options={sourcePanels}
-            getOptionLabel={(o) => o.title}
-            isOptionEqualToValue={(o, v) => o.id === v.id}
-            value={config.panels ?? []}
-            onChange={(_, v) => onChange({ ...config, panels: v })}
-            disabled={!config.dashboardLabel}
-            size="small"
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Panels"
-                variant="outlined"
-                fullWidth
-                helperText={
-                  !config.dashboardLabel
-                    ? 'Select a dashboard to see its panels'
-                    : `Select one or more panels to compare (${sourcePanels.length} available)`
-                }
-              />
-            )}
-          />
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+            <Autocomplete
+              multiple
+              limitTags={4}
+              options={sourceDashboards.map((d) => d.label)}
+              value={selectedDashboards}
+              onChange={(_, v) => setDashboards(v)}
+              size="small"
+              sx={{ flex: 1 }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Dashboards"
+                  variant="outlined"
+                  fullWidth
+                  helperText={`${sourceDashboards.length} available`}
+                />
+              )}
+            />
+            <Button
+              size="small"
+              onClick={() => setDashboards(
+                selectedDashboards.length === sourceDashboards.length ? [] : sourceDashboards.map((d) => d.label),
+              )}
+              disabled={sourceDashboards.length === 0}
+              sx={{ mt: 0.5, flexShrink: 0 }}
+            >
+              {selectedDashboards.length === sourceDashboards.length && sourceDashboards.length > 0 ? 'Clear' : 'Select all'}
+            </Button>
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+            <Autocomplete
+              multiple
+              limitTags={4}
+              options={panelOptions}
+              groupBy={(o) => o.dashboardLabel}
+              getOptionLabel={(o) => o.title}
+              isOptionEqualToValue={(o, v) => o.id === v.id && o.dashboardLabel === (v.dashboardLabel ?? o.dashboardLabel)}
+              value={selectedPanels.map((p) =>
+                panelOptions.find((o) => o.id === p.id && o.dashboardLabel === panelDashboard(p))
+                  ?? { id: p.id, title: p.title, dashboardLabel: panelDashboard(p), appDashboardId: '' },
+              )}
+              onChange={(_, v) => setPanels(v.map((o) => ({ id: o.id, title: o.title, dashboardLabel: o.dashboardLabel })))}
+              disabled={selectedDashboards.length === 0}
+              loading={panelsLoading}
+              size="small"
+              sx={{ flex: 1 }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Panels"
+                  variant="outlined"
+                  fullWidth
+                  helperText={
+                    selectedDashboards.length === 0
+                      ? 'Select a dashboard to see its panels'
+                      : panelsLoading
+                        ? 'Loading panels…'
+                        : `${panelOptions.length} available — leave empty to compare every panel`
+                  }
+                />
+              )}
+            />
+            <Button
+              size="small"
+              onClick={() => setPanels(
+                selectedPanels.length === panelOptions.length
+                  ? []
+                  : panelOptions.map((o) => ({ id: o.id, title: o.title, dashboardLabel: o.dashboardLabel })),
+              )}
+              disabled={panelOptions.length === 0}
+              sx={{ mt: 0.5, flexShrink: 0 }}
+            >
+              {selectedPanels.length === panelOptions.length && panelOptions.length > 0 ? 'Clear' : 'Select all'}
+            </Button>
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+            <Autocomplete
+              multiple
+              limitTags={6}
+              options={seriesOptions}
+              groupBy={(o) => `${o.dashboardLabel} / ${o.panelTitle}`}
+              getOptionLabel={(o) => o.metricName}
+              isOptionEqualToValue={(o, v) =>
+                o.metricName === v.metricName && o.panelId === v.panelId && o.dashboardLabel === v.dashboardLabel}
+              value={selectedSeries.map((sr) =>
+                seriesOptions.find((o) =>
+                  o.metricName === sr.metricName && o.panelId === sr.panelId && o.dashboardLabel === sr.dashboardLabel,
+                ) ?? { ...sr, panelTitle: '' },
+              )}
+              onChange={(_, v) => onChange({
+                ...config,
+                series: v.map((o) => ({ dashboardLabel: o.dashboardLabel, panelId: o.panelId, metricName: o.metricName })),
+              })}
+              disabled={selectedPanels.length === 0}
+              loading={seriesLoading}
+              size="small"
+              sx={{ flex: 1 }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Series"
+                  variant="outlined"
+                  fullWidth
+                  helperText={
+                    selectedPanels.length === 0
+                      ? 'Select a panel to see its series'
+                      : seriesLoading
+                        ? 'Loading series…'
+                        : `${seriesOptions.length} available — leave empty to compare every series`
+                  }
+                />
+              )}
+            />
+            <Button
+              size="small"
+              onClick={() => onChange({
+                ...config,
+                series: selectedSeries.length === seriesOptions.length
+                  ? []
+                  : seriesOptions.map((o) => ({ dashboardLabel: o.dashboardLabel, panelId: o.panelId, metricName: o.metricName })),
+              })}
+              disabled={seriesOptions.length === 0}
+              sx={{ mt: 0.5, flexShrink: 0 }}
+            >
+              {selectedSeries.length === seriesOptions.length && seriesOptions.length > 0 ? 'Clear' : 'Select all'}
+            </Button>
+          </Box>
         </>
       )}
 

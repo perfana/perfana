@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.70.0] - 2026-08-19
+
+### Added
+- **A comparison section can now span several dashboards, panels and series at once**, configured the way the compare card is: three multi-selects that cascade — dashboards, then their panels (grouped by dashboard), then those panels' series (grouped by panel) — each with a select-all that flips to clear once everything is chosen. Each level left empty means "everything below the level above": no panels picked compares the whole dashboard, no series picked compares the whole panel. Deselecting a dashboard drops the panels and series that hung off it, so the report cannot keep comparing something the form no longer shows. Sections saved with the old single-dashboard picker are read as a one-dashboard selection and keep working untouched.
+
+### Changed
+- The panel list now comes from the metrics actually stored for a dashboard rather than from the Grafana dashboard definition, so a panel that never collected data no longer appears as something you can compare — and Grafana and Dynatrace dashboards answer the same way instead of through two different endpoints.
+
 ## [0.2.67.0] - 2026-08-19
 
 ### Changed

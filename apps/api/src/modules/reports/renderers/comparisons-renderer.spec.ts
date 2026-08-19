@@ -285,11 +285,11 @@ describe('ComparisonsRenderer', () => {
     expect(optsArg.roles).toEqual(['user']);
   });
 
-  it('forwards dashboardLabel and panel ids from the config into the fetcher opts', async () => {
+  it('reads a pre-multi-select config as a one-dashboard selection', async () => {
     const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
     await renderer.renderComparisonsSection(
       { type: 'comparisons', order: 0, config: {
-        comparisonMode: 'baseline_run', baselineTestRunId: 'base-99', source: 'grafana',
+        baselineTestRunId: 'base-99', source: 'grafana',
         dashboardLabel: 'JVM Metrics',
         panels: [{ id: 3, title: 'Heap' }, { id: 7, title: 'GC Pause' }],
       } } as any,
@@ -297,9 +297,44 @@ describe('ComparisonsRenderer', () => {
       'user-1',
       ['user'],
     );
-    const optsArg = spy.mock.calls[0]![3];
-    expect(optsArg.dashboardLabel).toBe('JVM Metrics');
-    expect(optsArg.panelIds).toEqual([3, 7]);
+    expect(spy.mock.calls[0]![3].selections).toEqual([
+      { dashboardLabel: 'JVM Metrics', panelId: 3 },
+      { dashboardLabel: 'JVM Metrics', panelId: 7 },
+    ]);
+  });
+
+  it('forwards a multi-dashboard, multi-panel, multi-series selection', async () => {
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base-99', source: 'grafana',
+        dashboardLabels: ['JVM Metrics', 'Docker Metrics'],
+        panels: [
+          { id: 3, title: 'Heap', dashboardLabel: 'JVM Metrics' },
+          { id: 7, title: 'GC Pause', dashboardLabel: 'JVM Metrics' },
+        ],
+        series: [
+          { dashboardLabel: 'JVM Metrics', panelId: 3, metricName: 'used' },
+          { dashboardLabel: 'JVM Metrics', panelId: 3, metricName: 'committed' },
+        ],
+      } } as any,
+      { testRunId: 'cur-42' } as any,
+    );
+    expect(spy.mock.calls[0]![3].selections).toEqual([
+      { dashboardLabel: 'JVM Metrics', panelId: 3, metricNames: ['used', 'committed'] },
+      { dashboardLabel: 'JVM Metrics', panelId: 7 },
+      // No panels picked on the second dashboard — every panel on it is in scope.
+      { dashboardLabel: 'Docker Metrics' },
+    ]);
+  });
+
+  it('sends no selection at all when no dashboard is picked', async () => {
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: { baselineTestRunId: 'base-99', source: 'grafana' } } as any,
+      { testRunId: 'cur-42' } as any,
+    );
+    expect(spy.mock.calls[0]![3].selections).toEqual([]);
   });
 
   describe('All aggregated (performance-metrics baseline)', () => {

@@ -171,6 +171,19 @@ export interface AwrData {
   severitySummary: { critical: number; warning: number; info: number; total: number };
 }
 
+/**
+ * One dashboard/panel/series scope for a baseline comparison.
+ *
+ * Omitting `panelId` selects every panel on the dashboard; omitting `metricNames`
+ * selects every series in the panel. A section can hold many of these, which is how
+ * one comparison spans several dashboards.
+ */
+export interface BaselineComparisonSelection {
+  dashboardLabel: string;
+  panelId?: number;
+  metricNames?: string[];
+}
+
 /** A single row in a baseline comparison result */
 export interface BaselineComparisonRow {
   group: string;    // scenario_name (perf) | dashboard/panel (grafana) | host (dynatrace)

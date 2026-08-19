@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, BaselineComparisonRow } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, BaselineComparisonRow, BaselineComparisonSelection } from '../services/report-data-fetcher.service';
 import { bandColor, percentDiff, gatedDiffPercent, DiffThresholds } from './comparison-bands';
 import {
   ACCENT,
@@ -52,6 +52,47 @@ export class ComparisonsRenderer {
     private readonly utils: ReportUtilsService,
     private readonly dataFetcher: ReportDataFetcherService,
   ) {}
+
+  /**
+   * Flatten the section config's dashboard/panel/series pickers into the scopes the fetcher
+   * filters on.
+   *
+   * The three lists cascade: a dashboard with no panels selected means every panel on it, a
+   * panel with no series selected means every series in it. Configs saved before multi-select
+   * carried a single `dashboardLabel` and panels with no dashboard of their own; those still
+   * read correctly here, which is the only reason the legacy keys are still looked at.
+   */
+  private buildSelections(config: Record<string, unknown>): BaselineComparisonSelection[] {
+    const labels = Array.isArray(config.dashboardLabels)
+      ? (config.dashboardLabels as unknown[]).filter((l): l is string => typeof l === 'string')
+      : typeof config.dashboardLabel === 'string' && config.dashboardLabel
+        ? [config.dashboardLabel]
+        : [];
+    if (labels.length === 0) return [];
+
+    const panels = Array.isArray(config.panels)
+      ? (config.panels as { id: number; title?: string; dashboardLabel?: string }[])
+      : [];
+    const series = Array.isArray(config.series)
+      ? (config.series as { dashboardLabel?: string; panelId: number; metricName: string }[])
+      : [];
+
+    // A legacy panel has no dashboard of its own — it belonged to the single selected one.
+    const panelDashboard = (p: { dashboardLabel?: string }) => p.dashboardLabel ?? labels[0]!;
+
+    return labels.flatMap((label) => {
+      const own = panels.filter((p) => panelDashboard(p) === label);
+      if (own.length === 0) return [{ dashboardLabel: label }];
+      return own.map((p) => {
+        const names = series
+          .filter((sr) => (sr.dashboardLabel ?? labels[0]) === label && sr.panelId === p.id)
+          .map((sr) => sr.metricName);
+        return names.length > 0
+          ? { dashboardLabel: label, panelId: p.id, metricNames: names }
+          : { dashboardLabel: label, panelId: p.id };
+      });
+    });
+  }
 
   /**
    * The baseline this report should compare against: whatever the template pinned, or the run
@@ -122,14 +163,12 @@ export class ComparisonsRenderer {
     const dashboardMap = Array.isArray(config.dashboardMap)
       ? (config.dashboardMap as { current: string; baseline: string }[])
       : undefined;
-    const dashboardLabel = typeof config.dashboardLabel === 'string' ? config.dashboardLabel : undefined;
-    const panelIds = Array.isArray(config.panels)
-      ? (config.panels as { id: number; title: string }[]).map((p) => p.id)
-      : undefined;
+    const selections = this.buildSelections(config);
+    const selectedDashboards = [...new Set(selections.map((s) => s.dashboardLabel))];
 
     let data = testRun && baselineId
       ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
-          { metrics, userId, roles, dashboardMap, dashboardLabel, panelIds })
+          { metrics, userId, roles, dashboardMap, selections })
       : null;
 
     if (!data || data.rows.length === 0) {
@@ -271,7 +310,7 @@ export class ComparisonsRenderer {
       // the selected dashboard's pair; unscoped sections show every differing pair.
       const activePairs = (dashboardMap ?? [])
         .filter((p) => p.current && p.baseline && p.current !== p.baseline)
-        .filter((p) => !dashboardLabel || p.current === dashboardLabel);
+        .filter((p) => selectedDashboards.length === 0 || selectedDashboards.includes(p.current));
       const mappingCaption = activePairs.length === 0 ? '' : activePairs.map((p) =>
         `<div style="display:flex; align-items:center; gap:12px; margin:-2px 0 16px; font-size:12px;">
           <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f1f6ff; border:1px solid #d6e4fb;">

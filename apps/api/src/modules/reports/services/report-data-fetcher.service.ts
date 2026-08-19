@@ -20,6 +20,7 @@ import {
   AwrInsightSummary,
   AwrReportSummary,
   BaselineComparisonData,
+  BaselineComparisonSelection,
   BaselineComparisonRow,
   MetricsPanelSelector,
   MetricsTimeSeriesPanel,
@@ -1883,9 +1884,9 @@ export class ReportDataFetcherService {
       metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
       userId: string;
       roles: string[];
-      // grafana/dynatrace only: restrict the comparison to one dashboard and a panel selection
-      dashboardLabel?: string;
-      panelIds?: number[];
+      // grafana/dynatrace only: restrict the comparison to a set of dashboard /
+      // panel / series selections. Empty means "everything this run recorded".
+      selections?: BaselineComparisonSelection[];
       // grafana/dynatrace only: pair a current-run dashboard with a differently
       // named baseline-run dashboard (e.g. per-environment dashboard names)
       dashboardMap?: { current: string; baseline: string }[];
@@ -1966,22 +1967,25 @@ export class ReportDataFetcherService {
     source: 'grafana' | 'dynatrace',
     opts: {
       metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
-      dashboardLabel?: string;
-      panelIds?: number[];
+      selections?: BaselineComparisonSelection[];
       dashboardMap?: { current: string; baseline: string }[];
     },
   ): Promise<BaselineComparisonData | null> {
     const sourceType = source === 'grafana' ? 'grafana' : 'dynatrace';
-    // Optional dashboard scoping (from the section config's dashboard selection).
+    // Optional scoping (from the section config's dashboard/panel/series selection).
     // Absent -> unfiltered, preserving behavior for configs saved before selection existed.
-    // The mapped baseline label must be included or its rows never reach the pairing.
+    // The mapped baseline labels must be included or their rows never reach the pairing.
+    const selections = opts.selections ?? [];
     const params: unknown[] = [[currentRunId, baselineRunId], sourceType];
     let scopeFilter = '';
-    if (opts.dashboardLabel) {
-      const labels = [opts.dashboardLabel];
-      const mapped = opts.dashboardMap?.find((m) => m.current === opts.dashboardLabel)?.baseline;
-      if (mapped && !labels.includes(mapped)) labels.push(mapped);
-      params.push(labels);
+    if (selections.length > 0) {
+      const labels = new Set<string>();
+      for (const sel of selections) {
+        labels.add(sel.dashboardLabel);
+        const mapped = opts.dashboardMap?.find((m) => m.current === sel.dashboardLabel)?.baseline;
+        if (mapped) labels.add(mapped);
+      }
+      params.push([...labels]);
       scopeFilter += ` AND s.dashboard_label = ANY($${params.length})`;
     }
     const rows: Array<{
@@ -2007,11 +2011,19 @@ export class ReportDataFetcherService {
     const identity = (r: typeof rows[number]) =>
       `${r.dashboard_label}||${r.panel_title}||${r.metric_name}`;
 
-    // Panel selection applies to the CURRENT run only — the mapped baseline
+    // The selection applies to the CURRENT run only — the mapped baseline
     // dashboard may use different panel ids; pairing is by panel title.
-    const cur = rows
-      .filter((r) => r.test_run_id === currentRunId)
-      .filter((r) => !opts.panelIds?.length || (r.panel_id != null && opts.panelIds.includes(r.panel_id)));
+    // A selection with no panelId means "every panel on that dashboard", and a
+    // panel with no metricNames means "every series in that panel".
+    const selected = (r: typeof rows[number]) =>
+      selections.length === 0 ||
+      selections.some(
+        (sel) =>
+          sel.dashboardLabel === r.dashboard_label &&
+          (sel.panelId == null || sel.panelId === r.panel_id) &&
+          (!sel.metricNames?.length || (r.metric_name != null && sel.metricNames.includes(r.metric_name))),
+      );
+    const cur = rows.filter((r) => r.test_run_id === currentRunId).filter(selected);
     const baseByIdentity = new Map(
       rows.filter((r) => r.test_run_id === baselineRunId).map((r) => [identity(r), r]),
     );
