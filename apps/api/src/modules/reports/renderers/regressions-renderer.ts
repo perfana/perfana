@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, RegressionsMetric } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, RegressionsMetric, ControlGroupSummary } from '../services/report-data-fetcher.service';
 import { statusFromConclusion } from './comparison-bands';
 import {
   REPORT_COLORS,
@@ -21,11 +21,12 @@ import {
 } from './report-style';
 
 /**
- * Renderer for Regressions section
+ * Renderer for the Anomaly Detection section (section type `regressions`)
  *
- * Displays ADAPT performance regression analysis with:
- * - Section header with five-state status pill and summary chips (rules 01/04)
- * - Regression details table with per-metric status pills
+ * Displays ADAPT anomaly detection with:
+ * - Section header with regression/improvement counts and the control group size (rule 04)
+ * - Which past runs ADAPT compared against, so the counts can be judged
+ * - Regression details table with per-metric status pills (rule 01)
  * - Optional improvements table
  */
 @Injectable()
@@ -45,10 +46,12 @@ export class RegressionsRenderer {
     roles: string[] = [],
   ): Promise<string> {
     const config = section.config || {};
-    const title = section.title || 'Regressions';
+    const title = section.title || 'Anomaly Detection';
     const text = getSectionText(section);
     const showImprovements = config.showImprovements === true;
-    const maxRows = typeof config.maxRows === 'number' ? config.maxRows : 50;
+    // maxItems is what the config form writes; maxRows is the older key some saved templates hold.
+    const configuredMax = config.maxItems ?? config.maxRows;
+    const maxRows = typeof configuredMax === 'number' ? configuredMax : 50;
 
     const data = testRun
       ? await this.dataFetcher.getRegressionsData(testRun.testRunId, userId, roles)
@@ -59,28 +62,31 @@ export class RegressionsRenderer {
         <section class="regressions-section">
           ${sectionHeader(title)}
           ${sectionText(text)}
-          ${emptyState('No ADAPT regression analysis data available for this test run.')}
+          ${emptyState('No ADAPT anomaly detection data available for this test run.')}
         </section>
       `;
     }
 
+    // The counts ARE the verdict, so no status pill repeating them — except when ADAPT
+    // reached no verdict at all (skipped, insufficient data, …), where the reason is the
+    // only thing worth putting in the header. The total-metric count is gone: it counted
+    // every ADAPT result, matched nothing shown below it, and dwarfed the numbers beside it.
     const overallStatus = statusFromConclusion(data.conclusion);
-    // When the conclusion collapses to N/A (skipped, insufficient data, …),
-    // surface the human-readable reason next to the pill so readers still see
-    // WHY there is no verdict.
     const rawConclusion = (data.conclusion ?? '').toLowerCase().replace(/_/g, ' ').trim();
-    const naReasonChip = overallStatus === 'na' && rawConclusion ? chip(rawConclusion, 'neutral') : '';
-    const headerChips = [
-      statusPill(overallStatus),
-      naReasonChip,
-      data.regressionCount > 0 ? chip(`${formatInt(data.regressionCount)} regressions`, 'bad') : '',
-      data.improvementCount > 0 ? chip(`${formatInt(data.improvementCount)} improvements`, 'info') : '',
-      chip(`${formatInt(data.totalMetrics)} metrics`, 'neutral'),
-    ];
+    const cg = data.controlGroup;
+    const headerChips = overallStatus === 'na'
+      ? [statusPill('na'), rawConclusion ? chip(rawConclusion, 'neutral') : '']
+      : [
+          data.regressionCount > 0 ? chip(`${formatInt(data.regressionCount)} regressions`, 'bad') : '',
+          data.improvementCount > 0 ? chip(`${formatInt(data.improvementCount)} improvements`, 'info') : '',
+          data.regressionCount === 0 && data.improvementCount === 0 ? chip('no anomalies', 'good') : '',
+          cg ? chip(`control group: ${formatInt(cg.nTestRuns)} runs`, 'neutral') : '',
+        ];
 
     return `
       <section class="regressions-section">
         ${sectionHeader(title, { chipsHtml: headerChips })}
+        ${this.renderControlGroup(cg)}
         ${sectionText(text)}
 
         <!-- Regressions Table -->
@@ -92,6 +98,31 @@ export class RegressionsRenderer {
           : ''}
       </section>
     `;
+  }
+
+  /**
+   * Name the runs behind the verdict. "9 regressions" against three runs and against thirty
+   * are different claims, and only the reader can tell which one they are looking at.
+   */
+  private renderControlGroup(cg: ControlGroupSummary | undefined): string {
+    if (!cg) return '';
+    const window = [cg.firstDatetime, cg.lastDatetime]
+      .filter((d): d is string => !!d)
+      .map((d) => new Date(d).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }));
+    const range = window.length === 2 && window[0] !== window[1]
+      ? ` · ${window[0]} – ${window[1]}`
+      : window.length ? ` · ${window[0]}` : '';
+    // ponytail: 12 ids then a count — a 40-run control group would otherwise fill the page.
+    const shown = cg.testRuns.slice(0, 12);
+    const rest = cg.testRuns.length - shown.length;
+    const runs = shown.length
+      ? `${shown.map((r) => this.utils.escapeHtml(r)).join(', ')}${rest > 0 ? ` and ${formatInt(rest)} more` : ''}`
+      : 'run ids not recorded';
+
+    return `<div style="margin:-8px 0 20px; padding:12px 14px; background:${REPORT_COLORS.emptyBg}; border-radius:6px; font-size:12px; color:${REPORT_COLORS.mutedInk};">
+      <strong style="color:${REPORT_COLORS.ink}; font-weight:600;">Compared against ${formatInt(cg.nTestRuns)} previous ${cg.nTestRuns === 1 ? 'run' : 'runs'}</strong>${range}
+      <div style="margin-top:6px; line-height:1.6;">${runs}</div>
+    </div>`;
   }
 
   private renderMetricsTable(metrics: RegressionsMetric[], tableTitle: string): string {

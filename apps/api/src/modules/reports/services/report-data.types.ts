@@ -233,6 +233,18 @@ export interface RegressionsData {
   regressions: RegressionsMetric[];
   improvements: RegressionsMetric[];
   noDifference?: RegressionsMetric[];
+  /** The runs ADAPT compared this run against. Absent when the control group row is gone. */
+  controlGroup?: ControlGroupSummary;
+}
+
+/** The set of past runs ADAPT used as the baseline for this run's verdict. */
+export interface ControlGroupSummary {
+  id: string;
+  testRuns: string[];
+  /** ADAPT's own count — kept separate from testRuns.length, which can lag it. */
+  nTestRuns: number;
+  firstDatetime: string | null;
+  lastDatetime: string | null;
 }
 
 /** Raw ADAPT result row from database query */

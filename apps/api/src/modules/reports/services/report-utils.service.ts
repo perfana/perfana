@@ -83,7 +83,7 @@ export class ReportUtilsService {
       slo: 'SLO Results',
       apdex: 'Apdex Report',
       transaction_response_times: 'Transaction Response Times',
-      regressions: 'Regressions',
+      regressions: 'Anomaly Detection',
       awr: 'AWR Analysis',
       trends: 'Trends',
       comparisons: 'Comparisons',
