@@ -194,6 +194,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       'test_run_alerts',
       'test_run_configs',
       'expected_config_changes',
+      'test_run_parallel_group_stats',
       'test_run_sampler_stats',
       'test_run_transaction_stats',
       'test_run_views',

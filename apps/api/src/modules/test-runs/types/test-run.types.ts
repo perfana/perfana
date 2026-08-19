@@ -139,6 +139,51 @@ export interface TransactionStats {
 /**
  * Sampler/request statistics
  */
+/**
+ * How long a parallel group itself took, measured per pass as last finish minus first start.
+ * Distinct from its members' response times: those describe individual requests, this describes
+ * the concurrent pass they belong to.
+ */
+/**
+ * One enclosing controller on the path from the test plan's root down to a request.
+ *
+ * Deliberately only what is stable for a sampler aggregated over a whole run. The retired
+ * runtime shape also carried `iteration` and `execution`, which changed per request; the current
+ * plan-path shape carries neither, and no longer describes what the plan was doing at the time.
+ */
+export interface ControllerRef {
+  name: string;
+  /** Fully-qualified class, e.g. `org.apache.jmeter.control.ParallelController`. */
+  class: string;
+  /**
+   * Which of several identically-named siblings this is, 0-based. Absent on chains from the
+   * retired runtime shape, which could not tell them apart.
+   */
+  occurrence?: number;
+}
+
+/**
+ * Which metadata shape a request's chain was read from.
+ *
+ * `runtime` chains come from the retired per-request tagging and can carry parallel-group
+ * timings. `plan` chains are a fixed address in the test plan: they never can, so an absent
+ * timing is permanent rather than pending.
+ */
+export type ChainSource = 'plan' | 'runtime';
+
+export interface ParallelGroupStats {
+  parallel_group: string;
+  /** Number of times the group ran — the sample size behind the percentiles. */
+  executions: number;
+  passed_count: number;
+  failed_count: number;
+  avg_elapsed: number;
+  min_elapsed: number;
+  max_elapsed: number;
+  p95_elapsed: number;
+  p99_elapsed: number;
+}
+
 export interface SamplerStats {
   sampler_name: string;
   scenario_name?: string;
@@ -158,6 +203,35 @@ export interface SamplerStats {
   active_threshold: number;
   url_hash: string | null;
   url_pattern: string | null;
+  /**
+   * Statistics for the parallel group this request belongs to, repeated on each of the group's
+   * members so the client can read them off whichever member it renders first. Null when the
+   * request ran sequentially, or when the run predates the rollup that computes them.
+   */
+  parallel_group_stats?: ParallelGroupStats | null;
+  /**
+   * Name of the Parallel Controller this request ran under, or null when it ran sequentially.
+   * Also null for runs recorded before the load test tool reported it, so consumers must treat
+   * an absent value as "not parallel" rather than "unknown". Derived from `parent_controllers`.
+   */
+  parallel_group?: string | null;
+  /**
+   * The controllers this request ran under, outermost first, ending at its nearest parent.
+   * Null when the run predates the tag, when the tool does not report it, or when the sampler
+   * ran under more than one chain — in which case no single chain describes it.
+   */
+  parent_controllers?: ControllerRef[] | null;
+  /**
+   * Where this sampler first fired within the scanned slice of the run. A proxy for its
+   * position in the test plan — within one pass a thread walks the plan top to bottom —
+   * used to order the request table. Absent when the run carries no controller data.
+   */
+  first_seen?: number;
+  /**
+   * Which metadata shape `parent_controllers` above was built from. Absent when the run carries
+   * no controller data at all.
+   */
+  chain_source?: ChainSource;
 }
 
 /**

@@ -1084,10 +1084,11 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
-        // 7 calls: rollup existence check + scope lookup (rollup-pending gate)
+        // 8 calls: rollup existence check + scope lookup (rollup-pending gate)
         // + CAGG scope lookup (live-Apdex CAGG plan) + ramp-up lookup
         // + SET LOCAL statement_timeout + SET LOCAL work_mem + samples query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(7);
+        // + parallel-group lookup (bounded requests_raw read, decorates the result)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(8);
       });
 
       it('does not fetch cutoff when excludeRampUp is false', async () => {
@@ -1095,10 +1096,313 @@ describe('TestRunsPerformanceQueryService', () => {
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
-        // 6 calls — rollup existence check + scope lookup (rollup-pending gate)
+        // 7 calls — rollup existence check + scope lookup (rollup-pending gate)
         // + CAGG scope lookup (live-Apdex CAGG plan) + SET LOCAL statement_timeout
         // + SET LOCAL work_mem + samples query (no ramp-up lookup)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(6);
+        // + parallel-group lookup (bounded requests_raw read, decorates the result)
+        expect(testRunRepo.query).toHaveBeenCalledTimes(7);
+      });
+    });
+
+const TG = { name: 'Shoppers', class: 'org.apache.jmeter.threads.ThreadGroup' };
+const PC = (name: string) => ({ name, class: 'org.apache.jmeter.control.ParallelController' });
+/**
+ * A lookup row as the chain query returns it. `chain` is already trimmed by the SQL — the
+ * plan-path shape's trailing sampler entry is dropped there — so both metadata shapes reach the
+ * mapping code ending at the innermost controller. `from_plan` says which shape it came from.
+ */
+const chainRow = (
+  sampler: string,
+  scenario: string,
+  ...chain: Array<{ name: string; class: string; occurrence?: number }>
+) => ({ sampler_name: sampler, scenario_name: scenario, chain, first_seen: '1', from_plan: true });
+
+    describe('parallel groups', () => {
+      it('labels samplers with the Parallel Controller they ran under', async () => {
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [chainRow('POST /checkout', 'load_test', TG, PC('T01_Add_To_Cart_PG1'))],
+        );
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(Array.isArray(result)).toBe(true);
+        expect((result as SamplerStats[])[0].parallel_group).toBe('T01_Add_To_Cart_PG1');
+      });
+
+      it('leaves samplers unlabelled when the run has no tagged requests', async () => {
+        // An older run, or a load test tool that does not report groups: the lookup
+        // returns nothing and the response must look exactly as it did before.
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect((result as SamplerStats[])[0].parallel_group).toBeUndefined();
+      });
+
+      it('leaves a sampler unlabelled when it appears in more than one group', async () => {
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [
+            chainRow('POST /checkout', 'load_test', TG, PC('PG1')),
+            chainRow('POST /checkout', 'load_test', TG, PC('PG2')),
+          ],
+        );
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect((result as SamplerStats[])[0].parallel_group).toBeNull();
+      });
+
+      it('does not copy one scenario\'s group onto the same sampler in another scenario', async () => {
+        // The sampler rollup is keyed by (…, sampler_name, scenario_name, …), so one
+        // transaction can hold the same sampler under two scenarios. Keying the lookup on
+        // the sampler name alone would silently mislabel the sequential one.
+        mockQuerySequence(
+          [
+            { ...RAW_SAMPLER_ROW, scenario_name: 'browse' },
+            { ...RAW_SAMPLER_ROW, scenario_name: 'checkout' },
+          ],
+          [chainRow('POST /checkout', 'browse', TG, PC('PG1'))],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        const browse = result.find((r) => r.scenario_name === 'browse');
+        const checkout = result.find((r) => r.scenario_name === 'checkout');
+        expect(browse?.parallel_group).toBe('PG1');
+        expect(checkout?.parallel_group).toBeNull();
+      });
+
+      it('attaches where each sampler first fired, so the table can follow the test plan', async () => {
+        // Nothing in the data records a controller's position in the plan. Within one pass a
+        // thread walks the plan top to bottom, so first-appearance order is the closest proxy.
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [{ ...chainRow('POST /checkout', 'load_test', TG, PC('PG1')), first_seen: '7' }],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].first_seen).toBe(7);
+      });
+
+      it('bounds the ordinal to the scanned slice, not the whole hypertable', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const groupQuery = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('parent_controllers')) as string;
+        // The row number is assigned inside the LIMIT, so it counts scanned rows.
+        const limitAt = groupQuery.indexOf('LIMIT');
+        const rowNumberAt = groupQuery.indexOf('ROW_NUMBER()');
+        expect(rowNumberAt).toBeGreaterThan(-1);
+        expect(rowNumberAt).toBeLessThan(limitAt);
+      });
+
+      it('reads the plan-path column, falling back to the retired runtime one', async () => {
+        // A run is written by one listener version, so the COALESCE picks a shape per row rather
+        // than merging them. Both columns must be named, or a database holding only one of them
+        // fails the query outright and renders no bands at all.
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const q = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('source_element_path')) as string;
+        expect(q).toBeDefined();
+        expect(q).toMatch(/COALESCE/);
+        expect(q).toMatch(/jsonb_array_elements\(rr\.source_element_path\)/);
+        expect(q).toMatch(/jsonb_array_elements\(rr\.parent_controllers\)/);
+      });
+
+      it('drops the trailing sampler entry the plan path carries', async () => {
+        // source_element_path ends at the sampler itself. Kept, every request would be banded
+        // under a one-child band named after itself and the table would double in height.
+        // Trimmed by POSITION, not by class: a sampler is not always an HTTPSamplerProxy.
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const q = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('source_element_path')) as string;
+        expect(q).toMatch(/ord < jsonb_array_length\(rr\.source_element_path\)/);
+        expect(q).not.toMatch(/HTTPSamplerProxy/);
+      });
+
+      it('projects occurrence so same-named siblings stay distinguishable', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const q = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('source_element_path')) as string;
+        expect(q).toMatch(/'occurrence', e -> 'occurrence'/);
+      });
+
+      it('reports which metadata shape the chain came from', async () => {
+        // The UI needs it to tell "not analysed yet" from "this engine never records that".
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [chainRow('POST /checkout', 'load_test', TG, PC('PG1'))],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].chain_source).toBe('plan');
+      });
+
+      it('marks a historical run as runtime-shaped', async () => {
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [{ ...chainRow('POST /checkout', 'load_test', TG, PC('PG1')), from_plan: false }],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].chain_source).toBe('runtime');
+      });
+
+      it('tells two same-named sibling controllers apart by occurrence alone', async () => {
+        // Identical but for occurrence: these are two different plan positions, so the sampler
+        // has no single chain and is left unbanded rather than attributed to one of them.
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [
+            chainRow('POST /checkout', 'load_test', TG, { ...PC('retry'), occurrence: 0 }),
+            chainRow('POST /checkout', 'load_test', TG, { ...PC('retry'), occurrence: 1 }),
+          ],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].parallel_group).toBeNull();
+      });
+
+      it('still returns samplers when the parallel-group lookup fails', async () => {
+        // A database without the source_element_path column (deploy ahead of the migration)
+        // must degrade to the previous behaviour, not fail the whole request.
+        let call = 0;
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (isRollupExistenceCheck(sql)) return [];
+          if (isRollupScopeLookup(sql)) return [];
+          if (isCaggScopeLookup(sql)) return [];
+          if (String(sql).includes('source_element_path')) {
+            throw new Error('column "source_element_path" does not exist');
+          }
+          call++;
+          return call === 1 ? [RAW_SAMPLER_ROW] : [];
+        });
+
+        const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(result).toHaveLength(1);
+        expect((result as SamplerStats[])[0].sampler_name).toBe('POST /checkout');
+      });
+
+      it('attaches the group timings from the rollup', async () => {
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [chainRow('POST /checkout', 'load_test', TG, PC('PG1'))],
+          [{
+            parallel_group: 'PG1', scenario_name: 'load_test',
+            executions: '12', passed_count: '12', failed_count: '0',
+            avg_elapsed: '156.25', min_elapsed: '154', max_elapsed: '160',
+            p95_elapsed: '159.00', p99_elapsed: '160.00',
+          }],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].parallel_group_stats).toEqual({
+          parallel_group: 'PG1',
+          executions: 12,
+          passed_count: 12,
+          failed_count: 0,
+          avg_elapsed: 156.25,
+          min_elapsed: 154,
+          max_elapsed: 160,
+          p95_elapsed: 159,
+          p99_elapsed: 160,
+        });
+      });
+
+      it('still labels groups when the rollup has not been computed', async () => {
+        // A run analysed before the rollup table existed: the band still renders, without timings.
+        mockQuerySequence(
+          [RAW_SAMPLER_ROW],
+          [chainRow('POST /checkout', 'load_test', TG, PC('PG1'))],
+          [],
+        );
+
+        const result = (await service.getTransactionSamples(
+          TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, [],
+        )) as SamplerStats[];
+
+        expect(result[0].parallel_group).toBe('PG1');
+        expect(result[0].parallel_group_stats).toBeUndefined();
+      });
+
+      it('reads the rollup for the same ramp-up setting as the samplers', async () => {
+        // Group timings must describe the same window as the rows they sit above.
+        mockQuerySequence(
+          [{ start_time: new Date().toISOString(), ramp_up: '120' }],
+          [RAW_SAMPLER_ROW],
+          [chainRow('POST /checkout', 'load_test', TG, PC('PG1'))],
+          [],
+        );
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
+
+        const statsCall = (testRunRepo.query as jest.Mock).mock.calls
+          .find(([sql]) => /test_run_parallel_group_stats/i.test(String(sql)));
+        expect(statsCall).toBeDefined();
+        expect(statsCall[1]).toContain(true);
+      });
+
+      it('bounds the lookup so it cannot scan the whole hypertable', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const groupQuery = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('parent_controllers'));
+        expect(groupQuery).toBeDefined();
+        expect(groupQuery).toMatch(/ORDER BY time/);
+        expect(groupQuery).toMatch(/LIMIT \d+/);
+        // Only name and class are projected: iteration and execution change on every request
+        // and would defeat the DISTINCT, returning a row per request instead of per chain.
+        expect(groupQuery).toMatch(/jsonb_array_elements\(rr\.parent_controllers\)/);
+        expect(groupQuery).toMatch(/'name', e ->> 'name'/);
+        expect(groupQuery).toMatch(/'class', e ->> 'class'/);
+        expect(groupQuery).not.toMatch(/'iteration'/);
+        expect(groupQuery).not.toMatch(/'execution'/);
+        // The bound must be on rows SCANNED, not rows MATCHED: the LIMIT has to come before
+        // the parallel_group filter. Filtering first makes a run with no tagged requests
+        // scan the whole transaction looking for matches that do not exist.
+        const limitAt = (groupQuery as string).indexOf('LIMIT');
+        const filterAt = (groupQuery as string).indexOf('chain IS NOT NULL');
+        expect(limitAt).toBeGreaterThan(-1);
+        expect(filterAt).toBeGreaterThan(limitAt);
       });
     });
 

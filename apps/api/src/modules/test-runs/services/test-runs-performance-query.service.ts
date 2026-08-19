@@ -13,6 +13,8 @@ import {
   ErrorStats,
   VirtualUserStats,
   ThroughputStats,
+  ParallelGroupStats,
+  ControllerRef,
 } from '../types/test-run.types';
 
 interface SummaryTimeseriesBucket {
@@ -54,6 +56,29 @@ export function apdexScoreSql(thresholdExpr: string, aggExpr: string): string {
  * Service responsible for performance analysis queries
  * Handles: transaction stats, sampler stats, error analysis, virtual users, throughput
  */
+/**
+ * Rows read when resolving parallel-group membership. Membership is fixed by the test plan and
+ * repeats every iteration, so a bounded slice names every group without scanning the whole
+ * transaction.
+ */
+const PARALLEL_GROUP_SCAN_ROWS = 5000;
+
+/**
+ * `class` is the only reliable type discriminator in a `parent_controllers` entry: controller
+ * names are free text and not unique within a test plan.
+ */
+const PARALLEL_CONTROLLER_CLASS = 'org.apache.jmeter.control.ParallelController';
+
+const sameChain = (a: ControllerRef[], b: ControllerRef[]): boolean =>
+  a.length === b.length &&
+  a.every(
+    (entry, i) =>
+      entry.name === b[i]?.name &&
+      entry.class === b[i]?.class &&
+      // Two same-named siblings differ only here, which is the whole reason occurrence exists.
+      entry.occurrence === b[i]?.occurrence,
+  );
+
 @Injectable()
 export class TestRunsPerformanceQueryService {
   private readonly logger = new Logger(TestRunsPerformanceQueryService.name);
@@ -678,6 +703,69 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
+   * Attaches how long each parallel group itself took.
+   *
+   * Read from test_run_parallel_group_stats rather than derived here: the metric is a pass's
+   * elapsed time, so a percentile over it needs every pass of the run, which is a full scan of
+   * the transaction. The rollup pipeline computes it once instead.
+   *
+   * The stats are repeated on every member of a group so the client can read them off whichever
+   * member it renders first, without a second lookup or a change to the response shape.
+   */
+  private async attachParallelGroupStats(
+    resolvedTestRunId: string,
+    transactionName: string,
+    samples: SamplerStats[],
+    excludeRampUp: boolean,
+  ): Promise<void> {
+    const rows = await withRequestEm(this.testRunRepo).query(
+      `SELECT parallel_group,
+              NULLIF(scenario_name, '')                                   AS scenario_name,
+              executions, passed_count, failed_count,
+              avg_elapsed, min_elapsed, max_elapsed,
+              ROUND(approx_percentile(0.95, pct_agg)::numeric, 2)         AS p95_elapsed,
+              ROUND(approx_percentile(0.99, pct_agg)::numeric, 2)         AS p99_elapsed
+         FROM test_run_parallel_group_stats
+        WHERE test_run_id = $1
+          AND transaction_name = $2
+          AND ramp_up_excluded = $3`,
+      [resolvedTestRunId, transactionName, excludeRampUp],
+    );
+    if (!rows || rows.length === 0) {
+      // No rollup yet: an older run, or one analysed before this table existed. The groups still
+      // render, just without their own timings.
+      return;
+    }
+
+    const statsByGroup = new Map<string, ParallelGroupStats>();
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const scenario = (row.scenario_name as string) ?? '';
+      statsByGroup.set(`${scenario}\u0000${row.parallel_group as string}`, {
+        parallel_group: row.parallel_group as string,
+        executions: this.mapper.parseInt(row.executions),
+        passed_count: this.mapper.parseInt(row.passed_count),
+        failed_count: this.mapper.parseInt(row.failed_count),
+        avg_elapsed: this.mapper.parseFloat(row.avg_elapsed),
+        min_elapsed: this.mapper.parseInt(row.min_elapsed),
+        max_elapsed: this.mapper.parseInt(row.max_elapsed),
+        p95_elapsed: this.mapper.parseFloat(row.p95_elapsed),
+        p99_elapsed: this.mapper.parseFloat(row.p99_elapsed),
+      });
+    }
+
+    for (const sample of samples) {
+      if (!sample.parallel_group) {
+        continue;
+      }
+      const scoped = statsByGroup.get(`${sample.scenario_name ?? ''}\u0000${sample.parallel_group}`);
+      // Fall back to a scenario-less match: the rollup stores '' for an unset scenario, and a
+      // sampler row may carry undefined for the same thing.
+      sample.parallel_group_stats =
+        scoped ?? statsByGroup.get(`\u0000${sample.parallel_group}`) ?? null;
+    }
+  }
+
+  /**
    * CAGG-backed sampler stats — the live-Apdex companion to
    * `getTransactionSamplesFromRollup`. Reads from `requests_raw_5s` JOINed
    * with `requests_raw_passed_5s` (added in migration 1779100000000) instead
@@ -1122,6 +1210,176 @@ export class TestRunsPerformanceQueryService {
    * @param organizationIds - User's accessible organization IDs (ignored when isAdmin)
    */
   async getTransactionSamples(
+    testRunId: string,
+    transactionName: string,
+    excludeRampUp: boolean = false,
+    isAdmin: boolean = false,
+    organizationIds: string[] = [],
+    sinceMinutes?: number,
+  ): Promise<SamplerStats[] | RollupPendingResult> {
+    // Resolve once. Both the fetch and the decoration need the real test_run_id, and
+    // resolveTestRunId issues a lookup when handed a UUID — which is what the frontend sends.
+    const resolvedTestRunId = await this.resolveTestRunId(testRunId);
+    const samples = await this.getTransactionSamplesInternal(
+      resolvedTestRunId,
+      transactionName,
+      excludeRampUp,
+      isAdmin,
+      organizationIds,
+      sinceMinutes,
+    );
+    // Decorate here rather than in each fetch path (rollup / CAGG / raw fallback), so all of
+    // them report parallel groups identically.
+    if (Array.isArray(samples) && samples.length > 0) {
+      await this.attachParallelGroups(resolvedTestRunId, transactionName, samples, excludeRampUp);
+    }
+    return samples;
+  }
+
+  /**
+   * Labels each sampler with the chain of controllers it ran under.
+   *
+   * The sampler rollup is keyed by (test_run_id, transaction_name, sampler_name, scenario_name,
+   * ramp_up_excluded) and does not carry the chain, so this is a separate lookup against
+   * requests_raw rather than a change to the rollup or its populating job.
+   *
+   * Every failure mode degrades to "no chain", which renders exactly as before this existed:
+   * a database without the column (rolling deploy ahead of the migration), a run recorded by a
+   * load test tool that does not report the tag, or a query error.
+   */
+  private async attachParallelGroups(
+    resolvedTestRunId: string,
+    transactionName: string,
+    samples: SamplerStats[],
+    excludeRampUp: boolean,
+  ): Promise<void> {
+    try {
+      // Bounded scan. A plain DISTINCT over requests_raw would scan every row this
+      // transaction produced — the raw-hypertable cost the rollup and CAGG paths exist to
+      // avoid (60s+ on a 10M-row run). The chain is a property of the test plan, so it is
+      // identical in every iteration: the first slice of rows, walked along the
+      // (test_run_id, time) index, names every chain the transaction has.
+      //
+      // The LIMIT sits INSIDE the subquery and the chain filter OUTSIDE it, so the bound is on
+      // rows *scanned*, not rows *matched*. Filtering first would make a run with no tagged
+      // requests — every run recorded before this column existed — scan the whole transaction
+      // hunting for matches that do not exist.
+      //
+      // Two shapes, one result. `source_element_path` is where the request sits in the plan and
+      // ENDS AT THE SAMPLER, so its last entry is dropped here — the table already has a row for
+      // the sampler and would otherwise band every request under a copy of itself. Its retired
+      // predecessor `parent_controllers` ends at the innermost controller and needs no trim.
+      // A run is written by one listener version, so the COALESCE is a per-row choice between
+      // shapes, never a merge of them.
+      //
+      // Only `name`, `class` and `occurrence` are projected. The retired shape's `iteration` and
+      // `execution` changed on every request and would have defeated the grouping; `occurrence`
+      // is fixed per plan position, so it groups cleanly and lets same-named siblings be told
+      // apart.
+      //
+      // `first_seen` is where the sampler first fired inside the scanned slice. Nothing in the
+      // data records a controller's position in the test plan, and this is the closest honest
+      // proxy: within one pass a thread executes the plan top to bottom, so first-appearance
+      // order IS plan order. It can misplace a controller whose first pass did not run (an If
+      // that was false on iteration one), which is why it orders the table rather than claiming
+      // to be the plan.
+      const rows = await withRequestEm(this.testRunRepo).query(
+        `SELECT sampler_name, scenario_name, chain, from_plan, MIN(seq) AS first_seen
+           FROM (
+             SELECT rr.sampler_name, rr.scenario_name,
+                    COALESCE(
+                      (SELECT jsonb_agg(
+                                jsonb_build_object(
+                                  'name', e ->> 'name',
+                                  'class', e ->> 'class',
+                                  'occurrence', e -> 'occurrence')
+                                ORDER BY ord)
+                         FROM jsonb_array_elements(rr.source_element_path)
+                              WITH ORDINALITY AS t(e, ord)
+                        WHERE ord < jsonb_array_length(rr.source_element_path)),
+                      (SELECT jsonb_agg(
+                                jsonb_build_object('name', e ->> 'name', 'class', e ->> 'class')
+                                ORDER BY ord)
+                         FROM jsonb_array_elements(rr.parent_controllers)
+                              WITH ORDINALITY AS t(e, ord))
+                    ) AS chain,
+                    (rr.source_element_path IS NOT NULL) AS from_plan,
+                    ROW_NUMBER() OVER (ORDER BY rr.time) AS seq
+               FROM (
+                      SELECT sampler_name, scenario_name, parent_controllers,
+                             source_element_path, time
+                        FROM requests_raw
+                       WHERE test_run_id = $1
+                         AND transaction_name = $2
+                       ORDER BY time
+                       LIMIT ${PARALLEL_GROUP_SCAN_ROWS}
+                    ) rr
+           ) first_rows
+          WHERE chain IS NOT NULL
+          GROUP BY sampler_name, scenario_name, chain, from_plan`,
+        [resolvedTestRunId, transactionName],
+      );
+      if (!rows || rows.length === 0) {
+        return;
+      }
+      // Keyed by scenario AND sampler: the sampler rollup's primary key includes
+      // scenario_name, so one transaction can hold the same sampler under two scenarios.
+      // Keying on the name alone would copy one scenario's group onto the other's row.
+      const key = (scenario: string | null | undefined, sampler: string) =>
+        `${scenario ?? ''}\u0000${sampler}`;
+      const CONFLICT = 'conflict' as const;
+      const chainBySampler = new Map<string, ControllerRef[] | typeof CONFLICT>();
+      const firstSeenBySampler = new Map<string, number>();
+      const fromPlanBySampler = new Map<string, boolean>();
+      for (const row of rows as Array<Record<string, unknown>>) {
+        const k = key(row.scenario_name as string | null, row.sampler_name as string);
+        const chain = (row.chain as ControllerRef[]) ?? [];
+        const firstSeen = this.mapper.parseInt(row.first_seen);
+        firstSeenBySampler.set(k, Math.min(firstSeenBySampler.get(k) ?? firstSeen, firstSeen));
+        fromPlanBySampler.set(k, (fromPlanBySampler.get(k) ?? false) || row.from_plan === true);
+        const seen = chainBySampler.get(k);
+        // A sampler that ran at two different plan positions has no single answer HERE: the
+        // sampler rollup holds one row per (sampler_name, scenario_name), so its numbers already
+        // cover both positions. Banding it under one of them would misattribute them, so it is
+        // left unbanded. Splitting it into a row per position would need the sampler rollup
+        // keyed by path too, which is a schema change and separate work.
+        if (seen === undefined) {
+          chainBySampler.set(k, chain);
+        } else if (seen !== CONFLICT && !sameChain(seen, chain)) {
+          chainBySampler.set(k, CONFLICT);
+        }
+      }
+      for (const sample of samples) {
+        const k = key(sample.scenario_name, sample.sampler_name);
+        sample.first_seen = firstSeenBySampler.get(k);
+        // Which shape the chain came from, so the UI can tell "not analysed yet" from "this
+        // engine never records that" when a parallel band has no timings.
+        sample.chain_source = fromPlanBySampler.get(k) ? 'plan' : 'runtime';
+        const chain = chainBySampler.get(k);
+        if (chain === undefined || chain === CONFLICT) {
+          sample.parent_controllers = null;
+          sample.parallel_group = null;
+          continue;
+        }
+        sample.parent_controllers = chain;
+        // The chain is outermost-first, so the LAST Parallel Controller is the one that
+        // actually dispatched this request. Kept as its own field because the group stats
+        // below are keyed by it.
+        sample.parallel_group =
+          [...chain].reverse().find((c) => c.class === PARALLEL_CONTROLLER_CLASS)?.name || null;
+      }
+
+      await this.attachParallelGroupStats(resolvedTestRunId, transactionName, samples, excludeRampUp);
+    } catch (error) {
+      this.logger.warn(
+        `Could not resolve parallel groups for transaction ${transactionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }. Rendering without them.`,
+      );
+    }
+  }
+
+  private async getTransactionSamplesInternal(
     testRunId: string,
     transactionName: string,
     excludeRampUp: boolean = false,

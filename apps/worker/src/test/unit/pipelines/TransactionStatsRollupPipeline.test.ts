@@ -48,7 +48,7 @@ function makeTestRun(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function wireTransaction(counts: { tx: number; sampler: number }) {
+function wireTransaction(counts: { tx: number; sampler: number; parallelGroup?: number }) {
   // Simulate withAnalyticsTransaction → db.transaction → callback(manager)
   mockDb.transaction.mockImplementation(async (cb: any) => {
     mockManagerQuery.mockImplementation(async (sql: string) => {
@@ -58,6 +58,9 @@ function wireTransaction(counts: { tx: number; sampler: number }) {
       }
       if (/FROM test_run_sampler_stats/i.test(sql)) {
         return [{ count: String(counts.sampler) }];
+      }
+      if (/FROM test_run_parallel_group_stats/i.test(sql)) {
+        return [{ count: String(counts.parallelGroup ?? 0) }];
       }
       // INSERT ... SELECT ... ON CONFLICT
       return [];
@@ -131,6 +134,102 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(sqlCalls.some(s => /SET LOCAL work_mem/i.test(s))).toBe(true);
       expect(sqlCalls.some(s => /INSERT INTO test_run_transaction_stats/i.test(s))).toBe(true);
       expect(sqlCalls.some(s => /INSERT INTO test_run_sampler_stats/i.test(s))).toBe(true);
+    });
+
+    it('rolls up parallel-group stats alongside the transaction and sampler rollups', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 8, sampler: 42 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const sqlCalls = mockManagerQuery.mock.calls.map(([sql]) => sql as string);
+      expect(sqlCalls.some(s => /INSERT INTO test_run_parallel_group_stats/i.test(s))).toBe(true);
+      expect(sqlCalls.some(s => /DELETE FROM test_run_parallel_group_stats/i.test(s))).toBe(true);
+    });
+
+    it('defines a parallel pass by its id alone, never splitting one across transaction names', async () => {
+      // A run cut off mid-transaction leaves some members of a pass attributed to themselves
+      // rather than their Transaction Controller. Grouping the pass by transaction_name would
+      // split it and make each fragment report its own span as if it were the whole pass.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const groupSql = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_parallel_group_stats/i.test(s));
+      expect(groupSql).toBeDefined();
+
+      const passesCte = (groupSql as string).slice(0, (groupSql as string).indexOf('base AS'));
+      const groupBy = passesCte.slice(passesCte.lastIndexOf('GROUP BY'));
+      expect(groupBy).toMatch(/r\.pc ->> 'execution'/);
+      expect(groupBy).not.toMatch(/r\.transaction_name/);
+    });
+
+    it('is scoped to the retired runtime metadata, so it no-ops on plan-path runs', async () => {
+      // Its replacement records where a request sits in the plan and carries no per-execution
+      // identity, so no pass can be reconstructed. The pipeline stays for historical runs and
+      // must simply select nothing on newer ones rather than inventing groups from the path.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const groupSql = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_parallel_group_stats/i.test(s)) as string;
+
+      expect(groupSql).toMatch(/r\.parent_controllers IS NOT NULL/);
+      expect(groupSql).not.toMatch(/source_element_path/);
+    });
+
+    it('picks the innermost Parallel Controller from parent_controllers, by class', async () => {
+      // The chain is outermost-first, so `-> -1` is the controller that actually dispatched the
+      // request. Matching on name instead would break on a plan that reuses a controller name.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const groupSql = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_parallel_group_stats/i.test(s)) as string;
+
+      expect(groupSql).toMatch(
+        /jsonb_path_query_array\(\s*r\.parent_controllers,\s*'\$\[\*\] \? \(@\.class == "org\.apache\.jmeter\.control\.ParallelController"\)'\s*\) -> -1/,
+      );
+    });
+
+    it('measures a pass as last finish minus first start', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const groupSql = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_parallel_group_stats/i.test(s)) as string;
+
+      // MAX(finish) - MIN(start), where start is the stored time minus the response time.
+      expect(groupSql).toMatch(/MAX\(r\.time\)\s*-\s*MIN\(r\.time\s*-\s*\(r\.response_time/);
+      // The sketch is built over the pass durations, not over per-request response times.
+      expect(groupSql).toMatch(/tdigest\(100, elapsed_ms::double precision\)/);
+    });
+
+    it('assigns a pass to the ramp-up window by when it STARTED', async () => {
+      // Filtering the requests instead would slice passes at the cutoff and invent short
+      // durations that never happened.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const groupSql = mockManagerQuery.mock.calls
+        .map(([sql]) => sql as string)
+        .find(s => /INSERT INTO test_run_parallel_group_stats/i.test(s)) as string;
+
+      expect(groupSql).toMatch(/FILTER \(WHERE started_at >= \$2 AND started_at < \$3\)/);
     });
 
     it('sets a 10-minute statement_timeout (longer than the live query it replaces)', async () => {
@@ -217,13 +316,14 @@ describe('TransactionStatsRollupPipeline', () => {
 
     it('reports row counts in the success payload', async () => {
       mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
-      wireTransaction({ tx: 14, sampler: 73 });
+      wireTransaction({ tx: 14, sampler: 73, parallelGroup: 5 });
 
       const result = await pipeline.execute({ testRunId: 'run-001' });
 
       expect(result.success).toBe(true);
       expect((result.data as any).transactionRows).toBe(14);
       expect((result.data as any).samplerRows).toBe(73);
+      expect((result.data as any).parallelGroupRows).toBe(5);
     });
 
     it('uses tdigest(size, value) for the pct_agg sketch in both rollup INSERTs (issue #278)', async () => {
