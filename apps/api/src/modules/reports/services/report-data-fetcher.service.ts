@@ -1528,6 +1528,9 @@ export class ReportDataFetcherService {
           cr.dashboard_label,
           cr.requirement->>'operator' AS requirement_operator,
           (cr.requirement->>'value')::numeric AS requirement_value,
+          cr.requirement,
+          cr.targets,
+          cr.message,
           cr.panel_average,
           cr.meets_requirement
         FROM check_results cr

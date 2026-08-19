@@ -304,10 +304,6 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
 /** @public */
 export interface SloConfig {
   maxItems?: number;
-  showDetails?: boolean;
-  statusFilter?: string[];
-  includeTrends?: boolean;
-  showSummaryTable?: boolean;
 }
 
 interface SloConfigFormProps {
@@ -336,33 +332,6 @@ export function SloConfigForm({ config, onChange, text, onTextChange, testRunId 
         onChange={(e) => onChange({ ...config, maxItems: Number(e.target.value) })}
         size="small"
         inputProps={{ min: 1, max: 100 }}
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showDetails ?? true}
-            onChange={(e) => onChange({ ...config, showDetails: e.target.checked })}
-          />
-        }
-        label="Show Details"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showSummaryTable ?? true}
-            onChange={(e) => onChange({ ...config, showSummaryTable: e.target.checked })}
-          />
-        }
-        label="Show Summary Table"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.includeTrends ?? false}
-            onChange={(e) => onChange({ ...config, includeTrends: e.target.checked })}
-          />
-        }
-        label="Include Trends"
       />
     </SectionConfigShell>
   );

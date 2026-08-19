@@ -37,6 +37,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - The "no difference" metric bucket was filtered on an underscore that ADAPT never writes, so it was always empty. It is not displayed today, but anything reading it was reading zero.
+## [0.2.69.0] - 2026-08-19
+
+### Changed
+- **A failed Apdex SLO now names the transactions that failed it.** The section reported a single FAIL against "Workload Apdex" with a requirement column reading "No requirement" — the check's requirement is a minimum score at a latency threshold, which an operator/value pair cannot express, and the transactions behind the verdict were never shown even though the checker records every one of them. The requirement now reads "≥ 0.85 Apdex at 500 ms", and a failed check lists the transactions that fell short with their score, scenario, average response time and satisfied/tolerating/frustrated counts. This applies to every check type, not just Apdex: any failed check that measured multiple targets now names the ones that failed, capped at twenty with a count of the rest.
+- **An aggregated SLO says which statistic it evaluates.** "≤ 2000 ms" could have been the mean, the 95th percentile or the maximum. It now reads "P95 ≤ 2000 ms". Requirement operators stored as symbols (`<=`, `>=`) also render as proper comparison signs instead of being echoed raw.
+- **The SLO table has a Dashboard column**, so a check named "CPU" can be told from the other four checks named "CPU" on different dashboards. The value was already being read from the database and discarded.
+- **The SLO section's configuration no longer offers settings that do nothing.** Show Details, Show Summary Table and Include Trends were never read by the renderer. They are gone, and Max Items — which was equally inert — now genuinely caps the table.
 
 ## [0.2.66.0] - 2026-08-19
 

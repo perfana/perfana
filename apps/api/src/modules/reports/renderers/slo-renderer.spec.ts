@@ -36,6 +36,27 @@ const makeSloResult = (overrides?: Record<string, unknown>) => ({
   ...overrides,
 });
 
+const makeApdexResult = (overrides?: Record<string, unknown>) => makeSloResult({
+  panel_title: 'Workload Apdex',
+  metric_name: null,
+  evaluate_type: 'apdex',
+  metric_unit: 'apdex_score',
+  requirement_operator: null,
+  requirement_value: null,
+  requirement: { type: 'apdex', min_score: 0.85, threshold_ms: 500 },
+  panel_average: 0.939,
+  meets_requirement: false,
+  message: '2 of 15 transactions below minimum Apdex 0.85: T04_Payment_Processing, T05_Order_Confirmation',
+  targets: [
+    { target: 'T01_Homepage_Load', value: 1, meets_requirement: true, scenario_name: 'Browse' },
+    {
+      target: 'T04_Payment_Processing', value: 0.62, meets_requirement: false, scenario_name: 'Checkout',
+      avg_response_time_ms: 812.4, satisfied_count: 20, tolerating_count: 15, frustrated_count: 25, total_count: 60,
+    },
+  ],
+  ...overrides,
+});
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -129,8 +150,8 @@ describe('SloRenderer', () => {
 
   it('should render check results table with PASS/FAIL badges', async () => {
     dataFetcher.getSloCheckResults.mockResolvedValue([
-      makeSloResult({ meets_requirement: true, metric_name: 'Latency p95' }),
-      makeSloResult({ meets_requirement: false, metric_name: 'Error Rate' }),
+      makeSloResult({ meets_requirement: true, panel_title: 'Latency p95' }),
+      makeSloResult({ meets_requirement: false, panel_title: 'Error Rate' }),
     ]);
 
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
@@ -222,9 +243,9 @@ describe('SloRenderer', () => {
     expect(html).not.toContain('63.50 short');
   });
 
-  it('should escape HTML in metric names', async () => {
+  it('should escape HTML in check names', async () => {
     dataFetcher.getSloCheckResults.mockResolvedValue([
-      makeSloResult({ metric_name: '<img src=x onerror=alert(1)>' }),
+      makeSloResult({ panel_title: '<img src=x onerror=alert(1)>' }),
     ]);
 
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
@@ -232,6 +253,87 @@ describe('SloRenderer', () => {
     expect(html).not.toContain('<img');
     expect(html).toContain('&lt;img');
   });
+  it('shows the dashboard a check came from', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([
+      makeSloResult({ dashboard_label: 'JVM memory management G1GC afterburner-be' }),
+    ]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>Dashboard</th>');
+    expect(html).toContain('JVM memory management G1GC afterburner-be');
+  });
+
+  it('names the transactions that failed an apdex check', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([makeApdexResult()]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('T04_Payment_Processing');
+    expect(html).toContain('Checkout');
+    expect(html).toContain('0.62');
+    expect(html).toContain('812 ms');
+    expect(html).toContain('2 of 15 transactions below minimum Apdex 0.85');
+    // Passing transactions are not the finding
+    expect(html).not.toContain('T01_Homepage_Load');
+  });
+
+  it('states an apdex requirement as a minimum score at a threshold, not "No requirement"', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([makeApdexResult()]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('≥ 0.85 Apdex at 500 ms');
+    expect(html).not.toContain('No requirement');
+    // The raw unit code is not printable
+    expect(html).not.toContain('apdex_score');
+    expect(html).toContain('0.94');
+  });
+
+  it('names the statistic an aggregated check evaluates', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([
+      makeSloResult({
+        evaluate_type: 'aggregated',
+        panel_title: 'P95 Transaction Response Times',
+        requirement_operator: '<=',
+        requirement_value: 2000,
+        requirement: { type: 'aggregated', aggregate_stat: 'p95', aggregate_metric: 'transaction_response_time', operator: '<=', value: 2000 },
+        panel_average: 702.4,
+      }),
+    ]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('P95 ≤ 2000 ms');
+  });
+
+  it('does not list targets for a check that passed', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([
+      makeApdexResult({ meets_requirement: true }),
+    ]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).not.toContain('T04_Payment_Processing');
+  });
+
+  it('caps the table at config.maxItems', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([
+      makeSloResult({ panel_title: 'C1' }),
+      makeSloResult({ panel_title: 'C2' }),
+      makeSloResult({ panel_title: 'C3' }),
+    ]);
+
+    const html = await renderer.renderSloSection(
+      makeSection({ config: { maxItems: 2 } }),
+      makeTestRun(),
+    );
+
+    expect(html).toContain('C1');
+    expect(html).toContain('C2');
+    expect(html).not.toContain('C3');
+  });
+
   it('gives the summary-card grid columns a zero floor', async () => {
     // Same blowout as the Apdex cards: repeat(3, 1fr) floors each column at its content width,
     // so one long count pushed the row wider than the page.

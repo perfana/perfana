@@ -25,6 +25,26 @@ export interface SloCheckResult {
   requirement_value: number | null;
   panel_average: number | null;
   meets_requirement: boolean | null;
+  /** The whole requirement object — apdex and aggregated checks carry fields no operator/value pair can express. */
+  requirement: Record<string, unknown> | null;
+  /** Per-target outcomes: the transactions/series behind a single pass/fail verdict. */
+  targets: SloCheckTarget[] | null;
+  /** The checker's own summary line, e.g. "2 of 15 transactions below minimum Apdex 0.85: …". */
+  message: string | null;
+}
+
+/** One target inside a check — a transaction, a series, a host. */
+export interface SloCheckTarget {
+  target: string;
+  value: number | null;
+  meets_requirement: boolean | null;
+  /** apdex checks only */
+  scenario_name?: string | null;
+  avg_response_time_ms?: number | null;
+  satisfied_count?: number | null;
+  tolerating_count?: number | null;
+  frustrated_count?: number | null;
+  total_count?: number | null;
 }
 
 /** Anomaly detection summary for header renderer */
