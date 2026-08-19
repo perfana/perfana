@@ -18,50 +18,6 @@ const makeTestRun = (overrides?: Partial<TestRun>): TestRun =>
     ...overrides,
   }) as TestRun;
 
-const makeMetric = (overrides?: Record<string, unknown>) => ({
-  dashboardLabel: 'API Dashboard',
-  panelTitle: 'Response Time',
-  metricName: 'avg',
-  unit: 'ms',
-  currentValue: 120,
-  baselineValue: 100,
-  difference: 20,
-  differencePercent: 20.0,
-  conclusion: 'regression',
-  ...overrides,
-});
-
-const makeComparisonsData = (overrides?: Record<string, unknown>) => ({
-  metrics: [
-    makeMetric(),
-    makeMetric({
-      panelTitle: 'Throughput',
-      metricName: 'req/s',
-      unit: null,
-      currentValue: 500,
-      baselineValue: 450,
-      difference: 50,
-      differencePercent: 11.1,
-      conclusion: 'improvement',
-    }),
-    makeMetric({
-      panelTitle: 'Error Rate',
-      metricName: 'pct',
-      unit: '%',
-      currentValue: 0.5,
-      baselineValue: 0.5,
-      difference: 0,
-      differencePercent: 0,
-      conclusion: 'no_difference',
-    }),
-  ],
-  regressionCount: 1,
-  improvementCount: 1,
-  noDifferenceCount: 1,
-  totalMetrics: 3,
-  ...overrides,
-});
-
 describe('ComparisonsRenderer', () => {
   let renderer: ComparisonsRenderer;
   let dataFetcher: jest.Mocked<ReportDataFetcherService>;
@@ -74,7 +30,6 @@ describe('ComparisonsRenderer', () => {
         {
           provide: ReportDataFetcherService,
           useValue: {
-            getComparisonsData: jest.fn().mockResolvedValue(null),
             getBaselineRunComparison: jest.fn().mockResolvedValue(null),
             getAggregatedScalars: jest.fn(),
             getPreviousTestRun: jest.fn().mockResolvedValue(null),
@@ -91,188 +46,25 @@ describe('ComparisonsRenderer', () => {
     const html = await renderer.renderComparisonsSection(makeSection(), null);
 
     expect(html).toContain('comparisons-section');
-    expect(html).toContain('No comparison data available');
-    expect(dataFetcher.getComparisonsData).not.toHaveBeenCalled();
+    expect(html).toContain('without a test run');
+    expect(dataFetcher.getBaselineRunComparison).not.toHaveBeenCalled();
   });
 
-  it('should render placeholder when no data returned', async () => {
-    dataFetcher.getComparisonsData.mockResolvedValue(null);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('No comparison data available');
-  });
-
-  it('should render right-aligned summary chips in the section header (rule 04)', async () => {
-    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('1 regressions');
-    expect(html).toContain('1 improvements');
-    expect(html).toContain('1 within range');
-    expect(html).toContain('3 metrics compared');
-    // Old badge/label vocabulary is gone (rule 01/04)
-    expect(html).not.toContain('Total Metrics');
-    expect(html).not.toContain('No Difference');
-    expect(html).not.toContain('&#x2194;'); // section emoji icon removed
-  });
-
-  it('should render comparison table grouped by dashboard', async () => {
-    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('API Dashboard');
-    expect(html).toContain('Response Time');
-    expect(html).toContain('Throughput');
-    expect(html).toContain('Error Rate');
-    expect(html).toContain('120 ms');
-    expect(html).toContain('100 ms');
-    expect(html).toContain('+20.0%');
-    expect(html).toContain('▲'); // arrow bound to positive diff (rule 02)
-  });
-
-  it('should render five-state status pills per metric (rule 01)', async () => {
-    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('>REGRESSION</span>');
-    expect(html).toContain('>IMPROVEMENT</span>');
-    expect(html).toContain('>OK</span>');
-    // Old conclusion labels no longer rendered as-is
-    expect(html).not.toMatch(/no difference/i);
-    expect(html).not.toContain('>regression</span>');
-    // Generic minus arrow is gone (rule 02)
-    expect(html).not.toContain('&#x2796;');
-    expect(html).not.toContain('➖');
-  });
-
-  it('collapses raw increase/partial/incomparable labels to the five states', async () => {
-    const data = makeComparisonsData({
-      metrics: [
-        makeMetric({ conclusion: 'regression' }),
-        // increase/decrease/partial variants are only emitted when the metric
-        // direction is unclassified — they map to WARNING, never REGRESSION.
-        makeMetric({ panelTitle: 'P2', conclusion: 'increase', differencePercent: 12 }),
-        makeMetric({ panelTitle: 'P3', conclusion: 'partial increase', differencePercent: 12 }),
-        makeMetric({ panelTitle: 'P4', conclusion: 'decrease', differencePercent: -12 }),
-        makeMetric({ panelTitle: 'P5', conclusion: 'partial improvement', differencePercent: -12 }),
-        makeMetric({ panelTitle: 'P6', conclusion: 'incomparable', currentValue: null, baselineValue: null, difference: null, differencePercent: null }),
-      ],
-    });
-    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('>REGRESSION</span>');
-    expect(html).toContain('>WARNING</span>');
-    expect(html).toContain('>IMPROVEMENT</span>');
-    expect(html).toContain('>N/A</span>');
-    expect(html).not.toContain('>INCREASE<');
-    expect(html).not.toContain('>increase<');
-    expect(html).not.toContain('>DECREASE<');
-    expect(html).not.toMatch(/partial/i);
-    expect(html).not.toMatch(/incomparable/i);
-  });
-
-  it('maps an increase row to WARNING, not REGRESSION (unclassified direction)', async () => {
-    const data = makeComparisonsData({
-      metrics: [makeMetric({ conclusion: 'increase', differencePercent: 30 })],
-    });
-    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('>WARNING</span>');
-    expect(html).not.toContain('>REGRESSION</span>');
-  });
-
-  it('should render custom title and comment', async () => {
-    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
+  it('renders the comparison without a comparisonMode in the config (the mode switch is gone)', async () => {
+    dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      rows: [{ group: 'default', label: 'checkout', metrics: [{ key: 'avg', current: 60, baseline: 50, diffPercent: 20 }] }],
+    } as never);
 
     const html = await renderer.renderComparisonsSection(
-      makeSection({ title: 'Run Comparison', comment: 'vs baseline run' }),
+      makeSection({ title: 'Run Comparison', config: { baselineTestRunId: 'base-1' } } as never),
       makeTestRun(),
     );
 
     expect(html).toContain('Run Comparison');
-    expect(html).toContain('vs baseline run');
-    expect(html).toContain('section-text');
-  });
-
-  it('should pass baselineTestRunId from config', async () => {
-    dataFetcher.getComparisonsData.mockResolvedValue(makeComparisonsData() as any);
-
-    await renderer.renderComparisonsSection(
-      makeSection({ config: { baselineTestRunId: 'baseline-run-123' } }),
-      makeTestRun(),
+    expect(html).toContain('checkout');
+    expect(dataFetcher.getBaselineRunComparison).toHaveBeenCalledWith(
+      'run-001', 'base-1', 'performance-metrics', expect.anything(),
     );
-
-    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith('run-001', 'baseline-run-123');
-  });
-
-  it('should group metrics by dashboard with metric-count chips (rule 05)', async () => {
-    const data = makeComparisonsData({
-      metrics: [
-        makeMetric({ dashboardLabel: 'Dashboard A', panelTitle: 'Panel 1' }),
-        makeMetric({ dashboardLabel: 'Dashboard A', panelTitle: 'Panel 2' }),
-        makeMetric({ dashboardLabel: 'Dashboard B', panelTitle: 'Panel 3' }),
-      ],
-    });
-
-    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('>Dashboard A</h3>');
-    expect(html).toContain('>Dashboard B</h3>');
-    expect(html).toContain('2 metrics');
-    expect(html).toContain('1 metrics');
-  });
-
-  it('should handle empty metrics gracefully', async () => {
-    dataFetcher.getComparisonsData.mockResolvedValue(
-      makeComparisonsData({ metrics: [], totalMetrics: 0 }) as any,
-    );
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('No comparison data available');
-  });
-
-  it('should format different unit types', async () => {
-    const data = makeComparisonsData({
-      metrics: [
-        makeMetric({ unit: 'ms', currentValue: 250.6 }),
-        makeMetric({ panelTitle: 'CPU', metricName: 'usage', unit: '%', currentValue: 75.3 }),
-        makeMetric({ panelTitle: 'Memory', metricName: 'used', unit: 'bytes', currentValue: 1073741824 }),
-      ],
-    });
-
-    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('250.6 ms');
-    expect(html).toContain('75.3 %'); // '%' falls through unit-format's generic "value + unit" path
-    expect(html).toContain('1 GB');
-  });
-
-  it('keeps small non-zero values from collapsing to 0 (rule 03 precision)', async () => {
-    const data = makeComparisonsData({
-      metrics: [
-        makeMetric({ panelTitle: 'Tiny', metricName: 'ratio', unit: null, currentValue: 0.0042, baselineValue: 0.004, difference: 0.0002, differencePercent: 5 }),
-      ],
-    });
-
-    dataFetcher.getComparisonsData.mockResolvedValue(data as any);
-
-    const html = await renderer.renderComparisonsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('0.0042');
-    expect(html).not.toContain('>0<'); // never rendered as a bare zero
   });
 
   it('renders baseline_run mode grouped by scenario with band colors', async () => {
@@ -449,12 +241,31 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('afterburner-be');    // host chip unchanged
   });
 
-  it('shows empty state when baseline data is null', async () => {
+  it('shows empty state when baseline data is null, naming the baseline that came back empty', async () => {
     jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
     const html = await renderer.renderComparisonsSection(
       { type: 'comparisons', order: 0, config: { comparisonMode: 'baseline_run', baselineTestRunId: 'base', source: 'grafana' } } as any,
       { testRunId: 'cur' } as any);
-    expect(html).toContain('No comparison data available for the selected baseline run');
+    expect(html).toContain('No comparison data available');
+    expect(html).toContain('baseline run base returned no metrics');
+    expect(html).toContain('grafana');
+  });
+
+  it('says the section has no baseline configured, rather than blaming the data', async () => {
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison');
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: { comparisonMode: 'baseline_run', source: 'grafana' } } as any,
+      { testRunId: 'cur' } as any);
+    expect(html).toContain('no baseline run is configured for this section');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('says the run is the first in its scope when "previous" resolves to nothing', async () => {
+    jest.spyOn(dataFetcher, 'getPreviousTestRun').mockResolvedValue(null as never);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: { comparisonMode: 'baseline_run', baselineTestRunId: 'previous', source: 'grafana' } } as any,
+      { testRunId: 'cur' } as any);
+    expect(html).toContain('first run for its system, environment and workload');
   });
 
   it('seam: forwards userId and roles into getBaselineRunComparison opts (regression guard)', async () => {
@@ -539,7 +350,6 @@ describe('ComparisonsRenderer previous-run baseline', () => {
         {
           provide: ReportDataFetcherService,
           useValue: {
-            getComparisonsData: jest.fn().mockResolvedValue(null),
             getBaselineRunComparison: jest.fn().mockResolvedValue(null),
             getAggregatedScalars: jest.fn(),
             getPreviousTestRun: jest
@@ -557,9 +367,11 @@ describe('ComparisonsRenderer previous-run baseline', () => {
     await renderer.renderComparisonsSection(sectionWith('previous'), makeTestRun());
 
     expect(dataFetcher.getPreviousTestRun).toHaveBeenCalled();
-    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(
+    expect(dataFetcher.getBaselineRunComparison).toHaveBeenCalledWith(
       expect.anything(),
       'EA-acc-loadtest-00019',
+      expect.anything(),
+      expect.anything(),
     );
   });
 
@@ -567,9 +379,11 @@ describe('ComparisonsRenderer previous-run baseline', () => {
     await renderer.renderComparisonsSection(sectionWith('EA-acc-loadtest-00001'), makeTestRun());
 
     expect(dataFetcher.getPreviousTestRun).not.toHaveBeenCalled();
-    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(
+    expect(dataFetcher.getBaselineRunComparison).toHaveBeenCalledWith(
       expect.anything(),
       'EA-acc-loadtest-00001',
+      expect.anything(),
+      expect.anything(),
     );
   });
 
@@ -577,15 +391,15 @@ describe('ComparisonsRenderer previous-run baseline', () => {
     // Rather than falling back to comparing a run against itself.
     dataFetcher.getPreviousTestRun.mockResolvedValue(null);
 
-    await renderer.renderComparisonsSection(sectionWith('previous'), makeTestRun());
+    const html = await renderer.renderComparisonsSection(sectionWith('previous'), makeTestRun());
 
-    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(expect.anything(), undefined);
+    expect(dataFetcher.getBaselineRunComparison).not.toHaveBeenCalled();
+    expect(html).toContain('first run for its system, environment and workload');
   });
-  it('resolves "previous" in baseline_run mode too', async () => {
-    // The renderer has two entry branches and both take a baseline id; a fix applied to one and
-    // not the other leaves half the section pinned to an ageing run.
+  it('resolves "previous" for a config that still carries the old comparisonMode key', async () => {
+    // Sections saved before the mode switch was removed keep the key; it must simply be ignored.
     await renderer.renderComparisonsSection(
-      { ...makeSection(), config: { comparisonMode: 'baseline_run', baselineTestRunId: 'previous' } } as never,
+      { ...makeSection(), config: { comparisonMode: 'control_group', baselineTestRunId: 'previous' } } as never,
       makeTestRun(),
     );
 
@@ -596,9 +410,10 @@ describe('ComparisonsRenderer previous-run baseline', () => {
 
   it('treats a non-string baseline as no baseline at all', async () => {
     // Template configs are free-form JSON; a number or null must not reach the query.
-    await renderer.renderComparisonsSection(sectionWith(null), makeTestRun());
+    const html = await renderer.renderComparisonsSection(sectionWith(null), makeTestRun());
 
     expect(dataFetcher.getPreviousTestRun).not.toHaveBeenCalled();
-    expect(dataFetcher.getComparisonsData).toHaveBeenCalledWith(expect.anything(), undefined);
+    expect(dataFetcher.getBaselineRunComparison).not.toHaveBeenCalled();
+    expect(html).toContain('no baseline run is configured for this section');
   });
 });

@@ -18,11 +18,11 @@ jest.mock('@/lib/api', () => ({
   authenticatedFetch: jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve(CANDIDATES) })),
 }));
 
-it('reveals baseline_run fields when mode is baseline_run', () => {
+it('renders the threshold fields', () => {
   const onChange = jest.fn();
   render(
     <ComparisonsConfigForm
-      config={{ comparisonMode: 'baseline_run', thresholds: { good: 10, warning: 50 } }}
+      config={{ thresholds: { good: 10, warning: 50 } }}
       onChange={onChange}
     />
   );
@@ -30,20 +30,16 @@ it('reveals baseline_run fields when mode is baseline_run', () => {
   expect(screen.getByLabelText(/warning/i)).toBeInTheDocument();
 });
 
-it('hides baseline_run fields in control_group mode', () => {
-  render(
-    <ComparisonsConfigForm
-      config={{ comparisonMode: 'control_group' }}
-      onChange={jest.fn()}
-    />
-  );
-  expect(screen.queryByLabelText(/good/i)).not.toBeInTheDocument();
+it('renders the comparison fields for an empty config — there is no mode to pick', () => {
+  render(<ComparisonsConfigForm config={{}} onChange={jest.fn()} />);
+  expect(screen.getByLabelText(/good/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/comparison mode/i)).not.toBeInTheDocument();
 });
 
 it('renders the baseline dropdown as a rich Autocomplete (compare-card style)', async () => {
   render(
     <ComparisonsConfigForm
-      config={{ comparisonMode: 'baseline_run' }}
+      config={{}}
       onChange={jest.fn()}
       systemUnderTestId="sut-1"
       testRunId="PerfanaWebshop-acc-loadTest-00004"
@@ -62,7 +58,7 @@ it('renders the baseline dropdown as a rich Autocomplete (compare-card style)', 
 it('shows the dashboard → panels cascade for grafana source, panels disabled until a dashboard is chosen', () => {
   render(
     <ComparisonsConfigForm
-      config={{ comparisonMode: 'baseline_run', source: 'grafana' }}
+      config={{ source: 'grafana' }}
       onChange={jest.fn()}
       systemUnderTestId="sut-1"
       testEnvironment="acc"
@@ -77,7 +73,7 @@ it('shows the dashboard → panels cascade for grafana source, panels disabled u
 it('hides the dashboard cascade for performance-metrics source', () => {
   render(
     <ComparisonsConfigForm
-      config={{ comparisonMode: 'baseline_run', source: 'performance-metrics' }}
+      config={{ source: 'performance-metrics' }}
       onChange={jest.fn()}
     />
   );
@@ -87,7 +83,7 @@ it('hides the dashboard cascade for performance-metrics source', () => {
 
 it('adds a dashboard mapping row for grafana source (dropdown-based, not dynatrace-only)', () => {
   const onChange = jest.fn();
-  render(<ComparisonsConfigForm config={{ comparisonMode: 'baseline_run', source: 'grafana', dashboardMap: [] }} onChange={onChange} />);
+  render(<ComparisonsConfigForm config={{ source: 'grafana', dashboardMap: [] }} onChange={onChange} />);
   fireEvent.click(screen.getByRole('button', { name: /add dashboard mapping/i }));
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
     dashboardMap: [{ current: '', baseline: '' }],
@@ -97,7 +93,7 @@ it('adds a dashboard mapping row for grafana source (dropdown-based, not dynatra
 it('renders mapping rows as dropdowns (current + baseline dashboard autocompletes)', () => {
   render(
     <ComparisonsConfigForm
-      config={{ comparisonMode: 'baseline_run', source: 'dynatrace', dashboardMap: [{ current: '', baseline: '' }] }}
+      config={{ source: 'dynatrace', dashboardMap: [{ current: '', baseline: '' }] }}
       onChange={jest.fn()}
     />
   );

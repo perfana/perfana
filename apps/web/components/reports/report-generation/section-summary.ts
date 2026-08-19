@@ -48,7 +48,6 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
     }
     case 'comparisons': {
       const cfg = (section.config ?? {}) as ComparisonsConfig;
-      if (cfg.comparisonMode !== 'baseline_run') return text;
       const panelCount = Array.isArray(cfg.panels) ? cfg.panels.length : 0;
       return [
         'Baseline run',

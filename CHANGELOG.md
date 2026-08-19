@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.67.0] - 2026-08-19
+
+### Changed
+- **The Comparisons report section now only compares against a baseline run.** The section used to open with a Comparison Mode dropdown whose default, Control Group, rendered a table of this run's ADAPT conclusions — the same question the Regressions section already answers, under a heading that promises a comparison between two runs. Picking it produced a report nobody asked for, and leaving the dropdown alone was enough to get it. The dropdown and the mode are gone: configuring the section starts at the baseline run selector, and sections saved with the old mode simply render as baseline-run comparisons. Their control-group-only switches (auto-select baseline, side-by-side, delta percentage, highlight significant, significant-change threshold) never reached the renderer and have been removed with it.
+
+### Fixed
+- **An empty Comparisons section now says why it is empty.** Every way of ending up with nothing to show produced the same sentence, so "no comparison data available" could equally mean this is the first run in its scope, no baseline was ever configured, or the chosen baseline collected nothing comparable — three situations with three different responses, one of which is not a problem at all. Worse, a silent empty section reads like "nothing regressed", which is the opposite conclusion. The section now names the cause: the run that has no predecessor, the section that has no baseline configured, or the baseline run id that came back with no comparable metrics for the selected source.
+
 ## [0.2.66.0] - 2026-08-19
 
 ### Added

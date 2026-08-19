@@ -166,9 +166,8 @@ export function GenerateReportDialog({
 
   // Template-level baseline: sections that compare against a baseline test run
   // can all be pointed at one run from a single dropdown.
-  const isBaselineSection = (s: ReportSectionConfig) =>
-    s.type === 'comparisons' &&
-    (s.config as Record<string, unknown> | undefined)?.comparisonMode === 'baseline_run';
+  // Every comparisons section is a baseline-run comparison — the old control-group mode is gone.
+  const isBaselineSection = (s: ReportSectionConfig) => s.type === 'comparisons';
   const baselineSections = sections.filter(isBaselineSection);
   const baselineSectionCount = baselineSections.length;
   const baselineIds = new Set(

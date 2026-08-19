@@ -171,28 +171,6 @@ export interface AwrData {
   severitySummary: { critical: number; warning: number; info: number; total: number };
 }
 
-/** Per-metric comparison detail for report rendering (comparisons section) */
-export interface ComparisonMetric {
-  dashboardLabel: string;
-  panelTitle: string;
-  metricName: string;
-  unit: string | null;
-  currentValue: number | null;
-  baselineValue: number | null;
-  difference: number | null;
-  differencePercent: number | null;
-  conclusion: string;
-}
-
-/** Full comparisons data for report rendering */
-export interface ComparisonsData {
-  metrics: ComparisonMetric[];
-  regressionCount: number;
-  improvementCount: number;
-  noDifferenceCount: number;
-  totalMetrics: number;
-}
-
 /** A single row in a baseline comparison result */
 export interface BaselineComparisonRow {
   group: string;    // scenario_name (perf) | dashboard/panel (grafana) | host (dynatrace)

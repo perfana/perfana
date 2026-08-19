@@ -21,8 +21,6 @@ import {
   AwrReportSummary,
   BaselineComparisonData,
   BaselineComparisonRow,
-  ComparisonMetric,
-  ComparisonsData,
   MetricsPanelSelector,
   MetricsTimeSeriesPanel,
   MetricsTimeSeriesRow,
@@ -1573,66 +1571,6 @@ export class ReportDataFetcherService {
     } catch (error) {
       this.logger.warn(`Failed to get SLO summary for ${testRunId}: ${(error as Error).message}`);
       return { passed: 0, failed: 0, total: 0 };
-    }
-  }
-
-  /**
-   * Get comparisons data for a test run
-   * Fetches ADAPT results comparing current run vs control group
-   */
-  async getComparisonsData(testRunId: string, _baselineTestRunId?: string): Promise<ComparisonsData | null> {
-    try {
-      const resultRows: Array<{
-        dashboard_label: string;
-        panel_title: string;
-        metric_name: string;
-        unit: string | null;
-        conclusion: Record<string, unknown> | null;
-        statistic: Record<string, unknown> | null;
-      }> = await this.dataSource.query(
-        `SELECT dashboard_label, panel_title, metric_name, unit, conclusion, statistic
-         FROM ds_adapt_results
-         WHERE test_run_id = $1
-         ORDER BY dashboard_label ASC, panel_title ASC, metric_name ASC`,
-        [testRunId],
-      );
-
-      if (resultRows.length === 0) return null;
-
-      const metrics: ComparisonMetric[] = resultRows.map((row) => {
-        const conclusion = row.conclusion as Record<string, unknown> | null;
-        const statistic = row.statistic as Record<string, unknown> | null;
-        const conclusionLabel = conclusion && typeof conclusion.label === 'string'
-          ? conclusion.label : 'unknown';
-        const testValue = statistic?.test != null ? Number(statistic.test) : null;
-        const controlValue = statistic?.control != null ? Number(statistic.control) : null;
-        const diff = statistic?.diff != null ? Number(statistic.diff) : null;
-        const diffPct = controlValue && controlValue !== 0 && diff != null
-          ? (diff / Math.abs(controlValue)) * 100 : null;
-
-        return {
-          dashboardLabel: row.dashboard_label,
-          panelTitle: row.panel_title,
-          metricName: row.metric_name,
-          unit: row.unit || null,
-          currentValue: testValue,
-          baselineValue: controlValue,
-          difference: diff,
-          differencePercent: diffPct,
-          conclusion: conclusionLabel,
-        };
-      });
-
-      return {
-        metrics,
-        regressionCount: metrics.filter((m) => m.conclusion === 'regression').length,
-        improvementCount: metrics.filter((m) => m.conclusion === 'improvement').length,
-        noDifferenceCount: metrics.filter((m) => m.conclusion === 'no_difference').length,
-        totalMetrics: metrics.length,
-      };
-    } catch (error) {
-      this.logger.warn(`Failed to get comparisons data for ${testRunId}: ${(error as Error).message}`);
-      return null;
     }
   }
 

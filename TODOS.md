@@ -237,18 +237,6 @@ AssignmentIcon. All eleven accents are hardcoded literals, so the darker ones (b
 blue-grey `#607d8b`) sit near the 3:1 non-text contrast floor on dark-mode paper.
 **Where:** `apps/web/components/reports/report-generation/section-config.tsx`.
 
-### Comparison section cannot say why its baseline is empty
-
-**Priority:** P4
-**Origin:** /ship api-contract specialist on `feat/reporting-improvements` (2026-08-18).
-**Why:** When the `previous` sentinel resolves to nothing the section falls through to the
-generic "No comparison data available for the selected baseline run." A caller cannot tell "this
-run has no predecessor" from "the baseline exists but has no comparable data" from "the pinned id
-is wrong" — the same silent-empty-section failure mode the AWR fix in this branch removed.
-**Where:** `apps/api/src/modules/reports/renderers/comparisons-renderer.ts` — the generic empty
-state at ~line 189, and the second, differently worded one at ~line 87 ("...for this test run."),
-which should probably say the same thing.
-
 ### Three more places still say 50 sections
 
 **Priority:** P4
