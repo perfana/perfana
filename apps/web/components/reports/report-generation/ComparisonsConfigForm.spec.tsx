@@ -129,7 +129,7 @@ it('selects every series of every selected panel at once', async () => {
       workload="loadTest"
     />
   );
-  await waitFor(() => expect(screen.getByText(/2 available — leave empty to compare every series/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText(/2 available — leave empty to include every series/)).toBeInTheDocument());
   fireEvent.click(cascadeButtons()[2]!);
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
     series: [

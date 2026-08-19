@@ -12,6 +12,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - The panel list now comes from the metrics actually stored for a dashboard rather than from the Grafana dashboard definition, so a panel that never collected data no longer appears as something you can compare — and Grafana and Dynatrace dashboards answer the same way instead of through two different endpoints.
 
+## [0.2.71.0] - 2026-08-19
+
+### Added
+- **A trends section can now table the metrics behind the trend, not just the run-level summary.** The same dashboards → panels → series cascade the comparison section uses (multi-select at every level, select-all on each, empty meaning "everything under the level above") now picks what the section covers, and each selected dashboard gets its own table: a row per series, a column per run oldest-first, and the change across the whole window. The aggregated run-level trend — the summary cards and the run history — always leads the section, since it is the answer to "did this get slower" and the per-dashboard tables only explain it.
+
+### Changed
+- **The trends section's configuration only offers settings that do something.** Sensitivity, Preset ID, Show Charts and Show Statistics were never read by the renderer: changing them changed nothing in the report. They are gone. Number of Runs was written to a key the renderer never looked at, so it silently stayed at ten no matter what was chosen — it now reaches the renderer, which still accepts the old key so saved sections keep their setting.
+
 ## [0.2.67.0] - 2026-08-19
 
 ### Changed

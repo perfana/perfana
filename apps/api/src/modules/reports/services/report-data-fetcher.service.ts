@@ -21,6 +21,7 @@ import {
   AwrReportSummary,
   BaselineComparisonData,
   BaselineComparisonSelection,
+  MetricTrendSeries,
   BaselineComparisonRow,
   MetricsPanelSelector,
   MetricsTimeSeriesPanel,
@@ -1876,6 +1877,80 @@ export class ReportDataFetcherService {
    * dashboard_label/panel_title/metric_name, with optional dashboardMap
    * substitution so a differently named baseline dashboard pairs.
    */
+  /**
+   * The per-series history behind a trend section: one row per dashboard/panel/series,
+   * carrying that series' value in each of the given runs.
+   *
+   * Reads the same `ds_metric_statistics` rollups the comparison section pairs against, so a
+   * trend and a comparison of the same series never disagree. Selections scope it the same way
+   * (no panel = the whole dashboard, no series = the whole panel); an empty selection returns
+   * nothing rather than every series ever recorded — a trend section with nothing picked has
+   * nothing to draw.
+   */
+  async getMetricTrends(
+    testRunIds: string[],
+    selections: BaselineComparisonSelection[],
+    stat: 'avg' | 'p95' | 'p99' = 'avg',
+  ): Promise<MetricTrendSeries[]> {
+    if (testRunIds.length === 0 || selections.length === 0) return [];
+    try {
+      const labels = [...new Set(selections.map((s) => s.dashboardLabel))];
+      const rows: Array<{
+        test_run_id: string;
+        dashboard_label: string | null;
+        panel_title: string | null;
+        panel_id: number | null;
+        metric_name: string | null;
+        unit: string | null;
+        mean: number | null;
+        q95: number | null;
+        q99: number | null;
+      }> = await this.dataSource.query(
+        `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name, s.unit,
+                s.mean, s.q95, s.q99
+         FROM ds_metric_statistics s
+         WHERE s.test_run_id = ANY($1) AND s.dashboard_label = ANY($2)`,
+        [testRunIds, labels],
+      );
+
+      const field = stat === 'p95' ? 'q95' : stat === 'p99' ? 'q99' : 'mean';
+      const selected = (r: typeof rows[number]) =>
+        selections.some(
+          (sel) =>
+            sel.dashboardLabel === r.dashboard_label &&
+            (sel.panelId == null || sel.panelId === r.panel_id) &&
+            (!sel.metricNames?.length || (r.metric_name != null && sel.metricNames.includes(r.metric_name))),
+        );
+
+      const byIdentity = new Map<string, MetricTrendSeries>();
+      for (const r of rows.filter(selected)) {
+        const key = `${r.dashboard_label}||${r.panel_title}||${r.metric_name}`;
+        let series = byIdentity.get(key);
+        if (!series) {
+          series = {
+            dashboardLabel: r.dashboard_label ?? 'Other',
+            panelTitle: r.panel_title ?? '',
+            metricName: r.metric_name ?? '',
+            unit: r.unit,
+            valuesByRun: {},
+          };
+          byIdentity.set(key, series);
+        }
+        series.valuesByRun[r.test_run_id] = r[field];
+      }
+
+      return [...byIdentity.values()].sort(
+        (a, b) =>
+          a.dashboardLabel.localeCompare(b.dashboardLabel) ||
+          a.panelTitle.localeCompare(b.panelTitle) ||
+          a.metricName.localeCompare(b.metricName),
+      );
+    } catch (error) {
+      this.logger.warn(`Failed to get metric trends: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
   async getBaselineRunComparison(
     currentRunId: string,
     baselineRunId: string,

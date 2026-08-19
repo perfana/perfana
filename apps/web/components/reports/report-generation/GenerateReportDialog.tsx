@@ -868,7 +868,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
       case 'awr':
         return <AwrConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'trends':
-        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       case 'comparisons':
         return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       case 'top_10_lists':

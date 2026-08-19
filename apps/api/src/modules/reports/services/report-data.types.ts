@@ -275,6 +275,15 @@ export interface TrendsData {
   previousRuns: TrendRunSummary[];
 }
 
+/** One series' value in every run of a trend window, keyed by test run id. */
+export interface MetricTrendSeries {
+  dashboardLabel: string;
+  panelTitle: string;
+  metricName: string;
+  unit: string | null;
+  valuesByRun: Record<string, number | null>;
+}
+
 /** Panel selector for metrics time-series queries */
 export interface MetricsPanelSelector {
   dashboardLabel?: string;
