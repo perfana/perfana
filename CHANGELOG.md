@@ -4,46 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.70.0] - 2026-08-19
+## [0.2.67.0] - 2026-08-19
 
 ### Added
 - **A comparison section can now span several dashboards, panels and series at once**, configured the way the compare card is: three multi-selects that cascade — dashboards, then their panels (grouped by dashboard), then those panels' series (grouped by panel) — each with a select-all that flips to clear once everything is chosen. Each level left empty means "everything below the level above": no panels picked compares the whole dashboard, no series picked compares the whole panel. Deselecting a dashboard drops the panels and series that hung off it, so the report cannot keep comparing something the form no longer shows. Sections saved with the old single-dashboard picker are read as a one-dashboard selection and keep working untouched.
-
-### Changed
-- The panel list now comes from the metrics actually stored for a dashboard rather than from the Grafana dashboard definition, so a panel that never collected data no longer appears as something you can compare — and Grafana and Dynatrace dashboards answer the same way instead of through two different endpoints.
-
-## [0.2.71.0] - 2026-08-19
-
-### Added
 - **A trends section can now table the metrics behind the trend, not just the run-level summary.** The same dashboards → panels → series cascade the comparison section uses (multi-select at every level, select-all on each, empty meaning "everything under the level above") now picks what the section covers, and each selected dashboard gets its own table: a row per series, a column per run oldest-first, and the change across the whole window. The aggregated run-level trend — the summary cards and the run history — always leads the section, since it is the answer to "did this get slower" and the per-dashboard tables only explain it.
 
 ### Changed
-- **The trends section's configuration only offers settings that do something.** Sensitivity, Preset ID, Show Charts and Show Statistics were never read by the renderer: changing them changed nothing in the report. They are gone. Number of Runs was written to a key the renderer never looked at, so it silently stayed at ten no matter what was chosen — it now reaches the renderer, which still accepts the old key so saved sections keep their setting.
-
-## [0.2.67.0] - 2026-08-19
-
-### Changed
 - **The Comparisons report section now only compares against a baseline run.** The section used to open with a Comparison Mode dropdown whose default, Control Group, rendered a table of this run's ADAPT conclusions — the same question the Regressions section already answers, under a heading that promises a comparison between two runs. Picking it produced a report nobody asked for, and leaving the dropdown alone was enough to get it. The dropdown and the mode are gone: configuring the section starts at the baseline run selector, and sections saved with the old mode simply render as baseline-run comparisons. Their control-group-only switches (auto-select baseline, side-by-side, delta percentage, highlight significant, significant-change threshold) never reached the renderer and have been removed with it.
-
-### Fixed
-- **An empty Comparisons section now says why it is empty.** Every way of ending up with nothing to show produced the same sentence, so "no comparison data available" could equally mean this is the first run in its scope, no baseline was ever configured, or the chosen baseline collected nothing comparable — three situations with three different responses, one of which is not a problem at all. Worse, a silent empty section reads like "nothing regressed", which is the opposite conclusion. The section now names the cause: the run that has no predecessor, the section that has no baseline configured, or the baseline run id that came back with no comparable metrics for the selected source.
-## [0.2.68.0] - 2026-08-19
-
-### Changed
 - **The Performance Regressions report section is now called Anomaly Detection**, matching what ADAPT actually does and what the same analysis is called everywhere else in the product. Sections already saved keep whatever title they were given.
 - **The section header no longer repeats itself.** It carried an overall status pill saying REGRESSION next to a chip saying how many regressions there were, and a total-metric count — 830 on a typical run — that dwarfed both and matched nothing in the section below it. The header now shows the counts that matter, plus how many runs they were judged against, and falls back to the status pill only when ADAPT reached no verdict at all, where the reason is the one thing worth reporting. A run with neither regressions nor improvements says "no anomalies" instead of showing nothing.
 - **The section says which runs it compared against.** ADAPT's verdict is only as meaningful as the control group behind it — "9 regressions" against three runs and against thirty are different claims — so the section now names the control group runs and the window they span, truncating a long group to twelve ids and a count.
 - **The section's configuration only offers settings that do something.** Sort By, Min Change Percent, Regressions Only, Show Comparison Details and Include Comparison Chart were never read by the renderer: changing them changed nothing in the report. They are gone. Max Items now genuinely caps the table, and a new Show Improvements toggle reveals the improvements table the renderer could already produce but nothing in the interface could switch on.
-
-### Fixed
-- The "no difference" metric bucket was filtered on an underscore that ADAPT never writes, so it was always empty. It is not displayed today, but anything reading it was reading zero.
-## [0.2.69.0] - 2026-08-19
-
-### Changed
 - **A failed Apdex SLO now names the transactions that failed it.** The section reported a single FAIL against "Workload Apdex" with a requirement column reading "No requirement" — the check's requirement is a minimum score at a latency threshold, which an operator/value pair cannot express, and the transactions behind the verdict were never shown even though the checker records every one of them. The requirement now reads "≥ 0.85 Apdex at 500 ms", and a failed check lists the transactions that fell short with their score, scenario, average response time and satisfied/tolerating/frustrated counts. This applies to every check type, not just Apdex: any failed check that measured multiple targets now names the ones that failed, capped at twenty with a count of the rest.
 - **An aggregated SLO says which statistic it evaluates.** "≤ 2000 ms" could have been the mean, the 95th percentile or the maximum. It now reads "P95 ≤ 2000 ms". Requirement operators stored as symbols (`<=`, `>=`) also render as proper comparison signs instead of being echoed raw.
 - **The SLO table has a Dashboard column**, so a check named "CPU" can be told from the other four checks named "CPU" on different dashboards. The value was already being read from the database and discarded.
 - **The SLO section's configuration no longer offers settings that do nothing.** Show Details, Show Summary Table and Include Trends were never read by the renderer. They are gone, and Max Items — which was equally inert — now genuinely caps the table.
+- **The trends section's configuration only offers settings that do something.** Sensitivity, Preset ID, Show Charts and Show Statistics were never read by the renderer: changing them changed nothing in the report. They are gone. Number of Runs was written to a key the renderer never looked at, so it silently stayed at ten no matter what was chosen — it now reaches the renderer, which still accepts the old key so saved sections keep their setting.
+- The panel list now comes from the metrics actually stored for a dashboard rather than from the Grafana dashboard definition, so a panel that never collected data no longer appears as something you can compare — and Grafana and Dynatrace dashboards answer the same way instead of through two different endpoints.
+
+### Fixed
+- **An empty Comparisons section now says why it is empty.** Every way of ending up with nothing to show produced the same sentence, so "no comparison data available" could equally mean this is the first run in its scope, no baseline was ever configured, or the chosen baseline collected nothing comparable — three situations with three different responses, one of which is not a problem at all. Worse, a silent empty section reads like "nothing regressed", which is the opposite conclusion. The section now names the cause: the run that has no predecessor, the section that has no baseline configured, or the baseline run id that came back with no comparable metrics for the selected source.
+- The "no difference" metric bucket was filtered on an underscore that ADAPT never writes, so it was always empty. It is not displayed today, but anything reading it was reading zero.
 
 ## [0.2.66.0] - 2026-08-19
 
