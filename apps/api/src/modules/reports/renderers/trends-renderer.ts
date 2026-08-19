@@ -1,12 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, TrendRunSummary } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, TrendRunSummary, MetricTrendSeries } from '../services/report-data-fetcher.service';
+import { buildSelections } from './section-selections';
+import { formatValueWithUnit } from './unit-format';
 import {
   REPORT_COLORS,
+  TH_NUM,
+  TH_TEXT,
+  THEAD_ROW,
+  chip,
+  groupHeader,
   sectionHeader,
   sectionText,
   deltaChip,
+  deltaText,
   emptyState,
   formatInt,
   formatNum,
@@ -41,7 +49,9 @@ export class TrendsRenderer {
     const config = section.config || {};
     const title = section.title || 'Performance Trends';
     const text = getSectionText(section);
-    const maxRuns = typeof config.maxRuns === 'number' ? config.maxRuns : 10;
+    // timeRange.runCount is what the config form writes; maxRuns is the older key.
+    const runCount = (config.timeRange as { runCount?: unknown } | undefined)?.runCount ?? config.maxRuns;
+    const maxRuns = typeof runCount === 'number' ? runCount : 10;
 
     if (!testRun) {
       return this.renderNoDataSection(title, text, 'No test run data available for trends analysis.');
@@ -60,20 +70,93 @@ export class TrendsRenderer {
     const previousRun = trendsData.previousRuns[0]!;
     const currentRun = trendsData.currentRun;
 
+    // The aggregated run-level trend leads every trends section — it is the answer to
+    // "did this get slower", and the per-dashboard tables below only explain it.
+    const selections = buildSelections(config);
+    const series = selections.length
+      ? await this.dataFetcher.getMetricTrends(allRuns.map((r) => r.testRunId), selections)
+      : [];
+
     return `
       <section class="trends-section">
         ${sectionHeader(title, { kicker: `${formatInt(allRuns.length)} runs compared` })}
 
         ${sectionText(text)}
 
-        <!-- Trend Summary Cards -->
+        <h3 style="margin: 24px 0 16px 0; font-size: 10pt; font-weight: 700; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em;">Aggregated Performance Trends</h3>
         ${this.renderTrendSummaryCards(currentRun, previousRun)}
 
         <!-- Historical Runs Table -->
         <h3 style="margin: 32px 0 16px 0; font-size: 10pt; font-weight: 700; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em;">Run History</h3>
         ${this.renderRunHistoryTable(allRuns, currentRun.testRunId)}
+
+        ${this.renderDashboardTrends(series, allRuns)}
       </section>
     `;
+  }
+
+  /**
+   * One table per selected dashboard: a row per series, a column per run (oldest first),
+   * and the change across the whole window.
+   *
+   * Run columns are labelled with the run id's trailing token — the full ids and dates are
+   * in the Run History table directly above, so repeating them here would cost a third of
+   * the page width per column.
+   */
+  private renderDashboardTrends(series: MetricTrendSeries[], runs: TrendRunSummary[]): string {
+    if (series.length === 0) return '';
+
+    const byDashboard = new Map<string, MetricTrendSeries[]>();
+    for (const s of series) {
+      const arr = byDashboard.get(s.dashboardLabel) ?? [];
+      arr.push(s);
+      byDashboard.set(s.dashboardLabel, arr);
+    }
+
+    const shortLabel = (testRunId: string, idx: number) => {
+      const tail = testRunId.split('-').pop();
+      return tail && tail.length <= 8 ? tail : `#${idx + 1}`;
+    };
+
+    return [...byDashboard.entries()].map(([dashboard, rows]) => {
+      // ponytail: 50 series per dashboard, then a count — an unfiltered dashboard is 100s.
+      const shown = rows.slice(0, 50);
+      const rest = rows.length - shown.length;
+
+      const body = shown.map((s, idx) => {
+        const values = runs.map((r) => s.valuesByRun[r.testRunId] ?? null);
+        const first = values.find((v) => v != null) ?? null;
+        const last = [...values].reverse().find((v) => v != null) ?? null;
+        const change = first != null && first !== 0 && last != null ? ((last - first) / Math.abs(first)) * 100 : null;
+        const cells = values.map((v) => {
+          const formatted = v == null ? '—' : formatValueWithUnit(v, s.unit ?? undefined);
+          return `<td style="padding:8px 10px; text-align:right; font-size:11px; font-variant-numeric:tabular-nums; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(formatted === '-' ? '—' : formatted)}</td>`;
+        }).join('');
+        return `<tr style="background:${idx % 2 === 1 ? '#fbfcfd' : '#ffffff'};">
+          <td style="padding:8px 10px; font-size:11px; color:${REPORT_COLORS.mutedInk}; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(s.panelTitle)}</td>
+          <td style="padding:8px 10px; font-size:11.5px; color:${REPORT_COLORS.ink}; font-weight:600; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(s.metricName)}</td>
+          ${cells}
+          <td style="padding:8px 10px; text-align:right; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${deltaText(change)}</td>
+        </tr>`;
+      }).join('');
+
+      const runHeaders = runs.map((r, i) => `<th style="${TH_NUM}">${this.utils.escapeHtml(shortLabel(r.testRunId, i))}</th>`).join('');
+
+      return `<div style="margin-top:32px;">
+        ${groupHeader(dashboard, [chip(`${formatInt(rows.length)} series`, 'neutral')])}
+        <div style="font-size:11.5px; color:${REPORT_COLORS.mutedInk}; margin:-6px 0 10px;">Averages per run, oldest first. Change compares the last run to the first.</div>
+        <table style="width:100%; border-collapse:collapse;">
+          <thead><tr style="${THEAD_ROW}">
+            <th style="${TH_TEXT}">Panel</th>
+            <th style="${TH_TEXT}">Series</th>
+            ${runHeaders}
+            <th style="${TH_NUM}">Change</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+        ${rest > 0 ? `<div style="font-size:11px; color:${REPORT_COLORS.mutedInk}; margin-top:6px;">and ${formatInt(rest)} more series</div>` : ''}
+      </div>`;
+    }).join('\n');
   }
 
   private renderTrendSummaryCards(

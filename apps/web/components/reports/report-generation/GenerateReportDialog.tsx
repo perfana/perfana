@@ -166,9 +166,8 @@ export function GenerateReportDialog({
 
   // Template-level baseline: sections that compare against a baseline test run
   // can all be pointed at one run from a single dropdown.
-  const isBaselineSection = (s: ReportSectionConfig) =>
-    s.type === 'comparisons' &&
-    (s.config as Record<string, unknown> | undefined)?.comparisonMode === 'baseline_run';
+  // Every comparisons section is a baseline-run comparison — the old control-group mode is gone.
+  const isBaselineSection = (s: ReportSectionConfig) => s.type === 'comparisons';
   const baselineSections = sections.filter(isBaselineSection);
   const baselineSectionCount = baselineSections.length;
   const baselineIds = new Set(
@@ -869,7 +868,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
       case 'awr':
         return <AwrConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'trends':
-        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       case 'comparisons':
         return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       case 'top_10_lists':

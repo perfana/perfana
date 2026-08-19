@@ -32,6 +32,15 @@ const makeRegressionsData = (overrides?: Record<string, unknown>) => ({
   ...overrides,
 });
 
+const makeControlGroup = (overrides?: Record<string, unknown>) => ({
+  id: 'cg-1',
+  testRuns: ['run-a', 'run-b', 'run-c', 'run-d'],
+  nTestRuns: 4,
+  firstDatetime: '2026-08-01T10:00:00.000Z',
+  lastDatetime: '2026-08-04T10:00:00.000Z',
+  ...overrides,
+});
+
 const makeMetric = (overrides?: Record<string, unknown>) => ({
   dashboardLabel: 'API Dashboard',
   panelTitle: 'Response Time',
@@ -75,7 +84,7 @@ describe('RegressionsRenderer', () => {
     const html = await renderer.renderRegressionsSection(makeSection(), null);
 
     expect(html).toContain('regressions-section');
-    expect(html).toContain('No ADAPT regression analysis data available');
+    expect(html).toContain('No ADAPT anomaly detection data available');
     expect(dataFetcher.getRegressionsData).not.toHaveBeenCalled();
   });
 
@@ -84,7 +93,7 @@ describe('RegressionsRenderer', () => {
 
     const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('No ADAPT regression analysis data available');
+    expect(html).toContain('No ADAPT anomaly detection data available');
   });
 
   it('should render summary chips with counts in the section header', async () => {
@@ -93,6 +102,7 @@ describe('RegressionsRenderer', () => {
         regressionCount: 3,
         improvementCount: 2,
         totalMetrics: 15,
+        controlGroup: makeControlGroup(),
       }),
     );
 
@@ -100,39 +110,70 @@ describe('RegressionsRenderer', () => {
 
     expect(html).toContain('3 regressions');
     expect(html).toContain('2 improvements');
-    expect(html).toContain('15 metrics');
+    expect(html).toContain('control group: 4 runs');
+    // The total-metric count counted every ADAPT result and matched nothing in the section.
+    expect(html).not.toContain('15 metrics');
   });
 
-  it('should render overall REGRESSION status pill for regression conclusion', async () => {
+  it('names the runs in the control group and the window they span', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
-      makeRegressionsData({ conclusion: 'regression' }),
+      makeRegressionsData({ controlGroup: makeControlGroup() }),
     );
 
     const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('>REGRESSION</span>');
-    expect(html).not.toContain('Regression Detected');
+    expect(html).toContain('Compared against 4 previous runs');
+    expect(html).toContain('run-a');
+    expect(html).toContain('run-d');
+    expect(html).toMatch(/Aug 1, 2026.*Aug 4, 2026/s);
   });
 
-  it('should map no_difference conclusion to the OK status pill', async () => {
+  it('truncates a long control group instead of filling the page with ids', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({
+        controlGroup: makeControlGroup({
+          nTestRuns: 20,
+          testRuns: Array.from({ length: 20 }, (_, i) => `run-${i}`),
+        }),
+      }),
+    );
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('Compared against 20 previous runs');
+    expect(html).toContain('and 8 more');
+    expect(html).not.toContain('run-19');
+  });
+
+  it('says nothing about a control group when ADAPT recorded none', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(makeRegressionsData());
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    expect(html).not.toContain('control group');
+    expect(html).not.toContain('Compared against');
+  });
+
+  it('drops the overall status pill — the counts beside it already say the verdict', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({ conclusion: 'regression', regressionCount: 3 }),
+    );
+
+    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('3 regressions');
+    expect(html).not.toContain('>REGRESSION</span>');
+  });
+
+  it('says "no anomalies" when a decided run has neither regressions nor improvements', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
       makeRegressionsData({ conclusion: 'no_difference' }),
     );
 
     const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('>OK</span>');
-    expect(html).not.toMatch(/no difference/i);
-  });
-
-  it('should map PASSED overall conclusion to OK', async () => {
-    dataFetcher.getRegressionsData.mockResolvedValue(
-      makeRegressionsData({ conclusion: 'PASSED' }),
-    );
-
-    const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
-
-    expect(html).toContain('>OK</span>');
+    expect(html).toContain('no anomalies');
+    expect(html).not.toContain('>OK</span>');
   });
 
   it('should append a neutral reason chip when the conclusion collapses to N/A', async () => {
@@ -159,12 +200,11 @@ describe('RegressionsRenderer', () => {
 
   it('should not show a reason chip when the conclusion has a verdict', async () => {
     dataFetcher.getRegressionsData.mockResolvedValue(
-      makeRegressionsData({ conclusion: 'regression' }),
+      makeRegressionsData({ conclusion: 'regression', regressionCount: 1 }),
     );
 
     const html = await renderer.renderRegressionsSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('>REGRESSION</span>');
     expect(html).not.toContain('>N/A</span>');
     expect(html).not.toContain('>regression</span>'); // no lowercase raw-label chip
   });
@@ -191,7 +231,8 @@ describe('RegressionsRenderer', () => {
         conclusion: 'REGRESSION',
         regressionCount: 3,
         regressions: [
-          makeMetric({ conclusionLabel: 'increase' }),
+          makeMetric({ conclusionLabel: 'regression' }),
+          makeMetric({ panelTitle: 'P1', conclusionLabel: 'increase' }),
           makeMetric({ panelTitle: 'P2', conclusionLabel: 'partial increase', differencePercent: 12 }),
           makeMetric({ panelTitle: 'P3', conclusionLabel: 'incomparable', testValue: null, controlValue: null, differencePercent: null }),
         ],
@@ -246,6 +287,28 @@ describe('RegressionsRenderer', () => {
     expect(html).toContain('>Improvements</h3>');
     expect(html).toContain('1 metrics');
     expect(html).toContain('>IMPROVEMENT</span>');
+  });
+
+  it('caps the table at config.maxItems', async () => {
+    dataFetcher.getRegressionsData.mockResolvedValue(
+      makeRegressionsData({
+        regressionCount: 3,
+        regressions: [
+          makeMetric({ panelTitle: 'P1' }),
+          makeMetric({ panelTitle: 'P2' }),
+          makeMetric({ panelTitle: 'P3' }),
+        ],
+      }),
+    );
+
+    const html = await renderer.renderRegressionsSection(
+      makeSection({ config: { maxItems: 2 } }),
+      makeTestRun(),
+    );
+
+    expect(html).toContain('P1');
+    expect(html).toContain('P2');
+    expect(html).not.toContain('P3');
   });
 
   it('should render custom title', async () => {

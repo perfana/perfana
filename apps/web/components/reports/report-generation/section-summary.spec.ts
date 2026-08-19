@@ -51,7 +51,6 @@ describe('sectionSummary', () => {
         section({
           type: 'comparisons',
           config: {
-            comparisonMode: 'baseline_run',
             dashboardLabel: 'Perf Dashboard',
             panels: [{ id: 1, title: 'a' }, { id: 2, title: 'b' }],
           },
@@ -62,7 +61,7 @@ describe('sectionSummary', () => {
       sectionSummary(
         section({
           type: 'comparisons',
-          config: { comparisonMode: 'baseline_run', dashboardLabel: 'Perf', panels: [{ id: 1, title: 'a' }] },
+          config: { dashboardLabel: 'Perf', panels: [{ id: 1, title: 'a' }] },
           text: 'vs release 42',
         }),
       ),
@@ -70,18 +69,18 @@ describe('sectionSummary', () => {
   });
 
   it('handles half-configured baseline-run comparisons and garbage panels', () => {
-    expect(sectionSummary(section({ type: 'comparisons', config: { comparisonMode: 'baseline_run' } }))).toBe(
+    expect(sectionSummary(section({ type: 'comparisons', config: {} }))).toBe(
       'Baseline run',
     );
     expect(
-      sectionSummary(section({ type: 'comparisons', config: { comparisonMode: 'baseline_run', panels: 'oops' } })),
+      sectionSummary(section({ type: 'comparisons', config: { panels: 'oops' } })),
     ).toBe('Baseline run');
   });
 
-  it('falls back to text for control-group comparisons', () => {
+  it('summarises a comparisons section saved before the mode switch was removed', () => {
     expect(
       sectionSummary(section({ type: 'comparisons', config: { comparisonMode: 'control_group' }, text: 'vs 8 CPUs' })),
-    ).toBe('vs 8 CPUs');
+    ).toBe('Baseline run · vs 8 CPUs');
   });
 
   it('falls back to the section text for config-less sections', () => {

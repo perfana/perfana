@@ -25,6 +25,26 @@ export interface SloCheckResult {
   requirement_value: number | null;
   panel_average: number | null;
   meets_requirement: boolean | null;
+  /** The whole requirement object — apdex and aggregated checks carry fields no operator/value pair can express. */
+  requirement: Record<string, unknown> | null;
+  /** Per-target outcomes: the transactions/series behind a single pass/fail verdict. */
+  targets: SloCheckTarget[] | null;
+  /** The checker's own summary line, e.g. "2 of 15 transactions below minimum Apdex 0.85: …". */
+  message: string | null;
+}
+
+/** One target inside a check — a transaction, a series, a host. */
+export interface SloCheckTarget {
+  target: string;
+  value: number | null;
+  meets_requirement: boolean | null;
+  /** apdex checks only */
+  scenario_name?: string | null;
+  avg_response_time_ms?: number | null;
+  satisfied_count?: number | null;
+  tolerating_count?: number | null;
+  frustrated_count?: number | null;
+  total_count?: number | null;
 }
 
 /** Anomaly detection summary for header renderer */
@@ -171,26 +191,17 @@ export interface AwrData {
   severitySummary: { critical: number; warning: number; info: number; total: number };
 }
 
-/** Per-metric comparison detail for report rendering (comparisons section) */
-export interface ComparisonMetric {
+/**
+ * One dashboard/panel/series scope for a baseline comparison.
+ *
+ * Omitting `panelId` selects every panel on the dashboard; omitting `metricNames`
+ * selects every series in the panel. A section can hold many of these, which is how
+ * one comparison spans several dashboards.
+ */
+export interface BaselineComparisonSelection {
   dashboardLabel: string;
-  panelTitle: string;
-  metricName: string;
-  unit: string | null;
-  currentValue: number | null;
-  baselineValue: number | null;
-  difference: number | null;
-  differencePercent: number | null;
-  conclusion: string;
-}
-
-/** Full comparisons data for report rendering */
-export interface ComparisonsData {
-  metrics: ComparisonMetric[];
-  regressionCount: number;
-  improvementCount: number;
-  noDifferenceCount: number;
-  totalMetrics: number;
+  panelId?: number;
+  metricNames?: string[];
 }
 
 /** A single row in a baseline comparison result */
@@ -233,6 +244,18 @@ export interface RegressionsData {
   regressions: RegressionsMetric[];
   improvements: RegressionsMetric[];
   noDifference?: RegressionsMetric[];
+  /** The runs ADAPT compared this run against. Absent when the control group row is gone. */
+  controlGroup?: ControlGroupSummary;
+}
+
+/** The set of past runs ADAPT used as the baseline for this run's verdict. */
+export interface ControlGroupSummary {
+  id: string;
+  testRuns: string[];
+  /** ADAPT's own count — kept separate from testRuns.length, which can lag it. */
+  nTestRuns: number;
+  firstDatetime: string | null;
+  lastDatetime: string | null;
 }
 
 /** Raw ADAPT result row from database query */
@@ -282,6 +305,15 @@ export interface TrendRunSummary {
 export interface TrendsData {
   currentRun: TrendRunSummary;
   previousRuns: TrendRunSummary[];
+}
+
+/** One series' value in every run of a trend window, keyed by test run id. */
+export interface MetricTrendSeries {
+  dashboardLabel: string;
+  panelTitle: string;
+  metricName: string;
+  unit: string | null;
+  valuesByRun: Record<string, number | null>;
 }
 
 /** Panel selector for metrics time-series queries */

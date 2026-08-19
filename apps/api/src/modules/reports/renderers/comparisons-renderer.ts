@@ -1,30 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, ComparisonsData, ComparisonMetric, BaselineComparisonRow } from '../services/report-data-fetcher.service';
-import { bandColor, statusFromConclusion, percentDiff, gatedDiffPercent, DiffThresholds } from './comparison-bands';
+import { ReportDataFetcherService, BaselineComparisonRow } from '../services/report-data-fetcher.service';
+import { buildSelections } from './section-selections';
+import { bandColor, percentDiff, gatedDiffPercent, DiffThresholds } from './comparison-bands';
 import {
   ACCENT,
   DEFAULT_THRESHOLDS,
   REPORT_COLORS,
-  TH_CENTER,
   TH_NUM,
   TH_TEXT,
   THEAD_ROW,
   chip,
   sectionText,
   deltaChip,
-  deltaText,
   emptyState,
   escapeHtml,
-  formatDiff,
   formatInt,
-  formatMetricValue,
   formatNum,
   groupHeader,
   sectionHeader,
   splitHostLabel,
-  statusPill,
 } from './report-style';
 
 /**
@@ -46,10 +42,10 @@ type BaselineMetricKey = (typeof ALLOWED_BASELINE_METRICS)[number];
  * Renderer for Comparisons section
  *
  * Displays side-by-side comparison of metrics between
- * test run and control group (ADAPT baseline) with:
- * - Section header with right-aligned summary chips (rule 04)
- * - Comparison table grouped by dashboard, five-state status pills (rule 01)
- * - Delta arrows bound to the value (rule 02)
+ * this test run and a baseline run with:
+ * - One table per scenario (performance metrics) or one merged table (grafana/dynatrace)
+ * - Per-metric current vs baseline values with a banded delta chip (rules 01/02)
+ * - An explicit empty state naming why a comparison could not be made
  */
 @Injectable()
 export class ComparisonsRenderer {
@@ -57,62 +53,6 @@ export class ComparisonsRenderer {
     private readonly utils: ReportUtilsService,
     private readonly dataFetcher: ReportDataFetcherService,
   ) {}
-
-  /**
-   * Render Comparisons section
-   */
-  async renderComparisonsSection(
-    section: ReportSectionConfig,
-    testRun: TestRun | null,
-    userId: string = '',
-    roles: string[] = [],
-  ): Promise<string> {
-    const config = section.config || {};
-    if (config.comparisonMode === 'baseline_run') {
-      return this.renderBaselineRun(section, testRun, userId, roles);
-    }
-    const baselineTestRunId = await this.resolveBaseline(config.baselineTestRunId, testRun);
-    const title = section.title || 'Comparisons';
-    const text = getSectionText(section);
-
-    const data = testRun
-      ? await this.dataFetcher.getComparisonsData(testRun.testRunId, baselineTestRunId)
-      : null;
-
-    if (!data || data.metrics.length === 0) {
-      return `
-        <section class="comparisons-section">
-          ${sectionHeader(title)}
-          ${sectionText(text)}
-          ${emptyState('No comparison data available for this test run.')}
-        </section>
-      `;
-    }
-
-    // Group by dashboard
-    const grouped = this.groupByDashboard(data.metrics);
-
-    return `
-      <section class="comparisons-section">
-        ${sectionHeader(title, {
-          kicker: `Test run vs control group — ${formatInt(data.totalMetrics)} metrics compared`,
-          chipsHtml: this.summaryChips(data),
-        })}
-        ${sectionText(text)}
-
-        <!-- Grouped Comparison Tables -->
-        ${grouped.map(({ dashboard, metrics }) => this.renderDashboardGroup(dashboard, metrics)).join('\n')}
-      </section>
-    `;
-  }
-
-  private summaryChips(data: ComparisonsData): string[] {
-    return [
-      data.regressionCount > 0 ? chip(`${formatInt(data.regressionCount)} regressions`, 'bad') : '',
-      data.improvementCount > 0 ? chip(`${formatInt(data.improvementCount)} improvements`, 'info') : '',
-      data.noDifferenceCount > 0 ? chip(`${formatInt(data.noDifferenceCount)} within range`, 'good') : '',
-    ];
-  }
 
   /**
    * The baseline this report should compare against: whatever the template pinned, or the run
@@ -125,25 +65,34 @@ export class ComparisonsRenderer {
   private async resolveBaseline(
     configured: unknown,
     testRun: TestRun | null,
-  ): Promise<string | undefined> {
-    if (typeof configured !== 'string') {
-      return undefined;
+  ): Promise<{ id?: string; reason?: string }> {
+    if (typeof configured !== 'string' || configured === '') {
+      return { reason: 'no baseline run is configured for this section.' };
     }
     if (configured !== PREVIOUS_RUN_BASELINE) {
-      return configured;
+      return { id: configured };
     }
     if (!testRun) {
-      return undefined;
+      return { reason: 'this section was rendered without a test run.' };
     }
     const previous = await this.dataFetcher.getPreviousTestRun(testRun);
-    return previous?.testRunId ?? undefined;
+    return previous?.testRunId
+      ? { id: previous.testRunId }
+      : { reason: 'this is the first run for its system, environment and workload — there is no previous run behind it.' };
   }
 
-  private async renderBaselineRun(
+  /**
+   * Render the Comparisons section: this run against a baseline run.
+   *
+   * The old control-group mode (a table of ADAPT conclusions for this run) was dropped — it
+   * answered a different question than the section's title promises and duplicated the
+   * Regressions section, so there is only one mode left and no mode switch.
+   */
+  async renderComparisonsSection(
     section: ReportSectionConfig,
     testRun: TestRun | null,
-    userId: string,
-    roles: string[],
+    userId: string = '',
+    roles: string[] = [],
   ): Promise<string> {
     const config = section.config || {};
     const title = section.title || 'Comparisons';
@@ -169,24 +118,29 @@ export class ComparisonsRenderer {
         : DEFAULT_THRESHOLDS),
       minAbsolute: Number.isFinite(minAbsT) && minAbsT > 0 ? minAbsT : undefined,
     };
-    const baselineId = await this.resolveBaseline(config.baselineTestRunId, testRun);
+    const baseline = await this.resolveBaseline(config.baselineTestRunId, testRun);
+    const baselineId = baseline.id;
     const dashboardMap = Array.isArray(config.dashboardMap)
       ? (config.dashboardMap as { current: string; baseline: string }[])
       : undefined;
-    const dashboardLabel = typeof config.dashboardLabel === 'string' ? config.dashboardLabel : undefined;
-    const panelIds = Array.isArray(config.panels)
-      ? (config.panels as { id: number; title: string }[]).map((p) => p.id)
-      : undefined;
+    const selections = buildSelections(config);
+    const selectedDashboards = [...new Set(selections.map((s) => s.dashboardLabel))];
 
     let data = testRun && baselineId
       ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
-          { metrics, userId, roles, dashboardMap, dashboardLabel, panelIds })
+          { metrics, userId, roles, dashboardMap, selections })
       : null;
 
     if (!data || data.rows.length === 0) {
+      // Five ways to end up empty, one message each — a silent empty section is
+      // indistinguishable from "nothing regressed", which is the opposite conclusion.
+      const why = !testRun
+        ? 'this section was rendered without a test run.'
+        : baseline.reason
+          ?? `baseline run ${baselineId} returned no metrics comparable with this run — check that it exists and collected ${source} data.`;
       return `<section class="comparisons-section">${sectionHeader(title)}
         ${sectionText(text)}
-        ${emptyState('No comparison data available for the selected baseline run.')}</section>`;
+        ${emptyState(`No comparison data available: ${why}`)}</section>`;
     }
 
     // "All aggregated" row — run-wide aggregate across all transactions (perf-metrics only).
@@ -316,7 +270,7 @@ export class ComparisonsRenderer {
       // the selected dashboard's pair; unscoped sections show every differing pair.
       const activePairs = (dashboardMap ?? [])
         .filter((p) => p.current && p.baseline && p.current !== p.baseline)
-        .filter((p) => !dashboardLabel || p.current === dashboardLabel);
+        .filter((p) => selectedDashboards.length === 0 || selectedDashboards.includes(p.current));
       const mappingCaption = activePairs.length === 0 ? '' : activePairs.map((p) =>
         `<div style="display:flex; align-items:center; gap:12px; margin:-2px 0 16px; font-size:12px;">
           <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f1f6ff; border:1px solid #d6e4fb;">
@@ -384,60 +338,5 @@ export class ComparisonsRenderer {
       ${legend}
       ${bodyHtml}
     </section>`;
-  }
-
-  private renderDashboardGroup(dashboard: string, metrics: ComparisonMetric[]): string {
-    const rows = metrics.map((m) => {
-      const status = statusFromConclusion(m.conclusion);
-      const currentStr = formatMetricValue(m.currentValue, m.unit);
-      const baselineStr = formatMetricValue(m.baselineValue, m.unit);
-      // formatDiff owns the zero/null → em-dash rule (rule 03); non-zero diffs
-      // carry the metric's unit via formatMetricValue.
-      const diffStr = formatDiff(m.difference) === '—' ? '—' : formatMetricValue(m.difference, m.unit);
-
-      return `
-        <tr style="background: white;">
-          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; font-size: 9pt;">${this.utils.escapeHtml(m.panelTitle)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; font-size: 9pt;">${this.utils.escapeHtml(m.metricName)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${currentStr}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${baselineStr}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums;">${diffStr}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: right; font-size: 9pt; font-variant-numeric: tabular-nums; font-weight: 600;">${deltaText(m.differencePercent)}</td>
-          <td style="padding: 10px 12px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder}; text-align: center;">${statusPill(status)}</td>
-        </tr>
-      `;
-    }).join('');
-
-    return `
-      <div style="margin-top: 28px;">
-        ${groupHeader(dashboard, [chip(`${formatInt(metrics.length)} metrics`, 'neutral')])}
-        <table style="width: 100%; border-collapse: collapse;">
-          <thead>
-            <tr style="${THEAD_ROW}">
-              <th style="${TH_TEXT}">Panel</th>
-              <th style="${TH_TEXT}">Metric</th>
-              <th style="${TH_NUM}">Current</th>
-              <th style="${TH_NUM}">Baseline</th>
-              <th style="${TH_NUM}">Diff</th>
-              <th style="${TH_NUM}">Diff %</th>
-              <th style="${TH_CENTER}">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows}
-          </tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  private groupByDashboard(metrics: ComparisonMetric[]): Array<{ dashboard: string; metrics: ComparisonMetric[] }> {
-    const map = new Map<string, ComparisonMetric[]>();
-    for (const m of metrics) {
-      const key = m.dashboardLabel || 'Other';
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(m);
-    }
-    return Array.from(map.entries()).map(([dashboard, metrics]) => ({ dashboard, metrics }));
   }
 }

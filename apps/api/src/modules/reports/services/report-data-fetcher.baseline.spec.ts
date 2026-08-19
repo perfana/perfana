@@ -55,7 +55,7 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     const dataSource = { query: jest.fn().mockResolvedValue(rows) };
     const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any);
     const data = await svc.getBaselineRunComparison('cur', 'base', 'grafana',
-      { metrics: ['avg'], userId: 'u', roles: [], dashboardLabel: 'JVM', panelIds: [3] });
+      { metrics: ['avg'], userId: 'u', roles: [], selections: [{ dashboardLabel: 'JVM', panelId: 3 }] });
     const [sql, params] = dataSource.query.mock.calls[0]!;
     // Real column is metrics_sources.source_type — `ms.type` blew up against the live DB
     expect(sql).toContain('ms.source_type = $2');
@@ -70,6 +70,30 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     expect(data!.rows).toHaveLength(1);
     expect(data!.rows[0]!.label).toBe('used');
     expect(data!.rows[0]!.metrics[0]!.diffPercent).toBeCloseTo(10);
+  });
+
+  it('scopes the SQL to every selected dashboard and keeps only the selected series', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 3, metric_name: 'used', mean: 110, q95: 220, q99: 300, unit: 'bytes' },
+      // same panel, series not selected — dropped
+      { test_run_id: 'cur', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 3, metric_name: 'committed', mean: 9, q95: 9, q99: 9, unit: 'bytes' },
+      // second dashboard, no panel selection on it — every panel is in scope
+      { test_run_id: 'cur', dashboard_label: 'Docker', panel_title: 'CPU', panel_id: 8, metric_name: 'cpu', mean: 20, q95: 30, q99: 40, unit: '%' },
+      { test_run_id: 'base', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 3, metric_name: 'used', mean: 100, q95: 200, q99: 250, unit: 'bytes' },
+      { test_run_id: 'base', dashboard_label: 'Docker', panel_title: 'CPU', panel_id: 8, metric_name: 'cpu', mean: 10, q95: 20, q99: 30, unit: '%' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'grafana', {
+      metrics: ['avg'], userId: 'u', roles: [],
+      selections: [
+        { dashboardLabel: 'JVM', panelId: 3, metricNames: ['used'] },
+        { dashboardLabel: 'Docker' },
+      ],
+    });
+    const [, params] = dataSource.query.mock.calls[0]!;
+    expect(params).toEqual([['cur', 'base'], 'grafana', ['JVM', 'Docker']]);
+    expect(data!.rows.map((r) => r.label)).toEqual(['used', 'cpu']);
   });
 
   it('omits dashboard/panel filters when not configured', async () => {
@@ -92,7 +116,7 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     const data = await svc.getBaselineRunComparison('cur', 'base', 'grafana',
       {
         metrics: ['avg'], userId: 'u', roles: [],
-        dashboardLabel: 'JVM (acc)',
+        selections: [{ dashboardLabel: 'JVM (acc)' }],
         dashboardMap: [{ current: 'JVM (acc)', baseline: 'JVM (prod)' }],
       });
     const [, params] = dataSource.query.mock.calls[0]!;

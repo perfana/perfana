@@ -88,7 +88,7 @@ export class ReportSectionConfigDto {
       "reserved value 'previous' for baselineTestRunId, which resolves per report to the run " +
       'immediately before this one in the same system, environment and workload — so a template ' +
       'compares each report against its own predecessor rather than a pinned run.',
-    example: { comparisonMode: 'baseline_run', baselineTestRunId: 'previous' },
+    example: { baselineTestRunId: 'previous', source: 'performance-metrics' },
   })
   @IsOptional()
   @IsObject()

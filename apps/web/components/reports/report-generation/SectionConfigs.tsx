@@ -18,6 +18,7 @@ import { REPORT_LIMITS } from '@/lib/api/reports';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { isGrafana } from '@/lib/metrics-source-utils';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
+import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
 import { MarkdownField } from './MarkdownField';
 import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
 
@@ -303,10 +304,6 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
 /** @public */
 export interface SloConfig {
   maxItems?: number;
-  showDetails?: boolean;
-  statusFilter?: string[];
-  includeTrends?: boolean;
-  showSummaryTable?: boolean;
 }
 
 interface SloConfigFormProps {
@@ -335,33 +332,6 @@ export function SloConfigForm({ config, onChange, text, onTextChange, testRunId 
         onChange={(e) => onChange({ ...config, maxItems: Number(e.target.value) })}
         size="small"
         inputProps={{ min: 1, max: 100 }}
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showDetails ?? true}
-            onChange={(e) => onChange({ ...config, showDetails: e.target.checked })}
-          />
-        }
-        label="Show Details"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showSummaryTable ?? true}
-            onChange={(e) => onChange({ ...config, showSummaryTable: e.target.checked })}
-          />
-        }
-        label="Show Summary Table"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.includeTrends ?? false}
-            onChange={(e) => onChange({ ...config, includeTrends: e.target.checked })}
-          />
-        }
-        label="Include Trends"
       />
     </SectionConfigShell>
   );
@@ -719,12 +689,8 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
 
 /** @public */
 export interface RegressionsConfig {
-  sortBy?: 'severity' | 'change' | 'name';
   maxItems?: number;
-  regressionsOnly?: boolean;
-  minChangePercent?: number;
-  showComparisonDetails?: boolean;
-  includeComparisonChart?: boolean;
+  showImprovements?: boolean;
 }
 
 interface RegressionsConfigFormProps {
@@ -738,66 +704,30 @@ interface RegressionsConfigFormProps {
 export function RegressionsConfigForm({ config, onChange, text, onTextChange, testRunId }: RegressionsConfigFormProps) {
   return (
     <SectionConfigShell
-      sectionTitle="Performance Regressions"
-      sectionType="Regressions"
+      sectionTitle="Anomaly Detection"
+      sectionType="Anomaly Detection"
       previewType="regressions"
       previewConfig={config}
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
     >
-      <Select
-        value={config.sortBy || 'severity'}
-        onChange={(e) => onChange({ ...config, sortBy: e.target.value as RegressionsConfig['sortBy'] })}
-        fullWidth
-        size="small"
-      >
-        <MenuItem value="severity">Sort by Severity</MenuItem>
-        <MenuItem value="change">Sort by Change</MenuItem>
-        <MenuItem value="name">Sort by Name</MenuItem>
-      </Select>
       <TextField
         label="Max Items"
         type="number"
-        value={config.maxItems || 20}
+        value={config.maxItems ?? 50}
         onChange={(e) => onChange({ ...config, maxItems: Number(e.target.value) })}
         size="small"
         inputProps={{ min: 1, max: 100 }}
       />
-      <TextField
-        label="Min Change Percent"
-        type="number"
-        value={config.minChangePercent || 5}
-        onChange={(e) => onChange({ ...config, minChangePercent: Number(e.target.value) })}
-        size="small"
-        inputProps={{ min: 0, max: 100 }}
-      />
       <FormControlLabel
         control={
           <Switch
-            checked={config.regressionsOnly ?? false}
-            onChange={(e) => onChange({ ...config, regressionsOnly: e.target.checked })}
+            checked={config.showImprovements ?? false}
+            onChange={(e) => onChange({ ...config, showImprovements: e.target.checked })}
           />
         }
-        label="Regressions Only"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showComparisonDetails ?? true}
-            onChange={(e) => onChange({ ...config, showComparisonDetails: e.target.checked })}
-          />
-        }
-        label="Show Comparison Details"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.includeComparisonChart ?? false}
-            onChange={(e) => onChange({ ...config, includeComparisonChart: e.target.checked })}
-          />
-        }
-        label="Include Comparison Chart"
+        label="Show Improvements"
       />
     </SectionConfigShell>
   );
@@ -974,14 +904,15 @@ export function AwrConfigForm({ config, onChange, text, onTextChange, testRunId 
 
 /** @public */
 export interface TrendsConfig {
-  metrics?: string[];
-  presetId?: string;
   timeRange?: {
     runCount?: number;
   };
-  showCharts?: boolean;
-  sensitivity?: 'low' | 'medium' | 'high';
-  showStatistics?: boolean;
+  source?: 'grafana' | 'dynatrace';
+  // Which metric data the per-dashboard trend tables cover. Empty at a level means
+  // everything under the level above it.
+  dashboardLabels?: string[];
+  panels?: { id: number; title: string; dashboardLabel?: string }[];
+  series?: { dashboardLabel: string; panelId: number; metricName: string }[];
 }
 
 interface TrendsConfigFormProps {
@@ -990,9 +921,17 @@ interface TrendsConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  systemUnderTestId?: string;
+  testEnvironment?: string;
+  workload?: string;
 }
 
-export function TrendsConfigForm({ config, onChange, text, onTextChange, testRunId }: TrendsConfigFormProps) {
+export function TrendsConfigForm({
+  config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload,
+}: TrendsConfigFormProps) {
+  const source = config.source ?? 'grafana';
+  const dashboards = useSourceDashboards(source, systemUnderTestId, testEnvironment, workload);
+
   return (
     <SectionConfigShell
       sectionTitle="Trend Charts"
@@ -1006,7 +945,7 @@ export function TrendsConfigForm({ config, onChange, text, onTextChange, testRun
       <TextField
         label="Number of Runs"
         type="number"
-        value={config.timeRange?.runCount || 10}
+        value={config.timeRange?.runCount ?? 10}
         onChange={(e) => onChange({
           ...config,
           timeRange: { ...config.timeRange, runCount: Number(e.target.value) },
@@ -1014,40 +953,36 @@ export function TrendsConfigForm({ config, onChange, text, onTextChange, testRun
         size="small"
         inputProps={{ min: 2, max: 100 }}
       />
-      <Select
-        value={config.sensitivity || 'medium'}
-        onChange={(e) => onChange({ ...config, sensitivity: e.target.value as TrendsConfig['sensitivity'] })}
-        fullWidth
-        size="small"
-      >
-        <MenuItem value="low">Low Sensitivity</MenuItem>
-        <MenuItem value="medium">Medium Sensitivity</MenuItem>
-        <MenuItem value="high">High Sensitivity</MenuItem>
-      </Select>
-      <TextField
-        label="Preset ID (optional)"
-        value={config.presetId || ''}
-        onChange={(e) => onChange({ ...config, presetId: e.target.value })}
-        fullWidth
-        size="small"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showCharts ?? true}
-            onChange={(e) => onChange({ ...config, showCharts: e.target.checked })}
-          />
-        }
-        label="Show Charts"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showStatistics ?? true}
-            onChange={(e) => onChange({ ...config, showStatistics: e.target.checked })}
-          />
-        }
-        label="Show Statistics"
+
+      {/* The aggregated run-level trend always leads the section; these pick what is
+          tabled underneath it, one table per dashboard. */}
+      <FormControl size="small" fullWidth>
+        <InputLabel id="trends-source-label">Source</InputLabel>
+        <Select
+          labelId="trends-source-label"
+          label="Source"
+          value={source}
+          onChange={(e) => onChange({
+            ...config,
+            source: e.target.value as TrendsConfig['source'],
+            dashboardLabels: undefined,
+            panels: undefined,
+            series: undefined,
+          })}
+        >
+          <MenuItem value="grafana">Grafana</MenuItem>
+          <MenuItem value="dynatrace">Dynatrace</MenuItem>
+        </Select>
+      </FormControl>
+
+      <MetricSelectionCascade
+        source={source}
+        dashboards={dashboards}
+        systemUnderTestId={systemUnderTestId}
+        testEnvironment={testEnvironment}
+        workload={workload}
+        value={config}
+        onChange={(v) => onChange({ ...config, ...v })}
       />
     </SectionConfigShell>
   );
@@ -1057,29 +992,22 @@ export function TrendsConfigForm({ config, onChange, text, onTextChange, testRun
 
 /** @public */
 export interface ComparisonsConfig {
-  showSideBySide?: boolean;
-  metricsToCompare?: string[];
   baselineTestRunId?: string;
-  autoSelectBaseline?: boolean;
-  showDeltaPercentage?: boolean;
-  highlightSignificant?: boolean;
-  significantChangeThreshold?: number;
-  // Baseline-run comparison mode fields
-  comparisonMode?: 'control_group' | 'baseline_run';
   source?: 'performance-metrics' | 'grafana' | 'dynatrace';
   metrics?: ('avg' | 'p90' | 'p95' | 'p99')[];
   thresholds?: { good: number; warning: number; minAbsolute?: number };
-  // grafana/dynatrace only: scope the comparison to one dashboard and selected panels
+  // grafana/dynatrace only: scope the comparison to dashboards, their panels and their
+  // series. Each level left empty means "everything below the level above it".
+  dashboardLabels?: string[];
+  panels?: { id: number; title: string; dashboardLabel?: string }[];
+  series?: { dashboardLabel: string; panelId: number; metricName: string }[];
+  /** @deprecated single-dashboard key from before multi-select; read on load, never written */
   dashboardLabel?: string;
-  panels?: { id: number; title: string }[];
   // grafana/dynatrace only: pair current-run dashboards with differently named
   // dashboards from the baseline run's environment
   dashboardMap?: { current: string; baseline: string }[];
   includeAggregated?: boolean;
 }
-
-// Panel types the comparison can meaningfully diff (mirrors the compare card).
-const COMPARABLE_PANEL_TYPES = ['graph', 'timeseries', 'stat', 'singlestat', 'flamegraph'];
 
 interface ComparisonsConfigFormProps {
   config: ComparisonsConfig;
@@ -1092,102 +1020,16 @@ interface ComparisonsConfigFormProps {
   workload?: string;
 }
 
-interface SourceDashboardOption {
-  label: string;
-  uid?: string; // grafana only — needed to fetch the dashboard's panels
-}
-
 export function ComparisonsConfigForm({ config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload }: ComparisonsConfigFormProps) {
-  const [sourceDashboards, setSourceDashboards] = useState<SourceDashboardOption[]>([]);
-  const [baselineDashboards, setBaselineDashboards] = useState<SourceDashboardOption[]>([]);
-  const [sourcePanels, setSourcePanels] = useState<{ id: number; title: string }[]>([]);
-
-  const comparisonMode = config.comparisonMode ?? 'control_group';
   const source = config.source ?? 'performance-metrics';
-  const baselineCandidates = useBaselineCandidates(systemUnderTestId, testRunId, comparisonMode === 'baseline_run');
+  const baselineCandidates = useBaselineCandidates(systemUnderTestId, testRunId, true);
   // The baseline run may live in a different environment/workload — its
   // dashboard list (for the mapping dropdowns) is fetched for THAT scope.
   const baselineCandidate = baselineCandidates.find((c) => c.test_run_id === config.baselineTestRunId);
-
-  // Load dashboards for the selected source (grafana/dynatrace) — same endpoints as the compare card
-  useEffect(() => {
-    if (comparisonMode !== 'baseline_run' || source === 'performance-metrics' || !systemUnderTestId || !testEnvironment) {
-      setSourceDashboards([]);
-      return;
-    }
-    if (source === 'grafana') {
-      const params = new URLSearchParams({ systemId: systemUnderTestId, environment: testEnvironment });
-      authenticatedFetch(`/grafana/application-dashboards?${params.toString()}`)
-        .then((res) => (res.ok ? res.json() : undefined))
-        .then((data: { dashboard_label?: string; dashboard_uid?: string; source_type?: string }[] | undefined) => {
-          if (!Array.isArray(data)) { setSourceDashboards([]); return; }
-          setSourceDashboards(
-            data.filter((d) => isGrafana(d) && d.dashboard_label)
-              .map((d) => ({ label: d.dashboard_label as string, uid: d.dashboard_uid })),
-          );
-        })
-        .catch(() => setSourceDashboards([]));
-    } else if (workload) {
-      fetchDynatraceDashboards(systemUnderTestId, testEnvironment, workload)
-        .then((data) => setSourceDashboards(data.map((d) => ({ label: d.dashboardLabel }))))
-        .catch(() => setSourceDashboards([]));
-    }
-  }, [comparisonMode, source, systemUnderTestId, testEnvironment, workload]);
-
-  // Load the BASELINE run's dashboards for the mapping dropdowns (its env/workload
-  // may differ from the current run's — that's the point of the mapping)
-  const baselineEnv = baselineCandidate?.test_environment;
-  const baselineWorkload = baselineCandidate?.workload;
-  useEffect(() => {
-    if (comparisonMode !== 'baseline_run' || source === 'performance-metrics' || !systemUnderTestId || !baselineEnv) {
-      setBaselineDashboards([]);
-      return;
-    }
-    if (source === 'grafana') {
-      const params = new URLSearchParams({ systemId: systemUnderTestId, environment: baselineEnv });
-      authenticatedFetch(`/grafana/application-dashboards?${params.toString()}`)
-        .then((res) => (res.ok ? res.json() : undefined))
-        .then((data: { dashboard_label?: string; dashboard_uid?: string; source_type?: string }[] | undefined) => {
-          if (!Array.isArray(data)) { setBaselineDashboards([]); return; }
-          setBaselineDashboards(
-            data.filter((d) => isGrafana(d) && d.dashboard_label)
-              .map((d) => ({ label: d.dashboard_label as string, uid: d.dashboard_uid })),
-          );
-        })
-        .catch(() => setBaselineDashboards([]));
-    } else if (baselineWorkload) {
-      fetchDynatraceDashboards(systemUnderTestId, baselineEnv, baselineWorkload)
-        .then((data) => setBaselineDashboards(data.map((d) => ({ label: d.dashboardLabel }))))
-        .catch(() => setBaselineDashboards([]));
-    }
-  }, [comparisonMode, source, systemUnderTestId, baselineEnv, baselineWorkload]);
-
-  // Load panels once a dashboard is selected
-  useEffect(() => {
-    const dashboardLabel = config.dashboardLabel;
-    if (comparisonMode !== 'baseline_run' || source === 'performance-metrics' || !dashboardLabel) {
-      setSourcePanels([]);
-      return;
-    }
-    if (source === 'grafana') {
-      const uid = sourceDashboards.find((d) => d.label === dashboardLabel)?.uid;
-      if (!uid) { setSourcePanels([]); return; }
-      authenticatedFetch(`/grafana/dashboards?uid=${encodeURIComponent(uid)}`)
-        .then((res) => (res.ok ? res.json() : undefined))
-        .then((data: unknown) => {
-          const dashboard = Array.isArray(data) ? data[0] : data;
-          const panels = (dashboard as { panels?: { id: number; title: string; type: string }[] } | undefined)?.panels ?? [];
-          setSourcePanels(
-            panels.filter((p) => COMPARABLE_PANEL_TYPES.includes(p.type)).map((p) => ({ id: p.id, title: p.title })),
-          );
-        })
-        .catch(() => setSourcePanels([]));
-    } else if (systemUnderTestId && testEnvironment && workload) {
-      fetchDynatraceMetrics(systemUnderTestId, testEnvironment, workload, dashboardLabel)
-        .then((data) => setSourcePanels(data.map((m) => ({ id: m.panelId, title: m.panelTitle }))))
-        .catch(() => setSourcePanels([]));
-    }
-  }, [comparisonMode, source, config.dashboardLabel, sourceDashboards, systemUnderTestId, testEnvironment, workload]);
+  const sourceDashboards = useSourceDashboards(source, systemUnderTestId, testEnvironment, workload);
+  const baselineDashboards = useSourceDashboards(
+    source, systemUnderTestId, baselineCandidate?.test_environment, baselineCandidate?.workload,
+  );
 
   const metrics = config.metrics ?? ['avg', 'p95', 'p99'];
 
@@ -1206,275 +1048,161 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
       onTextChange={onTextChange}
       testRunId={testRunId}
     >
-      {/* Mode toggle — always visible */}
+      {/* Baseline run selector — shared compare-card-style Autocomplete */}
+      <BaselineRunSelect
+        candidates={baselineCandidates}
+        value={config.baselineTestRunId}
+        onChange={(c) => onChange({ ...config, baselineTestRunId: c?.test_run_id })}
+      />
+
+      {/* Source selector */}
       <FormControl size="small" fullWidth>
-        <InputLabel id="comparison-mode-label">Comparison Mode</InputLabel>
+        <InputLabel id="source-label">Source</InputLabel>
         <Select
-          labelId="comparison-mode-label"
-          label="Comparison Mode"
-          value={comparisonMode}
-          onChange={(e) => onChange({ ...config, comparisonMode: e.target.value as 'control_group' | 'baseline_run' })}
+          labelId="source-label"
+          label="Source"
+          value={config.source ?? 'performance-metrics'}
+          onChange={(e) =>
+            // Switching source invalidates any dashboard/panel selection from the previous source
+            onChange({
+              ...config,
+              source: e.target.value as ComparisonsConfig['source'],
+              dashboardLabels: undefined,
+              dashboardLabel: undefined,
+              panels: undefined,
+              series: undefined,
+              dashboardMap: undefined,
+            })
+          }
         >
-          <MenuItem value="control_group">Control Group</MenuItem>
-          <MenuItem value="baseline_run">Baseline Run</MenuItem>
+          <MenuItem value="performance-metrics">Performance Metrics</MenuItem>
+          <MenuItem value="grafana">Grafana</MenuItem>
+          <MenuItem value="dynatrace">Dynatrace</MenuItem>
         </Select>
       </FormControl>
 
-      {/* Existing control-group fields — hidden in baseline_run mode */}
-      {comparisonMode !== 'baseline_run' && (
-        <>
-          <TextField
-            label="Baseline Test Run ID (optional)"
-            value={config.baselineTestRunId || ''}
-            onChange={(e) => onChange({ ...config, baselineTestRunId: e.target.value })}
-            fullWidth
-            size="small"
-            placeholder="Leave empty for auto-select"
-          />
-          <TextField
-            label="Significant Change Threshold (%)"
-            type="number"
-            value={config.significantChangeThreshold || 10}
-            onChange={(e) => onChange({ ...config, significantChangeThreshold: Number(e.target.value) })}
-            size="small"
-            inputProps={{ min: 0, max: 100 }}
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.autoSelectBaseline ?? true}
-                onChange={(e) => onChange({ ...config, autoSelectBaseline: e.target.checked })}
-              />
-            }
-            label="Auto-Select Baseline"
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.showSideBySide ?? true}
-                onChange={(e) => onChange({ ...config, showSideBySide: e.target.checked })}
-              />
-            }
-            label="Show Side-by-Side"
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.showDeltaPercentage ?? true}
-                onChange={(e) => onChange({ ...config, showDeltaPercentage: e.target.checked })}
-              />
-            }
-            label="Show Delta Percentage"
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={config.highlightSignificant ?? true}
-                onChange={(e) => onChange({ ...config, highlightSignificant: e.target.checked })}
-              />
-            }
-            label="Highlight Significant Changes"
-          />
-        </>
+      {/* Dashboards → panels → series cascade (grafana/dynatrace only) */}
+      <MetricSelectionCascade
+        source={source}
+        dashboards={sourceDashboards}
+        systemUnderTestId={systemUnderTestId}
+        testEnvironment={testEnvironment}
+        workload={workload}
+        value={config}
+        onChange={(v) => onChange({ ...config, ...v })}
+      />
+
+      {/* Metric checkboxes */}
+      <Box>
+        <Typography variant="caption" color="text.secondary">Metrics</Typography>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {(['avg', 'p90', 'p95', 'p99'] as const).map((m) => (
+            <FormControlLabel
+              key={m}
+              control={
+                <Checkbox
+                  checked={metrics.includes(m)}
+                  onChange={() => toggleMetric(m)}
+                  size="small"
+                />
+              }
+              label={m}
+            />
+          ))}
+        </Box>
+      </Box>
+
+      {source === 'performance-metrics' && (
+        <FormControlLabel
+          control={
+            <Switch
+              checked={config.includeAggregated ?? false}
+              onChange={(e) => onChange({ ...config, includeAggregated: e.target.checked })}
+            />
+          }
+          label="Include 'All aggregated' row"
+        />
       )}
 
-      {/* Baseline-run fields — only shown in baseline_run mode */}
-      {comparisonMode === 'baseline_run' && (
-        <>
-          {/* Baseline run selector — shared compare-card-style Autocomplete */}
-          <BaselineRunSelect
-            candidates={baselineCandidates}
-            value={config.baselineTestRunId}
-            onChange={(c) => onChange({ ...config, baselineTestRunId: c?.test_run_id })}
-          />
+      {/* Threshold number fields */}
+      <TextField
+        label="Good threshold (%)"
+        type="number"
+        size="small"
+        value={config.thresholds?.good ?? 10}
+        onChange={(e) =>
+          onChange({
+            ...config,
+            thresholds: { good: Number(e.target.value), warning: config.thresholds?.warning ?? 50 },
+          })
+        }
+        inputProps={{ min: 0, max: 100 }}
+      />
+      <TextField
+        label="Warning threshold (%)"
+        type="number"
+        size="small"
+        value={config.thresholds?.warning ?? 50}
+        onChange={(e) =>
+          onChange({
+            ...config,
+            thresholds: { good: config.thresholds?.good ?? 10, warning: Number(e.target.value), minAbsolute: config.thresholds?.minAbsolute },
+          })
+        }
+        inputProps={{ min: 0, max: 100 }}
+      />
+      <TextField
+        label="Min. absolute change"
+        type="number"
+        size="small"
+        value={config.thresholds?.minAbsolute ?? ''}
+        onChange={(e) => {
+          const v = e.target.value === '' ? undefined : Number(e.target.value);
+          onChange({
+            ...config,
+            thresholds: { good: config.thresholds?.good ?? 10, warning: config.thresholds?.warning ?? 50, minAbsolute: v },
+          });
+        }}
+        helperText="Changes smaller than this (in the metric's units, e.g. ms) are treated as no difference. Leave empty to disable."
+        inputProps={{ min: 0 }}
+      />
 
-          {/* Source selector */}
-          <FormControl size="small" fullWidth>
-            <InputLabel id="source-label">Source</InputLabel>
-            <Select
-              labelId="source-label"
-              label="Source"
-              value={config.source ?? 'performance-metrics'}
-              onChange={(e) =>
-                // Switching source invalidates any dashboard/panel selection from the previous source
-                onChange({
-                  ...config,
-                  source: e.target.value as ComparisonsConfig['source'],
-                  dashboardLabel: undefined,
-                  panels: undefined,
-                  dashboardMap: undefined,
-                })
-              }
-            >
-              <MenuItem value="performance-metrics">Performance Metrics</MenuItem>
-              <MenuItem value="grafana">Grafana</MenuItem>
-              <MenuItem value="dynatrace">Dynatrace</MenuItem>
-            </Select>
-          </FormControl>
-
-          {/* Dashboard → panel cascade (grafana/dynatrace only) */}
-          {source !== 'performance-metrics' && (
-            <>
+      {/* Dashboard-map editor (grafana + dynatrace): pair a current-run dashboard
+          with a differently named dashboard from the baseline run's environment */}
+      {source !== 'performance-metrics' && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            Dashboard mapping (current → baseline) — map when the baseline run&apos;s dashboards have different names (e.g. per-environment dashboards)
+          </Typography>
+          {(config.dashboardMap ?? []).map((row, i) => (
+            <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
               <Autocomplete
-                options={sourceDashboards}
-                getOptionLabel={(o) => o.label}
-                isOptionEqualToValue={(o, v) => o.label === v.label}
-                value={sourceDashboards.find((d) => d.label === config.dashboardLabel) ?? null}
-                onChange={(_, v) => onChange({ ...config, dashboardLabel: v?.label, panels: [] })}
+                options={sourceDashboards.map((d) => d.label)}
+                value={row.current || null}
+                onChange={(_, v) => { const dm = [...(config.dashboardMap ?? [])]; dm[i] = { ...dm[i]!, current: v ?? '' }; onChange({ ...config, dashboardMap: dm }); }}
                 size="small"
+                sx={{ flex: 1 }}
+                renderInput={(params) => <TextField {...params} label="Current dashboard" />}
+              />
+              <Autocomplete
+                options={baselineDashboards.map((d) => d.label)}
+                value={row.baseline || null}
+                onChange={(_, v) => { const dm = [...(config.dashboardMap ?? [])]; dm[i] = { ...dm[i]!, baseline: v ?? '' }; onChange({ ...config, dashboardMap: dm }); }}
+                size="small"
+                sx={{ flex: 1 }}
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label="Dashboard"
-                    variant="outlined"
-                    fullWidth
-                    helperText={
-                      config.dashboardLabel
-                        ? undefined
-                        : `Select a dashboard first (${sourceDashboards.length} available)`
-                    }
+                    label="Baseline dashboard"
+                    helperText={!config.baselineTestRunId ? 'Select a baseline run first' : undefined}
                   />
                 )}
               />
-              <Autocomplete
-                multiple
-                options={sourcePanels}
-                getOptionLabel={(o) => o.title}
-                isOptionEqualToValue={(o, v) => o.id === v.id}
-                value={config.panels ?? []}
-                onChange={(_, v) => onChange({ ...config, panels: v })}
-                disabled={!config.dashboardLabel}
-                size="small"
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Panels"
-                    variant="outlined"
-                    fullWidth
-                    helperText={
-                      !config.dashboardLabel
-                        ? 'Select a dashboard to see its panels'
-                        : `Select one or more panels to compare (${sourcePanels.length} available)`
-                    }
-                  />
-                )}
-              />
-            </>
-          )}
-
-          {/* Metric checkboxes */}
-          <Box>
-            <Typography variant="caption" color="text.secondary">Metrics</Typography>
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              {(['avg', 'p90', 'p95', 'p99'] as const).map((m) => (
-                <FormControlLabel
-                  key={m}
-                  control={
-                    <Checkbox
-                      checked={metrics.includes(m)}
-                      onChange={() => toggleMetric(m)}
-                      size="small"
-                    />
-                  }
-                  label={m}
-                />
-              ))}
+              <IconButton size="small" onClick={() => { const dm = [...(config.dashboardMap ?? [])]; dm.splice(i, 1); onChange({ ...config, dashboardMap: dm }); }}><DeleteIcon fontSize="small" /></IconButton>
             </Box>
-          </Box>
-
-          {source === 'performance-metrics' && (
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={config.includeAggregated ?? false}
-                  onChange={(e) => onChange({ ...config, includeAggregated: e.target.checked })}
-                />
-              }
-              label="Include 'All aggregated' row"
-            />
-          )}
-
-          {/* Threshold number fields */}
-          <TextField
-            label="Good threshold (%)"
-            type="number"
-            size="small"
-            value={config.thresholds?.good ?? 10}
-            onChange={(e) =>
-              onChange({
-                ...config,
-                thresholds: { good: Number(e.target.value), warning: config.thresholds?.warning ?? 50 },
-              })
-            }
-            inputProps={{ min: 0, max: 100 }}
-          />
-          <TextField
-            label="Warning threshold (%)"
-            type="number"
-            size="small"
-            value={config.thresholds?.warning ?? 50}
-            onChange={(e) =>
-              onChange({
-                ...config,
-                thresholds: { good: config.thresholds?.good ?? 10, warning: Number(e.target.value), minAbsolute: config.thresholds?.minAbsolute },
-              })
-            }
-            inputProps={{ min: 0, max: 100 }}
-          />
-          <TextField
-            label="Min. absolute change"
-            type="number"
-            size="small"
-            value={config.thresholds?.minAbsolute ?? ''}
-            onChange={(e) => {
-              const v = e.target.value === '' ? undefined : Number(e.target.value);
-              onChange({
-                ...config,
-                thresholds: { good: config.thresholds?.good ?? 10, warning: config.thresholds?.warning ?? 50, minAbsolute: v },
-              });
-            }}
-            helperText="Changes smaller than this (in the metric's units, e.g. ms) are treated as no difference. Leave empty to disable."
-            inputProps={{ min: 0 }}
-          />
-
-          {/* Dashboard-map editor (grafana + dynatrace): pair a current-run dashboard
-              with a differently named dashboard from the baseline run's environment */}
-          {source !== 'performance-metrics' && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Typography variant="caption" color="text.secondary">
-                Dashboard mapping (current → baseline) — map when the baseline run&apos;s dashboards have different names (e.g. per-environment dashboards)
-              </Typography>
-              {(config.dashboardMap ?? []).map((row, i) => (
-                <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                  <Autocomplete
-                    options={sourceDashboards.map((d) => d.label)}
-                    value={row.current || null}
-                    onChange={(_, v) => { const dm = [...(config.dashboardMap ?? [])]; dm[i] = { ...dm[i]!, current: v ?? '' }; onChange({ ...config, dashboardMap: dm }); }}
-                    size="small"
-                    sx={{ flex: 1 }}
-                    renderInput={(params) => <TextField {...params} label="Current dashboard" />}
-                  />
-                  <Autocomplete
-                    options={baselineDashboards.map((d) => d.label)}
-                    value={row.baseline || null}
-                    onChange={(_, v) => { const dm = [...(config.dashboardMap ?? [])]; dm[i] = { ...dm[i]!, baseline: v ?? '' }; onChange({ ...config, dashboardMap: dm }); }}
-                    size="small"
-                    sx={{ flex: 1 }}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Baseline dashboard"
-                        helperText={!config.baselineTestRunId ? 'Select a baseline run first' : undefined}
-                      />
-                    )}
-                  />
-                  <IconButton size="small" onClick={() => { const dm = [...(config.dashboardMap ?? [])]; dm.splice(i, 1); onChange({ ...config, dashboardMap: dm }); }}><DeleteIcon fontSize="small" /></IconButton>
-                </Box>
-              ))}
-              <Button size="small" onClick={() => onChange({ ...config, dashboardMap: [...(config.dashboardMap ?? []), { current: '', baseline: '' }] })}>Add dashboard mapping</Button>
-            </Box>
-          )}
-        </>
+          ))}
+          <Button size="small" onClick={() => onChange({ ...config, dashboardMap: [...(config.dashboardMap ?? []), { current: '', baseline: '' }] })}>Add dashboard mapping</Button>
+        </Box>
       )}
     </SectionConfigShell>
   );

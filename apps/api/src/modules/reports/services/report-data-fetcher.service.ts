@@ -20,9 +20,9 @@ import {
   AwrInsightSummary,
   AwrReportSummary,
   BaselineComparisonData,
+  BaselineComparisonSelection,
+  MetricTrendSeries,
   BaselineComparisonRow,
-  ComparisonMetric,
-  ComparisonsData,
   MetricsPanelSelector,
   MetricsTimeSeriesPanel,
   MetricsTimeSeriesRow,
@@ -1528,6 +1528,9 @@ export class ReportDataFetcherService {
           cr.dashboard_label,
           cr.requirement->>'operator' AS requirement_operator,
           (cr.requirement->>'value')::numeric AS requirement_value,
+          cr.requirement,
+          cr.targets,
+          cr.message,
           cr.panel_average,
           cr.meets_requirement
         FROM check_results cr
@@ -1577,66 +1580,6 @@ export class ReportDataFetcherService {
   }
 
   /**
-   * Get comparisons data for a test run
-   * Fetches ADAPT results comparing current run vs control group
-   */
-  async getComparisonsData(testRunId: string, _baselineTestRunId?: string): Promise<ComparisonsData | null> {
-    try {
-      const resultRows: Array<{
-        dashboard_label: string;
-        panel_title: string;
-        metric_name: string;
-        unit: string | null;
-        conclusion: Record<string, unknown> | null;
-        statistic: Record<string, unknown> | null;
-      }> = await this.dataSource.query(
-        `SELECT dashboard_label, panel_title, metric_name, unit, conclusion, statistic
-         FROM ds_adapt_results
-         WHERE test_run_id = $1
-         ORDER BY dashboard_label ASC, panel_title ASC, metric_name ASC`,
-        [testRunId],
-      );
-
-      if (resultRows.length === 0) return null;
-
-      const metrics: ComparisonMetric[] = resultRows.map((row) => {
-        const conclusion = row.conclusion as Record<string, unknown> | null;
-        const statistic = row.statistic as Record<string, unknown> | null;
-        const conclusionLabel = conclusion && typeof conclusion.label === 'string'
-          ? conclusion.label : 'unknown';
-        const testValue = statistic?.test != null ? Number(statistic.test) : null;
-        const controlValue = statistic?.control != null ? Number(statistic.control) : null;
-        const diff = statistic?.diff != null ? Number(statistic.diff) : null;
-        const diffPct = controlValue && controlValue !== 0 && diff != null
-          ? (diff / Math.abs(controlValue)) * 100 : null;
-
-        return {
-          dashboardLabel: row.dashboard_label,
-          panelTitle: row.panel_title,
-          metricName: row.metric_name,
-          unit: row.unit || null,
-          currentValue: testValue,
-          baselineValue: controlValue,
-          difference: diff,
-          differencePercent: diffPct,
-          conclusion: conclusionLabel,
-        };
-      });
-
-      return {
-        metrics,
-        regressionCount: metrics.filter((m) => m.conclusion === 'regression').length,
-        improvementCount: metrics.filter((m) => m.conclusion === 'improvement').length,
-        noDifferenceCount: metrics.filter((m) => m.conclusion === 'no_difference').length,
-        totalMetrics: metrics.length,
-      };
-    } catch (error) {
-      this.logger.warn(`Failed to get comparisons data for ${testRunId}: ${(error as Error).message}`);
-      return null;
-    }
-  }
-
-  /**
    * Get detailed regression/improvement data for a test run.
    * Queries ds_adapt_conclusion for summary and ds_adapt_results for per-metric details.
    */
@@ -1647,12 +1590,24 @@ export class ReportDataFetcherService {
   ): Promise<RegressionsData | null> {
     try {
       // Get overall conclusion
+      // The control group joins in here rather than in a second round trip: a reader cannot
+      // judge "9 regressions" without knowing how many runs ADAPT weighed them against.
       const conclusionRows: {
         conclusion: string;
         regressions: string[] | null;
         improvements: string[] | null;
+        control_group_id: string | null;
+        n_test_runs: number | null;
+        test_runs: string[] | null;
+        first_datetime: string | null;
+        last_datetime: string | null;
       }[] = await this.dataSource.query(
-        `SELECT conclusion, regressions, improvements FROM ds_adapt_conclusion WHERE test_run_id = $1 LIMIT 1`,
+        `SELECT c.conclusion, c.regressions, c.improvements, c.control_group_id,
+                g.n_test_runs, g.test_runs, g.first_datetime, g.last_datetime
+         FROM ds_adapt_conclusion c
+         LEFT JOIN ds_control_groups g ON g.control_group_id = c.control_group_id
+         WHERE c.test_run_id = $1
+         LIMIT 1`,
         [testRunId],
       );
 
@@ -1708,7 +1663,19 @@ export class ReportDataFetcherService {
         totalMetrics: metrics.length,
         regressions,
         improvements,
-        noDifference: metrics.filter((m) => m.conclusionLabel === 'no_difference'),
+        // ADAPT writes this label with a space, not an underscore.
+        noDifference: metrics.filter((m) => m.conclusionLabel === 'no difference'),
+        ...(conclusionRow.control_group_id
+          ? {
+              controlGroup: {
+                id: conclusionRow.control_group_id,
+                testRuns: conclusionRow.test_runs ?? [],
+                nTestRuns: conclusionRow.n_test_runs ?? conclusionRow.test_runs?.length ?? 0,
+                firstDatetime: conclusionRow.first_datetime,
+                lastDatetime: conclusionRow.last_datetime,
+              },
+            }
+          : {}),
       };
     } catch (error) {
       this.logger.warn(`Failed to get regressions data for ${testRunId}: ${(error as Error).message}`);
@@ -1937,6 +1904,80 @@ export class ReportDataFetcherService {
    * dashboard_label/panel_title/metric_name, with optional dashboardMap
    * substitution so a differently named baseline dashboard pairs.
    */
+  /**
+   * The per-series history behind a trend section: one row per dashboard/panel/series,
+   * carrying that series' value in each of the given runs.
+   *
+   * Reads the same `ds_metric_statistics` rollups the comparison section pairs against, so a
+   * trend and a comparison of the same series never disagree. Selections scope it the same way
+   * (no panel = the whole dashboard, no series = the whole panel); an empty selection returns
+   * nothing rather than every series ever recorded — a trend section with nothing picked has
+   * nothing to draw.
+   */
+  async getMetricTrends(
+    testRunIds: string[],
+    selections: BaselineComparisonSelection[],
+    stat: 'avg' | 'p95' | 'p99' = 'avg',
+  ): Promise<MetricTrendSeries[]> {
+    if (testRunIds.length === 0 || selections.length === 0) return [];
+    try {
+      const labels = [...new Set(selections.map((s) => s.dashboardLabel))];
+      const rows: Array<{
+        test_run_id: string;
+        dashboard_label: string | null;
+        panel_title: string | null;
+        panel_id: number | null;
+        metric_name: string | null;
+        unit: string | null;
+        mean: number | null;
+        q95: number | null;
+        q99: number | null;
+      }> = await this.dataSource.query(
+        `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name, s.unit,
+                s.mean, s.q95, s.q99
+         FROM ds_metric_statistics s
+         WHERE s.test_run_id = ANY($1) AND s.dashboard_label = ANY($2)`,
+        [testRunIds, labels],
+      );
+
+      const field = stat === 'p95' ? 'q95' : stat === 'p99' ? 'q99' : 'mean';
+      const selected = (r: typeof rows[number]) =>
+        selections.some(
+          (sel) =>
+            sel.dashboardLabel === r.dashboard_label &&
+            (sel.panelId == null || sel.panelId === r.panel_id) &&
+            (!sel.metricNames?.length || (r.metric_name != null && sel.metricNames.includes(r.metric_name))),
+        );
+
+      const byIdentity = new Map<string, MetricTrendSeries>();
+      for (const r of rows.filter(selected)) {
+        const key = `${r.dashboard_label}||${r.panel_title}||${r.metric_name}`;
+        let series = byIdentity.get(key);
+        if (!series) {
+          series = {
+            dashboardLabel: r.dashboard_label ?? 'Other',
+            panelTitle: r.panel_title ?? '',
+            metricName: r.metric_name ?? '',
+            unit: r.unit,
+            valuesByRun: {},
+          };
+          byIdentity.set(key, series);
+        }
+        series.valuesByRun[r.test_run_id] = r[field];
+      }
+
+      return [...byIdentity.values()].sort(
+        (a, b) =>
+          a.dashboardLabel.localeCompare(b.dashboardLabel) ||
+          a.panelTitle.localeCompare(b.panelTitle) ||
+          a.metricName.localeCompare(b.metricName),
+      );
+    } catch (error) {
+      this.logger.warn(`Failed to get metric trends: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
   async getBaselineRunComparison(
     currentRunId: string,
     baselineRunId: string,
@@ -1945,9 +1986,9 @@ export class ReportDataFetcherService {
       metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
       userId: string;
       roles: string[];
-      // grafana/dynatrace only: restrict the comparison to one dashboard and a panel selection
-      dashboardLabel?: string;
-      panelIds?: number[];
+      // grafana/dynatrace only: restrict the comparison to a set of dashboard /
+      // panel / series selections. Empty means "everything this run recorded".
+      selections?: BaselineComparisonSelection[];
       // grafana/dynatrace only: pair a current-run dashboard with a differently
       // named baseline-run dashboard (e.g. per-environment dashboard names)
       dashboardMap?: { current: string; baseline: string }[];
@@ -2028,22 +2069,25 @@ export class ReportDataFetcherService {
     source: 'grafana' | 'dynatrace',
     opts: {
       metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
-      dashboardLabel?: string;
-      panelIds?: number[];
+      selections?: BaselineComparisonSelection[];
       dashboardMap?: { current: string; baseline: string }[];
     },
   ): Promise<BaselineComparisonData | null> {
     const sourceType = source === 'grafana' ? 'grafana' : 'dynatrace';
-    // Optional dashboard scoping (from the section config's dashboard selection).
+    // Optional scoping (from the section config's dashboard/panel/series selection).
     // Absent -> unfiltered, preserving behavior for configs saved before selection existed.
-    // The mapped baseline label must be included or its rows never reach the pairing.
+    // The mapped baseline labels must be included or their rows never reach the pairing.
+    const selections = opts.selections ?? [];
     const params: unknown[] = [[currentRunId, baselineRunId], sourceType];
     let scopeFilter = '';
-    if (opts.dashboardLabel) {
-      const labels = [opts.dashboardLabel];
-      const mapped = opts.dashboardMap?.find((m) => m.current === opts.dashboardLabel)?.baseline;
-      if (mapped && !labels.includes(mapped)) labels.push(mapped);
-      params.push(labels);
+    if (selections.length > 0) {
+      const labels = new Set<string>();
+      for (const sel of selections) {
+        labels.add(sel.dashboardLabel);
+        const mapped = opts.dashboardMap?.find((m) => m.current === sel.dashboardLabel)?.baseline;
+        if (mapped) labels.add(mapped);
+      }
+      params.push([...labels]);
       scopeFilter += ` AND s.dashboard_label = ANY($${params.length})`;
     }
     const rows: Array<{
@@ -2069,11 +2113,19 @@ export class ReportDataFetcherService {
     const identity = (r: typeof rows[number]) =>
       `${r.dashboard_label}||${r.panel_title}||${r.metric_name}`;
 
-    // Panel selection applies to the CURRENT run only — the mapped baseline
+    // The selection applies to the CURRENT run only — the mapped baseline
     // dashboard may use different panel ids; pairing is by panel title.
-    const cur = rows
-      .filter((r) => r.test_run_id === currentRunId)
-      .filter((r) => !opts.panelIds?.length || (r.panel_id != null && opts.panelIds.includes(r.panel_id)));
+    // A selection with no panelId means "every panel on that dashboard", and a
+    // panel with no metricNames means "every series in that panel".
+    const selected = (r: typeof rows[number]) =>
+      selections.length === 0 ||
+      selections.some(
+        (sel) =>
+          sel.dashboardLabel === r.dashboard_label &&
+          (sel.panelId == null || sel.panelId === r.panel_id) &&
+          (!sel.metricNames?.length || (r.metric_name != null && sel.metricNames.includes(r.metric_name))),
+      );
+    const cur = rows.filter((r) => r.test_run_id === currentRunId).filter(selected);
     const baseByIdentity = new Map(
       rows.filter((r) => r.test_run_id === baselineRunId).map((r) => [identity(r), r]),
     );

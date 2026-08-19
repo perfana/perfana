@@ -98,6 +98,7 @@ describe('TrendsRenderer', () => {
           provide: ReportDataFetcherService,
           useValue: {
             getTrendsData: jest.fn().mockResolvedValue(makeTrendsData()),
+            getMetricTrends: jest.fn().mockResolvedValue([]),
           },
         },
       ],
@@ -209,6 +210,58 @@ describe('TrendsRenderer', () => {
   });
 
   describe('config options', () => {
+    it('leads with the aggregated trend even when nothing is selected', async () => {
+      const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('Aggregated Performance Trends');
+      expect(html).toContain('Run History');
+      expect(dataFetcher.getMetricTrends).not.toHaveBeenCalled();
+    });
+
+    it('renders one table per selected dashboard, a row per series and a column per run', async () => {
+      dataFetcher.getMetricTrends.mockResolvedValue([
+        {
+          dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: 'used', unit: 'bytes',
+          valuesByRun: { 'run-001': 100, 'run-002': 110, 'run-003': 150 },
+        },
+        {
+          dashboardLabel: 'Docker', panelTitle: 'CPU', metricName: 'cpu', unit: 'percent',
+          valuesByRun: { 'run-001': 20, 'run-003': 10 },
+        },
+      ]);
+
+      const html = await renderer.renderTrendsSection(
+        makeSection({ config: { dashboardLabels: ['JVM', 'Docker'] } }),
+        makeTestRun(),
+      );
+
+      // Selection reaches the fetcher as scopes, with the runs of the window
+      expect(dataFetcher.getMetricTrends).toHaveBeenCalledWith(
+        ['run-001', 'run-002', 'run-003'],
+        [{ dashboardLabel: 'JVM' }, { dashboardLabel: 'Docker' }],
+      );
+      // A table per dashboard, keyed by its own group header
+      expect(html).toContain('>JVM</h3>');
+      expect(html).toContain('>Docker</h3>');
+      expect(html).toContain('used');
+      expect(html).toContain('cpu');
+      // Change across the window: 100 -> 150
+      expect(html).toContain('+50.0%');
+      // A run with no value for a series is an em-dash, not a zero
+      expect(html).toContain('—');
+    });
+
+    it('reads the run count the config form writes', async () => {
+      await renderer.renderTrendsSection(
+        makeSection({ config: { timeRange: { runCount: 7 } } }),
+        makeTestRun(),
+        'user-1',
+        ['user'],
+      );
+
+      expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(expect.anything(), 7, 'user-1', ['user']);
+    });
+
     it('should pass maxRuns config to data fetcher', async () => {
       const section = makeSection({ config: { maxRuns: 5 } });
       await renderer.renderTrendsSection(section, makeTestRun(), 'user-1', ['user']);
