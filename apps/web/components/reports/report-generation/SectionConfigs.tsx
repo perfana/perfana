@@ -720,12 +720,8 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
 
 /** @public */
 export interface RegressionsConfig {
-  sortBy?: 'severity' | 'change' | 'name';
   maxItems?: number;
-  regressionsOnly?: boolean;
-  minChangePercent?: number;
-  showComparisonDetails?: boolean;
-  includeComparisonChart?: boolean;
+  showImprovements?: boolean;
 }
 
 interface RegressionsConfigFormProps {
@@ -739,66 +735,30 @@ interface RegressionsConfigFormProps {
 export function RegressionsConfigForm({ config, onChange, text, onTextChange, testRunId }: RegressionsConfigFormProps) {
   return (
     <SectionConfigShell
-      sectionTitle="Performance Regressions"
-      sectionType="Regressions"
+      sectionTitle="Anomaly Detection"
+      sectionType="Anomaly Detection"
       previewType="regressions"
       previewConfig={config}
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
     >
-      <Select
-        value={config.sortBy || 'severity'}
-        onChange={(e) => onChange({ ...config, sortBy: e.target.value as RegressionsConfig['sortBy'] })}
-        fullWidth
-        size="small"
-      >
-        <MenuItem value="severity">Sort by Severity</MenuItem>
-        <MenuItem value="change">Sort by Change</MenuItem>
-        <MenuItem value="name">Sort by Name</MenuItem>
-      </Select>
       <TextField
         label="Max Items"
         type="number"
-        value={config.maxItems || 20}
+        value={config.maxItems ?? 50}
         onChange={(e) => onChange({ ...config, maxItems: Number(e.target.value) })}
         size="small"
         inputProps={{ min: 1, max: 100 }}
       />
-      <TextField
-        label="Min Change Percent"
-        type="number"
-        value={config.minChangePercent || 5}
-        onChange={(e) => onChange({ ...config, minChangePercent: Number(e.target.value) })}
-        size="small"
-        inputProps={{ min: 0, max: 100 }}
-      />
       <FormControlLabel
         control={
           <Switch
-            checked={config.regressionsOnly ?? false}
-            onChange={(e) => onChange({ ...config, regressionsOnly: e.target.checked })}
+            checked={config.showImprovements ?? false}
+            onChange={(e) => onChange({ ...config, showImprovements: e.target.checked })}
           />
         }
-        label="Regressions Only"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.showComparisonDetails ?? true}
-            onChange={(e) => onChange({ ...config, showComparisonDetails: e.target.checked })}
-          />
-        }
-        label="Show Comparison Details"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.includeComparisonChart ?? false}
-            onChange={(e) => onChange({ ...config, includeComparisonChart: e.target.checked })}
-          />
-        }
-        label="Include Comparison Chart"
+        label="Show Improvements"
       />
     </SectionConfigShell>
   );

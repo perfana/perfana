@@ -51,8 +51,8 @@ export const SECTION_CONFIG: Record<ReportSectionType, { icon: React.ReactNode; 
   },
   regressions: {
     icon: <WarningIcon />,
-    label: 'Performance Regressions',
-    description: 'Detected performance regressions and anomalies',
+    label: 'Anomaly Detection',
+    description: 'ADAPT anomalies against the control group of previous runs',
     color: '#f44336',
   },
   awr: {

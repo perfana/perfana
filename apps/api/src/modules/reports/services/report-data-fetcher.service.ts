@@ -1587,12 +1587,24 @@ export class ReportDataFetcherService {
   ): Promise<RegressionsData | null> {
     try {
       // Get overall conclusion
+      // The control group joins in here rather than in a second round trip: a reader cannot
+      // judge "9 regressions" without knowing how many runs ADAPT weighed them against.
       const conclusionRows: {
         conclusion: string;
         regressions: string[] | null;
         improvements: string[] | null;
+        control_group_id: string | null;
+        n_test_runs: number | null;
+        test_runs: string[] | null;
+        first_datetime: string | null;
+        last_datetime: string | null;
       }[] = await this.dataSource.query(
-        `SELECT conclusion, regressions, improvements FROM ds_adapt_conclusion WHERE test_run_id = $1 LIMIT 1`,
+        `SELECT c.conclusion, c.regressions, c.improvements, c.control_group_id,
+                g.n_test_runs, g.test_runs, g.first_datetime, g.last_datetime
+         FROM ds_adapt_conclusion c
+         LEFT JOIN ds_control_groups g ON g.control_group_id = c.control_group_id
+         WHERE c.test_run_id = $1
+         LIMIT 1`,
         [testRunId],
       );
 
@@ -1648,7 +1660,19 @@ export class ReportDataFetcherService {
         totalMetrics: metrics.length,
         regressions,
         improvements,
-        noDifference: metrics.filter((m) => m.conclusionLabel === 'no_difference'),
+        // ADAPT writes this label with a space, not an underscore.
+        noDifference: metrics.filter((m) => m.conclusionLabel === 'no difference'),
+        ...(conclusionRow.control_group_id
+          ? {
+              controlGroup: {
+                id: conclusionRow.control_group_id,
+                testRuns: conclusionRow.test_runs ?? [],
+                nTestRuns: conclusionRow.n_test_runs ?? conclusionRow.test_runs?.length ?? 0,
+                firstDatetime: conclusionRow.first_datetime,
+                lastDatetime: conclusionRow.last_datetime,
+              },
+            }
+          : {}),
       };
     } catch (error) {
       this.logger.warn(`Failed to get regressions data for ${testRunId}: ${(error as Error).message}`);

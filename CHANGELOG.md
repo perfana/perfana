@@ -27,6 +27,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **An empty Comparisons section now says why it is empty.** Every way of ending up with nothing to show produced the same sentence, so "no comparison data available" could equally mean this is the first run in its scope, no baseline was ever configured, or the chosen baseline collected nothing comparable — three situations with three different responses, one of which is not a problem at all. Worse, a silent empty section reads like "nothing regressed", which is the opposite conclusion. The section now names the cause: the run that has no predecessor, the section that has no baseline configured, or the baseline run id that came back with no comparable metrics for the selected source.
+## [0.2.68.0] - 2026-08-19
+
+### Changed
+- **The Performance Regressions report section is now called Anomaly Detection**, matching what ADAPT actually does and what the same analysis is called everywhere else in the product. Sections already saved keep whatever title they were given.
+- **The section header no longer repeats itself.** It carried an overall status pill saying REGRESSION next to a chip saying how many regressions there were, and a total-metric count — 830 on a typical run — that dwarfed both and matched nothing in the section below it. The header now shows the counts that matter, plus how many runs they were judged against, and falls back to the status pill only when ADAPT reached no verdict at all, where the reason is the one thing worth reporting. A run with neither regressions nor improvements says "no anomalies" instead of showing nothing.
+- **The section says which runs it compared against.** ADAPT's verdict is only as meaningful as the control group behind it — "9 regressions" against three runs and against thirty are different claims — so the section now names the control group runs and the window they span, truncating a long group to twelve ids and a count.
+- **The section's configuration only offers settings that do something.** Sort By, Min Change Percent, Regressions Only, Show Comparison Details and Include Comparison Chart were never read by the renderer: changing them changed nothing in the report. They are gone. Max Items now genuinely caps the table, and a new Show Improvements toggle reveals the improvements table the renderer could already produce but nothing in the interface could switch on.
+
+### Fixed
+- The "no difference" metric bucket was filtered on an underscore that ADAPT never writes, so it was always empty. It is not displayed today, but anything reading it was reading zero.
 
 ## [0.2.66.0] - 2026-08-19
 
