@@ -1,5 +1,6 @@
 'use client';
 
+import type { Config, Data, Layout } from 'plotly.js';
 import React from 'react';
 import {
   Box,
@@ -73,9 +74,9 @@ export function TrendsChart({
       {/* Plotly Chart */}
       <Box sx={{ width: '100%', mb: 3 }}>
         <Plot
-          data={plotData}
-          layout={plotLayout}
-          config={plotConfig}
+          data={plotData as Data[]}
+          layout={plotLayout as Partial<Layout>}
+          config={plotConfig as Partial<Config>}
           useResizeHandler={true}
           style={{ width: '100%', height: '400px' }}
         />

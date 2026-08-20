@@ -1,5 +1,6 @@
 'use client';
 
+import type { Config, Data, Layout } from 'plotly.js';
 import { useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Box, useTheme } from '@mui/material';
@@ -52,9 +53,9 @@ export function TransactionChart({
   return (
     <Box sx={{ width: '100%', height: '550px' }}>
       <Plot
-        data={plotData}
-        layout={plotLayout}
-        config={plotConfig}
+        data={plotData as Data[]}
+        layout={plotLayout as Partial<Layout>}
+        config={plotConfig as Partial<Config>}
         style={{ width: '100%', height: '100%' }}
         useResizeHandler
       />

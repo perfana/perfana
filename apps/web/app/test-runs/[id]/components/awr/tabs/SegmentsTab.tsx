@@ -120,11 +120,12 @@ const SEGMENT_TYPE_CONFIGS: SegmentTypeConfig[] = [
  */
 type SegmentStatistics = Record<string, SegmentStatistic[] | number | undefined>;
 
-function getSegmentData(report: AwrReport, segmentType: SegmentType): SegmentStatistic[] {
+function getSegmentData(report: AwrReport | undefined, segmentType: SegmentType): SegmentStatistic[] {
   const segmentStats = report?.parsedData?.segmentStatistics as SegmentStatistics | undefined;
   if (!segmentStats) return [];
 
-  const mapping: Record<SegmentType, string> = {
+  // rowLockWaits and bufferBusyWaits have no aggregate key in the report.
+  const mapping: Record<SegmentType, string | undefined> = {
     tableScans: 'byTableScans',
     logicalReads: 'byLogicalReads',
     physicalReads: 'byPhysicalReads',
@@ -133,14 +134,17 @@ function getSegmentData(report: AwrReport, segmentType: SegmentType): SegmentSta
     bufferBusyWaits: 'byBufferBusyWaits',
   };
 
-  return (segmentStats[mapping[segmentType]] as SegmentStatistic[] | undefined) || [];
+  const key = mapping[segmentType];
+  if (!key) return [];
+  return (segmentStats[key] as SegmentStatistic[] | undefined) || [];
 }
 
-function getTotalValue(report: AwrReport, segmentType: SegmentType): number | undefined {
+function getTotalValue(report: AwrReport | undefined, segmentType: SegmentType): number | undefined {
   const segmentStats = report?.parsedData?.segmentStatistics as SegmentStatistics | undefined;
   if (!segmentStats) return undefined;
 
-  const mapping: Record<SegmentType, string> = {
+  // rowLockWaits and bufferBusyWaits have no aggregate key in the report.
+  const mapping: Record<SegmentType, string | undefined> = {
     tableScans: 'totalTableScans',
     logicalReads: 'totalLogicalReads',
     physicalReads: 'totalPhysicalReads',

@@ -1,5 +1,6 @@
 'use client';
 
+import type { Config, Data, Layout } from 'plotly.js';
 import React, { useMemo } from 'react';
 import {
   Box,
@@ -61,7 +62,7 @@ interface AnomalyExpandedContentProps {
   trendsLoading: boolean;
   chartKey: number;
   drawerOpen: boolean;
-  drawerData: DrawerData;
+  drawerData: DrawerData | null;
   drawerLoading: boolean;
   showConfigForm: boolean;
   showToast?: (message: string) => void;
@@ -194,9 +195,9 @@ export function AnomalyExpandedContent({
                 return (
                   <Plot
                     key={`${rowKey}-${chartKey || 0}-${drawerOpen ? 'open' : 'closed'}-${selectedTestRunIdForRow || 'none'}`}
-                    data={plotData}
-                    layout={plotLayout}
-                    config={plotConfig}
+                    data={plotData as Data[]}
+                    layout={plotLayout as Partial<Layout>}
+                    config={plotConfig as Partial<Config>}
                     style={{ width: '100%', height: '100%' }}
                     useResizeHandler={true}
                     onInitialized={(_figure: unknown, rawGraphDiv: unknown) => {
@@ -307,7 +308,9 @@ export function AnomalyExpandedContent({
                 // end_time falls back to the metrics data range in the chart.
                 if (selectedTestRunIdForRow && selectedTestRunIdForRow !== testRunId && trendsData) {
                   const selectedTrendData = trendsData.find(t => t.test_run_id === selectedTestRunIdForRow);
-                  if (selectedTrendData) {
+                  // start_time is required on TestRunInfo; without one the chart has
+                  // no window to draw, so fall through to the current run instead.
+                  if (selectedTrendData?.test_run_start) {
                     return {
                       start_time: selectedTrendData.test_run_start,
                       end_time: undefined,
@@ -316,7 +319,8 @@ export function AnomalyExpandedContent({
                     };
                   }
                 }
-                return testRun ? {
+                // Same requirement on the current-run branch: no start_time, no window.
+                return testRun?.start_time ? {
                   start_time: testRun.start_time,
                   end_time: testRun.end_time || undefined,
                   // Draw the same analysis-window markers the SLO charts use.
@@ -424,7 +428,9 @@ export function AnomalyExpandedContent({
                         },
                         defaultValueIfControlGroupMissing: existingConfig.defaultValueIfControlGroupMissing ?? existingConfig.default_value_if_control_group_missing ?? null,
                         configSource: existingConfig.source ?? 'global'
-                      } as { ignore?: boolean; metricClassification?: { classification: string; higherIsBetter: boolean }; thresholds?: { aggregation: string; percentageThreshold: number; iqrThreshold: number; absoluteThreshold: number }; configSource?: string };
+                        // Assembled field by field out of `unknown` drawer data, so this
+                        // is a construction, not a narrowing — TS needs the unknown hop.
+                      } as unknown as { ignore?: boolean; metricClassification?: { classification: string; higherIsBetter: boolean }; thresholds?: { aggregation: string; percentageThreshold: number; iqrThreshold: number; absoluteThreshold: number }; configSource?: string };
                     })()
                   }}
                   onSave={onConfigSave}

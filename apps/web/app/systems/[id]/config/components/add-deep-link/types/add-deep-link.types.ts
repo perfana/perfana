@@ -27,6 +27,8 @@ export interface AddDeepLinkDialogProps {
     workload: string;
     name: string;
     url: string;
+    // useAddDeepLink has always sent tags; the prop type just did not say so.
+    tags: string[];
   }) => Promise<void>;
   systemId: string;
   systemName: string;

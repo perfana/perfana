@@ -29,7 +29,7 @@ import { formatNumber, getConfigSourceInfo, generateThresholdData } from '../uti
 import { DrawerData, AdaptStatisticValues } from '../../types';
 
 interface StatisticalDrawerContentProps {
-  drawerData: DrawerData;
+  drawerData: DrawerData | null;
   drawerLoading: boolean;
   row: AnomalyData;
 }
@@ -61,7 +61,7 @@ export function StatisticalDrawerContent({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* Thresholds */}
-      {((drawerData.checks && drawerData.compare_config) || drawerData.thresholds) && (
+      {Boolean((drawerData.checks && drawerData.compare_config) || drawerData.thresholds) && (
         <Paper sx={{ p: 0 }}>
           <Box sx={{ p: 1.5, pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -152,8 +152,9 @@ export function StatisticalDrawerContent({
         </Paper>
       )}
 
-      {/* Conclusion */}
-      {drawerData.conclusion && drawerData.conclusion.label && (
+      {/* Conclusion — the label is typed `unknown` on DrawerData, so narrow it to a
+          string once rather than at each of the three places it is read. */}
+      {((label) => typeof label === 'string' && label.length > 0 ? (
         <Paper sx={{ p: 1.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -162,18 +163,18 @@ export function StatisticalDrawerContent({
           </Box>
           <Box sx={{ display: 'flex', justifyContent: 'flex-start', gap: 1 }}>
             <Chip
-              label={drawerData.conclusion.label}
+              label={label}
               size="small"
-              color={getConclusionColor(drawerData.conclusion.label) as 'default' | 'error' | 'success' | 'warning'}
+              color={getConclusionColor(label) as 'default' | 'error' | 'success' | 'warning'}
               variant="filled"
               sx={{ height: '28px', fontSize: '0.75rem' }}
             />
           </Box>
         </Paper>
-      )}
+      ) : null)(drawerData.conclusion?.label)}
 
       {/* Statistical Summary Table */}
-      {(drawerData.mean || drawerData.q25) && (
+      {Boolean(drawerData.mean || drawerData.q25) && (
         <Paper sx={{ p: 0, overflow: 'hidden' }}>
           <Box sx={{ p: 1.5, pb: 1 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -194,7 +195,7 @@ export function StatisticalDrawerContent({
                 {/* Basic Statistics */}
                 {['mean', 'median', 'std', 'min', 'max', 'iqr'].map(stat => {
                   const isPrimaryStatistic = drawerData.statistic?.name === stat;
-                  return drawerData[stat] && (
+                  return drawerData[stat] ? (
                     <StatisticRow
                       key={stat}
                       stat={stat}
@@ -203,13 +204,13 @@ export function StatisticalDrawerContent({
                       unit={row.unit ?? undefined}
                       isIqr={stat === 'iqr'}
                     />
-                  );
+                  ) : null;
                 })}
 
                 {/* Quantiles */}
                 {['q10', 'q25', 'q75', 'q90', 'q95', 'q99'].map(quantile => {
                   const isPrimaryStatistic = drawerData.statistic?.name === quantile;
-                  return drawerData[quantile] && (
+                  return drawerData[quantile] ? (
                     <StatisticRow
                       key={quantile}
                       stat={quantile}
@@ -218,7 +219,7 @@ export function StatisticalDrawerContent({
                       unit={row.unit ?? undefined}
                       isQuantile
                     />
-                  );
+                  ) : null;
                 })}
               </TableBody>
             </Table>

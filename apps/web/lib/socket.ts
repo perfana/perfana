@@ -33,7 +33,10 @@ import {
 type EventListeners = {
   connectionStateChange: ((state: ConnectionState) => void)[];
   error: ((error: WebSocketError) => void)[];
-  [key: string]: ((...args: unknown[]) => void)[];
+  // The two named events carry concrete payloads; every other event is dispatched
+  // dynamically, so the index signature has to be wide enough to cover both. A
+  // `(...args: unknown[])` signature is not — its parameters are contravariant.
+  [key: string]: ((...args: never[]) => void)[];
 };
 
 /**

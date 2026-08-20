@@ -866,29 +866,36 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
     const sectionConfig = (section.config || {}) as Record<string, unknown>;
     const text = getSectionText(section);
 
+    // Each *ConfigForm declares its own concrete config type, while this dispatcher
+    // is deliberately type-erased and hands the same callback to all eleven. Under
+    // strictFunctionTypes those narrower parameter types are contravariant, so the
+    // erasure is stated once here instead of cast at eleven call sites.
+    const handleChange = <T extends object>(config: T) =>
+      onConfigChange(config as Record<string, unknown>);
+
     switch (section.type) {
       case 'header':
-        return <HeaderConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <HeaderConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'text_block':
-        return <TextBlockConfigForm config={sectionConfig} onChange={onConfigChange} testRunId={testRunId} />;
+        return <TextBlockConfigForm config={sectionConfig} onChange={handleChange} testRunId={testRunId} />;
       case 'slo':
-        return <SloConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <SloConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'apdex':
-        return <ApdexConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <ApdexConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'transaction_response_times':
-        return <TransactionResponseTimesConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <TransactionResponseTimesConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'regressions':
-        return <RegressionsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <RegressionsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'graphs':
-        return <GraphsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <GraphsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'awr':
-        return <AwrConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <AwrConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       case 'trends':
-        return <TrendsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
+        return <TrendsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       case 'comparisons':
-        return <ComparisonsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
+        return <ComparisonsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       case 'top_10_lists':
-        return <Top10ListsConfigForm config={sectionConfig} onChange={onConfigChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <Top10ListsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       default:
         return null;
     }

@@ -1,3 +1,4 @@
+import type { Config, Data, Layout } from 'plotly.js';
 import React, { useEffect, useState } from 'react';
 import { Box, CircularProgress, Alert, useTheme } from '@mui/material';
 import dynamic from 'next/dynamic';
@@ -96,9 +97,9 @@ export default function TrendChart({
     <Box sx={{ width: '100%', height: height || 400 }}>
       <Plot
         key={chartKey}
-        data={plotData}
-        layout={plotLayout}
-        config={plotConfig}
+        data={plotData as Data[]}
+        layout={plotLayout as Partial<Layout>}
+        config={plotConfig as Partial<Config>}
         style={{ width: '100%', height: '100%' }}
         useResizeHandler={true}
       />

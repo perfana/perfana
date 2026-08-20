@@ -54,24 +54,6 @@ Pass criterion (already encoded in the script): cold p99 < 200ms, warm p99 < 30m
 
 ---
 
-## Type safety
-
-### Turn on `strict` in apps/web
-
-**Priority:** P2
-**Origin:** /ship on `fix/web-type-errors-ts2339` (2026-08-15), after clearing 506 type errors.
-**Why:** apps/web compiles with `strict: false`, so `strictNullChecks` is off. The types added in that
-branch describe nullability accurately (113 optional fields on the shared API shapes), but nothing
-enforces it: a caller can dereference a possibly-undefined field and the compiler stays quiet. So the
-type system now catches shape and name errors, which is what all 506 were, and catches no null
-dereferences at all.
-**What:** Flip `strict` (or start with just `strictNullChecks`) in `apps/web/tsconfig.json` and work the
-errors down. Measured cost at the time of writing: `npx tsc -p tsconfig.json --noEmit --strict` reports
-**81 errors**. Bounded enough to do in one pass.
-**Where:** `apps/web/tsconfig.json`.
-
----
-
 ## Reports
 
 ### SLO section renders a green "all clear" card when the check-results query fails
@@ -202,6 +184,39 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
 ## Completed
+
+### Turn on `strict` in apps/web
+
+`"strict": true` in `apps/web/tsconfig.json`; all 81 errors cleared. `tsc --noEmit` 0,
+lint clean, 3945 tests passing.
+
+Most were real nullability the types had been hiding. The one **behaviour** bug it caught:
+`GraphsChart` built its Plotly traces with `allSeries.map(... => null)` for series with no
+data and passed the array — nulls included — straight to `<Plot data=...>`. Now filtered.
+
+Judgement calls worth knowing about:
+
+- **Plotly props stay `unknown` at the hook boundary**, narrowed with a cast at each
+  `<Plot>` call site. Typing the trace builders through `@types/plotly.js` is a real job
+  (its `Layout` is structurally strict about things like `xanchor`) and buys no
+  null-safety, so it is not this change.
+- **The anomaly config payload stays `unknown` through the component tree** and is
+  narrowed once at `AnomalyDetectionSection`. Its six declarations genuinely disagree on
+  which threshold fields are nullable; unifying them is a separate refactor. The first
+  attempt propagated `ConfigFormData` downward and cascaded — reverted.
+- **`DrawerData | null` was propagated**, because the fetch really does store `null` on
+  failure and every consumer was claiming otherwise.
+- **The zod `.default('saas')` was NOT removed.** Dropping it made the types line up and
+  the tests immediately failed on `should default to "saas" when not provided` — it is
+  load-bearing. Fixed properly with `useForm<Input, unknown, Output>` plus an exported
+  `CreateDynatraceConfigFormInput`.
+- A leftover `console.log('UnresolvedRegressionTable Debug:', ...)` block was the source
+  of four of the 81 errors and is gone.
+
+Not turned on: `noUncheckedIndexedAccess`, `noImplicitReturns`, `noUnusedLocals`,
+`noUnusedParameters`, `strictPropertyInitialization`. Each is its own error budget and the
+item asked for `strict`.
+**Completed:** v0.2.68.5 (2026-08-20)
 
 ### Fail fast when the API's DB role cannot bypass RLS
 

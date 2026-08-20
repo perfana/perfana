@@ -97,8 +97,11 @@ export function filterTestRuns(testRuns: TestRun[], filters: FilterState): TestR
  */
 export function sortTestRunsByEndTime(testRuns: TestRun[]): TestRun[] {
   return [...testRuns].sort((a, b) => {
-    const aTime = ((a as MaybeCamelTestRun).endTime || a.end_time) ? new Date((a as MaybeCamelTestRun).endTime || a.end_time).getTime() : 0;
-    const bTime = ((b as MaybeCamelTestRun).endTime || b.end_time) ? new Date((b as MaybeCamelTestRun).endTime || b.end_time).getTime() : 0;
+    // Either casing may be absent; an unfinished run sorts as epoch 0.
+    const aEnd = (a as MaybeCamelTestRun).endTime || a.end_time;
+    const bEnd = (b as MaybeCamelTestRun).endTime || b.end_time;
+    const aTime = aEnd ? new Date(aEnd).getTime() : 0;
+    const bTime = bEnd ? new Date(bEnd).getTime() : 0;
     return bTime - aTime;
   });
 }

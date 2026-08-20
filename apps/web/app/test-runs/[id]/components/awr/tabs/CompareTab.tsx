@@ -340,7 +340,7 @@ interface SqlChangesViewProps {
   improvements: SqlComparisonItem[];
   newStatements: SqlComparisonItem[];
   onSqlClick?: (sqlId: string, sqlText?: string) => void;
-  onSnackbar?: (message: string, severity: 'success' | 'error' | 'info') => void;
+  onSnackbar?: (message: string, severity?: 'success' | 'error' | 'info') => void;
 }
 
 function SqlChangesView({

@@ -159,8 +159,8 @@ export default function DistributedTracingCard({
                 allServiceNames={data.allServiceNames}
                 activeServiceNameTab={data.activeServiceNameTab}
                 onServiceNameTabChange={data.handleServiceNameTabChange}
-                currentServiceNameItem={data.currentServiceNameItem}
-                currentService={data.currentService}
+                currentServiceNameItem={data.currentServiceNameItem ?? null}
+                currentService={data.currentService ?? null}
                 error={data.error}
                 scenarios={data.scenarios}
                 transactions={data.transactions}

@@ -151,7 +151,10 @@ export function useAddSLOForm({
       if (response.ok) {
         const dashboardsData = await response.json();
         // Filter for performance-test-metrics dashboards only
-        const perfMetricsDashboards = dashboardsData.filter((d: unknown) => isPerformanceTest(d));
+        const perfMetricsDashboards = dashboardsData.filter(
+          (d: { dashboard_uid?: string; metrics_source_id?: string; source_type?: string }) =>
+            isPerformanceTest(d),
+        );
         setAvailablePerfMetricsDashboards(perfMetricsDashboards);
       } else {
         console.warn('Failed to fetch Performance metrics dashboards:', response.statusText);
@@ -244,7 +247,10 @@ export function useAddSLOForm({
 
       if (response.ok) {
         const dashboardsData = await response.json();
-        const perfMetricsDashboards = dashboardsData.filter((d: unknown) => isPerformanceTest(d));
+        const perfMetricsDashboards = dashboardsData.filter(
+          (d: { dashboard_uid?: string; metrics_source_id?: string; source_type?: string }) =>
+            isPerformanceTest(d),
+        );
         return perfMetricsDashboards.length > 0;
       }
       return false;

@@ -190,7 +190,7 @@ export function useEditSLOForm({
 
       // Handle validateWithDefaultIfNoDataValue percentunit conversion
       const displayDefaultValue = convertDecimalToPercentageForDisplay(
-        benchmark.configuration?.validateWithDefaultIfNoDataValue,
+        benchmark.configuration?.validateWithDefaultIfNoDataValue ?? undefined,
         effectiveUnitFormat
       );
 

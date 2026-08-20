@@ -226,7 +226,7 @@ export function SLOFormFields({
         <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availablePanels as SloPanel[]}
-            getOptionLabel={(option) => option.title}
+            getOptionLabel={(option) => option.title ?? ''}
             isOptionEqualToValue={(option, value) => option.id === value.id}
             value={selectedGrafanaPanel}
             onChange={(_, newValue) => {
@@ -284,7 +284,7 @@ export function SLOFormFields({
         <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availableDynatraceMetrics as SloPanel[]}
-            getOptionLabel={(option) => option.panelTitle}
+            getOptionLabel={(option) => option.panelTitle ?? ''}
             value={selectedDynatraceMetric}
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({

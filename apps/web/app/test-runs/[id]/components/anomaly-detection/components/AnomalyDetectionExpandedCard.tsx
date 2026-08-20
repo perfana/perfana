@@ -101,7 +101,7 @@ export default function AnomalyDetectionExpandedCard(props: AnomalyDetectionExpa
 
   return (
     <Card
-      ref={cardRef}
+      ref={cardRef as React.RefObject<HTMLDivElement>}
       tabIndex={-1}
       data-testid="anomaly-detection-section-expanded"
       elevation={0}

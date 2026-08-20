@@ -153,7 +153,7 @@ export interface AwrUploadZoneProps {
   /** Callback on upload error */
   onUploadError?: (error: Error) => void;
   /** Callback for snackbar notifications */
-  onSnackbar?: (message: string, severity: SnackbarSeverity) => void;
+  onSnackbar?: (message: string, severity?: SnackbarSeverity) => void;
   /** Whether upload is disabled */
   disabled?: boolean;
   /** Custom class name */
@@ -189,7 +189,7 @@ export interface AwrTabBaseProps {
   /** Test run ID for context */
   testRunId: string;
   /** Callback for snackbar notifications */
-  onSnackbar?: (message: string, severity: SnackbarSeverity) => void;
+  onSnackbar?: (message: string, severity?: SnackbarSeverity) => void;
 }
 
 /**
@@ -327,7 +327,7 @@ export interface SqlStatementCardProps {
   /** Baseline metrics for comparison */
   baselineMetrics?: SqlStatementMetrics;
   /** Callback for snackbar notifications */
-  onSnackbar?: (message: string, severity: SnackbarSeverity) => void;
+  onSnackbar?: (message: string, severity?: SnackbarSeverity) => void;
 }
 
 /**
@@ -369,7 +369,7 @@ export interface SqlTextViewerProps {
   /** Show expand button */
   showExpandButton?: boolean;
   /** Callback for snackbar notifications */
-  onSnackbar?: (message: string, severity: SnackbarSeverity) => void;
+  onSnackbar?: (message: string, severity?: SnackbarSeverity) => void;
 }
 
 // ==================== Chart Component Props ====================

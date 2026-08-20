@@ -115,7 +115,7 @@ export interface ReportCardProps {
   /** Callback when View Report is clicked */
   _onViewReport?: (reportId: string) => void;
   /** Callback for snackbar notifications */
-  onSnackbar?: (message: string, severity: SnackbarSeverity) => void;
+  onSnackbar?: (message: string, severity?: SnackbarSeverity) => void;
   /** Custom class name */
   className?: string;
   /** Trigger to refresh reports list (increment to trigger refresh) */

@@ -1,5 +1,6 @@
 'use client';
 
+import type { PlotTrace } from './types/chart.types';
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Box, useTheme } from '@mui/material';
 import dynamic from 'next/dynamic';
@@ -153,7 +154,10 @@ export default function GraphsChart({
     // Build config
     const config = buildChartConfig(chartName);
 
-    return { data: traces, layout, config };
+    // Series with no data map to null above; Plotly must never see them.
+    const data = traces.filter((t): t is PlotTrace => t !== null);
+
+    return { data, layout, config };
   }, [seriesData, seriesConfig, axisAssignment, testRun, theme, containerWidth, chartName, events]);
 
   // Loading state

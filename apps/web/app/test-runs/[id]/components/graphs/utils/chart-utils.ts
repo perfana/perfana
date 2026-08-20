@@ -531,7 +531,8 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
               new ClipboardItem({ 'image/png': blobPromise })
             ]).catch(() => {
               // Fallback to download if clipboard write fails
-              blobPromise.then(blob => {
+              blobPromise.then((blob: Blob | null) => {
+                if (!blob) return;
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
@@ -544,7 +545,8 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
             });
           } else {
             // No clipboard API available, download directly
-            blobPromise.then(blob => {
+            blobPromise.then((blob: Blob | null) => {
+              if (!blob) return;
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;

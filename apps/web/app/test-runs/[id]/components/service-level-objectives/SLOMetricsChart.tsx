@@ -1,5 +1,6 @@
 'use client';
 
+import type { Config, Data, Layout } from 'plotly.js';
 import React from 'react';
 import { Box, Typography, useTheme } from '@mui/material';
 import dynamic from 'next/dynamic';
@@ -77,9 +78,9 @@ export default function SLOMetricsChart({
       <Box sx={{ width: '100%', height: DEFAULT_CHART_HEIGHT }}>
         {plotData.length > 0 && (
           <Plot
-            data={plotData}
-            layout={plotLayout}
-            config={plotConfig}
+            data={plotData as Data[]}
+            layout={plotLayout as Partial<Layout>}
+            config={plotConfig as Partial<Config>}
             style={{ width: '100%', height: '100%' }}
             useResizeHandler={true}
             className="plotly-chart"

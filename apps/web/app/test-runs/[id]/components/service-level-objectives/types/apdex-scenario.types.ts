@@ -10,7 +10,8 @@ export interface SortConfig {
 
 export interface TransactionSample {
   sampler_name: string;
-  url_pattern?: string;
+  /** null when the sampler matched no URL pattern — the API sends null, not absence. */
+  url_pattern?: string | null;
   avg_response_time?: number;
   p95_response_time?: number;
   p99_response_time?: number;
