@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import {
   HeaderConfigForm,
   TextBlockConfigForm,
@@ -14,8 +14,13 @@ import {
 } from './SectionConfigs';
 
 // Mock authenticatedFetch so data-fetching effects don't blow up in tests
+// The comparisons form needs at least one baseline candidate before its preview button
+// unlocks, and every other form ignores the payload.
 jest.mock('@/lib/api', () => ({
-  authenticatedFetch: jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([]) })),
+  authenticatedFetch: jest.fn(() => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve([{ test_run_id: 'MyApp-acc-loadTest-00000', test_environment: 'acc', workload: 'loadTest' }]),
+  })),
 }));
 
 // Capture the props the generic HTML preview receives when the modal opens
@@ -63,7 +68,13 @@ const FORMS: [string, AnyConfigForm, string, Record<string, unknown>][] = [
   ['GraphsConfigForm', GraphsConfigForm as unknown as AnyConfigForm, 'graphs', {}],
   ['AwrConfigForm', AwrConfigForm as unknown as AnyConfigForm, 'awr', {}],
   ['TrendsConfigForm', TrendsConfigForm as unknown as AnyConfigForm, 'trends', {}],
-  ['ComparisonsConfigForm', ComparisonsConfigForm as unknown as AnyConfigForm, 'comparisons', {}],
+  [
+    'ComparisonsConfigForm',
+    ComparisonsConfigForm as unknown as AnyConfigForm,
+    'comparisons',
+    // Without a baseline there is nothing to preview, so the button stays disabled
+    { baselineTestRunId: 'MyApp-acc-loadTest-00000' },
+  ],
 ];
 
 describe.each(FORMS)('%s (shared section config affordances)', (_name, Form, previewType, enableConfig) => {
@@ -86,11 +97,12 @@ describe.each(FORMS)('%s (shared section config affordances)', (_name, Form, pre
         onChange={jest.fn()}
         onTextChange={jest.fn()}
         testRunId="MyApp-acc-loadTest-00001"
+        systemUnderTestId="sut-1"
       />,
     );
 
-    const previewButton = screen.getByRole('button', { name: /preview section/i });
-    expect(previewButton).toBeEnabled();
+    const previewButton = await screen.findByRole('button', { name: /preview section/i });
+    await waitFor(() => expect(previewButton).toBeEnabled());
     fireEvent.click(previewButton);
 
     if (previewType === 'apdex') {

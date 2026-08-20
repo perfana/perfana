@@ -1022,6 +1022,26 @@ describe('GenerateReportDialog', () => {
       ],
     };
 
+    it('blocks Generate Report until every comparison section has a baseline', async () => {
+      (reportsApi.getTemplate as jest.Mock).mockResolvedValue(baselineTemplate);
+      render(<GenerateReportDialog {...defaultProps} />);
+
+      fireEvent.click(await screen.findByText('Performance Summary'));
+      await screen.findByText(/set it once here/i);
+
+      // Two comparison sections, no baseline picked yet
+      const generate = screen.getByRole('button', { name: /generate report/i });
+      expect(generate).toBeDisabled();
+      expect(screen.getByText(/select a baseline run for every comparison section/i)).toBeInTheDocument();
+
+      const input = screen.getAllByLabelText(/baseline test run/i)[0];
+      fireEvent.mouseDown(input);
+      fireEvent.change(input, { target: { value: 'baseline' } });
+      fireEvent.click(await screen.findByText('baseline-001'));
+
+      await waitFor(() => expect(screen.getByRole('button', { name: /generate report/i })).toBeEnabled());
+    });
+
     it('shows one picker for baseline sections and applies the choice to all of them', async () => {
       (reportsApi.getTemplate as jest.Mock).mockResolvedValue(baselineTemplate);
       render(<GenerateReportDialog {...defaultProps} />);

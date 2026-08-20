@@ -155,7 +155,7 @@ export default function TestRunDetailsCard({
             gap: 3,
             mt: 2
           }}>
-            <TestRunIdentitySection testRun={testRun} />
+            <TestRunIdentitySection testRun={testRun} onTestRunUpdate={onTestRunUpdate} showToast={showToast} />
             <TestConfigurationSection testRun={testRun} />
             <TimingInformationSection testRun={testRun} onTestRunUpdate={onTestRunUpdate} showToast={showToast} />
             <EvaluationResultsSection testRun={testRun} onRefreshTriggered={onRefreshTriggered} showToast={showToast} />
