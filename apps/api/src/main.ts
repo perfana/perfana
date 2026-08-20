@@ -6,6 +6,7 @@ if (typeof globalThis.crypto === 'undefined') {
 }
 
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -27,9 +28,17 @@ async function bootstrap() {
     debug: ['error', 'warn', 'log', 'debug', 'verbose'],
   };
 
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: logLevels[logLevel] || logLevels.info,
   });
+
+  // Express defaults to a 100 kB JSON body, which a report section's configuration can
+  // exceed on its own: selecting every series of a couple of dashboards is a few thousand
+  // {dashboard, panel, metric} entries, and the preview posts the whole section. The old
+  // failure was a 500 "request entity too large" from the body parser, before any handler ran.
+  const bodyLimit = process.env.API_BODY_LIMIT || '10mb';
+  app.useBodyParser('json', { limit: bodyLimit });
+  app.useBodyParser('urlencoded', { limit: bodyLimit, extended: true });
 
   // Get ConfigService for Socket.IO adapter
   const configService = app.get(ConfigService);
