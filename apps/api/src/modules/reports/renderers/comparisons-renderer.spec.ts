@@ -427,11 +427,10 @@ describe('ComparisonsRenderer', () => {
       } } as any,
       { testRunId: 'cur-42' } as any,
     );
+    // Each level is all-or-explicit: picking any panel drops the dashboard nothing was
+    // picked on, and picking any series drops the panel nothing was picked on.
     expect(spy.mock.calls[0]![3].selections).toEqual([
       { dashboardLabel: 'JVM Metrics', panelId: 3, metricNames: ['used', 'committed'] },
-      { dashboardLabel: 'JVM Metrics', panelId: 7 },
-      // No panels picked on the second dashboard — every panel on it is in scope.
-      { dashboardLabel: 'Docker Metrics' },
     ]);
   });
 
@@ -442,6 +441,41 @@ describe('ComparisonsRenderer', () => {
       { testRunId: 'cur-42' } as any,
     );
     expect(spy.mock.calls[0]![3].selections).toEqual([]);
+  });
+
+  it('never widens to the whole run when every pick below the dashboards is orphaned', async () => {
+    // An empty selections list means "every metric this run recorded" to the fetcher, so a
+    // config whose panels name a dashboard that is no longer picked must fall back to the
+    // picked dashboards, not to nothing.
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base-99', source: 'grafana',
+        dashboardLabels: ['JVM Metrics'],
+        panels: [{ id: 3, title: 'Heap', dashboardLabel: 'Docker Metrics' }],
+      } } as any,
+      { testRunId: 'cur-42' } as any,
+    );
+    expect(spy.mock.calls[0]![3].selections).toEqual([{ dashboardLabel: 'JVM Metrics' }]);
+  });
+
+  it('drops a picked panel that has no series once any series is picked', async () => {
+    const spy = jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(null);
+    await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base-99', source: 'grafana',
+        dashboardLabels: ['JVM Metrics'],
+        panels: [
+          { id: 3, title: 'Heap', dashboardLabel: 'JVM Metrics' },
+          { id: 7, title: 'GC Pause', dashboardLabel: 'JVM Metrics' },
+        ],
+        series: [{ dashboardLabel: 'JVM Metrics', panelId: 3, metricName: 'used' }],
+      } } as any,
+      { testRunId: 'cur-42' } as any,
+    );
+    expect(spy.mock.calls[0]![3].selections).toEqual([
+      { dashboardLabel: 'JVM Metrics', panelId: 3, metricNames: ['used'] },
+    ]);
   });
 
   describe('All aggregated (performance-metrics baseline)', () => {
