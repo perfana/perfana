@@ -64,6 +64,38 @@ export function shouldOfferAllAggregated(source: string, panelId: number): boole
   return source === 'performance-metrics' && isAggregatablePanel(panelId);
 }
 
+/**
+ * Rewrite a legacy per-percentile aggregated series onto the keeper panel.
+ *
+ * `collapsePerfRtPanels` only filters the panel dropdown. Preset restore rebuilds
+ * series straight from the stored panelId/metricName, so a preset saved before the
+ * collapse can still hold panel 202 — a row labelled "All aggregated — Request RT
+ * P90" that now shows AVG/P90/P95/P99, contradicting its own label and duplicating
+ * the collapsed "All aggregated — Request RT" row if both are added.
+ *
+ * Returns the input unchanged for anything that is not one of those panels, so it
+ * is safe to run over every restored series.
+ */
+export function normaliseLegacyAggregatedSeries<
+  T extends { panelId: number; panelTitle?: string; metricName?: string; isAggregated?: boolean },
+>(series: T): T {
+  if (!series.isAggregated) return series;
+
+  const spec = getAggregateSpec(series.panelId);
+  if (!spec || !RT_AGG_METRICS.has(spec.metric) || spec.stat === 'avg') return series;
+
+  const keeper = spec.metric === 'transaction_response_time' ? 101 : 201;
+  const title = RT_KEEPER_TITLES[keeper];
+  if (!title) return series;
+
+  return {
+    ...series,
+    panelId: keeper,
+    panelTitle: title,
+    metricName: buildAggregatedMetricName(title),
+  };
+}
+
 /** Readable, per-panel-unique legend/row name so two aggregated panels don't collide. */
 export function buildAggregatedMetricName(panelTitle: string): string {
   return `${ALL_AGGREGATED_OPTION} — ${panelTitle}`;

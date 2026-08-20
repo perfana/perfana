@@ -411,18 +411,43 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         }
       }
 
-      // Aggregated series: one batch call each for [current, baseline]. The API
-      // returns every stat in that one call, so this emits one cell per column.
-      const aggregatedSeries = addedSeries.filter(s => s.isAggregated);
-      for (const series of aggregatedSeries) {
-        const spec = getAggregateSpec(series.panelId);
-        if (!spec) continue;
-        const values = await fetchAggregatedStatistics(
-          testRun.test_run_id,
-          [testRun.test_run_id, selectedTestRun.test_run_id],
-          spec,
+      // Aggregated series: one batch call per DISTINCT metric for [current, baseline].
+      //
+      // Deduped by metric, not by series: `stat` no longer changes the SQL — every
+      // statistic comes off the merged sketch — so two series sharing a metric issue
+      // byte-identical requests. Panels 105 and 205 (transaction and request error
+      // rate) both map to `error_percentage`, so that is reachable today; a legacy
+      // preset holding 101 and 102 duplicates too.
+      //
+      // And fetched with Promise.all rather than a serial await: the aggregate query
+      // moved onto the rollups and is cheap now, so this loop is what the user waits
+      // on, and it stacked on top of the already-serialized per-dashboard-group loop
+      // above.
+      //
+      // `spec.stat` stays on the series side — buildAggregatedComparisons still needs
+      // it for the value-only fallback path.
+      const aggregatedSeries = addedSeries
+        .map(series => ({ series, spec: getAggregateSpec(series.panelId) }))
+        .filter((e): e is { series: typeof e.series; spec: NonNullable<typeof e.spec> } =>
+          Boolean(e.series.isAggregated) && e.spec !== null,
         );
-        const byId = new Map(values.map(v => [v.testRunId, v]));
+
+      const specByMetric = new Map(aggregatedSeries.map(e => [e.spec.metric, e.spec]));
+      const fetched = await Promise.all(
+        [...specByMetric.values()].map(async spec => {
+          const values = await fetchAggregatedStatistics(
+            testRun.test_run_id,
+            [testRun.test_run_id, selectedTestRun.test_run_id],
+            spec,
+          );
+          return [spec.metric, new Map(values.map(v => [v.testRunId, v]))] as const;
+        }),
+      );
+      const valuesByMetric = new Map(fetched);
+
+      for (const { series, spec } of aggregatedSeries) {
+        const byId = valuesByMetric.get(spec.metric);
+        if (!byId) continue;
         const cells = buildAggregatedComparisons(
           series,
           byId.get(testRun.test_run_id),

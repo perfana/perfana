@@ -6,6 +6,7 @@ import {
   buildAggregatedMetricName,
   fetchAggregatedStatistics,
   collapsePerfRtPanels,
+  normaliseLegacyAggregatedSeries,
 } from '../aggregated-perf-series';
 import { authenticatedFetch } from '@/lib/api';
 
@@ -86,5 +87,58 @@ describe('aggregated-perf-series', () => {
     const res = await fetchAggregatedStatistics('a', ['a', 'b'], { metric: 'request_response_time', stat: 'p90' });
     expect(res).toEqual(payload);
     expect(res[0]?.values?.p95).toBe(300);
+  });
+});
+
+describe('normaliseLegacyAggregatedSeries', () => {
+  // collapsePerfRtPanels only filters the panel dropdown. Preset restore rebuilds
+  // series from the stored panelId, so a preset saved before the collapse still
+  // holds 102/103/104/202/203/204 — rows labelled "… RT P90" that now show all
+  // four statistics, and that duplicate the collapsed row if both are added.
+  const agg = (panelId: number, panelTitle: string) => ({
+    panelId,
+    panelTitle,
+    metricName: buildAggregatedMetricName(panelTitle),
+    isAggregated: true,
+  });
+
+  it.each([
+    [102, 101, 'Transaction RT'],
+    [103, 101, 'Transaction RT'],
+    [104, 101, 'Transaction RT'],
+    [202, 201, 'Request RT'],
+    [203, 201, 'Request RT'],
+    [204, 201, 'Request RT'],
+  ])('rewrites legacy panel %i onto keeper %i', (from, keeper, title) => {
+    const out = normaliseLegacyAggregatedSeries(agg(from, 'Legacy RT P90'));
+
+    expect(out.panelId).toBe(keeper);
+    expect(out.panelTitle).toBe(title);
+    expect(out.metricName).toBe(`${ALL_AGGREGATED_OPTION} — ${title}`);
+  });
+
+  it.each([101, 201])('leaves the keeper panel %i alone', (panelId) => {
+    const input = agg(panelId, 'Transaction RT');
+
+    expect(normaliseLegacyAggregatedSeries(input)).toEqual(input);
+  });
+
+  it.each([105, 205])('leaves the error-rate panel %i alone', (panelId) => {
+    const input = agg(panelId, 'Error rate');
+
+    expect(normaliseLegacyAggregatedSeries(input)).toEqual(input);
+  });
+
+  it('leaves a non-aggregated series alone even on a legacy panel id', () => {
+    // Panel ids are not unique across sources — a Grafana panel 202 is not an RT panel.
+    const input = { panelId: 202, panelTitle: 'Some Grafana panel', metricName: 'cpu', isAggregated: false };
+
+    expect(normaliseLegacyAggregatedSeries(input)).toEqual(input);
+  });
+
+  it('leaves a panel it knows nothing about alone', () => {
+    const input = agg(9999, 'Unknown');
+
+    expect(normaliseLegacyAggregatedSeries(input)).toEqual(input);
   });
 });

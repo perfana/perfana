@@ -62,63 +62,32 @@ not a P2 — and also what makes it easy to break without noticing.
 
 ---
 
-## Compare card
-
-### Parallelise and dedupe the aggregated-series fetch loop
-
-**Priority:** P3
-**Origin:** /ship performance specialist on `feat/aggregated-percentiles` (2026-08-14), deferred as out of scope.
-**Why:** The aggregate query moved onto the rollups and is now cheap, so the
-client-side loop is what the user actually waits on. Two problems, both
-pre-existing rather than regressions: the loop `await`s one series at a time,
-so each aggregated series costs a serialized round trip and these stack on
-top of the already-serialized per-dashboard-group loop above it. And `stat`
-no longer changes the SQL — every statistic comes off the merged sketch — so
-two series sharing a metric now issue byte-identical requests. Panels 105 and
-205 (transaction and request error rate) both map to `error_percentage`, so
-this is reachable today; a legacy preset holding 101+102 duplicates too.
-**What:** Replace the loop body with `Promise.all` over the series, and dedupe
-by `spec.metric` before fetching — one request per distinct metric, fanned
-back out to every series that maps to it. Keep `spec.stat` on the series side;
-`buildAggregatedComparisons` still needs it for the value-only fallback path.
-**Where:** `apps/web/app/test-runs/[id]/components/compare/hooks/useCompareData.ts`
-(~line 415) and the same shape at
-`apps/web/app/test-runs/[id]/components/trends/hooks/useTrendsData.ts` (~line 440).
-
-### Distinguish the aggregate row from the transactions it summarises
-
-**Priority:** P3
-**Origin:** /ship design review on `feat/aggregated-percentiles` (2026-08-14), deferred pending a visual check.
-**Why:** The aggregate row used to be self-evident because it carried one
-value and three blank cells. Now it fills the same four columns as every
-transaction row, with the same band border and delta chips, so it reads as a
-peer of its own constituents. `isAggregated` exists on the row but is used
-only to suppress the graph button. Worse, the panel header's `reg`/`warn`/`ok`
-tallies count the roll-up alongside the transactions inside it, so "3
-regressions" can mean two transactions plus their own aggregate.
-**What:** Give the row a lightweight marker (an outlined "aggregate" chip next
-to the metric name, or a distinct left border), and exclude `isAggregated`
-rows from the panel-header counts and band-chip filters.
-**Where:** `apps/web/app/test-runs/[id]/components/compare/components/MetricsComparisonTable.tsx`
-— counts at ~line 296, row render at ~line 371, `isAggregated` at ~line 232.
-
-### Normalise legacy per-percentile aggregated series on preset restore
-
-**Priority:** P4
-**Origin:** /ship design review on `feat/aggregated-percentiles` (2026-08-14).
-**Why:** `collapsePerfRtPanels` only filters the panel dropdown. Preset restore
-rebuilds series straight from the stored `panelId`/`metricName`, so a preset
-saved before the collapse can hold panel 202 — a row labelled "All aggregated
-— Request RT P90" that now shows AVG/P90/P95/P99, contradicting its own label
-and duplicating the collapsed "All aggregated — Request RT" row if both are
-added. Only affects presets saved before the collapse shipped.
-**What:** On restore, when `isAggregated` and the panel id is a non-avg RT spec
-(102–104 / 202–204), rewrite it to the keeper (101/201) and rebuild the name
-via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
-**Where:** `apps/web/app/test-runs/[id]/components/compare/hooks/useComparePresets.ts`
-(~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
-
 ## Completed
+
+### Compare card: parallelised aggregate fetch, aggregate-row marker, legacy preset restore
+
+**Parallelise and dedupe the aggregated-series fetch loop.** One request per *distinct
+metric* now, issued with `Promise.all`. `stat` stopped changing the SQL when the aggregate
+moved onto the merged sketch, so two series sharing a metric were issuing byte-identical
+requests one after the other — panels 105 and 205 both map to `error_percentage`, so it was
+reachable without a legacy preset. Applied to the twin in `useTrendsData.ts` as well.
+`spec.stat` stays on the series side; `buildAggregatedComparisons` still needs it for the
+value-only fallback.
+
+**Distinguish the aggregate row.** An outlined `aggregate` chip next to the metric name, and
+the row is excluded from the panel-header `reg`/`warn`/`ok` tallies and from the band-chip
+filter (it is always rendered). Counting the roll-up alongside its own constituents meant "3
+regressions" could be two transactions plus their own aggregate.
+
+**Normalise legacy per-percentile aggregated series on preset restore.**
+`normaliseLegacyAggregatedSeries` rewrites 102/103/104 → 101 and 202/203/204 → 201, rebuilding
+the name from the keeper title, and preset restore runs every series through it. Returns the
+input untouched for the keepers, the error-rate panels, non-aggregated series (panel ids are
+not unique across sources — a Grafana panel 202 is not an RT panel) and unknown panels; all
+six cases are tested.
+
+Web: 3957 passing (12 new), lint and tsc clean.
+**Completed:** v0.2.68.8 (2026-08-20)
 
 ### Surface failed background dashboard deletions in the UI
 
