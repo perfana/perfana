@@ -164,18 +164,6 @@ errors down. Measured cost at the time of writing: `npx tsc -p tsconfig.json --n
 **81 errors**. Bounded enough to do in one pass.
 **Where:** `apps/web/tsconfig.json`.
 
-### Move `--fix` out of the lint check scripts
-
-**Priority:** P3
-**Origin:** /health on `fix/web-type-errors-ts2339` (2026-08-15).
-**Why:** `apps/api`, `apps/grafana-sync` and `apps/perfana-report` run `eslint ... --fix` as their `lint`
-script. A check that repairs instead of reporting cannot fail: in CI's ephemeral checkout it fixes,
-passes, and throws the fix away, so an auto-fixable violation recurs forever without ever failing a
-build. It also mutates the working tree when you run lint locally. Harmless today (all three report
-zero fixable findings), but the gate is not doing what its name says.
-**What:** Drop `--fix` from `lint`; add a separate `lint:fix` script for the repair pass.
-**Where:** `apps/api/package.json`, `apps/grafana-sync/package.json`, `apps/perfana-report/package.json`.
-
 ---
 
 ## Test runs
@@ -255,20 +243,6 @@ AssignmentIcon. All eleven accents are hardcoded literals, so the darker ones (b
 blue-grey `#607d8b`) sit near the 3:1 non-text contrast floor on dark-mode paper.
 **Where:** `apps/web/components/reports/report-generation/section-config.tsx`.
 
-### Three more places still say 50 sections
-
-**Priority:** P4
-**Origin:** /document-release doc review on `feat/reporting-improvements` (2026-08-18).
-**Why:** `MAX_REPORT_SECTIONS` (20) is now the cap the ad-hoc validator and the builder enforce,
-and the Swagger `maxItems` was corrected to match. Three sized-for-50 leftovers remain, none of
-them load-bearing today but all of them lies waiting to be believed: a dead second cap, an order
-ceiling one short of the old limit, and the template DTOs, which are a genuinely separate limit
-that nobody has decided on.
-**Where:** `apps/api/src/modules/reports/services/report-generation.service.ts` (~line 423, the
-`> 50` throw the validator now pre-empts); `apps/api/src/modules/reports/dto/create-report.dto.ts`
-(~line 63, `@Max(49)` on `ReportSectionConfigDto.order`); `apps/api/src/modules/reports/dto/create-template.dto.ts`
-(~lines 87, 151, 203 — decide whether templates share the report cap or keep their own).
-
 ---
 
 ## Tests
@@ -280,17 +254,6 @@ that nobody has decided on.
 **Why:** `socketManager.disconnect()` tears down the socket but intentionally preserves `persistedListeners` so they survive transient reconnects. A *manual* disconnect is a full teardown though — a later `connect()` re-attaches listeners the caller may have meant to drop. This same leak caused the socket `on()` test to grab a stale handler across the suite (worked around in the test, not the source).
 **What:** Decide whether a manual `disconnect()` should clear `persistedListeners` while reconnect-triggered teardown keeps them. If yes, distinguish manual teardown from reconnect teardown.
 **Where:** `apps/web/lib/socket.ts` — `disconnect()` (~line 281) and `persistedListeners` (~line 55).
-
-### `apps/api/.test-db-config.json` is tracked but machine-generated
-
-**Priority:** P4
-**Origin:** /ship testing + maintainability specialists on `feat/reporting-improvements`
-(2026-08-18).
-**Why:** `src/test/setup-database.ts` writes this file from the running testcontainer with an
-ephemeral port, so every developer's test run dirties the tree and a stale port points tests at a
-dead socket. It has already been committed with a machine-local value at least once.
-**Where:** gitignore it and `git rm --cached`; commit a `.test-db-config.example.json` if the
-shape needs documenting. Not done in-branch because untracking affects every checkout.
 
 ---
 
@@ -351,6 +314,30 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
 ## Completed
+
+### Move `--fix` out of the lint check scripts
+
+`lint` in `apps/api`, `apps/grafana-sync` and `apps/perfana-report` now reports
+instead of repairing; the repair pass moved to a new `lint:fix` script in each.
+All three still pass clean, so nothing was being silently auto-fixed.
+**Completed:** v0.2.68.1 (2026-08-20)
+
+### Three more places still say 50
+
+All four leftovers now key off `MAX_REPORT_SECTIONS` (20): the `createAdHocReport`
+backstop, `ReportSectionConfigDto.order`'s `@Max`, and the three `create-template.dto.ts`
+caps. A fourth site the item did not list — `report-template.service.ts`
+`validateSections` — was aligned too. Decision taken on the open question: **templates
+share the report cap**, since a template holding more sections than a report can render
+can never be generated.
+**Completed:** v0.2.68.1 (2026-08-20)
+
+### `apps/api/.test-db-config.json` is tracked but machine-generated
+
+`git rm --cached` plus a `.gitignore` entry. No `.example.json`: both readers
+(`setup-database.ts`, `phase5-migration-validation.test.ts`) guard with `existsSync`
+and fall back to defaults, so the shape needs no separate documentation.
+**Completed:** v0.2.68.1 (2026-08-20)
 
 ### Fix pre-existing DynatraceCard test failures (23 tests)
 

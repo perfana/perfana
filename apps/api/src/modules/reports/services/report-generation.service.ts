@@ -11,6 +11,7 @@ import {
   OwnedResource,
   SystemUnderTest,
 } from '@perfana/shared';
+import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
 import { withRequestEm } from '../../../common/db/request-em';
 import { findTestRunByEitherId } from './resolve-test-run';
 import {
@@ -420,8 +421,8 @@ export class ReportGenerationService {
         throw new ValidationException('At least one section is required');
       }
 
-      if (options.sections.length > 50) {
-        throw new ValidationException('Maximum 50 sections allowed per report');
+      if (options.sections.length > MAX_REPORT_SECTIONS) {
+        throw new ValidationException(`Maximum ${MAX_REPORT_SECTIONS} sections allowed per report`);
       }
 
       let templateId = options.templateId;

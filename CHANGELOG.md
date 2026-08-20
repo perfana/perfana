@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.1] - 2026-08-20
+
+### Changed
+- **The section cap says 20 everywhere it is enforced.** `MAX_REPORT_SECTIONS` was already 20, but four checks still read 50 or 49: the ad-hoc generation backstop, the section `order` ceiling, the three template DTO caps, and the template service's own `validateSections`. They now all key off the constant, and templates share the report cap — a template holding more sections than a report can render could never be generated.
+- **`lint` reports instead of repairing.** `apps/api`, `apps/grafana-sync` and `apps/perfana-report` ran `eslint --fix` as their `lint` script, so the gate could not fail on an auto-fixable violation and mutated the working tree when run locally. The repair pass moved to a new `lint:fix` script in each.
+
+### Fixed
+- **`apps/api/.test-db-config.json` is no longer tracked.** The test setup writes it from the running testcontainer with an ephemeral port, so every test run dirtied the tree and the committed port pointed at a dead socket.
+
 ## [0.2.68.0] - 2026-08-20
 
 ### Added

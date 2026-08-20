@@ -59,11 +59,11 @@ export class ReportSectionConfigDto {
     description: 'Display order in the report (0-based)',
     example: 0,
     minimum: 0,
-    maximum: 49,
+    maximum: MAX_REPORT_SECTIONS - 1,
   })
   @IsNumber()
   @Min(0, { message: 'Order must be at least 0' })
-  @Max(49, { message: 'Order must not exceed 49' })
+  @Max(MAX_REPORT_SECTIONS - 1, { message: `Order must not exceed ${MAX_REPORT_SECTIONS - 1}` })
   order!: number;
 
   @ApiPropertyOptional({
