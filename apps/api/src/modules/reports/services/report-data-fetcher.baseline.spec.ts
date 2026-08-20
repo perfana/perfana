@@ -96,6 +96,166 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     expect(data!.rows.map((r) => r.label)).toEqual(['used', 'cpu']);
   });
 
+  it('compares selected performance-metrics dashboards from the rollups, not the transactions table', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Performance test metrics Checkout', panel_title: 'Response times', panel_id: 1, metric_name: 'T05', mean: 110, q95: 220, q99: 300, unit: 'ms' },
+      { test_run_id: 'base', dashboard_label: 'Performance test metrics Checkout', panel_title: 'Response times', panel_id: 1, metric_name: 'T05', mean: 100, q95: 200, q99: 250, unit: 'ms' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const repo = { query: jest.fn() } as any;
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics', {
+      metrics: ['avg'], userId: 'u', roles: [],
+      selections: [{ dashboardLabel: 'Performance test metrics Checkout' }],
+    });
+
+    // The transactions query never runs — the rollups answer it
+    expect(repo.query).not.toHaveBeenCalled();
+    const [, params] = dataSource.query.mock.calls[0]!;
+    expect(params[1]).toBe('performance_test');
+    expect(data!.rows[0]!.dashboardLabel).toBe('Performance test metrics Checkout');
+    expect(data!.rows[0]!.metrics[0]!.diffPercent).toBeCloseTo(10);
+  });
+
+  it('still compares transactions when no dashboard is selected', async () => {
+    const rows = [
+      { test_run_id: 'cur', scenario_name: 'checkout', transaction_name: 'login', avg_ms: '110', p90_ms: null, p95_ms: null, p99_ms: null },
+      { test_run_id: 'base', scenario_name: 'checkout', transaction_name: 'login', avg_ms: '100', p90_ms: null, p95_ms: null, p99_ms: null },
+    ];
+    const repo = { query: jest.fn().mockResolvedValue(rows) } as any;
+    const dataSource = { query: jest.fn() };
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics',
+      { metrics: ['avg'], userId: '', roles: [] });
+
+    expect(dataSource.query).not.toHaveBeenCalled();
+    expect(data!.rows[0]!.group).toBe('checkout');
+    expect(data!.rows[0]!.dashboardLabel).toBeUndefined();
+  });
+
+  it('compares URL panels from the sampler rollup, and only URL RT carries percentiles', async () => {
+    const urlRows = [
+      { test_run_id: 'cur', normalized_url: '/checkout', avg_response_time: '120', p90: '200', p95: '250', p99: '400',
+        avg_latency: '30', avg_connect_time: '5', error_percentage: '2.5', throughput: '10' },
+      { test_run_id: 'base', normalized_url: '/checkout', avg_response_time: '100', p90: '150', p95: '200', p99: '300',
+        avg_latency: '20', avg_connect_time: '4', error_percentage: '1.25', throughput: '8' },
+    ];
+    const repo = { query: jest.fn().mockResolvedValue(urlRows) } as any;
+    const dataSource = { query: jest.fn() };
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics', {
+      metrics: ['avg', 'p95'], userId: '', roles: [],
+      selections: [
+        { dashboardLabel: 'Performance test metrics Checkout', panelId: 210 },  // URL RT
+        { dashboardLabel: 'Performance test metrics Checkout', panelId: 214 },  // URL Error Rate
+      ],
+    });
+
+    // Sampler rollup, not ds_metric_statistics
+    expect(dataSource.query).not.toHaveBeenCalled();
+    expect(repo.query.mock.calls[0]![0]).toContain('test_run_sampler_stats');
+
+    const rt = data!.rows.find((r) => r.panelTitle === 'URL Response Times')!;
+    expect(rt.label).toBe('/checkout');
+    expect(rt.metrics.find((m) => m.key === 'avg')!.diffPercent).toBeCloseTo(20);
+    expect(rt.metrics.find((m) => m.key === 'p95')!.diffPercent).toBeCloseTo(25);
+
+    // An error rate is one number per URL — the percentile column stays empty rather
+    // than repeating the average
+    const errors = data!.rows.find((r) => r.panelTitle === 'URL Error Rate')!;
+    expect(errors.metrics.find((m) => m.key === 'avg')!.current).toBe(2.5);
+    expect(errors.metrics.find((m) => m.key === 'p95')!.current).toBeNull();
+  });
+
+  it('keeps a URL panel and a statistics panel in the same comparison', async () => {
+    const statsRows = [
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T01', mean: 110, q95: 220, q99: 300, unit: 'ms' },
+      { test_run_id: 'base', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T01', mean: 100, q95: 200, q99: 250, unit: 'ms' },
+    ];
+    const urlRows = [
+      { test_run_id: 'cur', normalized_url: '/checkout', avg_response_time: '120', p90: null, p95: null, p99: null,
+        avg_latency: null, avg_connect_time: null, error_percentage: null, throughput: null },
+    ];
+    const repo = { query: jest.fn().mockResolvedValue(urlRows) } as any;
+    const dataSource = { query: jest.fn().mockResolvedValue(statsRows) };
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics', {
+      metrics: ['avg'], userId: '', roles: [],
+      selections: [
+        { dashboardLabel: 'Perf', panelId: 101 },
+        { dashboardLabel: 'Perf', panelId: 210 },
+      ],
+    });
+
+    // Stored titles name the statistic; the report names the panel once, spelled out
+    expect(data!.rows.map((r) => r.panelTitle)).toEqual(['Transaction Response Times', 'URL Response Times']);
+  });
+
+  it('names the four per-percentile RT panels once, spelled out', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T01', mean: 110, q95: 220, q99: 300, unit: 'ms' },
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: 'Request RT P95', panel_id: 203, metric_name: 'R01', mean: 60, q95: 90, q99: 120, unit: 'ms' },
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: 'Transaction Error Rate', panel_id: 105, metric_name: 'T01', mean: 1, q95: 2, q99: 3, unit: 'percent' },
+      { test_run_id: 'base', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T01', mean: 100, q95: 200, q99: 250, unit: 'ms' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any);
+
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics', {
+      metrics: ['avg'], userId: 'u', roles: [],
+      selections: [{ dashboardLabel: 'Perf' }],
+    });
+
+    expect(data!.rows.map((r) => r.panelTitle)).toEqual([
+      'Transaction Response Times',
+      'Request Response Times',
+      'Transaction Error Rate',   // panels that are not response times keep their stored title
+    ]);
+  });
+
+  it('answers the "All aggregated" series from the run-wide rollup, not the per-series rows', async () => {
+    const statsRows = [
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'login', mean: 110, q95: 220, q99: 300, unit: 'ms' },
+      { test_run_id: 'base', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'login', mean: 100, q95: 200, q99: 250, unit: 'ms' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(statsRows) };
+    const repo = { query: jest.fn()
+      .mockResolvedValueOnce([{ avg: '150', p90: null, p95: '250', p99: '300', pass: '1', fail: '0' }])  // current
+      .mockResolvedValueOnce([{ avg: '120', p90: null, p95: '200', p99: '250', pass: '1', fail: '0' }]) } as any; // baseline
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics', {
+      metrics: ['avg'], userId: '', roles: [],
+      selections: [{ dashboardLabel: 'Perf', panelId: 101, metricNames: ['All aggregated', 'login'] }],
+    });
+
+    const agg = data!.rows.find((r) => r.label === 'All aggregated')!;
+    expect(agg.panelTitle).toBe('Transaction Response Times');
+    expect(agg.metrics[0]!.current).toBe(150);
+    expect(agg.metrics[0]!.diffPercent).toBeCloseTo(25);
+    // The sentinel is stripped before the per-series query, which still returns 'login'
+    expect(data!.rows.some((r) => r.label === 'login')).toBe(true);
+  });
+
+  it('runs no per-series query for a panel that asked only for the aggregate', async () => {
+    const dataSource = { query: jest.fn() };
+    const repo = { query: jest.fn().mockResolvedValue([{ avg: '10', p90: null, p95: null, p99: null, pass: '1', fail: '0' }]) } as any;
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics', {
+      metrics: ['avg'], userId: '', roles: [],
+      selections: [{ dashboardLabel: 'Perf', panelId: 201, metricNames: ['All aggregated'] }],
+    });
+
+    expect(dataSource.query).not.toHaveBeenCalled();
+    expect(data!.rows).toHaveLength(1);
+    expect(data!.rows[0]!.panelTitle).toBe('Request Response Times');
+  });
+
   it('omits dashboard/panel filters when not configured', async () => {
     const dataSource = { query: jest.fn().mockResolvedValue([]) };
     const svc = new ReportDataFetcherService(repoStub, authzStub, dataSource as any);
