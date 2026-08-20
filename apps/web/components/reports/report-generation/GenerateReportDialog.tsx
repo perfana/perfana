@@ -23,6 +23,7 @@ import {
   Chip,
   Collapse,
   TextField,
+  useMediaQuery,
 } from '@mui/material';
 import {
   DndContext,
@@ -156,6 +157,15 @@ export function GenerateReportDialog({
   const [sections, setSections] = useState<ReportSectionConfig[]>(initialSections);
   // Collapsing the catalogue hands its width to the canvas, for narrow windows and long reports.
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
+
+  // The builder had a ~662px hard floor: 380 (canvas) + 210 (palette) + gaps, inside a
+  // DialogContent that clipped rather than scrolled, so below it part of the palette or
+  // canvas was simply unreachable. Collapse the palette automatically on a narrow window —
+  // the control already exists, it just defaulted to expanded and had to be found.
+  const isNarrowDialog = useMediaQuery('(max-width:900px)');
+  useEffect(() => {
+    if (isNarrowDialog) setPaletteCollapsed(true);
+  }, [isNarrowDialog]);
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -431,7 +441,8 @@ export function GenerateReportDialog({
         </Typography>
       </DialogTitle>
 
-      <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* auto, not hidden: clipping made overflow unreachable instead of scrollable. */}
+      <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
         {/* Top Section: Banner and Toggle */}
         <Box sx={{ flexShrink: 0 }}>
           {/* Template Info Banner */}

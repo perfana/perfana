@@ -748,12 +748,31 @@ export class ReportHtmlCompilerService {
          was constrained they simply used the whole window; now they would run out of their card
          and off the page.
 
-         They scroll inside their own section instead. Forcing them to fit was tried and is
+         They scroll inside their own container instead. Forcing them to fit was tried and is
          worse: table-layout:fixed gives every column an equal share, which squashed the
          per-transaction tables until the text overlapped. Print is untouched — this is a screen
-         affordance, and paper has no scrollbar. */
-      section {
+         affordance, and paper has no scrollbar.
+
+         Scoped to .table-scroll, not the section itself. On the section the scrollbar landed at the
+         bottom of the whole 30px-padded card rather than under the table, the card's right
+         padding collapsed at the end of the scroll, and — per spec — overflow-y computed
+         from visible to auto, so any child overflowing vertically got its own scrollbar too. */
+      .table-scroll {
         overflow-x: auto;
+      }
+
+      /* Tables need the 340mm measure; prose does not. At full width body copy ran to
+         150-170 characters per line, well past the 65-75 the width change was partly
+         meant to fix. */
+      .section-text,
+      section > p {
+        max-width: 75ch;
+      }
+
+      /* 11pt is ~14.7px, below the 16px floor. That was defensible while the report was
+         print-first; it is a deliberate on-screen reading surface now. Print keeps 11pt. */
+      body {
+        font-size: 16px;
       }
     }
 

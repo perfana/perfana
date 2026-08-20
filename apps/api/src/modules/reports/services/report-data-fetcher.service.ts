@@ -1631,11 +1631,17 @@ export class ReportDataFetcherService {
    * Get detailed SLO check results for a test run.
    * Returns individual check results with requirement/actual value for the SLO renderer.
    */
+  /**
+   * Returns `null` — not `[]` — when the query fails. An empty array means the run
+   * genuinely has no checks, and the renderer draws a green "all clear" card for it.
+   * Conflating the two produced a permanently stored report that said everything
+   * passed because a transient DB error had been swallowed.
+   */
   async getSloCheckResults(
     testRunId: string,
     _userId: string = '',
     _roles: string[] = [],
-  ): Promise<SloCheckResult[]> {
+  ): Promise<SloCheckResult[] | null> {
     try {
       const rows: SloCheckResult[] = await this.dataSource.query(
         `SELECT
@@ -1653,7 +1659,13 @@ export class ReportDataFetcherService {
           cr.dashboard_label,
           cr.match_pattern,
           cr.requirement->>'operator' AS requirement_operator,
-          (cr.requirement->>'value')::numeric AS requirement_value,
+          -- Guarded cast: a single row whose requirement value is not numeric used to
+          -- throw here and collapse EVERY SLO into the green "no results" card. A
+          -- non-numeric value now yields NULL for that one row instead.
+          CASE
+            WHEN cr.requirement->>'value' ~ '^\\s*-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?\\s*$'
+            THEN (cr.requirement->>'value')::numeric
+          END AS requirement_value,
           cr.requirement,
           cr.targets,
           cr.message,
@@ -1668,8 +1680,8 @@ export class ReportDataFetcherService {
 
       return rows;
     } catch (error) {
-      this.logger.warn(`Failed to get SLO check results for ${testRunId}: ${(error as Error).message}`);
-      return [];
+      this.logger.error(`Failed to get SLO check results for ${testRunId}: ${(error as Error).message}`);
+      return null;
     }
   }
 

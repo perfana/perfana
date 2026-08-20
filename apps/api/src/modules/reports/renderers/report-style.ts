@@ -338,6 +338,17 @@ export function emptyState(message: string): string {
   return `<div style="padding:20px; background:${REPORT_COLORS.emptyBg}; border-radius:4px; text-align:center; color:${REPORT_COLORS.emptyInk}; font-size:13px;">${escapeHtml(message)}</div>`;
 }
 
+/**
+ * A section that could not be produced, as opposed to one with nothing to show.
+ * Deliberately not the neutral grey of {@link emptyState}: a stored report is read
+ * long after the failure, and "we could not load this" must never look like "this
+ * was fine".
+ */
+export function warningState(message: string): string {
+  const { bg, fg } = PILL_FILLS.warn;
+  return `<div style="padding:20px; background:${bg}; border:1px solid ${fg}33; border-left:4px solid ${fg}; border-radius:4px; color:${fg}; font-size:13px;"><strong>Section incomplete.</strong> ${escapeHtml(message)}</div>`;
+}
+
 /** Summary stat card (label + big value + optional sub-line). valueHtml is raw HTML. */
 export function statCard(label: string, valueHtml: string, subHtml = ''): string {
   return `<div style="background:${REPORT_COLORS.cardBg}; border:1px solid ${REPORT_COLORS.cardBorder}; border-radius:8px; padding:20px;">

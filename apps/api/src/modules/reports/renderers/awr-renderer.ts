@@ -163,7 +163,8 @@ export class AwrRenderer {
     return `
       <div style="margin-top: 24px;">
         ${groupHeader('Insights', [chip(`${formatInt(insights.length)} insights`, 'neutral')])}
-        <table style="width: 100%; border-collapse: collapse;">
+        <div class="table-scroll">
+          <table style="width: 100%; border-collapse: collapse;">
           <thead>
             <tr style="${THEAD_ROW}">
               <th style="${TH_CENTER} width: 80px;">Severity</th>
@@ -177,6 +178,7 @@ export class AwrRenderer {
             ${rows}
           </tbody>
         </table>
+        </div>
       </div>
     `;
   }
@@ -219,7 +221,8 @@ export class AwrRenderer {
     return `
       <div style="margin-top: 24px;">
         ${groupHeader('Top SQL by Elapsed Time', [chip(`${formatInt(topSqlEntries.length)} statements`, 'neutral')])}
-        <table style="width: 100%; border-collapse: collapse;">
+        <div class="table-scroll">
+          <table style="width: 100%; border-collapse: collapse;">
           <thead>
             <tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">SQL ID</th>
@@ -232,6 +235,7 @@ export class AwrRenderer {
             ${rows}
           </tbody>
         </table>
+        </div>
       </div>
     `;
   }

@@ -1019,13 +1019,35 @@ describe('ReportHtmlCompilerService wide tables', () => {
       { render: jest.fn() } as never,
     ).compileHtml('Report', '<section>x</section>', {} as never);
 
-  it('keeps a too-wide table inside its section on screen', () => {
+  it('scrolls a too-wide table in its own container, not the whole section', () => {
     // The regressions list and per-transaction Apdex breakdown carry more columns than 180mm
     // holds. Unconstrained they ran out of their card and off the page.
+    //
+    // The container must be .table-scroll, not the section: on the section the scrollbar
+    // landed at the bottom of the whole padded card, the card's right padding collapsed at
+    // the end of the scroll, and overflow-y computed from visible to auto.
     const out = html();
     const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
 
-    expect(screenBlock).toMatch(/section\s*\{[^}]*overflow-x:\s*auto/);
+    expect(screenBlock).toMatch(/\.table-scroll\s*\{[^}]*overflow-x:\s*auto/);
+    expect(screenBlock).not.toMatch(/^\s*section\s*\{[^}]*overflow-x:\s*auto/m);
+  });
+
+  it('caps the prose measure without capping the tables', () => {
+    // Body copy ran to 150-170 characters at the 340mm table measure.
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/\.section-text[\s\S]*?max-width:\s*75ch/);
+  });
+
+  it('lifts screen body text to the 16px floor, leaving print at 11pt', () => {
+    const out = html();
+    const screenBlock = out.slice(out.indexOf('@media screen'), out.indexOf('/* Print Styles */'));
+    const printBlock = out.slice(out.indexOf('/* Print Styles */'));
+
+    expect(screenBlock).toMatch(/body\s*\{[^}]*font-size:\s*16px/);
+    expect(printBlock).not.toMatch(/font-size:\s*16px/);
   });
 
   it('does not force columns to equal shares', () => {

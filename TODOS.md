@@ -54,67 +54,6 @@ Pass criterion (already encoded in the script): cold p99 < 200ms, warm p99 < 30m
 
 ---
 
-## Reports
-
-### SLO section renders a green "all clear" card when the check-results query fails
-
-**Priority:** P2
-**Origin:** Adversarial review during /ship on `fix/report-sut-name-and-slo-units` (2026-07-10). Pre-existing behavior, adjacent to the SLO unit-formatting fix.
-**Why:** `getSloCheckResults` swallows any query error (`logger.warn` + return `[]`), and the SLO renderer shows the green ✓ "No SLO check results available" card for an empty list. A transient DB error during generation produces a permanently stored report that visually implies "all clear". Worse: a single `check_results` row whose `requirement->>'value'` isn't castable to numeric throws in the `::numeric` cast and collapses *every* SLO into that green card.
-**What:** Distinguish "query failed" from "no results" — e.g. let the error propagate to fail the generation job (it retries), or render an explicit warning card. Consider `NULLIF`-guarding the `::numeric` cast so one malformed row doesn't blank the section.
-**Where:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts` (~1532-1555, the catch), `apps/api/src/modules/reports/renderers/slo-renderer.ts` (empty-state card).
-
-### Report typography on screen: prose measure and body size
-
-**Priority:** P3
-**Origin:** /ship design specialist on `feat/reporting-improvements` (2026-08-18).
-**Why:** The screen measure was widened to 340mm so the seven-column regressions table fits.
-Tables need it; prose does not — body copy now runs ~150-170 characters per line, past the
-65-75 range the width change was partly meant to fix. Separately, body is 11pt (~14.7px) on
-screen, below the 16px floor, which was defensible while the report was print-first and is less
-so now it is a deliberate on-screen reading surface.
-**Where:** `apps/api/src/modules/reports/services/report-html-compiler.service.ts` — the
-`@media screen` block. `max-width: 75ch` on `.section-text` and section `<p>`; a screen-only
-`body { font-size: 16px }` leaving 11pt for print.
-**Deferred because:** the report layout had already been through several rounds; only the print
-legibility floor was taken.
-
-### Scroll wide tables in their own container, not the whole section
-
-**Priority:** P3
-**Origin:** /ship design specialist on `feat/reporting-improvements` (2026-08-18).
-**Why:** `@media screen { section { overflow-x: auto } }` makes every section a scroll container,
-not just the wide tables. The scrollbar lands at the bottom of the whole 30px-padded card rather
-than under the table, the card's right padding collapses at the end of the scroll, and per spec
-`overflow-y` computes from `visible` to `auto`, so any child overflowing vertically gets its own
-scrollbar.
-**Where:** emit `<div class="table-scroll">` around `.data-table` in the renderers and scope the
-rule to it, leaving `section` alone.
-
-### Report builder has a ~662px hard floor
-
-**Priority:** P3
-**Origin:** /ship design specialist on `feat/reporting-improvements` (2026-08-18).
-**Why:** `minWidth: 380` on the canvas plus `minWidth: 210` on the palette plus gaps, inside a
-`DialogContent` with `overflow: hidden`. Below that the overflow is clipped rather than scrolled,
-so on tablet-portrait or a small laptop window part of the palette or canvas is unreachable. The
-collapse control exists but is manual and defaults to expanded.
-**Where:** `apps/web/components/reports/report-generation/GenerateReportDialog.tsx` — stack the
-columns below a breakpoint, or auto-collapse the palette when the dialog is narrow.
-
-### Section accent colours are not unique and are not theme tokens
-
-**Priority:** P4
-**Origin:** /ship design specialist on `feat/reporting-improvements` (2026-08-18).
-**Why:** The palette, card avatar and order badge all key off `config.color`, but `trends` and
-`transaction_response_times` share an icon, `trends` and `top_10_lists` share `#ff9800`, `header`
-and `transaction_response_times` share `#2196f3`, and `text_block`/`slo` share a rotated
-AssignmentIcon. All eleven accents are hardcoded literals, so the darker ones (brown `#795548`,
-blue-grey `#607d8b`) sit near the 3:1 non-text contrast floor on dark-mode paper.
-**Where:** `apps/web/components/reports/report-generation/section-config.tsx`.
-
----
-
 ## Tests
 
 ### Consider clearing `persistedListeners` on manual `disconnect()`
@@ -184,6 +123,41 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
 ## Completed
+
+### Reports: SLO all-clear card, prose measure, table scrolling, builder floor, section accents
+
+Five items from the Reports section, in one pass over the same files.
+
+**SLO section rendered a green "all clear" card when the query failed** (P2). Two separate
+faults, both fixed. `getSloCheckResults` now returns `null` on failure instead of `[]`, and
+the renderer draws an explicit amber "Section incomplete" card for it — an empty array still
+means the run genuinely has no checks. And the `(requirement->>'value')::numeric` cast is
+guarded by a regex, so one uncastable row yields NULL for that row rather than throwing and
+collapsing *every* SLO into the green card. The guard admits scientific notation, verified
+against the live database (`1e5` → 100000, `abc` → NULL, no error).
+
+**Prose measure and body size.** `max-width: 75ch` on `.section-text` and section `<p>`, and
+a screen-only `body { font-size: 16px }`. Tables keep the 340mm measure; print keeps 11pt.
+
+**Wide tables scroll in their own container.** All twelve `<table>` emitters across the nine
+renderers are wrapped in `<div class="table-scroll">` and the `overflow-x` rule moved off
+`section` onto it. On the section the scrollbar sat at the bottom of the whole 30px-padded
+card, the card's right padding collapsed at the end of the scroll, and per spec `overflow-y`
+computed from `visible` to `auto`.
+
+**Report builder ~662px floor.** The palette now auto-collapses below 900px, and
+`DialogContent` scrolls instead of clipping — the clipping is what made the overflow
+unreachable rather than merely off-screen.
+
+**Section accents and icons are all distinct.** Eleven distinct accents, contrast-checked for
+dark-mode paper (the brown and blue-grey are gone), and the four duplicated icons resolved:
+`text_block` → Notes, `slo` → Rule (was AssignmentIcon rotated 180°), `transaction_response_times`
+→ Timeline (was TrendingUp, same as `trends`). Kept as literals rather than theme tokens: it is
+a closed set of eleven that does not vary by theme, and a palette extension for them would be
+indirection for its own sake.
+
+API 733 report tests passing, web 3945, lint and tsc clean in both.
+**Completed:** v0.2.68.6 (2026-08-20)
 
 ### Turn on `strict` in apps/web
 

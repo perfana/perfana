@@ -14,6 +14,7 @@ import {
   markerChip,
   sectionText,
   emptyState,
+  warningState,
   formatInt,
   pill,
   sectionHeader,
@@ -76,6 +77,18 @@ export class SloRenderer {
     }
 
     const checkResults = await this.dataFetcher.getSloCheckResults(testRun.testRunId, userId, roles);
+
+    // null = the query failed. Saying "no SLO results" here would render the green
+    // all-clear card and store it permanently, which reads as "everything passed".
+    if (checkResults === null) {
+      return `
+        <section class="slo-section">
+          ${sectionHeader(title, { kicker: 'Service Level Objectives' })}
+          ${sectionText(text)}
+          ${warningState('SLO results could not be loaded for this test run. This section is incomplete — it does not mean the SLOs passed. See the API log for the query error.')}
+        </section>
+      `;
+    }
 
     // Apply optional type filter
     const filtered = filterType
@@ -200,7 +213,8 @@ export class SloRenderer {
       .join('');
 
     return `
-      <table style="width: 100%; border-collapse: collapse;">
+      <div class="table-scroll">
+        <table style="width: 100%; border-collapse: collapse;">
         <thead>
           <tr style="${THEAD_ROW}">
             <th style="${TH_TEXT}">Dashboard</th>
@@ -214,6 +228,7 @@ export class SloRenderer {
           ${tableRows}
         </tbody>
       </table>
+      </div>
     `;
   }
 
@@ -293,13 +308,15 @@ export class SloRenderer {
       <tr style="background:#fff7f6;">
         <td colspan="${columns}" style="padding: 0 16px 14px; border-bottom: 1px solid #f0f2f5;">
           <div style="font-size:11.5px; color:${REPORT_COLORS.mutedInk}; margin-bottom:6px;">${caption}</div>
-          <table style="width:100%; border-collapse:collapse; background:#ffffff; border:1px solid #f3d7d3; border-radius:6px;">
+          <div class="table-scroll">
+            <table style="width:100%; border-collapse:collapse; background:#ffffff; border:1px solid #f3d7d3; border-radius:6px;">
             <thead><tr>${head.map((h, i) => {
               const align = i === 0 ? 'left' : i === head.length - 1 ? 'center' : 'right';
               return `<th style="padding:6px 10px; font-size:10px; text-transform:uppercase; letter-spacing:0.05em; color:${REPORT_COLORS.mutedInk}; text-align:${align};">${h}</th>`;
             }).join('')}</tr></thead>
             <tbody>${rows}</tbody>
           </table>
+          </div>
           ${rest > 0 ? `<div style="font-size:11px; color:${REPORT_COLORS.mutedInk}; margin-top:6px;">and ${formatInt(rest)} more</div>` : ''}
         </td>
       </tr>
