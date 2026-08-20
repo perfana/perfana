@@ -56,6 +56,12 @@ export interface ApplicationDashboard {
   variables?: Record<string, unknown>[];
   replaced_templating_variables?: Record<string, unknown>[];
   snapshot_timeout: number;
+  /**
+   * Background-deletion state: null when not being deleted, 'queued' | 'deleting'
+   * while the job is in flight, 'failed' once its retries are exhausted. The row
+   * stays in the list wearing a badge rather than vanishing and reappearing.
+   */
+  deletion_status?: string | null;
   created_at: string;
   updated_at: string;
   // Joined data
@@ -134,14 +140,15 @@ export class ApplicationDashboardsService {
         this.logger.debug(`Applying org filter for non-admin user. Accessible orgs: ${JSON.stringify(orgIds)}`);
 
         if (orgIds.length === 0) {
-          // User has no organization access - only show legacy (NULL) dashboards
-          this.logger.debug('No accessible orgs - filtering to NULL organization_id only');
-          queryBuilder.andWhere('ad.organizationId IS NULL');
+          // No organization access at all: nothing is visible.
+          this.logger.debug('No accessible orgs - nothing is visible');
+          queryBuilder.andWhere('1 = 0'); // no memberships, nothing is visible
         } else {
-          // User has org access - show their org dashboards + legacy (NULL) dashboards
-          this.logger.debug(`Adding WHERE clause: organizationId IN (${orgIds.join(', ')}) OR organizationId IS NULL`);
+          // Scoped to the user's organizations. No null-org escape: organization_id
+          // has been NOT NULL since Phase 4, so it could only match a dangling join.
+          this.logger.debug(`Adding WHERE clause: organizationId IN (${orgIds.join(', ')})`);
           queryBuilder.andWhere(
-            '(ad.organizationId IN (:...orgIds) OR ad.organizationId IS NULL)',
+            'ad.organizationId IN (:...orgIds)',
             { orgIds }
           );
         }
@@ -216,6 +223,9 @@ export class ApplicationDashboardsService {
           variables: enrichedVariables,
           replaced_templating_variables: row.replacedTemplatingVariables as Record<string, unknown>[] | undefined,
           snapshot_timeout: row.snapshotTimeout,
+          // Background-deletion state, so the row can show a badge rather than the
+          // dashboard silently reappearing after a failed job.
+          deletion_status: row.deletionStatus ?? null,
           created_at: row.createdAt.toISOString(),
           updated_at: row.updatedAt.toISOString(),
           grafana_instance: row.grafanaInstance ? {
@@ -264,11 +274,11 @@ export class ApplicationDashboardsService {
       if (orgIds !== null) {
         if (orgIds.length === 0) {
           // User has no organization access - only legacy (NULL) dashboards
-          queryBuilder.andWhere('ad.organizationId IS NULL');
+          queryBuilder.andWhere('1 = 0'); // no memberships, nothing is visible
         } else {
           // User has org access - their org dashboards + legacy (NULL) dashboards
           queryBuilder.andWhere(
-            '(ad.organizationId IN (:...orgIds) OR ad.organizationId IS NULL)',
+            'ad.organizationId IN (:...orgIds)',
             { orgIds }
           );
         }

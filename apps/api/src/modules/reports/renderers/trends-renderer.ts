@@ -168,7 +168,8 @@ export class TrendsRenderer {
             <h4 style="margin:0; font-size:13px; font-weight:700; color:${REPORT_COLORS.mutedInk}; text-transform:uppercase; letter-spacing:0.05em;">${this.utils.escapeHtml(panel)}</h4>
             ${chip(`${formatInt(rows.length)} series`, 'neutral')}
           </div>
-          <table style="width:100%; border-collapse:collapse;">
+          <div class="table-scroll">
+            <table style="width:100%; border-collapse:collapse;">
             <thead><tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">Series</th>
               ${runHeaders}
@@ -176,6 +177,7 @@ export class TrendsRenderer {
             </tr></thead>
             <tbody>${body}</tbody>
           </table>
+          </div>
           ${rest > 0 ? `<div style="font-size:11px; color:${REPORT_COLORS.mutedInk}; margin-top:6px;">and ${formatInt(rest)} more series</div>` : ''}
         </div>`;
       }).join('\n');
@@ -272,7 +274,8 @@ export class TrendsRenderer {
     }).join('');
 
     return `
-      <table class="data-table">
+      <div class="table-scroll">
+        <table class="data-table">
         <thead>
           <tr>
             <th>Run Date</th>
@@ -292,6 +295,7 @@ export class TrendsRenderer {
           ${rows}
         </tbody>
       </table>
+      </div>
     `;
   }
 

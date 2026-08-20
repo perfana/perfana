@@ -6,16 +6,17 @@
  *
  * Authorization:
  * - All mutation methods accept userId and roles parameters for authorization
- * - Permission checks are performed before mutations
- * - Ownership (created_by, updated_by) will be assigned when entity columns exist
+ * - Every mutation of an existing run goes through `assertCanModify` /
+ *   `assertHasWriteCapability` before touching it (see those methods for why
+ *   RLS alone is not the gate)
  * - Global admins bypass all authorization checks
  *
  * @pattern Orchestrator Pattern + Command Pattern
  */
 
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { UpdateRunningTestDto } from '../dto/update-running-test.dto';
@@ -40,6 +41,8 @@ import { TestRunsMetricsService } from './test-runs-metrics.service';
 import { TestRun, SystemUnderTest, TestEnvironment, Workload } from '../types/test-run.types';
 import { mapEntityToTestRun } from '../handlers/entity-mapper';
 import { AuditService } from '../../audit/audit.service';
+import { AuthorizationService } from '../../../common/services/authorization.service';
+import { Capability } from '../../../constants/capabilities.constants';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { TestRunEventType } from '../types/realtime-events.types';
 
@@ -68,7 +71,77 @@ export class TestRunsMutationService {
     private readonly metricsService: TestRunsMetricsService,
     private readonly auditService: AuditService,
     private readonly testRunsGateway: TestRunsGateway,
+    private readonly authzService: AuthorizationService,
   ) {}
+
+
+  // ============================================
+  // Write gate
+  // ============================================
+
+  /**
+   * Reject callers who may READ a run but not WRITE it.
+   *
+   * RLS is not this gate. `rls_test_runs_update` calls `can_modify_resource`,
+   * whose last branch grants modify to any member of the resource's org — its
+   * own comment says so: "Coarse backstop ... Loose vs service layer; precise
+   * gates live there." This is there. Without it an `org-viewer` could edit
+   * every run they can see, which is every run in their organization.
+   *
+   * API-key principals are exempt. A key has no `organization_members` row, so
+   * `getCapabilities` returns an empty set for every key and gating on it would
+   * deny all programmatic writes. Issuing a key needs `api-key:create`, which
+   * only org-admins hold, so possession of one already implies write intent.
+   */
+  private async assertHasWriteCapability(
+    run: Pick<TestRunEntity, 'id' | 'organizationId' | 'teamId'>,
+    userId: string,
+    roles: string[],
+  ): Promise<void> {
+    if (userId.startsWith('api-key:')) return;
+
+    const caps = await this.authzService.getCapabilities(
+      userId,
+      roles,
+      run.organizationId ?? null,
+      run.teamId ?? null,
+    );
+
+    if (!caps.includes(Capability.TestRunUpdate)) {
+      this.logger.warn(
+        `Write denied: capability=${Capability.TestRunUpdate} userId=${userId} ` +
+          `testRun=${run.id} orgId=${run.organizationId ?? 'null'}`,
+      );
+      throw new ForbiddenException('You do not have permission to modify this test run');
+    }
+  }
+
+  /**
+   * Load a run for mutation and check write permission in one step.
+   *
+   * The load runs through `withRequestEm`, so a run the caller cannot even see
+   * comes back null and is refused as not-found — identical to what the handlers
+   * already do, and it keeps existence unlearnable. `label` is what the
+   * not-found message reports (the UUID, or the test run id for lookups keyed
+   * on that).
+   */
+  private async assertCanModify(
+    where: FindOptionsWhere<TestRunEntity>,
+    label: string,
+    userId: string,
+    roles: string[],
+  ): Promise<void> {
+    const run = await withRequestEm(this.testRunRepo).findOne({
+      where,
+      select: { id: true, organizationId: true, teamId: true },
+    });
+
+    if (!run) {
+      throw new NotFoundException(`Test run not found: ${label}`);
+    }
+
+    await this.assertHasWriteCapability(run, userId, roles);
+  }
 
   /**
    * Update or create a running test run.
@@ -80,7 +153,7 @@ export class TestRunsMutationService {
   async updateRunningTest(
     updateDto: UpdateRunningTestDto,
     userId: string,
-    _roles: string[],
+    roles: string[],
     organizationId: string,
   ): Promise<TestRun> {
     this.logger.debug(
@@ -97,8 +170,20 @@ export class TestRunsMutationService {
 
     const existingTestRun = await this.findTestRun(updateDto.testRunId, systemUnderTest.id, updateDto.testEnvironment, updateDto.workload);
 
-    // NOTE: Permission check will be added here when TestRun entity has organization_id
-    // For now, all test runs can be updated (treated as legacy data)
+    // Only the update branch is gated. Creating a run is the ingest contract —
+    // the caller already had to resolve an organization to get here — whereas
+    // overwriting a run that exists is editing someone else's data.
+    if (existingTestRun) {
+      await this.assertHasWriteCapability(
+        {
+          id: existingTestRun.id,
+          organizationId: existingTestRun.organization_id,
+          teamId: existingTestRun.team_id,
+        },
+        userId,
+        roles,
+      );
+    }
 
     if (existingTestRun?.completed) {
       throw new ResourceExistsException('Test run', `${updateDto.testRunId} for system ${updateDto.systemUnderTest}`);
@@ -136,12 +221,14 @@ export class TestRunsMutationService {
    * @param _roles - The user's roles (reserved for future authorization)
    * @param userIdentifier - Human-readable identifier (email) for the abort message
    */
-  async abortTestRun(id: string, userId: string, _roles: string[], userIdentifier: string): Promise<TestRun> {
+  async abortTestRun(id: string, userId: string, roles: string[], userIdentifier: string): Promise<TestRun> {
     const entity = await withRequestEm(this.testRunRepo).findOne({ where: { id } });
 
     if (!entity) {
       throw new NotFoundException(`Test run not found: ${id}`);
     }
+
+    await this.assertHasWriteCapability(entity, userId, roles);
 
     if (entity.completed) {
       throw new BadRequestException('Test run is already completed');
@@ -319,11 +406,13 @@ export class TestRunsMutationService {
    * @param userId - The user ID for authorization checks
    * @param roles - The user's roles for authorization checks
    */
-  async deleteTestRun(id: string, userId: string, _roles: string[]): Promise<void> {
+  async deleteTestRun(id: string, userId: string, roles: string[]): Promise<void> {
     this.logger.debug(`deleteTestRun: id=${id}, userId=${userId}`);
 
-    // NOTE: Permission check will be added here when TestRun entity has organization_id
-    // For now, all test runs can be deleted (treated as legacy data)
+    // Gated on TestRunUpdate, not TestRunDelete: the capability map reserves
+    // TestRunDelete for org-admins, and org-members delete their own runs today.
+    // Viewers are excluded either way, which is the hole being closed here.
+    await this.assertCanModify({ id }, id, userId, roles);
 
     const command = DeleteTestRunCommand.fromId(id);
     await this.deleteTestRunHandler.execute(command);
@@ -354,10 +443,10 @@ export class TestRunsMutationService {
    * @param userId - The user ID for authorization checks
    * @param roles - The user's roles for authorization checks
    */
-  async updateTags(id: string, tags: string[], userId: string, _roles: string[]): Promise<TestRun> {
+  async updateTags(id: string, tags: string[], userId: string, roles: string[]): Promise<TestRun> {
     this.logger.debug(`updateTags: id=${id}, userId=${userId}`);
 
-    // NOTE: Permission check will be added here when TestRun entity has organization_id
+    await this.assertCanModify({ id }, id, userId, roles);
 
     return this.updateTagsHandler.execute({ id, tags });
   }
@@ -370,22 +459,26 @@ export class TestRunsMutationService {
    * @param userId - The user ID for authorization checks
    * @param roles - The user's roles for authorization checks
    */
-  async updateApplicationRelease(id: string, applicationRelease: string, userId: string, _roles: string[]): Promise<TestRun> {
+  async updateApplicationRelease(id: string, applicationRelease: string, userId: string, roles: string[]): Promise<TestRun> {
     this.logger.debug(`updateApplicationRelease: id=${id}, userId=${userId}`);
+
+    await this.assertCanModify({ id }, id, userId, roles);
 
     return this.updateApplicationReleaseHandler.execute({ id, applicationRelease });
   }
 
-  async updateAnnotations(id: string, annotations: string[], userId: string, _roles: string[]): Promise<TestRun> {
+  async updateAnnotations(id: string, annotations: string[], userId: string, roles: string[]): Promise<TestRun> {
     this.logger.debug(`updateAnnotations: id=${id}, userId=${userId}`);
 
-    // NOTE: Permission check will be added here when TestRun entity has organization_id
+    await this.assertCanModify({ id }, id, userId, roles);
 
     return this.updateAnnotationsHandler.execute({ id, annotations });
   }
 
-  async updateAnalysisStartOffset(id: string, analysisStartOffset: number, userId: string, _roles: string[]): Promise<TestRun> {
+  async updateAnalysisStartOffset(id: string, analysisStartOffset: number, userId: string, roles: string[]): Promise<TestRun> {
     this.logger.debug(`updateAnalysisStartOffset: id=${id}, analysisStartOffset=${analysisStartOffset}, userId=${userId}`);
+
+    await this.assertCanModify({ id }, id, userId, roles);
 
     const result = await this.updateAnalysisStartOffsetHandler.execute({ id, analysisStartOffset });
 
@@ -415,11 +508,13 @@ export class TestRunsMutationService {
     analysisStartOffset: number,
     analysisEndOffset: number,
     userId: string,
-    _roles: string[],
+    roles: string[],
   ): Promise<TestRun> {
     this.logger.debug(
       `updateAnalysisTimeRange: id=${id}, startOffset=${analysisStartOffset}, endOffset=${analysisEndOffset}, userId=${userId}`,
     );
+
+    await this.assertCanModify({ id }, id, userId, roles);
 
     const result = await this.updateAnalysisTimeRangeHandler.execute({
       id,
@@ -465,7 +560,7 @@ export class TestRunsMutationService {
     testRunId: string,
     differencesAccepted: 'ACCEPTED' | 'DENIED' | 'TBD',
     userId: string,
-    _roles: string[],
+    roles: string[],
     systemUnderTestId?: string,
     environment?: string,
     workload?: string,
@@ -473,7 +568,15 @@ export class TestRunsMutationService {
   ): Promise<TestRun> {
     this.logger.debug(`updateAdaptConfig: testRunId=${testRunId}, userId=${userId}`);
 
-    // NOTE: Permission check will be added here when TestRun entity has organization_id
+    // Same where-clause the handler resolves with, so the row checked is the row written.
+    await this.assertCanModify(
+      systemUnderTestId && environment && workload
+        ? { testRunId, systemUnderTestId, testEnvironment: environment, workload }
+        : { testRunId },
+      testRunId,
+      userId,
+      roles,
+    );
 
     return this.updateAdaptConfigHandler.execute({
       testRunId,

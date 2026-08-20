@@ -41,7 +41,7 @@ export function AutocompletePopper({
       style={{ zIndex: 1400, minWidth: 300 }}
     >
       <Paper elevation={8} sx={{ maxHeight: 200, overflow: 'auto' }}>
-        <MenuList dense ref={menuListRef}>
+        <MenuList dense ref={menuListRef as React.RefObject<HTMLUListElement>}>
           {variables.map((variable, index) => {
             const isSelected = index === selectedIndex;
             const isHovered = index === hoveredIndex;

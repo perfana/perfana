@@ -1,5 +1,6 @@
 'use client';
 
+import { normaliseLegacyAggregatedSeries } from '@/lib/aggregated-perf-series';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { ComparePresetsAPI, PresetType } from '@/lib/compare-presets';
@@ -90,18 +91,24 @@ export function useComparePresets({
 
       // Restore series from preset's series_config
       if (preset.series_config && preset.series_config.length > 0) {
-        const restoredSeries: CompareSeries[] = preset.series_config.map((config, index) => ({
-          id: `preset-${preset.id}-${config.dashboardId}-${config.panelId}-${config.metricName}-${index}`,
-          dashboardId: config.dashboardId,
-          dashboardLabel: config.dashboardLabel,
-          panelId: config.panelId,
-          panelTitle: config.panelTitle,
-          metricName: config.metricName,
-          source: config.source as DataSource,
-          metricsSourceId: config.metricsSourceId,
-          isAggregated: config.isAggregated,
-          yAxesFormat: config.yAxesFormat
-        }));
+        const restoredSeries: CompareSeries[] = preset.series_config.map((config, index) =>
+          // A preset saved before the per-percentile RT panels were collapsed still
+          // holds e.g. panel 202, whose row would be labelled "… Request RT P90"
+          // while showing all four statistics — and would duplicate the collapsed
+          // "… Request RT" row if both are added. Rewrite it onto the keeper.
+          normaliseLegacyAggregatedSeries({
+            id: `preset-${preset.id}-${config.dashboardId}-${config.panelId}-${config.metricName}-${index}`,
+            dashboardId: config.dashboardId,
+            dashboardLabel: config.dashboardLabel,
+            panelId: config.panelId,
+            panelTitle: config.panelTitle,
+            metricName: config.metricName,
+            source: config.source as DataSource,
+            metricsSourceId: config.metricsSourceId,
+            isAggregated: config.isAggregated,
+            yAxesFormat: config.yAxesFormat
+          }),
+        );
         setAddedSeries(restoredSeries);
       }
 

@@ -159,10 +159,22 @@ export default function DashboardTable({
                   />
                 </TableCell>
                 <TableCell>
-                  <Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Typography variant="body2" fontWeight="medium">
                       {dashboard.dashboard_name}
                     </Typography>
+                    {/* The row is no longer dropped optimistically on batch delete, so
+                        a deletion that fails permanently says so here instead of the
+                        dashboard silently reappearing on the next reload. */}
+                    {dashboard.deletion_status === 'failed' ? (
+                      <Chip label="Deletion failed" size="small" color="error" variant="outlined" />
+                    ) : dashboard.deletion_status ? (
+                      <Chip
+                        label={dashboard.deletion_status === 'deleting' ? 'Deleting…' : 'Queued for deletion'}
+                        size="small"
+                        variant="outlined"
+                      />
+                    ) : null}
                   </Box>
                 </TableCell>
                 <TableCell>

@@ -270,7 +270,8 @@ export class ApdexRenderer {
       .join('');
 
     return `
-      <table class="data-table">
+      <div class="table-scroll">
+        <table class="data-table">
         <thead>
           <tr>
             <th>Transaction Name</th>
@@ -288,6 +289,7 @@ export class ApdexRenderer {
           ${tableRows}
         </tbody>
       </table>
+      </div>
     `;
   }
 }

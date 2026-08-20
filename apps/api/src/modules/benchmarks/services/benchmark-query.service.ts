@@ -59,11 +59,12 @@ export class BenchmarkQueryService {
       if (orgIds !== null) {
         this.logger.log(`[findAll] NON-ADMIN PATH - User ${userId} has access to organizations: ${orgIds.join(', ')}`);
 
-        // Filter by system_under_test organization_id, including legacy systems with null org_id
+        // Filter by the system's organization. No null-org allowance: the column has
+        // been NOT NULL since Phase 4, so it only ever matched a LEFT JOIN miss.
         if (orgIds.length === 0) {
-          queryBuilder.andWhere('sut.organization_id IS NULL');
+          queryBuilder.andWhere('1 = 0'); // no memberships, nothing is visible
         } else {
-          queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
+          queryBuilder.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
         }
       }
 
@@ -200,11 +201,10 @@ export class BenchmarkQueryService {
 
       // Apply organization filtering for non-admin users
       if (orgIds !== null) {
-        // Include legacy systems with null org_id for backward compatibility
         if (orgIds.length === 0) {
-          queryBuilder.andWhere('sut.organization_id IS NULL');
+          queryBuilder.andWhere('1 = 0'); // no memberships, nothing is visible
         } else {
-          queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
+          queryBuilder.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
         }
       }
 
@@ -240,15 +240,15 @@ export class BenchmarkQueryService {
       const orgIds = await withOrgFilter(userId, roles, this.authzService);
       this.logger.log(`[getBenchmarkTagSyncStatus] START - userId=${userId}, isGlobalAdmin=${orgIds === null}`);
 
-      // For non-admin users, filter by organization
+      // For non-admin users, filter by organization. `= ANY(empty)` is false, so a
+      // user with no memberships correctly sees nothing.
       if (orgIds !== null) {
-        // Include legacy systems with null org_id for backward compatibility
         const result = await this.dataSource.query(`
           SELECT bts.*
           FROM benchmark_tag_sync_status bts
           INNER JOIN benchmarks b ON bts.benchmark_id = b.id
           INNER JOIN systems_under_test sut ON b.system_under_test_id = sut.id
-          WHERE (sut.organization_id = ANY($1::uuid[]) OR sut.organization_id IS NULL)
+          WHERE sut.organization_id = ANY($1::uuid[])
           ORDER BY bts.system_name, bts.dashboard_label, bts.config_title
         `, [orgIds]);
 

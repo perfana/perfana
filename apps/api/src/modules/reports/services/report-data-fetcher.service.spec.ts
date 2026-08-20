@@ -201,7 +201,7 @@ describe('ReportDataFetcherService', () => {
         expect(params).toContain('org-2');
       });
 
-      it('should use IS NULL filter when non-admin user has no org memberships', async () => {
+      it('sees nothing when a non-admin user has no org memberships', async () => {
         authzService.isGlobalAdmin.mockReturnValue(false);
         authzService.getAccessibleOrganizations.mockResolvedValueOnce([]);
         testRunRepo.query.mockResolvedValueOnce([]);
@@ -209,7 +209,10 @@ describe('ReportDataFetcherService', () => {
         await service.getRampUpCutoffTime('run-001', true, 'user-1', []);
 
         const [sql] = testRunRepo.query.mock.calls[0] as [string, unknown[]];
-        expect(sql).toContain('organization_id IS NULL');
+        // Not `organization_id IS NULL`: the column is NOT NULL since Phase 4, so
+        // that read as a legacy-data allowance while matching only dangling joins.
+        expect(sql).toContain('AND FALSE');
+        expect(sql).not.toContain('organization_id IS NULL');
       });
     });
   });
@@ -862,7 +865,7 @@ describe('ReportDataFetcherService', () => {
         expect(sqls.some((sql) => sql.includes('org_filter'))).toBe(true);
       });
 
-      it('should use IS NULL variant CTE when user has no org memberships', async () => {
+      it('emits an empty org_filter CTE when user has no org memberships', async () => {
         authzService.isGlobalAdmin.mockReturnValue(false);
         authzService.getAccessibleOrganizations.mockResolvedValueOnce([]);
         mockThroughputCalls(REPORT_RUN_INFO_NO_CAGG, [], [], []);
@@ -870,7 +873,8 @@ describe('ReportDataFetcherService', () => {
         await service.getThroughputStatsForReport('run-001', false, null, 'user-1', []);
 
         const sqls = dataCalls().map((c) => c[0] as string);
-        expect(sqls.some((sql) => sql.includes('organization_id IS NULL'))).toBe(true);
+        expect(sqls.some((sql) => sql.includes('FROM test_runs tr WHERE FALSE'))).toBe(true);
+        expect(sqls.every((sql) => !sql.includes('organization_id IS NULL'))).toBe(true);
       });
 
       it('should not include org_filter CTE for admin users', async () => {
@@ -990,7 +994,7 @@ describe('ReportDataFetcherService', () => {
         expect(sqls.some((sql) => sql.includes('organization_id IN'))).toBe(true);
       });
 
-      it('should use EXISTS subquery with IS NULL when user has no org memberships', async () => {
+      it('filters everything out when user has no org memberships', async () => {
         authzService.isGlobalAdmin.mockReturnValue(false);
         authzService.getAccessibleOrganizations.mockResolvedValueOnce([]);
         testRunRepo.query.mockResolvedValue([]);
@@ -998,7 +1002,8 @@ describe('ReportDataFetcherService', () => {
         await service.getVirtualUserStatsForReport('run-001', false, null, 'user-1', []);
 
         const sqls = testRunRepo.query.mock.calls.map((c) => c[0] as string);
-        expect(sqls.some((sql) => sql.includes('organization_id IS NULL'))).toBe(true);
+        expect(sqls.some((sql) => sql.includes('AND FALSE'))).toBe(true);
+        expect(sqls.every((sql) => !sql.includes('organization_id IS NULL'))).toBe(true);
       });
 
       it('should not add org filter for admin users', async () => {
@@ -1132,7 +1137,7 @@ describe('ReportDataFetcherService', () => {
       expect(params).toEqual(['run-001', 'org-A', 'org-B']);
     });
 
-    it('should include IS NULL backward-compat clause for non-empty org list', async () => {
+    it('scopes strictly to the org list, with no null-org escape', async () => {
       authzService.isGlobalAdmin.mockReturnValue(false);
       authzService.getAccessibleOrganizations.mockResolvedValueOnce(['org-X']);
       testRunRepo.query.mockResolvedValueOnce([]);
@@ -1140,9 +1145,9 @@ describe('ReportDataFetcherService', () => {
       await service.getRampUpCutoffTime('run-001', true, 'user-1', []);
 
       const [sql] = testRunRepo.query.mock.calls[0] as [string, unknown[]];
-      // Should combine IN clause with IS NULL for backward compat
       expect(sql).toContain('organization_id IN');
-      expect(sql).toContain('organization_id IS NULL');
+      // The null-org escape only ever matched a dangling join — another tenant's row.
+      expect(sql).not.toContain('organization_id IS NULL');
     });
   });
 });

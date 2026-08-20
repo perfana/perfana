@@ -49,7 +49,7 @@ export class ComparePresetsService {
       FROM test_runs tr
       INNER JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
       WHERE tr.test_run_id = $1
-        AND (sut.organization_id = ANY($2::uuid[]) OR sut.organization_id IS NULL)
+        AND sut.organization_id = ANY($2::uuid[])
       LIMIT 1
     `;
 

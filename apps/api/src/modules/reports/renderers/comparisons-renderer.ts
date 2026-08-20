@@ -282,13 +282,15 @@ export class ComparisonsRenderer {
               <h4 style="margin:0; font-size:13px; font-weight:700; color:${REPORT_COLORS.mutedInk}; text-transform:uppercase; letter-spacing:0.05em;">${this.utils.escapeHtml(panel)}</h4>
               ${chip(`${formatInt(rows.length)} metrics`, 'neutral')}
             </div>
-            <table style="width:100%; border-collapse:collapse;">
+            <div class="table-scroll">
+              <table style="width:100%; border-collapse:collapse;">
               <thead><tr style="${THEAD_ROW}">
                 <th style="${TH_TEXT}">Metric</th>
                 ${metricHeaders}
               </tr></thead>
               <tbody>${rowsHtml}</tbody>
             </table>
+            </div>
           </div>`;
         }).join('\n');
 
@@ -327,13 +329,15 @@ export class ComparisonsRenderer {
 
         return `<div style="margin-top:38px;">
           ${groupHeader(group, [chip(`${formatInt(rows.length)} transactions`, 'neutral')], summaryChips(reg, warn, ok))}
-          <table style="width:100%; border-collapse:collapse;">
+          <div class="table-scroll">
+            <table style="width:100%; border-collapse:collapse;">
             <thead><tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">Transaction</th>
               ${metricHeaders}
             </tr></thead>
             <tbody>${body}</tbody>
           </table>
+          </div>
         </div>`;
       }).join('\n');
     }

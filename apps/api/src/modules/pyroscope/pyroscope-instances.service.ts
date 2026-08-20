@@ -107,9 +107,10 @@ export class PyroscopeInstancesService {
         }
         queryBuilder.andWhere('pi.organization_id = :organizationId', { organizationId });
       } else if (orgIds !== null) {
-        // Non-admin: filter to accessible orgs OR legacy instances (null organization_id)
+        // Non-admin: filter to accessible orgs. organization_id is NOT NULL since
+        // Phase 4, so a null-org escape could only match rows nobody should see.
         queryBuilder.andWhere(
-          '(pi.organization_id IN (:...orgIds) OR pi.organization_id IS NULL)',
+          'pi.organization_id IN (:...orgIds)',
           {
             orgIds: orgIds.length > 0
               ? orgIds

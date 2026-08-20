@@ -20,7 +20,7 @@ import GraphsChart from '../GraphsChart';
 import GraphPresetsTable from '../GraphPresetsTable';
 
 interface GraphsExpandedContentProps {
-  testRun: TestRun;
+  testRun: TestRun | null;
   // Presets
   presets: GraphPreset[];
   presetsLoading: boolean;
@@ -51,7 +51,8 @@ interface GraphsExpandedContentProps {
   seriesData: Map<string, MetricDataPoint[]>;
   chartDataLoading: boolean;
   onRemoveSeries: (seriesId: string) => void;
-  onUpdateSeriesUnit: (seriesId: string, unit: string) => void;
+  /** null clears the unit — GraphsSeriesList's Autocomplete allows deselection. */
+  onUpdateSeriesUnit: (seriesId: string, unit: string | null) => void;
   events?: PerfanaEvent[];
 }
 

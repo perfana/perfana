@@ -25,7 +25,8 @@ import { createMockRepository, MockRepository } from '../../../../test/helpers/m
 import { createAuthorizationServiceMock } from '../../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { AuditService } from '../../audit/audit.service';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Capability } from '../../../constants/capabilities.constants';
 
 describe('TestRunsMutationService', () => {
   let service: TestRunsMutationService;
@@ -41,6 +42,7 @@ describe('TestRunsMutationService', () => {
   let lookupService: jest.Mocked<TestRunLookupService>;
   let auditService: jest.Mocked<AuditService>;
   let testRunsGateway: jest.Mocked<TestRunsGateway>;
+  let authzService: ReturnType<typeof createAuthorizationServiceMock>;
 
   const createMockTestRunEntity = (overrides?: Partial<TestRunEntity>): TestRunEntity => {
     const now = new Date();
@@ -180,6 +182,11 @@ describe('TestRunsMutationService', () => {
     updateAdaptConfigHandler = module.get(UpdateAdaptConfigHandler);
     initTestHandler = module.get(InitTestHandler);
     lookupService = module.get(TestRunLookupService);
+    authzService = module.get(AuthorizationService);
+
+    // Every mutation of an existing run now loads it through the write gate first.
+    // Default to a visible, writable run so each test only overrides what it is about.
+    testRunRepo.findOne.mockResolvedValue(createMockTestRunEntity());
   });
 
   const mockUserId = 'test-user-id';
@@ -653,4 +660,76 @@ describe('TestRunsMutationService', () => {
         .rejects.toThrow(BadRequestException);
     });
   });
+
+  describe('write gate', () => {
+    // Every mutation of an existing run. RLS does not cover this: its
+    // `can_modify_resource` backstop grants modify to any member of the org, so
+    // an org-viewer could otherwise edit every run they can read.
+    const mutations: Array<[string, (userId: string) => Promise<unknown>]> = [
+      ['updateTags', (u) => service.updateTags('test-run-uuid-123', ['t'], u, mockRoles)],
+      ['updateAnnotations', (u) => service.updateAnnotations('test-run-uuid-123', ['a'], u, mockRoles)],
+      ['updateApplicationRelease', (u) => service.updateApplicationRelease('test-run-uuid-123', '2.0', u, mockRoles)],
+      ['updateAnalysisStartOffset', (u) => service.updateAnalysisStartOffset('test-run-uuid-123', 60, u, mockRoles)],
+      ['updateAnalysisTimeRange', (u) => service.updateAnalysisTimeRange('test-run-uuid-123', 60, 30, u, mockRoles)],
+      ['updateAdaptConfig', (u) => service.updateAdaptConfig('run-001', 'ACCEPTED', u, mockRoles)],
+      ['deleteTestRun', (u) => service.deleteTestRun('test-run-uuid-123', u, mockRoles)],
+      ['abortTestRun', (u) => service.abortTestRun('test-run-uuid-123', u, mockRoles, 'someone@example.com')],
+    ];
+
+    /**
+     * Asserts only that the write gate let the call through. Some of these
+     * mutations then fail on unrelated business rules against the shared
+     * fixture (abort rejects an already-completed run), which is not what this
+     * test is about.
+     */
+    const expectNotForbidden = async (p: Promise<unknown>) => {
+      await p.catch((err) => {
+        if (err instanceof ForbiddenException) throw err;
+      });
+    };
+
+    const mutationHandlers = () => [
+      updateTagsHandler.execute,
+      updateAnnotationsHandler.execute,
+      updateAdaptConfigHandler.execute,
+      deleteTestRunHandler.execute,
+    ];
+
+    describe.each(mutations)('%s', (_name, call) => {
+      it('refuses a caller holding test-run:read but not test-run:update', async () => {
+        authzService.getCapabilities.mockResolvedValue([Capability.TestRunRead]);
+
+        await expect(call(mockUserId)).rejects.toBeInstanceOf(ForbiddenException);
+        for (const handler of mutationHandlers()) expect(handler).not.toHaveBeenCalled();
+      });
+
+      it('allows a caller holding test-run:update', async () => {
+        authzService.getCapabilities.mockResolvedValue([
+          Capability.TestRunRead,
+          Capability.TestRunUpdate,
+        ]);
+
+        await expectNotForbidden(call(mockUserId));
+      });
+
+      it('exempts API-key principals from the capability lookup', async () => {
+        // A key has no organization_members row, so getCapabilities returns an
+        // empty set for every key — gating on it would deny all CI writes.
+        authzService.getCapabilities.mockResolvedValue([]);
+
+        await expectNotForbidden(call('api-key:abc-123'));
+        expect(authzService.getCapabilities).not.toHaveBeenCalled();
+      });
+    });
+
+    it('refuses a run the caller cannot see as not-found, without mutating', async () => {
+      testRunRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.updateTags('invisible-uuid', ['t'], mockUserId, mockRoles),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(updateTagsHandler.execute).not.toHaveBeenCalled();
+    });
+  });
+
 });

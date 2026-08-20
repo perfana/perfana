@@ -335,7 +335,8 @@ export class TransactionResponseTimesRenderer {
 
     return `
       <div style="margin-top: 24px;">
-        <table style="width: 100%; border-collapse: collapse;">
+        <div class="table-scroll">
+          <table style="width: 100%; border-collapse: collapse;">
           <thead>
             <tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">Transaction</th>
@@ -351,6 +352,7 @@ export class TransactionResponseTimesRenderer {
           ${tableRows}
         </tbody>
       </table>
+        </div>
       </div>
     `;
   }

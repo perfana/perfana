@@ -1,3 +1,4 @@
+import type { ConfigFormData } from './types';
 import React, { useRef } from 'react';
 import { TestRun } from '@/types/test-runs';
 import AnomalyDetectionCollapsedCard from './components/AnomalyDetectionCollapsedCard';
@@ -175,7 +176,11 @@ export default function AnomalyDetectionSection({
       showConfigForm={showConfigForm}
       onConfigFormToggle={handleConfigFormToggle}
       configFormData={configFormData}
-      onConfigSave={handleConfigSave}
+      // The component tree below carries the config payload as `unknown` (its several
+      // declarations disagree on which threshold fields are nullable). Narrow once here.
+      onConfigSave={(rowKey, data, scope) =>
+        handleConfigSave(rowKey, data as ConfigFormData, scope)
+      }
       onAcceptResults={handleAcceptResults}
       onDenyResults={handleDenyResults}
       updateAdaptConfig={updateAdaptConfig}

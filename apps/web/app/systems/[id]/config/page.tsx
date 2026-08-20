@@ -216,7 +216,9 @@ export default function SystemConfigurationPage() {
               onEditDashboard={dashboard.handleEditDashboard}
               onDeleteDashboard={dashboard.handleDeleteDashboard}
               onBatchDelete={(ids, del) =>
-                dashboard.handleBatchDeleteDashboards(ids, del, systemId, selectedEnvironment)
+                // The child leaves `del` optional; the hook requires a boolean.
+                // Default false — not deleting from Grafana is the safe reading.
+                dashboard.handleBatchDeleteDashboards(ids, del ?? false, systemId, selectedEnvironment)
               }
             />
           )}

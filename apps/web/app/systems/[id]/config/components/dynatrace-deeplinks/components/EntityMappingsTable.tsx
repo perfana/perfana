@@ -11,7 +11,6 @@ import {
   TableRow,
   IconButton,
   Chip,
-  Tooltip,
   Checkbox,
 } from '@mui/material';
 import {
@@ -19,6 +18,7 @@ import {
   Link as LinkIcon,
 } from '@mui/icons-material';
 import { DynatraceEntityMapping } from '../types';
+import { RequiresPermission } from '@/components/auth/RequiresPermission';
 import { getLevelDisplayName, getLevelColor } from '../utils';
 
 interface EntityMappingsTableProps {
@@ -103,15 +103,25 @@ export function EntityMappingsTable({
                 />
               </TableCell>
               <TableCell>
-                <Tooltip title="Delete">
+                {/* The button is the direct child: RequiresPermission clones it with
+                    `disabled` and supplies its own tooltip when denied. Nesting a
+                    MUI Tooltip in between would receive the `disabled` prop instead. */}
+                <RequiresPermission
+                  action="integration:dynatrace:delete"
+                  orgId={mapping.organizationId}
+                  resourcePermissions={mapping._permissions}
+                  disabledReason="You do not have permission to delete this mapping"
+                >
                   <IconButton
                     size="small"
+                    title="Delete"
+                    aria-label="Delete mapping"
                     onClick={() => onDelete(mapping)}
                     color="error"
                   >
                     <DeleteIcon fontSize="small" />
                   </IconButton>
-                </Tooltip>
+                </RequiresPermission>
               </TableCell>
             </TableRow>
           ))}

@@ -1,5 +1,6 @@
 'use client';
 
+import { MetricTrendData } from '../types';
 import React, { useState } from 'react';
 import {
   Box,
@@ -43,7 +44,7 @@ interface UnresolvedRegression {
 
 interface UnresolvedRegressionTableProps {
   regressions: UnresolvedRegression[];
-  trendsData?: unknown;
+  trendsData?: Record<string, MetricTrendData[]>;
 }
 
 export default function UnresolvedRegressionTable({ regressions, trendsData }: UnresolvedRegressionTableProps) {
@@ -209,16 +210,6 @@ export default function UnresolvedRegressionTable({ regressions, trendsData }: U
                   </Box>
 
                   {/* Trends Chart */}
-                  {(() => {
-                    console.log('UnresolvedRegressionTable Debug:', {
-                      metricName: regression.metricName,
-                      hasTrendsData: !!trendsData,
-                      trendsDataKeys: trendsData ? Object.keys(trendsData) : [],
-                      hasDataForMetric: trendsData && trendsData[regression.metricName] ? 'YES' : 'NO',
-                      dataForMetric: trendsData?.[regression.metricName]
-                    });
-                    return null;
-                  })()}
                   {trendsData && trendsData[regression.metricName] ? (
                     <TrendChart
                       data={trendsData[regression.metricName]}

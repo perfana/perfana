@@ -17,6 +17,7 @@ import {
 } from '@/lib/dynatrace';
 import {
   createDynatraceConfigSchema,
+  CreateDynatraceConfigFormInput,
   type CreateDynatraceConfigFormData,
 } from '@/lib/validations';
 import { SnackbarState } from '../types';
@@ -38,7 +39,9 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
   const [selectedTestRunIdAttribute, setSelectedTestRunIdAttribute] = useState<string>('');
   const [selectedRequestNameAttribute, setSelectedRequestNameAttribute] = useState<string>('');
 
-  const form = useForm<CreateDynatraceConfigFormData>({
+  // Three generics, not one: the schema's `.default('saas')` makes zod's input and
+  // output types differ, and a single generic cannot be both.
+  const form = useForm<CreateDynatraceConfigFormInput, unknown, CreateDynatraceConfigFormData>({
     resolver: zodResolver(createDynatraceConfigSchema),
     defaultValues: {
       label: '',

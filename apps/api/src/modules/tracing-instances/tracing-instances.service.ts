@@ -98,9 +98,10 @@ export class TracingInstancesService {
         }
         queryBuilder.andWhere('ti.organization_id = :organizationId', { organizationId });
       } else if (orgIds !== null) {
-        // Non-admin: filter to accessible orgs OR legacy instances (null organization_id)
+        // Non-admin: filter to accessible orgs. organization_id is NOT NULL since
+        // Phase 4, so a null-org escape could only match rows nobody should see.
         queryBuilder.andWhere(
-          '(ti.organization_id IN (:...orgIds) OR ti.organization_id IS NULL)',
+          'ti.organization_id IN (:...orgIds)',
           {
             orgIds: orgIds.length > 0
               ? orgIds

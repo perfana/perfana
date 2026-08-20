@@ -10,7 +10,7 @@ import { BadRequestException, ConflictException, ForbiddenException, NotFoundExc
 import axios from 'axios';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../common/services/authorization.service';
-import { Capability } from '../../constants/capabilities.constants';
+import { Capability, GLOBAL_ADMIN_CAPABILITIES } from '../../constants/capabilities.constants';
 import { AuditService } from '../audit/audit.service';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
 
@@ -21,6 +21,7 @@ describe('DynatraceService', () => {
   let service: DynatraceService;
   let repository: jest.Mocked<DynatraceRepository>;
   let auditService: jest.Mocked<AuditService>;
+  let authzService: ReturnType<typeof createAuthorizationServiceMock>;
 
   const mockUserId = 'test-user-id';
   const mockRoles = ['user'];
@@ -126,6 +127,7 @@ describe('DynatraceService', () => {
     service = module.get<DynatraceService>(DynatraceService);
     repository = module.get(DynatraceRepository);
     auditService = module.get(AuditService);
+    authzService = module.get(AuthorizationService);
   });
 
   afterEach(() => {
@@ -661,7 +663,8 @@ describe('DynatraceService', () => {
 
         const result = await service.findAllQuery(mockUserId, mockRoles);
 
-        expect(result).toEqual(mockQueries);
+        expect(result).toEqual(mockQueries.map(q => expect.objectContaining({ ...q })));
+        expect(result[0]).toHaveProperty('_permissions');
         expect(repository.findAllQuery).toHaveBeenCalledTimes(1);
       });
     });
@@ -673,12 +676,82 @@ describe('DynatraceService', () => {
 
         const result = await service.findQueryBySystemAndEnvironment('sys-123', 'production', 'load-test', mockUserId, mockRoles);
 
-        expect(result).toEqual(mockQueries);
+        expect(result).toEqual(mockQueries.map(q => expect.objectContaining({ ...q })));
+        expect(result[0]).toHaveProperty('_permissions');
         expect(repository.findQueryBySystemAndEnvironment).toHaveBeenCalledWith(
           'sys-123',
           'production',
           'load-test'
         );
+      });
+    });
+
+    describe('_permissions on sub-resources', () => {
+      // PR #187 made the backend 403 on PATCH/DELETE for non-admins. Without these
+      // flags the frontend cannot know that, so the user finds out by clicking.
+      // The flags must read the SAME capabilities updateQuery/deleteQuery enforce,
+      // or the button state and the eventual 403 disagree.
+      const orgQuery = { ...mockDynatraceQuery, organizationId: 'org-1' };
+
+      beforeEach(() => {
+        authzService.isGlobalAdmin.mockReturnValue(false);
+      });
+
+      it('grants update and delete to a caller holding both capabilities', async () => {
+        authzService.getCapabilities.mockResolvedValue([
+          Capability.IntegrationDynatraceUpdate,
+          Capability.IntegrationDynatraceDelete,
+        ]);
+        repository.findAllQuery.mockResolvedValue([orgQuery]);
+
+        const [row] = await service.findAllQuery(mockUserId, mockRoles);
+
+        expect(row._permissions).toEqual({ update: true, delete: true });
+      });
+
+      it('denies both to an org-viewer, who holds neither', async () => {
+        authzService.getCapabilities.mockResolvedValue([]);
+        repository.findAllQuery.mockResolvedValue([orgQuery]);
+
+        const [row] = await service.findAllQuery(mockUserId, mockRoles);
+
+        expect(row._permissions).toEqual({ update: false, delete: false });
+      });
+
+      it('looks capabilities up once per organization, not once per row', async () => {
+        authzService.getCapabilities.mockResolvedValue([]);
+        repository.findAllQuery.mockResolvedValue([
+          { ...mockDynatraceQuery, id: 'q1', organizationId: 'org-1' },
+          { ...mockDynatraceQuery, id: 'q2', organizationId: 'org-1' },
+          { ...mockDynatraceQuery, id: 'q3', organizationId: 'org-2' },
+        ]);
+
+        await service.findAllQuery(mockUserId, mockRoles);
+
+        expect(authzService.getCapabilities).toHaveBeenCalledTimes(2);
+      });
+
+      it('grants both to a global admin, via the full capability set', async () => {
+        // No isGlobalAdmin branch in the service: CapabilitiesService.compute
+        // short-circuits on systemRoles, so an admin gets every capability back
+        // from the ordinary lookup.
+        authzService.getCapabilities.mockResolvedValue(GLOBAL_ADMIN_CAPABILITIES);
+        repository.findAllQuery.mockResolvedValue([orgQuery]);
+
+        const [row] = await service.findAllQuery(mockUserId, mockRoles);
+
+        expect(row._permissions).toEqual({ update: true, delete: true });
+      });
+
+      it('attaches delete permission to entity mappings too', async () => {
+        authzService.getCapabilities.mockResolvedValue([Capability.IntegrationDynatraceDelete]);
+        repository.getEntityMappings.mockResolvedValue([
+          { id: 'm1', organizationId: 'org-1' },
+        ]);
+
+        const [row] = await service.getEntityMappings(mockUserId, mockRoles);
+
+        expect(row._permissions).toEqual({ update: false, delete: true });
       });
     });
 
@@ -688,7 +761,8 @@ describe('DynatraceService', () => {
 
         const result = await service.findQueryById('query-123', mockUserId, mockRoles);
 
-        expect(result).toEqual(mockDynatraceQuery);
+        expect(result).toEqual(expect.objectContaining({ ...mockDynatraceQuery }));
+        expect(result).toHaveProperty('_permissions');
       });
 
       it('should throw NotFoundException when query not found', async () => {
@@ -1112,7 +1186,7 @@ describe('DynatraceService', () => {
 
         const result = await service.getEntityMappings(mockUserId, mockRoles, 'sys-123', 'production', 'load-test');
 
-        expect(result).toEqual(mockMappings);
+        expect(result).toEqual(mockMappings.map(m => expect.objectContaining({ ...m })));
       });
 
       it('should return all mappings when no filters provided', async () => {
@@ -1121,7 +1195,7 @@ describe('DynatraceService', () => {
 
         const result = await service.getEntityMappings(mockUserId, mockRoles);
 
-        expect(result).toEqual(mockMappings);
+        expect(result).toEqual(mockMappings.map(m => expect.objectContaining({ ...m })));
         expect(repository.getEntityMappings).toHaveBeenCalledWith(undefined, undefined, undefined);
       });
     });

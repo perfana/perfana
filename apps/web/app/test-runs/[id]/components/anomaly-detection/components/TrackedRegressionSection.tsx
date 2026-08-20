@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import type { MetricTrendData } from '../types';
 import {
   Box,
   Card,
@@ -66,7 +67,7 @@ interface TrackedRegressionSectionProps {
   group: GroupedTrackedRegressions;
   onResolve: (trackedTestRunId: string, resolution: string) => void;
   onMarkChangepoint: (trackedTestRunId: string) => void;
-  trendsData?: Record<string, unknown[]>;
+  trendsData?: Record<string, MetricTrendData[]>;
 }
 
 export default function TrackedRegressionSection({

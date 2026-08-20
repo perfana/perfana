@@ -22,13 +22,15 @@ const mockTestRun = (overrides = {}) => ({
 describe('UpdateAnalysisTimeRangeHandler', () => {
   let handler: UpdateAnalysisTimeRangeHandler;
   let mockRepo: { findOne: jest.Mock };
-  let mockDataSource: { query: jest.Mock };
+  let mockDataSource: { query: jest.Mock; manager: { query: jest.Mock } };
   let mockGateway: { emitTestRunUpdated: jest.Mock };
   let mockAudit: { logUpdate: jest.Mock };
 
   beforeEach(async () => {
     mockRepo = { findOne: jest.fn() };
-    mockDataSource = { query: jest.fn().mockResolvedValue(undefined) };
+    const dsQuery = jest.fn().mockResolvedValue(undefined);
+    // Outside an RLS request, withRequestQuery falls through to the DataSource manager.
+    mockDataSource = { query: dsQuery, manager: { query: dsQuery } };
     mockGateway = { emitTestRunUpdated: jest.fn() };
     mockAudit = { logUpdate: jest.fn() };
 

@@ -526,7 +526,7 @@ export function SLOList({
                     <SLOMetricsChart
                       testRunId={testRunId}
                       checkResult={result}
-                      testRun={testRun}
+                      testRun={testRun ?? undefined}
                       targetName={selectedTarget.get(resultKey)}
                       isVisible={expandedSloRows.has(resultKey)}
                     />
@@ -537,7 +537,7 @@ export function SLOList({
                     <AggregatedSloChart
                       testRunId={testRunId}
                       checkResult={result}
-                      testRun={testRun}
+                      testRun={testRun ?? undefined}
                       isVisible={expandedSloRows.has(resultKey)}
                     />
                   </Box>

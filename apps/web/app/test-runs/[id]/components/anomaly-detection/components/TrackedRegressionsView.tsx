@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import type { MetricTrendData } from '../types';
 import { Box, Typography, Alert, CircularProgress, useTheme } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { authenticatedFetch } from '@/lib/api';
@@ -56,16 +57,18 @@ export default function TrackedRegressionsView({
   const [groupedRegressions, setGroupedRegressions] = useState<GroupedTrackedRegressions[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [localTrendsData, setLocalTrendsData] = useState<Record<string, unknown[]>>({});
+  const [localTrendsData, setLocalTrendsData] = useState<Record<string, MetricTrendData[]>>({});
 
+  // The prop is optional (`TestRun | null | undefined`); both hooks take
+  // `TestRun | null` and already handle the null case.
   const { triggerBatchReevaluation } = useBatchReevaluation({
-    testRun,
+    testRun: testRun ?? null,
     testRunId,
     showToast
   });
 
   const { updateAdaptConfig } = useUpdateAdaptConfig({
-    testRun,
+    testRun: testRun ?? null,
     showToast
   });
 
@@ -209,7 +212,7 @@ export default function TrackedRegressionsView({
           const response = await authenticatedFetch(url);
 
           if (response.ok) {
-            const trendsData: Array<{ test_run_start: string }> = await response.json();
+            const trendsData: MetricTrendData[] = await response.json();
             trendsData.sort((a, b) => new Date(a.test_run_start).getTime() - new Date(b.test_run_start).getTime());
             return { metricName, data: trendsData };
           } else {
@@ -225,7 +228,7 @@ export default function TrackedRegressionsView({
       const results = await Promise.all(trendsPromises);
 
       // Build the trends data object keyed by metric name
-      const newTrendsData: Record<string, unknown[]> = {};
+      const newTrendsData: Record<string, MetricTrendData[]> = {};
       results.forEach(({ metricName, data }) => {
         newTrendsData[metricName] = data;
       });

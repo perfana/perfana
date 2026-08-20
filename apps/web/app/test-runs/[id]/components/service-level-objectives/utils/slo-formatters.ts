@@ -133,7 +133,7 @@ export function formatRequirement(requirement: CheckResultRequirement | undefine
   };
 
   const evaluateText = evaluateTypeMap[evaluateType || ''] || 'Value';
-  const operatorText = operatorMap[operator] || `should ${operator}`;
+  const operatorText = operatorMap[operator ?? ''] || `should ${operator}`;
 
   // Format the unit using the same logic as config SLO table
   let displayValue = String(value);

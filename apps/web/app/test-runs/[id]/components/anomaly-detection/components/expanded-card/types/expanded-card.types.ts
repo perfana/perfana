@@ -81,7 +81,7 @@ export interface AnomalyTabContentProps {
   drawerOpen: Record<string, boolean>;
   onDrawerToggle: (rowKey: string) => void;
   /** ADAPT result per expanded row, keyed by the row key. */
-  drawerData: Record<string, DrawerData>;
+  drawerData: Record<string, DrawerData | null>;
   drawerLoading: Record<string, boolean>;
   showToast: (message: string) => void;
   showConfigForm: Record<string, boolean>;
@@ -146,7 +146,7 @@ export interface AnomalyDetectionExpandedCardProps {
   drawerOpen: Record<string, boolean>;
   onDrawerToggle: (rowKey: string) => void;
   /** ADAPT result per expanded row, keyed by the row key. */
-  drawerData: Record<string, DrawerData>;
+  drawerData: Record<string, DrawerData | null>;
   drawerLoading: Record<string, boolean>;
 
   // Trends state

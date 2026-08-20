@@ -332,11 +332,13 @@ function BarChartView({ data, height }: BarChartViewProps) {
           width={90}
         />
         <RechartsTooltip
-          formatter={(value: number, name: string, props: { payload: { percent?: number; name?: string } }) => {
-            const percent = props.payload.percent || 0;
+          // Recharts types `item` as its own Payload; only `payload` is read here.
+          formatter={(value: number, name: string, item: { payload?: { percent?: number; name?: string } }) => {
+            const payload = item.payload ?? {};
+            const percent = payload.percent || 0;
             return [
               `${formatDuration(value)} (${formatPercentage(percent)})`,
-              name === 'value' ? props.payload.name : name,
+              name === 'value' ? (payload.name ?? name) : name,
             ];
           }}
           contentStyle={{

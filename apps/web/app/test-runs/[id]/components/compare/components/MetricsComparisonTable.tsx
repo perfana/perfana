@@ -293,10 +293,17 @@ export default function MetricsComparisonTable({
 
           {Array.from(panels.entries()).map(([panelLabel, rows]) => {
             const bandByRow = new Map(rows.map(row => [row, worstBand(rowDiffs(row), thresholds)]));
+            // The aggregate row summarises the transactions beside it, so counting it
+            // alongside them double-counts: "3 regressions" could mean two transactions
+            // plus their own roll-up. It is excluded from the tallies and from the
+            // band-chip filter, and always rendered.
             let reg = 0, warn = 0, ok = 0;
-            bandByRow.forEach((b) => { if (b === 'bad') reg++; else if (b === 'warn') warn++; else ok++; });
+            bandByRow.forEach((b, row) => {
+              if (row.isAggregated) return;
+              if (b === 'bad') reg++; else if (b === 'warn') warn++; else ok++;
+            });
             const visibleRows = bandFilter.size
-              ? rows.filter(row => bandFilter.has(bandByRow.get(row)!))
+              ? rows.filter(row => row.isAggregated || bandFilter.has(bandByRow.get(row)!))
               : rows;
             // Hide panels with nothing matching the active filter.
             if (bandFilter.size && visibleRows.length === 0) return null;
@@ -367,9 +374,18 @@ export default function MetricsComparisonTable({
                         borderBottom: '1px solid', borderColor: 'divider',
                         borderLeft: '3px solid', borderLeftColor: BAND_COLORS[band] }}>
                         <Box sx={{ px: 2, py: 1.5, display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
-                          <Typography variant="body2" sx={{ fontWeight: 500, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-                            {row.metricName}
-                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 500, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+                              {row.metricName}
+                            </Typography>
+                            {/* Since it started filling all four columns with the same
+                                band border and delta chips as the transactions inside
+                                it, it reads as their peer. */}
+                            {row.isAggregated && (
+                              <Chip label="aggregate" size="small" variant="outlined"
+                                sx={{ height: 18, fontSize: '0.65rem', flexShrink: 0 }} />
+                            )}
+                          </Box>
                           {row.url && (
                             <Box sx={{ mt: 0.25 }}>
                               <ClippedUrl url={row.url} sx={{ fontSize: '0.75rem' }} />

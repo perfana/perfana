@@ -1578,7 +1578,7 @@ describe('ApplicationDashboardsService', () => {
       expect(andWhereCalls.some((c: unknown) => typeof c === 'string' && c.includes('organizationId'))).toBe(false);
     });
 
-    it('should filter to NULL org only when non-admin has no accessible organizations', async () => {
+    it('should show nothing when non-admin has no accessible organizations', async () => {
       // Arrange
       const authzService = service['authzService'] as ReturnType<typeof createAuthorizationServiceMock>;
       authzService.isGlobalAdmin.mockReturnValue(false);
@@ -1592,10 +1592,10 @@ describe('ApplicationDashboardsService', () => {
 
       // Assert
       expect(authzService.getAccessibleOrganizations).toHaveBeenCalledWith(mockUserId);
-      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith('ad.organizationId IS NULL');
+      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith('1 = 0');
     });
 
-    it('should filter to org IDs or NULL when non-admin has accessible organizations', async () => {
+    it('should scope strictly to the accessible org IDs', async () => {
       // Arrange
       const authzService = service['authzService'] as ReturnType<typeof createAuthorizationServiceMock>;
       authzService.isGlobalAdmin.mockReturnValue(false);
@@ -1609,12 +1609,12 @@ describe('ApplicationDashboardsService', () => {
 
       // Assert
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        '(ad.organizationId IN (:...orgIds) OR ad.organizationId IS NULL)',
+        'ad.organizationId IN (:...orgIds)',
         { orgIds: ['org-1', 'org-2'] }
       );
     });
 
-    it('should apply NULL org filter in findOne for non-admin with no orgs', async () => {
+    it('should show nothing in findOne for non-admin with no orgs', async () => {
       // Arrange
       const authzService = service['authzService'] as ReturnType<typeof createAuthorizationServiceMock>;
       authzService.isGlobalAdmin.mockReturnValue(false);
@@ -1627,10 +1627,10 @@ describe('ApplicationDashboardsService', () => {
       await service.findOne('app-dashboard-uuid', mockUserId, ['user']);
 
       // Assert
-      expect(mockQb.andWhere).toHaveBeenCalledWith('ad.organizationId IS NULL');
+      expect(mockQb.andWhere).toHaveBeenCalledWith('1 = 0');
     });
 
-    it('should apply org ID or NULL filter in findOne for non-admin with accessible orgs', async () => {
+    it('should scope findOne strictly to the accessible org IDs', async () => {
       // Arrange
       const authzService = service['authzService'] as ReturnType<typeof createAuthorizationServiceMock>;
       authzService.isGlobalAdmin.mockReturnValue(false);
@@ -1644,7 +1644,7 @@ describe('ApplicationDashboardsService', () => {
 
       // Assert
       expect(mockQb.andWhere).toHaveBeenCalledWith(
-        '(ad.organizationId IN (:...orgIds) OR ad.organizationId IS NULL)',
+        'ad.organizationId IN (:...orgIds)',
         { orgIds: ['org-1'] }
       );
     });

@@ -114,9 +114,15 @@ export class ProfilesService {
         .orderBy('profile.name', 'ASC');
 
       if (organizationIds) {
+        // No null-org escape (NOT NULL since Phase 4). The sentinel keeps the SQL
+        // valid for a user with zero memberships, who correctly sees nothing.
         queryBuilder.where(
-          '(profile.organization_id IN (:...orgIds) OR profile.organization_id IS NULL)',
-          { orgIds: organizationIds },
+          'profile.organization_id IN (:...orgIds)',
+          {
+            orgIds: organizationIds.length > 0
+              ? organizationIds
+              : ['00000000-0000-0000-0000-000000000000'],
+          },
         );
       }
 

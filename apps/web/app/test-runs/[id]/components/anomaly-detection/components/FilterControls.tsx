@@ -1,3 +1,4 @@
+import type { SelectChangeEvent } from '@mui/material';
 import React from 'react';
 import {
   Box,
@@ -20,13 +21,13 @@ interface FilterControlsProps {
   searchQuery: string;
   handleSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   conclusionFilter: string;
-  handleConclusionFilterChange: (e: unknown) => void;
+  handleConclusionFilterChange: (e: SelectChangeEvent<string>) => void;
   classificationFilter: string;
-  handleClassificationFilterChange: (e: unknown) => void;
+  handleClassificationFilterChange: (e: SelectChangeEvent<string>) => void;
   dashboardFilter: string;
-  handleDashboardFilterChange: (e: unknown) => void;
+  handleDashboardFilterChange: (e: SelectChangeEvent<string>) => void;
   panelFilter: string;
-  handlePanelFilterChange: (e: unknown) => void;
+  handlePanelFilterChange: (e: SelectChangeEvent<string>) => void;
   conclusionsForDropdown: string[];
   classificationsForDropdown: string[];
   dashboardsForDropdown: string[];

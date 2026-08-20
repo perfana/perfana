@@ -63,10 +63,12 @@ export class MetricsSourcesService {
 
       if (orgIds !== null) {
         if (orgIds.length === 0) {
-          qb.andWhere('ms.organizationId IS NULL');
+          qb.andWhere('1 = 0'); // no memberships, nothing is visible
         } else {
           qb.andWhere(
-            '(ms.organizationId IN (:...orgIds) OR ms.organizationId IS NULL)',
+            // No null-org escape: NOT NULL since Phase 4, so it could only match a
+            // dangling join — a row from another tenant.
+            'ms.organizationId IN (:...orgIds)',
             { orgIds },
           );
         }
@@ -122,10 +124,12 @@ export class MetricsSourcesService {
 
       if (orgIds !== null) {
         if (orgIds.length === 0) {
-          qb.andWhere('ms.organizationId IS NULL');
+          qb.andWhere('1 = 0'); // no memberships, nothing is visible
         } else {
           qb.andWhere(
-            '(ms.organizationId IN (:...orgIds) OR ms.organizationId IS NULL)',
+            // No null-org escape: NOT NULL since Phase 4, so it could only match a
+            // dangling join — a row from another tenant.
+            'ms.organizationId IN (:...orgIds)',
             { orgIds },
           );
         }
@@ -162,10 +166,12 @@ export class MetricsSourcesService {
 
       if (orgIds !== null) {
         if (orgIds.length === 0) {
-          qb.andWhere('ms.organizationId IS NULL');
+          qb.andWhere('1 = 0'); // no memberships, nothing is visible
         } else {
           qb.andWhere(
-            '(ms.organizationId IN (:...orgIds) OR ms.organizationId IS NULL)',
+            // No null-org escape: NOT NULL since Phase 4, so it could only match a
+            // dangling join — a row from another tenant.
+            'ms.organizationId IN (:...orgIds)',
             { orgIds },
           );
         }

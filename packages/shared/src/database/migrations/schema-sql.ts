@@ -1020,7 +1020,8 @@ CREATE TABLE public.application_dashboards (
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255),
-    metrics_source_id uuid
+    metrics_source_id uuid,
+    deletion_status character varying(20)
 );
 
 ALTER TABLE ONLY public.application_dashboards FORCE ROW LEVEL SECURITY;

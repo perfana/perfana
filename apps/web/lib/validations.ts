@@ -94,5 +94,12 @@ export type SignUpFormData = z.infer<typeof signUpSchema>
 export type CreateApiKeyFormData = z.infer<typeof createApiKeySchema>
 export type CreateGrafanaInstanceFormData = z.infer<typeof createGrafanaInstanceSchema>
 export type CreateDynatraceConfigFormData = z.infer<typeof createDynatraceConfigSchema>
+/**
+ * The pre-parse shape. `dynatraceType` is `.optional().default('saas')`, so zod's input
+ * and output types differ: the field is optional going in and present coming out.
+ * `useForm` needs the input type for its field values and the output type for what the
+ * resolver produces — see useDynatraceIntegration.
+ */
+export type CreateDynatraceConfigFormInput = z.input<typeof createDynatraceConfigSchema>
 export type CreatePyroscopeInstanceFormData = z.infer<typeof createPyroscopeInstanceSchema>
 export type CreateTracingInstanceFormData = z.infer<typeof createTracingInstanceSchema>

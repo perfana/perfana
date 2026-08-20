@@ -133,7 +133,8 @@ interface UseAnomalyDetectionReturn {
 
   // Drawer state
   drawerOpen: Record<string, boolean>;
-  drawerData: Record<string, DrawerData>;
+  /** null = the fetch failed for that row; the drawer renders an empty state. */
+  drawerData: Record<string, DrawerData | null>;
   drawerLoading: Record<string, boolean>;
   chartKey: Record<string, number>;
 
@@ -231,7 +232,7 @@ export function useAnomalyDetection({
 
   // Drawer state
   const [drawerOpen, setDrawerOpen] = useState<Record<string, boolean>>({});
-  const [drawerData, setDrawerData] = useState<Record<string, DrawerData>>({});
+  const [drawerData, setDrawerData] = useState<Record<string, DrawerData | null>>({});
   const [drawerLoading, setDrawerLoading] = useState<Record<string, boolean>>({});
   const [chartKey, setChartKey] = useState<Record<string, number>>({});
 

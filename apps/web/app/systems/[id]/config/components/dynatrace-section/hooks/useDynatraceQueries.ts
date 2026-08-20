@@ -68,6 +68,8 @@ export function useDynatraceQueries({
         omitGroupByVariableFromMetricName: query.omitGroupByVariableFromMetricName,
         templateVariables: query.templateVariables,
         dynatraceConfigLabel: query.dynatraceConfig?.label,
+        organizationId: query.organizationId,
+        _permissions: query._permissions,
         createdAt: query.createdAt,
       }));
 

@@ -435,11 +435,31 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         });
         const ids = runsInRange.map(r => r.test_run_id);
 
-        for (const series of aggregatedSeries) {
-          const spec = getAggregateSpec(series.panelId);
-          if (!spec || ids.length === 0) continue;
-          const values = await fetchAggregatedStatistics(testRun.test_run_id, ids, spec);
-          allData.push(...buildAggregatedTrendsStatistics(series, values, runsInRange));
+        // Same shape as useCompareData: one request per DISTINCT metric, fetched in
+        // parallel. `stat` no longer changes the SQL — every statistic comes off the
+        // merged sketch — so two series sharing a metric were issuing byte-identical
+        // requests, one after the other.
+        if (ids.length > 0) {
+          const specced = aggregatedSeries
+            .map(series => ({ series, spec: getAggregateSpec(series.panelId) }))
+            .filter((e): e is { series: typeof e.series; spec: NonNullable<typeof e.spec> } =>
+              e.spec !== null,
+            );
+
+          const specByMetric = new Map(specced.map(e => [e.spec.metric, e.spec]));
+          const fetched = await Promise.all(
+            [...specByMetric.values()].map(async spec => {
+              const values = await fetchAggregatedStatistics(testRun.test_run_id, ids, spec);
+              return [spec.metric, values] as const;
+            }),
+          );
+          const valuesByMetric = new Map(fetched);
+
+          for (const { series, spec } of specced) {
+            const values = valuesByMetric.get(spec.metric);
+            if (!values) continue;
+            allData.push(...buildAggregatedTrendsStatistics(series, values, runsInRange));
+          }
         }
       }
 

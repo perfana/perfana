@@ -33,7 +33,10 @@ import {
 type EventListeners = {
   connectionStateChange: ((state: ConnectionState) => void)[];
   error: ((error: WebSocketError) => void)[];
-  [key: string]: ((...args: unknown[]) => void)[];
+  // The two named events carry concrete payloads; every other event is dispatched
+  // dynamically, so the index signature has to be wide enough to cover both. A
+  // `(...args: unknown[])` signature is not — its parameters are contravariant.
+  [key: string]: ((...args: never[]) => void)[];
 };
 
 /**
@@ -276,7 +279,17 @@ class SocketManager {
   }
 
   /**
-   * Disconnect from WebSocket server
+   * Tear the connection down for good.
+   *
+   * This is NOT the reconnect path — reconnect goes through `scheduleReconnect`
+   * → `connect`, which builds a fresh socket and calls `reapplyPersistedListeners`.
+   * Nothing in the app calls this method; it exists for full teardown, and for
+   * tests, which is where the leak showed: `persistedListeners` survived, so a
+   * later `connect()` re-attached handlers the caller had meant to drop and one
+   * suite's socket `on()` test grabbed a stale handler from another's.
+   *
+   * So it clears them. A caller who wants the connection back also wants to say
+   * which events it cares about.
    */
   disconnect(): void {
     if (this.reconnectTimer) {
@@ -289,6 +302,8 @@ class SocketManager {
       this.socket.disconnect();
       this.socket = null;
     }
+
+    this.persistedListeners.clear();
 
     this.setConnectionState('disconnected');
     // console.log('[Socket] Disconnected');

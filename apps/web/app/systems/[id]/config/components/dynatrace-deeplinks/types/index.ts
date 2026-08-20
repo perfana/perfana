@@ -32,6 +32,13 @@ export interface DynatraceEntityMapping {
   entityDisplayName: string;
   entityType: string;
   level: EntityMappingLevel;
+  organizationId?: string;
+  /**
+   * Per-resource capability hint from the API. The backend 403s a non-admin on
+   * DELETE; without this the button looks live and the user only finds out by
+   * clicking. Fed straight to <RequiresPermission resourcePermissions=...>.
+   */
+  _permissions?: { update: boolean; delete: boolean };
   createdAt: string;
   updatedAt: string;
 }

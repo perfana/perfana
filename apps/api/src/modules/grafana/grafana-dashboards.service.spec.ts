@@ -1708,12 +1708,12 @@ describe('GrafanaDashboardsService', () => {
         // Assert
         expect(authzService.getAccessibleOrganizations).toHaveBeenCalledWith(mockUserId);
         expect(queryBuilder.andWhere).toHaveBeenCalledWith(
-          '(gd.organizationId IS NULL OR gd.organizationId IN (:...orgIds))',
+          'gd.organizationId IN (:...orgIds)',
           { orgIds }
         );
       });
 
-      it('should restrict to unowned dashboards when user has no org memberships', async () => {
+      it('should show nothing when user has no org memberships', async () => {
         // Arrange — getAccessibleOrganizations returns empty array
         authzService.getAccessibleOrganizations.mockResolvedValue([]);
         queryBuilder.getMany.mockResolvedValue([]);
@@ -1722,7 +1722,7 @@ describe('GrafanaDashboardsService', () => {
         await service.findAll(mockUserId, mockRoles);
 
         // Assert
-        expect(queryBuilder.andWhere).toHaveBeenCalledWith('gd.organizationId IS NULL');
+        expect(queryBuilder.andWhere).toHaveBeenCalledWith('1 = 0');
       });
 
       it('should skip org filtering entirely for global admins', async () => {

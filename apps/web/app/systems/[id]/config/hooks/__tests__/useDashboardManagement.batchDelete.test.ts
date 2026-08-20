@@ -82,7 +82,10 @@ describe('useDashboardManagement — handleBatchDeleteDashboards', () => {
 
   // Deletion finishes in the background, so refetching would pull the rows
   // straight back into the table. The hook drops them locally instead.
-  it('removes the queued dashboards from the list without refetching', async () => {
+  it('marks the queued dashboards without dropping them or refetching', async () => {
+    // The rows used to be removed locally, which told the user "queued for deletion"
+    // and then never contradicted it: a permanently failed job only surfaced as the
+    // dashboard reappearing after a reload. They stay, wearing a badge.
     const result = await renderWithDashboards();
     mockAuthFetch.mockResolvedValue(makeResponse({ queued: 2, deleted: 0 }));
 
@@ -90,7 +93,12 @@ describe('useDashboardManagement — handleBatchDeleteDashboards', () => {
       await result.current.handleBatchDeleteDashboards(['d1', 'd3'], false, 'sut1', 'acc');
     });
 
-    expect(result.current.dashboards.map(d => d.id)).toEqual(['d2']);
+    expect(result.current.dashboards.map(d => d.id)).toEqual(['d1', 'd2', 'd3']);
+    expect(result.current.dashboards.map(d => d.deletion_status)).toEqual([
+      'queued',
+      undefined,
+      'queued',
+    ]);
     expect(mockAuthFetch).toHaveBeenCalledTimes(1); // the POST only — no refetch
   });
 

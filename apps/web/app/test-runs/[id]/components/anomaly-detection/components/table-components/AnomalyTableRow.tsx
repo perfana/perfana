@@ -47,7 +47,7 @@ interface AnomalyTableRowProps {
   isLast: boolean;
   testRunId: string;
   /** ADAPT result per expanded row, keyed by the row key. */
-  drawerData: Record<string, DrawerData>;
+  drawerData: Record<string, DrawerData | null>;
   onToggleExpanded: () => void;
   onOpenActionMenu: (event: React.MouseEvent<HTMLElement>) => void;
   onStaleChipClick: () => void;

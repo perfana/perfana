@@ -147,7 +147,8 @@ export class RegressionsRenderer {
     return `
       <div style="margin-top: 28px;">
         ${groupHeader(tableTitle, [chip(`${formatInt(metrics.length)} metrics`, 'neutral')])}
-        <table style="width: 100%; border-collapse: collapse;">
+        <div class="table-scroll">
+          <table style="width: 100%; border-collapse: collapse;">
           <thead>
             <tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">Dashboard</th>
@@ -163,6 +164,7 @@ export class RegressionsRenderer {
             ${rows}
           </tbody>
         </table>
+        </div>
       </div>
     `;
   }

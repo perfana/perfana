@@ -21,12 +21,14 @@ import {
 } from '@mui/material';
 import { UseFormReturn } from 'react-hook-form';
 import { DynatraceConfig, DynatraceRequestAttribute } from '@/lib/dynatrace';
-import { CreateDynatraceConfigFormData } from '@/lib/validations';
+import { CreateDynatraceConfigFormData, CreateDynatraceConfigFormInput } from '@/lib/validations';
 
 interface DynatraceFormDialogProps {
   open: boolean;
   isEdit: boolean;
-  form: UseFormReturn<CreateDynatraceConfigFormData>;
+  // Mirrors useDynatraceIntegration's useForm: the schema's `.default('saas')` splits
+  // zod's input and output types, so the field values are the input shape.
+  form: UseFormReturn<CreateDynatraceConfigFormInput, unknown, CreateDynatraceConfigFormData>;
   testingConnection: boolean;
   requestAttributes: DynatraceRequestAttribute[];
   loadingAttributes: boolean;

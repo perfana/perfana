@@ -105,14 +105,19 @@ export class ReportDataFetcherService {
     organizationIds: string[],
     testRunAlias: string = 'tr',
   ): { clause: string; params: string[] } {
+    // Callers reach here only for a real, non-admin user: `resolveOrgFilter` returns
+    // an empty clause for system calls (no userId) and for global admins. So an empty
+    // list means a user with zero memberships, who must see nothing.
+    //
+    // This used to read `organization_id IS NULL` on both branches, framed as a legacy
+    // -data allowance. Phase 4 made the column NOT NULL, so that matched no real row —
+    // only a LEFT JOIN miss, which is exactly the row another tenant must not see.
     if (organizationIds.length === 0) {
-      // No org memberships - only allow legacy data (null organization_id)
-      return { clause: `AND ${testRunAlias}.organization_id IS NULL`, params: [] };
+      return { clause: 'AND FALSE', params: [] };
     }
 
-    // Filter to user's orgs + legacy data (null org_id) for backward compatibility
     const placeholders = organizationIds.map((_, i) => `$${paramStartIndex + i}`).join(', ');
-    const clause = `AND (${testRunAlias}.organization_id IN (${placeholders}) OR ${testRunAlias}.organization_id IS NULL)`;
+    const clause = `AND ${testRunAlias}.organization_id IN (${placeholders})`;
 
     return { clause, params: organizationIds };
   }
@@ -824,14 +829,14 @@ export class ReportDataFetcherService {
     endTime: Date;
     hasCagg: boolean;
   } | null> {
-    // Org filter: empty list (= no accessible orgs) maps to "null orgs only"
-    // to match the existing buildOrganizationFilterClause + null-org compatibility.
+    // Empty list = a user with no accessible orgs, who sees nothing. Matches
+    // buildOrganizationFilterClause.
     const orgClause =
       orgIds === null
         ? ''
         : orgIds.length > 0
-          ? `AND (tr.organization_id IN (${orgIds.map((_, i) => `$${2 + i}`).join(', ')}) OR tr.organization_id IS NULL)`
-          : 'AND tr.organization_id IS NULL';
+          ? `AND tr.organization_id IN (${orgIds.map((_, i) => `$${2 + i}`).join(', ')})`
+          : 'AND FALSE';
 
     const query = `
       SELECT
@@ -1047,11 +1052,10 @@ export class ReportDataFetcherService {
           ? `, org_filter AS (
               SELECT tr.test_run_id FROM test_runs tr
               WHERE tr.test_run_id = $1
-                AND (tr.organization_id IN (${orgIds.map((_, i) => `$${4 + i}`).join(', ')}) OR tr.organization_id IS NULL)
+                AND tr.organization_id IN (${orgIds.map((_, i) => `$${4 + i}`).join(', ')})
             )`
           : `, org_filter AS (
-              SELECT tr.test_run_id FROM test_runs tr
-              WHERE tr.test_run_id = $1 AND tr.organization_id IS NULL
+              SELECT tr.test_run_id FROM test_runs tr WHERE FALSE
             )`
         : '';
 
@@ -1203,12 +1207,9 @@ export class ReportDataFetcherService {
           ? `AND EXISTS (
               SELECT 1 FROM test_runs tr
               WHERE tr.test_run_id = vu.test_run_id
-                AND (tr.organization_id IN (${orgIds.map((_, i) => `$${4 + i}`).join(', ')}) OR tr.organization_id IS NULL)
+                AND tr.organization_id IN (${orgIds.map((_, i) => `$${4 + i}`).join(', ')})
             )`
-          : `AND EXISTS (
-              SELECT 1 FROM test_runs tr
-              WHERE tr.test_run_id = vu.test_run_id AND tr.organization_id IS NULL
-            )`
+          : 'AND FALSE'
         : '';
 
       const overallQuery = `
@@ -1630,11 +1631,17 @@ export class ReportDataFetcherService {
    * Get detailed SLO check results for a test run.
    * Returns individual check results with requirement/actual value for the SLO renderer.
    */
+  /**
+   * Returns `null` — not `[]` — when the query fails. An empty array means the run
+   * genuinely has no checks, and the renderer draws a green "all clear" card for it.
+   * Conflating the two produced a permanently stored report that said everything
+   * passed because a transient DB error had been swallowed.
+   */
   async getSloCheckResults(
     testRunId: string,
     _userId: string = '',
     _roles: string[] = [],
-  ): Promise<SloCheckResult[]> {
+  ): Promise<SloCheckResult[] | null> {
     try {
       const rows: SloCheckResult[] = await this.dataSource.query(
         `SELECT
@@ -1652,7 +1659,13 @@ export class ReportDataFetcherService {
           cr.dashboard_label,
           cr.match_pattern,
           cr.requirement->>'operator' AS requirement_operator,
-          (cr.requirement->>'value')::numeric AS requirement_value,
+          -- Guarded cast: a single row whose requirement value is not numeric used to
+          -- throw here and collapse EVERY SLO into the green "no results" card. A
+          -- non-numeric value now yields NULL for that one row instead.
+          CASE
+            WHEN cr.requirement->>'value' ~ '^\\s*-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?\\s*$'
+            THEN (cr.requirement->>'value')::numeric
+          END AS requirement_value,
           cr.requirement,
           cr.targets,
           cr.message,
@@ -1667,8 +1680,8 @@ export class ReportDataFetcherService {
 
       return rows;
     } catch (error) {
-      this.logger.warn(`Failed to get SLO check results for ${testRunId}: ${(error as Error).message}`);
-      return [];
+      this.logger.error(`Failed to get SLO check results for ${testRunId}: ${(error as Error).message}`);
+      return null;
     }
   }
 

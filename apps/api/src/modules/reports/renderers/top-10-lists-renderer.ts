@@ -133,7 +133,8 @@ export class Top10ListsRenderer {
     return `
       <div style="margin-top: 24px;">
         ${groupHeader(def.title)}
-        <table style="width: 100%; border-collapse: collapse;">
+        <div class="table-scroll">
+          <table style="width: 100%; border-collapse: collapse;">
           <thead>
             <tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">${nameHeader}</th>
@@ -145,6 +146,7 @@ export class Top10ListsRenderer {
           </thead>
           <tbody style="background: white;">${bodyRows}</tbody>
         </table>
+        </div>
       </div>`;
   }
 }
