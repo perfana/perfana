@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.9] - 2026-08-20
+
+### Fixed
+- **A comparison or trends section now reports on exactly what you picked.** Each level of the dashboards → panels → series picker is all-or-explicit: leave a level empty and everything below the level above it is covered, but pick anything and only your picks count. Selecting two dashboards and then panels on only one of them used to quietly pull in the whole second dashboard — every panel, every series — and a panel you picked without picking any of its series pulled in all of them. The picker now names whatever is dropping out ("no panel picked on Checkout, so it is left out") instead of silently widening the section.
+
 ## [0.2.68.1] - 2026-08-20
 
 ### Changed
