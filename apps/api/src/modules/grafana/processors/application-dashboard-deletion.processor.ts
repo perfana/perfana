@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { Queue, Worker, Job } from 'bullmq';
 import IORedis from 'ioredis';
+import { DataSource } from 'typeorm';
 import { ApplicationDashboardsService } from '../application-dashboards.service';
 
 export interface ApplicationDashboardDeletionJobData {
@@ -34,6 +35,7 @@ export class ApplicationDashboardDeletionProcessor implements OnModuleInit, OnMo
   constructor(
     private readonly configService: ConfigService,
     private readonly applicationDashboardsService: ApplicationDashboardsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -116,6 +118,15 @@ export class ApplicationDashboardDeletionProcessor implements OnModuleInit, OnMo
       this.logger.error(
         `Deletion job ${job?.id} for application dashboard ${job?.data?.id} failed: ${error.message}`,
       );
+      // Mark it failed so the row stays in the list wearing a badge. Without this
+      // the UI has dropped the row optimistically and the only sign of a
+      // permanently failed deletion is the dashboard reappearing on reload, with
+      // the reason buried in the API log. Mirrors TestRunDeletionProcessor.
+      if (job?.data?.id) {
+        this.setDeletionStatus(job.data.id, 'failed').catch((err) => {
+          this.logger.error(`Failed to set deletion_status to 'failed': ${err.message}`);
+        });
+      }
     });
 
     this.worker.on('error', (error) => {
@@ -125,8 +136,23 @@ export class ApplicationDashboardDeletionProcessor implements OnModuleInit, OnMo
     this.logger.log('Application dashboard deletion queue and worker initialized (concurrency: 1)');
   }
 
+  /**
+   * Set (or clear, with null) the background-deletion state on a dashboard row.
+   *
+   * Deliberately on the pooled connection: this runs in a BullMQ worker, outside
+   * any HTTP request, so there is no RLS context to inherit — the same reason
+   * processJob forwards an explicit audit actor.
+   */
+  private async setDeletionStatus(id: string, status: string | null): Promise<void> {
+    await this.dataSource.query(
+      'UPDATE application_dashboards SET deletion_status = $1 WHERE id = $2',
+      [status, id],
+    );
+  }
+
   private async processJob(job: Job<ApplicationDashboardDeletionJobData, void>): Promise<void> {
     const { id, deleteFromGrafana, userId, roles } = job.data;
+    await this.setDeletionStatus(id, 'deleting');
     // Jobs run outside the HTTP request, so there is no CLS context for the
     // audit actor — forward the queuing user (mirrors DeleteTestRunHandler).
     await this.applicationDashboardsService.delete(id, deleteFromGrafana, userId, roles, {
@@ -151,6 +177,13 @@ export class ApplicationDashboardDeletionProcessor implements OnModuleInit, OnMo
     if (!this.isAvailable()) {
       throw new Error('Application dashboard deletion processor is not available (Redis unavailable)');
     }
+
+    // Marked before enqueuing, so the list shows "queued" from the moment the
+    // request returns rather than from whenever the worker picks the job up.
+    await this.dataSource.query(
+      `UPDATE application_dashboards SET deletion_status = 'queued' WHERE id = ANY($1)`,
+      [ids],
+    );
 
     for (const id of ids) {
       await this.queue!.add(

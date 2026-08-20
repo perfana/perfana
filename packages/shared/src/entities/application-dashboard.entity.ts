@@ -123,4 +123,15 @@ export class ApplicationDashboard {
   @ManyToOne('MetricsSource')
   @JoinColumn({ name: 'metrics_source_id' })
   metricsSource?: unknown;
+
+  /**
+   * Background-deletion state, mirroring `test_runs.deletion_status`.
+   *
+   * null = not being deleted. 'queued' | 'deleting' while the job is in flight,
+   * 'failed' once its retries are exhausted. The row stays visible throughout, so
+   * a permanently failed deletion surfaces as a badge instead of the dashboard
+   * quietly reappearing on the next reload with the reason buried in the API log.
+   */
+  @Column({ name: 'deletion_status', type: 'varchar', length: 20, nullable: true, default: null })
+  deletionStatus?: string | null;
 }

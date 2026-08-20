@@ -1,3 +1,4 @@
+import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { ApplicationDashboardDeletionProcessor } from './application-dashboard-deletion.processor';
@@ -12,6 +13,7 @@ import { ApplicationDashboardsService } from '../application-dashboards.service'
  */
 describe('ApplicationDashboardDeletionProcessor', () => {
   let processor: ApplicationDashboardDeletionProcessor;
+  let dataSource: { query: jest.Mock };
   let dashboardsService: { delete: jest.Mock };
   let queue: { add: jest.Mock };
 
@@ -21,9 +23,12 @@ describe('ApplicationDashboardDeletionProcessor', () => {
     dashboardsService = { delete: jest.fn().mockResolvedValue({ deletedFromGrafana: false }) };
     queue = { add: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
+    dataSource = { query: jest.fn().mockResolvedValue(undefined) };
+
     processor = new ApplicationDashboardDeletionProcessor(
       new ConfigService({}),
       dashboardsService as unknown as ApplicationDashboardsService,
+      dataSource as unknown as DataSource,
     );
 
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
@@ -127,6 +132,42 @@ describe('ApplicationDashboardDeletionProcessor', () => {
   describe('onModuleDestroy', () => {
     it('closes cleanly when nothing was ever initialized', async () => {
       await expect(processor.onModuleDestroy()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('deletion_status', () => {
+    it("marks the rows 'queued' before enqueuing, so the list says so immediately", async () => {
+      markReady();
+
+      await processor.addBulkJobs(['d1', 'd2'], true, ctx);
+
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining("deletion_status = 'queued'"),
+        [['d1', 'd2']],
+      );
+    });
+
+    it("marks the row 'deleting' when the worker picks the job up", async () => {
+      await processor['processJob']({
+        data: { id: 'd1', deleteFromGrafana: false, userId: 'user-1', roles: ['user'] },
+      } as never);
+
+      expect(dataSource.query).toHaveBeenCalledWith(
+        'UPDATE application_dashboards SET deletion_status = $1 WHERE id = $2',
+        ['deleting', 'd1'],
+      );
+    });
+
+    it("marks the row 'failed' when its retries are exhausted", async () => {
+      // Without this the UI has already said "queued for deletion" and nothing ever
+      // contradicts it — the dashboard just reappears on the next reload, with the
+      // reason buried in the API log.
+      await processor['setDeletionStatus']('d1', 'failed');
+
+      expect(dataSource.query).toHaveBeenCalledWith(
+        'UPDATE application_dashboards SET deletion_status = $1 WHERE id = $2',
+        ['failed', 'd1'],
+      );
     });
   });
 });

@@ -93,17 +93,14 @@ export class GrafanaDashboardsService {
     try {
       const queryBuilder = withRequestEm(this.grafanaDashboardRepo).createQueryBuilder('gd');
 
-      // Organization filtering: non-admin users only see dashboards belonging to
-      // their organizations OR dashboards with no organization (legacy/shared data).
+      // Organization filtering: non-admin users see only their organizations'
+      // dashboards. No null-org escape — organization_id has been NOT NULL since
+      // Phase 4, so it could only ever match a dangling join.
       if (orgIds !== null) {
         if (orgIds.length > 0) {
-          queryBuilder.andWhere(
-            '(gd.organizationId IS NULL OR gd.organizationId IN (:...orgIds))',
-            { orgIds }
-          );
+          queryBuilder.andWhere('gd.organizationId IN (:...orgIds)', { orgIds });
         } else {
-          // User has no org memberships — only show unowned dashboards
-          queryBuilder.andWhere('gd.organizationId IS NULL');
+          queryBuilder.andWhere('1 = 0'); // no memberships, nothing is visible
         }
       }
 

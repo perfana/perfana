@@ -359,9 +359,13 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
       throw new Error('Failed to queue dashboards for deletion');
     }
 
-    // Deletion happens in the background, so refetching would just bring the
-    // rows back. Drop them locally; a reload shows anything that failed.
-    setDashboards(prev => prev.filter(d => !ids.includes(d.id)));
+    // The rows stay, marked. Dropping them locally told the user "queued for
+    // deletion" and then nothing ever contradicted it: a permanently failed job
+    // only surfaced as the dashboard reappearing after a reload, with the reason
+    // buried in the API log. The badge is the contradiction.
+    setDashboards(prev =>
+      prev.map(d => (ids.includes(d.id) ? { ...d, deletion_status: 'queued' as const } : d)),
+    );
   }, []);
 
   // Handle dashboard tag toggle

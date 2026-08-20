@@ -40,6 +40,13 @@ export interface ApplicationDashboard {
   variables: DashboardVariable[];
   tags?: string[];
   metrics_source_id?: string;
+  /**
+   * Background-deletion state. null = not being deleted; 'queued' | 'deleting' while
+   * the job is in flight; 'failed' once its retries are exhausted. Mirrors
+   * `test_runs.deletion_status` — the row stays in the list wearing a badge instead
+   * of vanishing and quietly reappearing on the next reload.
+   */
+  deletion_status?: 'queued' | 'deleting' | 'failed' | null;
   created_at: string;
   updated_at: string;
 }

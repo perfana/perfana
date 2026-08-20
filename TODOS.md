@@ -36,33 +36,29 @@ Pass criterion (already encoded in the script): cold p99 < 200ms, warm p99 < 30m
 
 ## Grafana dashboards
 
-### Surface failed background dashboard deletions in the UI
-
-**Priority:** P2
-**Origin:** Deliberate scope call during /ship on `fix/queue-grafana-dashboard-batch-delete` (2026-08-15).
-**Why:** Batch dashboard deletion is now queued, but `application_dashboards` has no `deletion_status` column (test runs do). The UI drops the queued rows optimistically and a permanently failed job only surfaces as the dashboard reappearing after a reload, with the reason buried in the API log. The user is told "queued for deletion" and nothing contradicts that.
-**What:** Either add `deletion_status` to `application_dashboards` and mirror the test-run treatment (queued/deleting/failed badge, row stays visible), or return a per-id result the UI can poll. The `failed` handler in the processor is already the hook point.
-**Where:** `apps/api/src/modules/grafana/processors/application-dashboard-deletion.processor.ts` (the `failed` worker event), `apps/web/app/systems/[id]/config/hooks/useDashboardManagement.ts` (`handleBatchDeleteDashboards`), compare with `apps/api/src/modules/test-runs/processors/test-run-deletion.processor.ts`.
-
 ### `concurrency: 1` deletion queues are per-process, not per-cluster
 
 **Priority:** P3
-**Origin:** Adversarial review during /ship on `fix/queue-grafana-dashboard-batch-delete` (2026-08-15). Pre-existing shape, inherited by the new dashboard-deletion queue.
-**Why:** Both deletion processors run their BullMQ `Worker` inside the API process with `concurrency: 1`, which is what stops the hypertable cascades from deadlocking each other. That guarantee holds only while exactly one API process exists — scale the API to N replicas and effective concurrency becomes N, silently restoring the deadlocks the queue was built to prevent. Nothing in the code or the deploy config asserts the single-replica assumption.
-**What:** Either move both workers into the worker app (one replica by design), or take a Redis-based distributed lock around the delete so concurrency stays 1 cluster-wide. At minimum, assert the assumption where replicas are configured.
-**Where:** `apps/api/src/modules/grafana/processors/application-dashboard-deletion.processor.ts` (~line 92), `apps/api/src/modules/test-runs/processors/test-run-deletion.processor.ts` (~line 155).
-
----
-
-## Tests
-
-### Consider clearing `persistedListeners` on manual `disconnect()`
-
-**Priority:** P3
-**Origin:** Noticed during /investigate of failing web tests on `fix/web-stale-failing-tests` (2026-05-31).
-**Why:** `socketManager.disconnect()` tears down the socket but intentionally preserves `persistedListeners` so they survive transient reconnects. A *manual* disconnect is a full teardown though — a later `connect()` re-attaches listeners the caller may have meant to drop. This same leak caused the socket `on()` test to grab a stale handler across the suite (worked around in the test, not the source).
-**What:** Decide whether a manual `disconnect()` should clear `persistedListeners` while reconnect-triggered teardown keeps them. If yes, distinguish manual teardown from reconnect teardown.
-**Where:** `apps/web/lib/socket.ts` — `disconnect()` (~line 281) and `persistedListeners` (~line 55).
+**Origin:** Adversarial review during /ship on `fix/queue-grafana-dashboard-batch-delete` (2026-08-15).
+Re-examined during /ship on `fix/queue-and-socket` (2026-08-20) and deliberately left open.
+**Why:** Both deletion processors run their BullMQ `Worker` inside the API process with
+`concurrency: 1`, which is what stops the hypertable cascades from deadlocking each other. That
+guarantee holds only while exactly one API process exists — scale to N replicas and effective
+concurrency becomes N, silently restoring the deadlocks the queue was built to prevent.
+**Current state:** no replica count is configured anywhere in the repo (`docker-compose*.yml` sets
+`deploy:` only on infra services), so the assumption holds today. That is what makes it a P3 and
+not a P2 — and also what makes it easy to break without noticing.
+**What:** Two real options, and one false one.
+- Move both workers into the worker app, which is one replica by design. Largest change,
+  smallest ongoing risk.
+- Take a Redis `SET NX PX` lock around the delete, so concurrency stays 1 cluster-wide.
+  Small diff, but it is deadlock-sensitive code and needs a multi-process test to be worth
+  trusting — do not land it on a green unit suite alone.
+- **Not** a heartbeat/registry that merely *detects* multiple workers: `redis.keys()` is banned
+  here for good reason, a TTL-based set is more moving parts than the lock it replaces, and
+  detection after the fact still leaves the deadlock.
+**Where:** `apps/api/src/modules/grafana/processors/application-dashboard-deletion.processor.ts`
+(~line 112), `apps/api/src/modules/test-runs/processors/test-run-deletion.processor.ts` (~line 155).
 
 ---
 
@@ -123,6 +119,34 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
 ## Completed
+
+### Surface failed background dashboard deletions in the UI
+
+`application_dashboards` gains `deletion_status`, mirroring `test_runs`: null when idle,
+`'queued'` set before the jobs are enqueued, `'deleting'` when the worker picks one up, and
+`'failed'` from the `failed` handler once retries are exhausted. The API returns it on the list
+DTO, and `DashboardTable` renders a badge. The UI no longer drops the rows optimistically — that
+was the actual defect: it told the user "queued for deletion" and then nothing ever contradicted
+it, so a permanently failed job surfaced only as the dashboard reappearing after a reload with
+the reason buried in the API log.
+
+**Also fixed here: twelve more dead null-org escapes that the previous sweep missed.** That
+sweep grepped `organization_id IS NULL` — the SQL-column form — and TypeORM query builders spell
+it `ad.organizationId IS NULL`, against the entity *property*. Those did not match.
+`application-dashboards` (4), `grafana-dashboards` (2), `metrics-sources` (6) are now clear, and
+`grep -rn "organizationId IS NULL" apps/api/src` returns nothing.
+**Completed:** v0.2.68.7 (2026-08-20)
+
+### Consider clearing `persistedListeners` on manual `disconnect()`
+
+Yes — it clears them. The investigation settled the open question: **nothing in the app calls
+`disconnect()`**, and reconnection does not go through it (that path is `scheduleReconnect` →
+`connect` → `reapplyPersistedListeners`, which builds a fresh socket). So the method is a full
+teardown by definition and there is no manual-vs-reconnect distinction to build — which would
+have been machinery for a case that does not exist. Clearing the map also removes the state leak
+that made one suite's socket `on()` test grab another's stale handler, which had been worked
+around in the test rather than the source.
+**Completed:** v0.2.68.7 (2026-08-20)
 
 ### Reports: SLO all-clear card, prose measure, table scrolling, builder floor, section accents
 
