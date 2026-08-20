@@ -4,10 +4,12 @@
  * Dashboards → panels → series pickers, shared by the report sections that scope
  * themselves to metric data (comparisons, trends).
  *
- * Each level is multi-select with a select-all, and each level left empty means
- * "everything under the level above it": no panels picked means the whole dashboard,
- * no series picked means the whole panel. The renderer reads the same rule, so the
- * common case — compare/trend these two dashboards — stays one click.
+ * Each level is multi-select with a select-all, and a level left entirely empty means
+ * "everything under the level above it" — so the common case, compare/trend these two
+ * dashboards, stays one click. Pick anything at a level and only the picks count: a
+ * dashboard with no panel picked, or a panel with no series picked, drops out. The
+ * renderer reads the same rule (section-selections.ts), and the helper text below names
+ * whatever is dropping out, because silently reporting on it is the older bug.
  */
 
 import { useEffect, useState } from 'react';
@@ -221,6 +223,15 @@ export function MetricSelectionCascade({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, panelsKey, panelOptions, testRunId]);
 
+  // Named in the helper text: with picks at a level, the parents that got none are out of scope.
+  const droppedDashboards = selectedPanels.length > 0
+    ? selectedDashboards.filter((l) => !selectedPanels.some((p) => panelDashboard(p) === l))
+    : [];
+  const droppedPanels = selectedSeries.length > 0
+    ? selectedPanels.filter((p) =>
+        !selectedSeries.some((sr) => sr.dashboardLabel === panelDashboard(p) && sr.panelId === p.id))
+    : [];
+
   // Dropping a dashboard has to drop the panels and series that hung off it, or the
   // report silently keeps using a dashboard the form no longer shows.
   const setDashboards = (labels: string[]) => {
@@ -313,7 +324,9 @@ export function MetricSelectionCascade({
                   ? 'Select a dashboard to see its panels'
                   : panelsLoading
                     ? 'Loading panels…'
-                    : `${panelOptions.length} available — leave empty to include every panel`
+                    : droppedDashboards.length > 0
+                      ? `${panelOptions.length} available — no panel picked on ${droppedDashboards.join(', ')}, so ${droppedDashboards.length === 1 ? 'it is' : 'they are'} left out`
+                      : `${panelOptions.length} available — leave empty to include every panel`
               }
             />
           )}
@@ -367,7 +380,9 @@ export function MetricSelectionCascade({
                   ? 'Select a panel to see its series'
                   : seriesLoading
                     ? 'Loading series…'
-                    : `${seriesOptions.length} available — leave empty to include every series`
+                    : droppedPanels.length > 0
+                      ? `${seriesOptions.length} available — no series picked on ${droppedPanels.map((p) => p.title).join(', ')}, so ${droppedPanels.length === 1 ? 'it is' : 'they are'} left out`
+                      : `${seriesOptions.length} available — leave empty to include every series`
               }
             />
           )}

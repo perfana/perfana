@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **Deleting dashboards from the list works again.** The two endpoints behind the multi-select delete took a request body whose fields carried no validation rules, and the API strips every unvalidated field from a body — so both handlers were handed an empty object. Fetching the delete summary failed with a 500, and the delete itself answered "ids must be a non-empty array of strings" about a request that plainly contained them. The batch delete also now rejects a malformed id with a clear 400 instead of failing deep in the database.
 
+## [0.2.68.9] - 2026-08-20
+
+### Fixed
+- **A comparison or trends section now reports on exactly what you picked.** Each level of the dashboards → panels → series picker is all-or-explicit: leave a level empty and everything below the level above it is covered, but pick anything and only your picks count. Selecting two dashboards and then panels on only one of them used to quietly pull in the whole second dashboard — every panel, every series — and a panel you picked without picking any of its series pulled in all of them. The picker now names whatever is dropping out ("no panel picked on Checkout, so it is left out") instead of silently widening the section.
+
 ## [0.2.68.1] - 2026-08-20
 
 ### Changed
