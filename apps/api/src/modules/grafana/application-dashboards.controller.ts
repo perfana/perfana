@@ -14,6 +14,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { IsArray, IsBoolean, IsOptional, IsUUID } from 'class-validator';
 import {
   ApplicationDashboardsService,
   ApplicationDashboard,
@@ -32,12 +33,31 @@ interface ApplicationDashboardRawQuery extends Omit<ApplicationDashboardQuery, '
   tags?: string | string[];
 }
 
-class BatchDeleteInfoDto {
+/**
+ * The global ValidationPipe runs with `whitelist: true`, which deletes every property a DTO
+ * does not decorate. An undecorated `ids` therefore never reached the handler: batch-delete-info
+ * threw on `undefined.length` (500) and batch-delete refused its own valid body (400 "ids must be
+ * a non-empty array of strings") while the exception filter logged the raw body that still had
+ * them. Decorate every field of a @Body() DTO in this codebase, or the pipe silently eats it.
+ *
+ * `'all'` rather than the `'4'` its sibling CopyApplicationDashboardsDto pins: the check is
+ * here to survive the whitelist and to turn a malformed id into a 400 instead of a failed
+ * Postgres uuid cast (a 500). Pinning a version would only add a way to make a row with a
+ * non-v4 id permanently undeletable.
+ */
+export class BatchDeleteInfoDto {
+  @IsArray()
+  @IsUUID('all', { each: true })
   ids!: string[];
 }
 
-class BatchDeleteDto {
+export class BatchDeleteDto {
+  @IsArray()
+  @IsUUID('all', { each: true })
   ids!: string[];
+
+  @IsOptional()
+  @IsBoolean()
   deleteFromGrafana?: boolean;
 }
 
