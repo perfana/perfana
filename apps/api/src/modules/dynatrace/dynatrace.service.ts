@@ -726,22 +726,60 @@ export class DynatraceService {
 
   // DQL Methods
 
+
+  /**
+   * Attach `_permissions` to DQL query / entity-mapping rows.
+   *
+   * PR #187 closed the backend authz bypass on these two sub-resources — a
+   * non-admin now correctly gets 403 on PATCH/DELETE. The frontend had no way to
+   * know that, so the user only discovered the denial after clicking. This is the
+   * same enrichment the parent `DynatraceConfig` already gets in `findAll`, and it
+   * reads the *same* capabilities the mutation paths enforce, so the button state
+   * and the eventual 403 cannot disagree.
+   *
+   * Batched the same way as `findAll`: one capability lookup per unique org, not
+   * per row.
+   */
+  private async attachSubResourcePermissions<T extends { organizationId?: string }>(
+    rows: T[],
+    userId: string,
+    roles: string[],
+  ): Promise<T[]> {
+    if (rows.length === 0) return rows;
+
+    // No isGlobalAdmin branch: getCapabilities already returns the full
+    // GLOBAL_ADMIN_CAPABILITIES set for a global admin regardless of org scope
+    // (CapabilitiesService.compute short-circuits on systemRoles), so admins fall
+    // out of the normal path with both flags true.
+    const uniqueOrgIds = Array.from(new Set(rows.map(r => r.organizationId ?? null)));
+    const capsResults = await Promise.all(
+      uniqueOrgIds.map(orgId => this.authzService.getCapabilities(userId, roles, orgId)),
+    );
+    const capsByOrg = new Map<string | null, string[]>();
+    uniqueOrgIds.forEach((orgId, i) => capsByOrg.set(orgId, capsResults[i] as string[]));
+
+    return rows.map(row => {
+      const caps = capsByOrg.get(row.organizationId ?? null) ?? [];
+      return attachPermissions(row, {
+        update: caps.includes(Capability.IntegrationDynatraceUpdate),
+        delete: caps.includes(Capability.IntegrationDynatraceDelete),
+      }) as T;
+    });
+  }
+
   /**
    * Find all Dynatrace DQL queries
    *
    * @param userId - The user ID for authorization
    * @param roles - The user's roles for authorization checks
    *
-   * Note: DynatraceQuery entity does not have organization_id yet, so org filtering is not applied.
-   * Full org filtering will be enabled when Phase 4 adds organization_id column.
+   * Rows are RLS-scoped by `rls_dynatrace_queries_select`; this adds the
+   * `_permissions` the UI needs to disable edit/delete before the user clicks.
    */
-  async findAllQuery(userId: string, _roles: string[]) {
-    // Log authorization context for debugging
+  async findAllQuery(userId: string, roles: string[]) {
     this.logger.debug(`findAllQuery: userId=${userId}`);
 
-    // NOTE: Org filtering will be added here when DynatraceQuery entity has organization_id
-    // For now, all queries are returned (treated as legacy data)
-    return this.repository.findAllQuery();
+    return this.attachSubResourcePermissions(await this.repository.findAllQuery(), userId, roles);
   }
 
   /**
@@ -753,16 +791,15 @@ export class DynatraceService {
    * @param userId - The user ID for authorization
    * @param roles - The user's roles for authorization checks
    *
-   * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string | undefined, userId: string, _roles: string[]) {
-    // Log authorization context for debugging
+  async findQueryBySystemAndEnvironment(systemId: string, environment: string, workload: string | undefined, userId: string, roles: string[]) {
     this.logger.debug(`findQueryBySystemAndEnvironment: systemId=${systemId}, environment=${environment}, workload=${workload}, userId=${userId}`);
 
-    // NOTE: Access permission check will be added here when DynatraceQuery entity has organization_id
-    // For now, all queries are accessible (treated as legacy data)
-    return this.repository.findQueryBySystemAndEnvironment(systemId, environment, workload);
+    return this.attachSubResourcePermissions(
+      await this.repository.findQueryBySystemAndEnvironment(systemId, environment, workload),
+      userId,
+      roles,
+    );
   }
 
   /**
@@ -772,11 +809,8 @@ export class DynatraceService {
    * @param userId - The user ID for authorization
    * @param roles - The user's roles for authorization checks
    *
-   * Note: DynatraceQuery entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
    */
-  async findQueryById(id: string, userId: string, _roles: string[]) {
-    // Log authorization context for debugging
+  async findQueryById(id: string, userId: string, roles: string[]) {
     this.logger.debug(`findQueryById: id=${id}, userId=${userId}`);
 
     const query = await this.repository.findQueryById(id);
@@ -784,10 +818,8 @@ export class DynatraceService {
       throw new NotFoundException(`Dynatrace DQL query with ID ${id} not found`);
     }
 
-    // NOTE: Access permission check will be added here when DynatraceQuery entity has organization_id
-    // For now, all queries are accessible (treated as legacy data)
-
-    return query;
+    const [enriched] = await this.attachSubResourcePermissions([query], userId, roles);
+    return enriched;
   }
 
   /**
@@ -1133,16 +1165,17 @@ export class DynatraceService {
    * @param environment - Optional test environment filter
    * @param workload - Optional workload filter
    *
-   * Note: DynatraceEntityMapping entity does not have organization_id yet, so org filtering is not applied.
-   * Full org filtering will be enabled when Phase 4 adds organization_id column.
+   * Mappings have no update endpoint — only delete — but the enrichment emits both
+   * flags for a uniform shape; the UI reads `_permissions.delete`.
    */
-  async getEntityMappings(userId: string, _roles: string[], systemId?: string, environment?: string, workload?: string) {
-    // Log authorization context for debugging
+  async getEntityMappings(userId: string, roles: string[], systemId?: string, environment?: string, workload?: string) {
     this.logger.debug(`getEntityMappings: userId=${userId}, systemId=${systemId}, environment=${environment}, workload=${workload}`);
 
-    // NOTE: Org filtering will be added here when DynatraceEntityMapping entity has organization_id
-    // For now, all mappings are returned (treated as legacy data)
-    return this.repository.getEntityMappings(systemId, environment, workload);
+    return this.attachSubResourcePermissions(
+      await this.repository.getEntityMappings(systemId, environment, workload),
+      userId,
+      roles,
+    );
   }
 
   /**

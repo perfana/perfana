@@ -13,108 +13,24 @@ with the version it landed in.
 
 ## RBAC
 
-### Add Grafana panel for `auth_capability_denied_total`
+### Run the cold-cache p99 benchmark for `/api/users/me/permissions`
 
 **Priority:** P3
 **Origin:** /plan-eng-review on `docs/superpowers/plans/2026-04-27-rbac-completion.md` (2026-04-28).
-**Depends on:** Phase 3c shipping the metric counter inside `CapabilityGuard`.
-**Why:** A spike in capability denials is real ops signal — misconfigured
-user, attack, deployment regression, missing membership backfill. Without a
-dashboard, the counter is dead data; with one, ops can spot patterns and
-alert on per-capability or per-org spikes.
-**What:** A Grafana panel in the existing observability dashboard (or a new
-RBAC-focused dashboard) showing:
-- `rate(auth_capability_denied_total[5m])` per capability, over time.
-- Top denied capabilities in the last 24h.
-- Per-organization denial counts (label slice).
-**Where to start:** confirm Phase 3c has shipped the counter (grep
-`auth_capability_denied_total` in `apps/api/src`); decide whether to extend
-an existing dashboard or create a new one (check `infra/grafana/dashboards/`
-for the pattern); add an alert rule on per-user denial rate >10/min for
-attack detection.
-
-### Cold-cache p99 benchmark for `/api/users/me/permissions`
-
-**Priority:** P3
-**Origin:** /plan-eng-review on `docs/superpowers/plans/2026-04-27-rbac-completion.md` (2026-04-28).
-**Depends on:** Phase 3a deployed (the endpoint must exist).
-**Why:** The plan parallelizes per-org capability lookups via `Promise.all`
-and uses a versioned cache key strategy to avoid `redis.keys()`. Both should
-keep cold-cache p99 at one round-trip's latency regardless of org count, but
-neither has been verified empirically. For a user with 20+ orgs (a realistic
-admin or support user scenario), a regression could quietly add hundreds of
-ms of session-startup latency.
-**What:** Hit `/api/users/me/permissions` 100 times for a seeded user with
-20 orgs against an empty Redis (cold cache); record p50/p95/p99/max. Repeat
-warm cache. Pass criterion: cold p99 < 200ms; warm p99 < 30ms.
-**Where to start:** if perfana has a load-test rig (k6, artillery), add a
-scenario; if not, a `bun run scripts/bench-me-permissions.ts` ad-hoc script
-that fires 100 sequential requests and prints the histogram is enough for
-a one-off check.
-
-### Extend `_permissions` enrichment to Dynatrace sub-resources
-
-**Priority:** P3
-**Origin:** PR #187 / v0.2.47.8 (RBAC Phase 3 follow-up).
-**Depends on:** Nothing — sub-resources already have `organizationId` on the
-DTO (added in this PR) and `getCapabilities` is in place.
-**Why:** PR #187 closed the *backend* authz bypass on `dynatrace_queries` and
-`dynatrace_entity_mappings` — non-admins now correctly get 403 on PATCH/DELETE.
-But the *frontend* doesn't know to disable those buttons, so the user only
-discovers the denial after clicking and seeing an error. Same UX gap that
-Phase 3b closed for the parent `DynatraceConfig`.
-**What:** Mirror the Phase 3b pattern on the read endpoints for queries and
-entity mappings: `attachPermissions(row, { update: …, delete: … })` with the
-booleans computed from `getCapabilities(userId, roles, row.organizationId)`.
-Frontend already has `<RequiresPermission>` wired — wrap the
-update/delete buttons in the query editor and entity-mapping list.
-**Where to start:** `apps/api/src/modules/dynatrace/dynatrace.service.ts` —
-the read methods (`findAllQuery`, `findQueryById`, `findQueryBySystemAndEnvironment`,
-`getEntityMappings`, `getEntityMappingById`) still have stale "treated as
-legacy data" TODO comments. Reuse the batched `capsByOrg` pattern from
-`findAll` (lines 105-121). Frontend wrappers go in the same place that
-already handles the parent config — `apps/web/app/integrations/components/`
-and any DQL query / entity-mapping editor pages.
+**Status:** the harness landed in v0.2.68.4 —
+`apps/api/scripts/bench-me-permissions.mjs`, no dependencies, exits non-zero when it
+misses the criterion. What is still owed is the **measurement**, which needs a fixture
+the local dev DB does not have.
+**Why:** the endpoint parallelises per-org capability lookups with `Promise.all` and uses
+a versioned cache key (never `redis.keys()`). Both should keep p99 at one round trip
+regardless of org count — reasoned, never measured. For a user with 20+ orgs (a realistic
+admin or support account) a regression would quietly add hundreds of ms to session start,
+on the path every page load waits for.
+**What:** seed a user into 20 organizations, flush `auth:*` from Redis, then
+`PERFANA_TOKEN=<bearer> node apps/api/scripts/bench-me-permissions.mjs`.
+Pass criterion (already encoded in the script): cold p99 < 200ms, warm p99 < 30ms.
 
 ---
-
-### Fail fast when the API's DB role cannot bypass RLS
-
-**Priority:** P2
-**Origin:** Red team review during /ship on `fix/api-key-authz-rls-and-denial-logging` (2026-08-18).
-**Why:** `AuthorizationService` resolves an API key's organization by reading
-`api_keys` on the pooled connection, deliberately outside RLS (the read is an
-*input* to the RLS context, so scoping it is circular). `api_keys` is FORCE ROW
-LEVEL SECURITY, so that read only returns rows because the API's login role is
-`rolsuper`/`rolbypassrls`. Deploy the API under a least-privilege role — the
-stated point of `perfana_app`, or an RDS master user, which is not BYPASSRLS —
-and both api-key branches return zero rows. Every API key silently loses all
-organization access, and it surfaces as the misleading denial
-"user is not a member of organization X". The dependency is documented in a
-comment but nothing enforces it.
-**What:** On boot, assert the configured `DB_USERNAME` has `rolsuper` OR
-`rolbypassrls` and fail with an explicit message naming this constraint, rather
-than degrading into blanket api-key 404s at runtime.
-**Where to start:** `apps/api/src/common/services/authorization.service.ts`
-(comment above the api-key branch in `isOrganizationMember` states the
-invariant); query `pg_roles` for the connected user during the existing startup
-checks.
-
----
-
-### Live-DB RLS regression test for API-key organization resolution
-
-**Priority:** P3
-**Origin:** /ship coverage audit on `fix/api-key-authz-rls-and-denial-logging` (2026-08-18).
-**Why:** The unit guards added in that PR pin *which repository* the api-key
-lookups use (they fail if either reverts to `withRequestEm`), but not the
-*policy outcome*. Nothing proves end-to-end that an RLS-scoped read actually
-starves an API-key caller, which is the behavior the whole fix turns on.
-**What:** A test in `apps/api/src/test/rls/` that seeds an API key plus a test
-run in its organization, drives a request through `RlsTransactionInterceptor`,
-and asserts the key reads its own run — and that the scoped variant does not.
-**Where to start:** `apps/api/src/test/rls/rls-test-harness.ts` already sets the
-four GUCs; needs Phase 5b migrations applied to the target database.
 
 ---
 
@@ -286,6 +202,62 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
 ## Completed
+
+### Fail fast when the API's DB role cannot bypass RLS
+
+`assertRlsBypass` runs in `bootstrap()` before the app listens: it queries `pg_roles` for
+`current_user` and refuses to start unless the role is `rolsuper` or `rolbypassrls`, with an
+error naming `api_keys`, the FORCE ROW LEVEL SECURITY dependency, and the fix. Postgres does
+not inherit role attributes through membership, so the current role's own attributes are the
+thing that matters. Unit-tested for superuser, bypassrls, the least-privilege deploy the item
+describes, and the unresolvable-role case (which also refuses, rather than assuming).
+**Completed:** v0.2.68.4 (2026-08-20)
+
+### Live-DB RLS regression test for API-key organization resolution
+
+`apps/api/src/test/rls/rls-api-key-org-resolution.spec.ts`, 7 cases. It pins the *policy
+outcome* the unit guards cannot show: an RLS-scoped read of `api_keys` returns nothing for the
+key itself (the circularity that forces the carve-out), the unscoped read the production code
+actually uses returns the row, and `api_keys` really is FORCE ROW LEVEL SECURITY.
+
+The test corrected the item's premise. An unresolved organization is **partial** blindness, not
+total: `can_access_resource` has a creator branch, so a key keeps reading the runs it uploaded
+itself and silently stops seeing everything else in its own org. That is why the failure reads
+as a confusing bug in the field rather than an outage — and it is now asserted in both
+directions. RLS suite: 142 passing, up from 135.
+
+### Extend `_permissions` enrichment to Dynatrace sub-resources
+
+`findAllQuery`, `findQueryBySystemAndEnvironment`, `findQueryById` and `getEntityMappings` now
+attach `_permissions`, batched one capability lookup per unique org rather than per row. The
+flags read the same `IntegrationDynatraceUpdate`/`Delete` capabilities `updateQuery` /
+`deleteQuery` / `deleteEntityMapping` enforce, so the button state and the eventual 403 cannot
+disagree. There is no `getEntityMappingById` on the service (the item listed it; it exists only
+on the repository), and no update endpoint for mappings — delete only.
+
+No `isGlobalAdmin` short-circuit: `getCapabilities` already returns the full admin set
+regardless of org scope, which is both less code and what the `no-direct-is-global-admin` lint
+rule requires.
+
+Frontend: `QueriesTable` (edit + delete) and `EntityMappingsTable` (delete) wrap their buttons
+in `<RequiresPermission>`. The button is the *direct* child in both — a MUI `Tooltip` in between
+would have received the injected `disabled` prop instead of the button. `organizationId` and
+`_permissions` are carried through `DynatraceQueryLocal` and the `useDynatraceQueries` mapper,
+and `mapEntityMappingToDtoFieldsWithLabel` now emits `organizationId` (it did not).
+**Completed:** v0.2.68.4 (2026-08-20)
+
+### Add Grafana panel for `auth_capability_denied_total` — closed, not built
+
+The counter never shipped, and the item assumed an observability stack this repo does not have:
+no `prom-client`, no `/metrics` endpoint, no scrape config, and `infra/grafana/dashboards/` holds
+only Perfana's own product dashboard templates. Standing up a metrics pipeline to serve one
+denial counter is disproportionate for a P3.
+
+The ops signal already exists: `CapabilityGuard` emits a structured WARN on every denial with
+capability, userId, orgId and route, and the admin log viewer (`LOG_VIEWER_ENABLED`) reads it.
+Reopen this only alongside a decision to add Prometheus metrics to the API generally — at which
+point the counter is a few lines and the panel follows.
+**Completed:** v0.2.68.4 (2026-08-20)
 
 ### Twenty-three more dead `organization_id IS NULL` branches
 

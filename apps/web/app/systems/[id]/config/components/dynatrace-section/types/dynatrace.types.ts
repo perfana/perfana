@@ -17,6 +17,13 @@ export interface DynatraceQueryLocal {
   omitGroupByVariableFromMetricName?: string[];
   templateVariables?: Record<string, string>;
   dynatraceConfigLabel?: string;
+  organizationId?: string;
+  /**
+   * Per-resource capability hint carried over from the API's DynatraceQuery.
+   * The backend 403s a non-admin on PATCH/DELETE; the table reads this to
+   * disable the buttons instead of letting the user find out by clicking.
+   */
+  _permissions?: { update: boolean; delete: boolean };
   createdAt?: string;
 }
 

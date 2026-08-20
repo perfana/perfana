@@ -15,6 +15,8 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { ValidationException } from './common/exceptions/business.exception';
 import { ConfigService } from '@nestjs/config';
 import { SocketIOAdapter } from './socket-io.adapter';
+import { DataSource } from 'typeorm';
+import { assertRlsBypass } from './common/db/assert-rls-bypass';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -39,6 +41,11 @@ async function bootstrap() {
   const bodyLimit = process.env.API_BODY_LIMIT || '10mb';
   app.useBodyParser('json', { limit: bodyLimit });
   app.useBodyParser('urlencoded', { limit: bodyLimit, extended: true });
+
+  // Before serving anything: API-key authentication depends on the login role
+  // being able to bypass RLS. Under a role that cannot, every key silently loses
+  // its organization instead of failing visibly. See assertRlsBypass.
+  await assertRlsBypass(app.get(DataSource));
 
   // Get ConfigService for Socket.IO adapter
   const configService = app.get(ConfigService);

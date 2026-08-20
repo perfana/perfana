@@ -629,6 +629,8 @@ export class DynatraceRepository {
       entityDisplayName: entity.entityDisplayName,
       entityType: entity.entityType,
       level: entity.level,
+      // Needed by the service to resolve per-row capabilities for _permissions.
+      organizationId: entity.organizationId,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
     };

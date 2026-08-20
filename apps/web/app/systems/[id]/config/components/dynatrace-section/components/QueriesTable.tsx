@@ -10,7 +10,6 @@ import {
   TableRow,
   IconButton,
   Chip,
-  Tooltip,
   Checkbox,
   Typography,
 } from '@mui/material';
@@ -20,6 +19,7 @@ import {
   Dashboard as DashboardIcon,
 } from '@mui/icons-material';
 import { QueriesTableProps } from '../types';
+import { RequiresPermission } from '@/components/auth/RequiresPermission';
 
 export function QueriesTable({
   queries,
@@ -146,16 +146,40 @@ export function QueriesTable({
               </TableCell>
               <TableCell>
                 <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Tooltip title="Edit">
-                    <IconButton size="small" onClick={() => onEditQuery(query)}>
+                  {/* The IconButton is the direct child: RequiresPermission clones it
+                      with `disabled` and supplies its own tooltip when denied. A MUI
+                      Tooltip in between would receive the `disabled` prop instead. */}
+                  <RequiresPermission
+                    action="integration:dynatrace:update"
+                    orgId={query.organizationId}
+                    resourcePermissions={query._permissions}
+                    disabledReason="You do not have permission to edit this query"
+                  >
+                    <IconButton
+                      size="small"
+                      title="Edit"
+                      aria-label="Edit query"
+                      onClick={() => onEditQuery(query)}
+                    >
                       <EditIcon fontSize="small" />
                     </IconButton>
-                  </Tooltip>
-                  <Tooltip title="Delete">
-                    <IconButton size="small" onClick={() => onDeleteQuery(query)} color="error">
+                  </RequiresPermission>
+                  <RequiresPermission
+                    action="integration:dynatrace:delete"
+                    orgId={query.organizationId}
+                    resourcePermissions={query._permissions}
+                    disabledReason="You do not have permission to delete this query"
+                  >
+                    <IconButton
+                      size="small"
+                      title="Delete"
+                      aria-label="Delete query"
+                      onClick={() => onDeleteQuery(query)}
+                      color="error"
+                    >
                       <DeleteIcon fontSize="small" />
                     </IconButton>
-                  </Tooltip>
+                  </RequiresPermission>
                 </Box>
               </TableCell>
             </TableRow>

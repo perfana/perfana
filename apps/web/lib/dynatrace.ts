@@ -173,6 +173,13 @@ export interface DynatraceQuery {
   /** Maps the dynatrace_queries.metric_unit column. */
   metricUnit?: string
   dynatraceConfig?: DynatraceConfig
+  organizationId?: string
+  /**
+   * Per-resource capability hint from the API. The backend 403s a non-admin on
+   * PATCH/DELETE; without this the buttons look live and the user only finds out
+   * by clicking. Fed to <RequiresPermission resourcePermissions=...>.
+   */
+  _permissions?: { update: boolean; delete: boolean }
   createdAt: string
   updatedAt: string
 }
