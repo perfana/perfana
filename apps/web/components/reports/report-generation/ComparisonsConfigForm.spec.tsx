@@ -258,6 +258,46 @@ it('shows the dashboard → panels cascade for grafana source, panels disabled u
   expect(screen.getByText(/select a panel to see its series/i)).toBeInTheDocument();
 });
 
+it('names the dashboards and panels that a partial selection leaves out', async () => {
+  // The renderer treats each level as all-or-explicit: a dashboard with no panel picked, and a
+  // panel with no series picked, drop out. The form has to say so, or the section silently
+  // reports on less than the picker shows selected.
+  (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
+    const body = url.includes('/grafana/application-dashboards')
+      ? [
+          { id: 'ad-1', dashboard_label: 'JVM', source_type: 'grafana' },
+          { id: 'ad-2', dashboard_label: 'Docker', source_type: 'grafana' },
+        ]
+      : url.includes('panels-by-dashboard')
+        ? [{ panel_id: 3, panel_title: 'Heap' }, { panel_id: 7, panel_title: 'GC Pause' }]
+        : ['used'];
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+  });
+
+  render(
+    <ComparisonsConfigForm
+      config={{
+        source: 'grafana',
+        dashboardLabels: ['JVM', 'Docker'],
+        panels: [
+          { id: 3, title: 'Heap', dashboardLabel: 'JVM' },
+          { id: 7, title: 'GC Pause', dashboardLabel: 'JVM' },
+        ],
+        series: [{ dashboardLabel: 'JVM', panelId: 3, metricName: 'used' }],
+      }}
+      onChange={jest.fn()}
+      systemUnderTestId="sut-1"
+      testEnvironment="acc"
+      workload="loadTest"
+    />
+  );
+
+  await waitFor(() =>
+    expect(screen.getByText(/no panel picked on Docker, so it is left out/)).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getByText(/no series picked on GC Pause, so it is left out/)).toBeInTheDocument());
+});
+
 it('collapses the redundant per-percentile RT panels, like the compare card does', async () => {
   (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
     const body = url.includes('/grafana/application-dashboards')
