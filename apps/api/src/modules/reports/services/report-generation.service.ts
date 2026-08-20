@@ -176,9 +176,16 @@ export class ReportGenerationService {
   ): void {
     queryBuilder
       .leftJoin(`${reportAlias}.test_run`, 'tr_org')
+      // No null-org escape: organization_id is NOT NULL since Phase 4, so it could
+      // only match a report whose test run row is missing. The sentinel keeps the
+      // SQL valid for a user with zero memberships, who correctly sees nothing.
       .andWhere(
-        '(tr_org.organization_id IN (:...orgIds) OR tr_org.organization_id IS NULL)',
-        { orgIds: organizationIds },
+        'tr_org.organization_id IN (:...orgIds)',
+        {
+          orgIds: organizationIds.length > 0
+            ? organizationIds
+            : ['00000000-0000-0000-0000-000000000000'],
+        },
       );
   }
 

@@ -87,8 +87,10 @@ All services inline the same authorization pattern as the rest of the project
 (matching `SystemsUnderTestService`):
 
 - **Global admins** (`perfana-admin`, `admin` roles) bypass all checks.
-- **Non-admins** see only records belonging to their accessible organizations
-  plus legacy records with `organization_id IS NULL`.
+- **Non-admins** see only records belonging to their accessible organizations.
+  There is no null-org allowance: `organization_id` has been NOT NULL on every
+  owned resource since RBAC Phase 4, so an `IS NULL` escape could only ever match
+  a dangling join — a row another tenant must not see.
 - **Mutations** on `GrafanaInstance` require org-admin in at least one
   organization. `GrafanaDashboard` and `MetricsSource` currently allow any
   authenticated user to mutate (legacy data pattern).

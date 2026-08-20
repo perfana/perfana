@@ -118,10 +118,12 @@ export class GrafanaInstancesService {
         // Explicit org selected — scope to that org only
         queryBuilder.andWhere('gi.organization_id = :organizationId', { organizationId });
       } else if (orgIds !== null) {
-        // Non-admin: filter to accessible organizations OR legacy instances (null organization_id)
+        // Non-admin: filter to accessible organizations. No null-org escape —
+        // organization_id has been NOT NULL since Phase 4, so it can only match
+        // a row that should not be visible.
         this.logger.debug(`User ${userId} has access to ${orgIds.length} organizations`);
         queryBuilder.andWhere(
-          '(gi.organization_id IN (:...orgIds) OR gi.organization_id IS NULL)',
+          'gi.organization_id IN (:...orgIds)',
           { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] }
         );
       }

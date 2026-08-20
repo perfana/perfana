@@ -364,7 +364,7 @@ export class MetricsService {
         if (orgIds.length === 0) {
           return [];
         }
-        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
+        queryBuilder.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
       }
 
       // Add system/environment/workload filtering
@@ -549,7 +549,7 @@ export class MetricsService {
         if (orgIds.length === 0) {
           return [];
         }
-        queryBuilder.andWhere('(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)', { orgIds });
+        queryBuilder.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
       }
 
       // Add system/environment/workload filtering

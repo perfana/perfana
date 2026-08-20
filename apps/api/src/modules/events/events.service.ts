@@ -36,7 +36,7 @@ export class EventsService {
 
     if (orgIds !== null) {
       qb.andWhere(
-        '(e.organization_id IN (:...orgIds) OR e.organization_id IS NULL)',
+        'e.organization_id IN (:...orgIds)',
         { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] },
       );
     }
@@ -93,7 +93,7 @@ export class EventsService {
 
     if (orgIds !== null) {
       qb.andWhere(
-        '(e.organization_id IN (:...orgIds) OR e.organization_id IS NULL)',
+        'e.organization_id IN (:...orgIds)',
         { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] },
       );
     }

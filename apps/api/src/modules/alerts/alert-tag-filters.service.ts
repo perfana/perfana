@@ -25,7 +25,7 @@ export class AlertTagFiltersService {
 
     if (orgIds !== null) {
       qb.andWhere(
-        '(f.organization_id IN (:...orgIds) OR f.organization_id IS NULL)',
+        'f.organization_id IN (:...orgIds)',
         { orgIds: orgIds.length > 0 ? orgIds : ['00000000-0000-0000-0000-000000000000'] },
       );
     }

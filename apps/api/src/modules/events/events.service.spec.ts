@@ -120,7 +120,7 @@ describe('EventsService', () => {
       authzService.getAccessibleOrganizations.mockResolvedValue(['org-1', 'org-2']);
       await service.findAll('user-1', ['user']);
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        '(e.organization_id IN (:...orgIds) OR e.organization_id IS NULL)',
+        'e.organization_id IN (:...orgIds)',
         { orgIds: ['org-1', 'org-2'] },
       );
     });

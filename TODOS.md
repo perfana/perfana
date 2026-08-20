@@ -156,33 +156,6 @@ errors down. Measured cost at the time of writing: `npx tsc -p tsconfig.json --n
 
 ---
 
-## Test runs
-
-### Twenty-three more dead `organization_id IS NULL` branches
-
-**Priority:** P2
-**Origin:** /ship on `fix/test-run-write-authz` (2026-08-20), while deleting the two the
-filter-options item named.
-**Why:** Same shape, same risk, thirteen more files. Phase 4 made `organization_id` NOT NULL
-on all 26 owned-resource entities, so `x.organization_id IS NULL` cannot match a real row —
-it only ever matches a LEFT JOIN miss, which is exactly the row a tenant should not see.
-`report-data-fetcher.service.ts` is the worst of them: four sites where an *empty* org list
-degrades to `WHERE organization_id IS NULL` as the whole filter, i.e. the no-access case is
-spelled as a filter rather than a refusal.
-**What:** Delete the branch at each site; where it is the sole clause for an empty org list,
-refuse instead. Confirm first that no dangling FK rows exist in the target deploy (the local
-DB has none: `test_runs`→`systems_under_test` is clean and both `organization_id` columns are
-NOT NULL).
-**Where:** `metrics.service.ts` (367, 552), `grafana-instances.service.ts` (124),
-`alert-tag-filters.service.ts` (28), `benchmark-query.service.ts` (64, 66, 205, 207, 251),
-`pyroscope-instances.service.ts` (112), `profiles.service.ts` (118), `events.service.ts` (39, 96),
-`tracing-instances.service.ts` (103), `compare-presets.service.ts` (52),
-`report-generation.service.ts` (180), `report-data-fetcher.service.ts` (110, 115, 833, 834,
-1050, 1054, 1206, 1210). Also `apps/api/src/modules/grafana/README.md:91` documents the rule
-as intended behavior and needs the same correction.
-
----
-
 ## Reports
 
 ### SLO section renders a green "all clear" card when the check-results query fails
@@ -313,6 +286,28 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
 ## Completed
+
+### Twenty-three more dead `organization_id IS NULL` branches
+
+All gone, across 13 files. Two shapes:
+
+- `... IN (:...orgIds) OR ... IS NULL` — the null half only ever matched a LEFT JOIN
+  miss, so it was deleted outright. Where the surrounding code passed a possibly-empty
+  array straight into `IN (:...orgIds)`, it now uses the same all-zeroes sentinel the
+  other services already used (`profiles.service.ts`, `report-generation.service.ts`).
+- `orgIds.length === 0 → organization_id IS NULL` as the *entire* filter — the no-access
+  case spelled as a filter. Now `AND FALSE` / `1 = 0` / an empty CTE. The outcome was
+  already "see nothing" (the column is NOT NULL), so this is a correctness-of-intent fix,
+  not a behavior change: it stops reading as a legacy-data allowance that someone would
+  later "restore".
+
+`resolveOrgFilter` in `report-data-fetcher.service.ts` was checked first — system calls
+(no userId) and global admins return an empty clause *before* reaching the filter builder,
+so an empty org list there genuinely means a user with zero memberships.
+`apps/api/src/modules/grafana/README.md` documented the null-org allowance as intended
+behavior and was corrected. Five specs that asserted the old contract now assert the new
+one. API suite green at 5203 passing.
+**Completed:** v0.2.68.3 (2026-08-20)
 
 ### Test-run mutations have no write-permission check
 
