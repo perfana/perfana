@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.10] - 2026-08-20
+
+### Fixed
+- **Deleting dashboards from the list works again.** The two endpoints behind the multi-select delete took a request body whose fields carried no validation rules, and the API strips every unvalidated field from a body — so both handlers were handed an empty object. Fetching the delete summary failed with a 500, and the delete itself answered "ids must be a non-empty array of strings" about a request that plainly contained them. The batch delete also now rejects a malformed id with a clear 400 instead of failing deep in the database.
+
 ## [0.2.68.9] - 2026-08-20
 
 ### Fixed
