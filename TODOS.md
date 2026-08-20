@@ -78,16 +78,6 @@ and any DQL query / entity-mapping editor pages.
 
 ---
 
-### Delete the dead `sut.organization_id IS NULL` branch in filter-options access filter
-
-**Priority:** P2
-**Origin:** Adversarial review during /ship on `fix/bugs-20260720` (2026-07-20). Pre-existing behavior, adjacent to the cascading filter-options change.
-**Why:** `applyAccessFilter` in `test-runs-crud-query.service.ts` (~line 371) still allows `sut.organization_id IS NULL` for non-admins. Phase 4 made `organization_id` NOT NULL, so the branch is dead for real SUT rows — but combined with the `leftJoin`, a test run whose SUT row is missing (dangling FK) would expose its environment/workload strings to every authenticated non-admin across tenants via this endpoint.
-**What:** Verify no dangling `system_under_test_id` FKs exist, then delete the `sut.organization_id IS NULL` escape (and audit sibling `withOrgFilter`-style helpers for the same leftover branch).
-**Where:** `apps/api/src/modules/test-runs/services/test-runs-crud-query.service.ts` (`applyAccessFilter` inside `getFilterOptions`).
-
----
-
 ### Fail fast when the API's DB role cannot bypass RLS
 
 **Priority:** P2
@@ -168,21 +158,30 @@ errors down. Measured cost at the time of writing: `npx tsc -p tsconfig.json --n
 
 ## Test runs
 
-### Test-run mutations have no write-permission check
+### Twenty-three more dead `organization_id IS NULL` branches
 
 **Priority:** P2
-**Origin:** Automated security review during /ship on `feat/reporting-improvements-2` (2026-08-20), raised against the new version-edit endpoint but true of all five.
-**Why:** `PUT :id/annotations`, `:id/tags`, `:id/analysis-start-offset`, `:id/analysis-time-range` and the new `:id/application-release` all check *visibility* (the RLS-scoped `findOne` 404s on a run the caller cannot see) but never check whether the caller may WRITE. An org-viewer can edit any run they can read. `TestRunsMutationService` says so out loud: "Permission check will be added here when TestRun entity has organization_id" — which it now has.
-**What:** Resolve the caller's role for the run's organization/team and reject viewers, in one pass across all five endpoints so the contract stays consistent. The handlers already receive `userId`/`roles` as far as the mutation service; they stop there.
-**Where:** `apps/api/src/modules/test-runs/controllers/test-runs.controller.ts`, `apps/api/src/modules/test-runs/services/test-runs-mutation.service.ts` (the NOTE), `apps/api/src/modules/test-runs/handlers/update-*.handler.ts`.
+**Origin:** /ship on `fix/test-run-write-authz` (2026-08-20), while deleting the two the
+filter-options item named.
+**Why:** Same shape, same risk, thirteen more files. Phase 4 made `organization_id` NOT NULL
+on all 26 owned-resource entities, so `x.organization_id IS NULL` cannot match a real row —
+it only ever matches a LEFT JOIN miss, which is exactly the row a tenant should not see.
+`report-data-fetcher.service.ts` is the worst of them: four sites where an *empty* org list
+degrades to `WHERE organization_id IS NULL` as the whole filter, i.e. the no-access case is
+spelled as a filter rather than a refusal.
+**What:** Delete the branch at each site; where it is the sole clause for an empty org list,
+refuse instead. Confirm first that no dangling FK rows exist in the target deploy (the local
+DB has none: `test_runs`→`systems_under_test` is clean and both `organization_id` columns are
+NOT NULL).
+**Where:** `metrics.service.ts` (367, 552), `grafana-instances.service.ts` (124),
+`alert-tag-filters.service.ts` (28), `benchmark-query.service.ts` (64, 66, 205, 207, 251),
+`pyroscope-instances.service.ts` (112), `profiles.service.ts` (118), `events.service.ts` (39, 96),
+`tracing-instances.service.ts` (103), `compare-presets.service.ts` (52),
+`report-generation.service.ts` (180), `report-data-fetcher.service.ts` (110, 115, 833, 834,
+1050, 1054, 1206, 1210). Also `apps/api/src/modules/grafana/README.md:91` documents the rule
+as intended behavior and needs the same correction.
 
-### Five test-run handlers write outside the RLS transaction
-
-**Priority:** P2
-**Origin:** Same review. `update-application-release.handler.ts` was fixed in that PR; its five siblings were left alone deliberately, to change them together.
-**Why:** They issue `this.dataSource.query('UPDATE test_runs ...')` on the pooled connection. The API's login role bypasses row-level security, so those writes are not policy-checked — only the RLS-scoped read before them stands between a caller and another org's row. See `docs/reference` RLS notes and `project_rls_request_em_writes`.
-**What:** Swap `this.dataSource.query(...)` for `withRequestQuery(this.dataSource).query(...)` in each, as `update-application-release.handler.ts` now does. Mechanical; one test each asserting the write goes through the request manager.
-**Where:** `apps/api/src/modules/test-runs/handlers/update-annotations.handler.ts`, `update-tags.handler.ts`, `update-analysis-start-offset.handler.ts`, `update-analysis-time-range.handler.ts`, `init-test.handler.ts`.
+---
 
 ## Reports
 
@@ -314,6 +313,40 @@ via `buildAggregatedMetricName(RT_KEEPER_TITLES[keeper])`.
 (~line 93); keeper map in `apps/web/lib/aggregated-perf-series.ts` (~line 34).
 
 ## Completed
+
+### Test-run mutations have no write-permission check
+
+`TestRunsMutationService` now gates every mutation of an existing run on
+`Capability.TestRunUpdate`, which `org-viewer` does not hold. Covers the five endpoints the
+item named plus three it did not — `deleteTestRun`, `abortTestRun`, `updateAdaptConfig` — and
+the update branch of `updateRunningTest`; all four stale "Permission check will be added here"
+NOTEs are gone. RLS is not this gate and cannot be: `rls_test_runs_update` calls
+`can_modify_resource`, whose final branch grants modify to any org member and whose own comment
+defers precision to the service layer. Delete is gated on `TestRunUpdate`, not `TestRunDelete`,
+so org-members keep the delete they have today; viewers lose it either way. API-key principals
+are exempt and the exemption is asserted in a test — a key has no `organization_members` row,
+so `getCapabilities` returns an empty set for every key and gating on it would deny all CI
+writes; issuing one requires `api-key:create`, which only org-admins hold.
+**Completed:** v0.2.68.2 (2026-08-20)
+
+### Five test-run handlers write outside the RLS transaction
+
+All five now use `withRequestQuery(this.dataSource)`. `init-test.handler.ts` turned out to be a
+`SELECT MAX(...)` rather than a write; it was scoped anyway, and the comment records why that is
+safe (every row it can see belongs to the caller's own org, and `test_run_id` is UNIQUE, so a
+hypothetically hidden row fails loudly rather than reusing a counter). `rls-write-routing.spec.ts`
+pins all five with *distinct* spies for `dataSource.query` and `dataSource.manager.query` — the
+obvious shared-spy mock passes either way and pins nothing.
+**Completed:** v0.2.68.2 (2026-08-20)
+
+### Delete the dead `sut.organization_id IS NULL` branch in filter-options access filter
+
+Both sites in `test-runs-crud-query.service.ts` deleted (the item named one; the sibling audit it
+asked for found a second, in the system-name lookup at ~line 759). Verified against the local DB
+first: zero dangling `test_runs.system_under_test_id`, and `systems_under_test.organization_id` is
+NOT NULL, so the branch could only ever match a LEFT JOIN miss. The wider sweep — 23 more sites
+across 13 files — is filed as its own item rather than smuggled into a security PR.
+**Completed:** v0.2.68.2 (2026-08-20)
 
 ### Move `--fix` out of the lint check scripts
 

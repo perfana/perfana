@@ -8,7 +8,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { withRequestEm } from '../../../common/db/request-em';
+import { withRequestEm, withRequestQuery } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { ResourceNotFoundException } from '../../../common/exceptions/business.exception';
 import { TestRun } from '../types/test-run.types';
@@ -48,7 +48,11 @@ export class UpdateAnnotationsHandler {
         throw new ResourceNotFoundException('TestRun', id);
       }
 
-      await this.dataSource.query(
+      // Through the request's RLS transaction, not the pooled connection: the API's login
+      // role bypasses row-level security, so a raw dataSource write would update a row the
+      // policies would have refused — the visibility check above is then the only thing
+      // standing between a caller and someone else's run.
+      await withRequestQuery(this.dataSource).query(
         `UPDATE test_runs
          SET annotations = $1::text[], updated_at = CURRENT_TIMESTAMP
          WHERE id = $2`,

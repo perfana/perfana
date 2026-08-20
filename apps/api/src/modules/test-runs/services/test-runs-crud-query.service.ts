@@ -367,10 +367,13 @@ export class TestRunsCrudQueryService {
           );
         } else if (!organizationId && !isAdmin && organizationIds.length > 0) {
           qb.leftJoin('teams', 'team', 'team.id = sut.team_id');
+          // No `sut.organization_id IS NULL` escape: Phase 4 made the column NOT NULL,
+          // so the only row that could satisfy it is a LEFT JOIN miss (dangling
+          // system_under_test_id) — which would hand its environment/workload strings
+          // to every authenticated non-admin, in any tenant.
           qb.andWhere(
             '(' +
-              'sut.organization_id IS NULL' +
-              ' OR (sut.team_id IS NULL AND sut.organization_id IN (:...orgIds))' +
+              '(sut.team_id IS NULL AND sut.organization_id IN (:...orgIds))' +
               ' OR (team.restrict_to_team_members = false AND sut.organization_id IN (:...orgIds))' +
               (userTeamIds.length > 0
                 ? ' OR (sut.team_id IN (:...userTeamIds))'
@@ -756,7 +759,9 @@ export class TestRunsCrudQueryService {
           throw new ResourceNotFoundException('System under test', systemName);
         }
         queryBuilder.andWhere(
-          '(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)',
+          // See applyAccessFilter: the NULL branch is unreachable for a real SUT row
+          // and only ever matches a dangling FK, so it is a leak, not a fallback.
+          'sut.organization_id IN (:...orgIds)',
           { orgIds: organizationIds }
         );
       }

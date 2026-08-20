@@ -408,7 +408,8 @@ describe('UpdateTagsHandler — audit (Phase 5a, PR8)', () => {
           provide: getRepositoryToken(TestRunEntity),
           useValue: { findOne: jest.fn() },
         },
-        { provide: DataSource, useValue: { query: jest.fn() } },
+        // Outside an RLS request, withRequestQuery falls through to the DataSource manager.
+        { provide: DataSource, useValue: (() => { const query = jest.fn(); return { query, manager: { query } }; })() },
         {
           provide: TestRunsGateway,
           useValue: { emitTestRunUpdated: jest.fn() },
@@ -478,7 +479,8 @@ describe('UpdateAnnotationsHandler — audit (Phase 5a, PR8)', () => {
           provide: getRepositoryToken(TestRunEntity),
           useValue: { findOne: jest.fn() },
         },
-        { provide: DataSource, useValue: { query: jest.fn() } },
+        // Outside an RLS request, withRequestQuery falls through to the DataSource manager.
+        { provide: DataSource, useValue: (() => { const query = jest.fn(); return { query, manager: { query } }; })() },
         {
           provide: TestRunsGateway,
           useValue: { emitTestRunUpdated: jest.fn() },
@@ -544,7 +546,8 @@ describe('UpdateAnalysisStartOffsetHandler — audit (Phase 5a, PR8)', () => {
           provide: getRepositoryToken(TestRunEntity),
           useValue: { findOne: jest.fn() },
         },
-        { provide: DataSource, useValue: { query: jest.fn() } },
+        // Outside an RLS request, withRequestQuery falls through to the DataSource manager.
+        { provide: DataSource, useValue: (() => { const query = jest.fn(); return { query, manager: { query } }; })() },
         {
           provide: TestRunsGateway,
           useValue: { emitTestRunUpdated: jest.fn() },

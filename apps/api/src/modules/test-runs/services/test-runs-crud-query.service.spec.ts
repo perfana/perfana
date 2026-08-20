@@ -1211,7 +1211,7 @@ describe('TestRunsCrudQueryService', () => {
       );
 
       expect(testRunQb.andWhere).toHaveBeenCalledWith(
-        '(sut.organization_id IN (:...orgIds) OR sut.organization_id IS NULL)',
+        'sut.organization_id IN (:...orgIds)',
         { orgIds: ['org-1', 'org-2'] },
       );
     });

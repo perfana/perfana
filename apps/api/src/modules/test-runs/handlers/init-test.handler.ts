@@ -8,6 +8,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { withRequestQuery } from '../../../common/db/request-em';
 import { ValidationException } from '../../../common/exceptions/business.exception';
 import { InitTestDto, InitTestResponse } from '../dto/init-test.dto';
 import { TestRunLookupService } from '../services/test-run-lookup.service';
@@ -45,7 +46,12 @@ export class InitTestHandler {
       // (2) limit(100) missing higher counters in gaps, (3) race conditions
       // where two concurrent /api/init calls both read the same max.
       const prefix = `${initDto.systemUnderTest}-${initDto.testEnvironment}-${initDto.workload}-`;
-      const result = await this.dataSource.query(
+      // Scoped to the request's RLS transaction. Every row this MAX can see belongs to
+      // the system resolved above — which is in the caller's own organization — so the
+      // scoped read returns the same rows the pooled one did. If a policy ever did hide
+      // one, `test_runs.test_run_id` is UNIQUE, so the collision fails loudly (23505)
+      // rather than silently reusing a counter.
+      const result = await withRequestQuery(this.dataSource).query(
         `SELECT COALESCE(MAX(
            CAST(SUBSTRING(test_run_id FROM LENGTH($1) + 1) AS INTEGER)
          ), 0) AS max_counter
