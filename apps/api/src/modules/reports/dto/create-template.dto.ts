@@ -12,6 +12,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
+import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ReportSectionConfigDto, ReportStylingDto } from './create-report.dto';
@@ -81,14 +82,14 @@ export class CreateTemplateDto {
   workload!: string;
 
   @ApiProperty({
-    description: 'Section configurations for the template (1-50 sections)',
+    description: `Section configurations for the template (1-${MAX_REPORT_SECTIONS} sections)`,
     type: [ReportSectionConfigDto],
     minItems: 1,
-    maxItems: 50,
+    maxItems: MAX_REPORT_SECTIONS,
   })
   @IsArray()
   @ArrayMinSize(1, { message: 'At least one section is required' })
-  @ArrayMaxSize(50, { message: 'Maximum 50 sections allowed' })
+  @ArrayMaxSize(MAX_REPORT_SECTIONS, { message: `Maximum ${MAX_REPORT_SECTIONS} sections allowed` })
   @ValidateNested({ each: true })
   @Type(() => ReportSectionConfigDto)
   sections!: ReportSectionConfigDto[];
@@ -145,15 +146,15 @@ export class UpdateTemplateDto {
   description?: string;
 
   @ApiPropertyOptional({
-    description: 'Section configurations for the template (1-50 sections)',
+    description: `Section configurations for the template (1-${MAX_REPORT_SECTIONS} sections)`,
     type: [ReportSectionConfigDto],
     minItems: 1,
-    maxItems: 50,
+    maxItems: MAX_REPORT_SECTIONS,
   })
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1, { message: 'At least one section is required' })
-  @ArrayMaxSize(50, { message: 'Maximum 50 sections allowed' })
+  @ArrayMaxSize(MAX_REPORT_SECTIONS, { message: `Maximum ${MAX_REPORT_SECTIONS} sections allowed` })
   @ValidateNested({ each: true })
   @Type(() => ReportSectionConfigDto)
   sections?: ReportSectionConfigDto[];
@@ -200,14 +201,14 @@ export class ReorderSectionsDto {
     type: [Number],
     example: [2, 0, 1],
     minItems: 1,
-    maxItems: 50,
+    maxItems: MAX_REPORT_SECTIONS,
   })
   @IsArray()
   @ArrayMinSize(1, { message: 'At least one order value is required' })
-  @ArrayMaxSize(50, { message: 'Maximum 50 order values allowed' })
+  @ArrayMaxSize(MAX_REPORT_SECTIONS, { message: `Maximum ${MAX_REPORT_SECTIONS} order values allowed` })
   @IsNumber({}, { each: true })
   @Min(0, { each: true, message: 'Order values must be at least 0' })
-  @Max(49, { each: true, message: 'Order values must not exceed 49' })
+  @Max(MAX_REPORT_SECTIONS - 1, { each: true, message: `Order values must not exceed ${MAX_REPORT_SECTIONS - 1}` })
   section_orders!: number[];
 }
 

@@ -14,7 +14,8 @@
     "test:cov": "jest --coverage",
     "test:coverage": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "lint": "eslint \"{src,test}/**/*.ts\" --fix",
+    "lint": "eslint \"{src,test}/**/*.ts\"",
+    "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

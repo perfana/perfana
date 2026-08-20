@@ -8,6 +8,7 @@ import {
   SystemUnderTest,
 } from '@perfana/shared';
 import type { OwnedResource } from '@perfana/shared';
+import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
 import { withRequestEm } from '../../../common/db/request-em';
 import {
   ResourceNotFoundException,
@@ -728,8 +729,8 @@ export class ReportTemplateService {
       throw new ValidationException('Sections must be an array');
     }
 
-    if (sections.length > 50) {
-      throw new ValidationException('Maximum 50 sections allowed per template');
+    if (sections.length > MAX_REPORT_SECTIONS) {
+      throw new ValidationException(`Maximum ${MAX_REPORT_SECTIONS} sections allowed per template`);
     }
 
     const validTypes = [
