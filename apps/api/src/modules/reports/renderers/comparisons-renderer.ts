@@ -3,7 +3,7 @@ import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, BaselineComparisonRow } from '../services/report-data-fetcher.service';
 import { buildSelections } from './section-selections';
-import { bandColor, percentDiff, gatedDiffPercent, DiffThresholds } from './comparison-bands';
+import { bandColor, gatedDiffPercent, DiffThresholds } from './comparison-bands';
 import {
   ACCENT,
   DEFAULT_THRESHOLDS,
@@ -104,9 +104,9 @@ export class ComparisonsRenderer {
     const whitelisted = requestedMetrics.filter(
       (m): m is BaselineMetricKey => (ALLOWED_BASELINE_METRICS as readonly unknown[]).includes(m),
     );
-    // Default set stays avg/p95/p99 — p90 is opt-in (added to ALLOWED_BASELINE_METRICS
-    // so it's selectable, but not shown unless the user picks it).
-    const metrics: BaselineMetricKey[] = whitelisted.length ? whitelisted : ['avg', 'p95', 'p99'];
+    // Default set: avg/p90/p95. p99 is opt-in — it is the noisiest column of the four and
+    // the one most often read as a regression when it is a single slow request.
+    const metrics: BaselineMetricKey[] = whitelisted.length ? whitelisted : ['avg', 'p90', 'p95'];
     // SECURITY: coerce thresholds — only accept when BOTH fields are finite numbers.
     const rawThresholds = (config.thresholds ?? {}) as { good?: unknown; warning?: unknown; minAbsolute?: unknown };
     const goodT = Number(rawThresholds.good);
@@ -124,9 +124,8 @@ export class ComparisonsRenderer {
       ? (config.dashboardMap as { current: string; baseline: string }[])
       : undefined;
     const selections = buildSelections(config);
-    const selectedDashboards = [...new Set(selections.map((s) => s.dashboardLabel))];
 
-    let data = testRun && baselineId
+    const data = testRun && baselineId
       ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
           { metrics, userId, roles, dashboardMap, selections })
       : null;
@@ -141,29 +140,6 @@ export class ComparisonsRenderer {
       return `<section class="comparisons-section">${sectionHeader(title)}
         ${sectionText(text)}
         ${emptyState(`No comparison data available: ${why}`)}</section>`;
-    }
-
-    // "All aggregated" row — run-wide aggregate across all transactions (perf-metrics only).
-    if (source === 'performance-metrics' && config.includeAggregated === true && testRun && baselineId) {
-      const [curS, baseS] = await Promise.all([
-        this.dataFetcher.getAggregatedScalars(testRun.testRunId, userId, roles),
-        this.dataFetcher.getAggregatedScalars(baselineId, userId, roles),
-      ]);
-      const byKey: Record<BaselineMetricKey, [number | null, number | null]> = {
-        avg: [curS.avg, baseS.avg],
-        p90: [curS.p90, baseS.p90],
-        p95: [curS.p95, baseS.p95],
-        p99: [curS.p99, baseS.p99],
-      };
-      const aggRow: BaselineComparisonRow = {
-        group: 'All aggregated',
-        label: 'All aggregated',
-        metrics: metrics.map((k) => {
-          const [cv, bv] = byKey[k];
-          return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
-        }),
-      };
-      data = { ...data, rows: [aggRow, ...data.rows] };
     }
 
     // Effective diff after the minimum-absolute-change gate (thresholds.minAbsolute).
@@ -237,68 +213,99 @@ export class ComparisonsRenderer {
     // next to the heading ("HOST-123_afterburner-be_Memory Usage" -> heading
     // "Dynatrace" + host chip "afterburner-be", metric "Memory Usage"). Grafana
     // labels have no host prefix, so the label is used as-is and the heading is "Grafana".
-    if (source === 'dynatrace' || source === 'grafana') {
+    if (data.rows.some((r) => r.dashboardLabel)) {
       const hasHost = source === 'dynatrace';
-      let hostName = '';
-      let reg = 0, warn = 0, ok = 0;
-
-      const rowsHtml = data.rows.map((row, idx) => {
-        const rank = worstRank(row);
-        if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
-        const cells = row.metrics.map((m) => renderCell(m, true)).join('');
-        let metric = row.label;
-        if (hasHost) {
-          const parsed = splitHostLabel(row.label);
-          if (parsed.host) hostName = parsed.host;
-          metric = parsed.metric;
-        }
-        return `<tr style="background:${rowBackground(rank, idx)};">
-          <td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid ${REPORT_COLORS.rowBorder}; font-size:13px; color:${REPORT_COLORS.ink}; font-weight:600; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(metric)}</td>
-          ${cells}</tr>`;
-      }).join('');
-
-      const heading = source === 'dynatrace' ? 'Dynatrace' : 'Grafana';
-      const headingChips = [
-        hasHost && hostName ? chip(hostName, 'info') : '',
-        chip(`${formatInt(data.rows.length)} metrics`, 'neutral'),
-      ];
       const metricHeaders = metrics.map((k) => `<th style="${TH_NUM} border-left:1px solid #eef1f5;">${escapeHtml(k.toUpperCase())}</th>`).join('');
 
       // Dashboard-mapping caption: when the comparison pairs a current-run
       // dashboard with a differently named baseline dashboard, say so —
-      // "Current <dash> → Baseline <dash>" chips under the heading. Scoped to
-      // the selected dashboard's pair; unscoped sections show every differing pair.
-      const activePairs = (dashboardMap ?? [])
-        .filter((p) => p.current && p.baseline && p.current !== p.baseline)
-        .filter((p) => selectedDashboards.length === 0 || selectedDashboards.includes(p.current));
-      const mappingCaption = activePairs.length === 0 ? '' : activePairs.map((p) =>
-        `<div style="display:flex; align-items:center; gap:12px; margin:-2px 0 16px; font-size:12px;">
-          <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f1f6ff; border:1px solid #d6e4fb;">
-            <span style="width:8px; height:8px; border-radius:50%; background:${ACCENT};"></span>
-            <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:#5b6470;">Current</span>
-            <span style="font-weight:600; color:#1f2933;">${this.utils.escapeHtml(p.current)}</span>
-          </span>
-          <span style="color:#b6bcc4; font-size:15px;">&rarr;</span>
-          <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f6f7f9; border:1px solid #e6e8ec;">
-            <span style="width:8px; height:8px; border-radius:50%; background:#9aa2ab;"></span>
-            <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:${REPORT_COLORS.faintInk};">Baseline</span>
-            <span style="font-weight:600; color:#4b5563;">${this.utils.escapeHtml(p.baseline)}</span>
-          </span>
-        </div>`).join('');
+      // "Current <dash> → Baseline <dash>" chips under the heading.
+      const mappingCaption = (dashboard: string): string => {
+        const pairs = (dashboardMap ?? [])
+          .filter((p) => p.current && p.baseline && p.current !== p.baseline)
+          .filter((p) => p.current === dashboard);
+        return pairs.map((p) =>
+          `<div style="display:flex; align-items:center; gap:12px; margin:-2px 0 16px; font-size:12px;">
+            <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f1f6ff; border:1px solid #d6e4fb;">
+              <span style="width:8px; height:8px; border-radius:50%; background:${ACCENT};"></span>
+              <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:#5b6470;">Current</span>
+              <span style="font-weight:600; color:#1f2933;">${this.utils.escapeHtml(p.current)}</span>
+            </span>
+            <span style="color:#b6bcc4; font-size:15px;">&rarr;</span>
+            <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f6f7f9; border:1px solid #e6e8ec;">
+              <span style="width:8px; height:8px; border-radius:50%; background:#9aa2ab;"></span>
+              <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:${REPORT_COLORS.faintInk};">Baseline</span>
+              <span style="font-weight:600; color:#4b5563;">${this.utils.escapeHtml(p.baseline)}</span>
+            </span>
+          </div>`).join('');
+      };
 
-      bodyHtml = `<div style="margin-top:30px;">
-        ${groupHeader(heading, headingChips, summaryChips(reg, warn, ok))}
-        ${mappingCaption}
-        <table style="width:100%; border-collapse:collapse;">
-          <thead><tr style="${THEAD_ROW}">
-            <th style="${TH_TEXT}">Metric</th>
-            ${metricHeaders}
-          </tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-      </div>`;
+      // Grouped twice: a section can select several dashboards, and each dashboard several
+      // panels. One merged table mixed them — "CPU" from two dashboards read as two unrelated
+      // rows with the same name, and a dashboard's panels ran together in one list.
+      const byDashboard = new Map<string, Map<string, BaselineComparisonRow[]>>();
+      for (const row of data.rows) {
+        const dashboard = row.dashboardLabel ?? (source === 'dynatrace' ? 'Hosts' : 'Other');
+        const panel = row.panelTitle || 'Other';
+        const panels = byDashboard.get(dashboard) ?? new Map<string, BaselineComparisonRow[]>();
+        const arr = panels.get(panel) ?? [];
+        arr.push(row);
+        panels.set(panel, arr);
+        byDashboard.set(dashboard, panels);
+      }
+
+      bodyHtml = [...byDashboard.entries()].map(([dashboard, panels]) => {
+        let hostName = '';
+        let reg = 0, warn = 0, ok = 0;
+        let dashboardRows = 0;
+
+        const panelBlocks = [...panels.entries()].map(([panel, rows]) => {
+          dashboardRows += rows.length;
+          const rowsHtml = rows.map((row, idx) => {
+            const rank = worstRank(row);
+            if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
+            const cells = row.metrics.map((m) => renderCell(m, true)).join('');
+            let metric = row.label;
+            if (hasHost) {
+              const parsed = splitHostLabel(row.label);
+              if (parsed.host) hostName = parsed.host;
+              metric = parsed.metric;
+            }
+            return `<tr style="background:${rowBackground(rank, idx)};">
+              <td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid ${REPORT_COLORS.rowBorder}; font-size:13px; color:${REPORT_COLORS.ink}; font-weight:600; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(metric)}</td>
+              ${cells}</tr>`;
+          }).join('');
+
+          // The panel heads its own table, so it is not repeated down a column.
+          return `<div style="margin-top:18px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+              <h4 style="margin:0; font-size:13px; font-weight:700; color:${REPORT_COLORS.mutedInk}; text-transform:uppercase; letter-spacing:0.05em;">${this.utils.escapeHtml(panel)}</h4>
+              ${chip(`${formatInt(rows.length)} metrics`, 'neutral')}
+            </div>
+            <table style="width:100%; border-collapse:collapse;">
+              <thead><tr style="${THEAD_ROW}">
+                <th style="${TH_TEXT}">Metric</th>
+                ${metricHeaders}
+              </tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>`;
+        }).join('\n');
+
+        const headingChips = [
+          hasHost && hostName ? chip(hostName, 'info') : '',
+          chip(`${formatInt(panels.size)} panels`, 'neutral'),
+          chip(`${formatInt(dashboardRows)} metrics`, 'neutral'),
+        ];
+
+        return `<div style="margin-top:30px;">
+          ${groupHeader(dashboard, headingChips, summaryChips(reg, warn, ok))}
+          ${mappingCaption(dashboard)}
+          ${panelBlocks}
+        </div>`;
+      }).join('\n');
     } else {
-      // ---- performance-metrics source: grouped by scenario, transaction rows ----
+      // ---- performance metrics with no dashboard selection: grouped by scenario ----
       const groups = new Map<string, BaselineComparisonRow[]>();
       for (const r of data.rows) {
         const arr = groups.get(r.group) ?? [];
@@ -331,8 +338,14 @@ export class ComparisonsRenderer {
       }).join('\n');
     }
 
+    const SOURCE_LABELS: Record<string, string> = {
+      'performance-metrics': 'Performance metrics',
+      grafana: 'Grafana',
+      dynatrace: 'Dynatrace',
+    };
+
     return `<section class="comparisons-section">
-      ${sectionHeader(title)}
+      ${sectionHeader(title, { chipsHtml: [chip(SOURCE_LABELS[source] ?? source, 'neutral')] })}
       ${runIds}
       ${sectionText(text)}
       ${legend}
