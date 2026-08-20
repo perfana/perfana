@@ -51,6 +51,7 @@ const makeApdexResult = (overrides?: Record<string, unknown>) => makeSloResult({
     { target: 'T01_Homepage_Load', value: 1, meets_requirement: true, scenario_name: 'Browse' },
     {
       target: 'T04_Payment_Processing', value: 0.62, meets_requirement: false, scenario_name: 'Checkout',
+      threshold_ms: 800,
       avg_response_time_ms: 812.4, satisfied_count: 20, tolerating_count: 15, frustrated_count: 25, total_count: 60,
     },
   ],
@@ -200,15 +201,21 @@ describe('SloRenderer', () => {
     expect(html).not.toContain('Apdex Score');
   });
 
-  it('should format requirement operators correctly', async () => {
+  it('names the statistic the check evaluates, not just the threshold', async () => {
     dataFetcher.getSloCheckResults.mockResolvedValue([
-      makeSloResult({ requirement_operator: 'lte', requirement_value: 1000, metric_unit: 'ms' }),
+      makeSloResult({ evaluate_type: 'max', requirement_operator: 'gt', requirement_value: 0.9, metric_unit: 'percentunit' }),
+      makeSloResult({ evaluate_type: 'mean', requirement_operator: 'lte', requirement_value: 1000, metric_unit: 'ms' }),
+      makeSloResult({ evaluate_type: 'q95', requirement_operator: 'lt', requirement_value: 500, metric_unit: 'ms' }),
+      // A statistic the map does not know still reads as a sentence
+      makeSloResult({ evaluate_type: 'whatever', requirement_operator: 'lt', requirement_value: 5, metric_unit: 'ms' }),
     ]);
 
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('≤');
-    expect(html).toContain('1000 ms');
+    expect(html).toContain('Maximum value should be greater than 90%');
+    expect(html).toContain('Average value should be less than or equal to 1000 ms');
+    expect(html).toContain('95th percentile should be less than 500 ms');
+    expect(html).toContain('Value should be less than 5 ms');
   });
 
   it('should render human-readable units instead of raw Grafana unit codes', async () => {
@@ -232,10 +239,10 @@ describe('SloRenderer', () => {
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
 
     // percentunit: stored 0.0-1.0, displayed as 0-100%
-    expect(html).toContain('&gt; 90%');
+    expect(html).toContain('greater than 90%');
     expect(html).toContain('85%');
     // short: unitless number, no ".00" padding
-    expect(html).toContain('&lt; 70');
+    expect(html).toContain('less than 70');
     expect(html).toContain('63.5');
     // the pre-fix artifacts never reach the report
     expect(html).not.toContain('percentunit');
@@ -278,16 +285,104 @@ describe('SloRenderer', () => {
     expect(html).not.toContain('T01_Homepage_Load');
   });
 
-  it('states an apdex requirement as a minimum score at a threshold, not "No requirement"', async () => {
+  it('states an apdex requirement as a minimum score for every transaction, not "No requirement"', async () => {
     dataFetcher.getSloCheckResults.mockResolvedValue([makeApdexResult()]);
 
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('≥ 0.85 Apdex at 500 ms');
+    expect(html).toContain('≥ 0.85 Apdex for all transactions');
     expect(html).not.toContain('No requirement');
     // The raw unit code is not printable
     expect(html).not.toContain('apdex_score');
-    expect(html).toContain('0.94');
+    // The requirement no longer names one threshold — the transaction rows carry their own
+    expect(html).not.toContain('at 500 ms');
+  });
+
+  it('gives the apdex table the SLO card\'s columns and no Actual column', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([makeApdexResult()]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>Dashboard</th>');
+    expect(html).toContain('>Metric Name</th>');
+    expect(html).toContain('>Requirement</th>');
+    expect(html).not.toContain('>Actual</th>');
+    // The card names these two the same way
+    expect(html).toContain('Apdex SLO');
+    expect(html).toContain('Apdex Score');
+    // A run-wide 0.94 says nothing the transactions below do not say better
+    expect(html).not.toContain('0.94');
+  });
+
+  it('flags each failing apdex transaction and gives it its own threshold', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([makeApdexResult()]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>Threshold</th>');
+    expect(html).toContain('800 ms'); // this transaction's own threshold, not the section default
+    expect(html).toContain('>FAIL</span>');
+  });
+
+  it('tables each source separately, apdex apart from the grafana checks it is stored under', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([
+      makeApdexResult(),
+      makeSloResult({ source: 'grafana', benchmark_source: 'grafana', panel_title: 'CPU' }),
+      makeSloResult({ source: 'dynatrace', benchmark_source: 'dynatrace', panel_title: 'Memory' }),
+    ]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>Apdex</h3>');
+    expect(html).toContain('>Grafana</h3>');
+    expect(html).toContain('>Dynatrace</h3>');
+    // Grouping replaced the column that repeated one value down the whole table
+    expect(html).not.toContain('>Source</th>');
+    expect(html).not.toContain('>Type</th>');
+  });
+
+  it('follows the benchmark for the source, not the grafana stamp every check result carries', async () => {
+    dataFetcher.getSloCheckResults.mockResolvedValue([
+      // The checker writes source: 'grafana' on every row; the benchmark knows better.
+      makeSloResult({ source: 'grafana', benchmark_source: 'performance-metrics', panel_title: 'Transaction RT Avg' }),
+      makeSloResult({ source: 'grafana', benchmark_source: 'custom', panel_title: 'P95 Transaction Response Times' }),
+      makeSloResult({ source: 'grafana', benchmark_source: 'grafana', panel_title: 'CPU' }),
+    ]);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('>Performance metrics</h3>');
+    expect(html).toContain('>Grafana</h3>');
+    // 'custom' is what the SLO card labels performance-metrics, so it groups with it
+    expect(html).toContain('2 checks');
+    expect(html).toContain('1 checks');
+  });
+
+  it('lists the failing series of a metric check only when the section asks for details', async () => {
+    const failing = makeSloResult({
+      meets_requirement: false,
+      panel_title: 'CPU',
+      message: '2 of 3 targets failed',
+      targets: [
+        { target: 'host-a', value: 95, meets_requirement: false },
+        { target: 'host-b', value: 12, meets_requirement: true },
+      ],
+    });
+    dataFetcher.getSloCheckResults.mockResolvedValue([failing]);
+
+    const off = await renderer.renderSloSection(makeSection(), makeTestRun());
+    expect(off).not.toContain('host-a');
+
+    const on = await renderer.renderSloSection(
+      makeSection({ config: { showFailureDetails: true } }),
+      makeTestRun(),
+    );
+    expect(on).toContain('host-a');
+    // Counted from the rows shown, not quoted from a message that can disagree with them
+    expect(on).toContain('1 of 2 targets failed');
+    expect(on).toContain('>FAIL</span>');
+    // Passing series are not the finding
+    expect(on).not.toContain('host-b');
   });
 
   it('names the statistic an aggregated check evaluates', async () => {
@@ -304,7 +399,7 @@ describe('SloRenderer', () => {
 
     const html = await renderer.renderSloSection(makeSection(), makeTestRun());
 
-    expect(html).toContain('P95 ≤ 2000 ms');
+    expect(html).toContain('P95 should be less than or equal to 2000 ms');
   });
 
   it('does not list targets for a check that passed', async () => {

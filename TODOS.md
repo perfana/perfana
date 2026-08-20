@@ -178,6 +178,24 @@ zero fixable findings), but the gate is not doing what its name says.
 
 ---
 
+## Test runs
+
+### Test-run mutations have no write-permission check
+
+**Priority:** P2
+**Origin:** Automated security review during /ship on `feat/reporting-improvements-2` (2026-08-20), raised against the new version-edit endpoint but true of all five.
+**Why:** `PUT :id/annotations`, `:id/tags`, `:id/analysis-start-offset`, `:id/analysis-time-range` and the new `:id/application-release` all check *visibility* (the RLS-scoped `findOne` 404s on a run the caller cannot see) but never check whether the caller may WRITE. An org-viewer can edit any run they can read. `TestRunsMutationService` says so out loud: "Permission check will be added here when TestRun entity has organization_id" — which it now has.
+**What:** Resolve the caller's role for the run's organization/team and reject viewers, in one pass across all five endpoints so the contract stays consistent. The handlers already receive `userId`/`roles` as far as the mutation service; they stop there.
+**Where:** `apps/api/src/modules/test-runs/controllers/test-runs.controller.ts`, `apps/api/src/modules/test-runs/services/test-runs-mutation.service.ts` (the NOTE), `apps/api/src/modules/test-runs/handlers/update-*.handler.ts`.
+
+### Five test-run handlers write outside the RLS transaction
+
+**Priority:** P2
+**Origin:** Same review. `update-application-release.handler.ts` was fixed in that PR; its five siblings were left alone deliberately, to change them together.
+**Why:** They issue `this.dataSource.query('UPDATE test_runs ...')` on the pooled connection. The API's login role bypasses row-level security, so those writes are not policy-checked — only the RLS-scoped read before them stands between a caller and another org's row. See `docs/reference` RLS notes and `project_rls_request_em_writes`.
+**What:** Swap `this.dataSource.query(...)` for `withRequestQuery(this.dataSource).query(...)` in each, as `update-application-release.handler.ts` now does. Mechanical; one test each asserting the write goes through the request manager.
+**Where:** `apps/api/src/modules/test-runs/handlers/update-annotations.handler.ts`, `update-tags.handler.ts`, `update-analysis-start-offset.handler.ts`, `update-analysis-time-range.handler.ts`, `init-test.handler.ts`.
+
 ## Reports
 
 ### SLO section renders a green "all clear" card when the check-results query fails

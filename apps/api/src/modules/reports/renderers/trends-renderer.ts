@@ -20,6 +20,7 @@ import {
   formatNum,
   formatPercent,
   markerChip,
+  pill,
 } from './report-style';
 
 /**
@@ -49,15 +50,18 @@ export class TrendsRenderer {
     const config = section.config || {};
     const title = section.title || 'Performance Trends';
     const text = getSectionText(section);
-    // timeRange.runCount is what the config form writes; maxRuns is the older key.
+    // timeRange.runCount is the older key; the form now picks where the window starts.
     const runCount = (config.timeRange as { runCount?: unknown } | undefined)?.runCount ?? config.maxRuns;
     const maxRuns = typeof runCount === 'number' ? runCount : 10;
+    const oldestTestRunId = typeof config.oldestTestRunId === 'string' && config.oldestTestRunId
+      ? config.oldestTestRunId
+      : undefined;
 
     if (!testRun) {
       return this.renderNoDataSection(title, text, 'No test run data available for trends analysis.');
     }
 
-    const trendsData = await this.dataFetcher.getTrendsData(testRun, maxRuns, userId, roles);
+    const trendsData = await this.dataFetcher.getTrendsData(testRun, maxRuns, userId, roles, oldestTestRunId);
 
     if (!trendsData || trendsData.previousRuns.length === 0) {
       return this.renderNoDataSection(title, text, 'No previous runs found for trend comparison. Trends require at least two completed runs with the same system, environment, and workload.');
@@ -88,7 +92,7 @@ export class TrendsRenderer {
 
         <!-- Historical Runs Table -->
         <h3 style="margin: 32px 0 16px 0; font-size: 10pt; font-weight: 700; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em;">Run History</h3>
-        ${this.renderRunHistoryTable(allRuns, currentRun.testRunId)}
+        ${this.renderRunHistoryTable([...allRuns].reverse(), currentRun.testRunId)}
 
         ${this.renderDashboardTrends(series, allRuns)}
       </section>
@@ -106,55 +110,83 @@ export class TrendsRenderer {
   private renderDashboardTrends(series: MetricTrendSeries[], runs: TrendRunSummary[]): string {
     if (series.length === 0) return '';
 
-    const byDashboard = new Map<string, MetricTrendSeries[]>();
+    // Grouped the way the comparison section groups: a dashboard heads the block, each of its
+    // panels heads its own table. Two dashboards with a "CPU" panel stay apart, and a panel's
+    // name is not repeated down a column.
+    const byDashboard = new Map<string, Map<string, MetricTrendSeries[]>>();
     for (const s of series) {
-      const arr = byDashboard.get(s.dashboardLabel) ?? [];
+      const panels = byDashboard.get(s.dashboardLabel) ?? new Map<string, MetricTrendSeries[]>();
+      const arr = panels.get(s.panelTitle || 'Other') ?? [];
       arr.push(s);
-      byDashboard.set(s.dashboardLabel, arr);
+      panels.set(s.panelTitle || 'Other', arr);
+      byDashboard.set(s.dashboardLabel, panels);
     }
 
     const shortLabel = (testRunId: string, idx: number) => {
       const tail = testRunId.split('-').pop();
       return tail && tail.length <= 8 ? tail : `#${idx + 1}`;
     };
+    // The run being reported on is marked in its own column header, the way the Run History
+    // table marks its row — otherwise the reader has to count columns to find it.
+    const currentTestRunId = runs[runs.length - 1]?.testRunId;
+    const runHeaders = runs.map((r, i) => `<th style="${TH_NUM}">${this.utils.escapeHtml(shortLabel(r.testRunId, i))}${
+      r.testRunId === currentTestRunId ? ` ${markerChip('Current', 'info')}` : ''
+    }</th>`).join('');
 
-    return [...byDashboard.entries()].map(([dashboard, rows]) => {
-      // ponytail: 50 series per dashboard, then a count — an unfiltered dashboard is 100s.
-      const shown = rows.slice(0, 50);
-      const rest = rows.length - shown.length;
+    return [...byDashboard.entries()].map(([dashboard, panels]) => {
+      const dashboardSeries = [...panels.values()].reduce((n, rows) => n + rows.length, 0);
 
-      const body = shown.map((s, idx) => {
-        const values = runs.map((r) => s.valuesByRun[r.testRunId] ?? null);
-        const first = values.find((v) => v != null) ?? null;
-        const last = [...values].reverse().find((v) => v != null) ?? null;
-        const change = first != null && first !== 0 && last != null ? ((last - first) / Math.abs(first)) * 100 : null;
-        const cells = values.map((v) => {
-          const formatted = v == null ? '—' : formatValueWithUnit(v, s.unit ?? undefined);
-          return `<td style="padding:8px 10px; text-align:right; font-size:11px; font-variant-numeric:tabular-nums; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(formatted === '-' ? '—' : formatted)}</td>`;
+      const panelBlocks = [...panels.entries()].map(([panel, rows]) => {
+        // ponytail: 50 series per panel, then a count — an unfiltered panel is 100s.
+        const shown = rows.slice(0, 50);
+        const rest = rows.length - shown.length;
+
+        const body = shown.map((s, idx) => {
+          const values = runs.map((r) => s.valuesByRun[r.testRunId] ?? null);
+          // Against the run before this one, not the oldest in the window: that is the
+          // comparison a reader makes when a number moved, and the one the summary cards
+          // at the top of the section already use.
+          const measured = values.filter((v): v is number => v != null);
+          const last = measured[measured.length - 1] ?? null;
+          const previous = measured[measured.length - 2] ?? null;
+          const change = previous != null && previous !== 0 && last != null
+            ? ((last - previous) / Math.abs(previous)) * 100
+            : null;
+          const cells = values.map((v) => {
+            const formatted = v == null ? '—' : formatValueWithUnit(v, s.unit ?? undefined);
+            return `<td style="padding:8px 10px; text-align:right; font-size:11px; font-variant-numeric:tabular-nums; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(formatted === '-' ? '—' : formatted)}</td>`;
+          }).join('');
+          return `<tr style="background:${idx % 2 === 1 ? '#fbfcfd' : '#ffffff'};">
+            <td style="padding:8px 10px; font-size:11.5px; color:${REPORT_COLORS.ink}; font-weight:600; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(s.metricName)}</td>
+            ${cells}
+            <td style="padding:8px 10px; text-align:right; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${deltaText(change)}</td>
+          </tr>`;
         }).join('');
-        return `<tr style="background:${idx % 2 === 1 ? '#fbfcfd' : '#ffffff'};">
-          <td style="padding:8px 10px; font-size:11px; color:${REPORT_COLORS.mutedInk}; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(s.panelTitle)}</td>
-          <td style="padding:8px 10px; font-size:11.5px; color:${REPORT_COLORS.ink}; font-weight:600; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(s.metricName)}</td>
-          ${cells}
-          <td style="padding:8px 10px; text-align:right; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${deltaText(change)}</td>
-        </tr>`;
-      }).join('');
 
-      const runHeaders = runs.map((r, i) => `<th style="${TH_NUM}">${this.utils.escapeHtml(shortLabel(r.testRunId, i))}</th>`).join('');
+        return `<div style="margin-top:18px;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <h4 style="margin:0; font-size:13px; font-weight:700; color:${REPORT_COLORS.mutedInk}; text-transform:uppercase; letter-spacing:0.05em;">${this.utils.escapeHtml(panel)}</h4>
+            ${chip(`${formatInt(rows.length)} series`, 'neutral')}
+          </div>
+          <table style="width:100%; border-collapse:collapse;">
+            <thead><tr style="${THEAD_ROW}">
+              <th style="${TH_TEXT}">Series</th>
+              ${runHeaders}
+              <th style="${TH_NUM}">Change</th>
+            </tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+          ${rest > 0 ? `<div style="font-size:11px; color:${REPORT_COLORS.mutedInk}; margin-top:6px;">and ${formatInt(rest)} more series</div>` : ''}
+        </div>`;
+      }).join('\n');
 
       return `<div style="margin-top:32px;">
-        ${groupHeader(dashboard, [chip(`${formatInt(rows.length)} series`, 'neutral')])}
-        <div style="font-size:11.5px; color:${REPORT_COLORS.mutedInk}; margin:-6px 0 10px;">Averages per run, oldest first. Change compares the last run to the first.</div>
-        <table style="width:100%; border-collapse:collapse;">
-          <thead><tr style="${THEAD_ROW}">
-            <th style="${TH_TEXT}">Panel</th>
-            <th style="${TH_TEXT}">Series</th>
-            ${runHeaders}
-            <th style="${TH_NUM}">Change</th>
-          </tr></thead>
-          <tbody>${body}</tbody>
-        </table>
-        ${rest > 0 ? `<div style="font-size:11px; color:${REPORT_COLORS.mutedInk}; margin-top:6px;">and ${formatInt(rest)} more series</div>` : ''}
+        ${groupHeader(dashboard, [
+          chip(`${formatInt(panels.size)} panels`, 'neutral'),
+          chip(`${formatInt(dashboardSeries)} series`, 'neutral'),
+        ])}
+        <div style="font-size:11.5px; color:${REPORT_COLORS.mutedInk}; margin:-6px 0 4px;">One column per run, oldest first. Change compares this run to the one before it.</div>
+        ${panelBlocks}
       </div>`;
     }).join('\n');
   }
@@ -195,6 +227,11 @@ export class TrendsRenderer {
     `;
   }
 
+  /**
+   * Newest run first: the run being reported on is the one the reader came for, and a
+   * history that grows downwards puts it at the bottom of a table that only gets longer.
+   * The per-panel trend tables keep their columns oldest-first — a series reads left to right.
+   */
   private renderRunHistoryTable(runs: TrendRunSummary[], currentTestRunId: string): string {
     const rows = runs.map((run) => {
       const isCurrent = run.testRunId === currentTestRunId;
@@ -209,6 +246,7 @@ export class TrendsRenderer {
 
       const durationStr = run.duration ? this.utils.formatDuration(run.duration) : '-';
       const release = run.applicationRelease ? this.utils.escapeHtml(run.applicationRelease) : '-';
+      const verdicts = this.verdicts(run);
 
       return `
         <tr style="${rowStyle}">
@@ -222,6 +260,13 @@ export class TrendsRenderer {
           <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatNum(run.p99Ms)}</td>
           <td style="text-align: right; font-variant-numeric: tabular-nums;" class="${run.errorRate > 0 ? 'table-value-error-pct' : ''}">${formatPercent(run.errorRate)}</td>
           <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatInt(run.totalTransactions)}</td>
+          <td style="text-align: center;">${verdicts.slo}</td>
+          <td style="text-align: center;">${verdicts.adapt}</td>
+          <td style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk};">${
+            run.annotations.length
+              ? run.annotations.map((a) => this.utils.escapeHtml(a)).join('; ')
+              : '-'
+          }</td>
         </tr>
       `;
     }).join('');
@@ -238,6 +283,9 @@ export class TrendsRenderer {
             <th style="text-align: right;">P99 (ms)</th>
             <th style="text-align: right;">Errors</th>
             <th style="text-align: right;">Transactions</th>
+            <th style="text-align: center;">SLO</th>
+            <th style="text-align: center;">Anomalies</th>
+            <th>Annotations</th>
           </tr>
         </thead>
         <tbody>
@@ -245,6 +293,27 @@ export class TrendsRenderer {
         </tbody>
       </table>
     `;
+  }
+
+  /**
+   * The run's two verdicts, as the run itself recorded them.
+   *
+   * `consolidated_result` already carries both — `meetsRequirement` for the SLO checks and
+   * `adaptTestRunOK` for anomaly detection — so the history table costs no extra query.
+   * A run evaluated before either check ran carries neither, and says so rather than
+   * claiming a pass.
+   */
+  private verdicts(run: TrendRunSummary): { slo: string; adapt: string } {
+    const result = (run.consolidatedResult ?? {}) as { meetsRequirement?: unknown; adaptTestRunOK?: unknown };
+    const verdict = (value: unknown, okLabel: string, badLabel: string): string => {
+      if (value === true) return pill(okLabel, 'good');
+      if (value === false) return pill(badLabel, 'bad');
+      return pill('N/A', 'neutral');
+    };
+    return {
+      slo: verdict(result.meetsRequirement, 'PASS', 'FAIL'),
+      adapt: verdict(result.adaptTestRunOK, 'OK', 'ANOMALIES'),
+    };
   }
 
   /**

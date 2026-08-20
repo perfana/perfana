@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.0] - 2026-08-20
+
+### Added
+- **A failed SLO check now names what failed.** Apdex reported one FAIL against "Workload Apdex" with a requirement column reading "No requirement", while the checker had already stored a score for every transaction. The requirement now reads "≥ 0.85 Apdex for all transactions" and a failed check lists the transactions that fell short — score, scenario, their own threshold, average response time, and the satisfied/tolerating/frustrated split, each marked FAIL. A new "Show details in case of failure" setting extends the same treatment to metric checks, listing the series that failed one rather than a bare verdict on the check as a whole.
+- **The comparison and trends sections pick what they cover the way the compare card does**: dashboards, then their panels, then those panels' series, each multi-select with a select-all, and each level left empty meaning everything under the level above it. Performance metrics are selectable the same way as Grafana and Dynatrace, including the per-URL panels — response time, error rate, throughput, latency and connect time — and the run-wide "All aggregated" series on the response-time panels.
+- **A trends section covers the runs since the system last changed.** Instead of a fixed number of runs it takes an oldest test run, defaulting to ADAPT's most recent change point — the run past which older results describe a system that has since moved. Each selected dashboard then gets its own tables underneath the aggregated trend, a row per series and a column per run.
+- **The run history says how each run was judged**: an SLO verdict, an anomaly-detection verdict, and the run's annotations — the note that explains why a number moved. The run being reported on is at the top of the table and marked in the trend columns.
+- **A test run's version can be corrected from the test run page.** A version arrives from whatever the pipeline passed, and until now a wrong or missing one could only be fixed by ingesting the run again.
+
+### Changed
+- **The SLO section is laid out like the SLO card**: one table per source with the card's own columns — Dashboard, Metric Name, Requirement — so the report and the screen name the same things the same way. Apdex is its own source rather than being filed under Grafana, and performance-metrics checks are no longer mixed in with Grafana panel checks: the source now follows the benchmark, not the "grafana" stamp the checker writes on every row.
+- **A requirement says which statistic it measures.** "> 90%" left the reader guessing whether that was the maximum, the mean or a percentile; it now reads "Maximum value should be greater than 90%", with aggregated SLOs naming their own statistic ("P95 should be less than or equal to 2000 ms").
+- **Comparisons and trends group by dashboard and then by panel**, each with its own counts and, for comparisons, its own regression/warning tally. One merged table mixed metrics from different dashboards, so two panels named "CPU" read as unrelated rows with the same name. The section header names the source the tables came from.
+- **Performance-test response-time panels are named once.** "Transaction RT Avg/P90/P95/P99" are four names for one row that already carries the whole distribution; they read as "Transaction Response Times", and the same for requests and URLs.
+- Comparisons default to avg, p90 and p95. p99 is opt-in — it is the noisiest of the four and the one most often read as a regression when a single slow request moved it.
+- The dashboard, panel and series dropdowns stay open while picking, and the preview and generate buttons are disabled — with the reason shown — when a comparison has no baseline run to compare against.
+
+### Fixed
+- **A report section with a large selection can be previewed again.** Selecting every series across a couple of dashboards is thousands of entries, and the whole section is posted to render a preview, which exceeded the server's default 100 kB body limit and failed with "request entity too large" before any handler ran. The limit is now 2 MB, overridable with `API_BODY_LIMIT`.
+- A trend of a Grafana panel that happens to share an id with a performance-test panel keeps its own name — panel ids are not unique across sources.
+
 ## [0.2.67.0] - 2026-08-19
 
 ### Added

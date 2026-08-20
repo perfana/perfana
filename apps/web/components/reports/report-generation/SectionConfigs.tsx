@@ -304,6 +304,7 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
 /** @public */
 export interface SloConfig {
   maxItems?: number;
+  showFailureDetails?: boolean;
 }
 
 interface SloConfigFormProps {
@@ -332,6 +333,15 @@ export function SloConfigForm({ config, onChange, text, onTextChange, testRunId 
         onChange={(e) => onChange({ ...config, maxItems: Number(e.target.value) })}
         size="small"
         inputProps={{ min: 1, max: 100 }}
+      />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={config.showFailureDetails ?? false}
+            onChange={(e) => onChange({ ...config, showFailureDetails: e.target.checked })}
+          />
+        }
+        label="Show details in case of failure"
       />
     </SectionConfigShell>
   );
@@ -903,11 +913,17 @@ export function AwrConfigForm({ config, onChange, text, onTextChange, testRunId 
 // ==================== Trends Config ====================
 
 /** @public */
+/** Sentinel meaning "start at ADAPT's most recent change point" (CHANGE_POINT_WINDOW in the API). */
+export const TRENDS_CHANGE_POINT = 'changepoint';
+
 export interface TrendsConfig {
+  /** Oldest run to include: a test run id, or TRENDS_CHANGE_POINT. */
+  oldestTestRunId?: string;
+  /** @deprecated run-count window from before the oldest-run picker; still honoured as a cap */
   timeRange?: {
     runCount?: number;
   };
-  source?: 'grafana' | 'dynatrace';
+  source?: 'performance-metrics' | 'grafana' | 'dynatrace';
   // Which metric data the per-dashboard trend tables cover. Empty at a level means
   // everything under the level above it.
   dashboardLabels?: string[];
@@ -929,8 +945,10 @@ interface TrendsConfigFormProps {
 export function TrendsConfigForm({
   config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload,
 }: TrendsConfigFormProps) {
-  const source = config.source ?? 'grafana';
+  const source = config.source ?? 'performance-metrics';
   const dashboards = useSourceDashboards(source, systemUnderTestId, testEnvironment, workload);
+  const runCandidates = useBaselineCandidates(systemUnderTestId, testRunId);
+  const oldest = config.oldestTestRunId ?? TRENDS_CHANGE_POINT;
 
   return (
     <SectionConfigShell
@@ -942,17 +960,26 @@ export function TrendsConfigForm({
       onTextChange={onTextChange}
       testRunId={testRunId}
     >
-      <TextField
-        label="Number of Runs"
-        type="number"
-        value={config.timeRange?.runCount ?? 10}
-        onChange={(e) => onChange({
-          ...config,
-          timeRange: { ...config.timeRange, runCount: Number(e.target.value) },
-        })}
-        size="small"
-        inputProps={{ min: 2, max: 100 }}
-      />
+      {/* Where the window starts. The default follows ADAPT: everything since the run at
+          which it last saw the system change, because older runs describe a system that has
+          since moved. Pin a run to override it. */}
+      <FormControl size="small" fullWidth>
+        <InputLabel id="trends-oldest-label">Oldest test run</InputLabel>
+        <Select
+          labelId="trends-oldest-label"
+          label="Oldest test run"
+          value={oldest}
+          onChange={(e) => onChange({ ...config, oldestTestRunId: e.target.value })}
+        >
+          <MenuItem value={TRENDS_CHANGE_POINT}>Most recent change point</MenuItem>
+          {runCandidates.map((c) => (
+            <MenuItem key={c.test_run_id} value={c.test_run_id}>
+              {c.test_run_id}
+              {c.application_release ? ` · ${c.application_release}` : ''}
+            </MenuItem>
+          ))}
+        </Select>
+      </FormControl>
 
       {/* The aggregated run-level trend always leads the section; these pick what is
           tabled underneath it, one table per dashboard. */}
@@ -970,6 +997,7 @@ export function TrendsConfigForm({
             series: undefined,
           })}
         >
+          <MenuItem value="performance-metrics">Performance Metrics</MenuItem>
           <MenuItem value="grafana">Grafana</MenuItem>
           <MenuItem value="dynatrace">Dynatrace</MenuItem>
         </Select>
@@ -981,6 +1009,8 @@ export function TrendsConfigForm({
         systemUnderTestId={systemUnderTestId}
         testEnvironment={testEnvironment}
         workload={workload}
+        testRunId={testRunId}
+        includeUrlPanels
         value={config}
         onChange={(v) => onChange({ ...config, ...v })}
       />
@@ -1006,7 +1036,6 @@ export interface ComparisonsConfig {
   // grafana/dynatrace only: pair current-run dashboards with differently named
   // dashboards from the baseline run's environment
   dashboardMap?: { current: string; baseline: string }[];
-  includeAggregated?: boolean;
 }
 
 interface ComparisonsConfigFormProps {
@@ -1031,7 +1060,8 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
     source, systemUnderTestId, baselineCandidate?.test_environment, baselineCandidate?.workload,
   );
 
-  const metrics = config.metrics ?? ['avg', 'p95', 'p99'];
+  // Keep in step with the renderer's default (comparisons-renderer.ts).
+  const metrics = config.metrics ?? ['avg', 'p90', 'p95'];
 
   const toggleMetric = (metric: 'avg' | 'p90' | 'p95' | 'p99') => {
     const next = metrics.includes(metric) ? metrics.filter((m) => m !== metric) : [...metrics, metric];
@@ -1047,6 +1077,14 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      // Without a baseline the preview can only render the "no baseline configured" empty
+      // state, so the button offers nothing but a round trip.
+      previewDisabled={baselineCandidates.length === 0 || !config.baselineTestRunId}
+      previewDisabledReason={
+        baselineCandidates.length === 0
+          ? 'No baseline run available — this run has no earlier runs in its system, environment and workload'
+          : 'Select a baseline run to enable preview'
+      }
     >
       {/* Baseline run selector — shared compare-card-style Autocomplete */}
       <BaselineRunSelect
@@ -1088,6 +1126,8 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
         systemUnderTestId={systemUnderTestId}
         testEnvironment={testEnvironment}
         workload={workload}
+        testRunId={testRunId}
+        includeUrlPanels
         value={config}
         onChange={(v) => onChange({ ...config, ...v })}
       />
@@ -1111,18 +1151,6 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
           ))}
         </Box>
       </Box>
-
-      {source === 'performance-metrics' && (
-        <FormControlLabel
-          control={
-            <Switch
-              checked={config.includeAggregated ?? false}
-              onChange={(e) => onChange({ ...config, includeAggregated: e.target.checked })}
-            />
-          }
-          label="Include 'All aggregated' row"
-        />
-      )}
 
       {/* Threshold number fields */}
       <TextField

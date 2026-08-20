@@ -42,6 +42,7 @@ const makeRunSummary = (overrides?: Partial<TrendRunSummary>): TrendRunSummary =
   errorRate: 0.5,
   totalTransactions: 10000,
   consolidatedResult: null,
+  annotations: [],
   ...overrides,
 });
 
@@ -210,6 +211,65 @@ describe('TrendsRenderer', () => {
   });
 
   describe('config options', () => {
+    it('shows a run\'s annotations — the note that explains a jump', async () => {
+      dataFetcher.getTrendsData.mockResolvedValue(makeTrendsData({
+        currentRun: makeRunSummary({
+          testRunId: 'run-003',
+          annotations: ['Proxy Dev: triple the back end calls', '<img src=x>'],
+        }),
+        previousRuns: [makeRunSummary({ testRunId: 'run-002' })],
+      }));
+
+      const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('>Annotations</th>');
+      expect(html).toContain('Proxy Dev: triple the back end calls');
+      // Free text from the run, so it is escaped like every other caller-supplied value
+      expect(html).not.toContain('<img src=x>');
+      expect(html).toContain('&lt;img');
+    });
+
+    it('puts the run being reported on at the top of the history', async () => {
+      dataFetcher.getTrendsData.mockResolvedValue(makeTrendsData({
+        currentRun: makeRunSummary({ testRunId: 'run-003', applicationRelease: 'v3.0.0' }),
+        previousRuns: [
+          makeRunSummary({ testRunId: 'run-002', applicationRelease: 'v2.0.0' }),
+          makeRunSummary({ testRunId: 'run-001', applicationRelease: 'v1.0.0' }),
+        ],
+      }));
+
+      const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
+
+      const order = ['v3.0.0', 'v2.0.0', 'v1.0.0'].map((v) => html.indexOf(v));
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+      // The current-run marker sits in the first row
+      expect(html.indexOf('Current')).toBeLessThan(html.indexOf('v2.0.0'));
+    });
+
+    it('shows each run\'s SLO and anomaly verdict in the run history', async () => {
+      dataFetcher.getTrendsData.mockResolvedValue(makeTrendsData({
+        currentRun: makeRunSummary({
+          testRunId: 'run-003',
+          consolidatedResult: { meetsRequirement: false, adaptTestRunOK: true },
+        }),
+        previousRuns: [
+          makeRunSummary({ testRunId: 'run-002', consolidatedResult: { meetsRequirement: true, adaptTestRunOK: false } }),
+          makeRunSummary({ testRunId: 'run-001', consolidatedResult: null }),
+        ],
+      }));
+
+      const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('>SLO</th>');
+      expect(html).toContain('>Anomalies</th>');
+      expect(html).toContain('>PASS</span>');
+      expect(html).toContain('>FAIL</span>');
+      expect(html).toContain('>OK</span>');
+      expect(html).toContain('>ANOMALIES</span>');
+      // A run evaluated before either check ran says so rather than claiming a pass
+      expect(html).toContain('>N/A</span>');
+    });
+
     it('leads with the aggregated trend even when nothing is selected', async () => {
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
@@ -240,13 +300,18 @@ describe('TrendsRenderer', () => {
         ['run-001', 'run-002', 'run-003'],
         [{ dashboardLabel: 'JVM' }, { dashboardLabel: 'Docker' }],
       );
-      // A table per dashboard, keyed by its own group header
+      // A block per dashboard, a table per panel inside it — the comparison section's shape
       expect(html).toContain('>JVM</h3>');
       expect(html).toContain('>Docker</h3>');
+      expect(html).toContain('>Heap</h4>');
+      expect(html).toContain('>CPU</h4>');
+      expect(html).toContain('1 panels');
       expect(html).toContain('used');
       expect(html).toContain('cpu');
-      // Change across the window: 100 -> 150
-      expect(html).toContain('+50.0%');
+      // Change against the run before this one: 110 -> 150
+      expect(html).toContain('+36.4%');
+      // The current run's column is marked, as its row is in the run history
+      expect(html).toContain('>Current</span>');
       // A run with no value for a series is an em-dash, not a zero
       expect(html).toContain('—');
     });
@@ -259,7 +324,7 @@ describe('TrendsRenderer', () => {
         ['user'],
       );
 
-      expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(expect.anything(), 7, 'user-1', ['user']);
+      expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(expect.anything(), 7, 'user-1', ['user'], undefined);
     });
 
     it('should pass maxRuns config to data fetcher', async () => {
@@ -267,10 +332,7 @@ describe('TrendsRenderer', () => {
       await renderer.renderTrendsSection(section, makeTestRun(), 'user-1', ['user']);
 
       expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(
-        expect.anything(),
-        5,
-        'user-1',
-        ['user'],
+        expect.anything(), 5, 'user-1', ['user'], undefined,
       );
     });
 
@@ -278,10 +340,25 @@ describe('TrendsRenderer', () => {
       await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
       expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(
-        expect.anything(),
-        10,
-        '',
-        [],
+        expect.anything(), 10, '', [], undefined,
+      );
+    });
+
+    it('forwards where the window starts — a pinned run or the change-point sentinel', async () => {
+      await renderer.renderTrendsSection(
+        makeSection({ config: { oldestTestRunId: 'changepoint' } }),
+        makeTestRun(),
+      );
+      expect(dataFetcher.getTrendsData).toHaveBeenLastCalledWith(
+        expect.anything(), 10, '', [], 'changepoint',
+      );
+
+      await renderer.renderTrendsSection(
+        makeSection({ config: { oldestTestRunId: 'run-000' } }),
+        makeTestRun(),
+      );
+      expect(dataFetcher.getTrendsData).toHaveBeenLastCalledWith(
+        expect.anything(), 10, '', [], 'run-000',
       );
     });
   });

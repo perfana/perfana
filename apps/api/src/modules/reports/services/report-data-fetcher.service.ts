@@ -7,6 +7,8 @@ import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { percentDiff } from '../renderers/comparison-bands';
+import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isUrlPanel, perfPanelTitle } from './url-perf-panels';
+import { CHANGE_POINT_WINDOW } from './trend-window';
 
 // The shapes these queries return. Re-exported so the ten renderers that import them from
 // this module keep working unchanged.
@@ -456,6 +458,123 @@ export class ReportDataFetcherService {
       pass: Number(r.pass ?? 0),
       fail: Number(r.fail ?? 0),
     };
+  }
+
+  /**
+   * The start of a trend window.
+   *
+   * `CHANGE_POINT_WINDOW` follows ADAPT: its control group records the run at which the
+   * system last changed behaviour, which is the point past which older runs are comparing
+   * against a different system. Any other value is a run id the reader pinned. Null means
+   * "no floor" — the caller's run count decides.
+   */
+  private async resolveTrendWindowStart(
+    testRun: TestRun,
+    oldestTestRunId?: string,
+  ): Promise<Date | null> {
+    if (!oldestTestRunId) return null;
+
+    let runId = oldestTestRunId;
+    if (oldestTestRunId === CHANGE_POINT_WINDOW) {
+      const rows: Array<{ test_run_id: string | null }> = await this.dataSource.query(
+        `SELECT g.change_point->>'test_run_id' AS test_run_id
+         FROM ds_adapt_conclusion c
+         JOIN ds_control_groups g ON g.control_group_id = c.control_group_id
+         WHERE c.test_run_id = $1
+         LIMIT 1`,
+        [testRun.testRunId],
+      );
+      const found = rows[0]?.test_run_id;
+      // No change point recorded yet — fall back to the run count rather than the whole history.
+      if (!found) return null;
+      runId = found;
+    }
+
+    const rows: Array<{ start_time: string | null }> = await withRequestEm(this.testRunRepo).query(
+      `SELECT start_time FROM test_runs WHERE test_run_id = $1 LIMIT 1`,
+      [runId],
+    );
+    const startTime = rows[0]?.start_time;
+    return startTime ? new Date(startTime) : null;
+  }
+
+  /**
+   * Run-wide request response times, the request-side twin of getAggregatedScalars.
+   *
+   * Reads the sampler rollup rather than raw rows: `pct_agg` is the stored percentile sketch,
+   * so rolling it up over every sampler gives the run's distribution without re-reading
+   * millions of requests.
+   */
+  async getAggregatedRequestScalars(
+    testRunId: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<{ avg: number | null; p90: number | null; p95: number | null; p99: number | null }> {
+    const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
+    const rows: Array<Record<string, string | null>> = await withRequestEm(this.testRunRepo).query(
+      `WITH agg AS (
+         SELECT rollup(s.pct_agg) AS pct_agg,
+                SUM(s.avg_response_time * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg
+         FROM test_run_sampler_stats s
+         JOIN test_runs tr ON tr.test_run_id = s.test_run_id
+         WHERE s.test_run_id = $1
+           AND s.ramp_up_excluded = true
+           AND s.total_count > 0
+           ${orgFilter.clause}
+       )
+       SELECT ROUND(a.avg::numeric, 2) AS avg,
+              ROUND(approx_percentile(0.90, a.pct_agg)::numeric, 2) AS p90,
+              ROUND(approx_percentile(0.95, a.pct_agg)::numeric, 2) AS p95,
+              ROUND(approx_percentile(0.99, a.pct_agg)::numeric, 2) AS p99
+       FROM agg a`,
+      [testRunId, ...orgFilter.params],
+    );
+    const r = rows[0] ?? {};
+    const num = (v: string | null | undefined) => (v == null ? null : Number(v));
+    return { avg: num(r.avg), p90: num(r.p90), p95: num(r.p95), p99: num(r.p99) };
+  }
+
+  /**
+   * The "All aggregated" rows a selection asked for: one per panel whose series list carries
+   * the sentinel, holding the run-wide aggregate instead of a single series.
+   */
+  private async getAggregatedSeriesRows(
+    currentRunId: string,
+    baselineRunId: string,
+    selections: BaselineComparisonSelection[],
+    opts: { metrics: ('avg' | 'p90' | 'p95' | 'p99')[]; userId: string; roles: string[] },
+  ): Promise<BaselineComparisonRow[]> {
+    const wanted = selections.filter(
+      (s) => s.metricNames?.includes(ALL_AGGREGATED_SERIES) && aggregatedKindFor(s.panelId),
+    );
+    if (wanted.length === 0) return [];
+
+    const kinds = new Set(wanted.map((s) => aggregatedKindFor(s.panelId)!));
+    const scalars = new Map<string, { avg: number | null; p90: number | null; p95: number | null; p99: number | null }>();
+    for (const kind of kinds) {
+      const [cur, base] = await Promise.all(
+        [currentRunId, baselineRunId].map((run) => (kind === 'transaction'
+          ? this.getAggregatedScalars(run, opts.userId, opts.roles)
+          : this.getAggregatedRequestScalars(run, opts.userId, opts.roles))),
+      );
+      scalars.set(`${kind}:current`, cur!);
+      scalars.set(`${kind}:baseline`, base!);
+    }
+
+    return wanted.map((sel) => {
+      const kind = aggregatedKindFor(sel.panelId)!;
+      const cur = scalars.get(`${kind}:current`)!;
+      const base = scalars.get(`${kind}:baseline`)!;
+      return {
+        group: `${sel.dashboardLabel} / ${perfPanelTitle(sel.panelId ?? null, '')}`,
+        dashboardLabel: sel.dashboardLabel,
+        panelTitle: perfPanelTitle(sel.panelId ?? null, ''),
+        label: ALL_AGGREGATED_SERIES,
+        metrics: opts.metrics.map((k) => ({
+          key: k, current: cur[k], baseline: base[k], diffPercent: percentDiff(cur[k], base[k]),
+        })),
+      };
+    });
   }
 
   /**
@@ -1525,7 +1644,13 @@ export class ReportDataFetcherService {
           cr.metric_unit,
           cr.evaluate_type,
           cr.source,
+          -- The real source of a check is the benchmark's, not the check result's: the checker
+          -- writes 'grafana' on every row because that is where the data was collected, while
+          -- the benchmark knows whether it is a Grafana panel check, a performance-metrics
+          -- check or a custom one. This is the same field the SLO card's source chip reads.
+          b.source AS benchmark_source,
           cr.dashboard_label,
+          cr.match_pattern,
           cr.requirement->>'operator' AS requirement_operator,
           (cr.requirement->>'value')::numeric AS requirement_value,
           cr.requirement,
@@ -1534,6 +1659,7 @@ export class ReportDataFetcherService {
           cr.panel_average,
           cr.meets_requirement
         FROM check_results cr
+        LEFT JOIN benchmarks b ON b.id::text = cr.benchmark_id
         WHERE cr.test_run_id = $1
         ORDER BY cr.meets_requirement ASC NULLS LAST, cr.evaluate_type, cr.panel_title`,
         [testRunId],
@@ -1718,10 +1844,19 @@ export class ReportDataFetcherService {
     maxRuns: number = 10,
     userId: string = '',
     roles: string[] = [],
+    /**
+     * Where the window starts: a test run id, or the CHANGE_POINT_WINDOW sentinel for
+     * "everything since ADAPT last saw the system change". Absent falls back to maxRuns.
+     */
+    oldestTestRunId?: string,
   ): Promise<TrendsData | null> {
     try {
       const safeMaxRuns = Math.max(1, Math.min(Math.floor(maxRuns), 50));
       const orgFilter = await this.resolveOrgFilter(userId, roles, 5, 'tr');
+      const floorTime = await this.resolveTrendWindowStart(testRun, oldestTestRunId);
+      // Bound as a parameter, not interpolated: the org filter claims $5..$N, so the floor
+      // takes the next free index rather than shifting everything after it.
+      const floorParamIndex = 5 + orgFilter.params.length;
 
       // Fetch recent completed runs for the same system/environment/workload
       const query = `
@@ -1731,6 +1866,7 @@ export class ReportDataFetcherService {
           tr.application_release,
           tr.duration,
           tr.consolidated_result,
+          tr.annotations,
           COALESCE(txn_stats.avg_ms, 0) as avg_ms,
           COALESCE(txn_stats.p95_ms, 0) as p95_ms,
           COALESCE(txn_stats.p99_ms, 0) as p99_ms,
@@ -1757,9 +1893,10 @@ export class ReportDataFetcherService {
           AND tr.completed = true
           AND tr.is_stale = false
           AND tr.start_time <= $4
+          ${floorTime ? `AND tr.start_time >= $${floorParamIndex}` : ''}
           ${orgFilter.clause}
         ORDER BY tr.start_time DESC
-        LIMIT ${safeMaxRuns + 1}
+        LIMIT ${floorTime ? 51 : safeMaxRuns + 1}
       `;
 
       const rows = await withRequestEm(this.testRunRepo).query(query, [
@@ -1768,6 +1905,7 @@ export class ReportDataFetcherService {
         testRun.workload,
         testRun.startTime || new Date(),
         ...orgFilter.params,
+        ...(floorTime ? [floorTime] : []),
       ]);
 
       if (!rows || rows.length === 0) {
@@ -1785,6 +1923,7 @@ export class ReportDataFetcherService {
         errorRate: parseFloat(row.error_rate as string) || 0,
         totalTransactions: parseInt(row.total_transactions as string) || 0,
         consolidatedResult: row.consolidated_result ?? null,
+        annotations: Array.isArray(row.annotations) ? (row.annotations as string[]) : [],
       });
 
       // First row is the current (or most recent) run
@@ -1914,6 +2053,134 @@ export class ReportDataFetcherService {
    * nothing rather than every series ever recorded — a trend section with nothing picked has
    * nothing to draw.
    */
+  /**
+   * Per-URL history for the virtual URL panels — the trends twin of getUrlComparison, reading
+   * the same sampler rollup so a trend and a comparison of one URL cannot disagree.
+   */
+  private async getUrlTrends(
+    testRunIds: string[],
+    selections: BaselineComparisonSelection[],
+    stat: 'avg' | 'p95' | 'p99',
+  ): Promise<MetricTrendSeries[]> {
+    const urlSelections = selections.filter((s) => isUrlPanel(s.panelId));
+    if (urlSelections.length === 0) return [];
+
+    // No org clause here: the run ids arrive from getTrendsData's own org-filtered window,
+    // and the request EM applies RLS on top. Adding one would filter an already-filtered set.
+    const rows: Array<Record<string, string | null>> = await withRequestEm(this.testRunRepo).query(
+      `WITH agg AS (
+         SELECT s.test_run_id, s.url_hash, s.system_under_test, s.test_environment,
+                rollup(s.pct_agg) AS pct_agg,
+                SUM(s.total_count) AS total_count,
+                SUM(s.failed_count) AS failed_count,
+                SUM(s.avg_response_time * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_response_time,
+                SUM(s.avg_latency      * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_latency,
+                SUM(s.avg_connect_time * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_connect_time
+         FROM test_run_sampler_stats s
+         WHERE s.test_run_id = ANY($1::text[]) AND s.ramp_up_excluded = true AND s.total_count > 0
+         GROUP BY s.test_run_id, s.url_hash, s.system_under_test, s.test_environment
+       )
+       SELECT a.test_run_id,
+              COALESCE(up.normalized_url, a.url_hash) AS normalized_url,
+              ROUND(a.avg_response_time::numeric, 2) AS avg_response_time,
+              ROUND(approx_percentile(0.95, a.pct_agg)::numeric, 2) AS p95,
+              ROUND(approx_percentile(0.99, a.pct_agg)::numeric, 2) AS p99,
+              ROUND(a.avg_latency::numeric, 2) AS avg_latency,
+              ROUND(a.avg_connect_time::numeric, 2) AS avg_connect_time,
+              ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2) AS error_percentage,
+              ROUND(a.total_count::numeric / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2) AS throughput
+       FROM agg a
+       JOIN test_runs tr ON tr.test_run_id = a.test_run_id
+       LEFT JOIN url_patterns up
+         ON up.url_hash = a.url_hash
+        AND up.system_under_test = a.system_under_test
+        AND up.test_environment = a.test_environment`,
+      [testRunIds],
+    );
+    if (rows.length === 0) return [];
+
+    const num = (v: string | null | undefined) => (v == null ? null : Number(v));
+    const out: MetricTrendSeries[] = [];
+    for (const sel of urlSelections) {
+      const spec = getUrlPanel(sel.panelId!);
+      if (!spec) continue;
+      const scalarColumn = spec.metric === 'error_percentage' ? 'error_percentage'
+        : spec.metric === 'throughput' ? 'throughput'
+        : spec.metric === 'latency' ? 'avg_latency'
+        : 'avg_connect_time';
+      const byUrl = new Map<string, MetricTrendSeries>();
+      for (const r of rows) {
+        const url = r.normalized_url as string;
+        if (sel.metricNames?.length && !sel.metricNames.includes(url)) continue;
+        const series = byUrl.get(url) ?? {
+          dashboardLabel: sel.dashboardLabel,
+          panelTitle: spec.title,
+          metricName: url,
+          unit: spec.metric === 'error_percentage' ? 'percent' : spec.metric === 'throughput' ? 'reqps' : 'ms',
+          valuesByRun: {},
+        };
+        series.valuesByRun[r.test_run_id as string] = spec.hasPercentiles
+          ? num(stat === 'p95' ? r.p95 : stat === 'p99' ? r.p99 : r.avg_response_time)
+          : num(r[scalarColumn]);
+        byUrl.set(url, series);
+      }
+      out.push(...byUrl.values());
+    }
+    return out;
+  }
+
+  /** Run-wide aggregate history for a panel whose series list carries the sentinel. */
+  private async getAggregatedTrends(
+    testRunIds: string[],
+    selections: BaselineComparisonSelection[],
+    stat: 'avg' | 'p95' | 'p99',
+  ): Promise<MetricTrendSeries[]> {
+    const wanted = selections.filter(
+      (s) => s.metricNames?.includes(ALL_AGGREGATED_SERIES) && aggregatedKindFor(s.panelId),
+    );
+    if (wanted.length === 0) return [];
+
+    const pct = stat === 'p99' ? 0.99 : 0.95;
+    const byKind = new Map<string, Map<string, number | null>>();
+    for (const kind of new Set(wanted.map((s) => aggregatedKindFor(s.panelId)!))) {
+      const rows: Array<Record<string, string | null>> = kind === 'transaction'
+        ? await withRequestEm(this.testRunRepo).query(
+            `SELECT t.test_run_id,
+                    ROUND(AVG(t.response_time)::numeric, 2) AS avg,
+                    ROUND(PERCENTILE_CONT($2) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS pct
+             FROM transactions t
+             WHERE t.test_run_id = ANY($1::text[])
+             GROUP BY t.test_run_id`,
+            [testRunIds, pct])
+        : await withRequestEm(this.testRunRepo).query(
+            `WITH agg AS (
+               SELECT s.test_run_id, rollup(s.pct_agg) AS pct_agg,
+                      SUM(s.avg_response_time * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg
+               FROM test_run_sampler_stats s
+               WHERE s.test_run_id = ANY($1::text[]) AND s.ramp_up_excluded = true AND s.total_count > 0
+               GROUP BY s.test_run_id
+             )
+             SELECT a.test_run_id, ROUND(a.avg::numeric, 2) AS avg,
+                    ROUND(approx_percentile($2, a.pct_agg)::numeric, 2) AS pct
+             FROM agg a`,
+            [testRunIds, pct]);
+      const values = new Map<string, number | null>();
+      for (const r of rows) {
+        const v = stat === 'avg' ? r.avg : r.pct;
+        values.set(r.test_run_id as string, v == null ? null : Number(v));
+      }
+      byKind.set(kind, values);
+    }
+
+    return wanted.map((sel) => ({
+      dashboardLabel: sel.dashboardLabel,
+      panelTitle: perfPanelTitle(sel.panelId ?? null, ''),
+      metricName: ALL_AGGREGATED_SERIES,
+      unit: 'ms',
+      valuesByRun: Object.fromEntries(byKind.get(aggregatedKindFor(sel.panelId)!) ?? []),
+    }));
+  }
+
   async getMetricTrends(
     testRunIds: string[],
     selections: BaselineComparisonSelection[],
@@ -1929,13 +2196,15 @@ export class ReportDataFetcherService {
         panel_id: number | null;
         metric_name: string | null;
         unit: string | null;
+        source_type: string | null;
         mean: number | null;
         q95: number | null;
         q99: number | null;
       }> = await this.dataSource.query(
         `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name, s.unit,
-                s.mean, s.q95, s.q99
+                ms.source_type, s.mean, s.q95, s.q99
          FROM ds_metric_statistics s
+         LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
          WHERE s.test_run_id = ANY($1) AND s.dashboard_label = ANY($2)`,
         [testRunIds, labels],
       );
@@ -1951,12 +2220,18 @@ export class ReportDataFetcherService {
 
       const byIdentity = new Map<string, MetricTrendSeries>();
       for (const r of rows.filter(selected)) {
-        const key = `${r.dashboard_label}||${r.panel_title}||${r.metric_name}`;
+        // Perf-test panels name the statistic in their stored title; the report names the
+        // panel once, exactly as the comparison section does. Gated on the source: panel ids
+        // are not unique across sources, so a Grafana panel 101 must keep its own title.
+        const panelTitle = r.source_type === 'performance_test'
+          ? perfPanelTitle(r.panel_id, r.panel_title)
+          : (r.panel_title ?? '');
+        const key = `${r.dashboard_label}||${panelTitle}||${r.metric_name}`;
         let series = byIdentity.get(key);
         if (!series) {
           series = {
             dashboardLabel: r.dashboard_label ?? 'Other',
-            panelTitle: r.panel_title ?? '',
+            panelTitle,
             metricName: r.metric_name ?? '',
             unit: r.unit,
             valuesByRun: {},
@@ -1964,6 +2239,13 @@ export class ReportDataFetcherService {
           byIdentity.set(key, series);
         }
         series.valuesByRun[r.test_run_id] = r[field];
+      }
+
+      for (const extra of [
+        ...(await this.getUrlTrends(testRunIds, selections, stat)),
+        ...(await this.getAggregatedTrends(testRunIds, selections, stat)),
+      ]) {
+        byIdentity.set(`${extra.dashboardLabel}||${extra.panelTitle}||${extra.metricName}`, extra);
       }
 
       return [...byIdentity.values()].sort(
@@ -1976,6 +2258,115 @@ export class ReportDataFetcherService {
       this.logger.warn(`Failed to get metric trends: ${(error as Error).message}`);
       return [];
     }
+  }
+
+  /**
+   * Compare the per-URL sampler rollup between two runs.
+   *
+   * The "URL …" panels a performance-test dashboard offers are virtual: nothing writes them
+   * to ds_metric_statistics, so the statistics path returns nothing for them. Their numbers
+   * live in `test_run_sampler_stats`, rolled up per normalized URL — the same rollup the
+   * compare card's URL dimension reads, so the report and the card cannot disagree.
+   *
+   * Only URL RT has a distribution; a rate, a throughput or a connect time is one number per
+   * URL, so the percentile columns stay empty rather than repeating the average four times.
+   */
+  private async getUrlComparison(
+    currentRunId: string,
+    baselineRunId: string,
+    selections: BaselineComparisonSelection[],
+    opts: { metrics: ('avg' | 'p90' | 'p95' | 'p99')[]; userId: string; roles: string[] },
+  ): Promise<BaselineComparisonRow[]> {
+    const urlSelections = selections.filter((s) => isUrlPanel(s.panelId));
+    if (urlSelections.length === 0) return [];
+
+    const orgFilter = await this.resolveOrgFilter(opts.userId, opts.roles, 2, 'tr');
+    const rows: Array<{
+      test_run_id: string;
+      normalized_url: string;
+      avg_response_time: string | null;
+      p90: string | null;
+      p95: string | null;
+      p99: string | null;
+      avg_latency: string | null;
+      avg_connect_time: string | null;
+      error_percentage: string | null;
+      throughput: string | null;
+    }> = await withRequestEm(this.testRunRepo).query(
+      `WITH agg AS (
+         SELECT s.test_run_id, s.url_hash, s.system_under_test, s.test_environment,
+                rollup(s.pct_agg) AS pct_agg,
+                SUM(s.total_count) AS total_count,
+                SUM(s.failed_count) AS failed_count,
+                SUM(s.avg_response_time * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_response_time,
+                SUM(s.avg_latency      * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_latency,
+                SUM(s.avg_connect_time * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg_connect_time
+         FROM test_run_sampler_stats s
+         JOIN test_runs tr ON tr.test_run_id = s.test_run_id
+         WHERE s.test_run_id = ANY($1::text[])
+           AND s.ramp_up_excluded = true
+           AND s.total_count > 0
+           ${orgFilter.clause}
+         GROUP BY s.test_run_id, s.url_hash, s.system_under_test, s.test_environment
+       )
+       SELECT a.test_run_id,
+              COALESCE(up.normalized_url, a.url_hash) AS normalized_url,
+              ROUND(a.avg_response_time::numeric, 2) AS avg_response_time,
+              ROUND(approx_percentile(0.90, a.pct_agg)::numeric, 2) AS p90,
+              ROUND(approx_percentile(0.95, a.pct_agg)::numeric, 2) AS p95,
+              ROUND(approx_percentile(0.99, a.pct_agg)::numeric, 2) AS p99,
+              ROUND(a.avg_latency::numeric, 2) AS avg_latency,
+              ROUND(a.avg_connect_time::numeric, 2) AS avg_connect_time,
+              ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2) AS error_percentage,
+              ROUND(a.total_count::numeric / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2) AS throughput
+       FROM agg a
+       JOIN test_runs tr ON tr.test_run_id = a.test_run_id
+       LEFT JOIN url_patterns up
+         ON up.url_hash = a.url_hash
+        AND up.system_under_test = a.system_under_test
+        AND up.test_environment = a.test_environment
+       ORDER BY a.total_count DESC`,
+      [[currentRunId, baselineRunId], ...orgFilter.params],
+    );
+    if (rows.length === 0) return [];
+
+    const num = (v: unknown) => (v == null ? null : Number(v));
+    const byRun = (id: string) => new Map(rows.filter((r) => r.test_run_id === id).map((r) => [r.normalized_url, r]));
+    const current = byRun(currentRunId);
+    const baseline = byRun(baselineRunId);
+
+    const out: BaselineComparisonRow[] = [];
+    for (const sel of urlSelections) {
+      const spec = getUrlPanel(sel.panelId!);
+      if (!spec) continue;
+      const scalarColumn = spec.metric === 'error_percentage' ? 'error_percentage'
+        : spec.metric === 'throughput' ? 'throughput'
+        : spec.metric === 'latency' ? 'avg_latency'
+        : 'avg_connect_time';
+
+      const urls = [...current.keys()].filter((u) => !sel.metricNames?.length || sel.metricNames.includes(u));
+      for (const url of urls) {
+        const c = current.get(url)!;
+        const b = baseline.get(url);
+        const pick = (row: typeof c | undefined, key: 'avg' | 'p90' | 'p95' | 'p99'): number | null => {
+          if (!row) return null;
+          if (!spec.hasPercentiles) return key === 'avg' ? num(row[scalarColumn]) : null;
+          return key === 'avg' ? num(row.avg_response_time) : num(row[key]);
+        };
+        out.push({
+          group: `${sel.dashboardLabel} / ${spec.title}`,
+          dashboardLabel: sel.dashboardLabel,
+          panelTitle: spec.title,
+          label: url,
+          metrics: opts.metrics.map((k) => {
+            const cv = pick(c, k);
+            const bv = pick(b, k);
+            return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
+          }),
+        });
+      }
+    }
+    return out;
   }
 
   async getBaselineRunComparison(
@@ -1994,6 +2385,30 @@ export class ReportDataFetcherService {
       dashboardMap?: { current: string; baseline: string }[];
     },
   ): Promise<BaselineComparisonData | null> {
+    // Performance-test metrics are stored in the same rollups as every other source, under
+    // their own artificial dashboards — so a section that picked dashboards/panels/series
+    // compares them the same way. Without a selection the run-wide transaction comparison
+    // below stays, which is what an unconfigured section has always rendered.
+    if (source === 'performance-metrics' && (opts.selections?.length ?? 0) > 0) {
+      const selections = opts.selections ?? [];
+      // "All aggregated" is a series the run has no row for — it is the whole run rolled up.
+      const aggregatedRows = await this.getAggregatedSeriesRows(currentRunId, baselineRunId, selections, opts);
+      // The URL panels are virtual — they need the sampler rollup, not the statistics.
+      const urlRows = await this.getUrlComparison(currentRunId, baselineRunId, selections, opts);
+      const statSelections = selections
+        .filter((s) => !isUrlPanel(s.panelId))
+        // A panel that asked ONLY for the aggregate has no per-series query left to run.
+        .map((s) => (s.metricNames?.includes(ALL_AGGREGATED_SERIES)
+          ? { ...s, metricNames: s.metricNames.filter((m) => m !== ALL_AGGREGATED_SERIES) }
+          : s))
+        .filter((s) => !(s.metricNames && s.metricNames.length === 0));
+      const stats = statSelections.length
+        ? await this.getBaselineRunComparisonFromStatistics(
+            currentRunId, baselineRunId, source, { ...opts, selections: statSelections })
+        : null;
+      const rows = [...aggregatedRows, ...(stats?.rows ?? []), ...urlRows];
+      return rows.length ? { source, rows } : null;
+    }
     if (source === 'performance-metrics') {
       // Query the transactions table directly (like getScenarioDataFromDatabase)
       // instead of the controller-facing TestRunsService facade. The facade treats
@@ -2052,7 +2467,7 @@ export class ReportDataFetcherService {
       return { source, rows };
     }
     // grafana / dynatrace: source is narrowed to 'grafana' | 'dynatrace' here
-    return this.getBaselineRunComparisonFromStatistics(currentRunId, baselineRunId, source as 'grafana' | 'dynatrace', opts);
+    return this.getBaselineRunComparisonFromStatistics(currentRunId, baselineRunId, source, opts);
   }
 
   /**
@@ -2066,14 +2481,15 @@ export class ReportDataFetcherService {
   private async getBaselineRunComparisonFromStatistics(
     currentRunId: string,
     baselineRunId: string,
-    source: 'grafana' | 'dynatrace',
+    source: 'grafana' | 'dynatrace' | 'performance-metrics',
     opts: {
       metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
       selections?: BaselineComparisonSelection[];
       dashboardMap?: { current: string; baseline: string }[];
     },
   ): Promise<BaselineComparisonData | null> {
-    const sourceType = source === 'grafana' ? 'grafana' : 'dynatrace';
+    const sourceType =
+      source === 'grafana' ? 'grafana' : source === 'dynatrace' ? 'dynatrace' : 'performance_test';
     // Optional scoping (from the section config's dashboard/panel/series selection).
     // Absent -> unfiltered, preserving behavior for configs saved before selection existed.
     // The mapped baseline labels must be included or their rows never reach the pairing.
@@ -2143,12 +2559,17 @@ export class ReportDataFetcherService {
     const rowsOut: BaselineComparisonRow[] = cur.map((c) => {
       const b = baseByIdentity.get(remapIdentity(c));
       const host = source === 'dynatrace' ? this.extractHost(c.metric_name) : null;
+      const panelTitle = source === 'performance-metrics'
+        ? perfPanelTitle(c.panel_id, c.panel_title)
+        : (c.panel_title ?? '');
       return {
         group:
           source === 'dynatrace'
             ? (host ?? 'Hosts')
-            : `${c.dashboard_label ?? 'Other'} / ${c.panel_title ?? ''}`.trim(),
+            : `${c.dashboard_label ?? 'Other'} / ${panelTitle}`.trim(),
         label: c.metric_name ?? '',
+        dashboardLabel: c.dashboard_label ?? 'Other',
+        panelTitle,
         metrics: opts.metrics.map((k) => {
           const cv = c[fieldByKey[k]];
           const bv = b ? b[fieldByKey[k]] : null;

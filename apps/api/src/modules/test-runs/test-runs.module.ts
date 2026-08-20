@@ -38,6 +38,7 @@ import { CreateTestRunHandler } from './handlers/create-test-run.handler';
 import { UpdateTestRunHandler } from './handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from './handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from './handlers/update-tags.handler';
+import { UpdateApplicationReleaseHandler } from './handlers/update-application-release.handler';
 import { UpdateAnnotationsHandler } from './handlers/update-annotations.handler';
 import { UpdateAnalysisStartOffsetHandler } from './handlers/update-analysis-start-offset.handler';
 import { UpdateAnalysisTimeRangeHandler } from './handlers/update-analysis-time-range.handler';
@@ -170,6 +171,7 @@ import {
     DeleteTestRunHandler,
     UpdateTagsHandler,
     UpdateAnnotationsHandler,
+    UpdateApplicationReleaseHandler,
     UpdateAnalysisStartOffsetHandler,
     UpdateAnalysisTimeRangeHandler,
     UpdateAdaptConfigHandler,

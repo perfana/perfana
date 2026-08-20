@@ -349,6 +349,10 @@ export class TestRunsService {
     return this.mutationService.updateTags(id, tags, userId, roles);
   }
 
+  async updateApplicationRelease(id: string, applicationRelease: string, userId: string, roles: string[]): Promise<TestRun> {
+    return this.mutationService.updateApplicationRelease(id, applicationRelease, userId, roles);
+  }
+
   async updateAnnotations(id: string, annotations: string[], userId: string, roles: string[]): Promise<TestRun> {
     return this.mutationService.updateAnnotations(id, annotations, userId, roles);
   }

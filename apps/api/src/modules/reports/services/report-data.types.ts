@@ -20,7 +20,11 @@ export interface SloCheckResult {
   metric_unit: string | null;
   evaluate_type: string;
   source: string;
+  /** The benchmark's own source — what the SLO card shows as the source chip. */
+  benchmark_source: string | null;
   dashboard_label: string | null;
+  /** Series filter of a metric check, shown under the metric name like the SLO card does. */
+  match_pattern: string | null;
   requirement_operator: string | null;
   requirement_value: number | null;
   panel_average: number | null;
@@ -40,6 +44,7 @@ export interface SloCheckTarget {
   meets_requirement: boolean | null;
   /** apdex checks only */
   scenario_name?: string | null;
+  threshold_ms?: number | null;
   avg_response_time_ms?: number | null;
   satisfied_count?: number | null;
   tolerating_count?: number | null;
@@ -208,6 +213,9 @@ export interface BaselineComparisonSelection {
 export interface BaselineComparisonRow {
   group: string;    // scenario_name (perf) | dashboard/panel (grafana) | host (dynatrace)
   label: string;    // transaction_name | metric_name
+  /** Which dashboard the row came from — a section can span several, so it gets its own table. */
+  dashboardLabel?: string;
+  panelTitle?: string;
   metrics: {        // one entry per selected metric key
     key: 'avg' | 'p90' | 'p95' | 'p99';
     current: number | null;
@@ -299,6 +307,8 @@ export interface TrendRunSummary {
   errorRate: number;
   totalTransactions: number;
   consolidatedResult: unknown | null;
+  /** Free-text notes attached to the run — what a reader needs to explain a jump. */
+  annotations: string[];
 }
 
 /** Trends data: current run + historical runs for comparison */

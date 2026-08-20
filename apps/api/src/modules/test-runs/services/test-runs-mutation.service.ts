@@ -29,6 +29,7 @@ import { CreateTestRunHandler } from '../handlers/create-test-run.handler';
 import { UpdateTestRunHandler } from '../handlers/update-test-run.handler';
 import { DeleteTestRunHandler } from '../handlers/delete-test-run.handler';
 import { UpdateTagsHandler } from '../handlers/update-tags.handler';
+import { UpdateApplicationReleaseHandler } from '../handlers/update-application-release.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
 import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-start-offset.handler';
 import { UpdateAnalysisTimeRangeHandler } from '../handlers/update-analysis-time-range.handler';
@@ -58,6 +59,7 @@ export class TestRunsMutationService {
     private readonly deleteTestRunHandler: DeleteTestRunHandler,
     private readonly updateTagsHandler: UpdateTagsHandler,
     private readonly updateAnnotationsHandler: UpdateAnnotationsHandler,
+    private readonly updateApplicationReleaseHandler: UpdateApplicationReleaseHandler,
     private readonly updateAnalysisStartOffsetHandler: UpdateAnalysisStartOffsetHandler,
     private readonly updateAnalysisTimeRangeHandler: UpdateAnalysisTimeRangeHandler,
     private readonly updateAdaptConfigHandler: UpdateAdaptConfigHandler,
@@ -368,6 +370,12 @@ export class TestRunsMutationService {
    * @param userId - The user ID for authorization checks
    * @param roles - The user's roles for authorization checks
    */
+  async updateApplicationRelease(id: string, applicationRelease: string, userId: string, _roles: string[]): Promise<TestRun> {
+    this.logger.debug(`updateApplicationRelease: id=${id}, userId=${userId}`);
+
+    return this.updateApplicationReleaseHandler.execute({ id, applicationRelease });
+  }
+
   async updateAnnotations(id: string, annotations: string[], userId: string, _roles: string[]): Promise<TestRun> {
     this.logger.debug(`updateAnnotations: id=${id}, userId=${userId}`);
 

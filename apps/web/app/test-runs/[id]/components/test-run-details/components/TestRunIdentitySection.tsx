@@ -9,20 +9,62 @@ import {
   Tooltip,
   IconButton,
   LinearProgress,
+  TextField,
   useTheme,
 } from '@mui/material';
-import { HourglassEmpty, Launch, ContentCopy, Check } from '@mui/icons-material';
+import { HourglassEmpty, Launch, ContentCopy, Check, Edit, Save, Cancel } from '@mui/icons-material';
 import { TestRun } from '@/types/test-runs';
+import { authenticatedFetch } from '@/lib/api';
 import { calculateProgress } from '@/app/test-runs/utils/test-run-utils';
 
 interface TestRunIdentitySectionProps {
   testRun: TestRun;
+  /** Lets the card show the new version without refetching the run. */
+  onTestRunUpdate?: (updatedTestRun: TestRun) => void;
+  showToast?: (message: string) => void;
 }
 
-export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps) {
+export function TestRunIdentitySection({ testRun, onTestRunUpdate, showToast }: TestRunIdentitySectionProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   const [copied, setCopied] = useState(false);
+
+  // The version is often wrong on the run itself — a pipeline passes the wrong variable, or
+  // the build is retagged after the test — so it is editable here rather than only at ingest.
+  const [editingVersion, setEditingVersion] = useState(false);
+  const [versionDraft, setVersionDraft] = useState('');
+  const [versionSaving, setVersionSaving] = useState(false);
+
+  const startVersionEdit = () => {
+    setVersionDraft(testRun.application_release || '');
+    setEditingVersion(true);
+  };
+
+  const saveVersion = async () => {
+    const applicationRelease = versionDraft.trim();
+    if (applicationRelease === (testRun.application_release || '')) {
+      setEditingVersion(false);
+      return;
+    }
+    setVersionSaving(true);
+    try {
+      const response = await authenticatedFetch(`/test-runs/${testRun.id}/application-release`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ applicationRelease }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      onTestRunUpdate?.({ ...testRun, application_release: applicationRelease });
+      setEditingVersion(false);
+      showToast?.('Version updated successfully');
+    } catch (error) {
+      console.error('Failed to update version:', error);
+      showToast?.('Failed to update version');
+    } finally {
+      setVersionSaving(false);
+    }
+  };
 
   const handleCopyTestRunId = () => {
     navigator.clipboard.writeText(testRun.test_run_id);
@@ -119,19 +161,58 @@ export function TestRunIdentitySection({ testRun }: TestRunIdentitySectionProps)
         >
           Version
         </Typography>
-        <Typography
-          variant="body2"
-          sx={{
-            fontSize: '0.9375rem',
-            fontWeight: 600,
-            color: 'text.primary',
-            lineHeight: 1.4,
-          }}
-        >
-          {testRun.application_release || (
-            <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Not specified</span>
-          )}
-        </Typography>
+        {editingVersion ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <TextField
+              value={versionDraft}
+              onChange={(e) => setVersionDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveVersion();
+                if (e.key === 'Escape') setEditingVersion(false);
+              }}
+              size="small"
+              autoFocus
+              placeholder="e.g. 2.4.3"
+              inputProps={{ maxLength: 255 }}
+              sx={{ flex: 1 }}
+            />
+            <Tooltip title="Save version">
+              <span>
+                <IconButton size="small" aria-label="Save version" onClick={saveVersion} disabled={versionSaving}>
+                  {versionSaving ? <CircularProgress size={14} /> : <Save sx={{ fontSize: '1rem' }} />}
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Cancel">
+              <span>
+                <IconButton size="small" aria-label="Cancel version edit" onClick={() => setEditingVersion(false)} disabled={versionSaving}>
+                  <Cancel sx={{ fontSize: '1rem' }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Box>
+        ) : (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <Typography
+              variant="body2"
+              sx={{
+                fontSize: '0.9375rem',
+                fontWeight: 600,
+                color: 'text.primary',
+                lineHeight: 1.4,
+              }}
+            >
+              {testRun.application_release || (
+                <span style={{ fontStyle: 'italic', opacity: 0.5 }}>Not specified</span>
+              )}
+            </Typography>
+            <Tooltip title="Edit version">
+              <IconButton size="small" aria-label="Edit version" onClick={startVersionEdit} sx={{ opacity: 0.6, '&:hover': { opacity: 1 } }}>
+                <Edit sx={{ fontSize: '0.9rem' }} />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        )}
       </Box>
 
       {/* Status */}

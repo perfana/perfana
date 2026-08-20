@@ -8,7 +8,8 @@ jest.mock('@/lib/api', () => ({
 
 const cascadeFetch = () => (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
   const body = url.includes('/grafana/application-dashboards')
-    ? [{ id: 'ad-1', dashboard_label: 'JVM', source_type: 'grafana' }]
+    // The section now defaults to performance metrics, like the comparison section
+    ? [{ id: 'ad-1', dashboard_label: 'Performance test metrics Checkout', source_type: 'performance_test' }]
     : url.includes('panels-by-dashboard')
       ? [{ panel_id: 3, panel_title: 'Heap' }]
       : url.includes('distinct-names')
@@ -31,12 +32,26 @@ const renderForm = (config = {}, onChange = jest.fn()) => {
   return onChange;
 };
 
-it('offers the run count and the dashboards → panels → series cascade', () => {
+it('offers performance metrics as a source, like the comparison section', () => {
   renderForm();
-  expect(screen.getByLabelText(/number of runs/i)).toBeInTheDocument();
-  expect(screen.getByLabelText(/dashboards/i)).toBeInTheDocument();
-  expect(screen.getByLabelText(/panels/i)).toBeDisabled();
-  expect(screen.getByLabelText(/series/i)).toBeDisabled();
+  fireEvent.mouseDown(screen.getByLabelText(/source/i));
+  expect(screen.getByRole('option', { name: /performance metrics/i })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: /grafana/i })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: /dynatrace/i })).toBeInTheDocument();
+});
+
+it('offers an oldest-run picker and the dashboards → panels → series cascade', () => {
+  renderForm();
+  expect(screen.getByLabelText(/oldest test run/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/number of runs/i)).not.toBeInTheDocument();
+  expect(screen.getByLabelText(/^dashboards$/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/^panels$/i)).toBeDisabled();
+  expect(screen.getByLabelText(/^series$/i)).toBeDisabled();
+});
+
+it('defaults the window to the most recent change point', () => {
+  renderForm();
+  expect(screen.getByText(/most recent change point/i)).toBeInTheDocument();
 });
 
 it('no longer offers the preset id, the sensitivity dropdown or the toggles', () => {
@@ -48,10 +63,20 @@ it('no longer offers the preset id, the sensitivity dropdown or the toggles', ()
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
 });
 
-it('writes the run count where the renderer reads it', () => {
-  const onChange = renderForm({ timeRange: { runCount: 10 } });
-  fireEvent.change(screen.getByLabelText(/number of runs/i), { target: { value: '20' } });
-  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ timeRange: { runCount: 20 } }));
+it('pins the window to a chosen run', async () => {
+  (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
+    const body = url.includes('baseline-candidates') || url.includes('systemUnderTestId')
+      ? [{ test_run_id: 'run-000', test_environment: 'acc', workload: 'loadTest', created_at: '2026-08-01T10:00:00Z' }]
+      : [];
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+  });
+  const onChange = renderForm();
+
+  fireEvent.mouseDown(screen.getByLabelText(/oldest test run/i));
+  await waitFor(() => expect(screen.getByRole('option', { name: /run-000/ })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('option', { name: /run-000/ }));
+
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ oldestTestRunId: 'run-000' }));
 });
 
 it('selects every dashboard at once', async () => {
@@ -59,7 +84,9 @@ it('selects every dashboard at once', async () => {
   const onChange = renderForm();
   await waitFor(() => expect(screen.getByText(/1 available/)).toBeInTheDocument());
   fireEvent.click(screen.getAllByRole('button', { name: /select all|^clear$/i })[0]!);
-  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ dashboardLabels: ['JVM'] }));
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+    dashboardLabels: ['Performance test metrics Checkout'],
+  }));
 });
 
 it('clears the cascade when the source changes — the dashboards belong to one source', () => {

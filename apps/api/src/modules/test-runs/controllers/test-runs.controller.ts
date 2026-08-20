@@ -210,6 +210,27 @@ export class TestRunsController {
     return result;
   }
 
+  @Put(':id/application-release')
+  @ApiOperation({ summary: "Update a test run's version (application release)" })
+  @ApiResponse({ status: 200, description: 'Version updated successfully' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  async updateApplicationRelease(
+    @Param('id') id: string,
+    @Body() body: { applicationRelease: string },
+    @UserCtx() ctx: UserContext,
+  ) {
+    if (typeof body.applicationRelease !== 'string') {
+      throw new ValidationException('applicationRelease must be a string');
+    }
+    // A version is a label on a run, not a document — long enough for a git sha and a tag.
+    if (body.applicationRelease.length > 255) {
+      throw new ValidationException('applicationRelease must be 255 characters or fewer');
+    }
+
+    return this.testRunsService.updateApplicationRelease(id, body.applicationRelease, ctx.userId, ctx.roles);
+  }
+
   @Put(':id/annotations')
   @ApiOperation({ summary: 'Update test run annotations' })
   @ApiResponse({ status: 200, description: 'Annotations updated successfully' })

@@ -186,6 +186,17 @@ export function GenerateReportDialog({
     testRunId,
     open && !isTemplateBuilder && baselineSectionCount > 0,
   );
+  // A comparisons section with no baseline renders one empty state and nothing else, so
+  // generating the report is a wasted round trip. Templates are configured without a test
+  // run in hand, so they are exempt — a template may legitimately be saved unpinned.
+  const baselineBlockReason = isTemplateBuilder || baselineSectionCount === 0
+    ? null
+    : baselineCandidates.length === 0
+      ? 'This test run has no earlier run in its system, environment and workload to compare against. Remove the comparison section to generate the report.'
+      : baselineSections.some((s) => !(s.config as Record<string, unknown> | undefined)?.baselineTestRunId)
+        ? 'Select a baseline run for every comparison section before generating the report.'
+        : null;
+
   // "Save as template" name conflict: template summaries are scoped to the
   // same (system, environment, workload) as the DB unique constraint, so a
   // client-side match means the server would reject it.
@@ -778,6 +789,11 @@ export function GenerateReportDialog({
         )}
 
         {/* Action Buttons */}
+        {baselineBlockReason && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'right', mb: 1 }}>
+            {baselineBlockReason}
+          </Typography>
+        )}
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
           <Button onClick={onClose} disabled={isSubmitting} sx={{ textTransform: 'none' }}>
             Cancel
@@ -786,7 +802,7 @@ export function GenerateReportDialog({
             <Button
               variant="contained"
               onClick={handleGenerate}
-              disabled={isSubmitting || sections.length === 0 || (saveAsTemplate && !templateName.trim()) || templateNameTaken}
+              disabled={isSubmitting || sections.length === 0 || (saveAsTemplate && !templateName.trim()) || templateNameTaken || baselineBlockReason !== null}
               startIcon={isSubmitting ? <CircularProgress size={16} color="inherit" /> : <DescriptionIcon />}
               sx={{
                 textTransform: 'none',
