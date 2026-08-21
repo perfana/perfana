@@ -43,12 +43,19 @@ export class BackfillOrganizationId1794000000000 implements MigrationInterface {
     await queryRunner.query(`
       DO $migration$
       DECLARE
+        -- Above this, a table is data rather than configuration, and repairing it at start-up
+        -- costs more than the visibility it buys. Config tables are orders of magnitude smaller;
+        -- anything larger is named in a warning and left to the runbook, which can do it in
+        -- batches at a time of someone's choosing.
+        MAX_ROWS       CONSTANT bigint := 100000;
         t              text;
+        est            bigint;
         remaining      bigint;
         repaired       bigint;
         total_repaired bigint := 0;
         unfixed        text[] := ARRAY[]::text[];
         failed         text[] := ARRAY[]::text[];
+        oversized      text[] := ARRAY[]::text[];
         has_timescale  boolean := to_regclass('timescaledb_information.hypertables') IS NOT NULL;
       BEGIN
         FOR t IN
@@ -64,6 +71,25 @@ export class BackfillOrganizationId1794000000000 implements MigrationInterface {
            ORDER BY c.table_name
         LOOP
           repaired := 0;
+
+          -- Size gate. This runs before the API listens, and the ds_* metric tables hold
+          -- millions of rows on a real installation: a full-table UPDATE plus the scan that
+          -- SET NOT NULL forces under ACCESS EXCLUSIVE would turn a start-up into an outage.
+          -- reltuples is free; -1 means never analysed, so probe with a bounded scan that
+          -- stops at the threshold rather than counting a table that might be enormous.
+          SELECT reltuples::bigint INTO est
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'public' AND c.relname = t;
+
+          IF est < 0 THEN
+            EXECUTE format('SELECT count(*) FROM (SELECT 1 FROM %I LIMIT %s) probe', t, MAX_ROWS + 1)
+              INTO est;
+          END IF;
+
+          IF est > MAX_ROWS THEN
+            oversized := oversized || format('%s (~%s rows)', t, est);
+            CONTINUE;
+          END IF;
 
           -- Each table is isolated. This runs during service startup, so one table that cannot
           -- be repaired must not abort the rest and leave the API refusing to boot: the failure
@@ -124,6 +150,11 @@ export class BackfillOrganizationId1794000000000 implements MigrationInterface {
         IF array_length(unfixed, 1) > 0 THEN
           RAISE WARNING 'organization_id still NULL, column left nullable: %. Those rows are invisible to every org-filtered list. Their parent row has no organization either, so assigning one is a decision rather than a backfill — see docs/ops/2026-08-21-org-id-backfill-runbook.md',
             array_to_string(unfixed, ', ');
+        END IF;
+
+        IF array_length(oversized, 1) > 0 THEN
+          RAISE WARNING 'organization_id backfill skipped these tables as too large to repair during start-up: %. Rows in them with no organization stay invisible to org-filtered reads. Repair them deliberately, in batches, with docs/ops/2026-08-21-org-id-backfill-runbook.md.',
+            array_to_string(oversized, ', ');
         END IF;
 
         IF array_length(failed, 1) > 0 THEN

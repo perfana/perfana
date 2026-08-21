@@ -13,9 +13,9 @@ with the version it landed in.
 
 ## RBAC
 
-### Schema constraints reach new databases only, and the code assumes otherwise
+### Schema changes reach new databases only, and the code assumes otherwise
 
-**Priority:** P1
+**Priority:** P0
 **Origin:** the 0.2.68.7 incident — "deploying the last version deleted all application
 dashboards" (2026-08-21). Nothing was deleted.
 **Status:** the immediate damage is repaired by
@@ -29,13 +29,27 @@ cannot be null" — and every deployment older than the consolidated schema lost
 every list. The premise was true in dev and false in production, which is the worst shape a
 premise can have. Any future "this column cannot be null, delete the dead branch" cleanup
 repeats it, and so does any other constraint that lives only in the consolidated schema.
-**What:** two parts.
+**It has now caused a production outage, not just a theory.** `application_dashboards.deletion_status`
+(v0.2.68.7) landed in the consolidated schema alone. The entity declares it, TypeORM names every
+declared column in its SELECT, and an existing database does not have it — so the dashboard list
+query failed on the first request after the upgrade, and `useDashboardManagement.ts` turned the
+failure into `setDashboards([])`: an empty list, no error on screen, every SUT, plus the compare
+card. Fixed by `1795000000000-AddApplicationDashboardDeletionStatus.ts`, but only after the
+column had been missing in production for a full release.
+
+**What:** three parts.
 1. Audit `1700000000000-ConsolidatedSchema.ts` for every NOT NULL, CHECK, UNIQUE and FK that has
    no corresponding incremental migration, and write the migrations that bring an existing
    database to the same shape. `information_schema` diff between a fresh database and a restored
    production dump is the cheapest way to enumerate them.
 2. Add a boot-time or CI assertion that the two agree, so the next divergence is caught by a
    failing check rather than by a customer's empty screen.
+3. **Cover columns, not just constraints, and make it mechanical.** The failing case is an
+   `@Column` added to an entity with no incremental migration — a diff CI can compute: build the
+   entity metadata, compare it against a database migrated from scratch, fail on any column the
+   database lacks. That check would have caught `deletion_status` in #516 for the cost of one CI
+   step. Until it exists, every entity change is one forgotten migration away from taking a
+   customer's list out, and the symptom will again be an empty page rather than an error.
 
 **Left over from the backfill:** `ds_metric_collection_status` has no `system_under_test_id`, so
 the migration cannot infer its organization and leaves the column nullable with a warning. It
