@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.15] - 2026-08-21
+
+### Added
+- **The API now says at start-up when its database is missing schema it needs.** A column added to the application but only ever created on new installations leaves existing ones without it, and every read of that table then fails — which is what emptied the dashboard lists, presented as missing data rather than an error. The API compares what it expects against what the database has and names anything absent, so the next occurrence is a line in the start-up log instead of a hunt. It keeps serving by default; set `SCHEMA_DRIFT_CHECK=strict` to refuse to start instead.
+- **A pre-ship check that catches the same mistake before a release.** Adding a column to the data model without a migration to carry it to existing installations now fails `npm run preflight`, naming the column. Verified against the change that caused the incident: it fails on it.
+
 ## [0.2.68.13] - 2026-08-21
 
 ### Fixed
