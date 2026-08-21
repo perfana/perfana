@@ -413,7 +413,11 @@ export default function TestRunDetailsPage() {
         <GenerateReportDialog
           open={generateReportDialogOpen}
           onClose={() => setGenerateReportDialogOpen(false)}
-          testRunId={testRun.id}
+          // The human test_run_id, as every other consumer on this page and the compare card
+          // pass it. The report endpoints accept either form, but the URL-panel series lookup
+          // reads test_run_sampler_stats, which keys on this one — with the UUID it matched
+          // nothing and "URL RT" offered no series at all.
+          testRunId={testRun.test_run_id}
           scope={{
             systemId: testRun.system_under_test?.id || testRun.system_under_test_id,
             testEnvironment: testRun.test_environment || '',

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.16] - 2026-08-21
+
+### Fixed
+- **The URL panels in a report's comparison section offer their URLs again.** Picking "URL RT" (or URL Error Rate, Throughput, Latency, Connect Time) showed an empty series list. The report dialog identified the run one way and the URL lookup expected the other, so the query matched nothing and returned an empty list rather than an error — the same shape as a run that genuinely recorded no URLs. The dialog now identifies the run the way the rest of the page does, and the URL lookups accept either form, as the rest of the API already did.
+
 ## [0.2.68.13] - 2026-08-21
 
 ### Fixed
