@@ -52,6 +52,15 @@ const PERF_RT_PANEL_TITLES: Record<number, string> = {
   204: 'Request Response Times',
 };
 
+/**
+ * The per-request panels: response time (201-204), error rate, throughput, apdex, latency
+ * and connect time (205-209). All of them name their series `transaction_name.sampler_name`,
+ * so all of them can be given the request's URL.
+ */
+export function isRequestPanel(panelId: number | null | undefined): boolean {
+  return panelId != null && panelId >= 201 && panelId <= 209;
+}
+
 export function perfPanelTitle(panelId: number | null, storedTitle: string | null): string {
   return (panelId != null && PERF_RT_PANEL_TITLES[panelId]) || storedTitle || '';
 }

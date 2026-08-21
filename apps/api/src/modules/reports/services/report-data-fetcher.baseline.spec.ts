@@ -29,6 +29,58 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     expect(params).toEqual([['cur', 'base']]);
   });
 
+  it.each([
+    [201, 'Request RT Avg'],
+    [206, 'Request Throughput'],
+  ])('attaches the normalized URL to request rows on panel %i', async (panelId, panelTitle) => {
+    // 205-209 name their series `transaction.sampler` exactly like the RT panels, so a
+    // throughput or error-rate comparison gets the URL too — it used to stop at 204.
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: panelTitle, panel_id: panelId, metric_name: 'checkout.login', mean: 110, q95: 220, q99: 300, unit: 'ms' },
+      { test_run_id: 'base', dashboard_label: 'Perf', panel_title: panelTitle, panel_id: panelId, metric_name: 'checkout.login', mean: 100, q95: 200, q99: 250, unit: 'ms' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const testRunRepo = { query: jest.fn().mockResolvedValue([
+      { metric_name: 'checkout.login', normalized_url: 'https://shop.example.com/api/v1/login' },
+    ]) } as any;
+    const svc = new ReportDataFetcherService(testRunRepo, authzStub, dataSource as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics',
+      { metrics: ['avg'], userId: '', roles: [], selections: [{ dashboardLabel: 'Perf', panelId }] });
+    expect(data!.rows[0]!.url).toBe('https://shop.example.com/api/v1/login');
+    expect(testRunRepo.query.mock.calls[0]![0]).toContain('test_run_sampler_stats');
+  });
+
+  it('still renders the comparison when the sampler URL lookup fails', async () => {
+    // A missing URL is cosmetic; losing the whole comparison because the sampler
+    // rollup query failed would not be.
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: 'Request RT Avg', panel_id: 201, metric_name: 'checkout.login', mean: 110, q95: 220, q99: 300, unit: 'ms' },
+      { test_run_id: 'base', dashboard_label: 'Perf', panel_title: 'Request RT Avg', panel_id: 201, metric_name: 'checkout.login', mean: 100, q95: 200, q99: 250, unit: 'ms' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const testRunRepo = { query: jest.fn().mockRejectedValue(new Error('sampler stats unavailable')) } as any;
+    const svc = new ReportDataFetcherService(testRunRepo, authzStub, dataSource as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics',
+      { metrics: ['avg'], userId: '', roles: [], selections: [{ dashboardLabel: 'Perf', panelId: 201 }] });
+    expect(data!.rows).toHaveLength(1);
+    expect(data!.rows[0]!.url).toBeUndefined();
+    expect(data!.rows[0]!.metrics[0]!.diffPercent).toBeCloseTo(10);
+  });
+
+  it('leaves non-request rows without a URL and does not query the sampler map', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T01_Checkout', mean: 110, q95: 220, q99: 300, unit: 'ms' },
+      { test_run_id: 'base', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T01_Checkout', mean: 100, q95: 200, q99: 250, unit: 'ms' },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const testRunRepo = { query: jest.fn() } as any;
+    const svc = new ReportDataFetcherService(testRunRepo, authzStub, dataSource as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics',
+      { metrics: ['avg'], userId: '', roles: [], selections: [{ dashboardLabel: 'Perf', panelId: 101 }] });
+    expect(data!.rows[0]!.url).toBeUndefined();
+    expect(testRunRepo.query).not.toHaveBeenCalled();
+  });
+
   it('pairs ds_metric_statistics rows by dashboard/panel/metric (grafana)', async () => {
     const rows = [
       { test_run_id: 'cur', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 3, metric_name: 'used', mean: 110, q95: 220, q99: 300, unit: 'bytes' },

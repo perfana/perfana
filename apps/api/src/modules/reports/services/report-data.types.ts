@@ -216,6 +216,8 @@ export interface BaselineComparisonRow {
   /** Which dashboard the row came from — a section can span several, so it gets its own table. */
   dashboardLabel?: string;
   panelTitle?: string;
+  /** Normalized URL behind a request row (Request RT panels only) — shown as sub-text under the label. */
+  url?: string;
   metrics: {        // one entry per selected metric key
     key: 'avg' | 'p90' | 'p95' | 'p99';
     current: number | null;
