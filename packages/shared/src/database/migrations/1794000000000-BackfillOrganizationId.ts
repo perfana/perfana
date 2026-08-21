@@ -58,6 +58,14 @@ export class BackfillOrganizationId1794000000000 implements MigrationInterface {
         oversized      text[] := ARRAY[]::text[];
         has_timescale  boolean := to_regclass('timescaledb_information.hypertables') IS NOT NULL;
       BEGIN
+        -- This runs while the worker and grafana-sync are live, and SET NOT NULL needs
+        -- ACCESS EXCLUSIVE. The database default is to wait forever: the migration would queue
+        -- behind an open worker transaction, every later query would queue behind the migration,
+        -- and the API would never finish starting. Fail the table instead, and report it.
+        PERFORM set_config('lock_timeout', '5s', true);
+        -- Backstop for a table that slips under the row gate but is still slow to rewrite.
+        PERFORM set_config('statement_timeout', '120s', true);
+
         FOR t IN
           SELECT c.table_name
             FROM information_schema.columns c

@@ -24,9 +24,45 @@ export class AddApplicationDashboardDeletionStatus1795000000000 implements Migra
   name = 'AddApplicationDashboardDeletionStatus1795000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `ALTER TABLE "application_dashboards" ADD COLUMN IF NOT EXISTS "deletion_status" character varying(20) DEFAULT NULL`,
-    );
+    // ADD COLUMN needs ACCESS EXCLUSIVE for an instant, but the database default is to wait for
+    // it forever. This runs while the worker and grafana-sync are live and holding transactions
+    // on test_runs, so an unbounded wait would hang start-up and queue every later query behind
+    // it. Short timeout, retried: once granted, the lock is held for microseconds, so a retry
+    // almost always lands.
+    //
+    // The retry lives in plpgsql rather than TypeScript because TypeORM runs a migration inside
+    // ONE transaction: a lock_timeout error there poisons it, and every following statement —
+    // including the sleep between attempts — dies with "current transaction is aborted". A
+    // plpgsql EXCEPTION block sets an implicit savepoint, so it can actually recover and retry.
+    const addColumn = async (table: string) => {
+      await queryRunner.query(`
+        DO $add_column$
+        DECLARE
+          attempt int := 0;
+        BEGIN
+          PERFORM set_config('lock_timeout', '3s', true);
+          LOOP
+            attempt := attempt + 1;
+            BEGIN
+              EXECUTE 'ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS deletion_status character varying(20) DEFAULT NULL';
+              RETURN;
+            EXCEPTION WHEN lock_not_available THEN
+              IF attempt >= 10 THEN
+                -- Ten attempts over ~30s means something holds this table open indefinitely.
+                -- Fail loudly: a failed migration is one restart away, a hung one takes the
+                -- database's throughput with it.
+                RAISE EXCEPTION
+                  'could not add ${table}.deletion_status: the table stayed locked across % attempts. Find the long-running transaction (pg_stat_activity) and retry the deploy.', attempt;
+              END IF;
+              PERFORM pg_sleep(3);
+            END;
+          END LOOP;
+        END
+        $add_column$;
+      `);
+    };
+
+    await addColumn('application_dashboards');
     await queryRunner.query(`
       COMMENT ON COLUMN "application_dashboards"."deletion_status" IS
         'Background-deletion state: NULL when idle, queued before the jobs are enqueued, deleting while a worker holds it, failed once retries are exhausted. Lets the row show a badge instead of vanishing and reappearing.'
@@ -35,9 +71,7 @@ export class AddApplicationDashboardDeletionStatus1795000000000 implements Migra
     // The column this one mirrors. It predates the consolidated schema, but a database old
     // enough to be missing one may be missing the other, and the symptom is identical: the
     // test-run list query names a column that is not there and the page comes back empty.
-    await queryRunner.query(
-      `ALTER TABLE "test_runs" ADD COLUMN IF NOT EXISTS "deletion_status" character varying(20) DEFAULT NULL`,
-    );
+    await addColumn('test_runs');
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
