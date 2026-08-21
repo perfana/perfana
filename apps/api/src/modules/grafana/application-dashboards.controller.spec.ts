@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
-import { ApplicationDashboardsController } from './application-dashboards.controller';
+import { ValidationPipe } from '@nestjs/common';
+import {
+  ApplicationDashboardsController,
+  BatchDeleteDto,
+  BatchDeleteInfoDto,
+} from './application-dashboards.controller';
 import { ApplicationDashboardsService, ApplicationDashboard } from './application-dashboards.service';
 import { CreateApplicationDashboardDto, UpdateApplicationDashboardDto } from './dto/application-dashboard.dto';
 import { UserContext } from '../../common/decorators/user-context.decorator';
@@ -1610,5 +1615,39 @@ describe('ApplicationDashboardsController', () => {
       await expect(controller.delete(id, undefined, mockUserContext)).rejects.toThrow();
       // Logger calls are internal
     });
+  });
+});
+
+describe('batch-delete DTOs under the global ValidationPipe', () => {
+  // Mirrors main.ts. `whitelist: true` deletes every property the DTO does not decorate, so an
+  // undecorated field never reaches the handler — the body arrives as {}, and the endpoint blames
+  // the caller for a payload it was actually handed. A controller unit test calls the method
+  // directly and cannot see this; the pipe has to be in the loop.
+  const pipe = new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: false,
+    transform: true,
+    transformOptions: { enableImplicitConversion: true },
+  });
+  const ids = ['8e57be72-01f6-4306-8f88-662d9bd111b3', '76a4b06a-51bb-4f14-a476-656a722bb72c'];
+
+  it('keeps ids on the batch-delete-info body', async () => {
+    const body = await pipe.transform({ ids }, { type: 'body', metatype: BatchDeleteInfoDto });
+    expect(body.ids).toEqual(ids);
+  });
+
+  it('keeps ids and deleteFromGrafana on the batch-delete body', async () => {
+    const body = await pipe.transform(
+      { ids, deleteFromGrafana: false },
+      { type: 'body', metatype: BatchDeleteDto },
+    );
+    expect(body.ids).toEqual(ids);
+    expect(body.deleteFromGrafana).toBe(false);
+  });
+
+  it('rejects an id that is not a uuid instead of handing it to a Postgres cast', async () => {
+    await expect(
+      pipe.transform({ ids: ['not-a-uuid'] }, { type: 'body', metatype: BatchDeleteDto }),
+    ).rejects.toThrow();
   });
 });
