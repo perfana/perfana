@@ -2855,8 +2855,11 @@ export class TestRunsPerformanceQueryService {
     isAdmin: boolean,
     organizationIds: string[],
   ): Promise<Array<{ testRunId: string; value: number | null; values: Record<string, number | null> }>> {
-    const requested = testRunIds ?? [];
-    if (requested.length === 0) return [];
+    const rawIds = testRunIds ?? [];
+    if (rawIds.length === 0) return [];
+    // Same resolution as its two siblings: the stats table keys on the human test_run_id, and a
+    // caller holding UUIDs would match nothing rather than fail.
+    const requested = await Promise.all(rawIds.map((id) => this.resolveTestRunId(id)));
     // Non-admin with no orgs can see nothing.
     if (!isAdmin && organizationIds.length === 0) {
       return requested.map(testRunId => ({ testRunId, value: null, values: {} }));
@@ -2978,8 +2981,10 @@ export class TestRunsPerformanceQueryService {
     annotations: string | null;
     statistics: { avg?: number; q50?: number; q90?: number; q95?: number; q99?: number; count?: number };
   }>> {
-    const requested = testRunIds ?? [];
-    if (requested.length === 0) return [];
+    const rawIds = testRunIds ?? [];
+    if (rawIds.length === 0) return [];
+    // The stats table keys on the human test_run_id; a caller holding UUIDs matched nothing.
+    const requested = await Promise.all(rawIds.map((id) => this.resolveTestRunId(id)));
     if (!isAdmin && organizationIds.length === 0) return [];
 
     try {
@@ -3095,7 +3100,11 @@ export class TestRunsPerformanceQueryService {
         ${orgClause}
       ORDER BY 1
     `;
-      const params: unknown[] = isAdmin ? [testRunId] : [testRunId, organizationIds];
+      // test_run_sampler_stats keys on the human test_run_id, so a caller holding the row UUID
+      // silently matched nothing. Every other query in this service resolves first; these three
+      // were the exceptions, and the report dialog passing a UUID is what surfaced it.
+      const resolvedId = await this.resolveTestRunId(testRunId);
+      const params: unknown[] = isAdmin ? [resolvedId] : [resolvedId, organizationIds];
       const rows: Array<{ normalized_url: string }> = await withRequestEm(this.testRunRepo).query(query, params);
       return rows.map(r => r.normalized_url).filter(Boolean);
     } catch (error) {
@@ -3137,7 +3146,8 @@ export class TestRunsPerformanceQueryService {
         ${orgClause}
       ORDER BY s.transaction_name || '.' || s.sampler_name, s.total_count DESC
     `;
-      const params: unknown[] = isAdmin ? [testRunId] : [testRunId, organizationIds];
+      const resolvedId = await this.resolveTestRunId(testRunId);
+      const params: unknown[] = isAdmin ? [resolvedId] : [resolvedId, organizationIds];
       const rows: Array<{ metric_name: string; normalized_url: string }> =
         await withRequestEm(this.testRunRepo).query(query, params);
       const map: Record<string, string> = {};
