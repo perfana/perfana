@@ -1,13 +1,12 @@
 /**
- * Tests for useCompareData — URL panel injection + routing (Task 4), and the
- * aggregated-series fan-out.
+ * Tests for useCompareData — the aggregated-series fan-out.
  *
  * Covers:
- * - `fetchDashboardPanels` appends virtual URL panels for performance-metrics dashboards
- * - `fetchDashboardPanels` does NOT append URL panels for non-perf dashboards
- * - `fetchPanelMetrics` routes URL-panel distinct-names lookups to `fetchUrlDistinctNames`
  * - an aggregated series becomes one comparison cell per stat column, each
  *   carrying the panel metadata that decides which table row it lands in
+ *
+ * The panel/series option loading these used to cover now lives in
+ * utils/__tests__/metric-options.test.ts.
  */
 
 import { renderHook, act } from '@testing-library/react';
@@ -25,7 +24,6 @@ jest.mock('@/lib/aggregated-perf-series', () => ({
 }));
 
 import { authenticatedFetch } from '@/lib/api';
-import { fetchUrlDistinctNames } from '@/lib/url-perf-panels';
 import { fetchAggregatedStatistics } from '@/lib/aggregated-perf-series';
 
 const testRun = {
@@ -38,40 +36,6 @@ const testRun = {
 
 beforeEach(() => {
   jest.clearAllMocks();
-});
-
-it('appends URL panels for a performance-metrics dashboard', async () => {
-  (authenticatedFetch as jest.Mock).mockResolvedValue({
-    ok: true,
-    json: async () => [{ panels: [
-      { id: 201, title: 'Request RT Avg', type: 'timeseries' },
-      { id: 202, title: 'Request RT P90', type: 'timeseries' },
-    ] }],
-  });
-  const { result } = renderHook(() => useCompareData({ testRun, testRunId: 'run-1', compareExpanded: true }));
-  let panels: any[] = [];
-  await act(async () => { panels = await result.current.fetchDashboardPanels('perf-uid', true); });
-  expect(panels.some(p => p.id === 210)).toBe(true);   // URL panel injected
-  expect(panels.some(p => p.id === 201)).toBe(true);   // Avg request panel kept ("Request RT")
-  expect(panels.some(p => p.id === 202)).toBe(false);  // P90 collapsed away
-});
-
-it('does NOT append URL panels for a non-perf dashboard', async () => {
-  (authenticatedFetch as jest.Mock).mockResolvedValue({
-    ok: true, json: async () => [{ panels: [{ id: 5, title: 'CPU', type: 'timeseries' }] }],
-  });
-  const { result } = renderHook(() => useCompareData({ testRun, testRunId: 'run-1', compareExpanded: true }));
-  let panels: any[] = [];
-  await act(async () => { panels = await result.current.fetchDashboardPanels('grafana-uid', false); });
-  expect(panels.some(p => p.id >= 210 && p.id <= 218)).toBe(false);
-});
-
-it('routes URL panel distinct-names to the URL endpoint', async () => {
-  const { result } = renderHook(() => useCompareData({ testRun, testRunId: 'run-1', compareExpanded: true }));
-  let names: string[] = [];
-  await act(async () => { names = await result.current.fetchPanelMetrics('dash-1', 210); });
-  expect(fetchUrlDistinctNames).toHaveBeenCalledWith('run-1');
-  expect(names).toEqual(['/api/user/{id}']);
 });
 
 it('fans an aggregated series out into one cell per stat, keeping panel metadata', async () => {

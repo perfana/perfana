@@ -7,7 +7,7 @@ import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { percentDiff } from '../renderers/comparison-bands';
-import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isUrlPanel, perfPanelTitle } from './url-perf-panels';
+import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isUrlPanel, perfPanelTitle } from './url-perf-panels';
 import { CHANGE_POINT_WINDOW } from './trend-window';
 
 // The shapes these queries return. Re-exported so the ten renderers that import them from
@@ -2499,6 +2499,8 @@ export class ReportDataFetcherService {
       metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
       selections?: BaselineComparisonSelection[];
       dashboardMap?: { current: string; baseline: string }[];
+      userId?: string;
+      roles?: string[];
     },
   ): Promise<BaselineComparisonData | null> {
     const sourceType =
@@ -2569,6 +2571,12 @@ export class ReportDataFetcherService {
 
     const fieldByKey = { avg: 'mean', p90: 'q90', p95: 'q95', p99: 'q99' } as const;
 
+    // Request rows are named `transaction_name.sampler_name`, which says nothing about what was
+    // called — the compare card shows the URL underneath, so the report does too.
+    const urlByMetricName = source === 'performance-metrics' && cur.some((r) => isRequestPanel(r.panel_id))
+      ? await this.getSamplerUrlMap(currentRunId, opts.userId ?? '', opts.roles ?? [])
+      : {};
+
     const rowsOut: BaselineComparisonRow[] = cur.map((c) => {
       const b = baseByIdentity.get(remapIdentity(c));
       const host = source === 'dynatrace' ? this.extractHost(c.metric_name) : null;
@@ -2583,6 +2591,7 @@ export class ReportDataFetcherService {
         label: c.metric_name ?? '',
         dashboardLabel: c.dashboard_label ?? 'Other',
         panelTitle,
+        ...(c.metric_name && urlByMetricName[c.metric_name] ? { url: urlByMetricName[c.metric_name] } : {}),
         metrics: opts.metrics.map((k) => {
           const cv = c[fieldByKey[k]];
           const bv = b ? b[fieldByKey[k]] : null;
@@ -2592,6 +2601,52 @@ export class ReportDataFetcherService {
     });
 
     return { source, rows: rowsOut };
+  }
+
+  /**
+   * Map of `transaction_name.sampler_name` -> normalized URL for a run, matching
+   * ds_metric_statistics.metric_name on the Request RT panels. Mirrors
+   * TestRunsPerformanceQueryService.getSamplerUrlMap, but org-scoped through
+   * resolveOrgFilter — report generation runs with no user context, and the
+   * facade would return {} for an empty userId.
+   * Requests with no url_patterns row are omitted; the label then stands alone.
+   *
+   * `testRunId` must be the human `test_run_id` — test_run_sampler_stats keys on it, so a
+   * row UUID matches nothing and returns an empty map (no URLs, no error). Every caller
+   * reaches here from `testRun.testRunId`.
+   */
+  private async getSamplerUrlMap(
+    testRunId: string,
+    userId: string,
+    roles: string[],
+  ): Promise<Record<string, string>> {
+    try {
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
+      const rows: Array<{ metric_name: string; normalized_url: string }> = await withRequestEm(this.testRunRepo).query(
+        `SELECT DISTINCT ON (s.transaction_name || '.' || s.sampler_name)
+           s.transaction_name || '.' || s.sampler_name AS metric_name,
+           LOWER(up.normalized_url) AS normalized_url
+         FROM test_run_sampler_stats s
+         JOIN test_runs tr ON tr.test_run_id = s.test_run_id
+         JOIN url_patterns up
+           ON  up.url_hash          = s.url_hash
+           AND up.system_under_test = s.system_under_test
+           AND up.test_environment  = s.test_environment
+         WHERE s.test_run_id = $1
+           AND s.ramp_up_excluded = true
+           AND s.total_count > 0
+           ${orgFilter.clause}
+         ORDER BY s.transaction_name || '.' || s.sampler_name, s.total_count DESC`,
+        [testRunId, ...orgFilter.params],
+      );
+      const map: Record<string, string> = {};
+      for (const r of rows) if (r.metric_name && r.normalized_url) map[r.metric_name] = r.normalized_url;
+      return map;
+    } catch (error) {
+      // A missing URL is cosmetic — the comparison itself is still worth rendering.
+      this.logger.warn('Failed to load sampler URL map for comparison rows:', error);
+      return {};
+    }
   }
 
   /**

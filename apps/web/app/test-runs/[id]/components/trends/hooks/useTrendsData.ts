@@ -123,7 +123,10 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
     try {
       setDashboardsLoading(true);
-      const url = `/grafana/application-dashboards?systemId=${encodeURIComponent(testRun.system_under_test_id || '')}&environment=${encodeURIComponent(testRun.test_environment)}`;
+      // hasData: a dashboard no run ever recorded metrics for has no panels to pick — same
+      // filter the compare card and the report pickers use. Run-agnostic, so it is still
+      // right for a trend spanning many runs.
+      const url = `/grafana/application-dashboards?systemId=${encodeURIComponent(testRun.system_under_test_id || '')}&environment=${encodeURIComponent(testRun.test_environment)}&hasData=true`;
 
       const response = await authenticatedFetch(url, {
         headers: { 'Content-Type': 'application/json' },
@@ -283,7 +286,13 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
       const params = new URLSearchParams({
         applicationDashboardId,
-        panelId: panelId.toString()
+        panelId: panelId.toString(),
+        // Scoped to this run — unscoped, the panel lists every series it ever recorded,
+        // including names from runs whose naming has since changed, which then compare
+        // against nothing.
+        // Only the human test_run_id keys ds_metrics; the route param can be the row UUID,
+        // and sending that would silently return an empty series list. No run id = unscoped.
+        ...(testRun?.test_run_id ? { testRunId: testRun.test_run_id } : {}),
       });
 
       // Send metricsSourceId if available
@@ -312,7 +321,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     } finally {
       setAvailableMetricsLoading(false);
     }
-  }, [selectedSource]);
+  }, [selectedSource, testRun?.test_run_id]);
 
   // Load metrics data for all added series
   const fetchMetricsData = useCallback(async () => {

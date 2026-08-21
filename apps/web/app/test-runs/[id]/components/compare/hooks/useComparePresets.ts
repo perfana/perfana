@@ -15,7 +15,6 @@ import {
 } from '../types';
 import { TestRun } from '@/types/test-runs';
 import { DEFAULT_DISPLAY_CONFIG, DisplayConfig } from '../utils/compare-utils';
-import { isPerformanceTest } from '@/lib/metrics-source-utils';
 
 interface UseComparePresetsProps {
   testRun: TestRun | null;
@@ -39,7 +38,6 @@ interface UseComparePresetsProps {
   setDisplayConfig: (config: DisplayConfig) => void;
 
   // Fetch functions
-  fetchDashboardPanels: (uid: string, isPerfMetrics?: boolean, applicationDashboardId?: string) => Promise<Panel[]>;
 }
 
 export function useComparePresets({
@@ -58,7 +56,6 @@ export function useComparePresets({
   setSeriesSearchText,
   setShowPercentiles,
   setDisplayConfig,
-  fetchDashboardPanels,
 }: UseComparePresetsProps) {
   const { user } = useAuth();
   const currentUserId = user?.id;
@@ -127,15 +124,12 @@ export function useComparePresets({
           setSelectedDashboard(dashboard);
 
           if (preset.panel_id && preset.panel_title) {
-            await fetchDashboardPanels(dashboard.dashboard_uid, isPerformanceTest(dashboard), dashboard.id);
-
-            setTimeout(() => {
-              setSelectedMetric({
-                id: preset.panel_id!,
-                title: preset.panel_title!,
-                type: 'graph'
-              } as Panel);
-            }, 100);
+            // Context for the next preset save only — the pickers hold their own selection.
+            setSelectedMetric({
+              id: preset.panel_id,
+              title: preset.panel_title,
+              type: 'graph',
+            } as Panel);
           }
         }
       }
@@ -149,7 +143,6 @@ export function useComparePresets({
   }, [
     relatedTestRuns, dashboards, showToast, setSeriesSearchText, setShowPercentiles,
     setDisplayConfig, setAddedSeries, setSelectedTestRun, setSelectedDashboard, setSelectedMetric,
-    fetchDashboardPanels
   ]);
 
   // Save preset

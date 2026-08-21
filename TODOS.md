@@ -126,6 +126,29 @@ not a P2 — and also what makes it easy to break without noticing.
 
 ---
 
+## Compare card
+
+### The series dropdown is not virtualised, so a whole-system selection renders every option
+
+**Priority:** P3
+**Origin:** Adversarial review during /ship on `fix/compare-and-report-metric-pickers` (2026-08-21),
+where the picker became multi-select at all three levels.
+**Why:** With select-all on dashboards and panels, the series list is the product of both — on a
+system with tens of dashboards it can reach several thousand options. MUI's `Autocomplete` renders
+every option matching the current filter with no virtualisation, so the popup gets slow to open and
+to type in. Nothing breaks; it degrades, and only for a selection the user opted into. The request
+fan-out behind those levels is already bounded (`OPTION_FETCH_CONCURRENCY` in
+`apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts`) — this is rendering, not
+fetching.
+**What:** Either a `ListboxComponent` backed by `react-window` (the pattern MUI documents for large
+option sets), or a cheaper cap: stop rendering past N options and tell the user to type to narrow.
+Measure before choosing — the threshold where it actually hurts has not been established.
+**Where:** `apps/web/app/test-runs/[id]/components/compare/components/CompareSelectionPanel.tsx`,
+the Series `Autocomplete`.
+
+---
+
+
 ## Completed
 
 ### Compare card: parallelised aggregate fetch, aggregate-row marker, legacy preset restore

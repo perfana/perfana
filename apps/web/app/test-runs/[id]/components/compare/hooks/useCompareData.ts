@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
-import { fetchDynatraceDashboards, fetchDynatraceMetrics, DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
+import { fetchDynatraceDashboards, DynatraceDashboard } from '@/lib/dynatrace';
 import {
   ApplicationDashboard,
   Panel,
@@ -13,26 +13,17 @@ import {
   DataSource,
   RelatedTestRun,
   ComparisonStatus,
-  SUPPORTED_PANEL_TYPES,
 } from '../types';
 import { calculatePercentageDifference, buildAggregatedComparisons, DEFAULT_DISPLAY_CONFIG, DisplayConfig } from '../utils/compare-utils';
 import { TestRun } from '@/types/test-runs';
 import { isGrafana, isPerformanceTest} from '@/lib/metrics-source-utils';
-import {
-  ALL_AGGREGATED_OPTION,
-  getAggregateSpec,
-  shouldOfferAllAggregated,
-  fetchAggregatedStatistics,
-  collapsePerfRtPanels,
-} from '@/lib/aggregated-perf-series';
+import { getAggregateSpec, fetchAggregatedStatistics } from '@/lib/aggregated-perf-series';
 import {
   isUrlPanel,
   getUrlPanelMetric,
-  buildUrlPanels,
-  fetchUrlDistinctNames,
   fetchUrlMetricStatistics,
   fetchSamplerUrlMap,
-  REQUEST_RT_PANEL_ID,
+  isRequestPanel,
 } from '@/lib/url-perf-panels';
 
 interface UseCompareDataProps {
@@ -58,20 +49,13 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   const [selectedDashboard, setSelectedDashboard] = useState<ApplicationDashboard | null>(null);
 
   // Panel state
-  const [panels, setPanels] = useState<Panel[]>([]);
-  const [panelsLoading, setPanelsLoading] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState<Panel | null>(null);
 
   // Dynatrace state
   const [dynatraceDashboards, setDynatraceDashboards] = useState<DynatraceDashboard[]>([]);
   const [dynatraceDashboardsLoading, setDynatraceDashboardsLoading] = useState(false);
-  const [dynatraceMetrics, setDynatraceMetrics] = useState<DynatraceMetric[]>([]);
-  const [dynatraceMetricsLoading, setDynatraceMetricsLoading] = useState(false);
 
   // Series selection state
-  const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
-  const [availableMetricsLoading, setAvailableMetricsLoading] = useState(false);
-  const [selectedMetricNames, setSelectedMetricNames] = useState<string[]>([]);
   const [addedSeries, setAddedSeries] = useState<CompareSeries[]>([]);
 
   // Metrics comparison state
@@ -184,135 +168,6 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     }
   }, [testRun]);
 
-  // Load Grafana panels when dashboard selected
-  const fetchDashboardPanels = useCallback(async (
-    dashboardUid: string,
-    isPerfMetrics = false,
-    applicationDashboardId = '',
-  ): Promise<Panel[]> => {
-    if (!dashboardUid) return [];
-
-    try {
-      setPanelsLoading(true);
-      const response = await authenticatedFetch(
-        `/grafana/dashboards?uid=${dashboardUid}`,
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      if (response.ok) {
-        const dashboardData = await response.json();
-        const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
-
-        const filteredPanels: Panel[] = dashboard?.panels?.filter((panel: Panel) =>
-          SUPPORTED_PANEL_TYPES.includes(panel.type)
-        ) || [];
-
-        // Inject virtual URL panels for performance-metrics dashboards only.
-        // The `/grafana/dashboards` payload is raw Grafana JSON and never carries
-        // an `applicationDashboardId` — the caller passes the DB row id explicitly.
-        const withUrl = isPerfMetrics
-          ? collapsePerfRtPanels([...filteredPanels, ...buildUrlPanels(applicationDashboardId)])
-          : filteredPanels;
-
-        setPanels(withUrl);
-        return withUrl;
-      } else {
-        setPanels([]);
-        return [];
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard panels:', error);
-      setPanels([]);
-      return [];
-    } finally {
-      setPanelsLoading(false);
-    }
-  }, []);
-
-  // Load Dynatrace metrics when dashboard selected
-  const fetchDynatraceMetricsList = useCallback(async (dashboardLabel: string) => {
-    if (!dashboardLabel || !testRun) return;
-
-    try {
-      setDynatraceMetricsLoading(true);
-      const systemId = testRun.system_under_test_id;
-      const environment = testRun.test_environment;
-      const workload = testRun.workload;
-
-      if (!systemId || !environment || !workload) {
-        setDynatraceMetrics([]);
-        return;
-      }
-
-      const metricsData = await fetchDynatraceMetrics(systemId, environment, workload, dashboardLabel);
-      setDynatraceMetrics(metricsData);
-    } catch (error) {
-      console.error('Error fetching Dynatrace metrics:', error);
-      setDynatraceMetrics([]);
-    } finally {
-      setDynatraceMetricsLoading(false);
-    }
-  }, [testRun]);
-
-  // Fetch available metric names for a selected panel
-  const fetchPanelMetrics = useCallback(async (applicationDashboardId: string, panelId: number, metricsSourceId?: string): Promise<string[]> => {
-    if (!applicationDashboardId || !panelId || !testRun) {
-      setAvailableMetrics([]);
-      return [];
-    }
-
-    if (isUrlPanel(panelId)) {
-      setAvailableMetricsLoading(true);
-      try {
-        const names = await fetchUrlDistinctNames(testRun.test_run_id);
-        setAvailableMetrics(names);
-        return names;
-      } finally {
-        setAvailableMetricsLoading(false);
-      }
-    }
-
-    try {
-      setAvailableMetricsLoading(true);
-
-      const params = new URLSearchParams({
-        applicationDashboardId,
-        panelId: panelId.toString(),
-        system: testRun.systems_under_test?.name || '',
-        environment: testRun.test_environment || '',
-        workload: testRun.workload || ''
-      });
-
-      // Send metricsSourceId if available
-      if (metricsSourceId) {
-        params.set('metricsSourceId', metricsSourceId);
-      }
-
-      const response = await authenticatedFetch(
-        `/metrics/ds-metrics/distinct-names?${params.toString()}`,
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      if (response.ok) {
-        const metricNames: string[] = await response.json();
-        const withAggregate = shouldOfferAllAggregated(selectedSource, panelId)
-          ? [ALL_AGGREGATED_OPTION, ...metricNames]
-          : metricNames;
-        setAvailableMetrics(withAggregate);
-        return withAggregate;
-      } else {
-        setAvailableMetrics([]);
-        return [];
-      }
-    } catch (error) {
-      console.error('Error fetching distinct metric names:', error);
-      setAvailableMetrics([]);
-      return [];
-    } finally {
-      setAvailableMetricsLoading(false);
-    }
-  }, [testRun, selectedSource]);
-
   // Fetch metrics comparison
   const fetchMetricsComparison = useCallback(async () => {
     if (!selectedTestRun || !testRun || addedSeries.length === 0) return;
@@ -388,7 +243,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         for (const metricName of new Set(group.metricNames)) {
           const currentMetric = currentData.find(m => m.metric_name === metricName);
           const baselineMetric = selectedData.find(m => m.metric_name === metricName);
-          const url = group.panelId === REQUEST_RT_PANEL_ID
+          const url = isRequestPanel(group.panelId)
             ? (await getSamplerUrlMap())[metricName]
             : undefined;
           for (const evaluateType of evaluateTypes) {
@@ -572,16 +427,9 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     dashboards,
     dashboardsLoading,
     selectedDashboard,
-    panels,
-    panelsLoading,
     selectedMetric,
     dynatraceDashboards,
     dynatraceDashboardsLoading,
-    dynatraceMetrics,
-    dynatraceMetricsLoading,
-    availableMetrics,
-    availableMetricsLoading,
-    selectedMetricNames,
     addedSeries,
     currentMetrics,
     selectedMetrics,
@@ -599,10 +447,6 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     setSelectedSource,
     setSelectedDashboard,
     setSelectedMetric,
-    setPanels,
-    setDynatraceMetrics,
-    setAvailableMetrics,
-    setSelectedMetricNames,
     setAddedSeries,
     setMetricComparisons,
     setCurrentMetrics,
@@ -618,9 +462,6 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     fetchRelatedTestRuns,
     fetchApplicationDashboards,
     fetchDynatraceDashboardsList,
-    fetchDashboardPanels,
-    fetchDynatraceMetricsList,
-    fetchPanelMetrics,
     fetchMetricsComparison,
     getAllDashboardsMerged,
     getFilteredDashboards,

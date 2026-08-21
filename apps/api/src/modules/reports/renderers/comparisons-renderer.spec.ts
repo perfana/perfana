@@ -42,6 +42,26 @@ describe('ComparisonsRenderer', () => {
     dataFetcher = module.get(ReportDataFetcherService);
   });
 
+  it('renders the request URL as sub-text and lets a long label fold', async () => {
+    dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      source: 'performance-metrics',
+      rows: [{
+        group: 'Perf / Request Response Times',
+        label: 'checkout.login',
+        dashboardLabel: 'Perf',
+        panelTitle: 'Request Response Times',
+        url: 'https://shop.example.com/api/v1/a-very-long-path-that-would-blow-out-the-column',
+        metrics: [{ key: 'avg', current: 110, baseline: 100, diffPercent: 10 }],
+      }],
+    });
+    const html = await renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'base-1', metrics: ['avg'] } }), makeTestRun());
+    expect(html).toContain('https://shop.example.com/api/v1/a-very-long-path-that-would-blow-out-the-column');
+    // The label column must be able to wrap, or the value columns scroll out of view.
+    expect(html).toContain('overflow-wrap:anywhere');
+    expect(html).not.toContain('font-weight:600; white-space:nowrap; vertical-align:top;');
+  });
+
   it('should render placeholder when testRun is null', async () => {
     const html = await renderer.renderComparisonsSection(makeSection(), null);
 

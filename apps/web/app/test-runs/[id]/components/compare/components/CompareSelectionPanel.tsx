@@ -1,6 +1,15 @@
 'use client';
 
-import React from 'react';
+/**
+ * Baseline run + a dashboards → panels → series cascade, the same shape the report's
+ * comparison section config uses (MetricSelectionCascade): every level multi-select
+ * with a select-all, panels grouped by their dashboard and series by dashboard/panel.
+ *
+ * One dashboard and one panel at a time was six trips through the dropdowns to compare
+ * six panels, and each trip had to be finished with "Add series" before the next.
+ */
+
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Typography,
@@ -13,14 +22,26 @@ import {
 } from '@mui/material';
 import {
   ApplicationDashboard,
-  Panel,
   CompareSeries,
-  DataSource,
   RelatedTestRun,
 } from '../types';
-import { DynatraceMetric } from '@/lib/dynatrace';
+import { TestRun } from '@/types/test-runs';
 import { getTestRunDisplayText, getTestRunSecondaryInfo } from '../utils/compare-utils';
-import { getSourceDisplayInfo, getSourceType } from '@/lib/metrics-source-utils';
+import { getSourceDisplayInfo } from '@/lib/metrics-source-utils';
+import {
+  PanelOption,
+  SeriesOption,
+  fetchPanelsForDashboards,
+  fetchSeriesForPanels,
+  panelKey,
+  seriesKey,
+} from '../utils/metric-options';
+
+export interface SeriesPick {
+  dashboard: ApplicationDashboard;
+  panel: PanelOption;
+  metricName: string;
+}
 
 interface CompareSelectionPanelProps {
   // Test Run Selection
@@ -28,60 +49,120 @@ interface CompareSelectionPanelProps {
   selectedTestRun: RelatedTestRun | null;
   onTestRunSelect: (testRun: RelatedTestRun | null) => void;
 
-  // Dashboard selection
-  selectedDashboard: ApplicationDashboard | null;
+  // Dashboards
   allDashboards: ApplicationDashboard[];
   dashboardsLoading: boolean;
-  dynatraceDashboardsLoading: boolean;
-  onDashboardSelect: (
-    dashboard: ApplicationDashboard | null,
-    dynatraceDashboardLabel?: string
-  ) => void;
 
-  // Determined source (auto-detected from selected dashboard)
-  selectedSource: DataSource;
+  /** Anchor run — the panel and series lists are what it recorded. */
+  testRun: TestRun | null;
 
-  // Panel selection
-  selectedMetric: Panel | null;
-  panels: Panel[];
-  panelsLoading: boolean;
-  dynatraceMetrics: DynatraceMetric[];
-  dynatraceMetricsLoading: boolean;
-  onMetricSelect: (metric: Panel | null) => void;
-
-  // Series selection
-  availableMetrics: string[];
-  availableMetricsLoading: boolean;
-  selectedMetricNames: string[];
-  setSelectedMetricNames: (names: string[]) => void;
   addedSeries: CompareSeries[];
-  onAddSeries: () => void;
+  onAddSeries: (picks: SeriesPick[]) => void;
+  /**
+   * The first picked dashboard/panel, mirrored up for preset saving — a preset stores one
+   * application_dashboard_id/panel_id and names itself after them.
+   */
+  onPrimaryChange: (dashboard: ApplicationDashboard | null, panel: PanelOption | null) => void;
 }
 
 export function CompareSelectionPanel({
   relatedTestRuns,
   selectedTestRun,
   onTestRunSelect,
-  selectedDashboard,
   allDashboards,
   dashboardsLoading,
-  dynatraceDashboardsLoading,
-  onDashboardSelect,
-  selectedSource,
-  selectedMetric,
-  panels,
-  panelsLoading,
-  dynatraceMetrics,
-  dynatraceMetricsLoading,
-  onMetricSelect,
-  availableMetrics,
-  availableMetricsLoading,
-  selectedMetricNames,
-  setSelectedMetricNames,
+  testRun,
   addedSeries,
   onAddSeries,
+  onPrimaryChange,
 }: CompareSelectionPanelProps) {
-  const isLoading = dashboardsLoading || dynatraceDashboardsLoading;
+  const [selectedDashboards, setSelectedDashboards] = useState<ApplicationDashboard[]>([]);
+  const [panelOptions, setPanelOptions] = useState<PanelOption[]>([]);
+  const [panelsLoading, setPanelsLoading] = useState(false);
+  const [selectedPanels, setSelectedPanels] = useState<PanelOption[]>([]);
+  const [seriesOptions, setSeriesOptions] = useState<SeriesOption[]>([]);
+  const [seriesLoading, setSeriesLoading] = useState(false);
+  const [selectedSeries, setSelectedSeries] = useState<SeriesOption[]>([]);
+
+  // Effects key off the selection contents, not the array identity React keeps recreating.
+  const dashboardsKey = selectedDashboards.map((d) => d.id).join('|');
+  const panelsKey = selectedPanels.map(panelKey).join('|');
+
+  // Load the panels of every selected dashboard.
+  useEffect(() => {
+    const picked = selectedDashboards;
+    if (picked.length === 0) {
+      setPanelOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setPanelsLoading(true);
+    fetchPanelsForDashboards(picked, testRun)
+      .then((lists) => { if (!cancelled) setPanelOptions(lists.flat()); })
+      .finally(() => { if (!cancelled) setPanelsLoading(false); });
+    return () => { cancelled = true; };
+    // selectedDashboards is read through dashboardsKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardsKey, testRun]);
+
+  // Load the series of every selected panel.
+  useEffect(() => {
+    const picked = selectedPanels;
+    if (picked.length === 0) {
+      setSeriesOptions([]);
+      return;
+    }
+    let cancelled = false;
+    setSeriesLoading(true);
+    fetchSeriesForPanels(picked, testRun)
+      .then((lists) => { if (!cancelled) setSeriesOptions(lists.flat()); })
+      .finally(() => { if (!cancelled) setSeriesLoading(false); });
+    return () => { cancelled = true; };
+    // selectedPanels is read through panelsKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelsKey, testRun]);
+
+  // Dropping a dashboard drops the panels and series that hung off it, or a series would be
+  // added for a dashboard the form no longer shows.
+  const pickDashboards = (dashboards: ApplicationDashboard[]) => {
+    const kept = new Set(dashboards.map((d) => d.id));
+    setSelectedDashboards(dashboards);
+    const panels = selectedPanels.filter((p) => kept.has(p.dashboard.id));
+    setSelectedPanels(panels);
+    setSelectedSeries(selectedSeries.filter((s) => kept.has(s.panel.dashboard.id)));
+    onPrimaryChange(dashboards[0] ?? null, panels[0] ?? null);
+  };
+
+  const pickPanels = (panels: PanelOption[]) => {
+    const kept = new Set(panels.map(panelKey));
+    setSelectedPanels(panels);
+    setSelectedSeries(selectedSeries.filter((s) => kept.has(panelKey(s.panel))));
+    onPrimaryChange(selectedDashboards[0] ?? null, panels[0] ?? null);
+  };
+
+  const isAdded = (s: SeriesOption) => addedSeries.some((a) =>
+    a.dashboardId === (s.panel.applicationDashboardId || s.panel.dashboard.id)
+    && a.panelId === s.panel.id
+    && a.metricName === s.metricName);
+
+  const addPicked = () => {
+    onAddSeries(selectedSeries.map((s) => ({
+      dashboard: s.panel.dashboard,
+      panel: s.panel,
+      metricName: s.metricName,
+    })));
+    setSelectedSeries([]);
+  };
+
+  const allDashboardsPicked = selectedDashboards.length === allDashboards.length && allDashboards.length > 0;
+  const allPanelsPicked = selectedPanels.length === panelOptions.length && panelOptions.length > 0;
+  const allSeriesPicked = selectedSeries.length === seriesOptions.length && seriesOptions.length > 0;
+
+  const dashboardCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of panelOptions) counts.set(p.dashboardLabel, (counts.get(p.dashboardLabel) ?? 0) + 1);
+    return counts;
+  }, [panelOptions]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -131,29 +212,23 @@ export function CompareSelectionPanel({
         sx={{ mb: 2 }}
       />
 
-      {/* Dashboard and Metric Selection Row */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-        {/* Dashboard Selection - Grouped by source type */}
+      {/* Dashboards */}
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
         <Autocomplete
+          multiple
+          // Picking dashboards/panels/series is almost never one choice, and a popup that
+          // closes after each made "these six" six trips through the dropdown.
+          disableCloseOnSelect
+          limitTags={4}
           options={allDashboards}
           getOptionLabel={(option) => option.dashboard_label || ''}
           isOptionEqualToValue={(option, value) => option.id === value.id}
-          value={selectedDashboard}
-          onChange={(_, newValue) => {
-            if (newValue) {
-              const srcType = getSourceType(newValue);
-              const isDynatrace = srcType === 'dynatrace';
-              onDashboardSelect(
-                newValue,
-                isDynatrace ? newValue.dashboard_label : undefined
-              );
-            } else {
-              onDashboardSelect(null);
-            }
-          }}
-          loading={isLoading}
-          sx={{ flex: 1 }}
+          value={selectedDashboards}
+          onChange={(_, newValue) => pickDashboards(newValue)}
+          loading={dashboardsLoading}
           groupBy={(option) => getSourceDisplayInfo(option).groupLabel}
+          size="small"
+          sx={{ flex: 1 }}
           renderGroup={(params) => {
             const dashboardInGroup = allDashboards.find(
               d => getSourceDisplayInfo(d).groupLabel === params.group
@@ -181,19 +256,15 @@ export function CompareSelectionPanel({
           renderInput={(params) => (
             <TextField
               {...params}
-              label="Dashboard"
+              label="Dashboards"
               variant="outlined"
               fullWidth
-              helperText={
-                isLoading
-                  ? 'Loading dashboards...'
-                  : `Select dashboard (${allDashboards.length} available)`
-              }
+              helperText={dashboardsLoading ? 'Loading dashboards…' : `${allDashboards.length} available`}
               InputProps={{
                 ...params.InputProps,
                 endAdornment: (
                   <>
-                    {isLoading ? <CircularProgress size={20} /> : null}
+                    {dashboardsLoading ? <CircularProgress size={20} /> : null}
                     {params.InputProps.endAdornment}
                   </>
                 ),
@@ -211,175 +282,173 @@ export function CompareSelectionPanel({
             );
           }}
         />
-
-        {/* Metric/Panel Selection */}
-        {selectedDashboard && (
-          <Autocomplete
-            options={selectedSource === 'dynatrace'
-              ? dynatraceMetrics.map(m => ({
-                  id: m.panelId,
-                  title: m.panelTitle,
-                  type: 'dynatrace',
-                  applicationDashboardId: m.applicationDashboardId
-                } as Panel))
-              : panels
-            }
-            getOptionLabel={(option) => option.title}
-            isOptionEqualToValue={(option, value) => option.id === value.id}
-            value={selectedMetric}
-            onChange={(_, newValue) => onMetricSelect(newValue)}
-            loading={selectedSource === 'dynatrace' ? dynatraceMetricsLoading : panelsLoading}
-            sx={{ flex: 1 }}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Panel"
-                variant="outlined"
-                fullWidth
-                helperText={
-                  selectedSource === 'dynatrace'
-                    ? (dynatraceMetricsLoading ? 'Loading panels...' : `Select panel from ${selectedDashboard?.dashboard_label}`)
-                    : (panelsLoading ? 'Loading panels...' : `Select panel from ${selectedDashboard?.dashboard_label}`)
-                }
-                InputProps={{
-                  ...params.InputProps,
-                  endAdornment: (
-                    <>
-                      {(selectedSource === 'dynatrace' ? dynatraceMetricsLoading : panelsLoading) ? <CircularProgress size={20} /> : null}
-                      {params.InputProps.endAdornment}
-                    </>
-                  ),
-                }}
-              />
-            )}
-            renderOption={(props, option) => {
-              const { key: _key, ...otherProps } = props;
-              return (
-                <Box component="li" key={option.id} {...otherProps}>
-                  <Typography variant="body1">{option.title}</Typography>
-                </Box>
-              );
-            }}
-          />
-        )}
+        <Button
+          size="small"
+          onClick={() => pickDashboards(allDashboardsPicked ? [] : [...allDashboards])}
+          disabled={allDashboards.length === 0}
+          sx={{ mt: 0.5, flexShrink: 0 }}
+        >
+          {allDashboardsPicked ? 'Clear' : 'Select all'}
+        </Button>
       </Box>
 
-      {/* Series Selection Row */}
-      {selectedMetric && (
-        <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'flex-end' }}>
-          {/* Series Multi-Select */}
-          <Autocomplete
-            multiple
-            limitTags={8}
-            options={availableMetrics}
-            value={selectedMetricNames}
-            onChange={(_, newValue) => setSelectedMetricNames(newValue)}
-            loading={availableMetricsLoading}
-            sx={{ flex: 1 }}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Select Series"
-                variant="outlined"
-                fullWidth
-                helperText={
-                  availableMetricsLoading
-                    ? 'Loading available series...'
-                    : `${availableMetrics.length} series available from ${selectedMetric.title}`
-                }
-                InputProps={{
-                  ...params.InputProps,
-                  endAdornment: (
-                    <>
-                      {availableMetricsLoading ? <CircularProgress size={20} /> : null}
-                      {params.InputProps.endAdornment}
-                    </>
-                  ),
-                }}
-              />
-            )}
-            renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
-              const isAlreadyAdded = addedSeries.some(
-                s => s.dashboardId === (selectedMetric.applicationDashboardId || selectedDashboard?.id) &&
-                     s.panelId === selectedMetric.id &&
-                     s.metricName === option
-              );
+      {/* Panels */}
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+        <Autocomplete
+          multiple
+          disableCloseOnSelect
+          limitTags={4}
+          options={panelOptions}
+          groupBy={(o) => o.dashboardLabel}
+          getOptionLabel={(o) => o.title}
+          isOptionEqualToValue={(o, v) => panelKey(o) === panelKey(v)}
+          value={selectedPanels}
+          onChange={(_, newValue) => pickPanels(newValue)}
+          disabled={selectedDashboards.length === 0}
+          loading={panelsLoading}
+          size="small"
+          sx={{ flex: 1 }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Panels"
+              variant="outlined"
+              fullWidth
+              helperText={
+                selectedDashboards.length === 0
+                  ? 'Select a dashboard to see its panels'
+                  : panelsLoading
+                    ? 'Loading panels…'
+                    : `${panelOptions.length} available across ${dashboardCounts.size} dashboard${dashboardCounts.size === 1 ? '' : 's'}`
+              }
+              InputProps={{
+                ...params.InputProps,
+                endAdornment: (
+                  <>
+                    {panelsLoading ? <CircularProgress size={20} /> : null}
+                    {params.InputProps.endAdornment}
+                  </>
+                ),
+              }}
+            />
+          )}
+        />
+        <Button
+          size="small"
+          onClick={() => pickPanels(allPanelsPicked ? [] : [...panelOptions])}
+          disabled={panelOptions.length === 0}
+          sx={{ mt: 0.5, flexShrink: 0 }}
+        >
+          {allPanelsPicked ? 'Clear' : 'Select all'}
+        </Button>
+      </Box>
+
+      {/* Series */}
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+        <Autocomplete
+          multiple
+          disableCloseOnSelect
+          limitTags={8}
+          options={seriesOptions}
+          groupBy={(o) => `${o.panel.dashboardLabel} / ${o.panel.title}`}
+          getOptionLabel={(o) => o.metricName}
+          isOptionEqualToValue={(o, v) => seriesKey(o) === seriesKey(v)}
+          value={selectedSeries}
+          onChange={(_, newValue) => setSelectedSeries(newValue)}
+          disabled={selectedPanels.length === 0}
+          loading={seriesLoading}
+          size="small"
+          sx={{ flex: 1 }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Series"
+              variant="outlined"
+              fullWidth
+              helperText={
+                selectedPanels.length === 0
+                  ? 'Select a panel to see its series'
+                  : seriesLoading
+                    ? 'Loading series…'
+                    : `${seriesOptions.length} available from ${selectedPanels.length} panel${selectedPanels.length === 1 ? '' : 's'}`
+              }
+              InputProps={{
+                ...params.InputProps,
+                endAdornment: (
+                  <>
+                    {seriesLoading ? <CircularProgress size={20} /> : null}
+                    {params.InputProps.endAdornment}
+                  </>
+                ),
+              }}
+            />
+          )}
+          renderOption={(props, option) => {
+            const { key, ...otherProps } = props;
+            const already = isAdded(option);
+            return (
+              <Box component="li" key={key} {...otherProps} sx={{
+                opacity: already ? 0.5 : 1,
+                backgroundColor: already ? 'action.disabledBackground' : 'inherit'
+              }}>
+                <Typography variant="body2">
+                  {option.metricName}
+                  {already && (
+                    <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                      (already added)
+                    </Typography>
+                  )}
+                </Typography>
+              </Box>
+            );
+          }}
+          renderTags={(value, getTagProps) =>
+            value.map((option, index) => {
+              const tagProps = getTagProps({ index });
               return (
-                <Box component="li" key={key} {...otherProps} sx={{
-                  opacity: isAlreadyAdded ? 0.5 : 1,
-                  backgroundColor: isAlreadyAdded ? 'action.disabledBackground' : 'inherit'
-                }}>
-                  <Typography variant="body1">
-                    {option}
-                    {isAlreadyAdded && (
-                      <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-                        (already added)
-                      </Typography>
-                    )}
-                  </Typography>
-                </Box>
+                <Chip
+                  {...tagProps}
+                  key={seriesKey(option)}
+                  label={option.metricName}
+                  size="small"
+                  sx={{
+                    background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.1) 0%, rgba(30, 136, 229, 0.15) 100%)',
+                    border: '1px solid rgba(25, 118, 210, 0.3)',
+                    color: 'primary.dark'
+                  }}
+                />
               );
-            }}
-            renderTags={(value, getTagProps) =>
-              value.map((option, index) => {
-                const tagProps = getTagProps({ index });
-                return (
-                  <Chip
-                    {...tagProps}
-                    key={option}
-                    label={option}
-                    size="small"
-                    sx={{
-                      background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.1) 0%, rgba(30, 136, 229, 0.15) 100%)',
-                      border: '1px solid rgba(25, 118, 210, 0.3)',
-                      color: 'primary.dark'
-                    }}
-                  />
-                );
-              })
+            })
+          }
+        />
+        <Button
+          size="small"
+          onClick={() => setSelectedSeries(allSeriesPicked ? [] : [...seriesOptions])}
+          disabled={seriesOptions.length === 0}
+          sx={{ mt: 0.5, flexShrink: 0 }}
+        >
+          {allSeriesPicked ? 'Clear' : 'Select all'}
+        </Button>
+        <Button
+          variant="contained"
+          onClick={addPicked}
+          disabled={selectedSeries.length === 0}
+          sx={{
+            minWidth: 140,
+            flexShrink: 0,
+            background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+            boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)',
+            '&:hover': {
+              background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
+            },
+            '&:disabled': {
+              background: 'rgba(0, 0, 0, 0.12)',
             }
-          />
-
-          {/* Select All Button */}
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              if (selectedMetricNames.length === availableMetrics.length) {
-                setSelectedMetricNames([]);
-              } else {
-                setSelectedMetricNames([...availableMetrics]);
-              }
-            }}
-            disabled={!selectedMetric || availableMetrics.length === 0}
-            sx={{ height: '56px', minWidth: '100px', flexShrink: 0 }}
-          >
-            {selectedMetricNames.length === availableMetrics.length && availableMetrics.length > 0 ? 'Deselect All' : 'Select All'}
-          </Button>
-
-          {/* Add Series Button */}
-          <Button
-            variant="contained"
-            onClick={onAddSeries}
-            disabled={selectedMetricNames.length === 0}
-            sx={{
-              minWidth: 120,
-              height: 56,
-              background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
-              boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)',
-              '&:hover': {
-                background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
-              },
-              '&:disabled': {
-                background: 'rgba(0, 0, 0, 0.12)',
-              }
-            }}
-          >
-            Add Series
-          </Button>
-        </Box>
-      )}
+          }}
+        >
+          Add {selectedSeries.length > 0 ? `${selectedSeries.length} ` : ''}series
+        </Button>
+      </Box>
     </Box>
   );
 }

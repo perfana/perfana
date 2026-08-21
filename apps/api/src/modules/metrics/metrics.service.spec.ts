@@ -1925,4 +1925,37 @@ describe('MetricsService', () => {
       expect(result.get('test-run-123')).toBe(false);
     });
   });
+
+  describe('getDistinctMetricNames', () => {
+    const makeQb = () => ({
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([{ metric_name: 'T01.login' }]),
+    });
+
+    it('limits the series list to one run when a testRunId is given', async () => {
+      // Unscoped, this answers with every series the panel EVER recorded — a run whose
+      // naming has since changed contributes names that match nothing in the comparison,
+      // which is how the compare card ended up listing value-less, URL-less rows.
+      const qb = makeQb();
+      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+
+      const names = await service.getDistinctMetricNames('dash-1', 201, 'ms-1', 'run-18');
+
+      expect(qb.andWhere).toHaveBeenCalledWith('dsMetrics.test_run_id = :testRunId', { testRunId: 'run-18' });
+      expect(names).toEqual(['T01.login']);
+    });
+
+    it('stays unscoped when no testRunId is given', async () => {
+      const qb = makeQb();
+      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+
+      await service.getDistinctMetricNames('dash-1', 201);
+
+      expect(qb.andWhere).not.toHaveBeenCalledWith(
+        'dsMetrics.test_run_id = :testRunId', expect.anything());
+    });
+  });
 });
