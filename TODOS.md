@@ -18,7 +18,7 @@ with the version it landed in.
 **Priority:** P0
 **Origin:** the 0.2.68.7 incident — "deploying the last version deleted all application
 dashboards" (2026-08-21). Nothing was deleted.
-**Status:** parts 2 and 3 are built (v0.2.68.15) — `assertEntityColumns` at boot and
+**Status:** parts 2 and 3 are built (v0.2.68.14) — `assertEntityColumns` at boot and
 `scripts/check-entity-migrations.mjs` in preflight. **Part 1, the constraint audit, is still
 open**, which is why this item stays P0. The outage itself is fixed by
 `1795000000000-AddApplicationDashboardDeletionStatus.ts` (v0.2.68.12). An automatic
@@ -50,14 +50,14 @@ column had been missing in production for a full release.
    dump — `docs/ops/2026-08-21-org-id-backfill-runbook.md` phase 0 does exactly that for one
    column and can be widened.
 
-2. **DONE (v0.2.68.15) — boot assertion.** `apps/api/src/common/db/assert-entity-columns.ts`
+2. **DONE (v0.2.68.14) — boot assertion.** `apps/api/src/common/db/assert-entity-columns.ts`
    compares TypeORM's entity metadata against `information_schema` on whatever database the
    service is pointed at, and reports what is missing. Warns by default; `SCHEMA_DRIFT_CHECK=strict`
    refuses the boot. Warn is the default because a false positive that takes the API down on a
    healthy database trades a silent bug for a self-inflicted outage — and the log line alone
    turns this incident's day into a minute.
 
-3. **DONE (v0.2.68.15) — pre-ship gate.** `scripts/check-entity-migrations.mjs`, wired into
+3. **DONE (v0.2.68.14) — pre-ship gate.** `scripts/check-entity-migrations.mjs`, wired into
    `npm run preflight`: adding an `@Column` in a branch with no new migration file fails, naming
    the column.
 
