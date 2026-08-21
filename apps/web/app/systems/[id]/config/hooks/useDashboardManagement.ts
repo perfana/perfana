@@ -36,6 +36,12 @@ interface UseDashboardManagementReturn {
   editFormLoading: boolean;
   deleteLoading: boolean;
   deleteError: string | null;
+  /**
+   * Why the dashboard list could not be loaded, or null when it loaded. NOT the same as an
+   * empty list: an empty list means the system genuinely has no dashboards configured, and
+   * showing that for a failed request is what made a broken API read as deleted data.
+   */
+  dashboardsError: string | null;
 
   // Actions
   fetchApplicationDashboards: (systemId: string, environment: string) => Promise<void>;
@@ -101,11 +107,13 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
   const [editFormLoading, setEditFormLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [dashboardsError, setDashboardsError] = useState<string | null>(null);
 
   // Fetch application dashboards
   const fetchApplicationDashboards = useCallback(async (systemId: string, environment: string) => {
     try {
       setDashboardsLoading(true);
+      setDashboardsError(null);
 
       const response = await authenticatedFetch(
         `/grafana/application-dashboards?systemId=${encodeURIComponent(systemId)}&environment=${encodeURIComponent(environment)}`,
@@ -116,13 +124,22 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
       );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch application dashboards');
+        // The status is the whole diagnosis. A 500 here meant a column the API asked for did
+        // not exist in the database, and swallowing it cost a day of looking for deleted rows.
+        throw new Error(`The server could not return the dashboards (HTTP ${response.status}).`);
       }
 
       const data = await response.json();
       setDashboards(data || []);
     } catch (err) {
+      // Keep the list empty — stale rows would be worse — but say WHY it is empty. Rendering
+      // a failed request as "no dashboards found" tells the user their data is gone.
       setDashboards([]);
+      setDashboardsError(
+        err && typeof err === 'object' && 'message' in err
+          ? (err as Error).message
+          : 'Could not load the dashboards.',
+      );
     } finally {
       setDashboardsLoading(false);
     }
@@ -170,7 +187,11 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
 
       setAvailableGrafanaDashboards(allDashboards);
     } catch (err) {
-      // Error fetching available dashboards, silently handle
+      // Same failure class, quieter blast radius: this one feeds the "add dashboard" picker,
+      // so it surfaces as an empty dropdown rather than a missing list. Still not silent —
+      // an operator with the console open should be able to see why the picker is empty.
+      setAvailableGrafanaDashboards([]);
+      console.error('Failed to fetch available Grafana dashboards:', err);
     }
   }, []);
 
@@ -419,6 +440,7 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
     editFormLoading,
     deleteLoading,
     deleteError,
+    dashboardsError,
 
     // Actions
     fetchApplicationDashboards,

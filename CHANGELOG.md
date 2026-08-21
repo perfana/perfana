@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.14] - 2026-08-21
+
+### Fixed
+- **A dashboard list that fails to load now says so, instead of reporting that you have none.** Any failure while fetching a system's dashboards was turned into an empty list, and an empty list is shown as "No application dashboards found" — so a server fault was presented as a statement about your data. That is how a missing database column read as 443 deleted dashboards. The page now separates the two: a failure shows what went wrong, with a Retry button and the reassurance that nothing has been changed, while "none found" is reserved for a system that genuinely has none. The dropdown of available Grafana dashboards logs its failures too, rather than quietly coming up empty.
+
 ## [0.2.68.13] - 2026-08-21
 
 ### Fixed
