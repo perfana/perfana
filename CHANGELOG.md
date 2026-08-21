@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.12] - 2026-08-21
+
+### Fixed
+- **The dashboard lists that emptied out after upgrading are back.** A column added in 0.2.68.7 for the deletion badge was only ever created on new installations, so an existing database did not have it. The application asks for it on every dashboard read, the database answered that no such column exists, and the page turned that failure into an empty list without an error — the SUT configuration view listed nothing for any system, and the compare card offered no dashboards at all. Nothing was deleted. Upgrading adds the column and the lists return on the first request.
+- **Upgrading no longer risks a long start-up on installations with a lot of history.** The organization backfill added in 0.2.68.11 would have rewritten every metrics table with a missing organization before the API accepted its first request, which on a database with millions of measurement rows means a very long boot. It now repairs configuration-sized tables only, and names anything larger in the log for `docs/ops/2026-08-21-org-id-backfill-runbook.md` to handle deliberately.
+
 ## [0.2.68.11] - 2026-08-21
 
 ### Fixed
