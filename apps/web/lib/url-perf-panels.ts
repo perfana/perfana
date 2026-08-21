@@ -76,8 +76,15 @@ export async function fetchSamplerUrlMap(
   }
 }
 
-/** Panel id for the per-request response-time panel ("Request RT"). */
-export const REQUEST_RT_PANEL_ID = 201;
+/**
+ * The per-request panels: response time (201-204), error rate, throughput, apdex,
+ * latency and connect time (205-209). They all name their series
+ * `transaction_name.sampler_name`, so the sampler URL map keys them all — attaching the
+ * URL to only the response-time panel left every other request row without one.
+ */
+export function isRequestPanel(panelId: number | undefined): boolean {
+  return panelId != null && panelId >= 201 && panelId <= 209;
+}
 
 /** Per-URL statistics for the given metric across runs. [] on error. */
 export async function fetchUrlMetricStatistics(
