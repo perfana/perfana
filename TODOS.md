@@ -18,9 +18,11 @@ with the version it landed in.
 **Priority:** P0
 **Origin:** the 0.2.68.7 incident — "deploying the last version deleted all application
 dashboards" (2026-08-21). Nothing was deleted.
-**Status:** the immediate damage is repaired by
-`packages/shared/src/database/migrations/1794000000000-BackfillOrganizationId.ts` (v0.2.68.11).
-The pattern that caused it is untouched.
+**Status:** the outage is fixed by
+`packages/shared/src/database/migrations/1795000000000-AddApplicationDashboardDeletionStatus.ts`
+(v0.2.68.12). An automatic organization_id backfill shipped in 0.2.68.11 and was removed in
+.12 — it addressed a different, unreported condition and would have rewritten millions of rows
+during start-up. The pattern that caused the outage is untouched.
 **Why:** Phase 4 declared `organization_id` NOT NULL on the owned-resource tables, but only
 inside `1700000000000-ConsolidatedSchema.ts`, which runs on a FRESH database. No migration ever
 carried the constraint or the backfill to an existing one. Code was then written against the
