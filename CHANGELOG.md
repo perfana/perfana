@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **The URL panels in a report's comparison section offer their URLs again.** Picking "URL RT" (or URL Error Rate, Throughput, Latency, Connect Time) showed an empty series list. The report dialog identified the run one way and the URL lookup expected the other, so the query matched nothing and returned an empty list rather than an error — the same shape as a run that genuinely recorded no URLs. The dialog now identifies the run the way the rest of the page does, and the URL lookups accept either form, as the rest of the API already did.
 
+## [0.2.68.17] - 2026-08-21
+
+### Changed
+- **The dashboard dropdowns stop offering dashboards nothing was ever measured on.** Picking metrics — in the compare card, a report's comparison and trends sections, and the add and edit SLO dialogs — listed every dashboard ever attached to a system and environment, including ones left behind by workloads and spans that no longer exist. Hundreds of them on a long-lived system, and none of them selectable: the panel list comes from stored measurements, so a dashboard without any offers nothing to pick. Those are now left out of the pickers. The dashboard list in the system's configuration still shows everything, because that is where they are found and deleted.
+
 ## [0.2.68.13] - 2026-08-21
 
 ### Fixed

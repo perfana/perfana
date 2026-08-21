@@ -86,6 +86,19 @@ export interface ApplicationDashboardQuery {
   dashboardLabel?: string;
   dashboardUid?: string;
   tags?: string[];
+  /**
+   * Keep only dashboards that some run has actually recorded metrics for.
+   *
+   * The pickers that choose metrics — the compare card, a report's comparison and trends
+   * sections, the add/edit SLO dialogs — read their panel list from ds_metric_statistics. A
+   * dashboard with no rows there offers no panels, so it is an unselectable dead end that
+   * nothing can be built from, and on a long-lived system there are hundreds of them: dashboards
+   * for workloads and spans that no longer exist, kept because the row was never deleted.
+   *
+   * Opt-in, because the management view in the system's configuration MUST keep listing them —
+   * that is where they are found and deleted.
+   */
+  hasData?: boolean;
 }
 
 /**
@@ -122,6 +135,40 @@ export class ApplicationDashboardsService {
    * Note: Organization-based filtering is applied. Global admins see all dashboards.
    * Non-admin users only see dashboards from their accessible organizations or legacy (NULL org_id) dashboards.
    */
+  /**
+   * Narrow a page of dashboards to the ones ds_metric_statistics has rows for.
+   *
+   * One statement, scoped to the ids already in hand, rather than an EXISTS per dashboard: the
+   * unique index on ds_metric_statistics leads with test_run_id, so a per-dashboard probe is not
+   * a leading-column match and would repeat that cost once per row. Deliberately NOT accompanied
+   * by a new index — ds_metric_statistics is one of the largest tables in the schema, and
+   * building an index on it inside a start-up migration is the kind of lock this codebase has
+   * already been bitten by. Measure first; add it CONCURRENTLY, out of band, if the measurement
+   * asks for it.
+   */
+  private async filterToDashboardsWithData(rows: ApplicationDashboardEntity[]): Promise<ApplicationDashboardEntity[]> {
+    if (rows.length === 0) return rows;
+
+    const ids = rows.map((r) => r.id);
+    const found: Array<{ application_dashboard_id: string }> = await withRequestEm(this.appDashboardRepo).query(
+      `SELECT DISTINCT application_dashboard_id
+         FROM ds_metric_statistics
+        WHERE application_dashboard_id = ANY($1::uuid[])`,
+      [ids],
+    );
+
+    const withData = new Set(found.map((r) => r.application_dashboard_id));
+    const kept = rows.filter((r) => withData.has(r.id));
+
+    if (kept.length !== rows.length) {
+      this.logger.debug(
+        `hasData: ${rows.length - kept.length} of ${rows.length} dashboards have no stored metrics and were left out`,
+      );
+    }
+
+    return kept;
+  }
+
   async findAll(userId: string, roles: string[], query: ApplicationDashboardQuery = {}): Promise<ApplicationDashboard[]> {
     // Resolve accessible org IDs: null means global admin (no filter needed)
     const orgIds = await withOrgFilter(userId, roles, this.authzService);
@@ -201,7 +248,9 @@ export class ApplicationDashboardsService {
 
       this.logger.debug(`Found ${results.length} application dashboards`);
 
-      return results.map(row => {
+      const withData = query.hasData ? await this.filterToDashboardsWithData(results) : results;
+
+      return withData.map(row => {
         // Enrich variables with template metadata from Grafana dashboard
         const enrichedVariables = this.enrichVariablesWithTemplateMetadata(
           Array.isArray(row.variables) ? row.variables : [],
