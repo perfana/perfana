@@ -2,6 +2,17 @@
 
 Companion to `2026-08-21-org-id-backfill-runbook.sql`. Read this first; run that.
 
+> **Most deployments do not need this file.** Migration
+> `1794000000000-BackfillOrganizationId` performs the same repair automatically at
+> service startup: it backfills from each row's parent and sets `NOT NULL` per
+> table where the result is clean. Upgrade and read the API's startup log.
+>
+> Use this runbook when you want to inspect before changing anything, when you
+> need a snapshot you can revert to precisely, or when the migration logged a
+> warning it could not resolve on its own — a row whose parent has no
+> organization either. That last case is a decision about who owns the data, and
+> no migration should make it for you.
+
 ## When you need this
 
 After upgrading past **v0.2.68.6**, lists come back empty even though the data is there:
