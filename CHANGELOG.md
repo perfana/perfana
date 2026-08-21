@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.11] - 2026-08-21
+
+### Fixed
+- **Dashboards, profiles and other lists that emptied out after upgrading are visible again.** Every owned record carries the organization that owns it, and lists filter on it. On installations older than the current database schema that value was never filled in for some records, and until now a compatibility clause kept showing them anyway. Removing that clause in 0.2.68.7 made those records vanish from every list — the SUT configuration view showed no Grafana dashboards for any system, and the compare card offered no performance-metrics dashboards. Nothing was deleted. Upgrading now fills the value in from each record's own system under test, so the lists come back on the first start after the upgrade, and the database is brought up to the shape a new installation already has. Records whose system under test has no organization either cannot be assigned one automatically — the API logs exactly which those are and starts normally; `docs/ops/2026-08-21-org-id-backfill-runbook.md` covers finishing those by hand.
+
 ## [0.2.68.10] - 2026-08-20
 
 ### Fixed

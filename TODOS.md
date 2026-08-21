@@ -13,6 +13,38 @@ with the version it landed in.
 
 ## RBAC
 
+### Schema constraints reach new databases only, and the code assumes otherwise
+
+**Priority:** P1
+**Origin:** the 0.2.68.7 incident — "deploying the last version deleted all application
+dashboards" (2026-08-21). Nothing was deleted.
+**Status:** the immediate damage is repaired by
+`packages/shared/src/database/migrations/1794000000000-BackfillOrganizationId.ts` (v0.2.68.11).
+The pattern that caused it is untouched.
+**Why:** Phase 4 declared `organization_id` NOT NULL on the owned-resource tables, but only
+inside `1700000000000-ConsolidatedSchema.ts`, which runs on a FRESH database. No migration ever
+carried the constraint or the backfill to an existing one. Code was then written against the
+declaration — v0.2.68.7 deleted ~35 `OR organization_id IS NULL` escapes because "the column
+cannot be null" — and every deployment older than the consolidated schema lost the rows from
+every list. The premise was true in dev and false in production, which is the worst shape a
+premise can have. Any future "this column cannot be null, delete the dead branch" cleanup
+repeats it, and so does any other constraint that lives only in the consolidated schema.
+**What:** two parts.
+1. Audit `1700000000000-ConsolidatedSchema.ts` for every NOT NULL, CHECK, UNIQUE and FK that has
+   no corresponding incremental migration, and write the migrations that bring an existing
+   database to the same shape. `information_schema` diff between a fresh database and a restored
+   production dump is the cheapest way to enumerate them.
+2. Add a boot-time or CI assertion that the two agree, so the next divergence is caught by a
+   failing check rather than by a customer's empty screen.
+
+**Left over from the backfill:** `ds_metric_collection_status` has no `system_under_test_id`, so
+the migration cannot infer its organization and leaves the column nullable with a warning. It
+needs a rule of its own. A greenfield database also shows null-org rows in `check_results`,
+`ds_change_points`, `ds_compare_config` and `ds_metric_collection_status`, so "NOT NULL on all 26
+owned entities" is not true even for new installs.
+
+---
+
 ### Run the cold-cache p99 benchmark for `/api/users/me/permissions`
 
 **Priority:** P3
