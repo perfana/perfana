@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.15] - 2026-08-21
+
+### Added
+- **The compare card picks dashboards, panels and series the way a report section does.** It offered one dashboard and one panel at a time, so comparing six panels meant six trips through the dropdowns, each finished with "Add series" before the next could start. All three levels are now multi-select with a select-all, panels are grouped under the dashboard they came from and series under the dashboard and panel, and one "Add series" adds everything picked — across dashboards, and across Grafana, Dynatrace and performance-test sources in the same selection. Loading is bounded to a handful of requests at a time, so selecting every dashboard on a large system does not flood the API.
+
+### Fixed
+- **Requests in a comparison show the URL that was called.** The compare card showed the URL under a request's name only on the response-time panel; on error rate, throughput, apdex, latency and connect time — which name their series exactly the same way — the row was just a name. A report's comparison section showed no URL at all. Both now show it wherever the row is a request, and the report folds long URLs instead of pushing the value columns off the page.
+- **The series list offers only what the runs being compared actually recorded.** A panel's series list spanned every run that dashboard ever had, so a run whose naming has since changed contributed names that match nothing today: rows with no values, no URL, and no explanation. The compare card, the trends card, the graphs card and both report sections now ask for the series of the run in front of you.
+- **A comparison table with long request names stays readable.** The name column could not wrap, so a long URL stretched it past the page and the current-vs-baseline columns scrolled out of sight — the table looked like it had a single column.
+- **The trends card stops offering dashboards nothing was measured on.** The same filter the compare card and the report pickers received in 0.2.68.14; the trends card was missed.
+
+### Changed
+- **The Reports card collapses by clicking its header, like the Compare card.** Only the small chevron worked before.
+
 ## [0.2.68.14] - 2026-08-21
 
 ### Fixed
