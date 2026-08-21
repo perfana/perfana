@@ -4,21 +4,16 @@ import { useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import type React from 'react';
 import {
-  ApplicationDashboard,
-  Panel,
   GraphData,
   CompareSeries,
-  DataSource,
   RelatedTestRun,
   MetricComparison,
   MetricStatistic,
 } from '../types';
-import { DynatraceMetric } from '@/lib/dynatrace';
 import { TestRun } from '@/types/test-runs';
-import { getSourceType, isPerformanceTest } from '@/lib/metrics-source-utils';
-import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName, collapsePerfRtPanels } from '@/lib/aggregated-perf-series';
-import { buildUrlPanels } from '@/lib/url-perf-panels';
+import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName } from '@/lib/aggregated-perf-series';
 import { graphKeyOf } from '../utils/compare-utils';
+import type { SeriesPick } from '../components/CompareSelectionPanel';
 
 interface UseCompareHandlersProps {
   testRun: TestRun | null;
@@ -26,22 +21,11 @@ interface UseCompareHandlersProps {
   showToast: (message: string) => void;
 
   // State
-  selectedSource: DataSource;
-  selectedDashboard: ApplicationDashboard | null;
-  selectedMetric: Panel | null;
-  selectedMetricNames: string[];
   addedSeries: CompareSeries[];
   selectedTestRun: RelatedTestRun | null;
   showGraphs: Record<string, boolean>;
 
   // State setters
-  setSelectedSource: (source: DataSource) => void;
-  setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
-  setSelectedMetric: (metric: Panel | null) => void;
-  setPanels: (panels: Panel[]) => void;
-  setDynatraceMetrics: React.Dispatch<React.SetStateAction<DynatraceMetric[]>>;
-  setAvailableMetrics: (metrics: string[]) => void;
-  setSelectedMetricNames: (names: string[]) => void;
   setAddedSeries: (series: CompareSeries[] | ((prev: CompareSeries[]) => CompareSeries[])) => void;
   setMetricComparisons: React.Dispatch<React.SetStateAction<MetricComparison[]>>;
   setCurrentMetrics: React.Dispatch<React.SetStateAction<MetricStatistic[]>>;
@@ -49,31 +33,15 @@ interface UseCompareHandlersProps {
   setShowGraphs: (graphs: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
   setGraphData: (data: Record<string, GraphData> | ((prev: Record<string, GraphData>) => Record<string, GraphData>)) => void;
   setGraphLoading: (loading: Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)) => void;
-
-  // Fetch functions
-  fetchDashboardPanels: (uid: string, isPerfMetrics?: boolean, applicationDashboardId?: string) => Promise<Panel[]>;
-  fetchDynatraceMetricsList: (label: string) => Promise<void>;
-  fetchPanelMetrics: (dashboardId: string, panelId: number, metricsSourceId?: string) => Promise<string[]>;
 }
 
 export function useCompareHandlers({
   testRun,
   testRunId,
   showToast,
-  selectedSource,
-  selectedDashboard,
-  selectedMetric,
-  selectedMetricNames,
   addedSeries,
   selectedTestRun,
   showGraphs,
-  setSelectedSource,
-  setSelectedDashboard,
-  setSelectedMetric,
-  setPanels,
-  setDynatraceMetrics,
-  setAvailableMetrics,
-  setSelectedMetricNames,
   setAddedSeries,
   setMetricComparisons,
   setCurrentMetrics,
@@ -81,143 +49,35 @@ export function useCompareHandlers({
   setShowGraphs,
   setGraphData,
   setGraphLoading,
-  fetchDashboardPanels,
-  fetchDynatraceMetricsList,
-  fetchPanelMetrics,
 }: UseCompareHandlersProps) {
 
-  // Handle source selection
-  const handleSourceSelect = useCallback((source: DataSource) => {
-    setSelectedSource(source);
-    setSelectedDashboard(null);
-    setSelectedMetric(null);
-    setPanels([]);
-    setDynatraceMetrics([]);
-    setCurrentMetrics([]);
-    setSelectedMetrics([]);
-    setMetricComparisons([]);
-    setAvailableMetrics([]);
-    setSelectedMetricNames([]);
-  }, [
-    setSelectedSource, setSelectedDashboard, setSelectedMetric, setPanels,
-    setDynatraceMetrics, setCurrentMetrics, setSelectedMetrics,
-    setMetricComparisons, setAvailableMetrics, setSelectedMetricNames
-  ]);
+  // Add the picked series to the comparison. The picks carry their own dashboard and panel,
+  // so one click can add series from several panels across several dashboards.
+  const handleAddSeries = useCallback((picks: SeriesPick[]) => {
+    if (picks.length === 0) return;
 
-  // Handle dashboard selection
-  const handleDashboardSelect = useCallback((
-    dashboard: ApplicationDashboard | null,
-    dynatraceDashboardLabel?: string
-  ) => {
-    setSelectedDashboard(dashboard);
-    setSelectedMetric(null);
-    setPanels([]);
-    setDynatraceMetrics([]);
-    setCurrentMetrics([]);
-    setSelectedMetrics([]);
-    setMetricComparisons([]);
-    setAvailableMetrics([]);
-    setSelectedMetricNames([]);
-
-    if (!dashboard) return;
-
-    // Auto-determine source from the dashboard itself
-    const detectedSourceType = getSourceType(dashboard);
-    const sourceToUse = (
-      detectedSourceType === 'dynatrace' ? 'dynatrace' as DataSource :
-      detectedSourceType === 'performance_test' ? 'performance-metrics' as DataSource :
-      'grafana' as DataSource
-    );
-    setSelectedSource(sourceToUse);
-
-    if (sourceToUse === 'dynatrace') {
-      const label = dynatraceDashboardLabel || dashboard.dashboard_label;
-      fetchDynatraceMetricsList(label);
-    } else if (sourceToUse === 'performance-metrics') {
-      // Fetch panels from ds_metrics for performance-test dashboards
-      if (testRun) {
-        authenticatedFetch(
-          `/metrics/ds-metrics/available/${testRun.test_run_id}`,
-          { headers: { 'Content-Type': 'application/json' } }
-        ).then(async (response) => {
-          if (response.ok) {
-            const rows: Array<{ dashboard_label: string; panel_title: string; panel_id: number; unit?: string }> = await response.json();
-            const dashboardLabel = dashboard.dashboard_label;
-            const seen = new Set<number>();
-            const panels: Panel[] = [];
-            for (const row of rows) {
-              if (row.dashboard_label === dashboardLabel && !seen.has(row.panel_id)) {
-                seen.add(row.panel_id);
-                panels.push({
-                  id: row.panel_id,
-                  title: row.panel_title,
-                  type: 'timeseries',
-                  applicationDashboardId: dashboard.id,
-                  metricsSourceId: dashboard.metrics_source_id,
-                });
-              }
-            }
-            setPanels(collapsePerfRtPanels([...panels, ...buildUrlPanels(dashboard.id)]));
-          } else {
-            setPanels([]);
-          }
-        }).catch(() => setPanels([]));
-      }
-    } else if (dashboard.dashboard_uid) {
-      fetchDashboardPanels(dashboard.dashboard_uid, isPerformanceTest(dashboard), dashboard.id);
-    }
-  }, [
-    testRun,
-    setSelectedSource, setSelectedDashboard, setSelectedMetric, setPanels,
-    setDynatraceMetrics, setCurrentMetrics, setSelectedMetrics,
-    setMetricComparisons, setAvailableMetrics, setSelectedMetricNames,
-    fetchDashboardPanels, fetchDynatraceMetricsList
-  ]);
-
-  // Handle metric/panel selection
-  const handleMetricSelect = useCallback(async (metric: Panel | null) => {
-    setSelectedMetric(metric);
-    setSelectedMetricNames([]);
-
-    if (metric && selectedDashboard) {
-      const applicationDashboardId = metric.applicationDashboardId || selectedDashboard.id;
-      const metricsSourceId = metric.metricsSourceId || selectedDashboard.metrics_source_id;
-      await fetchPanelMetrics(applicationDashboardId, metric.id, metricsSourceId);
-    } else {
-      setAvailableMetrics([]);
-    }
-  }, [selectedDashboard, setSelectedMetric, setSelectedMetricNames, setAvailableMetrics, fetchPanelMetrics]);
-
-  // Add selected metrics as series to the comparison
-  const handleAddSeries = useCallback(() => {
-    if (!selectedDashboard || !selectedMetric || selectedMetricNames.length === 0) return;
-
-    const dashboardId = selectedMetric.applicationDashboardId || selectedDashboard.id;
-
-    const newSeries: CompareSeries[] = selectedMetricNames
-      .map(metricName => {
+    const newSeries: CompareSeries[] = picks
+      .map(({ dashboard, panel, metricName }) => {
         const isAggregated = metricName === ALL_AGGREGATED_OPTION;
         return {
-          id: `${selectedDashboard.id}-${selectedMetric.id}-${metricName}-${Date.now()}`,
-          dashboardId,
-          dashboardLabel: selectedDashboard.dashboard_label,
-          panelId: selectedMetric.id,
-          panelTitle: selectedMetric.title,
-          metricName: isAggregated ? buildAggregatedMetricName(selectedMetric.title) : metricName,
-          source: selectedSource,
-          metricsSourceId: selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id,
-          yAxesFormat: selectedMetric.yAxesFormat,
+          id: `${dashboard.id}-${panel.id}-${metricName}-${Date.now()}`,
+          dashboardId: panel.applicationDashboardId || dashboard.id,
+          dashboardLabel: dashboard.dashboard_label,
+          panelId: panel.id,
+          panelTitle: panel.title,
+          metricName: isAggregated ? buildAggregatedMetricName(panel.title) : metricName,
+          source: panel.source,
+          metricsSourceId: panel.metricsSourceId || dashboard.metrics_source_id,
+          yAxesFormat: panel.yAxesFormat,
           isAggregated,
         };
       })
-      .filter(newS => {
-        return !addedSeries.some(
-          existing =>
-            existing.dashboardId === newS.dashboardId &&
-            existing.panelId === newS.panelId &&
-            existing.metricName === newS.metricName
-        );
-      });
+      .filter(newS => !addedSeries.some(
+        existing =>
+          existing.dashboardId === newS.dashboardId &&
+          existing.panelId === newS.panelId &&
+          existing.metricName === newS.metricName
+      ));
 
     if (newSeries.length > 0) {
       setAddedSeries(prev => [...prev, ...newSeries]);
@@ -225,12 +85,7 @@ export function useCompareHandlers({
     } else {
       showToast('Selected series already added');
     }
-
-    setSelectedMetricNames([]);
-  }, [
-    selectedDashboard, selectedMetric, selectedMetricNames, addedSeries,
-    selectedSource, setAddedSeries, setSelectedMetricNames, showToast
-  ]);
+  }, [addedSeries, setAddedSeries, showToast]);
 
   // Remove a series from the comparison
   const handleRemoveSeries = useCallback((seriesId: string) => {
@@ -291,9 +146,6 @@ export function useCompareHandlers({
   }, [showGraphs, fetchGraphData, setShowGraphs]);
 
   return {
-    handleSourceSelect,
-    handleDashboardSelect,
-    handleMetricSelect,
     handleAddSeries,
     handleRemoveSeries,
     handleClearAllSeries,

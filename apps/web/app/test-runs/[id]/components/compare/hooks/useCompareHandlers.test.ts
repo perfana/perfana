@@ -1,92 +1,112 @@
 /**
- * Tests for useCompareHandlers — URL panel injection on interactive dashboard select (Fix wave 1).
+ * Tests for useCompareHandlers.handleAddSeries.
  *
- * Covers:
- * - `handleDashboardSelect` injects virtual URL panels (210-218) alongside the
- *   ds-metrics/available panels when a performance-metrics dashboard is selected.
+ * Covers what the multi-select cascade made possible and what it must not break:
+ * - one click adds series from several panels across several dashboards, each row
+ *   keeping its own dashboard id, panel and metrics source
+ * - a series already in the comparison is not added twice
+ * - "All aggregated" is stored under its aggregated metric name, flagged as such
  */
 
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { useCompareHandlers } from './useCompareHandlers';
-import { ApplicationDashboard } from '../types';
+import { ApplicationDashboard, CompareSeries } from '../types';
+import type { PanelOption } from '../utils/metric-options';
+import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
 
 jest.mock('@/lib/api', () => ({ authenticatedFetch: jest.fn() }));
 
-import { authenticatedFetch } from '@/lib/api';
-
-const testRun = {
-  test_run_id: 'run-1',
-  system_under_test_id: 'sut-1',
-  test_environment: 'acc',
-  workload: 'load',
-  systems_under_test: { name: 'sut' },
-} as any;
+const testRun = { test_run_id: 'run-1' } as never;
 
 const perfDashboard: ApplicationDashboard = {
-  id: 'dash-1',
-  dashboard_label: 'Perf',
-  dashboard_name: 'Perf',
-  dashboard_uid: 'perf-uid',
-  source_type: 'performance_test',
+  id: 'dash-1', dashboard_label: 'Perf', dashboard_name: 'Perf',
+  dashboard_uid: 'perf-uid', source_type: 'performance_test', metrics_source_id: 'ms-1',
+};
+const jvmDashboard: ApplicationDashboard = {
+  id: 'dash-2', dashboard_label: 'JVM', dashboard_name: 'JVM',
+  dashboard_uid: 'jvm-uid', source_type: 'grafana', metrics_source_id: 'ms-2',
 };
 
-function setup() {
-  const setPanels = jest.fn();
-  const props = {
+const panelOf = (dashboard: ApplicationDashboard, id: number, title: string): PanelOption => ({
+  id, title, type: 'timeseries',
+  applicationDashboardId: dashboard.id,
+  metricsSourceId: dashboard.metrics_source_id,
+  dashboard,
+  dashboardLabel: dashboard.dashboard_label,
+  source: dashboard.source_type === 'performance_test' ? 'performance-metrics' : 'grafana',
+});
+
+function setup(addedSeries: CompareSeries[] = []) {
+  const setAddedSeries = jest.fn();
+  const showToast = jest.fn();
+  const { result } = renderHook(() => useCompareHandlers({
     testRun,
     testRunId: 'run-1',
-    showToast: jest.fn(),
-    selectedSource: 'grafana' as any,
-    selectedDashboard: null,
-    selectedMetric: null,
-    selectedMetricNames: [],
-    addedSeries: [],
+    showToast,
+    addedSeries,
     selectedTestRun: null,
     showGraphs: {},
-    setSelectedSource: jest.fn(),
-    setSelectedDashboard: jest.fn(),
-    setSelectedMetric: jest.fn(),
-    setPanels,
-    setDynatraceMetrics: jest.fn(),
-    setAvailableMetrics: jest.fn(),
-    setSelectedMetricNames: jest.fn(),
-    setAddedSeries: jest.fn(),
+    setAddedSeries,
     setMetricComparisons: jest.fn(),
     setCurrentMetrics: jest.fn(),
     setSelectedMetrics: jest.fn(),
     setShowGraphs: jest.fn(),
     setGraphData: jest.fn(),
     setGraphLoading: jest.fn(),
-    fetchDashboardPanels: jest.fn().mockResolvedValue([]),
-    fetchDynatraceMetricsList: jest.fn().mockResolvedValue(undefined),
-    fetchPanelMetrics: jest.fn().mockResolvedValue([]),
-  };
-  const { result } = renderHook(() => useCompareHandlers(props));
-  return { result, setPanels };
+  }));
+  return { result, setAddedSeries, showToast };
 }
 
-beforeEach(() => {
-  jest.clearAllMocks();
+/** The array handleAddSeries hands to setAddedSeries, which is called with an updater. */
+const added = (setAddedSeries: jest.Mock): CompareSeries[] =>
+  setAddedSeries.mock.calls[0]![0]([]);
+
+beforeEach(() => jest.clearAllMocks());
+
+it('adds series from several panels across several dashboards in one go', () => {
+  const { result, setAddedSeries, showToast } = setup();
+
+  result.current.handleAddSeries([
+    { dashboard: perfDashboard, panel: panelOf(perfDashboard, 201, 'Request RT'), metricName: 'login' },
+    { dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap'), metricName: 'used' },
+  ]);
+
+  const series = added(setAddedSeries);
+  expect(series).toHaveLength(2);
+  expect(series[0]).toMatchObject({
+    dashboardId: 'dash-1', dashboardLabel: 'Perf', panelId: 201, panelTitle: 'Request RT',
+    metricName: 'login', source: 'performance-metrics', metricsSourceId: 'ms-1',
+  });
+  expect(series[1]).toMatchObject({
+    dashboardId: 'dash-2', dashboardLabel: 'JVM', panelId: 5, panelTitle: 'Heap',
+    metricName: 'used', source: 'grafana', metricsSourceId: 'ms-2',
+  });
+  expect(showToast).toHaveBeenCalledWith('Added 2 series to comparison');
 });
 
-it('injects URL panels alongside ds-metrics panels for a performance-metrics dashboard', async () => {
-  (authenticatedFetch as jest.Mock).mockResolvedValue({
-    ok: true,
-    json: async () => [
-      { dashboard_label: 'Perf', panel_title: 'Request RT Avg', panel_id: 201, unit: 'ms' },
-      { dashboard_label: 'Perf', panel_title: 'Request RT P90', panel_id: 202, unit: 'ms' },
-    ],
-  });
+it('does not add a series that is already in the comparison', () => {
+  const { result, setAddedSeries, showToast } = setup([
+    { id: 'x', dashboardId: 'dash-2', dashboardLabel: 'JVM', panelId: 5,
+      panelTitle: 'Heap', metricName: 'used', source: 'grafana' } as CompareSeries,
+  ]);
 
-  const { result, setPanels } = setup();
+  result.current.handleAddSeries([
+    { dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap'), metricName: 'used' },
+  ]);
 
-  result.current.handleDashboardSelect(perfDashboard);
+  expect(setAddedSeries).not.toHaveBeenCalled();
+  expect(showToast).toHaveBeenCalledWith('Selected series already added');
+});
 
-  await waitFor(() => expect(setPanels).toHaveBeenCalled());
-  await waitFor(() => {
-    const lastCallPanels = setPanels.mock.calls[setPanels.mock.calls.length - 1][0];
-    expect(lastCallPanels.some((p: any) => p.id === 210)).toBe(true);   // URL panel injected
-    expect(lastCallPanels.some((p: any) => p.id === 201)).toBe(true);   // Avg request panel kept ("Request RT")
-    expect(lastCallPanels.some((p: any) => p.id === 202)).toBe(false);  // P90 collapsed away
-  });
+it('stores "All aggregated" under its aggregated name and flags it', () => {
+  const { result, setAddedSeries } = setup();
+
+  result.current.handleAddSeries([
+    { dashboard: perfDashboard, panel: panelOf(perfDashboard, 201, 'Request RT'), metricName: ALL_AGGREGATED_OPTION },
+  ]);
+
+  const series = added(setAddedSeries);
+  expect(series[0]!.isAggregated).toBe(true);
+  expect(series[0]!.metricName).toContain('Request RT');
+  expect(series[0]!.metricName).not.toBe(ALL_AGGREGATED_OPTION);
 });

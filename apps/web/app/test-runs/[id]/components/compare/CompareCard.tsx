@@ -46,20 +46,9 @@ export default function CompareCard({
     testRun,
     testRunId,
     showToast,
-    selectedSource: compareData.selectedSource,
-    selectedDashboard: compareData.selectedDashboard,
-    selectedMetric: compareData.selectedMetric,
-    selectedMetricNames: compareData.selectedMetricNames,
     addedSeries: compareData.addedSeries,
     selectedTestRun: compareData.selectedTestRun,
     showGraphs: compareData.showGraphs,
-    setSelectedSource: compareData.setSelectedSource,
-    setSelectedDashboard: compareData.setSelectedDashboard,
-    setSelectedMetric: compareData.setSelectedMetric,
-    setPanels: compareData.setPanels,
-    setDynatraceMetrics: compareData.setDynatraceMetrics,
-    setAvailableMetrics: compareData.setAvailableMetrics,
-    setSelectedMetricNames: compareData.setSelectedMetricNames,
     setAddedSeries: compareData.setAddedSeries,
     setMetricComparisons: compareData.setMetricComparisons,
     setCurrentMetrics: compareData.setCurrentMetrics,
@@ -67,9 +56,6 @@ export default function CompareCard({
     setShowGraphs: compareData.setShowGraphs,
     setGraphData: compareData.setGraphData,
     setGraphLoading: compareData.setGraphLoading,
-    fetchDashboardPanels: compareData.fetchDashboardPanels,
-    fetchDynatraceMetricsList: compareData.fetchDynatraceMetricsList,
-    fetchPanelMetrics: compareData.fetchPanelMetrics,
   });
 
   // Presets hook
@@ -89,7 +75,6 @@ export default function CompareCard({
     setSeriesSearchText: compareData.setSeriesSearchText,
     setShowPercentiles: compareData.setShowPercentiles,
     setDisplayConfig: compareData.setDisplayConfig,
-    fetchDashboardPanels: compareData.fetchDashboardPanels,
   });
 
   // Handle expand/collapse
@@ -239,22 +224,16 @@ export default function CompareCard({
                 relatedTestRuns={compareData.relatedTestRuns}
                 selectedTestRun={compareData.selectedTestRun}
                 onTestRunSelect={compareData.setSelectedTestRun}
-                selectedSource={compareData.selectedSource}
-                selectedDashboard={compareData.selectedDashboard}
                 allDashboards={compareData.getAllDashboardsMerged()}
-                dashboardsLoading={compareData.dashboardsLoading}
-                dynatraceDashboardsLoading={compareData.dynatraceDashboardsLoading}
-                onDashboardSelect={compareHandlers.handleDashboardSelect}
+                dashboardsLoading={compareData.dashboardsLoading || compareData.dynatraceDashboardsLoading}
+                selectedDashboard={compareData.selectedDashboard}
                 selectedMetric={compareData.selectedMetric}
-                panels={compareData.panels}
-                panelsLoading={compareData.panelsLoading}
-                dynatraceMetrics={compareData.dynatraceMetrics}
-                dynatraceMetricsLoading={compareData.dynatraceMetricsLoading}
-                onMetricSelect={compareHandlers.handleMetricSelect}
-                availableMetrics={compareData.availableMetrics}
-                availableMetricsLoading={compareData.availableMetricsLoading}
-                selectedMetricNames={compareData.selectedMetricNames}
-                setSelectedMetricNames={compareData.setSelectedMetricNames}
+                onPrimarySelectionChange={(dashboard, panel) => {
+                  // A preset stores one dashboard/panel; the cascade's first pick is it.
+                  compareData.setSelectedDashboard(dashboard);
+                  compareData.setSelectedMetric(panel);
+                  if (panel) compareData.setSelectedSource(panel.source);
+                }}
                 addedSeries={compareData.addedSeries}
                 onAddSeries={compareHandlers.handleAddSeries}
                 onRemoveSeries={compareHandlers.handleRemoveSeries}

@@ -10,13 +10,13 @@ import {
   ApplicationDashboard,
   Panel,
   CompareSeries,
-  DataSource,
   RelatedTestRun,
   MetricComparison,
   GraphData,
 } from '../types';
 import { DisplayConfig } from '../utils/compare-utils';
-import { DynatraceMetric } from '@/lib/dynatrace';
+import type { SeriesPick } from './CompareSelectionPanel';
+import type { PanelOption } from '../utils/metric-options';
 import {
   CompareSelectionPanel,
   CompareDiffTable,
@@ -43,31 +43,17 @@ interface CompareExpandedContentProps {
   selectedTestRun: RelatedTestRun | null;
   onTestRunSelect: (testRun: RelatedTestRun | null) => void;
 
-  // Source selection (auto-detected from dashboard)
-  selectedSource: DataSource;
-
-  // Dashboard selection
-  selectedDashboard: ApplicationDashboard | null;
+  // Dashboards — the cascade below picks dashboards, panels and series from these
   allDashboards: ApplicationDashboard[];
   dashboardsLoading: boolean;
-  dynatraceDashboardsLoading: boolean;
-  onDashboardSelect: (dashboard: ApplicationDashboard | null, label?: string) => void;
 
-  // Panel selection
+  /** First picked dashboard/panel, kept for preset saving. */
+  selectedDashboard: ApplicationDashboard | null;
   selectedMetric: Panel | null;
-  panels: Panel[];
-  panelsLoading: boolean;
-  dynatraceMetrics: DynatraceMetric[];
-  dynatraceMetricsLoading: boolean;
-  onMetricSelect: (metric: Panel | null) => void;
+  onPrimarySelectionChange: (dashboard: ApplicationDashboard | null, panel: PanelOption | null) => void;
 
-  // Series selection
-  availableMetrics: string[];
-  availableMetricsLoading: boolean;
-  selectedMetricNames: string[];
-  setSelectedMetricNames: (names: string[]) => void;
   addedSeries: CompareSeries[];
-  onAddSeries: () => void;
+  onAddSeries: (picks: SeriesPick[]) => void;
   onRemoveSeries: (id: string) => void;
   onClearAllSeries: () => void;
 
@@ -102,22 +88,11 @@ export function CompareExpandedContent({
   relatedTestRuns,
   selectedTestRun,
   onTestRunSelect,
-  selectedSource,
-  selectedDashboard,
   allDashboards,
   dashboardsLoading,
-  dynatraceDashboardsLoading,
-  onDashboardSelect,
+  selectedDashboard,
   selectedMetric,
-  panels,
-  panelsLoading,
-  dynatraceMetrics,
-  dynatraceMetricsLoading,
-  onMetricSelect,
-  availableMetrics,
-  availableMetricsLoading,
-  selectedMetricNames,
-  setSelectedMetricNames,
+  onPrimarySelectionChange,
   addedSeries,
   onAddSeries,
   onRemoveSeries,
@@ -167,24 +142,12 @@ export function CompareExpandedContent({
             relatedTestRuns={relatedTestRuns}
             selectedTestRun={selectedTestRun}
             onTestRunSelect={onTestRunSelect}
-            selectedDashboard={selectedDashboard}
             allDashboards={allDashboards}
             dashboardsLoading={dashboardsLoading}
-            dynatraceDashboardsLoading={dynatraceDashboardsLoading}
-            onDashboardSelect={onDashboardSelect}
-            selectedSource={selectedSource}
-            selectedMetric={selectedMetric}
-            panels={panels}
-            panelsLoading={panelsLoading}
-            dynatraceMetrics={dynatraceMetrics}
-            dynatraceMetricsLoading={dynatraceMetricsLoading}
-            onMetricSelect={onMetricSelect}
-            availableMetrics={availableMetrics}
-            availableMetricsLoading={availableMetricsLoading}
-            selectedMetricNames={selectedMetricNames}
-            setSelectedMetricNames={setSelectedMetricNames}
+            testRun={testRun}
             addedSeries={addedSeries}
             onAddSeries={onAddSeries}
+            onPrimaryChange={onPrimarySelectionChange}
           />
 
           {/* Added Series Display */}
@@ -209,7 +172,7 @@ export function CompareExpandedContent({
                 No series added yet
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Select a dashboard, panel, and series above, then click &quot;Add Series&quot; to start comparing metrics
+                Pick dashboards, panels and series above, then click &quot;Add series&quot; to start comparing metrics
               </Typography>
             </Box>
           )}
