@@ -280,7 +280,11 @@ export function useTrendsPresets({
         try {
           const params = new URLSearchParams({
             applicationDashboardId: presetData.application_dashboard_id,
-            panelId: presetData.panel_id.toString()
+            panelId: presetData.panel_id.toString(),
+            // Same run scoping as the picker, or a preset saved with "all series" would
+            // pick up names no current run produces. Human test_run_id only — the route
+            // param can be the row UUID, which ds_metrics does not key on.
+            ...(testRun?.test_run_id ? { testRunId: testRun.test_run_id } : {}),
           });
           const metricsResponse = await authenticatedFetch(
             `/metrics/ds-metrics/distinct-names?${params.toString()}`,
@@ -330,7 +334,7 @@ export function useTrendsPresets({
     } finally {
       setPresetsSaving(false);
     }
-  }, [addedSeries, selectedSource, fetchPresets, showToast]);
+  }, [addedSeries, selectedSource, fetchPresets, showToast, testRun?.test_run_id]);
 
   // Delete preset
   const deletePreset = useCallback(async (presetId: string) => {

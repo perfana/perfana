@@ -304,7 +304,9 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
       setMetricsLoading(true);
       const params = new URLSearchParams({
         applicationDashboardId: dashboardId,
-        panelId: panelId.toString()
+        panelId: panelId.toString(),
+        // Only this run's series can be plotted for this run.
+        testRunId: testRun.test_run_id,
       });
       if (metricsSourceId) {
         params.set('metricsSourceId', metricsSourceId);

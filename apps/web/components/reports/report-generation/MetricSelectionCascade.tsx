@@ -202,6 +202,9 @@ export function MetricSelectionCascade({
       const params = new URLSearchParams({
         applicationDashboardId: option.appDashboardId,
         panelId: String(panel.id),
+        // Same scoping the compare card needs: without a run this lists every series the
+        // panel ever recorded, including names no run produces any more.
+        ...(testRunId ? { testRunId } : {}),
       });
       const res = await authenticatedFetch(`/metrics/ds-metrics/distinct-names?${params.toString()}`);
       if (!res.ok) return [];
