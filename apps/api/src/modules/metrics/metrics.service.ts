@@ -971,6 +971,7 @@ export class MetricsService {
     applicationDashboardId: string,
     panelId: number,
     metricsSourceId?: string,
+    testRunId?: string,
   ): Promise<string[]> {
     try {
       const qb = this.metricsRepo
@@ -978,6 +979,16 @@ export class MetricsService {
         .select('DISTINCT dsMetrics.metric_name', 'metric_name')
         .where('dsMetrics.panel_id = :panelId', { panelId })
         .orderBy('dsMetrics.metric_name', 'ASC');
+
+      // Without a run, this answers "every series this panel has EVER recorded" — including
+      // series from runs whose naming has since changed. The compare card then offered
+      // e.g. `category_page_load` from a 2024 run next to today's
+      // `T02_Browse_Category.category_page_load`: no values in either compared run, and no
+      // URL, because nothing matches it. Scoping to the run keeps the list to what can
+      // actually be compared. Optional so existing callers keep their behaviour.
+      if (testRunId) {
+        qb.andWhere('dsMetrics.test_run_id = :testRunId', { testRunId });
+      }
 
       // Prefer metricsSourceId over applicationDashboardId
       if (metricsSourceId) {

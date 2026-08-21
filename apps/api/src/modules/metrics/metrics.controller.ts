@@ -277,11 +277,13 @@ export class MetricsController {
   @Get('ds-metrics/distinct-names')
   @ApiOperation({ summary: 'Get distinct metric names for a dashboard/panel' })
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
+  @ApiQuery({ name: 'testRunId', required: false, description: 'Limit to the series this run recorded. Without it the answer spans every run the panel ever had, including series whose names are no longer produced.' })
   async getDistinctMetricNames(
     @UserCtx() _ctx: UserContext,
     @Query('applicationDashboardId') applicationDashboardId: string,
     @Query('panelId') panelId: string,
     @Query('metricsSourceId') metricsSourceId?: string,
+    @Query('testRunId') testRunId?: string,
   ): Promise<string[]> {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
@@ -292,6 +294,7 @@ export class MetricsController {
       applicationDashboardId,
       panelIdNumber,
       metricsSourceId,
+      testRunId,
     );
   }
 }
