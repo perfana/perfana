@@ -63,7 +63,9 @@ export function useSourceDashboards(
       // Performance-test metrics live in their own artificial dashboards, listed by the same
       // endpoint and told apart by their source type.
       const belongs = source === 'grafana' ? isGrafana : isPerformanceTest;
-      const params = new URLSearchParams({ systemId: systemUnderTestId, environment });
+      // hasData: a dashboard with no stored metrics has no panels to pick, so offering it is
+      // an invitation to a dead end. The management view deliberately still lists them.
+      const params = new URLSearchParams({ systemId: systemUnderTestId, environment, hasData: 'true' });
       authenticatedFetch(`/grafana/application-dashboards?${params.toString()}`)
         .then((res) => (res.ok ? res.json() : undefined))
         .then((data: { id?: string; dashboard_label?: string; source_type?: string }[] | undefined) => {

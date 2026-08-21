@@ -51,7 +51,7 @@ export function useEditSLOForm({
     try {
       setDashboardsLoading(true);
       const response = await authenticatedFetch(
-        `/grafana/application-dashboards?systemId=${encodeURIComponent(systemId)}&environment=${encodeURIComponent(environment)}`,
+        `/grafana/application-dashboards?systemId=${encodeURIComponent(systemId)}&environment=${encodeURIComponent(environment)}&hasData=true`,
         {
           headers: {
             'Content-Type': 'application/json',

@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **A dashboard list that fails to load now says so, instead of reporting that you have none.** Any failure while fetching a system's dashboards was turned into an empty list, and an empty list is shown as "No application dashboards found" — so a server fault was presented as a statement about your data. That is how a missing database column read as 443 deleted dashboards. The page now separates the two: a failure shows what went wrong, with a Retry button and the reassurance that nothing has been changed, while "none found" is reserved for a system that genuinely has none. The dropdown of available Grafana dashboards logs its failures too, rather than quietly coming up empty.
 
+## [0.2.68.17] - 2026-08-21
+
+### Changed
+- **The dashboard dropdowns stop offering dashboards nothing was ever measured on.** Picking metrics — in the compare card, a report's comparison and trends sections, and the add and edit SLO dialogs — listed every dashboard ever attached to a system and environment, including ones left behind by workloads and spans that no longer exist. Hundreds of them on a long-lived system, and none of them selectable: the panel list comes from stored measurements, so a dashboard without any offers nothing to pick. Those are now left out of the pickers. The dashboard list in the system's configuration still shows everything, because that is where they are found and deleted.
+
 ## [0.2.68.13] - 2026-08-21
 
 ### Fixed
