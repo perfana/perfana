@@ -2,24 +2,25 @@
 
 Companion to `2026-08-21-org-id-backfill-runbook.sql`. Read this first; run that.
 
-> **Most deployments do not need this file.** Migration
-> `1794000000000-BackfillOrganizationId` performs the same repair automatically at
-> service startup: it backfills from each row's parent and sets `NOT NULL` per
-> table where the result is clean. Upgrade and read the API's startup log.
+> **Optional maintenance, not an outage fix.** An automatic migration for this
+> shipped in 0.2.68.11 and was removed in 0.2.68.12: it repaired a condition
+> nobody had reported, and on a database with real history it would have rewritten
+> millions of metric rows before the API accepted its first request. If you want
+> the repair, do it deliberately with this runbook, at a time you choose.
 >
-> Use this runbook when you want to inspect before changing anything, when you
-> need a snapshot you can revert to precisely, or when the migration logged a
-> warning it could not resolve on its own — a row whose parent has no
-> organization either. That last case is a decision about who owns the data, and
-> no migration should make it for you.
+> **This is NOT what empties the dashboard lists.** That was a missing
+> `deletion_status` column (0.2.68.12). If your lists are empty, fix that first.
 
 ## When you need this
 
-After upgrading past **v0.2.68.6**, lists come back empty even though the data is there:
+Only when phase 0 shows rows with no organization AND you have reason to think
+something is hidden because of it. Records with a null organization do not match
+org-filtered reads, so they are invisible to the lists that filter on ownership.
 
-- SUT configuration view shows no Grafana dashboards, for every SUT
-- Compare card's dashboard dropdown is missing performance-metrics dashboards
-- Profiles, benchmarks or events look emptier than they should
+Databases created before the current schema can have them; so, it turns out, can
+fresh ones (`check_results`, `ds_change_points`, `ds_compare_config` and
+`ds_metric_collection_status` all carry nulls on a brand-new install), which is why
+"NOT NULL on every owned resource" should not be trusted without checking.
 
 **Nothing has been deleted.** v0.2.68.7 removed the `OR organization_id IS NULL`
 escape from roughly 35 org filters, on the premise that Phase 4 made the column
