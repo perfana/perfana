@@ -703,55 +703,92 @@ export function ReportCard({
             '&:last-child': { pb: 3.5 },
           }}
         >
-          {/* Header */}
-          <Box
-            display="flex"
-            justifyContent="center"
-            alignItems="center"
-            mb={2}
-            sx={{
-              position: expanded ? 'sticky' : 'relative',
-              ...(expanded ? { top: 0, zIndex: 10, bgcolor: 'background.paper', borderBottom: '1px solid', borderColor: 'divider' } : {}),
-            }}
-          >
-            <Typography
-              variant="subtitle1"
-              component="h2"
+          {/* Header — expanded, the whole bar collapses the card, like the Compare card */}
+          {expanded ? (
+            <Box
+              display="flex"
+              justifyContent="center"
+              alignItems="center"
+              mb={2}
+              onClick={handleExpand}
               sx={{
-                fontWeight: 600,
-                color: 'text.secondary',
-                fontSize: '0.875rem',
-                letterSpacing: '0.01em',
-                textTransform: 'uppercase',
-                textAlign: 'center',
+                cursor: 'pointer',
+                py: 1, px: 1.25, mx: -1.25,
+                borderRadius: 2,
+                transition: 'background-color 0.2s ease',
+                position: 'sticky',
+                top: 0,
+                zIndex: 10,
+                bgcolor: 'background.paper',
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+                '&:hover': { backgroundColor: 'action.hover' },
               }}
             >
-              Reports
-            </Typography>
+              <Box textAlign="center">
+                <Typography variant="h5" component="h2" sx={{
+                  fontWeight: 600, color: 'text.primary', fontSize: '1.25rem', lineHeight: 1.2
+                }}>
+                  Reports
+                </Typography>
+                <Typography variant="body2" color="text.secondary">Click to collapse</Typography>
+              </Box>
+              <IconButton
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleExpand();
+                }}
+                size="medium"
+                sx={{
+                  position: 'absolute', right: 0, backgroundColor: 'action.hover',
+                  '&:hover': { backgroundColor: getAccentColor(), color: 'primary.contrastText' },
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <ExpandLess />
+              </IconButton>
+            </Box>
+          ) : (
+            <Box display="flex" justifyContent="center" alignItems="center" mb={2} position="relative">
+              <Typography
+                variant="subtitle1"
+                component="h2"
+                sx={{
+                  fontWeight: 600,
+                  color: 'text.secondary',
+                  fontSize: '0.875rem',
+                  letterSpacing: '0.01em',
+                  textTransform: 'uppercase',
+                  textAlign: 'center',
+                }}
+              >
+                Reports
+              </Typography>
 
-            {/* Expand/Collapse Button */}
-            <IconButton
-              onClick={(e) => {
-                e.stopPropagation();
-                handleExpand();
-              }}
-              size="small"
-              sx={{
-                position: 'absolute',
-                right: 0,
-                width: 32,
-                height: 32,
-                color: 'text.secondary',
-                '&:hover': {
-                  backgroundColor: `${getAccentColor()}15`,
-                  color: getAccentColor(),
-                },
-                transition: 'all 0.2s ease',
-              }}
-            >
-              {expanded ? <ExpandLess /> : <ExpandMore />}
-            </IconButton>
-          </Box>
+              {/* Expand Button */}
+              <IconButton
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleExpand();
+                }}
+                size="small"
+                sx={{
+                  position: 'absolute',
+                  right: 0,
+                  width: 32,
+                  height: 32,
+                  color: 'text.secondary',
+                  '&:hover': {
+                    backgroundColor: `${getAccentColor()}15`,
+                    color: getAccentColor(),
+                  },
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <ExpandMore />
+              </IconButton>
+            </Box>
+          )}
 
           {/* Collapsed Content */}
           {!expanded && renderCollapsedContent()}
