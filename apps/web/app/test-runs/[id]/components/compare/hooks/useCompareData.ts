@@ -136,7 +136,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
 
     try {
       setDashboardsLoading(true);
-      const url = `/grafana/application-dashboards?systemId=${encodeURIComponent(testRun.system_under_test_id || '')}&environment=${encodeURIComponent(testRun.test_environment)}`;
+      const url = `/grafana/application-dashboards?systemId=${encodeURIComponent(testRun.system_under_test_id || '')}&environment=${encodeURIComponent(testRun.test_environment)}&hasData=true`;
 
       const response = await authenticatedFetch(url, {
         headers: { 'Content-Type': 'application/json' },

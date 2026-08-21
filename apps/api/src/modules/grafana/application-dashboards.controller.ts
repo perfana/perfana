@@ -29,8 +29,9 @@ import { UserCtx, UserContext } from '../../common/decorators/user-context.decor
 import { ApplicationDashboardQuery } from './application-dashboards.service';
 
 /** Raw query shape from NestJS @Query() — tags may arrive as a comma-separated string */
-interface ApplicationDashboardRawQuery extends Omit<ApplicationDashboardQuery, 'tags'> {
+interface ApplicationDashboardRawQuery extends Omit<ApplicationDashboardQuery, 'tags' | 'hasData'> {
   tags?: string | string[];
+  hasData?: string | boolean;
 }
 
 /**
@@ -90,6 +91,7 @@ export class ApplicationDashboardsController {
   @ApiQuery({ name: 'dashboardLabel', required: false, description: 'Filter by dashboard label (partial match)' })
   @ApiQuery({ name: 'dashboardUid', required: false, description: 'Filter by dashboard UID' })
   @ApiQuery({ name: 'tags', required: false, description: 'Filter by tags (comma-separated)' })
+  @ApiQuery({ name: 'hasData', required: false, description: 'Keep only dashboards some run has recorded metrics for. For metric pickers; the management view must NOT set it, since that is where dead dashboards are found and deleted.' })
   @ApiResponse({ status: 200, description: 'Return all application dashboards' })
   async findAll(
     @Query() query: ApplicationDashboardRawQuery,
@@ -97,11 +99,17 @@ export class ApplicationDashboardsController {
   ): Promise<ApplicationDashboard[]> {
     try {
       // Parse tags if provided as comma-separated string
+      // hasData arrives as text on the query string, so it is kept out of the spread rather than
+      // widening the typed field. Set only when the caller actually sent it: injecting
+      // hasData: false into every other call would change the shape every existing consumer
+      // already agrees on.
+      const { hasData: rawHasData, ...rest } = query;
       const parsedQuery: ApplicationDashboardQuery = {
-        ...query,
+        ...rest,
         tags: typeof query.tags === 'string'
           ? query.tags.split(',').map((tag: string) => tag.trim()).filter((tag: string) => tag.length > 0)
           : query.tags,
+        ...(rawHasData === undefined ? {} : { hasData: String(rawHasData) === 'true' }),
       };
 
       return await this.applicationDashboardsService.findAll(ctx.userId, ctx.roles, parsedQuery);

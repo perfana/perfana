@@ -3,6 +3,7 @@ import {
   Box,
   Paper,
   Alert,
+  AlertTitle,
   CircularProgress,
   Typography,
   Toolbar,
@@ -51,6 +52,10 @@ interface DashboardSectionProps {
   selectedWorkload: string;
   dashboards: ApplicationDashboard[];
   loading: boolean;
+  /** Why the list could not be loaded, or null. Distinct from an empty list — see below. */
+  error?: string | null;
+  /** Re-runs the fetch, so a transient failure does not need a page reload. */
+  onRetry?: () => void;
   searchText: string;
   onSearchChange: (text: string) => void;
   selectedTags: string[];
@@ -69,6 +74,8 @@ export default function DashboardSection({
   selectedWorkload,
   dashboards,
   loading,
+  error,
+  onRetry,
   searchText,
   onSearchChange,
   selectedTags,
@@ -231,6 +238,30 @@ export default function DashboardSection({
             Loading application dashboards...
           </Typography>
         </Box>
+      </Paper>
+    );
+  }
+
+  // Before the empty state, always. A failed request also leaves `dashboards` empty, and
+  // reporting that as "none found" is what made a broken API read as deleted data: the rows
+  // were all still there, and the page said the system had none.
+  if (error) {
+    return (
+      <Paper sx={{ p: 3, mb: 3, mx: 3 }}>
+        <Alert
+          severity="error"
+          action={
+            onRetry ? (
+              <Button color="inherit" size="small" onClick={onRetry}>
+                Retry
+              </Button>
+            ) : undefined
+          }
+        >
+          <AlertTitle>Could not load dashboards</AlertTitle>
+          {error} Your configured dashboards have not been changed — this page could not read
+          them. If it keeps happening, the API log will name the cause.
+        </Alert>
       </Paper>
     );
   }

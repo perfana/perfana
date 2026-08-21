@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.68.14] - 2026-08-21
+
+### Fixed
+- **The URL panels in a report's comparison section offer their URLs again.** Picking "URL RT" (or URL Error Rate, Throughput, Latency, Connect Time) showed an empty series list. The report dialog identified the run one way and the URL lookup expected the other, so the query matched nothing and returned an empty list rather than an error — the same shape as a run that genuinely recorded no URLs. The dialog now identifies the run the way the rest of the page does, and the URL lookups accept either form, as the rest of the API already did.
+- **A dashboard list that fails to load now says so, instead of reporting that you have none.** Any failure while fetching a system's dashboards was turned into an empty list, and an empty list is shown as "No application dashboards found" — so a server fault was presented as a statement about your data. That is how a missing database column read as hundreds of deleted dashboards. The page now separates the two: a failure shows what went wrong, with a Retry button and the reassurance that nothing has been changed, while "none found" is reserved for a system that genuinely has none.
+
+### Changed
+- **The dashboard dropdowns stop offering dashboards nothing was ever measured on.** Picking metrics — in the compare card, a report's comparison and trends sections, and the add and edit SLO dialogs — listed every dashboard ever attached to a system and environment, including ones left behind by workloads and spans that no longer exist. Hundreds of them on a long-lived system, and none of them selectable: the panel list comes from stored measurements, so a dashboard without any offers nothing to pick. Those are now left out of the pickers. The dashboard list in the system's configuration still shows everything, because that is where they are found and deleted.
+
+### Added
+- **The API now says at start-up when its database is missing schema it needs.** A column added to the application but only ever created on new installations leaves existing ones without it, and every read of that table then fails — which is what emptied the dashboard lists, presented as missing data rather than an error. The API compares what it expects against what the database has and names anything absent, so the next occurrence is a line in the start-up log instead of a hunt. It keeps serving by default; set `SCHEMA_DRIFT_CHECK=strict` to refuse to start instead.
+- **A pre-ship check that catches the same mistake before a release.** Adding a column to the data model without a migration to carry it to existing installations now fails `npm run preflight`, naming the column. Verified against the change that caused the incident: it fails on it.
+
 ## [0.2.68.13] - 2026-08-21
 
 ### Fixed

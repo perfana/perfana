@@ -17,6 +17,7 @@ import { ConfigService } from '@nestjs/config';
 import { SocketIOAdapter } from './socket-io.adapter';
 import { DataSource } from 'typeorm';
 import { assertRlsBypass } from './common/db/assert-rls-bypass';
+import { assertEntityColumns } from './common/db/assert-entity-columns';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -46,6 +47,12 @@ async function bootstrap() {
   // being able to bypass RLS. Under a role that cannot, every key silently loses
   // its organization instead of failing visibly. See assertRlsBypass.
   await assertRlsBypass(app.get(DataSource));
+
+  // And: does this database actually have the schema the entities declare? A column that only
+  // ever reached the consolidated schema exists on new installations and nowhere else, and the
+  // symptom is a read that fails and a list that looks empty. Warns by default; set
+  // SCHEMA_DRIFT_CHECK=strict to refuse the boot instead. See assertEntityColumns.
+  await assertEntityColumns(app.get(DataSource));
 
   // Get ConfigService for Socket.IO adapter
   const configService = app.get(ConfigService);

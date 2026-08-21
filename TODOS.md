@@ -18,11 +18,12 @@ with the version it landed in.
 **Priority:** P0
 **Origin:** the 0.2.68.7 incident — "deploying the last version deleted all application
 dashboards" (2026-08-21). Nothing was deleted.
-**Status:** the outage is fixed by
-`packages/shared/src/database/migrations/1795000000000-AddApplicationDashboardDeletionStatus.ts`
-(v0.2.68.12). An automatic organization_id backfill shipped in 0.2.68.11 and was removed in
-.12 — it addressed a different, unreported condition and would have rewritten millions of rows
-during start-up. The pattern that caused the outage is untouched.
+**Status:** parts 2 and 3 are built (v0.2.68.14) — `assertEntityColumns` at boot and
+`scripts/check-entity-migrations.mjs` in preflight. **Part 1, the constraint audit, is still
+open**, which is why this item stays P0. The outage itself is fixed by
+`1795000000000-AddApplicationDashboardDeletionStatus.ts` (v0.2.68.12). An automatic
+organization_id backfill shipped in 0.2.68.11 and was removed in .13 — it addressed a different,
+unreported condition and would have rewritten millions of rows during start-up.
 **Why:** Phase 4 declared `organization_id` NOT NULL on the owned-resource tables, but only
 inside `1700000000000-ConsolidatedSchema.ts`, which runs on a FRESH database. No migration ever
 carried the constraint or the backfill to an existing one. Code was then written against the
@@ -40,18 +41,33 @@ card. Fixed by `1795000000000-AddApplicationDashboardDeletionStatus.ts`, but onl
 column had been missing in production for a full release.
 
 **What:** three parts.
-1. Audit `1700000000000-ConsolidatedSchema.ts` for every NOT NULL, CHECK, UNIQUE and FK that has
-   no corresponding incremental migration, and write the migrations that bring an existing
-   database to the same shape. `information_schema` diff between a fresh database and a restored
-   production dump is the cheapest way to enumerate them.
-2. Add a boot-time or CI assertion that the two agree, so the next divergence is caught by a
-   failing check rather than by a customer's empty screen.
-3. **Cover columns, not just constraints, and make it mechanical.** The failing case is an
-   `@Column` added to an entity with no incremental migration — a diff CI can compute: build the
-   entity metadata, compare it against a database migrated from scratch, fail on any column the
-   database lacks. That check would have caught `deletion_status` in #516 for the cost of one CI
-   step. Until it exists, every entity change is one forgotten migration away from taking a
-   customer's list out, and the symptom will again be an empty page rather than an error.
+
+1. **STILL OPEN — audit the constraints.** `1700000000000-ConsolidatedSchema.ts` holds NOT NULL,
+   CHECK, UNIQUE and FK declarations with no corresponding incremental migration, so an existing
+   database does not have them while the code assumes it does. Columns are now covered by parts 2
+   and 3; constraints are not, and `organization_id NOT NULL` is the known example. The cheapest
+   enumeration is an `information_schema` diff between a fresh database and a restored production
+   dump — `docs/ops/2026-08-21-org-id-backfill-runbook.md` phase 0 does exactly that for one
+   column and can be widened.
+
+2. **DONE (v0.2.68.14) — boot assertion.** `apps/api/src/common/db/assert-entity-columns.ts`
+   compares TypeORM's entity metadata against `information_schema` on whatever database the
+   service is pointed at, and reports what is missing. Warns by default; `SCHEMA_DRIFT_CHECK=strict`
+   refuses the boot. Warn is the default because a false positive that takes the API down on a
+   healthy database trades a silent bug for a self-inflicted outage — and the log line alone
+   turns this incident's day into a minute.
+
+3. **DONE (v0.2.68.14) — pre-ship gate.** `scripts/check-entity-migrations.mjs`, wired into
+   `npm run preflight`: adding an `@Column` in a branch with no new migration file fails, naming
+   the column.
+
+   **The check this item originally proposed would NOT have caught the bug.** "Compare entity
+   metadata against a database migrated from scratch" passes, because a database migrated from
+   scratch is built from the consolidated schema and therefore HAS the new column. Only an
+   existing database lacks it. That is the whole shape of this failure, and it is why the two
+   checks that shipped are a diff gate and a check against the live database rather than against
+   a fresh one. Verified by running the gate against `deeb3990`, the commit that caused the
+   incident: it fails, naming `application-dashboard.entity.ts → deletion_status`.
 
 **Left over from the backfill:** `ds_metric_collection_status` has no `system_under_test_id`, so
 the migration cannot infer its organization and leaves the column nullable with a warning. It

@@ -207,6 +207,11 @@ export default function SystemConfigurationPage() {
               selectedWorkload={selectedWorkload}
               dashboards={dashboard.dashboards}
               loading={dashboard.dashboardsLoading}
+              error={dashboard.dashboardsError}
+              onRetry={() =>
+                selectedEnvironment &&
+                dashboard.fetchApplicationDashboards(systemId, selectedEnvironment)
+              }
               searchText={dashboard.dashboardSearchText}
               onSearchChange={dashboard.setDashboardSearchText}
               selectedTags={dashboard.selectedDashboardTags}
