@@ -178,6 +178,15 @@ export class ComparisonsRenderer {
         </div></td>`;
     };
 
+    // Label column. `white-space:nowrap` used to be here: one long URL then blew the column
+    // out past the page and the value columns scrolled out of sight, so the table read as a
+    // single column. `overflow-wrap:anywhere` lets a URL fold instead.
+    const labelCell = (label: string, rank: number, url?: string): string =>
+      `<td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid ${REPORT_COLORS.rowBorder}; font-size:13px; color:${REPORT_COLORS.ink}; font-weight:600; vertical-align:top; max-width:320px; overflow-wrap:anywhere; word-break:break-word;">
+        ${this.utils.escapeHtml(label)}
+        ${url ? `<div style="margin-top:3px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10.5px; font-weight:400; color:${REPORT_COLORS.faintInk}; overflow-wrap:anywhere; word-break:break-word;">${this.utils.escapeHtml(url)}</div>` : ''}
+      </td>`;
+
     const summaryChips = (reg: number, warn: number, ok: number): string[] => [
       reg > 0 ? chip(`${reg} regressions`, 'bad') : '',
       warn > 0 ? chip(`${warn} warnings`, 'warn') : '',
@@ -272,7 +281,7 @@ export class ComparisonsRenderer {
               metric = parsed.metric;
             }
             return `<tr style="background:${rowBackground(rank, idx)};">
-              <td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid ${REPORT_COLORS.rowBorder}; font-size:13px; color:${REPORT_COLORS.ink}; font-weight:600; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(metric)}</td>
+              ${labelCell(metric, rank, row.url)}
               ${cells}</tr>`;
           }).join('');
 
@@ -323,7 +332,7 @@ export class ComparisonsRenderer {
           if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
           const cells = row.metrics.map((m, gi) => renderCell(m, gi > 0)).join('');
           return `<tr style="background:${rowBackground(rank, idx)};">
-            <td style="padding:14px 14px 14px 12px; border-left:3px solid ${accent(rank)}; border-bottom:1px solid ${REPORT_COLORS.rowBorder}; font-size:13px; color:#374151; font-weight:500; white-space:nowrap; vertical-align:top;">${this.utils.escapeHtml(row.label)}</td>
+            ${labelCell(row.label, rank, row.url)}
             ${cells}</tr>`;
         }).join('');
 
