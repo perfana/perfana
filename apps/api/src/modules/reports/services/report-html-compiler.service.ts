@@ -12,7 +12,12 @@ import { TrendsRenderer } from '../renderers/trends-renderer';
 import { ComparisonsRenderer } from '../renderers/comparisons-renderer';
 import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
+import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
+import {
+  REPORT_INTERACTIVITY_CSS,
+  REPORT_INTERACTIVITY_SCRIPT,
+} from '../renderers/report-interactivity';
 
 /**
  * Service for compiling report sections into HTML
@@ -38,6 +43,7 @@ export class ReportHtmlCompilerService {
     private readonly comparisonsRenderer: ComparisonsRenderer,
     private readonly graphsRenderer: GraphsRenderer,
     private readonly top10ListsRenderer: Top10ListsRenderer,
+    private readonly errorAnalysisRenderer: ErrorAnalysisRenderer,
     private readonly placeholderRenderer: PlaceholderRenderer,
   ) {}
 
@@ -113,6 +119,8 @@ export class ReportHtmlCompilerService {
         return await this.graphsRenderer.renderGraphsSection(section, testRun, userId, roles);
       case 'top_10_lists':
         return await this.top10ListsRenderer.renderTop10ListsSection(section, testRun, userId, roles);
+      case 'error_analysis':
+        return await this.errorAnalysisRenderer.renderErrorAnalysisSection(section, testRun, userId, roles);
       default:
         return this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
     }
@@ -860,6 +868,8 @@ export class ReportHtmlCompilerService {
          @bottom-right, which duplicated the footerTemplate page counter. */
     }
 
+    ${REPORT_INTERACTIVITY_CSS}
+
     /* Custom CSS Override */
     ${customCss}
   </style>
@@ -881,6 +891,8 @@ export class ReportHtmlCompilerService {
       Generated: ${currentDate}
     </div>
   </footer>
+
+  ${REPORT_INTERACTIVITY_SCRIPT}
 </body>
 </html>`;
   }

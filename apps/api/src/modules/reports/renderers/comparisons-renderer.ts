@@ -6,11 +6,13 @@ import { buildSelections } from './section-selections';
 import { bandColor, gatedDiffPercent, DiffThresholds } from './comparison-bands';
 import {
   ACCENT,
+  BAND_FOR_RANK,
   DEFAULT_THRESHOLDS,
   REPORT_COLORS,
   TH_NUM,
   TH_TEXT,
   THEAD_ROW,
+  bandFilterChip,
   chip,
   sectionText,
   deltaChip,
@@ -187,10 +189,12 @@ export class ComparisonsRenderer {
         ${url ? `<div style="margin-top:3px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10.5px; font-weight:400; color:${REPORT_COLORS.faintInk}; overflow-wrap:anywhere; word-break:break-word;">${this.utils.escapeHtml(url)}</div>` : ''}
       </td>`;
 
+    // These double as the group's band filters once the report's interactivity
+    // script runs; without it they are the same count chips as before.
     const summaryChips = (reg: number, warn: number, ok: number): string[] => [
-      reg > 0 ? chip(`${reg} regressions`, 'bad') : '',
-      warn > 0 ? chip(`${warn} warnings`, 'warn') : '',
-      ok > 0 ? chip(`${ok} within range`, 'good') : '',
+      reg > 0 ? bandFilterChip(`${reg} regressions`, 'bad', 'regression') : '',
+      warn > 0 ? bandFilterChip(`${warn} warnings`, 'warn', 'warning') : '',
+      ok > 0 ? bandFilterChip(`${ok} within range`, 'good', 'ok') : '',
     ];
 
     // Name the two runs being compared explicitly, so the report is unambiguous
@@ -280,7 +284,7 @@ export class ComparisonsRenderer {
               if (parsed.host) hostName = parsed.host;
               metric = parsed.metric;
             }
-            return `<tr style="background:${rowBackground(rank, idx)};">
+            return `<tr data-band="${BAND_FOR_RANK[rank]}" style="background:${rowBackground(rank, idx)};">
               ${labelCell(metric, rank, row.url)}
               ${cells}</tr>`;
           }).join('');
@@ -309,7 +313,7 @@ export class ComparisonsRenderer {
           chip(`${formatInt(dashboardRows)} metrics`, 'neutral'),
         ];
 
-        return `<div style="margin-top:30px;">
+        return `<div data-band-scope style="margin-top:30px;">
           ${groupHeader(dashboard, headingChips, summaryChips(reg, warn, ok))}
           ${mappingCaption(dashboard)}
           ${panelBlocks}
@@ -331,12 +335,12 @@ export class ComparisonsRenderer {
           const rank = worstRank(row);
           if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
           const cells = row.metrics.map((m, gi) => renderCell(m, gi > 0)).join('');
-          return `<tr style="background:${rowBackground(rank, idx)};">
+          return `<tr data-band="${BAND_FOR_RANK[rank]}" style="background:${rowBackground(rank, idx)};">
             ${labelCell(row.label, rank, row.url)}
             ${cells}</tr>`;
         }).join('');
 
-        return `<div style="margin-top:38px;">
+        return `<div data-band-scope style="margin-top:38px;">
           ${groupHeader(group, [chip(`${formatInt(rows.length)} transactions`, 'neutral')], summaryChips(reg, warn, ok))}
           <div class="table-scroll">
             <table style="width:100%; border-collapse:collapse;">

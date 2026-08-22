@@ -17,6 +17,8 @@ import {
   statCard,
   markerChip,
   chip,
+  bandFilterChip,
+  BAND_FOR_RANK,
   TH_TEXT,
   TH_NUM,
 } from './report-style';
@@ -272,5 +274,36 @@ describe('status pills in a table cell', () => {
     ['deltaChip', deltaChip(12.5, 'higher-is-worse')],
   ])('%s opts out of break-anywhere', (_name, markup) => {
     expect(markup).toContain('overflow-wrap:normal');
+  });
+});
+
+describe('bandFilterChip', () => {
+  it('renders the same chip as chip(), plus an inert data attribute', () => {
+    // The attribute is what the report's interactivity script binds to. It must
+    // change nothing about how the chip looks or prints — a script-blocked
+    // viewer and the PDF both keep the plain count chip.
+    const plain = chip('4 warnings', 'warn');
+    const filterable = bandFilterChip('4 warnings', 'warn', 'warning');
+
+    expect(filterable).toContain('data-band-filter="warning"');
+    expect(filterable.replace(' data-band-filter="warning"', '')).toBe(plain);
+  });
+
+  it('carries the band it filters for', () => {
+    expect(bandFilterChip('3 regressions', 'bad', 'regression')).toContain('data-band-filter="regression"');
+    expect(bandFilterChip('9 within range', 'good', 'ok')).toContain('data-band-filter="ok"');
+  });
+
+  it('escapes the label like every other chip', () => {
+    expect(bandFilterChip('<script>', 'bad', 'regression')).toContain('&lt;script&gt;');
+    expect(bandFilterChip('<script>', 'bad', 'regression')).not.toContain('<script>');
+  });
+});
+
+describe('BAND_FOR_RANK', () => {
+  it('maps the comparisons renderer\'s 0/1/2 rank onto the band names', () => {
+    expect(BAND_FOR_RANK[0]).toBe('ok');
+    expect(BAND_FOR_RANK[1]).toBe('warning');
+    expect(BAND_FOR_RANK[2]).toBe('regression');
   });
 });

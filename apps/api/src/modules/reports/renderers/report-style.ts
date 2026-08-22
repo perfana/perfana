@@ -136,10 +136,34 @@ export function statusPill(status: ReportStatus): string {
   return pill(STATUS_LABEL[status], STATUS_PILL_KIND[status]);
 }
 
+function chipHtml(label: string, kind: PillKind, attrs: string): string {
+  const { bg, fg } = PILL_FILLS[kind];
+  return `<span${attrs} style="display:inline-block; padding:4px 11px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:12px; font-weight:700;">${escapeHtml(label)}</span>`;
+}
+
 /** Summary chip (counts in section/group headers). Not uppercased. */
 export function chip(label: string, kind: PillKind): string {
-  const { bg, fg } = PILL_FILLS[kind];
-  return `<span style="display:inline-block; padding:4px 11px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:12px; font-weight:700;">${escapeHtml(label)}</span>`;
+  return chipHtml(label, kind, '');
+}
+
+/**
+ * The three-state band a compared row falls in. Stamped on each row as
+ * `data-band` and named by the summary chips, so the report's interactivity
+ * script can filter one against the other.
+ */
+export type ReportBand = 'regression' | 'warning' | 'ok';
+
+/** rank 0/1/2 as produced by the comparisons renderer's worstRank. */
+export const BAND_FOR_RANK: readonly ReportBand[] = ['ok', 'warning', 'regression'];
+
+/**
+ * A summary chip that doubles as a filter control once the interactivity script
+ * runs. Byte-identical to {@link chip} apart from the data attribute, which is
+ * inert on its own — so the chip looks and prints exactly as it does today in
+ * the PDF and in the script-blocked viewers.
+ */
+export function bandFilterChip(label: string, kind: PillKind, band: ReportBand): string {
+  return chipHtml(label, kind, ` data-band-filter="${band}"`);
 }
 
 /** Compact in-table marker chip (e.g. a CURRENT run marker) sized for table rows. */
