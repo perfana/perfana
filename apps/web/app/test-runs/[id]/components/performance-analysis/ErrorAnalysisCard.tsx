@@ -1,6 +1,6 @@
 'use client';
 
-import { Box, Typography, CircularProgress, Alert } from '@mui/material';
+import { Box, Paper, Typography, CircularProgress, Alert } from '@mui/material';
 import { CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import { useErrorAnalysisData } from './error-analysis/hooks';
 import {
@@ -33,23 +33,15 @@ export default function ErrorAnalysisCard({ testRunId, selectedScenarios = [], e
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress sx={{ color: 'primary.main' }} />
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: 8 }}>
+        <CircularProgress />
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Alert
-        severity="error"
-        sx={{
-          m: 2,
-          borderRadius: 2,
-          border: '1px solid rgba(244, 67, 54, 0.3)',
-          backgroundColor: 'rgba(244, 67, 54, 0.08)',
-        }}
-      >
+      <Alert severity="error" sx={{ my: 2 }}>
         {error}
       </Alert>
     );
@@ -57,35 +49,34 @@ export default function ErrorAnalysisCard({ testRunId, selectedScenarios = [], e
 
   if (!summary || summary.totalErrors === 0) {
     return (
-      <Box
-        sx={{
-          p: 4,
-          textAlign: 'center',
-          background: 'linear-gradient(135deg, rgba(76, 175, 80, 0.05) 0%, rgba(76, 175, 80, 0.02) 100%)',
-          borderRadius: 3,
-          border: '1.5px solid rgba(76, 175, 80, 0.15)',
-        }}
-      >
-        <CheckCircleIcon sx={{ fontSize: 64, color: 'success.main', mb: 2 }} />
-        <Typography
-          variant="h6"
+      <Box sx={{ p: 3 }}>
+        <Paper
+          elevation={2}
           sx={{
-            color: 'success.main',
-            fontWeight: 700,
-            mb: 1,
+            p: 3,
+            borderLeft: '4px solid #4caf50',
+            backgroundColor: 'background.paper',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
           }}
         >
-          No Errors Detected
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          This test run completed without any errors. Excellent performance!
-        </Typography>
+          <CheckCircleIcon sx={{ color: 'success.main' }} />
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem' }}>
+              No errors detected
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              This test run completed without any errors.
+            </Typography>
+          </Box>
+        </Paper>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ p: 2 }}>
+    <Box sx={{ p: 3 }}>
       {/* Summary Statistics */}
       <ErrorSummaryCards summary={summary} />
 
