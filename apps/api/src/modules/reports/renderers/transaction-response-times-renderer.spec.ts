@@ -59,6 +59,7 @@ describe('TransactionResponseTimesRenderer', () => {
           provide: ReportDataFetcherService,
           useValue: {
             getScenarioDataFromDatabase: jest.fn().mockResolvedValue(makeScenarioData()),
+            listScenarioNames: jest.fn().mockResolvedValue(['checkout']),
             getMockScenarioData: jest.fn().mockReturnValue(makeScenarioData()),
             getAggregatedSeries: jest.fn().mockResolvedValue([]),
             getAggregatedScalars: jest.fn().mockResolvedValue({ avg: null, p95: null, p99: null, pass: 0, fail: 0 }),
@@ -170,8 +171,58 @@ describe('TransactionResponseTimesRenderer', () => {
         'checkout',
         'user-1',
         ['user'],
+        false,
       );
       expect(dataFetcher.getMockScenarioData).not.toHaveBeenCalled();
+      // A named scenario is the selection; the run's scenario list is not needed
+      expect(dataFetcher.listScenarioNames).not.toHaveBeenCalled();
+    });
+
+    it('fetches one block per selected scenario', async () => {
+      dataFetcher.getScenarioDataFromDatabase
+        .mockResolvedValueOnce(makeScenarioData({ scenario: 'checkout' }))
+        .mockResolvedValueOnce(makeScenarioData({ scenario: 'browse' }));
+      const section = makeSection({ config: { scenarios: ['checkout', 'browse'] } });
+
+      const html = await renderer.renderTransactionResponseTimesSection(section, makeTestRun());
+
+      expect(dataFetcher.getScenarioDataFromDatabase).toHaveBeenCalledTimes(2);
+      // Each scenario heads its own block once there is more than one
+      expect(html).toContain('>checkout</h3>');
+      expect(html).toContain('>browse</h3>');
+      expect(html).toContain('checkout, browse'); // both named in the header kicker
+    });
+
+    it('falls back to every scenario in the run when none is selected', async () => {
+      dataFetcher.listScenarioNames.mockResolvedValue(['checkout', 'browse']);
+
+      await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(dataFetcher.listScenarioNames).toHaveBeenCalled();
+      expect(dataFetcher.getScenarioDataFromDatabase).toHaveBeenCalledTimes(2);
+    });
+
+    it('treats a legacy scenario:"all" the same as no selection', async () => {
+      dataFetcher.listScenarioNames.mockResolvedValue(['checkout']);
+      const section = makeSection({ config: { scenario: 'all' } });
+
+      await renderer.renderTransactionResponseTimesSection(section, makeTestRun());
+
+      // Never queried for a scenario literally named "all", which matches no row
+      expect(dataFetcher.listScenarioNames).toHaveBeenCalled();
+      expect(dataFetcher.getScenarioDataFromDatabase).toHaveBeenCalledWith(
+        expect.anything(), 'checkout', '', [], false,
+      );
+    });
+
+    it('asks for child requests only when the toggle is on', async () => {
+      const section = makeSection({ config: { scenario: 'checkout', includeChildRequests: true } });
+
+      await renderer.renderTransactionResponseTimesSection(section, makeTestRun());
+
+      expect(dataFetcher.getScenarioDataFromDatabase).toHaveBeenCalledWith(
+        expect.anything(), 'checkout', '', [], true,
+      );
     });
 
     it('should fall back to mock data when testRun is null', async () => {
@@ -190,6 +241,128 @@ describe('TransactionResponseTimesRenderer', () => {
       expect(html).toContain('not found');
       expect(html).toContain('missing-scenario');
       expect(html).toContain('response-times-section');
+    });
+  });
+
+  describe('child requests', () => {
+    it('renders a request table attached to its transaction', async () => {
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({
+        transactions: [
+          {
+            name: 'Login', avgMs: 120, p95Ms: 250, p99Ms: 400, pass: 100, fail: 0, errPct: 0,
+            children: [
+              { name: 'POST /auth', avgMs: 80, p95Ms: 160, p99Ms: 240, pass: 100, fail: 0, errPct: 0 },
+              { name: 'GET /profile', avgMs: 40, p95Ms: 90, p99Ms: 160, pass: 99, fail: 1, errPct: 1 },
+            ],
+          },
+        ],
+      }));
+
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('POST /auth');
+      expect(html).toContain('GET /profile');
+      expect(html).toContain('2 requests');
+      // A single-cell colspan row is what keeps the requests attached to their
+      // transaction when the report's table script sorts or filters.
+      expect(html).toContain('colspan="7"');
+      expect(html).toContain('>Request</th>');
+    });
+
+    it('bands requests under the controllers they ran in', async () => {
+      const PARALLEL = 'org.apache.jmeter.control.ParallelController';
+      const LOOP = 'org.apache.jmeter.control.LoopController';
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({
+        transactions: [
+          {
+            name: 'Login', avgMs: 120, p95Ms: 250, p99Ms: 400, pass: 100, fail: 0, errPct: 0,
+            children: [
+              {
+                name: 'GET /assets', avgMs: 10, p95Ms: 20, p99Ms: 30, pass: 100, fail: 0, errPct: 0,
+                firstSeen: 1,
+                parentControllers: [
+                  { name: 'Thread Group', class: 'org.apache.jmeter.threads.ThreadGroup' },
+                  { name: 'Assets', class: PARALLEL },
+                ],
+              },
+              {
+                name: 'GET /icons', avgMs: 12, p95Ms: 22, p99Ms: 33, pass: 100, fail: 0, errPct: 0,
+                firstSeen: 2,
+                parentControllers: [
+                  { name: 'Thread Group', class: 'org.apache.jmeter.threads.ThreadGroup' },
+                  { name: 'Assets', class: PARALLEL },
+                ],
+              },
+              {
+                name: 'POST /auth', avgMs: 80, p95Ms: 160, p99Ms: 240, pass: 300, fail: 0, errPct: 0,
+                firstSeen: 3,
+                parentControllers: [{ name: 'Retry', class: LOOP }],
+              },
+            ],
+          },
+        ],
+      }));
+
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      // The band the two concurrent requests share, labelled by what it does
+      expect(html).toContain('Assets');
+      expect(html).toContain('parallel');
+      // A loop band survives around a single request — "this repeats" is still true
+      expect(html).toContain('Retry');
+      expect(html).toContain('loop');
+      // The Thread Group is the same for every row in the run and carries nothing here
+      expect(html).not.toContain('Thread Group');
+    });
+
+    it('drops a parallel band that would wrap a single request', async () => {
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({
+        transactions: [
+          {
+            name: 'Login', avgMs: 120, p95Ms: 250, p99Ms: 400, pass: 100, fail: 0, errPct: 0,
+            children: [
+              {
+                name: 'GET /solo', avgMs: 10, p95Ms: 20, p99Ms: 30, pass: 100, fail: 0, errPct: 0,
+                firstSeen: 1,
+                parentControllers: [{ name: 'Lonely', class: 'org.apache.jmeter.control.ParallelController' }],
+              },
+            ],
+          },
+        ],
+      }));
+
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('GET /solo');
+      expect(html).not.toContain('Lonely');
+    });
+
+    it('renders a flat request table when the run records no controllers', async () => {
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({
+        transactions: [
+          {
+            name: 'Login', avgMs: 120, p95Ms: 250, p99Ms: 400, pass: 100, fail: 0, errPct: 0,
+            children: [
+              { name: 'POST /auth', avgMs: 80, p95Ms: 160, p99Ms: 240, pass: 100, fail: 0, errPct: 0 },
+              { name: 'GET /profile', avgMs: 40, p95Ms: 90, p99Ms: 160, pass: 99, fail: 1, errPct: 1 },
+            ],
+          },
+        ],
+      }));
+
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('POST /auth');
+      expect(html).toContain('GET /profile');
+      // One colspan row only: the detail row itself, no bands inside it
+      expect((html.match(/colspan="7"/g) ?? []).length).toBe(1);
+    });
+
+    it('renders no detail row when a transaction has no children', async () => {
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(html).not.toContain('colspan="7"');
+      expect(html).not.toContain('requests</div>');
     });
   });
 
