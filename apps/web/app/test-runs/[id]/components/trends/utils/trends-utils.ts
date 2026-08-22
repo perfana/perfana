@@ -9,42 +9,84 @@ export function getSeriesColor(index: number): string {
   return colors[index % colors.length];
 }
 
-/**
- * Get y-axis title and suffix based on the unit format
- * Uses the first series with a unit set
- */
-export function getYAxisConfig(addedSeries: TrendsSeries[]): { title: string; ticksuffix: string } {
-  const seriesWithUnit = addedSeries.find(s => s.yAxisFormat);
-  if (!seriesWithUnit?.yAxisFormat) {
+const UNIT_SUFFIXES: Record<string, string> = {
+  'ms': ' ms',
+  's': ' s',
+  'µs': ' µs',
+  'ns': ' ns',
+  'percent': '%',
+  'percentunit': '',
+  'bytes': ' B',
+  'kbytes': ' KB',
+  'mbytes': ' MB',
+  'gbytes': ' GB',
+  'reqps': ' req/s',
+  'ops': ' ops/s',
+  'wps': ' w/s',
+  'rps': ' r/s',
+  'short': '',
+  'none': ''
+};
+
+export interface AxisConfig {
+  title: string;
+  ticksuffix: string;
+}
+
+function axisConfigForUnit(unit: string | undefined): AxisConfig {
+  if (!unit) {
     return { title: 'Value', ticksuffix: '' };
   }
-
-  const unit = seriesWithUnit.yAxisFormat;
-  const unitConfig = GRAFANA_UNITS.find(u => u.value === unit);
-
-  const suffixMap: Record<string, string> = {
-    'ms': ' ms',
-    's': ' s',
-    'µs': ' µs',
-    'ns': ' ns',
-    'percent': '%',
-    'percentunit': '',
-    'bytes': ' B',
-    'kbytes': ' KB',
-    'mbytes': ' MB',
-    'gbytes': ' GB',
-    'reqps': ' req/s',
-    'ops': ' ops/s',
-    'wps': ' w/s',
-    'rps': ' r/s',
-    'short': '',
-    'none': ''
-  };
-
   return {
-    title: unitConfig?.label || 'Value',
-    ticksuffix: suffixMap[unit] || ''
+    title: GRAFANA_UNITS.find(u => u.value === unit)?.label || 'Value',
+    ticksuffix: UNIT_SUFFIXES[unit] || ''
   };
+}
+
+/**
+ * Split the added series across a left and a right y-axis by unit, mirroring the
+ * Graphs card: the first unit keeps the left axis and every other unit shares the
+ * right one. Without this a percent series and a req/s series land on one axis and
+ * the second one is drawn under the first one's label and tick suffix.
+ *
+ * `rightMetrics` holds the metric names that belong on the right axis, which is what
+ * the traces are keyed by.
+ *
+ * ponytail: three or more distinct units still share a single right axis, labelled
+ * for the first of them. Give each unit its own axis if that combination shows up.
+ */
+export function getYAxisConfigs(addedSeries: TrendsSeries[]): {
+  left: AxisConfig;
+  right: AxisConfig | null;
+  rightMetrics: Set<string>;
+} {
+  const groups = new Map<string, string[]>();
+  for (const series of addedSeries) {
+    const key = series.yAxisFormat || '';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(series.metricName);
+  }
+
+  const entries = Array.from(groups.entries());
+  const left = axisConfigForUnit(entries[0]?.[0] || undefined);
+
+  if (entries.length < 2) {
+    return { left, right: null, rightMetrics: new Set() };
+  }
+
+  const rightEntries = entries.slice(1);
+  return {
+    left,
+    right: axisConfigForUnit(rightEntries[0]![0] || undefined),
+    rightMetrics: new Set(rightEntries.flatMap(([, names]) => names))
+  };
+}
+
+/**
+ * Left-axis config only. Kept for callers that do not deal with a second axis.
+ */
+export function getYAxisConfig(addedSeries: TrendsSeries[]): AxisConfig {
+  return getYAxisConfigs(addedSeries).left;
 }
 
 /**

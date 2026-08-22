@@ -12,7 +12,7 @@ import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
 import { useState, useEffect} from 'react';
 import { useTheme } from '@mui/material';
 import { MetricStatistic, TrendsSeries, Panel } from '../types';
-import { getYAxisConfig } from '../utils';
+import { getYAxisConfigs } from '../utils';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 interface UseTrendsPlotProps {
@@ -87,6 +87,10 @@ export function useTrendsPlot({
 
     const isDark = theme.palette.mode === 'dark';
 
+    // Series whose unit differs from the first one get their own right-hand axis,
+    // otherwise they would be drawn under the first series' label and tick suffix.
+    const yAxes = getYAxisConfigs(addedSeries);
+
     // Create traces for each series with datetime x-axis but equal spacing
     // Annotated so the changepoint legend trace below (mode 'lines', a dashed
     // coloured line) fits alongside the data traces rather than being narrowed out.
@@ -135,6 +139,7 @@ export function useTrendsPlot({
           }
         },
         line: { width: 2 },
+        yaxis: yAxes.rightMetrics.has(seriesName) ? 'y2' : 'y',
         showlegend: true
       }));
 
@@ -178,8 +183,6 @@ export function useTrendsPlot({
       graphTitle = `${selectedMetric?.title || 'Metrics'} Trends - ${selectedSeriesNames.size} series (${evaluateType})`;
     }
 
-    const yAxisConfig = getYAxisConfig(addedSeries);
-
     const layout = {
       title: {
         text: graphTitle,
@@ -221,7 +224,7 @@ export function useTrendsPlot({
       },
       yaxis: {
         title: {
-          text: yAxisConfig.title,
+          text: yAxes.left.title,
           font: {
             size: 12,
             color: textSecondary
@@ -237,7 +240,7 @@ export function useTrendsPlot({
           size: 11,
           color: textSecondary
         },
-        ticksuffix: yAxisConfig.ticksuffix,
+        ticksuffix: yAxes.left.ticksuffix,
         ticks: '',
         zeroline: true,
         zerolinecolor: gridColor,
@@ -245,6 +248,26 @@ export function useTrendsPlot({
         automargin: true,
         nticks: 5
       },
+      ...(yAxes.right ? {
+        yaxis2: {
+          title: {
+            text: yAxes.right.title,
+            font: { size: 12, color: textSecondary }
+          },
+          rangemode: 'tozero' as const,
+          overlaying: 'y' as const,
+          side: 'right' as const,
+          showgrid: false,
+          showline: true,
+          linecolor: theme.palette.divider,
+          color: textSecondary,
+          tickfont: { size: 11, color: textSecondary },
+          ticksuffix: yAxes.right.ticksuffix,
+          ticks: '',
+          automargin: true,
+          nticks: 5
+        }
+      } : {}),
       hovermode: 'x unified' as const,
       hoverlabel: {
         bgcolor: bgColor,
