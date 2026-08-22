@@ -26,6 +26,7 @@ export const REPORT_SECTION_TYPES = [
   'comparisons',
   'graphs',
   'top_10_lists',
+  'error_analysis',
 ] as const;
 
 export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
@@ -45,6 +46,7 @@ export const SECTION_TYPES_WITH_TEXT = [
   'comparisons',
   'graphs',
   'top_10_lists',
+  'error_analysis',
 ] as const;
 
 export type TextableSectionType = (typeof SECTION_TYPES_WITH_TEXT)[number];
@@ -1077,6 +1079,7 @@ export function getSectionTypeLabel(type: ReportSectionType): string {
     comparisons: 'Comparisons',
     graphs: 'Custom Graphs',
     top_10_lists: 'Top 10 Lists',
+    error_analysis: 'Error Analysis',
   };
   return labels[type] || type;
 }

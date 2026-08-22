@@ -89,6 +89,7 @@ export class ReportUtilsService {
       comparisons: 'Comparisons',
       graphs: 'Custom Graphs',
       top_10_lists: 'Top 10 Lists',
+      error_analysis: 'Error Analysis',
     };
     return titles[type] || type;
   }

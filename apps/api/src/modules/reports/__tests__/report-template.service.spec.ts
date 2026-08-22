@@ -36,6 +36,7 @@ import {
   MockSelectQueryBuilder,
 } from '../../../../test/helpers/mock-repository.factory';
 import { AuditService } from '../../audit/audit.service';
+import { REPORT_SECTION_TYPES } from '@perfana/shared/types';
 
 describe('ReportTemplateService', () => {
   let service: ReportTemplateService;
@@ -771,20 +772,11 @@ describe('ReportTemplateService', () => {
       await expect(service.create(options)).rejects.toThrow(ValidationException);
     });
 
-    it('should accept all valid section types', async () => {
-      // Arrange
-      const validTypes = [
-        'header',
-        'text_block',
-        'slo',
-        'apdex',
-        'transaction_response_times',
-        'regressions',
-        'awr',
-        'trends',
-        'comparisons',
-        'graphs',
-      ] as const;
+    it('should accept every section type the platform defines', async () => {
+      // Arrange — iterate the canonical list rather than a copy of it. A
+      // hardcoded copy here drifted silently: it was missing top_10_lists and
+      // error_analysis, so neither was ever proven to survive validation.
+      const validTypes = REPORT_SECTION_TYPES;
       const sections: ReportSectionConfig[] = validTypes.map((type, index) => ({
         type,
         order: index,

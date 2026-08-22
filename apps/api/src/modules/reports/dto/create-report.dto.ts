@@ -36,6 +36,7 @@ export const REPORT_SECTION_TYPES = [
   'comparisons',
   'graphs',
   'top_10_lists',
+  'error_analysis',
 ] as const;
 
 export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
