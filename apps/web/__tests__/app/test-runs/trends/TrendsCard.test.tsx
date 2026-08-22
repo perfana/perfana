@@ -285,9 +285,8 @@ describe('TrendsCard', () => {
     it('should show collapse button when expanded', async () => {
       render(<TrendsCard {...defaultProps} trendsExpanded={true} />);
 
-      // The expanded header shows "Click to collapse" text
       await waitFor(() => {
-        expect(screen.getByText('Click to collapse')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /collapse trends/i })).toBeInTheDocument();
       });
     });
 

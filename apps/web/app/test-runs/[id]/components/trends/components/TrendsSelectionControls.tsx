@@ -97,9 +97,11 @@ export function TrendsSelectionControls({
   const isLoading = dashboardsLoading || dynatraceDashboardsLoading;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 3 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 1.5 }}>
       {/* Dashboard Selection - Grouped by source type */}
       <Autocomplete
+        sx={{ flex: '2 1 220px' }}
         options={allDashboards}
         getOptionLabel={(option) => option.dashboard_label || ''}
         isOptionEqualToValue={(option, value) => option.id === value.id}
@@ -149,11 +151,7 @@ export function TrendsSelectionControls({
             label="Dashboard"
             variant="outlined"
             fullWidth
-            helperText={
-              isLoading
-                ? 'Loading dashboards...'
-                : `Select dashboard (${allDashboards.length} available)`
-            }
+            helperText={isLoading ? 'Loading…' : `${allDashboards.length} available`}
             InputProps={{
               ...params.InputProps,
               endAdornment: (
@@ -178,8 +176,9 @@ export function TrendsSelectionControls({
       />
 
       {/* Panel Selection */}
-      {selectedDashboard && (
-        <Autocomplete
+      <Autocomplete
+          sx={{ flex: '2 1 200px' }}
+          disabled={!selectedDashboard}
           options={selectedSource === 'dynatrace'
             ? dynatraceMetrics.map(m => ({
                 id: m.panelId,
@@ -201,9 +200,11 @@ export function TrendsSelectionControls({
               variant="outlined"
               fullWidth
               helperText={
-                selectedSource === 'dynatrace'
-                  ? (dynatraceMetricsLoading ? 'Loading panels...' : `Select panel from ${selectedDashboard?.dashboard_label}`)
-                  : (panelsLoading ? 'Loading panels...' : `Select panel from ${selectedDashboard?.dashboard_label}`)
+                !selectedDashboard
+                  ? 'Pick a dashboard first'
+                  : (selectedSource === 'dynatrace' ? dynatraceMetricsLoading : panelsLoading)
+                    ? 'Loading…'
+                    : `${selectedSource === 'dynatrace' ? dynatraceMetrics.length : panels.length} available`
               }
               InputProps={{
                 ...params.InputProps,
@@ -225,19 +226,17 @@ export function TrendsSelectionControls({
             );
           }}
         />
-      )}
 
       {/* Series Selection and Add Button */}
-      {selectedMetric && (
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-          <Autocomplete
+      <Autocomplete
+            disabled={!selectedMetric}
             multiple
             options={availableMetrics}
             getOptionLabel={(option) => option}
             value={selectedMetricNames}
             onChange={(_, newValue) => setSelectedMetricNames(newValue)}
             loading={availableMetricsLoading}
-            sx={{ flex: 1 }}
+            sx={{ flex: '3 1 260px' }}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -245,9 +244,13 @@ export function TrendsSelectionControls({
                 variant="outlined"
                 fullWidth
                 helperText={
-                  availableMetricsLoading
-                    ? 'Loading available series...'
-                    : `Select series to add (${availableMetrics.length} available)`
+                  !selectedMetric
+                    ? 'Pick a panel first'
+                    : availableMetricsLoading
+                      ? 'Loading…'
+                      : selectedMetricNames.length > 0
+                        ? `${selectedMetricNames.length} of ${availableMetrics.length} selected`
+                        : `${availableMetrics.length} available`
                 }
                 InputProps={{
                   ...params.InputProps,
@@ -263,8 +266,8 @@ export function TrendsSelectionControls({
             renderOption={(props, option) => {
               const { key, ...otherProps } = props;
               const isAlreadyAdded = addedSeries.some(
-                s => s.dashboardId === (selectedMetric.applicationDashboardId || selectedDashboard?.id) &&
-                     s.panelId === selectedMetric.id &&
+                s => s.dashboardId === (selectedMetric?.applicationDashboardId || selectedDashboard?.id) &&
+                     s.panelId === selectedMetric?.id &&
                      s.metricName === option
               );
               return (
@@ -298,28 +301,23 @@ export function TrendsSelectionControls({
               }
             }}
             disabled={!selectedMetric || availableMetrics.length === 0}
-            sx={{ height: '56px', minWidth: '100px', flexShrink: 0 }}
+            sx={{ height: '56px', minWidth: '92px', flexShrink: 0 }}
           >
-            {selectedMetricNames.length === availableMetrics.length && availableMetrics.length > 0 ? 'Deselect All' : 'Select All'}
+            {selectedMetricNames.length === availableMetrics.length && availableMetrics.length > 0 ? 'Clear all' : 'Select all'}
           </Button>
           <Button
             variant="contained"
             onClick={onAddSeries}
             disabled={selectedMetricNames.length === 0}
-            sx={{
-              height: '56px',
-              minWidth: '120px',
-              flexShrink: 0
-            }}
+            sx={{ height: '56px', px: 3, whiteSpace: 'nowrap', flexShrink: 0 }}
           >
-            Add Series
+            Add {selectedMetricNames.length > 0 ? `(${selectedMetricNames.length})` : 'series'}
           </Button>
-        </Box>
-      )}
+      </Box>
 
       {/* Time Range and Evaluate Type Row */}
       {addedSeries.length > 0 && (
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end' }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'flex-start' }}>
           {/* Time Range Selection */}
           <Autocomplete
             options={[...TIME_RANGE_OPTIONS]}
@@ -327,11 +325,11 @@ export function TrendsSelectionControls({
             value={timeRange}
             onChange={(_, newValue) => newValue && onTimeRangeChange(newValue)}
             isOptionEqualToValue={(option, value) => option.value === value.value}
-            sx={{ flex: 1 }}
+            sx={{ flex: '1 1 200px' }}
             renderInput={(params) => (
               <TextField
                 {...params}
-                label="Time Range"
+                label="Time range"
                 variant="outlined"
                 fullWidth
               />
@@ -344,7 +342,7 @@ export function TrendsSelectionControls({
             getOptionLabel={(option) => option.label}
             value={EVALUATE_TYPE_OPTIONS.find(option => option.value === evaluateType)}
             onChange={(_, newValue) => newValue && onEvaluateTypeChange(newValue.value)}
-            sx={{ flex: 1 }}
+            sx={{ flex: '1 1 200px' }}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -389,7 +387,7 @@ export function TrendsSelectionControls({
                 }
               }}
             >
-              Save Preset
+              Save as preset
             </Button>
           </Box>
         </Box>
