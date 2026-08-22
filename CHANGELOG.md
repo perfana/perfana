@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.69.0] - 2026-08-22
+
+### Added
+- **Report tables sort and filter in the downloaded HTML.** A 400-row comparisons table could only be scrolled. Every table now gets a click-to-sort header (ascending, descending, back to the original order) and a filter box with a row counter. The controls are injected by a script rather than emitted as markup, so the in-app viewer and public share page — which render the report in a script-blocked iframe — look exactly as they did, and the PDF is unchanged because the controls hide under `@media print`.
+- **The comparisons section's summary chips are filters.** "4 warnings" and "37 within range" already counted the rows; clicking one now narrows the tables beneath it to that band, and clicking more adds them. Clearing the last selection goes back to showing everything, so the tables are never empty. A dashboard group's chips govern every panel table under them, including tables too short to carry their own filter box.
+- **Error Analysis report section.** Four blocks answering one question each: headline counts (total errors, error rate, distinct response codes, transactions affected), an errors-over-time chart with one line per response code, a by-response-code table, and a by-transaction-and-request table. Response codes are coloured by HTTP class — 5xx is the server's problem, 4xx usually the test's — and a non-numeric code (a JMeter assertion label, "Unknown host") gets a neutral pill rather than being forced into a class it does not belong to. Aggregates only: `requests_error` also stores response bodies and request/response headers, and a generated report is downloadable and shareable over an unauthenticated link.
+- **Custom Graphs sections select graph presets.** The section now picks one or more presets saved from the Graphs card, and re-applies their series to whichever run is being reported on — a preset stores series identities, not data, so a template pinned to one keeps working for every later run.
+- **Response Times sections take several scenarios and can list child requests.** The scenario picker is multi-select and an empty selection means every scenario in the run; previously an unset scenario defaulted to the string "all", which matched no row and rendered "Scenario not found". With child requests on, the samplers inside each transaction are listed beneath it, banded by the controllers they ran under — the same slice of the test plan the Performance Analysis card draws.
+- **Test run id column in the Trends run history table.** The per-panel trend tables label their run columns with the id's trailing token, and the comment claiming the full ids were "in the run history table above" is now true.
+
+### Changed
+- **Trend values are marked against the run before them, and the trailing Change column is gone.** Each value carries an arrow coloured by how far it moved from the previous run — green for a drop or a rise within 10%, amber past 10%, red past 50% — and past 10% the number itself is coloured. The comparison uses the nearest earlier measurement, so a gap in the window does not silently compare across two hops. The exact percentage moved to the cell's hover.
+- **P95 and P99 dropped from the Trends run history table**, and "Avg (ms)" is now "Average transaction response times". The percentiles are still in the summary cards and the per-panel trend tables.
+- **A graph preset combining series from several panels renders as one chart.** It was flattened into one selector per series and drawn as one chart per panel, which threw away the combination the author built. Series are scaled per unit, so a preset mixing milliseconds with a count gets an axis each — the first on the left, the rest down the right, all sharing the gridlines — instead of flattening whichever is smaller into the axis.
+
+### Fixed
+- **Three dead controls in the Custom Graphs section config.** Start/End Offset, Show Legends and Quality were written into the section config and never read by the renderer. Offsets now trim from each end of the run, the same convention the analysis time range uses; Show Legends hides the multi-series legend; Quality sets the chart's rendered size (low 700×240, standard 1000×320, high 1400×460), with an explicit `chartWidth`/`chartHeight` still winning.
+- **Template validation rejected any new section type.** `ReportTemplateService` validated sections against a hardcoded copy of the section-type list, so a template containing an Error Analysis section threw `ValidationException` on save. It now derives from the canonical list, and the test that was meant to catch this iterates that list instead of a copy of its own — it had silently drifted two types behind.
+- **The "Include 'All aggregated' series" toggle is gone from the Custom Graphs config.** Templates that already have it set keep rendering as before.
+
 ## [0.2.68.15] - 2026-08-21
 
 ### Added

@@ -21,6 +21,7 @@ import { TrendsRenderer } from '../renderers/trends-renderer';
 import { ComparisonsRenderer } from '../renderers/comparisons-renderer';
 import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
+import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import {
   ReportSectionConfig,
@@ -78,6 +79,7 @@ describe('ReportHtmlCompilerService', () => {
   let comparisonsRenderer: jest.Mocked<ComparisonsRenderer>;
   let graphsRenderer: jest.Mocked<GraphsRenderer>;
   let top10ListsRenderer: jest.Mocked<Top10ListsRenderer>;
+  let errorAnalysisRenderer: jest.Mocked<ErrorAnalysisRenderer>;
   let placeholderRenderer: jest.Mocked<PlaceholderRenderer>;
   // Real utils so we can verify escaping behaviour without extra mocking noise
   let utils: ReportUtilsService;
@@ -154,6 +156,12 @@ describe('ReportHtmlCompilerService', () => {
           },
         },
         {
+          provide: ErrorAnalysisRenderer,
+          useValue: {
+            renderErrorAnalysisSection: jest.fn().mockResolvedValue('<div>error_analysis</div>'),
+          },
+        },
+        {
           provide: PlaceholderRenderer,
           useValue: {
             renderPlaceholderSection: jest
@@ -186,6 +194,7 @@ describe('ReportHtmlCompilerService', () => {
     comparisonsRenderer = module.get(ComparisonsRenderer);
     graphsRenderer = module.get(GraphsRenderer);
     top10ListsRenderer = module.get(Top10ListsRenderer);
+    errorAnalysisRenderer = module.get(ErrorAnalysisRenderer);
     placeholderRenderer = module.get(PlaceholderRenderer);
   });
 
@@ -609,6 +618,15 @@ describe('ReportHtmlCompilerService', () => {
         expect(html).toContain('.badge-info');
       });
 
+      it('should not include the interactivity script', () => {
+        // The editor preview renders in a fully locked (sandbox="") iframe and
+        // is a single section — nothing to sort or filter across.
+        const html = service.compilePreviewHtml('<p/>', makeSection('slo', 0), makeStyling());
+
+        expect(html).not.toContain('<script>');
+        expect(html).not.toContain('report-table-tools');
+      });
+
       it('should produce different titles for different section types', () => {
         const sloHtml = service.compilePreviewHtml('<p/>', makeSection('slo', 0), makeStyling());
         const headerHtml = service.compilePreviewHtml(
@@ -676,6 +694,31 @@ describe('ReportHtmlCompilerService', () => {
         const html = service.compileHtml('My Report', '<p/>', makeStyling());
 
         expect(html).toContain('Generated:');
+      });
+
+      it('should include the table interactivity script and its styles', () => {
+        const html = service.compileHtml('My Report', '<p/>', makeStyling());
+
+        expect(html).toContain('.report-table-tools');
+        expect(html).toContain('<script>');
+        // The controls are injected by the script, never emitted as markup —
+        // that is what keeps the script-blocked iframe viewers unchanged.
+        expect(html).not.toContain('class="report-table-tools"');
+        // The script sits inside <body>, before the closing tag.
+        expect(html.indexOf('<script>')).toBeGreaterThan(html.indexOf('<footer>'));
+        expect(html.indexOf('<script>')).toBeLessThan(html.indexOf('</body>'));
+      });
+
+      it('should let customCss override the interactivity styles', () => {
+        const html = service.compileHtml(
+          'My Report',
+          '<p/>',
+          makeStyling({ customCss: '.report-table-tools { display: none; }' }),
+        );
+
+        expect(html.lastIndexOf('.report-table-tools { display: none; }')).toBeGreaterThan(
+          html.indexOf('.report-table-count'),
+        );
       });
 
       it('should inject primaryColor CSS variable', () => {

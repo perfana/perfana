@@ -4,6 +4,7 @@ import type {
   HeaderConfig,
   TextBlockConfig,
   TransactionResponseTimesConfig,
+  ErrorAnalysisConfig,
   Top10ListsConfig,
 } from './SectionConfigs';
 
@@ -43,8 +44,22 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
     }
     case 'transaction_response_times': {
       const cfg = (section.config ?? {}) as TransactionResponseTimesConfig;
-      const scenario = trim(cfg.scenario);
-      return scenario ? `Scenario: ${scenario}` : text;
+      const scenarios = Array.isArray(cfg.scenarios) && cfg.scenarios.length > 0
+        ? cfg.scenarios
+        : trim(cfg.scenario) && trim(cfg.scenario) !== 'all' ? [trim(cfg.scenario)] : [];
+      const parts = [
+        scenarios.length > 0 ? `Scenarios: ${scenarios.join(', ')}` : 'All scenarios',
+        cfg.includeChildRequests ? 'with child requests' : '',
+      ].filter(Boolean);
+      return parts.join(' · ') || text;
+    }
+    case 'error_analysis': {
+      const cfg = (section.config ?? {}) as ErrorAnalysisConfig;
+      const scenarios = Array.isArray(cfg.scenarios) && cfg.scenarios.length > 0 ? cfg.scenarios : [];
+      return [
+        scenarios.length > 0 ? `Scenarios: ${scenarios.join(', ')}` : 'All scenarios',
+        cfg.includeChart === false ? 'no chart' : '',
+      ].filter(Boolean).join(' · ');
     }
     case 'comparisons': {
       const cfg = (section.config ?? {}) as ComparisonsConfig;

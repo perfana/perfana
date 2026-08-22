@@ -8,7 +8,7 @@ import {
   SystemUnderTest,
 } from '@perfana/shared';
 import type { OwnedResource } from '@perfana/shared';
-import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
+import { MAX_REPORT_SECTIONS, REPORT_SECTION_TYPES } from '@perfana/shared/types';
 import { withRequestEm } from '../../../common/db/request-em';
 import {
   ResourceNotFoundException,
@@ -733,19 +733,10 @@ export class ReportTemplateService {
       throw new ValidationException(`Maximum ${MAX_REPORT_SECTIONS} sections allowed per template`);
     }
 
-    const validTypes = [
-      'header',
-      'text_block',
-      'slo',
-      'apdex',
-      'transaction_response_times',
-      'regressions',
-      'awr',
-      'trends',
-      'comparisons',
-      'graphs',
-      'top_10_lists',
-    ];
+    // Derived from the canonical list, never re-typed: a hardcoded copy here
+    // silently rejected every new section type until someone remembered to add
+    // it in a seventh place.
+    const validTypes: readonly string[] = REPORT_SECTION_TYPES;
 
     const orders = new Set<number>();
 

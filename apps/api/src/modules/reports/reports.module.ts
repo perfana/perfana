@@ -31,6 +31,7 @@ import { TrendsRenderer } from './renderers/trends-renderer';
 import { ComparisonsRenderer } from './renderers/comparisons-renderer';
 import { GraphsRenderer } from './renderers/graphs-renderer';
 import { Top10ListsRenderer } from './renderers/top-10-lists-renderer';
+import { ErrorAnalysisRenderer } from './renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from './renderers/placeholder-renderer';
 
 @Module({
@@ -68,6 +69,7 @@ import { PlaceholderRenderer } from './renderers/placeholder-renderer';
     ComparisonsRenderer,
     GraphsRenderer,
     Top10ListsRenderer,
+    ErrorAnalysisRenderer,
     PlaceholderRenderer,
   ],
   exports: [

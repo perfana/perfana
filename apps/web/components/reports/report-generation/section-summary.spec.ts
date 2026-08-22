@@ -42,7 +42,26 @@ describe('sectionSummary', () => {
   it('shows scenario for response times', () => {
     expect(
       sectionSummary(section({ type: 'transaction_response_times', config: { scenario: 'CheckoutFlow' } })),
-    ).toBe('Scenario: CheckoutFlow');
+    ).toBe('Scenarios: CheckoutFlow');
+  });
+
+  it('lists every selected scenario for response times', () => {
+    expect(
+      sectionSummary(section({
+        type: 'transaction_response_times',
+        config: { scenarios: ['CheckoutFlow', 'BrowseAndSearch'], includeChildRequests: true },
+      })),
+    ).toBe('Scenarios: CheckoutFlow, BrowseAndSearch · with child requests');
+  });
+
+  it('says all scenarios when response times selects none', () => {
+    expect(
+      sectionSummary(section({ type: 'transaction_response_times', config: {} })),
+    ).toBe('All scenarios');
+    // "all" was the legacy do-not-filter placeholder, not a scenario name
+    expect(
+      sectionSummary(section({ type: 'transaction_response_times', config: { scenario: 'all' } })),
+    ).toBe('All scenarios');
   });
 
   it('summarizes baseline-run comparisons with dashboard, panel count and text', () => {
@@ -108,5 +127,17 @@ describe('sectionSummary', () => {
     expect(
       sectionSummary({ type: 'top_10_lists', order: 0, config: { scope: 'urls' } } as never),
     ).toBe('URLs · 4 lists');
+  });
+
+  it('summarizes error analysis by scenario selection', () => {
+    expect(
+      sectionSummary(section({ type: 'error_analysis', config: {} })),
+    ).toBe('All scenarios');
+    expect(
+      sectionSummary(section({
+        type: 'error_analysis',
+        config: { scenarios: ['Checkout'], includeChart: false },
+      })),
+    ).toBe('Scenarios: Checkout · no chart');
   });
 });

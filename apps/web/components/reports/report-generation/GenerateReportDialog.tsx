@@ -78,6 +78,7 @@ import {
   TrendsConfigForm,
   ComparisonsConfigForm,
   Top10ListsConfigForm,
+  ErrorAnalysisConfigForm,
 } from './SectionConfigs';
 import { BaselineRunSelect, useBaselineCandidates, type BaselineCandidate } from './BaselineRunSelect';
 import { sectionSummary } from './section-summary';
@@ -127,7 +128,7 @@ const STARTER_LAYOUTS: ReadonlyArray<{ name: string; description: string; sectio
   {
     name: 'Full analysis',
     description: 'The complete picture, section by section',
-    sections: ['header', 'slo', 'apdex', 'transaction_response_times', 'top_10_lists', 'regressions', 'trends'],
+    sections: ['header', 'slo', 'apdex', 'transaction_response_times', 'error_analysis', 'top_10_lists', 'regressions', 'trends'],
   },
 ];
 
@@ -907,6 +908,8 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
         return <ComparisonsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
       case 'top_10_lists':
         return <Top10ListsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+      case 'error_analysis':
+        return <ErrorAnalysisConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
       default:
         return null;
     }

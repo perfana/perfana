@@ -1,3 +1,4 @@
+import { ControllerRef } from '../renderers/controller-sections';
 /**
  * Shapes the report renderers consume.
  *
@@ -68,6 +69,22 @@ export interface ReportTransaction {
   pass: number;
   fail: number;
   errPct: number;
+  /**
+   * The samplers that ran inside this transaction, when the section asked for
+   * them. Same shape one level down — a request has no children of its own.
+   */
+  children?: ReportTransaction[];
+  /**
+   * The controllers this request ran under, outermost first — what the
+   * Performance Analysis card bands its request table by. Only set on child
+   * requests, and only for runs whose engine recorded the test-plan structure.
+   */
+  parentControllers?: ControllerRef[] | null;
+  /**
+   * Where this request first fired, a proxy for its position in the test plan.
+   * Orders the bands so they read in plan order rather than by volume.
+   */
+  firstSeen?: number;
 }
 
 /** Transaction with Apdex score for apdex rendering */
@@ -342,6 +359,13 @@ export interface MetricsDataPoint {
 }
 
 /** Time-series data for one panel/metric combination */
+/** A graph preset's series, kept together so the preset renders as one chart. */
+export interface GraphPresetPanels {
+  id: string;
+  name: string;
+  panels: MetricsPanelSelector[];
+}
+
 export interface MetricsTimeSeriesPanel {
   panelTitle: string;
   dashboardLabel: string;
@@ -395,4 +419,48 @@ export interface RawTop10Row {
   avg_response_time: string | number | null;
   total_count: string | number | null;
   failed_count: string | number | null;
+}
+
+/**
+ * Error analysis for the `error_analysis` section.
+ *
+ * Aggregates only. `requests_error` also stores response bodies and request /
+ * response headers — auth tokens, cookies, PII — and a generated report is
+ * downloadable and shareable over an unauthenticated link, so none of that is
+ * carried here. Per-error inspection stays in the app, behind auth.
+ */
+export interface ReportErrorAnalysis {
+  totalErrors: number;
+  errorRate: number | null;
+  totalRequests: number | null;
+  uniqueResponseCodes: number;
+  transactionsWithErrors: number;
+  byCode: ReportErrorByCode[];
+  byTransaction: ReportErrorByTransaction[];
+  overTime: ReportErrorOverTimePoint[];
+}
+
+export interface ReportErrorByCode {
+  responseCode: string;
+  errorCount: number;
+  share: number;
+  avgResponseTime: number | null;
+  minResponseTime: number | null;
+  maxResponseTime: number | null;
+}
+
+export interface ReportErrorByTransaction {
+  transactionName: string;
+  samplerName: string;
+  url: string | null;
+  responseCode: string | null;
+  errorCount: number;
+  share: number;
+  avgResponseTime: number | null;
+}
+
+/** One minute bucket, with a count per response code seen in that bucket. */
+export interface ReportErrorOverTimePoint {
+  time: Date;
+  countsByCode: Record<string, number>;
 }

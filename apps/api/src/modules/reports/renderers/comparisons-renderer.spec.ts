@@ -498,6 +498,82 @@ describe('ComparisonsRenderer', () => {
     ]);
   });
 
+  describe('band markers (what the chip filters bind to)', () => {
+    const bandSection = () => makeSection({
+      config: {
+        source: 'performance-metrics', baselineTestRunId: 'base-1', metrics: ['avg'],
+        dashboardLabels: ['Perf'],
+        panels: [{ id: 101, title: 'RT', dashboardLabel: 'Perf' }],
+        series: [{ dashboardLabel: 'Perf', panelId: 101, metricName: 'a' }],
+      },
+    });
+
+    it('stamps each row with the band its worst metric falls in', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [
+          {
+            group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: 'bad',
+            metrics: [{ key: 'avg', current: 300, baseline: 100, diffPercent: 200 }],
+          },
+          {
+            group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: 'warn',
+            metrics: [{ key: 'avg', current: 130, baseline: 100, diffPercent: 30 }],
+          },
+          {
+            group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: 'fine',
+            metrics: [{ key: 'avg', current: 102, baseline: 100, diffPercent: 2 }],
+          },
+        ],
+        metrics: ['avg'],
+      } as never);
+
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      expect(html).toContain('data-band="regression"');
+      expect(html).toContain('data-band="warning"');
+      expect(html).toContain('data-band="ok"');
+    });
+
+    it('scopes the group so a chip only filters its own tables', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [
+          {
+            group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: 'a',
+            metrics: [{ key: 'avg', current: 300, baseline: 100, diffPercent: 200 }],
+          },
+        ],
+        metrics: ['avg'],
+      } as never);
+
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      expect(html).toContain('data-band-scope');
+      // The summary chips double as filter controls
+      expect(html).toContain('data-band-filter="regression"');
+    });
+
+    it('omits a chip for a band with no rows', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [
+          {
+            group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: 'fine',
+            metrics: [{ key: 'avg', current: 101, baseline: 100, diffPercent: 1 }],
+          },
+        ],
+        metrics: ['avg'],
+      } as never);
+
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      expect(html).toContain('data-band-filter="ok"');
+      expect(html).not.toContain('data-band-filter="regression"');
+      expect(html).not.toContain('data-band-filter="warning"');
+    });
+  });
+
   describe('All aggregated (performance-metrics baseline)', () => {
     it('renders the aggregate as a series row of its panel, not a section-level extra', async () => {
       // The aggregate is now a series the config form offers inside a panel, so the renderer

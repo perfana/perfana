@@ -17,6 +17,7 @@ import type { ReportSectionType } from '@/lib/api/reports';
 import { REPORT_LIMITS } from '@/lib/api/reports';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { isGrafana } from '@/lib/metrics-source-utils';
+import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
 import { MarkdownField } from './MarkdownField';
@@ -413,8 +414,12 @@ export function ApdexConfigForm({ config, onChange, text, onTextChange, testRunI
 
 /** @public */
 export interface TransactionResponseTimesConfig {
+  /** Empty or absent = every scenario in the run. */
+  scenarios?: string[];
+  /** Older templates stored a single name here; "all" meant no filter. */
   scenario?: string;
   includeAggregated?: boolean;
+  includeChildRequests?: boolean;
 }
 
 interface TransactionResponseTimesConfigFormProps {
@@ -482,42 +487,59 @@ export function TransactionResponseTimesConfigForm({ config, onChange, text, onT
     fetchScenarios();
   }, [testRunId]);
 
+  // A legacy single-scenario config is shown as a one-item selection, so
+  // opening an old template and saving it migrates it without losing the choice.
+  const selectedScenarios = config.scenarios
+    ?? (config.scenario && config.scenario !== 'all' ? [config.scenario] : []);
+
+  const writeScenarios = (next: string[]) => {
+    // Drop the superseded single-value key rather than leaving two sources of truth.
+    const { scenario: _legacy, ...rest } = config;
+    onChange({ ...rest, scenarios: next });
+  };
+
   return (
     <SectionConfigShell
-      sectionTitle={`Response Times - ${config.scenario || 'N/A'}`}
+      sectionTitle={`Response Times - ${selectedScenarios.join(', ') || 'All scenarios'}`}
       sectionType="Transaction Response Times"
       previewType="transaction_response_times"
       previewConfig={config}
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
-      previewDisabled={!config.scenario}
-      previewDisabledReason="Select a scenario to enable preview"
     >
-      {/* Scenario Input - Dropdown if scenarios available, otherwise text field */}
+      {/* Scenarios (multi-select; empty = all) — dropdown when the run's
+          scenarios are known, free text otherwise */}
+      <Typography variant="caption" color="text.secondary">Scenarios (empty = all)</Typography>
       {scenarios.length > 0 ? (
         <Select
-          value={config.scenario || ''}
-          onChange={(e) => onChange({ ...config, scenario: e.target.value })}
+          multiple
+          value={selectedScenarios}
+          onChange={(e) => {
+            const value = e.target.value as string[];
+            writeScenarios(typeof value === 'string' ? [value] : value);
+          }}
+          input={<OutlinedInput />}
+          renderValue={(selected) => (selected as string[]).join(', ') || 'All scenarios'}
           fullWidth
           size="small"
           displayEmpty
           disabled={loadingScenarios}
         >
-          <MenuItem value="" disabled>
-            Select a scenario ({scenarios.length} available)
-          </MenuItem>
           {scenarios.map((scenario) => (
             <MenuItem key={scenario} value={scenario}>
-              {scenario}
+              <Checkbox checked={selectedScenarios.includes(scenario)} />
+              <ListItemText primary={scenario} />
             </MenuItem>
           ))}
         </Select>
       ) : (
         <TextField
-          label="Scenario / Transaction Name"
-          value={config.scenario || ''}
-          onChange={(e) => onChange({ ...config, scenario: e.target.value })}
+          label="Scenario names (comma separated)"
+          value={selectedScenarios.join(', ')}
+          onChange={(e) =>
+            writeScenarios(e.target.value.split(',').map((n) => n.trim()).filter(Boolean))
+          }
           fullWidth
           size="small"
           placeholder="e.g., BrowseAndSearch, LoginFlow"
@@ -526,8 +548,8 @@ export function TransactionResponseTimesConfigForm({ config, onChange, text, onT
             loadingScenarios
               ? 'Loading scenarios...'
               : !testRunId
-                ? 'No test run selected - enter scenario name manually'
-                : 'No scenarios found for this test run - enter manually or select a different test run'
+                ? 'No test run selected - enter scenario names manually, or leave empty for all'
+                : 'No scenarios found for this test run - enter manually, or leave empty for all'
           }
         />
       )}
@@ -540,6 +562,16 @@ export function TransactionResponseTimesConfigForm({ config, onChange, text, onT
           />
         }
         label="Include 'All aggregated' series"
+      />
+
+      <FormControlLabel
+        control={
+          <Switch
+            checked={config.includeChildRequests ?? false}
+            onChange={(e) => onChange({ ...config, includeChildRequests: e.target.checked })}
+          />
+        }
+        label="Include child requests"
       />
 
       {/* Debug info */}
@@ -695,6 +727,126 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
   );
 }
 
+// ==================== Error Analysis Config ====================
+
+/** @public */
+export interface ErrorAnalysisConfig {
+  /** Empty or absent = every scenario in the run. */
+  scenarios?: string[];
+  /** Restrict to the analysis window (after ramp-up, before ramp-down). */
+  excludeRampUp?: boolean;
+  includeChart?: boolean;
+  /** Rows in the per-request table before it is capped. */
+  topN?: number;
+}
+
+interface ErrorAnalysisConfigFormProps {
+  config: ErrorAnalysisConfig;
+  onChange: (config: ErrorAnalysisConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
+  testRunId?: string;
+}
+
+export function ErrorAnalysisConfigForm({ config, onChange, text, onTextChange, testRunId }: ErrorAnalysisConfigFormProps) {
+  const [scenarios, setScenarios] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!testRunId) return;
+    let cancelled = false;
+    const fetchScenarios = async () => {
+      try {
+        const response = await authenticatedFetch(`/test-runs/${testRunId}/transactions`, { method: 'GET' });
+        if (!response.ok) return;
+        const transactions = await response.json();
+        if (!Array.isArray(transactions) || cancelled) return;
+        setScenarios(Array.from(
+          new Set(transactions.map((t: { scenario_name?: string }) => t.scenario_name).filter(Boolean)),
+        ) as string[]);
+      } catch {
+        if (!cancelled) setScenarios([]);
+      }
+    };
+    fetchScenarios();
+    return () => { cancelled = true; };
+  }, [testRunId]);
+
+  const selectedScenarios = config.scenarios ?? [];
+
+  return (
+    <SectionConfigShell
+      sectionTitle="Error Analysis"
+      sectionType="Error Analysis"
+      previewType="error_analysis"
+      previewConfig={config}
+      text={text}
+      onTextChange={onTextChange}
+      testRunId={testRunId}
+    >
+      {scenarios.length > 0 && (
+        <>
+          <Typography variant="caption" color="text.secondary">Scenarios (empty = all)</Typography>
+          <Select
+            multiple
+            value={selectedScenarios}
+            onChange={(e) => {
+              const value = e.target.value as string[];
+              onChange({ ...config, scenarios: typeof value === 'string' ? [value] : value });
+            }}
+            input={<OutlinedInput />}
+            renderValue={(selected) => (selected as string[]).join(', ') || 'All scenarios'}
+            fullWidth
+            size="small"
+            displayEmpty
+          >
+            {scenarios.map((s) => (
+              <MenuItem key={s} value={s}>
+                <Checkbox checked={selectedScenarios.includes(s)} />
+                <ListItemText primary={s} />
+              </MenuItem>
+            ))}
+          </Select>
+        </>
+      )}
+
+      <FormControlLabel
+        control={
+          <Switch
+            checked={config.includeChart ?? true}
+            onChange={(e) => onChange({ ...config, includeChart: e.target.checked })}
+          />
+        }
+        label="Include errors-over-time chart"
+      />
+
+      <FormControlLabel
+        control={
+          <Switch
+            checked={config.excludeRampUp ?? true}
+            onChange={(e) => onChange({ ...config, excludeRampUp: e.target.checked })}
+          />
+        }
+        label="Analysis timerange only (exclude ramp-up / ramp-down)"
+      />
+
+      <TextField
+        label="Max failing requests listed"
+        type="number"
+        value={config.topN ?? 20}
+        onChange={(e) => onChange({ ...config, topN: Number(e.target.value) })}
+        size="small"
+        inputProps={{ min: 1, max: 200 }}
+        helperText="The rest are summarised as 'and N more'."
+      />
+
+      <Typography variant="caption" color="text.secondary">
+        Counts and rates only. Response bodies, headers and cookies are never included — reports can be
+        downloaded and shared by link.
+      </Typography>
+    </SectionConfigShell>
+  );
+}
+
 // ==================== Regressions Config ====================
 
 /** @public */
@@ -747,6 +899,8 @@ export function RegressionsConfigForm({ config, onChange, text, onTextChange, te
 
 /** @public */
 export interface GraphsConfig {
+  /** Graph presets saved from the Graphs card; empty = auto-discover panels. */
+  graphPresetIds?: string[];
   panels?: string[];
   quality?: 'low' | 'standard' | 'high';
   timeRange?: {
@@ -754,6 +908,10 @@ export interface GraphsConfig {
     endOffset?: number;
   };
   showLegends?: boolean;
+  /**
+   * No longer offered by the form. Kept on the type so a template saved before
+   * the toggle was removed still type-checks and keeps rendering as it did.
+   */
   includeAggregated?: boolean;
 }
 
@@ -766,6 +924,31 @@ interface GraphsConfigFormProps {
 }
 
 export function GraphsConfigForm({ config, onChange, text, onTextChange, testRunId }: GraphsConfigFormProps) {
+  const [presets, setPresets] = useState<GraphPreset[]>([]);
+  const [loadingPresets, setLoadingPresets] = useState(false);
+
+  // The same list the Graphs card shows for this run: its own presets plus the
+  // global ones.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPresets = async () => {
+      setLoadingPresets(true);
+      try {
+        const all = await GraphPresetsAPI.getAll(testRunId);
+        if (!cancelled) setPresets(all);
+      } catch {
+        if (!cancelled) setPresets([]);
+      } finally {
+        if (!cancelled) setLoadingPresets(false);
+      }
+    };
+    fetchPresets();
+    return () => { cancelled = true; };
+  }, [testRunId]);
+
+  const selectedPresetIds = config.graphPresetIds ?? [];
+  const nameOf = (id: string) => presets.find((p) => p.id === id)?.name ?? id;
+
   return (
     <SectionConfigShell
       sectionTitle="Custom Graphs"
@@ -776,6 +959,43 @@ export function GraphsConfigForm({ config, onChange, text, onTextChange, testRun
       onTextChange={onTextChange}
       testRunId={testRunId}
     >
+      {/* Graph presets — the section's series selection. Empty means the
+          renderer auto-discovers this run's panels, as it always has. */}
+      <Typography variant="caption" color="text.secondary">
+        Graph presets (empty = auto-discover panels)
+      </Typography>
+      <Select
+        multiple
+        value={selectedPresetIds}
+        onChange={(e) => {
+          const value = e.target.value as string[];
+          onChange({ ...config, graphPresetIds: typeof value === 'string' ? [value] : value });
+        }}
+        input={<OutlinedInput />}
+        renderValue={(selected) =>
+          (selected as string[]).map(nameOf).join(', ') || 'Auto-discover panels'
+        }
+        fullWidth
+        size="small"
+        displayEmpty
+        disabled={loadingPresets || presets.length === 0}
+      >
+        {presets.map((preset) => (
+          <MenuItem key={preset.id} value={preset.id}>
+            <Checkbox checked={selectedPresetIds.includes(preset.id)} />
+            <ListItemText
+              primary={preset.name}
+              secondary={`${preset.seriesConfig?.length ?? 0} series${preset.isGlobal ? ' · global' : ''}`}
+            />
+          </MenuItem>
+        ))}
+      </Select>
+      {presets.length === 0 && !loadingPresets && (
+        <Typography variant="caption" color="text.secondary">
+          No graph presets found. Save one from the Graphs card on a test run first.
+        </Typography>
+      )}
+
       <Select
         value={config.quality || 'standard'}
         onChange={(e) => onChange({ ...config, quality: e.target.value as GraphsConfig['quality'] })}
@@ -794,15 +1014,6 @@ export function GraphsConfigForm({ config, onChange, text, onTextChange, testRun
           />
         }
         label="Show Legends"
-      />
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.includeAggregated ?? false}
-            onChange={(e) => onChange({ ...config, includeAggregated: e.target.checked })}
-          />
-        }
-        label="Include 'All aggregated' series (performance test metrics)"
       />
       <Box sx={{ display: 'flex', gap: 2 }}>
         <TextField

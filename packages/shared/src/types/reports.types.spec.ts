@@ -2,6 +2,7 @@ import {
   getSectionText,
   sectionSupportsText,
   SECTION_TYPES_WITH_TEXT,
+  REPORT_SECTION_TYPES,
   REPORT_DEFAULTS,
 } from './reports.types';
 
@@ -30,11 +31,14 @@ describe('sectionSupportsText', () => {
     expect(sectionSupportsText('header')).toBe(true);
     expect(sectionSupportsText('slo')).toBe(true);
     expect(sectionSupportsText('top_10_lists')).toBe(true);
+    expect(sectionSupportsText('error_analysis')).toBe(true);
     expect(sectionSupportsText('text_block')).toBe(false);
   });
 
-  it('lists ten types and never text_block', () => {
-    expect(SECTION_TYPES_WITH_TEXT).toHaveLength(10);
+  it('covers every section type but text_block', () => {
+    // Asserted against REPORT_SECTION_TYPES rather than a hard-coded count, so
+    // adding a section type does not silently need this number edited too.
+    expect(SECTION_TYPES_WITH_TEXT).toHaveLength(REPORT_SECTION_TYPES.length - 1);
     expect(SECTION_TYPES_WITH_TEXT).not.toContain('text_block');
   });
 });

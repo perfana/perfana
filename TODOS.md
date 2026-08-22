@@ -149,6 +149,30 @@ the Series `Autocomplete`.
 ---
 
 
+## Reports
+
+### A new report section type must be registered in six places
+
+**Priority:** P3
+
+Adding `error_analysis` in v0.2.69.0 required edits in six separate registries, and
+missing any one of them fails in a different way:
+
+- `packages/shared/src/entities/report-template.entity.ts` — the `ReportSectionType` union
+- `packages/shared/src/types/reports.types.ts` — `REPORT_SECTION_TYPES`, `SECTION_TYPES_WITH_TEXT`, `SECTION_TYPE_LABELS`
+- `apps/web/lib/api/reports.ts` — the web's own copy of all three
+- `apps/api/src/modules/reports/dto/create-report.dto.ts` — a third copy, used by `@IsEnum`
+- `apps/api/src/modules/reports/services/report-utils.service.ts` — `Record<ReportSectionType, string>`
+- `apps/api/src/modules/reports/services/report-template.service.ts` — `validTypes` (now derived)
+
+Only the two `Record<ReportSectionType, …>` maps fail at compile time. The array copies
+drift silently: `validTypes` rejected the new type at save time, and the test meant to
+catch that had itself drifted two types behind. Both are fixed by deriving from the
+canonical list — the remaining copies (web, DTO) should do the same, or the web should
+import from `@perfana/shared` rather than keeping its own registry.
+
+**Found:** v0.2.69.0 (2026-08-22)
+
 ## Completed
 
 ### Compare card: parallelised aggregate fetch, aggregate-row marker, legacy preset restore

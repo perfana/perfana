@@ -551,6 +551,7 @@ export const REPORT_SECTION_TYPES: readonly ReportSectionType[] = [
   'comparisons',
   'graphs',
   'top_10_lists',
+  'error_analysis',
 ] as const;
 
 /**
@@ -567,6 +568,7 @@ export const SECTION_TYPES_WITH_TEXT: readonly TextableSectionType[] = [
   'comparisons',
   'graphs',
   'top_10_lists',
+  'error_analysis',
 ] as const;
 
 /**
@@ -584,6 +586,7 @@ export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   comparisons: 'Comparisons',
   graphs: 'Custom Graphs',
   top_10_lists: 'Top 10 Lists',
+  error_analysis: 'Error Analysis',
 } as const;
 
 /**

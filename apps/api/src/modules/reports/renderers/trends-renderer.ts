@@ -3,8 +3,10 @@ import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, TrendRunSummary, MetricTrendSeries } from '../services/report-data-fetcher.service';
 import { buildSelections } from './section-selections';
+import { bandColor, percentDiff } from './comparison-bands';
 import { formatValueWithUnit } from './unit-format';
 import {
+  DEFAULT_THRESHOLDS,
   REPORT_COLORS,
   TH_NUM,
   TH_TEXT,
@@ -13,8 +15,8 @@ import {
   groupHeader,
   sectionHeader,
   sectionText,
+  deltaArrow,
   deltaChip,
-  deltaText,
   emptyState,
   formatInt,
   formatNum,
@@ -143,23 +145,36 @@ export class TrendsRenderer {
 
         const body = shown.map((s, idx) => {
           const values = runs.map((r) => s.valuesByRun[r.testRunId] ?? null);
-          // Against the run before this one, not the oldest in the window: that is the
-          // comparison a reader makes when a number moved, and the one the summary cards
-          // at the top of the section already use.
-          const measured = values.filter((v): v is number => v != null);
-          const last = measured[measured.length - 1] ?? null;
-          const previous = measured[measured.length - 2] ?? null;
-          const change = previous != null && previous !== 0 && last != null
-            ? ((last - previous) / Math.abs(previous)) * 100
-            : null;
+          // Every value is read against the run before it — the nearest earlier
+          // measurement, so a gap in the window does not silently compare across
+          // two hops. The movement is marked in the cell itself; the trailing
+          // "Change" column this replaces only ever described the last hop.
+          let previous: number | null = null;
           const cells = values.map((v) => {
+            const change = v == null ? null : percentDiff(v, previous);
+            if (v != null) previous = v;
+
             const formatted = v == null ? '—' : formatValueWithUnit(v, s.unit ?? undefined);
-            return `<td style="padding:8px 10px; text-align:right; font-size:11px; font-variant-numeric:tabular-nums; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(formatted === '-' ? '—' : formatted)}</td>`;
+            const moved = change != null && change !== 0;
+            // bandColor is the comparison section's scale: any decrease and any
+            // rise within 10% read as good, past 10% amber, past 50% red.
+            const band = moved ? bandColor(change, DEFAULT_THRESHOLDS) : REPORT_COLORS.dot.neutral;
+            const drift = band === REPORT_COLORS.dot.warn || band === REPORT_COLORS.dot.bad;
+            const arrow = moved
+              ? `<span style="color:${band}; font-size:9px; margin-right:4px;">${deltaArrow(change)}</span>`
+              : '';
+            // The exact number is not lost with the column gone, it just moves
+            // to the hover. Invisible in the PDF, which is why the colour and
+            // the arrow carry the meaning on their own.
+            const title = moved
+              ? ` title="${change > 0 ? '+' : ''}${formatPercent(change)} vs previous run"`
+              : '';
+            const value = `<span${drift ? ` style="color:${band}; font-weight:700;"` : ''}>${this.utils.escapeHtml(formatted === '-' ? '—' : formatted)}</span>`;
+            return `<td${title} style="padding:8px 10px; text-align:right; font-size:11px; font-variant-numeric:tabular-nums; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${arrow}${value}</td>`;
           }).join('');
           return `<tr style="background:${idx % 2 === 1 ? '#fbfcfd' : '#ffffff'};">
             <td style="padding:8px 10px; font-size:11.5px; color:${REPORT_COLORS.ink}; font-weight:600; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(s.metricName)}</td>
             ${cells}
-            <td style="padding:8px 10px; text-align:right; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${deltaText(change)}</td>
           </tr>`;
         }).join('');
 
@@ -173,7 +188,6 @@ export class TrendsRenderer {
             <thead><tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">Series</th>
               ${runHeaders}
-              <th style="${TH_NUM}">Change</th>
             </tr></thead>
             <tbody>${body}</tbody>
           </table>
@@ -187,7 +201,7 @@ export class TrendsRenderer {
           chip(`${formatInt(panels.size)} panels`, 'neutral'),
           chip(`${formatInt(dashboardSeries)} series`, 'neutral'),
         ])}
-        <div style="font-size:11.5px; color:${REPORT_COLORS.mutedInk}; margin:-6px 0 4px;">One column per run, oldest first. Change compares this run to the one before it.</div>
+        <div style="font-size:11.5px; color:${REPORT_COLORS.mutedInk}; margin:-6px 0 4px;">One column per run, oldest first. Each value is marked against the run before it: ▲ up, ▼ down — amber past 10%, red past 50%. A decrease reads as good.</div>
         ${panelBlocks}
       </div>`;
     }).join('\n');
@@ -252,14 +266,13 @@ export class TrendsRenderer {
 
       return `
         <tr style="${rowStyle}">
+          <td style="font-size: 9pt; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">${this.utils.escapeHtml(run.testRunId)}</td>
           <td style="font-size: 9pt; white-space: nowrap; font-variant-numeric: tabular-nums;">
             ${dateStr}${isCurrent ? ` ${markerChip('Current', 'info')}` : ''}
           </td>
           <td style="font-size: 9pt;">${release}</td>
           <td style="text-align: right; font-variant-numeric: tabular-nums;">${durationStr}</td>
           <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatNum(run.avgMs)}</td>
-          <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatNum(run.p95Ms)}</td>
-          <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatNum(run.p99Ms)}</td>
           <td style="text-align: right; font-variant-numeric: tabular-nums;" class="${run.errorRate > 0 ? 'table-value-error-pct' : ''}">${formatPercent(run.errorRate)}</td>
           <td style="text-align: right; font-variant-numeric: tabular-nums;">${formatInt(run.totalTransactions)}</td>
           <td style="text-align: center;">${verdicts.slo}</td>
@@ -278,12 +291,11 @@ export class TrendsRenderer {
         <table class="data-table">
         <thead>
           <tr>
+            <th style="white-space: nowrap;">Test Run</th>
             <th>Run Date</th>
             <th>Release</th>
             <th style="text-align: right;">Duration</th>
-            <th style="text-align: right;">Avg (ms)</th>
-            <th style="text-align: right;">P95 (ms)</th>
-            <th style="text-align: right;">P99 (ms)</th>
+            <th style="text-align: right;">Average transaction response times</th>
             <th style="text-align: right;">Errors</th>
             <th style="text-align: right;">Transactions</th>
             <th style="text-align: center;">SLO</th>

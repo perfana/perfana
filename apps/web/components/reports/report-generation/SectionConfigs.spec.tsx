@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { GraphPresetsAPI } from '@/lib/graph-presets';
 import {
   HeaderConfigForm,
   TextBlockConfigForm,
@@ -7,6 +8,7 @@ import {
   TransactionResponseTimesConfigForm,
   RegressionsConfigForm,
   GraphsConfigForm,
+  ErrorAnalysisConfigForm,
   AwrConfigForm,
   TrendsConfigForm,
   ComparisonsConfigForm,
@@ -25,6 +27,15 @@ jest.mock('@/lib/api', () => ({
 
 // Capture the props the generic HTML preview receives when the modal opens
 const mockHtmlPreviewProps: Array<Record<string, unknown>> = [];
+jest.mock('@/lib/graph-presets', () => ({
+  GraphPresetsAPI: {
+    getAll: jest.fn().mockResolvedValue([
+      { id: 'preset-1', name: 'JVM overview', seriesConfig: [{}, {}], isGlobal: false },
+      { id: 'preset-2', name: 'Docker CPU', seriesConfig: [{}], isGlobal: true },
+    ]),
+  },
+}));
+
 jest.mock('./preview/HtmlSectionPreview', () => ({
   __esModule: true,
   default: (props: Record<string, unknown>) => {
@@ -192,7 +203,9 @@ it('enables the Preview Section button when a testRunId is provided', () => {
   expect(screen.getByRole('button', { name: /preview section/i })).toBeEnabled();
 });
 
-it('keeps the Preview Section button disabled for response times until a scenario is chosen', () => {
+it('allows previewing response times with no scenario chosen, which means all of them', () => {
+  // The section takes a scenario list now, and an empty list is a valid
+  // selection — every scenario in the run — so there is nothing to wait for.
   render(
     <TransactionResponseTimesConfigForm
       config={{}}
@@ -201,7 +214,44 @@ it('keeps the Preview Section button disabled for response times until a scenari
       testRunId="MyApp-acc-loadTest-00001"
     />
   );
-  expect(screen.getByRole('button', { name: /preview section/i })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /preview section/i })).toBeEnabled();
+});
+
+it('migrates a legacy single-scenario config to a list when the selection changes', () => {
+  const onChange = jest.fn();
+  render(
+    <TransactionResponseTimesConfigForm
+      config={{ scenario: 'CheckoutFlow' }}
+      onChange={onChange}
+      onTextChange={jest.fn()}
+      testRunId="MyApp-acc-loadTest-00001"
+    />
+  );
+
+  // With no fetched scenario list the form falls back to the free-text field,
+  // pre-filled from the legacy single value.
+  const field = screen.getByLabelText(/scenario names/i);
+  expect(field).toHaveValue('CheckoutFlow');
+
+  fireEvent.change(field, { target: { value: 'CheckoutFlow, BrowseAndSearch' } });
+
+  expect(onChange).toHaveBeenCalledWith({ scenarios: ['CheckoutFlow', 'BrowseAndSearch'] });
+});
+
+it('offers a child requests toggle that writes includeChildRequests', () => {
+  const onChange = jest.fn();
+  render(
+    <TransactionResponseTimesConfigForm
+      config={{}}
+      onChange={onChange}
+      onTextChange={jest.fn()}
+      testRunId="MyApp-acc-loadTest-00001"
+    />
+  );
+
+  fireEvent.click(screen.getByLabelText(/include child requests/i));
+
+  expect(onChange).toHaveBeenCalledWith({ includeChildRequests: true });
 });
 
 describe('TextBlockConfigForm', () => {
@@ -346,5 +396,91 @@ describe('Top10ListsConfigForm', () => {
       />,
     );
     expect(screen.getByLabelText(/show url/i)).toBeInTheDocument();
+  });
+});
+
+describe('GraphsConfigForm', () => {
+  it('offers the run\'s graph presets and stores the chosen ids', async () => {
+    const onChange = jest.fn();
+    render(
+      <GraphsConfigForm
+        config={{}}
+        onChange={onChange}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    // Presets arrive from the same endpoint the Graphs card uses
+    expect(GraphPresetsAPI.getAll).toHaveBeenCalledWith('MyApp-acc-loadTest-00001');
+    const picker = await screen.findByText('Auto-discover panels');
+
+    fireEvent.mouseDown(picker);
+    fireEvent.click(await screen.findByText('JVM overview'));
+
+    expect(onChange).toHaveBeenCalledWith({ graphPresetIds: ['preset-1'] });
+  });
+
+  it('shows the selected preset names rather than their ids', async () => {
+    render(
+      <GraphsConfigForm
+        config={{ graphPresetIds: ['preset-2'] }}
+        onChange={jest.fn()}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    expect(await screen.findByText('Docker CPU')).toBeInTheDocument();
+  });
+});
+
+describe('ErrorAnalysisConfigForm', () => {
+  it('offers the chart, analysis-window and cap controls', async () => {
+    const onChange = jest.fn();
+    render(
+      <ErrorAnalysisConfigForm
+        config={{}}
+        onChange={onChange}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    // Chart and analysis window default on
+    expect(screen.getByLabelText(/errors-over-time chart/i)).toBeChecked();
+    expect(screen.getByLabelText(/analysis timerange only/i)).toBeChecked();
+
+    fireEvent.click(screen.getByLabelText(/errors-over-time chart/i));
+    expect(onChange).toHaveBeenCalledWith({ includeChart: false });
+  });
+
+  it('writes the row cap', () => {
+    const onChange = jest.fn();
+    render(
+      <ErrorAnalysisConfigForm
+        config={{}}
+        onChange={onChange}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/max failing requests/i), { target: { value: '50' } });
+
+    expect(onChange).toHaveBeenCalledWith({ topN: 50 });
+  });
+
+  it('tells the author what the section deliberately leaves out', () => {
+    render(
+      <ErrorAnalysisConfigForm
+        config={{}}
+        onChange={jest.fn()}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    expect(screen.getByText(/response bodies, headers and cookies are never included/i)).toBeInTheDocument();
   });
 });
