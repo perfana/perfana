@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.71.0] - 2026-08-22
+
+### Changed
+- **The Error Analysis tab looks like the rest of the app.** Its five summary tiles were the only place in the product using gradient fills, drop shadows, 1.5px borders and a hover lift, with a 48px weight-800 number above its label. They now match the Overall Test Metrics tiles one tab over exactly: a flat colour tint, a small uppercase label, and the value in monospace underneath. The error-rate tile also gained the caption the others already had, so it reads "1.46%" over "of 821 requests" instead of leaving you to find the request total elsewhere.
+- **The errors-over-time graph is a Perfana graph.** It was the one chart in the test-run analysis drawn with Recharts instead of Plotly, so it had a different tooltip, different fonts, a different legend, and no toolbar at all — no drag-to-zoom, no PNG export and no copy-to-clipboard, while every neighbouring chart had all three. It is now Plotly, using the same theme tokens, hover font and horizontal legend as the Trends and Compare charts, and the same toolbar — including the copy-to-clipboard button, which is the shared one the Graphs and Compare cards use rather than a fifth copy of it.
+- **The three panels are framed like every other section in the card.** "Errors Over Time", "Errors by Code" and "Error Details" were rounded outlined boxes with 28px icons; they are now the elevated panel with a 4px coloured left border, a 1rem heading and a divider that the Top 10 Lists sections use. The "No errors detected" state — which is what a healthy run shows — was a centred green gradient panel with a 64px tick and the line "Excellent performance!"; it is now the same quiet panel as everything else.
+
+### Fixed
+- **Two tables were unreadable in dark mode.** "Errors by Code" hardcoded a light-blue header tint and near-black header text, and striped its rows with `rgba(0,0,0,0.02)` — a black stripe over a dark background, which is invisible, over text that was nearly invisible. Both tables now use theme colours, so the header and stripes track light and dark.
+
+### Removed
+- **A chart-axis formatter with no callers.** `formatTimeBucket` existed only to label the Recharts x-axis; Plotly formats the date axis itself, and nothing else imported it.
+
 ## [0.2.70.0] - 2026-08-22
 
 ### Changed

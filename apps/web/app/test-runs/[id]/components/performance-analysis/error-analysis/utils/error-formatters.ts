@@ -45,14 +45,6 @@ export const formatJson = (jsonString: string): string => {
 };
 
 /**
- * Format time bucket for chart display
- */
-export const formatTimeBucket = (value: string): string => {
-  const date = new Date(value);
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
-/**
  * Calculate percentage of errors
  */
 export const calculateErrorPercentage = (errorCount: number, totalErrors: number): number => {
