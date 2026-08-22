@@ -149,6 +149,30 @@ the Series `Autocomplete`.
 ---
 
 
+## Trends card
+
+### `trends-chart-utils.ts` is dead code that duplicates the live plot builder
+
+**Priority:** P3
+**Origin:** the /ship adversarial review for v0.2.70.0 (2026-08-22), while fixing the
+single-y-axis bug in the Trends chart.
+**Why:** `apps/web/app/test-runs/[id]/components/trends/utils/trends-chart-utils.ts` is 387
+lines exporting `groupMetricsData`, `createPlotTraces`, `createXAxisLabels`,
+`getChangepointPositions`, `getGraphTitle`, `createPlotLayout`, `createPlotConfig` and
+`addChangepointLegendTrace`. None of them is imported anywhere; `hooks/useTrendsPlot.ts`
+reimplements all of it inline. Only the barrel `utils/index.ts` (`export * from
+'./trends-chart-utils'`) keeps the file reachable, which is probably why knip has not flagged
+it. The trap is that the dead `createPlotLayout` looks exactly like the function you would
+patch to change the Trends chart's axes — it even took the old single-axis `getYAxisConfig` —
+so a future fix can land in it, pass review, and change nothing on screen. `getYAxisConfig`
+now survives in `trends-utils.ts` only as a thin wrapper over `getYAxisConfigs` to keep this
+file compiling.
+**What:** verify the eight exports are genuinely unreferenced (`createPlotConfig` shares a name
+with live functions in the compare and SLO cards, so grep by name alone is misleading — resolve
+the imports), then delete the file, drop its line from `utils/index.ts`, and remove the
+`getYAxisConfig` wrapper with it. If any export turns out to be load-bearing, the opposite fix
+applies: make `useTrendsPlot` call it instead of carrying a second copy.
+
 ## Reports
 
 ### A new report section type must be registered in six places

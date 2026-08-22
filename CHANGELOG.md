@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.70.0] - 2026-08-22
+
+### Changed
+- **The Graphs and Trends cards put the graph first.** Both cards opened with a table of saved presets, then the pickers, then the series list, and only then the chart — so adding a series meant scrolling past everything to see what it did. The order is now: one row of pickers, the chart, the series it contains, and saved presets tucked into a collapsed section at the bottom. Picking a dashboard, a panel and some metrics and seeing the result no longer takes a scroll.
+- **A series is one line instead of a card.** Each added series took about 120px — a name, a breadcrumb, and a full unit dropdown with its own helper text underneath. It is now a single row: a coloured dot matching its line on the chart, the metric name, where it came from, the unit picker inline, and a remove button. Ten series take about 400px instead of 1200px, and because the rows sit directly under the chart they read as its legend.
+- **The graph's name is edited where it is displayed.** The Graphs card had a separate "Chart Name" field several hundred pixels above the chart it named, and the chart repeated the name inside the plot. The name is now an editable heading directly above the chart, with "Save as preset" beside it. Exported PNGs carry the name in the filename rather than burnt into the image.
+- **Dashboard, panel and series pickers sit on one row and stay put.** In the Trends card the panel and series fields only appeared once their prerequisite was chosen, so the layout jumped as you worked down it. They are always present now, disabled until they apply, and the helper text carries counts (`22 available`, `3 of 12 selected`) instead of repeating what the disabled state already says.
+- **The sticky card header no longer cuts a strip out of the chart.** It was a two-line opaque band that slid over the chart as you scrolled. It is a single line now, translucent and blurred, so the chart stays readable underneath it.
+
+### Fixed
+- **A Trends graph mixing two units drew both on one axis, under the first one's label.** Adding a percentage series and a requests-per-second series produced an axis titled "Percent (0-100)" with ticks reading `0% 5% 10% 15%`, and the requests-per-second line was plotted against it — 8 req/s displayed as "8%". Series whose unit differs from the first now get their own axis on the right, with its own title and tick suffix, the same way the Graphs card has always handled it. Three or more distinct units still share the right-hand axis.
+- **A Trends series that returned no data could not be removed.** When the query came back empty the card replaced everything with "No trends data available", which unmounted the series list — leaving no way to see which series was empty or to take it out. The list now stays put, and the message says what to do about it.
+- **Graph tooltips could sit misaligned the first time a card was expanded.** The chart measures its own width when it mounts, which happened while the expand animation was still running, so it kept a width that was never right. The Graphs card now nudges it once the animation settles, which the Trends card already did.
+
 ## [0.2.69.0] - 2026-08-22
 
 ### Added
