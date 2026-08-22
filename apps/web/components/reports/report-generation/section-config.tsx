@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   CompareArrows as CompareIcon,
+  ErrorOutline as ErrorIcon,
   FormatListNumbered as ListNumberedIcon,
   Notes as NotesIcon,
   Rule as RuleIcon,
@@ -90,6 +91,12 @@ export const SECTION_CONFIG: Record<ReportSectionType, { icon: React.ReactNode; 
     label: 'Custom Graphs',
     description: 'Performance metrics visualizations',
     color: '#00acc1',
+  },
+  error_analysis: {
+    icon: <ErrorIcon />,
+    label: 'Error Analysis',
+    description: 'Failed requests by response code, transaction and time',
+    color: '#c62828',
   },
   top_10_lists: {
     icon: <ListNumberedIcon />,
