@@ -902,11 +902,10 @@ describe('buildChartConfig', () => {
     expect(options.filename).toBe('custom_metrics_chart');
   });
 
-  it('includes copy-to-clipboard button in modeBarButtonsToAdd', () => {
+  it('adds a download button alongside copy-to-clipboard', () => {
     const config = buildChartConfig('My Chart');
     const buttons = config.modeBarButtonsToAdd as Array<{ name: string }>;
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0].name).toBe('Copy to Clipboard');
+    expect(buttons.map(b => b.name)).toEqual(['Download as PNG', 'Copy to Clipboard']);
   });
 
   it('removes the expected mode bar buttons', () => {
@@ -916,6 +915,79 @@ describe('buildChartConfig', () => {
     expect(removed).toContain('lasso2d');
     expect(removed).toContain('select2d');
     expect(removed).toContain('zoom2d');
+  });
+
+  it('replaces the built-in toImage button, which would export an untitled chart', () => {
+    const config = buildChartConfig('My Chart');
+    expect(config.modeBarButtonsToRemove as string[]).toContain('toImage');
+  });
+
+  describe('export title', () => {
+    // The chart deliberately has no title in its live layout — the editable heading
+    // above it is the on-screen title. An exported PNG has nothing else naming it,
+    // so both export paths must put the title back on the figure they render.
+    const gd = {
+      data: [{ y: [1, 2, 3] }],
+      layout: { font: { color: '#111', family: 'Inter' }, xaxis: {} },
+      _fullLayout: { width: 900, height: 400 },
+    };
+
+    let toImage: jest.Mock;
+
+    beforeEach(() => {
+      toImage = jest.fn().mockResolvedValue('data:image/png;base64,AAAA');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Plotly = { toImage, downloadImage: jest.fn() };
+      // jsdom implements neither, and the download path calls both
+      URL.createObjectURL = jest.fn(() => 'blob:mock');
+      URL.revokeObjectURL = jest.fn();
+    });
+
+    const clickButton = async (name: string, chartName?: string) => {
+      const config = buildChartConfig(chartName);
+      const buttons = config.modeBarButtonsToAdd as Array<{ name: string; click: (gd: unknown) => void }>;
+      const button = buttons.find(b => b.name === name)!;
+      button.click(gd);
+      await Promise.resolve();
+    };
+
+    it('puts the chart name on the figure the download button renders', async () => {
+      await clickButton('Download as PNG', 'Response times p95');
+      const figure = toImage.mock.calls[0][0] as { layout: { title: { text: string } } };
+      expect(figure.layout.title.text).toBe('Response times p95');
+    });
+
+    it('puts the chart name on the figure the clipboard button renders', async () => {
+      await clickButton('Copy to Clipboard', 'Response times p95');
+      const figure = toImage.mock.calls[0][0] as { layout: { title: { text: string } } };
+      expect(figure.layout.title.text).toBe('Response times p95');
+    });
+
+    it('falls back to a default title when the chart is unnamed', async () => {
+      await clickButton('Download as PNG', undefined);
+      const figure = toImage.mock.calls[0][0] as { layout: { title: { text: string } } };
+      expect(figure.layout.title.text).toBe('Custom Metrics Chart');
+    });
+
+    it('leaves the live layout untouched — the title exists only on the export copy', async () => {
+      await clickButton('Download as PNG', 'Response times p95');
+      expect(gd.layout).not.toHaveProperty('title');
+    });
+
+    it('carries the rest of the layout onto the export figure', async () => {
+      await clickButton('Download as PNG', 'Response times p95');
+      const figure = toImage.mock.calls[0][0] as {
+        data: unknown[];
+        layout: { font: { color: string } };
+      };
+      expect(figure.data).toEqual(gd.data);
+      expect(figure.layout.font.color).toBe('#111');
+    });
+
+    it('renders the clipboard copy at the size the chart is displayed at', async () => {
+      await clickButton('Copy to Clipboard', 'My Chart');
+      expect(toImage.mock.calls[0][1]).toMatchObject({ width: 900, height: 400, scale: 2 });
+    });
   });
 
   it('sets toImageButtonOptions scale to 2', () => {
