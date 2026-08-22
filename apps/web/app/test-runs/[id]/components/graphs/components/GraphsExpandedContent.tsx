@@ -7,8 +7,11 @@ import {
   TextField,
   Button,
   CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
-import { BookmarkBorder } from '@mui/icons-material';
+import { BookmarkBorder, ExpandMore } from '@mui/icons-material';
 
 import { SeriesConfig, ApplicationDashboard, Panel, MetricDataPoint, DataSource } from '../types';
 import type { TestRun } from '@/types/test-runs';
@@ -92,98 +95,66 @@ export function GraphsExpandedContent({
   const chartData = seriesData;
 
   return (
-    <Box sx={{ py: 2 }}>
-      {/* Saved Presets Table */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-          Saved Graph Presets
-        </Typography>
-        <GraphPresetsTable
-          presets={presets}
-          loading={presetsLoading}
-          currentUserId={currentUserId}
-          onSelectPreset={onLoadPreset}
-          onDeletePreset={onDeletePreset}
-          onDeleteAllPresets={onDeleteAllPresets}
-        />
-      </Box>
+    <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {/* Builder row — pick what to plot */}
+      <GraphsSelectionControls
+        selectedDashboard={selectedDashboard}
+        allDashboards={allDashboards}
+        dashboardsLoading={dashboardsLoading}
+        dynatraceDashboardsLoading={dynatraceDashboardsLoading}
+        onDashboardSelect={onDashboardSelect}
+        selectedPanel={selectedPanel}
+        panels={panels}
+        panelsLoading={panelsLoading}
+        onPanelSelect={onPanelSelect}
+        metrics={metrics}
+        metricsLoading={metricsLoading}
+        selectedMetrics={selectedMetrics}
+        setSelectedMetrics={setSelectedMetrics}
+        onAddSeries={onAddSeries}
+      />
 
-      {/* Add Series Controls */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-          Add Series to Graph
-        </Typography>
-        <GraphsSelectionControls
-          selectedDashboard={selectedDashboard}
-          allDashboards={allDashboards}
-          dashboardsLoading={dashboardsLoading}
-          dynatraceDashboardsLoading={dynatraceDashboardsLoading}
-          onDashboardSelect={onDashboardSelect}
-          selectedPanel={selectedPanel}
-          panels={panels}
-          panelsLoading={panelsLoading}
-          onPanelSelect={onPanelSelect}
-          metrics={metrics}
-          metricsLoading={metricsLoading}
-          selectedMetrics={selectedMetrics}
-          setSelectedMetrics={setSelectedMetrics}
-          onAddSeries={onAddSeries}
-        />
-      </Box>
-
-      {/* Chart Name */}
-      {addedSeries.length > 0 && (
-        <Box sx={{ mb: 4 }}>
-          <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-            Chart Name
-          </Typography>
-          <TextField
-            fullWidth
-            label="Chart Name"
-            value={chartName}
-            onChange={(e) => setChartName(e.target.value)}
-            variant="outlined"
-            helperText="This name will be used as the default preset name when saving"
-            placeholder="Enter a descriptive name for this chart"
-          />
-        </Box>
-      )}
-
-      {/* Added Series List */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-          Added Series ({addedSeries.length})
-        </Typography>
-        <GraphsSeriesList
-          addedSeries={addedSeries}
-          onRemoveSeries={onRemoveSeries}
-          onUpdateSeriesUnit={onUpdateSeriesUnit}
-        />
-      </Box>
-
-      {/* Chart Visualization */}
+      {/* Chart title + save, then the chart itself — the result stays in view */}
       {chartSeries.length > 0 && (
-        <Box sx={{ mb: 4 }}>
-          <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-            Graph Visualization
-          </Typography>
+        <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+            <TextField
+              value={chartName}
+              onChange={(e) => setChartName(e.target.value)}
+              variant="standard"
+              placeholder="Untitled graph"
+              aria-label="Graph name"
+              sx={{
+                flex: 1,
+                '& .MuiInput-input': { fontSize: '1.125rem', fontWeight: 600, py: 0.5 },
+              }}
+            />
+            <Button
+              variant="outlined"
+              startIcon={<BookmarkBorder />}
+              onClick={onOpenSavePresetModal}
+              sx={{ flexShrink: 0 }}
+            >
+              Save as preset
+            </Button>
+          </Box>
+
           {chartDataLoading ? (
             <Box sx={{
               p: 4,
-              border: '2px dashed',
+              border: '1px dashed',
               borderColor: 'divider',
               borderRadius: 2,
-              backgroundColor: 'action.hover',
               textAlign: 'center',
               minHeight: 400,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
             }}>
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <CircularProgress />
                 <Typography variant="body2" color="text.secondary">
-                  Loading chart data...
+                  Loading chart data…
                 </Typography>
               </Box>
             </Box>
@@ -200,31 +171,38 @@ export function GraphsExpandedContent({
         </Box>
       )}
 
-      {/* Save as Preset Button */}
-      {addedSeries.length > 0 && (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            variant="outlined"
-            startIcon={<BookmarkBorder />}
-            onClick={onOpenSavePresetModal}
-            sx={{
-              borderColor: 'primary.main',
-              color: 'primary.main',
-              px: 3,
-              transition: 'all 0.2s ease',
-              '&:hover': {
-                transform: 'translateY(-1px)',
-                borderColor: 'primary.dark',
-                backgroundColor: 'primary.main',
-                color: 'primary.contrastText',
-                boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
-              }
-            }}
-          >
-            Save as Preset
-          </Button>
-        </Box>
-      )}
+      {/* Legend / series controls, directly under the chart they describe */}
+      <Box>
+        {addedSeries.length > 0 && (
+          <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            Series ({addedSeries.length})
+          </Typography>
+        )}
+        <GraphsSeriesList
+          addedSeries={addedSeries}
+          onRemoveSeries={onRemoveSeries}
+          onUpdateSeriesUnit={onUpdateSeriesUnit}
+        />
+      </Box>
+
+      {/* Presets — out of the way until you want one */}
+      <Accordion disableGutters elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Saved presets{presetsLoading ? '' : ` (${presets.length})`}
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <GraphPresetsTable
+            presets={presets}
+            loading={presetsLoading}
+            currentUserId={currentUserId}
+            onSelectPreset={onLoadPreset}
+            onDeletePreset={onDeletePreset}
+            onDeleteAllPresets={onDeleteAllPresets}
+          />
+        </AccordionDetails>
+      </Accordion>
     </Box>
   );
 }

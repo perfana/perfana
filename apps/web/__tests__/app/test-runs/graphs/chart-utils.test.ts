@@ -757,27 +757,16 @@ describe('buildChartLayout', () => {
 
     expect(layout).toHaveProperty('xaxis');
     expect(layout).toHaveProperty('yaxis');
-    expect(layout).toHaveProperty('title');
     expect(layout).toHaveProperty('legend');
     expect(layout).toHaveProperty('hovermode', 'x unified');
   });
 
-  it('uses chartName in the title', () => {
+  it('does not set a plot title — the editable heading above the chart is the title', () => {
     const layout = buildChartLayout(
       themeColors, 'My Chart Title', leftConversion, null,
       [], [], 0, 0, false, 800
     );
-    const title = layout.title as { text: string };
-    expect(title.text).toBe('My Chart Title');
-  });
-
-  it('falls back to "Custom Metrics Chart" when chartName is undefined', () => {
-    const layout = buildChartLayout(
-      themeColors, undefined, leftConversion, null,
-      [], [], 0, 0, false, 800
-    );
-    const title = layout.title as { text: string };
-    expect(title.text).toBe('Custom Metrics Chart');
+    expect(layout).not.toHaveProperty('title');
   });
 
   it('uses leftConversion.label as the yaxis title', () => {

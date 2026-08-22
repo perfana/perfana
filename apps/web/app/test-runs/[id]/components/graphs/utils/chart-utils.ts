@@ -326,7 +326,7 @@ export function buildTrace(
  */
 export function buildChartLayout(
   themeColors: ChartThemeColors,
-  chartName: string | undefined,
+  _chartName: string | undefined,
   leftConversion: UnitConversion,
   rightConversion: UnitConversion | null,
   tickValues: number[],
@@ -406,18 +406,6 @@ export function buildChartLayout(
       zerolinewidth: 1,
       automargin: true,
       nticks: 5
-    },
-    title: {
-      text: chartName || 'Custom Metrics Chart',
-      font: {
-        color: themeColors.textColor,
-        size: 16,
-        family: themeColors.fontFamily
-      },
-      x: 0.5,
-      xanchor: 'center',
-      y: 0.95,
-      yanchor: 'top'
     },
     hovermode: 'x unified',
     hoverlabel: {
