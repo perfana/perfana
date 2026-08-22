@@ -8,7 +8,8 @@ import {
   CardContent,
   IconButton,
   Collapse,
-  Divider,
+  Tooltip,
+  alpha,
 } from '@mui/material';
 import { ExpandMore, ExpandLess } from '@mui/icons-material';
 
@@ -148,7 +149,10 @@ export default function GraphsCard({
                 position: 'sticky',
                 top: 0,
                 zIndex: 10,
-                bgcolor: 'background.paper',
+                // ponytail: translucent + short so it reads as chrome floating over the
+                // chart rather than a solid strip cut out of it while scrolling
+                bgcolor: (theme) => alpha(theme.palette.background.paper, 0.85),
+                backdropFilter: 'blur(8px)',
                 borderBottom: '1px solid',
                 borderColor: 'divider',
                 '&:hover': {
@@ -157,42 +161,40 @@ export default function GraphsCard({
               }}
               onClick={handleGraphsExpand}
             >
-              <Box textAlign="center">
-                <Typography
-                  variant="h5"
-                  component="h2"
-                  sx={{
-                    fontWeight: 600,
-                    color: 'text.primary',
-                    fontSize: '1.25rem',
-                    lineHeight: 1.2
-                  }}
-                >
-                  Graphs
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Click to collapse
-                </Typography>
-              </Box>
-              <IconButton
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleGraphsExpand();
-                }}
-                size="medium"
+              <Typography
+                variant="h6"
+                component="h2"
                 sx={{
-                  position: 'absolute',
-                  right: 0,
-                  backgroundColor: 'action.hover',
-                  '&:hover': {
-                    backgroundColor: 'primary.main',
-                    color: 'primary.contrastText',
-                  },
-                  transition: 'all 0.2s ease'
+                  fontWeight: 600,
+                  color: 'text.primary',
+                  fontSize: '1rem',
+                  lineHeight: 1.4
                 }}
               >
-                <ExpandLess />
-              </IconButton>
+                Graphs
+              </Typography>
+              <Tooltip title="Collapse">
+                <IconButton
+                  aria-label="Collapse graphs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleGraphsExpand();
+                  }}
+                  size="small"
+                  sx={{
+                    position: 'absolute',
+                    right: 0,
+                    backgroundColor: 'action.hover',
+                    '&:hover': {
+                      backgroundColor: 'primary.main',
+                      color: 'primary.contrastText',
+                    },
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <ExpandLess />
+                </IconButton>
+              </Tooltip>
             </Box>
           ) : (
             <>
@@ -253,9 +255,10 @@ export default function GraphsCard({
           )}
 
           {/* Expandable detailed content */}
-          <Collapse in={graphsExpanded}>
-            <Divider sx={{ my: 2 }} />
-
+          {/* Kick a window resize once the Collapse settles: GraphsChart measures its
+              width on mount and on window resize only, so a chart mounted mid-animation
+              keeps a stale width and its hover tooltips sit misaligned. */}
+          <Collapse in={graphsExpanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
             {/* Expanded Content */}
             <GraphsExpandedContent
               testRun={testRun}

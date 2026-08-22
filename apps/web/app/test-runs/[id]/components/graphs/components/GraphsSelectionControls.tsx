@@ -60,9 +60,10 @@ export function GraphsSelectionControls({
   const isLoading = dashboardsLoading || dynatraceDashboardsLoading;
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 1.5 }}>
       {/* Dashboard Selection - Grouped by source type */}
       <Autocomplete
+        sx={{ flex: '2 1 220px' }}
         options={allDashboards}
         getOptionLabel={(option) => option.dashboard_label || ''}
         isOptionEqualToValue={(option, value) => option.id === value.id}
@@ -100,11 +101,7 @@ export function GraphsSelectionControls({
             label="Dashboard"
             variant="outlined"
             fullWidth
-            helperText={
-              isLoading
-                ? 'Loading dashboards...'
-                : `Select dashboard (${allDashboards.length} available)`
-            }
+            helperText={isLoading ? 'Loading…' : `${allDashboards.length} available`}
             InputProps={{
               ...params.InputProps,
               endAdornment: (
@@ -130,6 +127,7 @@ export function GraphsSelectionControls({
 
       {/* Panel Selection */}
       <Autocomplete
+        sx={{ flex: '2 1 200px' }}
         options={panels}
         getOptionLabel={(option) => option.title}
         isOptionEqualToValue={(option, value) => option.id === value.id}
@@ -145,12 +143,10 @@ export function GraphsSelectionControls({
             fullWidth
             helperText={
               !selectedDashboard
-                ? 'Select a dashboard first'
+                ? 'Pick a dashboard first'
                 : panelsLoading
-                  ? 'Loading panels...'
-                  : selectedDashboard
-                    ? `Select panel from ${selectedDashboard.dashboard_label}`
-                    : 'Select panel'
+                  ? 'Loading…'
+                  : `${panels.length} available`
             }
             InputProps={{
               ...params.InputProps,
@@ -174,7 +170,7 @@ export function GraphsSelectionControls({
       />
 
       {/* Metric Selection */}
-      <Box sx={{ display: 'flex', gap: 2 }}>
+      <>
         <Autocomplete
           options={metrics}
           multiple
@@ -183,7 +179,7 @@ export function GraphsSelectionControls({
           onChange={(_, newValue) => setSelectedMetrics(newValue)}
           loading={metricsLoading}
           disabled={!selectedPanel}
-          sx={{ flex: 1 }}
+          sx={{ flex: '3 1 260px' }}
           renderInput={(params) => (
             <TextField
               {...params}
@@ -192,12 +188,12 @@ export function GraphsSelectionControls({
               fullWidth
               helperText={
                 !selectedPanel
-                  ? 'Select a panel first'
+                  ? 'Pick a panel first'
                   : metricsLoading
-                    ? 'Loading metrics...'
+                    ? 'Loading…'
                     : selectedMetrics.length > 0
-                      ? `${selectedMetrics.length} metric(s) selected`
-                      : 'Select one or more metrics'
+                      ? `${selectedMetrics.length} of ${metrics.length} selected`
+                      : `${metrics.length} available`
               }
               InputProps={{
                 ...params.InputProps,
@@ -232,9 +228,9 @@ export function GraphsSelectionControls({
             }
           }}
           disabled={!selectedPanel || metrics.length === 0}
-          sx={{ height: '56px', minWidth: '100px', flexShrink: 0 }}
+          sx={{ height: '56px', minWidth: '92px', flexShrink: 0 }}
         >
-          {selectedMetrics.length === metrics.length && metrics.length > 0 ? 'Deselect All' : 'Select All'}
+          {selectedMetrics.length === metrics.length && metrics.length > 0 ? 'Clear all' : 'Select all'}
         </Button>
 
         {/* Add Series Button */}
@@ -243,16 +239,11 @@ export function GraphsSelectionControls({
           startIcon={<Add />}
           onClick={onAddSeries}
           disabled={!selectedDashboard || !selectedPanel || selectedMetrics.length === 0}
-          sx={{
-            height: '56px',
-            px: 3,
-            whiteSpace: 'nowrap',
-            minWidth: 'auto'
-          }}
+          sx={{ height: '56px', px: 3, whiteSpace: 'nowrap', flexShrink: 0 }}
         >
-          Add {selectedMetrics.length > 0 ? `(${selectedMetrics.length})` : 'Series'}
+          Add {selectedMetrics.length > 0 ? `(${selectedMetrics.length})` : 'series'}
         </Button>
-      </Box>
+      </>
     </Box>
   );
 }

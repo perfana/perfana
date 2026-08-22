@@ -326,7 +326,7 @@ export function buildTrace(
  */
 export function buildChartLayout(
   themeColors: ChartThemeColors,
-  chartName: string | undefined,
+  _chartName: string | undefined,
   leftConversion: UnitConversion,
   rightConversion: UnitConversion | null,
   tickValues: number[],
@@ -407,18 +407,6 @@ export function buildChartLayout(
       automargin: true,
       nticks: 5
     },
-    title: {
-      text: chartName || 'Custom Metrics Chart',
-      font: {
-        color: themeColors.textColor,
-        size: 16,
-        family: themeColors.fontFamily
-      },
-      x: 0.5,
-      xanchor: 'center',
-      y: 0.95,
-      yanchor: 'top'
-    },
     hovermode: 'x unified',
     hoverlabel: {
       bgcolor: themeColors.hoverBgColor,
@@ -479,22 +467,126 @@ export function buildChartLayout(
 }
 
 /**
+ * Plotly renders an export from the live layout, which no longer carries a title —
+ * the editable heading above the chart is the on-screen title now. An exported PNG
+ * is a different context: once it leaves the app nothing else names it, so the title
+ * goes back on for the image only. `toImage` accepts a figure object as well as a
+ * graph div, so building one here never touches what is on screen.
+ *
+ * The layout already reserves `margin.t: 50`, so the title has room without shifting
+ * the plot area between the on-screen and exported versions.
+ */
+function buildExportFigure(gd: unknown, chartName: string | undefined) {
+  const graph = gd as { data?: unknown[]; layout?: Record<string, unknown> };
+  const layout = graph.layout ?? {};
+  const font = (layout.font ?? {}) as { color?: string; family?: string };
+
+  return {
+    data: graph.data ?? [],
+    layout: {
+      ...layout,
+      title: {
+        text: chartName || 'Custom Metrics Chart',
+        font: { color: font.color, size: 16, family: font.family },
+        x: 0.5,
+        xanchor: 'center',
+        y: 0.95,
+        yanchor: 'top'
+      }
+    }
+  };
+}
+
+/** Filename shared by every export path, so a PNG is named the same however it was saved. */
+function exportFilename(chartName: string | undefined): string {
+  return chartName ? chartName.toLowerCase().replace(/\s+/g, '_') : 'custom_metrics_chart';
+}
+
+/** Trigger a browser download for an already-rendered blob. */
+function downloadBlob(blob: Blob | null, chartName: string | undefined): void {
+  if (!blob) return;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = exportFilename(chartName) + '.png';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** Convert Plotly's data-URL output into a Blob. */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const parts = dataUrl.split(',');
+  const mime = parts[0]!.match(/:(.*?);/)?.[1] || 'image/png';
+  const raw = atob(parts[1]!);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    arr[i] = raw.charCodeAt(i);
+  }
+  return new Blob([arr], { type: mime });
+}
+
+/** Render the chart to a PNG blob with the export title applied. */
+function renderExportPng(
+  gd: unknown,
+  chartName: string | undefined,
+  size: { width: number; height: number }
+): Promise<Blob> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (window as any).Plotly
+    .toImage(buildExportFigure(gd, chartName), { format: 'png', ...size, scale: 2 })
+    .then(dataUrlToBlob);
+}
+
+/**
  * Build the Plotly config with copy to clipboard functionality
  */
 export function buildChartConfig(chartName: string | undefined): Record<string, unknown> {
+  const plotSize = (gd: unknown) => {
+    const full = (gd as { _fullLayout?: { width?: number; height?: number } })._fullLayout;
+    return { width: full?.width || 1200, height: full?.height || 600 };
+  };
+
   return {
     displayModeBar: true,
-    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'],
+    // 'toImage' is removed and replaced below: the built-in download renders the live
+    // layout, which deliberately has no title, so its PNG would come out unlabelled.
+    modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d', 'toImage'],
     displaylogo: false,
     responsive: true,
     toImageButtonOptions: {
       format: 'png',
-      filename: chartName ? chartName.toLowerCase().replace(/\s+/g, '_') : 'custom_metrics_chart',
+      filename: exportFilename(chartName),
       height: 600,
       width: 1200,
       scale: 2
     },
     modeBarButtonsToAdd: [
+      {
+        name: 'Download as PNG',
+        icon: {
+          width: 1000,
+          height: 1000,
+          path: 'm500 450c-83 0-150-67-150-150 0-83 67-150 150-150 83 0 150 67 150 150 0 83-67 150-150 150z m400 150h-120c-16 0-34 13-39 29l-31 93c-6 15-23 28-40 28h-340c-16 0-34-13-39-28l-31-94c-6-15-23-28-40-28h-120c-55 0-100-45-100-100v-450c0-55 45-100 100-100h800c55 0 100 45 100 100v450c0 55-45 100-100 100z m-400-550c-138 0-250 112-250 250 0 138 112 250 250 250 138 0 250-112 250-250 0-138-112-250-250-250z m365 380c-19 0-35 16-35 35 0 19 16 35 35 35 19 0 35-16 35-35 0-19-16-35-35-35z',
+          transform: 'matrix(1 0 0 -1 0 850)'
+        },
+        click: function(gd: unknown) {
+          renderExportPng(gd, chartName, { width: 1200, height: 600 })
+            .then((blob) => downloadBlob(blob, chartName))
+            .catch(() => {
+              // Fall back to Plotly's own download so the button is never a dead end.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (window as any).Plotly.downloadImage(gd, {
+                format: 'png',
+                filename: exportFilename(chartName),
+                width: 1200,
+                height: 600,
+                scale: 2
+              });
+            });
+        }
+      },
       {
         name: 'Copy to Clipboard',
         icon: {
@@ -504,58 +596,19 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
           transform: 'scale(0.8)'
         },
         click: function(gd: unknown) {
-          const plotlyGd = gd as { _fullLayout?: { width?: number; height?: number } };
-          // Build a blob promise from Plotly's toImage
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const blobPromise = (window as any).Plotly.toImage(gd, {
-            format: 'png',
-            width: plotlyGd._fullLayout?.width || 1200,
-            height: plotlyGd._fullLayout?.height || 600,
-            scale: 2
-          }).then((dataUrl: string) => {
-            // Convert data URL to blob synchronously via atob
-            const parts = dataUrl.split(',');
-            const mime = parts[0].match(/:(.*?);/)?.[1] || 'image/png';
-            const raw = atob(parts[1]);
-            const arr = new Uint8Array(raw.length);
-            for (let i = 0; i < raw.length; i++) {
-              arr[i] = raw.charCodeAt(i);
-            }
-            return new Blob([arr], { type: mime });
-          });
+          const blobPromise = renderExportPng(gd, chartName, plotSize(gd));
 
-          // Call clipboard.write synchronously with a Promise<Blob> to
-          // preserve the user-activation context (avoids triggering download)
+          // clipboard.write must be called synchronously with the Promise<Blob> to
+          // keep the user-activation context, otherwise the browser treats it as a
+          // download instead.
           if (navigator.clipboard && 'write' in navigator.clipboard) {
             navigator.clipboard.write([
               new ClipboardItem({ 'image/png': blobPromise })
             ]).catch(() => {
-              // Fallback to download if clipboard write fails
-              blobPromise.then((blob: Blob | null) => {
-                if (!blob) return;
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = chartName ? chartName.toLowerCase().replace(/\s+/g, '_') + '.png' : 'custom_metrics_chart.png';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-              });
+              blobPromise.then((blob) => downloadBlob(blob, chartName));
             });
           } else {
-            // No clipboard API available, download directly
-            blobPromise.then((blob: Blob | null) => {
-              if (!blob) return;
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = chartName ? chartName.toLowerCase().replace(/\s+/g, '_') + '.png' : 'custom_metrics_chart.png';
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
-            });
+            blobPromise.then((blob) => downloadBlob(blob, chartName));
           }
         }
       }

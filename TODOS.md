@@ -149,6 +149,32 @@ the Series `Autocomplete`.
 ---
 
 
+## Dead code detection
+
+### knip treats every file under `apps/web/app/**` as an entry point, so nothing there is ever unused
+
+**Priority:** P3
+**Origin:** deleting `trends-chart-utils.ts` for v0.2.70.0 (2026-08-22). That file was 387 lines
+of dead code that knip had never reported.
+**Why:** `knip.json` sets `apps/web.entry` to `["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"]`. An
+entry point is a root of the reachability graph, so declaring the whole App Router tree as entries
+means no file or export under `app/` can ever be reported unused — the largest part of the
+frontend is exempt from the dead-code check that `npm run knip` implies is covering it. The
+blanket glob also disables the benefit of knip's built-in Next.js plugin, which already knows the
+real entry conventions (`page`/`layout`/`route`/`loading`/`error`/`not-found`/`template`/`default`,
+plus `middleware.ts` and `instrumentation.ts`).
+**Evidence:** a probe run with those conventions as the entry set reports **323 unused exports**
+under `app/`, including all eight exports of the file deleted in v0.2.70.0. The default config
+reports 12 findings for the whole monorepo and none of them.
+**What:** replace the blanket entry glob with the Next.js conventions, then triage the backlog.
+It cannot land as one change — 323 findings is a release of its own, and per
+`docs/` history much of it is the known false-positive classes: barrel files that re-export a
+component both named and default (removing the named export breaks runtime rendering and `tsc`
+does not catch it — that is why `"exclude": ["duplicates"]` is already set), and type vocabularies
+consumed only by feature code. Suggested order: land the config change with the current backlog
+captured in a baseline/ignore list, then burn the list down by directory so each PR stays
+reviewable.
+
 ## Reports
 
 ### A new report section type must be registered in six places

@@ -9,7 +9,11 @@ import {
   IconButton,
   Collapse,
   CircularProgress,
-  Divider,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Tooltip,
+  alpha,
 } from '@mui/material';
 import {
   ExpandMore,
@@ -202,7 +206,10 @@ export default function TrendsCard({
                 position: 'sticky',
                 top: 0,
                 zIndex: 10,
-                bgcolor: 'background.paper',
+                // ponytail: translucent + short so it reads as chrome floating over the
+                // chart rather than a solid strip cut out of it while scrolling
+                bgcolor: (theme) => alpha(theme.palette.background.paper, 0.85),
+                backdropFilter: 'blur(8px)',
                 borderBottom: '1px solid',
                 borderColor: 'divider',
                 '&:hover': {
@@ -211,45 +218,40 @@ export default function TrendsCard({
               }}
               onClick={handleTrendsExpand}
             >
-              <Box textAlign="center">
-                <Typography
-                  variant="h5"
-                  component="h2"
-                  sx={{
-                    fontWeight: 600,
-                    color: 'text.primary',
-                    fontSize: '1.125rem',
-                    letterSpacing: 'normal',
-                    lineHeight: 1.2
-                  }}
-                >
-                  Trends
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Click to collapse
-                </Typography>
-              </Box>
-              <IconButton
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleTrendsExpand();
-                }}
-                size="medium"
+              <Typography
+                variant="h6"
+                component="h2"
                 sx={{
-                  position: 'absolute',
-                  right: 0,
-                  width: 40,
-                  height: 40,
-                  backgroundColor: 'action.hover',
-                  '&:hover': {
-                    backgroundColor: 'primary.main',
-                    color: 'primary.contrastText',
-                  },
-                  transition: 'all 0.2s ease'
+                  fontWeight: 600,
+                  color: 'text.primary',
+                  fontSize: '1rem',
+                  lineHeight: 1.4
                 }}
               >
-                <ExpandLess />
-              </IconButton>
+                Trends
+              </Typography>
+              <Tooltip title="Collapse">
+                <IconButton
+                  aria-label="Collapse trends"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTrendsExpand();
+                  }}
+                  size="small"
+                  sx={{
+                    position: 'absolute',
+                    right: 0,
+                    backgroundColor: 'action.hover',
+                    '&:hover': {
+                      backgroundColor: 'primary.main',
+                      color: 'primary.contrastText',
+                    },
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <ExpandLess />
+                </IconButton>
+              </Tooltip>
             </Box>
           )}
 
@@ -266,71 +268,89 @@ export default function TrendsCard({
               measures its geometry mid-animation and useResizeHandler only listens to
               window resize, so without this the hover tooltip stays misaligned. */}
           <Collapse in={trendsExpanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
-            <Divider sx={{ my: 2 }} />
+            <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {/* Builder row, then the view controls that sit right above the chart */}
+              <TrendsSelectionControls
+                selectedDashboard={trendsData.selectedDashboard}
+                allDashboards={trendsData.getAllDashboardsMerged()}
+                dashboardsLoading={trendsData.dashboardsLoading}
+                dynatraceDashboardsLoading={trendsData.dynatraceDashboardsLoading}
+                onDashboardSelect={trendsData.handleDashboardSelect}
+                selectedSource={trendsData.selectedSource}
+                selectedMetric={trendsData.selectedMetric}
+                panels={trendsData.panels}
+                panelsLoading={trendsData.panelsLoading}
+                dynatraceMetrics={trendsData.dynatraceMetrics}
+                dynatraceMetricsLoading={trendsData.dynatraceMetricsLoading}
+                onMetricSelect={trendsData.handleMetricSelect}
+                availableMetrics={trendsData.availableMetrics}
+                availableMetricsLoading={trendsData.availableMetricsLoading}
+                selectedMetricNames={trendsData.selectedMetricNames}
+                setSelectedMetricNames={trendsData.setSelectedMetricNames}
+                addedSeries={trendsData.addedSeries}
+                onAddSeries={handleAddSeries}
+                timeRange={trendsData.timeRange}
+                onTimeRangeChange={trendsData.handleTimeRangeChange}
+                customTimeRange={trendsData.customTimeRange}
+                onCustomTimeRangeChange={trendsData.handleCustomTimeRangeChange}
+                evaluateType={trendsData.evaluateType}
+                onEvaluateTypeChange={trendsData.handleEvaluateTypeChange}
+                onSavePresetClick={() => trendsPresets.setSavePresetModalOpen(true)}
+              />
 
-            {/* Saved Presets Section */}
-            <Box sx={{ mb: 4 }}>
-              <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-                Saved Filter Presets
-              </Typography>
-              {trendsPresets.applyingPreset && (
-                <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <CircularProgress size={16} />
+              {trendsData.addedSeries.length === 0 && (
+                <Box sx={{
+                  p: 3,
+                  border: '1px dashed',
+                  borderColor: 'divider',
+                  borderRadius: 2,
+                  textAlign: 'center',
+                }}>
                   <Typography variant="body2" color="text.secondary">
-                    Applying preset...
+                    Pick a dashboard, panel and series above, then add them to plot a trend.
                   </Typography>
                 </Box>
               )}
-              <TrendsPresetsTable
-                presets={trendsPresets.presets}
-                loading={trendsPresets.presetsLoading}
-                currentUserId={trendsPresets.currentUserId}
-                onSelectPreset={trendsPresets.applyPreset}
-                onDeletePreset={trendsPresets.deletePreset}
+
+              {/* Chart, with the series list directly under it */}
+              <TrendsChart
+                addedSeries={trendsData.addedSeries}
+                metricsData={trendsData.metricsData}
+                metricsLoading={trendsData.metricsLoading}
+                plotData={trendsPlot.plotData}
+                plotLayout={trendsPlot.plotLayout}
+                plotConfig={trendsPlot.plotConfig}
+                onRemoveSeries={trendsData.handleRemoveSeries}
+                onClearAllSeries={trendsData.handleClearAllSeries}
+                onUpdateSeriesUnit={trendsData.handleUpdateSeriesUnit}
               />
+
+              {/* Presets — out of the way until you want one */}
+              <Accordion disableGutters elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    Saved presets{trendsPresets.presetsLoading ? '' : ` (${trendsPresets.presets.length})`}
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  {trendsPresets.applyingPreset && (
+                    <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <CircularProgress size={16} />
+                      <Typography variant="body2" color="text.secondary">
+                        Applying preset…
+                      </Typography>
+                    </Box>
+                  )}
+                  <TrendsPresetsTable
+                    presets={trendsPresets.presets}
+                    loading={trendsPresets.presetsLoading}
+                    currentUserId={trendsPresets.currentUserId}
+                    onSelectPreset={trendsPresets.applyPreset}
+                    onDeletePreset={trendsPresets.deletePreset}
+                  />
+                </AccordionDetails>
+              </Accordion>
             </Box>
-
-            {/* Selection Controls */}
-            <TrendsSelectionControls
-              selectedDashboard={trendsData.selectedDashboard}
-              allDashboards={trendsData.getAllDashboardsMerged()}
-              dashboardsLoading={trendsData.dashboardsLoading}
-              dynatraceDashboardsLoading={trendsData.dynatraceDashboardsLoading}
-              onDashboardSelect={trendsData.handleDashboardSelect}
-              selectedSource={trendsData.selectedSource}
-              selectedMetric={trendsData.selectedMetric}
-              panels={trendsData.panels}
-              panelsLoading={trendsData.panelsLoading}
-              dynatraceMetrics={trendsData.dynatraceMetrics}
-              dynatraceMetricsLoading={trendsData.dynatraceMetricsLoading}
-              onMetricSelect={trendsData.handleMetricSelect}
-              availableMetrics={trendsData.availableMetrics}
-              availableMetricsLoading={trendsData.availableMetricsLoading}
-              selectedMetricNames={trendsData.selectedMetricNames}
-              setSelectedMetricNames={trendsData.setSelectedMetricNames}
-              addedSeries={trendsData.addedSeries}
-              onAddSeries={handleAddSeries}
-              timeRange={trendsData.timeRange}
-              onTimeRangeChange={trendsData.handleTimeRangeChange}
-              customTimeRange={trendsData.customTimeRange}
-              onCustomTimeRangeChange={trendsData.handleCustomTimeRangeChange}
-              evaluateType={trendsData.evaluateType}
-              onEvaluateTypeChange={trendsData.handleEvaluateTypeChange}
-              onSavePresetClick={() => trendsPresets.setSavePresetModalOpen(true)}
-            />
-
-            {/* Chart */}
-            <TrendsChart
-              addedSeries={trendsData.addedSeries}
-              metricsData={trendsData.metricsData}
-              metricsLoading={trendsData.metricsLoading}
-              plotData={trendsPlot.plotData}
-              plotLayout={trendsPlot.plotLayout}
-              plotConfig={trendsPlot.plotConfig}
-              onRemoveSeries={trendsData.handleRemoveSeries}
-              onClearAllSeries={trendsData.handleClearAllSeries}
-              onUpdateSeriesUnit={trendsData.handleUpdateSeriesUnit}
-            />
           </Collapse>
         </CardContent>
       </Card>
