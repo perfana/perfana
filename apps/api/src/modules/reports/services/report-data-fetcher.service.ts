@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { TestRun } from '@perfana/shared';
+import { SeriesConfig } from '@perfana/shared/entities';
+import { ControllerRef } from '../renderers/controller-sections';
 import { withRequestEm } from '../../../common/db/request-em';
 import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
@@ -31,6 +33,9 @@ import {
   RawTop10Row,
   RegressionsData,
   RegressionsMetric,
+  GraphPresetPanels,
+  ReportErrorAnalysis,
+  ReportTransaction,
   ScenarioData,
   SloCheckResult,
   SloSummary,
@@ -82,6 +87,22 @@ export function mapRawToTop10Rows(raw: RawTop10Row[], testDuration: number): Top
  * - Non-admin users only see data for test runs belonging to their organizations
  * - Organizations are loaded from AuthorizationService (cached via Redis)
  */
+
+/**
+ * Rows read per transaction when resolving controller chains. Chain membership is fixed by the
+ * test plan and repeats every iteration, so a bounded slice names every chain without scanning
+ * the whole transaction. Same bound, same reason, as the Performance Analysis card's.
+ */
+const REQUEST_CHAIN_SCAN_ROWS = 5000;
+
+/** Two chains are the same when they name the same controllers, in order, at the same slots. */
+function sameControllerChain(a: ControllerRef[], b: ControllerRef[]): boolean {
+  return a.length === b.length
+    && a.every((c, i) => c.name === b[i]?.name
+      && c.class === b[i]?.class
+      && (c.occurrence ?? 0) === (b[i]?.occurrence ?? 0));
+}
+
 @Injectable()
 export class ReportDataFetcherService {
   private readonly logger = new Logger(ReportDataFetcherService.name);
@@ -190,6 +211,7 @@ export class ReportDataFetcherService {
     scenarioName: string,
     userId: string = '',
     roles: string[] = [],
+    includeChildRequests: boolean = false,
   ): Promise<ScenarioData | null> {
     try {
       // Build organization filter for test_run validation
@@ -237,6 +259,10 @@ export class ReportDataFetcherService {
 
       const timeSeriesData = await withRequestEm(this.testRunRepo).query(timeSeriesQuery, [testRun.testRunId, scenarioName, ...orgFilter.params]);
 
+      const childrenByTransaction = includeChildRequests
+        ? await this.getChildRequestsByTransaction(testRun, scenarioName, userId, roles)
+        : new Map<string, ReportTransaction[]>();
+
       // Format data for chart rendering
       return {
         scenario: scenarioName,
@@ -248,6 +274,9 @@ export class ReportDataFetcherService {
           pass: parseInt(txn.pass) || 0,
           fail: parseInt(txn.fail) || 0,
           errPct: parseInt(txn.total) > 0 ? ((parseInt(txn.fail) / parseInt(txn.total)) * 100) : 0,
+          ...(childrenByTransaction.has(txn.transaction_name)
+            ? { children: childrenByTransaction.get(txn.transaction_name) }
+            : {}),
         })),
         timeSeries: timeSeriesData,
       };
@@ -255,6 +284,349 @@ export class ReportDataFetcherService {
       this.logger.error(`Failed to fetch scenario data for ${scenarioName}:`, error);
       return null;
     }
+  }
+
+  /**
+   * Everything the Error Analysis section shows, in one pass.
+   *
+   * The queries mirror TestRunsErrorAnalysisService, which owns the same shapes for
+   * the app's error views. They are re-issued here rather than delegated because that
+   * service reads through the plain data source with no organization filter — fine
+   * behind an authenticated controller that has already checked the run, wrong for a
+   * fetcher that also serves unauthenticated share links. resolveOrgFilter applies the
+   * report convention instead: empty userId = system call, real users get org-scoped
+   * results.
+   *
+   * Aggregates only, by design — see ReportErrorAnalysis.
+   */
+  async getErrorAnalysis(
+    testRun: TestRun,
+    scenarios: string[],
+    excludeRampUp: boolean,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<ReportErrorAnalysis> {
+    const empty: ReportErrorAnalysis = {
+      totalErrors: 0, errorRate: null, totalRequests: null, uniqueResponseCodes: 0,
+      transactionsWithErrors: 0, byCode: [], byTransaction: [], overTime: [],
+    };
+    try {
+      // The analysis window, matching the Performance Analysis card's toggle: start
+      // after ramp-up, end before ramp-down, and only for a run that has finished.
+      const bounds: string[] = [];
+      const params: unknown[] = [testRun.testRunId];
+      if (excludeRampUp) {
+        // ramp_up / ramp_down on the entity are analysisStartOffset /
+        // analysisEndOffset — the same seconds the analysis time range dialog sets.
+        const rampUp = Number(testRun.analysisStartOffset ?? 0);
+        if (testRun.startTime && rampUp > 0) {
+          params.push(new Date(new Date(testRun.startTime).getTime() + rampUp * 1000));
+          bounds.push(`AND e.time >= $${params.length}`);
+        }
+        const rampDown = Number(testRun.analysisEndOffset ?? 0);
+        if (testRun.endTime && rampDown > 0) {
+          params.push(new Date(new Date(testRun.endTime).getTime() - rampDown * 1000));
+          bounds.push(`AND e.time <= $${params.length}`);
+        }
+      }
+      if (scenarios.length > 0) {
+        params.push(scenarios);
+        bounds.push(`AND COALESCE(e.scenario_name, '') = ANY($${params.length})`);
+      }
+      const orgFilter = await this.resolveOrgFilter(userId, roles, params.length + 1, 'tr');
+      params.push(...orgFilter.params);
+      const where = `e.test_run_id = $1 ${bounds.join(' ')} ${orgFilter.clause}`;
+      const from = `FROM requests_error e JOIN test_runs tr ON tr.test_run_id = e.test_run_id WHERE ${where}`;
+
+      const [codeRows, txnRows, timeRows] = await Promise.all([
+        withRequestEm(this.testRunRepo).query(
+          `SELECT e.response_code, COUNT(*) AS error_count,
+                  ROUND(AVG(e.response_time)) AS avg_rt,
+                  MIN(e.response_time) AS min_rt, MAX(e.response_time) AS max_rt
+           ${from}
+           GROUP BY e.response_code
+           ORDER BY error_count DESC`, params),
+        withRequestEm(this.testRunRepo).query(
+          `SELECT e.transaction_name, e.sampler_name, e.url, e.response_code,
+                  COUNT(*) AS error_count, ROUND(AVG(e.response_time)) AS avg_rt
+           ${from}
+           GROUP BY e.transaction_name, e.sampler_name, e.url, e.response_code
+           ORDER BY error_count DESC`, params),
+        withRequestEm(this.testRunRepo).query(
+          `SELECT time_bucket('1 minute', e.time) AS bucket, e.response_code, COUNT(*) AS error_count
+           ${from}
+           GROUP BY bucket, e.response_code
+           ORDER BY bucket ASC`, params),
+      ]);
+
+      const num = (v: unknown) => (v == null ? null : Number(v));
+      const int = (v: unknown) => parseInt(String(v ?? 0), 10) || 0;
+      const totalErrors = (codeRows as Array<Record<string, unknown>>).reduce((n, r) => n + int(r.error_count), 0);
+      if (totalErrors === 0) return empty;
+      const share = (count: number) => (totalErrors > 0 ? (count / totalErrors) * 100 : 0);
+
+      // The denominator for the error rate: every request the run made in the same
+      // window. Counted from the sampler rollup rather than requests_raw, which is
+      // sampled on large runs and would inflate the rate.
+      const totalRows: Array<{ total: string | null }> = await withRequestEm(this.testRunRepo).query(
+        `SELECT SUM(s.total_count) AS total
+           FROM test_run_sampler_stats s
+           JOIN test_runs tr ON tr.test_run_id = s.test_run_id
+          WHERE s.test_run_id = $1
+            AND s.ramp_up_excluded = $2
+            ${scenarios.length > 0 ? `AND COALESCE(NULLIF(s.scenario_name, ''), '') = ANY($3)` : ''}`,
+        scenarios.length > 0
+          ? [testRun.testRunId, excludeRampUp, scenarios]
+          : [testRun.testRunId, excludeRampUp],
+      );
+      const totalRequests = num(totalRows?.[0]?.total);
+
+      const buckets = new Map<number, Record<string, number>>();
+      for (const row of timeRows as Array<Record<string, unknown>>) {
+        const t = new Date(row.bucket as string).getTime();
+        const counts = buckets.get(t) ?? {};
+        counts[String(row.response_code ?? 'unknown')] = int(row.error_count);
+        buckets.set(t, counts);
+      }
+
+      return {
+        totalErrors,
+        totalRequests,
+        errorRate: totalRequests && totalRequests > 0 ? (totalErrors / totalRequests) * 100 : null,
+        uniqueResponseCodes: (codeRows as unknown[]).length,
+        transactionsWithErrors: new Set(
+          (txnRows as Array<Record<string, unknown>>).map((r) => String(r.transaction_name)),
+        ).size,
+        byCode: (codeRows as Array<Record<string, unknown>>).map((r) => ({
+          responseCode: String(r.response_code ?? 'unknown'),
+          errorCount: int(r.error_count),
+          share: share(int(r.error_count)),
+          avgResponseTime: num(r.avg_rt),
+          minResponseTime: num(r.min_rt),
+          maxResponseTime: num(r.max_rt),
+        })),
+        byTransaction: (txnRows as Array<Record<string, unknown>>).map((r) => ({
+          transactionName: String(r.transaction_name ?? ''),
+          samplerName: String(r.sampler_name ?? ''),
+          url: (r.url as string) ?? null,
+          responseCode: (r.response_code as string) ?? null,
+          errorCount: int(r.error_count),
+          share: share(int(r.error_count)),
+          avgResponseTime: num(r.avg_rt),
+        })),
+        overTime: [...buckets.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([t, countsByCode]) => ({ time: new Date(t), countsByCode })),
+      };
+    } catch (error) {
+      this.logger.error(`Failed to fetch error analysis for ${testRun.testRunId}:`, error);
+      return empty;
+    }
+  }
+
+  /**
+   * The controller chain each sampler ran under, keyed `transaction\u0000scenario\u0000sampler`.
+   *
+   * A trimmed port of TestRunsPerformanceQueryService.attachParallelGroups — the report needs the
+   * chain to band its request tables, not the parallel-group timings or the apdex machinery that
+   * service also assembles, and that service is org-gated in a way report rendering (empty
+   * userId) cannot satisfy.
+   *
+   * Bounded the same way and for the same reason: chain membership is fixed by the test plan and
+   * repeats every iteration, so the first slice of a transaction's rows names every chain it has.
+   * The LIMIT sits inside the lateral and the chain filter outside it, so the bound is on rows
+   * *scanned* — a run recorded before the column existed must not scan a whole transaction
+   * hunting for matches that do not exist.
+   *
+   * `source_element_path` ends AT THE SAMPLER, so its last entry is dropped: the table already
+   * has a row for the sampler and would otherwise band every request under a copy of itself. Its
+   * retired predecessor `parent_controllers` ends at the innermost controller and needs no trim.
+   */
+  async getSamplerControllerChains(
+    testRunId: string,
+    transactionNames: string[],
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<Map<string, { chain: ControllerRef[]; firstSeen: number }>> {
+    const chains = new Map<string, { chain: ControllerRef[]; firstSeen: number }>();
+    if (transactionNames.length === 0) return chains;
+    try {
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 3, 'tr');
+      const rows: Array<Record<string, unknown>> = await withRequestEm(this.testRunRepo).query(
+        `SELECT txn.name AS transaction_name, r.scenario_name, r.sampler_name, r.chain,
+                MIN(r.seq) AS first_seen
+           FROM unnest($2::text[]) AS txn(name)
+           CROSS JOIN LATERAL (
+             SELECT rr.scenario_name, rr.sampler_name,
+                    COALESCE(
+                      (SELECT jsonb_agg(
+                                jsonb_build_object(
+                                  'name', e ->> 'name',
+                                  'class', e ->> 'class',
+                                  'occurrence', e -> 'occurrence')
+                                ORDER BY ord)
+                         FROM jsonb_array_elements(rr.source_element_path)
+                              WITH ORDINALITY AS t(e, ord)
+                        WHERE ord < jsonb_array_length(rr.source_element_path)),
+                      (SELECT jsonb_agg(
+                                jsonb_build_object('name', e ->> 'name', 'class', e ->> 'class')
+                                ORDER BY ord)
+                         FROM jsonb_array_elements(rr.parent_controllers)
+                              WITH ORDINALITY AS t(e, ord))
+                    ) AS chain,
+                    ROW_NUMBER() OVER (ORDER BY rr.time) AS seq
+               FROM (
+                      SELECT sampler_name, scenario_name, parent_controllers,
+                             source_element_path, time
+                        FROM requests_raw
+                       WHERE test_run_id = $1
+                         AND transaction_name = txn.name
+                       ORDER BY time
+                       LIMIT ${REQUEST_CHAIN_SCAN_ROWS}
+                    ) rr
+           ) r
+           JOIN test_runs tr ON tr.test_run_id = $1
+          WHERE r.chain IS NOT NULL
+            ${orgFilter.clause}
+          GROUP BY 1, 2, 3, 4`,
+        [testRunId, transactionNames, ...orgFilter.params],
+      );
+
+      // A sampler that ran at two different plan positions has no single answer here: the sampler
+      // rollup holds one row per (sampler_name, scenario_name), so its numbers already cover both
+      // positions. Banding it under one of them would misattribute them, so it is left unbanded.
+      const CONFLICT = Symbol('conflict');
+      const seen = new Map<string, ControllerRef[] | typeof CONFLICT>();
+      const firstSeen = new Map<string, number>();
+
+      for (const row of rows) {
+        const key = `${row.transaction_name as string}\u0000${(row.scenario_name as string) ?? ''}\u0000${row.sampler_name as string}`;
+        const chain = (row.chain as ControllerRef[]) ?? [];
+        const seq = Number(row.first_seen) || 0;
+        firstSeen.set(key, Math.min(firstSeen.get(key) ?? seq, seq));
+        const previous = seen.get(key);
+        if (previous === undefined) {
+          seen.set(key, chain);
+        } else if (previous !== CONFLICT && !sameControllerChain(previous, chain)) {
+          seen.set(key, CONFLICT);
+        }
+      }
+
+      for (const [key, chain] of seen) {
+        if (chain === CONFLICT) continue;
+        chains.set(key, { chain, firstSeen: firstSeen.get(key) ?? 0 });
+      }
+    } catch (error) {
+      // No chains just means flat request tables, which is what they were before.
+      this.logger.error(`Failed to fetch controller chains for ${testRunId}:`, error);
+    }
+    return chains;
+  }
+
+  /**
+   * Every scenario that ran in this test run, in the order the transactions
+   * table lists them. Used when the section selects no scenario at all, which
+   * the config form presents as "all scenarios".
+   */
+  async listScenarioNames(
+    testRun: TestRun,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<string[]> {
+    try {
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
+      const rows: Array<{ scenario_name: string | null }> = await withRequestEm(this.testRunRepo).query(
+        `SELECT DISTINCT txn.scenario_name
+         FROM transactions txn
+         JOIN test_runs tr ON tr.test_run_id = txn.test_run_id
+         WHERE txn.test_run_id = $1
+           AND txn.scenario_name IS NOT NULL
+           ${orgFilter.clause}
+         ORDER BY txn.scenario_name`,
+        [testRun.testRunId, ...orgFilter.params],
+      );
+      return rows.map((r) => r.scenario_name).filter((n): n is string => !!n);
+    } catch (error) {
+      this.logger.error(`Failed to list scenarios for ${testRun.testRunId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * The samplers that ran inside each transaction of a scenario, keyed by
+   * transaction name.
+   *
+   * Percentiles come from the stored `pct_agg` tdigest rather than from raw
+   * samples: `transactions` holds one row per transaction occurrence and has no
+   * sampler column at all, so the request level only exists pre-aggregated in
+   * `test_run_sampler_stats`. `ramp_up_excluded = false` is deliberate — the
+   * parent numbers above come from an unfiltered scan of `transactions`, and a
+   * child that silently covered a shorter window would not add up.
+   */
+  private async getChildRequestsByTransaction(
+    testRun: TestRun,
+    scenarioName: string,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<Map<string, ReportTransaction[]>> {
+    const byTransaction = new Map<string, ReportTransaction[]>();
+    try {
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 3, 'tr');
+      const rows: Array<Record<string, string | null>> = await withRequestEm(this.testRunRepo).query(
+        `SELECT
+           trss.transaction_name,
+           trss.sampler_name,
+           ROUND(trss.avg_response_time::numeric, 2)              AS avg_ms,
+           ROUND(approx_percentile(0.95, trss.pct_agg)::numeric, 2) AS p95_ms,
+           ROUND(approx_percentile(0.99, trss.pct_agg)::numeric, 2) AS p99_ms,
+           trss.passed_count                                      AS pass,
+           trss.failed_count                                      AS fail,
+           trss.total_count                                       AS total
+         FROM test_run_sampler_stats trss
+         JOIN test_runs tr ON tr.test_run_id = trss.test_run_id
+         WHERE trss.test_run_id = $1
+           AND trss.scenario_name = $2
+           AND trss.ramp_up_excluded = false
+           AND trss.total_count > 0
+           ${orgFilter.clause}
+         ORDER BY trss.transaction_name, trss.sampler_name`,
+        [testRun.testRunId, scenarioName, ...orgFilter.params],
+      );
+
+      // The plan structure the requests ran under, so the report can band them the way the
+      // Performance Analysis card does. Absent for engines that record no chain, which just
+      // leaves the flat table.
+      const chains = await this.getSamplerControllerChains(
+        testRun.testRunId,
+        [...new Set(rows.map((r) => r.transaction_name ?? ''))],
+        userId,
+        roles,
+      );
+
+      for (const row of rows) {
+        const parent = row.transaction_name ?? '';
+        const total = parseInt(row.total ?? '0') || 0;
+        const fail = parseInt(row.fail ?? '0') || 0;
+        const list = byTransaction.get(parent) ?? [];
+        const chain = chains.get(`${parent}\u0000${scenarioName}\u0000${row.sampler_name ?? ''}`);
+        list.push({
+          name: row.sampler_name ?? '',
+          avgMs: parseFloat(row.avg_ms ?? '0') || 0,
+          p95Ms: parseFloat(row.p95_ms ?? '0') || 0,
+          p99Ms: parseFloat(row.p99_ms ?? '0') || 0,
+          pass: parseInt(row.pass ?? '0') || 0,
+          fail,
+          errPct: total > 0 ? (fail / total) * 100 : 0,
+          ...(chain ? { parentControllers: chain.chain, firstSeen: chain.firstSeen } : {}),
+        });
+        byTransaction.set(parent, list);
+      }
+    } catch (error) {
+      // A missing request level must not take the whole section down — the
+      // parent table is still the answer to the section's question.
+      this.logger.error(`Failed to fetch child requests for ${scenarioName}:`, error);
+    }
+    return byTransaction;
   }
 
   /**
@@ -2667,6 +3039,75 @@ export class ReportDataFetcherService {
    * Auto-discover available panels for a test run from ds_metrics.
    * Used when no explicit panel selection is provided.
    */
+  /**
+   * The series a set of graph presets selects, flattened into panel selectors.
+   *
+   * A preset stores whole series identities (dashboard, panel, metric) rather
+   * than data, so a template pinned to a preset keeps working for every later
+   * run: the selectors are re-applied to whichever run is being reported on,
+   * even when the preset itself was saved against a different one.
+   *
+   * Read here rather than through GraphPresetsService because report rendering
+   * runs as a background job with no user context, and that service treats an
+   * empty userId as a user with zero organizations. resolveOrgFilter follows the
+   * fetcher's convention instead: empty userId = system call = no org filter.
+   *
+   * Returned grouped BY PRESET, never flattened: a preset is one chart that may
+   * draw series from several panels, which is exactly what the Graphs card
+   * saves. Flattening them into a panel list turns a two-panel preset into two
+   * charts and loses the combination the author built.
+   *
+   * `foundIds` lets a caller tell a preset that is empty from one that has been
+   * deleted.
+   */
+  async getGraphPresetPanels(
+    presetIds: string[],
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<{ presets: GraphPresetPanels[]; foundIds: string[] }> {
+    if (presetIds.length === 0) return { presets: [], foundIds: [] };
+    try {
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'gp');
+      const rows: Array<{ id: string; name: string; series_config: SeriesConfig[] | null }> =
+        await withRequestEm(this.testRunRepo).query(
+          `SELECT gp.id, gp.name, gp.series_config
+           FROM graph_presets gp
+           WHERE gp.id = ANY($1::uuid[])
+             ${orgFilter.clause}`,
+          [presetIds, ...orgFilter.params],
+        );
+
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      // Preserve the order the template listed the presets in — the report
+      // reads top to bottom and the author chose that order.
+      const presets: GraphPresetPanels[] = [];
+      for (const id of presetIds) {
+        const row = byId.get(id);
+        if (!row) continue;
+        // Deduped within the preset only: two presets may legitimately draw the
+        // same series, and each still gets its own chart.
+        const seen = new Set<string>();
+        const panels: MetricsPanelSelector[] = [];
+        for (const series of row.series_config ?? []) {
+          const selector: MetricsPanelSelector = {
+            dashboardLabel: series.dashboardLabel,
+            panelTitle: series.panelTitle,
+            metricName: series.metricName,
+          };
+          const key = `${selector.dashboardLabel}\u0000${selector.panelTitle}\u0000${selector.metricName}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          panels.push(selector);
+        }
+        presets.push({ id, name: row.name, panels });
+      }
+      return { presets, foundIds: presets.map((p) => p.id) };
+    } catch (error) {
+      this.logger.error(`Failed to fetch graph presets ${presetIds.join(', ')}:`, error);
+      return { presets: [], foundIds: [] };
+    }
+  }
+
   async getAvailableMetricsPanels(
     testRunId: string,
     userId: string = '',
