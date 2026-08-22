@@ -3,6 +3,7 @@ import { TrendsRenderer } from './trends-renderer';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, TrendsData, TrendRunSummary } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
+import { REPORT_COLORS } from './report-style';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -172,13 +173,17 @@ describe('TrendsRenderer', () => {
       expect(html).toContain('#e3f2fd'); // highlight color
     });
 
-    it('should show response time metrics for each run', async () => {
+    it('should show the average response time for each run', async () => {
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
-      // Check run-001 metrics (formatNum: grouped, max 2 decimals)
-      expect(html).toContain('120.5');
-      expect(html).toContain('250');
-      expect(html).toContain('400');
+      // One average per run (formatNum: grouped, max 2 decimals). The p95/p99
+      // columns are gone — a run's percentiles are in the summary cards and the
+      // per-panel trend tables, not repeated here.
+      expect(html).toContain('>120.5</td>');
+      expect(html).toContain('>110</td>');
+      expect(html).toContain('>95</td>');
+      expect(html).not.toContain('>250</td>');
+      expect(html).not.toContain('>400</td>');
     });
   });
 
@@ -223,6 +228,15 @@ describe('TrendsRenderer', () => {
       const html = await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
       expect(html).toContain('>Annotations</th>');
+      // The per-panel trend tables label their columns with the id's trailing
+      // token, so the history table has to carry the full id they refer back to.
+      expect(html).toContain('>Test Run</th>');
+      // The history table carries the average only; the percentiles live in the
+      // summary cards above it and in the per-panel trend tables.
+      expect(html).toContain('>Average transaction response times</th>');
+      expect(html).not.toContain('>P95 (ms)</th>');
+      expect(html).not.toContain('>P99 (ms)</th>');
+      expect(html).toContain('>run-003</td>');
       expect(html).toContain('Proxy Dev: triple the back end calls');
       // Free text from the run, so it is escaped like every other caller-supplied value
       expect(html).not.toContain('<img src=x>');
@@ -308,8 +322,13 @@ describe('TrendsRenderer', () => {
       expect(html).toContain('1 panels');
       expect(html).toContain('used');
       expect(html).toContain('cpu');
-      // Change against the run before this one: 110 -> 150
-      expect(html).toContain('+36.4%');
+      // The move against the run before this one (110 -> 150) is marked in the
+      // cell itself, with the exact number on the hover — there is no longer a
+      // trailing Change column to carry it.
+      expect(html).toContain('title="+36.4% vs previous run"');
+      expect(html).not.toContain('>Change</th>');
+      expect(html).toContain('\u25B2'); // up arrow on the risen value
+      expect(html).toContain(REPORT_COLORS.dot.warn); // +36.4% is past the 10% band
       // The current run's column is marked, as its row is in the run history
       expect(html).toContain('>Current</span>');
       // A run with no value for a series is an em-dash, not a zero
