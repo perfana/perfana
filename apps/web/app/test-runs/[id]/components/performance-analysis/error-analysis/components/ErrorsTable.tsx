@@ -14,6 +14,7 @@ import {
   IconButton,
   Tooltip,
   Collapse,
+  Divider,
 } from '@mui/material';
 import {
   Error as ErrorIcon,
@@ -92,19 +93,19 @@ function GroupRow({
               <Table size="small">
                 <TableHead>
                   <TableRow sx={{ backgroundColor: 'action.hover' }}>
-                    <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'text.secondary' }}>
+                    <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: 'text.secondary' }}>
                       Response Code
                     </TableCell>
-                    <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'text.secondary' }}>
+                    <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: 'text.secondary' }}>
                       URL
                     </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'text.secondary' }}>
+                    <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem', color: 'text.secondary' }}>
                       Error Count
                     </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'text.secondary' }}>
+                    <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem', color: 'text.secondary' }}>
                       Avg Response Time (ms)
                     </TableCell>
-                    <TableCell align="center" sx={{ fontWeight: 600, fontSize: '0.75rem', color: 'text.secondary' }}>
+                    <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem', color: 'text.secondary' }}>
                       Actions
                     </TableCell>
                   </TableRow>
@@ -212,19 +213,20 @@ export function ErrorsTable({ errorsByTransaction, onViewDetails }: ErrorsTableP
 
   return (
     <Paper
+      elevation={2}
       sx={{
-        borderRadius: 3,
+        p: 3,
+        borderLeft: '4px solid #9c27b0',
         backgroundColor: 'background.paper',
-        border: '1px solid',
-        borderColor: 'divider',
-        overflow: 'hidden',
       }}
     >
-      <Box sx={{ p: 3, pb: 2 }}>
+      <Box>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <ErrorIcon sx={{ mr: 1.5, color: 'error.main', fontSize: 28 }} />
-            <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ color: '#9c27b0', display: 'flex', alignItems: 'center' }}>
+              <ErrorIcon />
+            </Box>
+            <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem' }}>
               Error Details
             </Typography>
           </Box>
@@ -267,18 +269,21 @@ export function ErrorsTable({ errorsByTransaction, onViewDetails }: ErrorsTableP
           </Box>
         )}
       </Box>
+
+      <Divider sx={{ my: 2 }} />
+
       <TableContainer>
         <Table size="small">
           <TableHead>
-            <TableRow sx={{ backgroundColor: 'action.hover' }}>
+            <TableRow>
               <TableCell sx={{ width: 40, px: 1 }} />
-              <TableCell sx={{ fontWeight: 700, color: 'primary.main' }}>Transaction</TableCell>
-              <TableCell sx={{ fontWeight: 700, color: 'primary.main' }}>Sampler</TableCell>
-              <TableCell align="right" sx={{ fontWeight: 700, color: 'primary.main' }}>
+              <TableCell sx={{ fontWeight: 700 }}>Transaction</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Sampler</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>
                 Error Count
               </TableCell>
-              <TableCell sx={{ fontWeight: 700, color: 'primary.main' }}>Response Codes</TableCell>
-              <TableCell align="right" sx={{ fontWeight: 700, color: 'primary.main' }}>
+              <TableCell sx={{ fontWeight: 700 }}>Response Codes</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>
                 Avg Response Time (ms)
               </TableCell>
             </TableRow>

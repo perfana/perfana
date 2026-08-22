@@ -4,6 +4,7 @@ import {
   Box,
   Typography,
   Paper,
+  Divider,
   Table,
   TableBody,
   TableCell,
@@ -11,7 +12,7 @@ import {
   TableHead,
   TableRow,
 } from '@mui/material';
-import { Error as ErrorIcon } from '@mui/icons-material';
+import { PieChart as PieChartIcon } from '@mui/icons-material';
 import FancyChip from '../../../shared/FancyChip';
 import { ErrorByCode } from '../types';
 import { calculateErrorPercentage } from '../utils/error-formatters';
@@ -26,127 +27,58 @@ export function ErrorsByCodeTable({ errorsByCode }: ErrorsByCodeTableProps) {
 
   return (
     <Paper
+      elevation={2}
       sx={{
         p: 3,
-        borderRadius: 3,
+        borderLeft: '4px solid #e91e63',
         backgroundColor: 'background.paper',
-        border: '1px solid',
-        borderColor: 'divider',
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <ErrorIcon sx={{ mr: 1.5, color: 'error.main', fontSize: 28 }} />
-        <Typography
-          variant="h6"
-          sx={{
-            fontWeight: 700,
-            color: 'text.primary',
-          }}
-        >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+        <Box sx={{ color: '#e91e63', display: 'flex', alignItems: 'center' }}>
+          <PieChartIcon />
+        </Box>
+        <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem' }}>
           Errors by Code
         </Typography>
       </Box>
+
+      <Divider sx={{ mb: 2 }} />
+
       <TableContainer sx={{ maxHeight: 400, overflow: 'auto' }}>
         <Table size="small" stickyHeader>
           <TableHead>
             <TableRow>
-              <TableCell
-                sx={{
-                  fontWeight: 700,
-                  fontSize: '0.7rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  color: 'primary.dark',
-                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
-                  borderBottom: '2px solid',
-                  borderBottomColor: 'primary.main',
-                  py: 1.5,
-                }}
-              >
-                Code
-              </TableCell>
-              <TableCell
-                align="right"
-                sx={{
-                  fontWeight: 700,
-                  fontSize: '0.7rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  color: 'primary.dark',
-                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
-                  borderBottom: '2px solid',
-                  borderBottomColor: 'primary.main',
-                  py: 1.5,
-                }}
-              >
+              <TableCell sx={{ fontWeight: 700, backgroundColor: 'background.paper' }}>Code</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: 'background.paper' }}>
                 Errors
               </TableCell>
-              <TableCell
-                align="right"
-                sx={{
-                  fontWeight: 700,
-                  fontSize: '0.7rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  color: 'primary.dark',
-                  backgroundColor: 'rgba(25, 118, 210, 0.04)',
-                  borderBottom: '2px solid',
-                  borderBottomColor: 'primary.main',
-                  py: 1.5,
-                }}
-              >
+              <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: 'background.paper' }}>
                 % of Total
               </TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {sortedErrorsByCode.map((row, index) => {
+            {sortedErrorsByCode.map((row) => {
               const percentage = calculateErrorPercentage(row.errorCount, totalErrors);
               return (
-                <TableRow
-                  key={row.responseCode}
-                  hover
-                  sx={{
-                    backgroundColor: index % 2 === 0 ? 'transparent' : 'rgba(0, 0, 0, 0.02)',
-                    '&:hover': {
-                      backgroundColor: 'rgba(244, 67, 54, 0.04)',
-                    },
-                    transition: 'background-color 0.2s ease',
-                  }}
-                >
-                  <TableCell sx={{ py: 1.5 }}>
-                    <FancyChip
-                      label={row.responseCode}
-                      colorTheme="red"
-                      sx={{ fontSize: '0.75rem' }}
-                    />
+                <TableRow key={row.responseCode} hover>
+                  <TableCell>
+                    <FancyChip label={row.responseCode} colorTheme="red" />
                   </TableCell>
-                  <TableCell align="right" sx={{ py: 1.5 }}>
+                  <TableCell align="right">
                     <Typography
                       variant="body2"
-                      sx={{
-                        fontWeight: 700,
-                        color: 'error.main',
-                        fontFamily: 'monospace',
-                        fontSize: '0.875rem',
-                      }}
+                      sx={{ fontWeight: 700, color: 'error.main', fontFamily: 'monospace' }}
                     >
                       {row.errorCount.toLocaleString()}
                     </Typography>
                   </TableCell>
-                  <TableCell align="right" sx={{ py: 1.5 }}>
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        fontFamily: 'monospace',
-                        fontSize: '0.875rem',
-                        color: 'text.primary',
-                        fontWeight: 600,
-                      }}
-                    >
+                  <TableCell align="right">
+                    <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 600 }}>
                       {percentage.toFixed(1)}%
                     </Typography>
                   </TableCell>
