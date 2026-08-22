@@ -199,6 +199,29 @@ import from `@perfana/shared` rather than keeping its own registry.
 
 **Found:** v0.2.69.0 (2026-08-22)
 
+## Chart export
+
+### The shared copy-to-clipboard handler can leave an unhandled rejection
+
+**Priority:** P3
+
+`buildChartConfig` in `apps/web/app/test-runs/[id]/components/graphs/utils/chart-utils.ts`
+hands `navigator.clipboard.write` a `Promise<Blob>` synchronously — correct, that is what
+keeps the user-activation context. But if `renderExportPng` itself rejects (Plotly not yet
+on `window`, `toImage` throwing on a figure it cannot render), `clipboard.write` rejects,
+and the `.catch` handler calls `blobPromise.then(...)` on the *same already-rejected*
+promise. That second rejection has no handler, so the failure surfaces as an unhandled
+rejection in the console and the user gets no feedback at all — the button simply does
+nothing. The download fallback below it has the same shape.
+
+Fix: attach a `.catch` to the fallback chain, and surface a toast or a console warning so a
+failed copy is visible rather than silent.
+
+Affects every chart using `buildChartConfig`: the Graphs card, the Compare card, and (as of
+v0.2.71.0) the Error Analysis errors-over-time chart.
+
+**Found:** v0.2.71.0 (2026-08-22), during the /ship adversarial review
+
 ## Completed
 
 ### Compare card: parallelised aggregate fetch, aggregate-row marker, legacy preset restore
