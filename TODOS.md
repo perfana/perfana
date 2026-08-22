@@ -149,29 +149,31 @@ the Series `Autocomplete`.
 ---
 
 
-## Trends card
+## Dead code detection
 
-### `trends-chart-utils.ts` is dead code that duplicates the live plot builder
+### knip treats every file under `apps/web/app/**` as an entry point, so nothing there is ever unused
 
 **Priority:** P3
-**Origin:** the /ship adversarial review for v0.2.70.0 (2026-08-22), while fixing the
-single-y-axis bug in the Trends chart.
-**Why:** `apps/web/app/test-runs/[id]/components/trends/utils/trends-chart-utils.ts` is 387
-lines exporting `groupMetricsData`, `createPlotTraces`, `createXAxisLabels`,
-`getChangepointPositions`, `getGraphTitle`, `createPlotLayout`, `createPlotConfig` and
-`addChangepointLegendTrace`. None of them is imported anywhere; `hooks/useTrendsPlot.ts`
-reimplements all of it inline. Only the barrel `utils/index.ts` (`export * from
-'./trends-chart-utils'`) keeps the file reachable, which is probably why knip has not flagged
-it. The trap is that the dead `createPlotLayout` looks exactly like the function you would
-patch to change the Trends chart's axes — it even took the old single-axis `getYAxisConfig` —
-so a future fix can land in it, pass review, and change nothing on screen. `getYAxisConfig`
-now survives in `trends-utils.ts` only as a thin wrapper over `getYAxisConfigs` to keep this
-file compiling.
-**What:** verify the eight exports are genuinely unreferenced (`createPlotConfig` shares a name
-with live functions in the compare and SLO cards, so grep by name alone is misleading — resolve
-the imports), then delete the file, drop its line from `utils/index.ts`, and remove the
-`getYAxisConfig` wrapper with it. If any export turns out to be load-bearing, the opposite fix
-applies: make `useTrendsPlot` call it instead of carrying a second copy.
+**Origin:** deleting `trends-chart-utils.ts` for v0.2.70.0 (2026-08-22). That file was 387 lines
+of dead code that knip had never reported.
+**Why:** `knip.json` sets `apps/web.entry` to `["app/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"]`. An
+entry point is a root of the reachability graph, so declaring the whole App Router tree as entries
+means no file or export under `app/` can ever be reported unused — the largest part of the
+frontend is exempt from the dead-code check that `npm run knip` implies is covering it. The
+blanket glob also disables the benefit of knip's built-in Next.js plugin, which already knows the
+real entry conventions (`page`/`layout`/`route`/`loading`/`error`/`not-found`/`template`/`default`,
+plus `middleware.ts` and `instrumentation.ts`).
+**Evidence:** a probe run with those conventions as the entry set reports **323 unused exports**
+under `app/`, including all eight exports of the file deleted in v0.2.70.0. The default config
+reports 12 findings for the whole monorepo and none of them.
+**What:** replace the blanket entry glob with the Next.js conventions, then triage the backlog.
+It cannot land as one change — 323 findings is a release of its own, and per
+`docs/` history much of it is the known false-positive classes: barrel files that re-export a
+component both named and default (removing the named export breaks runtime rendering and `tsc`
+does not catch it — that is why `"exclude": ["duplicates"]` is already set), and type vocabularies
+consumed only by feature code. Suggested order: land the config change with the current backlog
+captured in a baseline/ignore list, then burn the list down by directory so each PR stays
+reviewable.
 
 ## Reports
 

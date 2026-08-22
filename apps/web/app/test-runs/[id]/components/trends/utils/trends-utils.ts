@@ -1,4 +1,4 @@
-import { GRAFANA_UNITS, TrendsSeries, TimeRangeOption, TimeRange, MetricStatistic } from '../types';
+import { GRAFANA_UNITS, TrendsSeries, MetricStatistic } from '../types';
 
 /**
  * Get color for a series based on its index
@@ -80,50 +80,6 @@ export function getYAxisConfigs(addedSeries: TrendsSeries[]): {
     right: axisConfigForUnit(rightEntries[0]![0] || undefined),
     rightMetrics: new Set(rightEntries.flatMap(([, names]) => names))
   };
-}
-
-/**
- * Left-axis config only. Kept for callers that do not deal with a second axis.
- */
-export function getYAxisConfig(addedSeries: TrendsSeries[]): AxisConfig {
-  return getYAxisConfigs(addedSeries).left;
-}
-
-/**
- * Calculate time range dates based on the selected option
- */
-export function calculateTimeRangeDates(
-  timeRange: TimeRangeOption,
-  customTimeRange: TimeRange
-): { fromDate: Date; toDate: Date } {
-  let fromDate: Date;
-  let toDate: Date;
-
-  if (timeRange.value === 'custom') {
-    fromDate = customTimeRange.from;
-    toDate = customTimeRange.to;
-  } else {
-    toDate = new Date();
-
-    if (timeRange.type === 'months') {
-      fromDate = new Date(toDate);
-      fromDate.setMonth(fromDate.getMonth() - (timeRange.value as number));
-    } else {
-      const days = timeRange.value as number;
-      fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    }
-  }
-
-  return { fromDate, toDate };
-}
-
-/**
- * Format unit label for display
- */
-export function getUnitLabel(unitValue: string | undefined): string {
-  if (!unitValue) return 'No unit set';
-  const unit = GRAFANA_UNITS.find(u => u.value === unitValue);
-  return unit?.label || unitValue;
 }
 
 /**
