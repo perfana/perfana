@@ -42,6 +42,7 @@ export interface TestRun {
   created_at?: Date;
   updated_at?: Date;
   organization_id?: string | null;
+  team_id?: string | null;
 }
 
 // Panel Document structure (from actual database schema - ds_panels table)

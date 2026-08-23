@@ -70,19 +70,24 @@ pnpm-lock.yaml
 # ================================================================================================
 # BUILD ARTIFACTS AND CACHE
 # ================================================================================================
-dist/
-build/
-out/
-.next/
-.nuxt/
-.output/
-.turbo/
-coverage/
-.nyc_output/
+# **/ prefix required: a bare `dist/` only matches at the context root, so
+# `COPY packages/shared/ ...` still carried the builder's LOCAL stale dist and
+# tsbuildinfo into the image build. With tsbuildinfo present, `npm run build`
+# emits nothing and the stale dist ships verbatim — which is how the deleted
+# 1794-BackfillOrganizationId migration ended up inside
+# perfana-migration:0.2.71.0-splitfix after #521 had removed it from source.
+**/dist/
+**/build/
+**/out/
+**/.next/
+**/.nuxt/
+**/.output/
+**/.turbo/
+**/coverage/
+**/.nyc_output/
 
 # TypeScript build info
-*.tsbuildinfo
-tsconfig.build.tsbuildinfo
+**/*.tsbuildinfo
 
 # ================================================================================================
 # TESTING FILES AND ARTIFACTS

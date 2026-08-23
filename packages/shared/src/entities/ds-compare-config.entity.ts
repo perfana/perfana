@@ -33,8 +33,10 @@ export class DsCompareConfig {
   @Column({ type: 'jsonb' })
   config_data!: Record<string, unknown>;
 
-  @Column({ type: 'uuid', nullable: true })
-  organization_id?: string;
+  // NOT NULL since 1796000000000-BackfillOwnedResourceOrgIds (Phase 4 shape) — a row
+  // without an organization is invisible under RLS, so the type must not permit omission.
+  @Column({ type: 'uuid', nullable: false })
+  organization_id!: string;
 
   @Column({ type: 'uuid', nullable: true })
   team_id?: string;

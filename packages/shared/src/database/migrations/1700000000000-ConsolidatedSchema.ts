@@ -943,6 +943,18 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       `ALTER TABLE public.notification_channels ADD COLUMN IF NOT EXISTS use_proxy boolean NOT NULL DEFAULT false`,
     );
 
+    // organization_id is NOT NULL on every owned resource (Phase 4), but these three shipped
+    // nullable in the schema-sql.ts dump, and three write paths took that as licence to omit it.
+    // can_access_resource() fails closed on a NULL org, so such rows are invisible under RLS to
+    // everyone but a global admin — an empty SLO view, no error. Constrain them on a greenfield
+    // install; 1796000000000-BackfillOwnedResourceOrgIds does the same for an existing database
+    // (with the backfill this fresh schema does not need).
+    for (const table of ['check_results', 'ds_metric_collection_status', 'ds_compare_config']) {
+      await queryRunner.query(
+        `ALTER TABLE public.${table} ALTER COLUMN organization_id SET NOT NULL`,
+      );
+    }
+
     console.log('Phase 6: Post-schema column additions applied.');
   }
 
@@ -957,6 +969,7 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
     const statements: string[] = [];
     let current = '';
     let inDollarQuote = false;
+    let inSingleQuote = false;
     let i = 0;
 
     // Remove pg_dump specific settings and comments
@@ -990,15 +1003,38 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
 
     while (i < cleanSql.length) {
       // Check for $$ delimiter
-      if (cleanSql[i] === '$' && cleanSql[i + 1] === '$') {
+      if (!inSingleQuote && cleanSql[i] === '$' && cleanSql[i + 1] === '$') {
         current += '$$';
         i += 2;
         inDollarQuote = !inDollarQuote;
         continue;
       }
 
-      // Check for statement end (semicolon not inside $$ block)
-      if (cleanSql[i] === ';' && !inDollarQuote) {
+      // Skip inline -- comments (outside quotes and $$ bodies) to end-of-line.
+      // The line filter above only drops comments at column 0, so an indented or
+      // trailing `-- don't` would otherwise toggle inSingleQuote on its apostrophe
+      // and silently glue every following statement into one. Known limitations,
+      // deliberately unhandled until a dump needs them: E'\'' backslash escapes,
+      // $tag$ dollar-quotes, and apostrophes in double-quoted identifiers.
+      if (!inDollarQuote && !inSingleQuote && cleanSql[i] === '-' && cleanSql[i + 1] === '-') {
+        while (i < cleanSql.length && cleanSql[i] !== '\n') {
+          i++;
+        }
+        continue;
+      }
+
+      // Track single-quoted literals so a semicolon inside one (e.g. a COMMENT
+      // body) does not cut the statement in half. A doubled '' escape toggles
+      // twice and lands back in the string, which is the correct end state.
+      if (!inDollarQuote && cleanSql[i] === "'") {
+        current += "'";
+        i++;
+        inSingleQuote = !inSingleQuote;
+        continue;
+      }
+
+      // Check for statement end (semicolon outside $$ blocks and '' literals)
+      if (cleanSql[i] === ';' && !inDollarQuote && !inSingleQuote) {
         current += ';';
         const trimmed = current.trim();
         if (trimmed && trimmed !== ';') {

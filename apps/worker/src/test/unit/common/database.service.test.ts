@@ -1862,4 +1862,73 @@ describe('WorkerDatabaseService', () => {
       expect(loggerWarnSpy).toHaveBeenCalledTimes(2);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // organization_id on ds_metric_collection_status writes (RLS NOT NULL)
+  // -------------------------------------------------------------------------
+
+  describe('ds_metric_collection_status organization_id', () => {
+    // resolved in SQL from the owning test run — no extra bind parameter
+    const orgSubquery = '(SELECT organization_id FROM test_runs WHERE test_run_id = $1::text)';
+
+    it('upsertCollectionStatus ensure-insert resolves organization_id from the test run', async () => {
+      // Arrange
+      const { service, dataSource, dsMetricCollectionStatusRepo } = buildService();
+      const existing = { id: 'cs-1', test_run_id: 'run-001', source_type: 'grafana', source_id: 's-1' };
+      dsMetricCollectionStatusRepo.findOne
+        .mockResolvedValueOnce(existing)
+        .mockResolvedValueOnce(existing);
+
+      // Act
+      await service.upsertCollectionStatus({
+        test_run_id: 'run-001',
+        source_type: 'grafana',
+        source_id: 's-1',
+      } as any);
+
+      // Assert
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).toContain('organization_id');
+      expect(sql).toContain(orgSubquery);
+    });
+
+    it('updateCollectedRanges resolves organization_id on insert and self-heals NULLs on conflict', async () => {
+      // Arrange
+      const { service, dataSource } = buildService();
+
+      // Act
+      await service.updateCollectedRanges('run-001', 'grafana', 'src-1', {
+        from: new Date('2024-01-01T00:00:00Z'),
+        to: new Date('2024-01-01T01:00:00Z'),
+      });
+
+      // Assert
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).toContain(orgSubquery);
+      // COALESCE self-heal: a pre-fix NULL row adopts the org on its next collection
+      expect(sql).toContain(
+        'organization_id = COALESCE(ds_metric_collection_status.organization_id, EXCLUDED.organization_id)'
+      );
+    });
+
+    it('recordFailedRange ensure-insert resolves organization_id from the test run', async () => {
+      // Arrange
+      const { service, dataSource } = buildService();
+      vi.spyOn(service, 'getCollectionStatus').mockResolvedValue({ id: 'cs-1', failed_ranges: [] } as any);
+
+      // Act
+      await service.recordFailedRange(
+        'run-001',
+        'grafana',
+        's-1',
+        { from: new Date('2024-01-01T00:00:00Z'), to: new Date('2024-01-01T01:00:00Z') },
+        'timeout'
+      );
+
+      // Assert
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).toContain(orgSubquery);
+    });
+  });
+
 });

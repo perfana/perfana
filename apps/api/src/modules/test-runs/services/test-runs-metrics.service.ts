@@ -221,7 +221,7 @@ export class TestRunsMetricsService {
       const systemQuery = withRequestEm(this.systemRepo).createQueryBuilder('sut')
         .leftJoin('sut.team', 'team')
         .where('sut.id = :id', { id: createDto.systemUnderTestId })
-        .select(['sut.id']);
+        .select(['sut.id', 'sut.organization_id', 'sut.team_id']);
 
       // Apply organization filter for non-admin users
       if (!isAdmin) {
@@ -272,7 +272,11 @@ export class TestRunsMetricsService {
         application_dashboard_id: createDto.applicationDashboardId,
         panel_id: parseInt(createDto.panelId, 10),
         metric_name: createDto.metricName || undefined,
-        config_data: createDto.configData
+        config_data: createDto.configData,
+        // Inherit ownership from the parent system — organization_id is NOT NULL on
+        // ds_compare_config, and a NULL would make the row invisible under RLS anyway.
+        organization_id: systemUnderTest.organization_id,
+        team_id: systemUnderTest.team_id,
       });
 
       const result = await this.dsCompareConfigRepo.save(newConfig);
@@ -589,6 +593,9 @@ export class TestRunsMetricsService {
             panel_id: template.panel_id ?? 0,
             metric_name: template.metric_name,
             config_data: configData,
+            // Inherit ownership from the dashboard (organization_id NOT NULL on both).
+            organization_id: dashboard.organizationId,
+            team_id: dashboard.teamId,
             created_by: 'system:golden-path',
             updated_by: 'system:golden-path',
           });

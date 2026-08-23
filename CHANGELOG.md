@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.72.0] - 2026-08-23
+
+### Fixed
+- **Check results and SLO views no longer come back empty — or crash — depending on how your database was created.** The worker and API wrote check results, metrics-collection status and compare configurations without the organization that owns them. On most databases those rows were silently invisible to everyone except a global admin (an empty SLO tab, no error); on databases whose schema was already strict about ownership, every test-run evaluation failed outright with a constraint violation. Every write path now stamps the owning organization — and team, so team-scoped members see their results too — inherited from the test run, system under test, or dashboard the data belongs to.
+- **Existing databases repair themselves on upgrade.** A new migration backfills the missing ownership on existing rows (surviving deleted test runs by falling back to the parent system) and then locks the columns down so the gap cannot silently reopen. It converges from any starting state — untouched, partially repaired, or already strict — takes its table locks with bounded, deadlock-tolerant retries, and refuses loudly with instructions rather than guessing when a row's ownership cannot be determined. Fresh installs get the same strict columns from day one.
+- **Deploys can no longer resurrect deleted migrations.** Docker image builds carried the builder's local stale build output into the image (a `.dockerignore` pattern only matched at the repo root), which is how a reverted migration kept shipping inside published migration images. Build artifacts and TypeScript build caches are now excluded at every depth, and the shared package's test files are kept out of the compiled migrations directory entirely — a stray compiled test there crashed the migration container before it ran a single migration.
+- **A schema statement containing a semicolon inside quotes no longer splits the consolidated migration in half.** The statement splitter now tracks quoted literals and inline comments (an apostrophe in a `-- don't` comment used to silently glue the rest of the schema into one statement).
+
 ## [0.2.71.0] - 2026-08-22
 
 ### Changed

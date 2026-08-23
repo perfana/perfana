@@ -8,6 +8,7 @@ export interface TestRun {
   test_environment: string;
   workload: string;
   organization_id?: string;
+  team_id?: string | null;
   start_time?: Date;
   end_time?: Date;
   ramp_up?: number;

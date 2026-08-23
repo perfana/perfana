@@ -14,6 +14,8 @@ export interface CheckResultTarget {
 
 export interface CheckResult {
   system_under_test_id: string;
+  organization_id: string;
+  team_id?: string | null;
   test_environment: string;
   workload: string;
   test_run_id: string;
@@ -158,8 +160,18 @@ export class RequirementChecker extends BaseCheckService {
 
       // Create CheckResult document
       // Based on requirement_checker.py:187-231
+      // check_results.organization_id is NOT NULL; a run without one means legacy data the
+      // 1796 backfill refused to constrain — name the run instead of surfacing a bare 23502.
+      if (!testRun.organization_id) {
+        throw new RequirementCheckError(
+          `test run ${testRun.test_run_id} has no organization_id — backfill test_runs before re-evaluating checks`
+        );
+      }
+
       const checkResult: CheckResult = {
         system_under_test_id: testRun.system_under_test_id,
+        organization_id: testRun.organization_id,
+        team_id: testRun.team_id ?? null,
         test_environment: testRun.test_environment,
         workload: testRun.workload,
         test_run_id: testRun.test_run_id,
@@ -211,11 +223,11 @@ export class RequirementChecker extends BaseCheckService {
         average_all, evaluate_type, exclude_ramp_up_time, ramp_up,
         match_pattern, requirement, panel_average, meets_requirement,
         targets, validate_with_default_if_no_data, validate_with_default_if_no_data_value,
-        tags, created_at, updated_at
+        tags, organization_id, team_id, created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
+        $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, NOW(), NOW()
       )
     `;
 
@@ -247,7 +259,9 @@ export class RequirementChecker extends BaseCheckService {
       JSON.stringify(checkResult.targets),
       checkResult.validate_with_default_if_no_data,
       checkResult.validate_with_default_if_no_data_value,
-      checkResult.tags
+      checkResult.tags,
+      checkResult.organization_id,
+      checkResult.team_id ?? null
     ]);
   }
 

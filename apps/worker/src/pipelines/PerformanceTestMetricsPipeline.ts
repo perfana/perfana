@@ -984,7 +984,12 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       batch.forEach((config, idx) => {
         const base = idx * 11;
         placeholders.push(
-          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11})`
+          // organization_id is NOT NULL on ds_compare_config: when the optional metadata is
+          // absent, resolve it from the FK-guaranteed parent SUT instead of inserting NULL.
+          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, ` +
+            `COALESCE($${base + 8}, (SELECT organization_id FROM systems_under_test WHERE id = $${base + 1})), ` +
+            `COALESCE($${base + 9}, (SELECT team_id FROM systems_under_test WHERE id = $${base + 1})), ` +
+            `$${base + 10}, $${base + 11})`
         );
         values.push(
           config.system_under_test_id,
@@ -994,8 +999,8 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
           config.panel_id,
           config.metric_name?.substring(0, 255) ?? null,
           JSON.stringify(config.config_data),
-          testRunMetadata?.organization_id || null,
-          testRunMetadata?.team_id || null,
+          testRunMetadata?.organization_id ?? null,
+          testRunMetadata?.team_id ?? null,
           'worker-pipeline',
           'worker-pipeline'
         );

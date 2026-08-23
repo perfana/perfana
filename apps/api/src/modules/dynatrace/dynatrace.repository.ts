@@ -832,11 +832,18 @@ export class DynatraceRepository {
       );
 
       if (!existingConfig || existingConfig.length === 0) {
+        // Ownership is inherited from the parent dashboard (which inherits from its SUT at
+        // creation). NOTE: this runs on the plain pooled connection, not withRequestEm — under
+        // a least-privilege deploy (no rolbypassrls) the subqueries would return zero rows and
+        // the insert would fail on the NOT NULL org column. Same deployment constraint as the
+        // documented api_keys carve-out in CLAUDE.md.
         await manager.query(
           `INSERT INTO ds_compare_config (
             system_under_test_id, test_environment, workload,
-            application_dashboard_id, panel_id, config_data
-          ) VALUES ($1, $2, $3, $4, $5, $6)`,
+            application_dashboard_id, panel_id, config_data, organization_id, team_id
+          ) VALUES ($1, $2, $3, $4, $5, $6,
+            (SELECT organization_id FROM application_dashboards WHERE id = $4),
+            (SELECT team_id FROM application_dashboards WHERE id = $4))`,
           [
             systemUnderTestId,
             testEnvironment,
