@@ -184,7 +184,6 @@ describe('analyzeTestWorker', () => {
             'control-groups-creation',
             'control-group-statistics',
             'adapt-analysis',
-            'data-sanity-check',
           ]),
           errorHandling: 'abort',
           timeoutMs: 600000,
@@ -428,6 +427,9 @@ describe('analyzeTestWorker', () => {
 
       // Assert
       const callArgs = mockOrchestrator.executeSequentialPipeline.mock.calls[0];
+      // data-sanity-check is deliberately absent: the orchestrator has no case for it (it runs
+      // after the pipeline returns), so passing it made every run log "Unknown stage" and finish
+      // as 'partial'. It stays in the ProgressReporter's list — see the progress test below.
       expect(callArgs[1].stages).toEqual([
         'dynatrace-collection',
         'panels-processing',
@@ -439,7 +441,6 @@ describe('analyzeTestWorker', () => {
         'control-groups-creation',
         'control-group-statistics',
         'adapt-analysis',
-        'data-sanity-check',
       ]);
     });
 
@@ -471,9 +472,34 @@ describe('analyzeTestWorker', () => {
         'checks-evaluation',
         'control-groups-creation',
         'control-group-statistics',
-        'data-sanity-check',
       ]);
       expect(callArgs[1].stages).not.toContain('adapt-analysis');
+      expect(callArgs[1].stages).not.toContain('data-sanity-check');
+    });
+
+    it('never hands the orchestrator a stage it cannot run, but still shows it in progress', async () => {
+      // Regression: analyze.ts used one array for both the execution plan and the progress list.
+      // data-sanity-check has no case in PipelineOrchestrator.executeStage, so it came back
+      // success:false with "Unknown stage", and errorHandling:'abort' turned that into
+      // overallSuccess=false — every analysis reported 'partial' while all ten real stages passed.
+      const { ProgressReporter } = await import('../../../services/ProgressReporter.js');
+      mockOrchestrator.executeSequentialPipeline.mockResolvedValue({
+        success: true,
+        duration: 40000,
+        data: {},
+      });
+
+      await worker({ data: { testRunId: 'test-run-1', adapt: true } });
+
+      const executionStages: string[] = mockOrchestrator.executeSequentialPipeline.mock.calls[0][1].stages;
+      const progressStages: string[] = (ProgressReporter as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][4] as string[];
+
+      // Nothing in the execution plan that the orchestrator cannot dispatch.
+      expect(executionStages).not.toContain('data-sanity-check');
+      // ...but the user still sees the step.
+      expect(progressStages).toContain('data-sanity-check');
+      // The progress list is the execution plan plus the sanity check, in that order.
+      expect(progressStages).toEqual([...executionStages, 'data-sanity-check']);
     });
 
     it('should use abort error handling strategy', async () => {

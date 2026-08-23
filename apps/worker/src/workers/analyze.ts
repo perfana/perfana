@@ -103,8 +103,10 @@ export function analyzeTestWorker() {
         scope: `${testRunInfo.systemUnderTestId}:${testRunInfo.testEnvironment}:${testRunInfo.workload}`,
       });
 
-      // Define the complete 10-stage pipeline for analyze-test
-      const stages = [
+      // Stages the orchestrator knows how to run. Every name here must have a case in
+      // PipelineOrchestrator.executeStage — an unknown one returns success:false, which under
+      // errorHandling:'abort' fails the whole run.
+      const orchestratedStages = [
         'dynatrace-collection',       // Step 1: External data collection (DQL metrics)
         'panels-processing',          // Step 2: Panel document creation
         'performance-test-metrics',   // Step 3: Performance test metrics extraction (raw test data)
@@ -115,6 +117,14 @@ export function analyzeTestWorker() {
         'control-groups-creation',    // Step 8: Control groups creation (after checks)
         'control-group-statistics',   // Step 9: Control group statistics calculation
         ...(adapt ? ['adapt-analysis'] : []),  // Step 10: ADAPT (if enabled)
+      ];
+
+      // What the UI shows. data-sanity-check belongs here but NOT above: it runs after the
+      // orchestrator returns (see below), and the orchestrator has no case for it. Passing it
+      // as an execution stage made every run report "Unknown stage: data-sanity-check" and
+      // finish as 'partial' even when all ten real stages succeeded.
+      const stages = [
+        ...orchestratedStages,
         'data-sanity-check',          // Step 11: Data sanity validation
       ];
 
@@ -132,7 +142,7 @@ export function analyzeTestWorker() {
       const result = await orchestrator.executeSequentialPipeline(
         testRunId,
         {
-          stages,
+          stages: orchestratedStages,
           errorHandling: 'abort', // Stop pipeline if a critical stage fails
           timeoutMs: 600000 // 10 minute total timeout
         },
