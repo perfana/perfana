@@ -165,9 +165,10 @@ export function CompareSelectionPanel({
   }, [panelOptions]);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* Test Run Selection */}
       <Autocomplete
+        size="small"
         options={relatedTestRuns}
         getOptionLabel={getTestRunDisplayText}
         value={selectedTestRun}
@@ -178,11 +179,7 @@ export function CompareSelectionPanel({
             label="Select Test Run for Comparison"
             variant="outlined"
             fullWidth
-            helperText={
-              selectedTestRun
-                ? `Comparing with: ${selectedTestRun.test_run_id}`
-                : `Select from ${relatedTestRuns.length} available test runs`
-            }
+            helperText={`${relatedTestRuns.length} comparable run${relatedTestRuns.length === 1 ? '' : 's'}`}
           />
         )}
         renderOption={(props, option) => {
@@ -209,11 +206,13 @@ export function CompareSelectionPanel({
             </Box>
           );
         }}
-        sx={{ mb: 2 }}
       />
 
-      {/* Dashboards */}
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+      {/* Builder row — dashboards, panels and series side by side, the way Trends and Graphs
+          lay theirs out. Stacked full-width they pushed the added-series list and the
+          comparison table below the fold before you had picked anything. */}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 1.5 }}>
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '2 1 260px' }}>
         <Autocomplete
           multiple
           // Picking dashboards/panels/series is almost never one choice, and a popup that
@@ -286,14 +285,14 @@ export function CompareSelectionPanel({
           size="small"
           onClick={() => pickDashboards(allDashboardsPicked ? [] : [...allDashboards])}
           disabled={allDashboards.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
+          variant="outlined"
+          sx={{ height: 40, minWidth: 92, flexShrink: 0 }}
         >
           {allDashboardsPicked ? 'Clear' : 'Select all'}
         </Button>
       </Box>
 
-      {/* Panels */}
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '2 1 260px' }}>
         <Autocomplete
           multiple
           disableCloseOnSelect
@@ -337,14 +336,14 @@ export function CompareSelectionPanel({
           size="small"
           onClick={() => pickPanels(allPanelsPicked ? [] : [...panelOptions])}
           disabled={panelOptions.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
+          variant="outlined"
+          sx={{ height: 40, minWidth: 92, flexShrink: 0 }}
         >
           {allPanelsPicked ? 'Clear' : 'Select all'}
         </Button>
       </Box>
 
-      {/* Series */}
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '3 1 320px' }}>
         <Autocomplete
           multiple
           disableCloseOnSelect
@@ -406,16 +405,13 @@ export function CompareSelectionPanel({
             value.map((option, index) => {
               const tagProps = getTagProps({ index });
               return (
+                // Default chip: the gradient version hardcoded primary.dark on a translucent
+                // blue, which is close to unreadable on the dark theme.
                 <Chip
                   {...tagProps}
                   key={seriesKey(option)}
                   label={option.metricName}
                   size="small"
-                  sx={{
-                    background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.1) 0%, rgba(30, 136, 229, 0.15) 100%)',
-                    border: '1px solid rgba(25, 118, 210, 0.3)',
-                    color: 'primary.dark'
-                  }}
                 />
               );
             })
@@ -425,7 +421,8 @@ export function CompareSelectionPanel({
           size="small"
           onClick={() => setSelectedSeries(allSeriesPicked ? [] : [...seriesOptions])}
           disabled={seriesOptions.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
+          variant="outlined"
+          sx={{ height: 40, minWidth: 92, flexShrink: 0 }}
         >
           {allSeriesPicked ? 'Clear' : 'Select all'}
         </Button>
@@ -433,21 +430,11 @@ export function CompareSelectionPanel({
           variant="contained"
           onClick={addPicked}
           disabled={selectedSeries.length === 0}
-          sx={{
-            minWidth: 140,
-            flexShrink: 0,
-            background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
-            boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)',
-            '&:hover': {
-              background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
-            },
-            '&:disabled': {
-              background: 'rgba(0, 0, 0, 0.12)',
-            }
-          }}
+          sx={{ height: 40, px: 3, whiteSpace: 'nowrap', flexShrink: 0 }}
         >
           Add {selectedSeries.length > 0 ? `${selectedSeries.length} ` : ''}series
         </Button>
+      </Box>
       </Box>
     </Box>
   );

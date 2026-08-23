@@ -5,7 +5,11 @@ import {
   Box,
   Typography,
   CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
+import { ExpandMore } from '@mui/icons-material';
 import {
   ApplicationDashboard,
   Panel,
@@ -120,21 +124,7 @@ export function CompareExpandedContent({
   }
 
   return (
-    <Box>
-      {/* Saved Presets Section */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-          Saved Filter Presets
-        </Typography>
-        <ComparePresetsTable
-          presets={presets}
-          loading={presetsLoading}
-          currentUserId={currentUserId}
-          onSelectPreset={onApplyPreset}
-          onDeletePreset={onDeletePreset}
-        />
-      </Box>
-
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {relatedTestRuns.length > 0 ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {/* Selection Panel */}
@@ -161,51 +151,27 @@ export function CompareExpandedContent({
           {selectedTestRun && addedSeries.length === 0 && (
             <Box sx={{
               p: 3,
-              border: '2px dashed',
-              borderColor: 'primary.light',
+              border: '1px dashed',
+              borderColor: 'divider',
               borderRadius: 2,
-              backgroundColor: 'rgba(25, 118, 210, 0.02)',
               textAlign: 'center',
-              mb: 2
             }}>
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
-                No series added yet
-              </Typography>
               <Typography variant="body2" color="text.secondary">
-                Pick dashboards, panels and series above, then click &quot;Add series&quot; to start comparing metrics
+                Pick dashboards, panels and series above, then add them to compare metrics.
               </Typography>
             </Box>
           )}
 
           {/* Selected Test Run Details */}
           {selectedTestRun && (
-            <Box sx={{
-              p: 2,
-              border: '1px solid',
-              borderColor: 'primary.main',
-              borderRadius: 2,
-              backgroundColor: 'rgba(25, 118, 210, 0.04)'
-            }}>
-              <Typography variant="subtitle2" sx={{ mb: 1, color: 'primary.main', fontWeight: 600 }}>
-                Comparing With (Baseline)
-              </Typography>
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {selectedTestRun.test_run_id}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Started: {new Date(selectedTestRun.start_time || selectedTestRun.created_at).toLocaleString()}
-              </Typography>
-              {selectedTestRun.application_release && (
-                <Typography variant="body2" color="text.secondary">
-                  Version: {selectedTestRun.application_release}
-                </Typography>
-              )}
-              {selectedTestRun.annotations && selectedTestRun.annotations.length > 0 && (
-                <Typography variant="body2" color="text.secondary">
-                  Annotations: {selectedTestRun.annotations.join(', ')}
-                </Typography>
-              )}
-            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: -1.5 }}>
+              {[
+                `Baseline: ${selectedTestRun.test_run_id}`,
+                new Date(selectedTestRun.start_time || selectedTestRun.created_at).toLocaleString(),
+                selectedTestRun.application_release,
+                selectedTestRun.annotations?.length ? selectedTestRun.annotations.join(', ') : null,
+              ].filter(Boolean).join('  ·  ')}
+            </Typography>
           )}
 
           {/* Metrics Comparison Table */}
@@ -249,6 +215,28 @@ export function CompareExpandedContent({
           </Typography>
         </Box>
       )}
+
+      {/* Presets — out of the way until you want one, as in Trends */}
+      <Accordion
+        disableGutters
+        elevation={0}
+        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}
+      >
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+            Saved presets{presetsLoading ? '' : ` (${presets.length})`}
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <ComparePresetsTable
+            presets={presets}
+            loading={presetsLoading}
+            currentUserId={currentUserId}
+            onSelectPreset={onApplyPreset}
+            onDeletePreset={onDeletePreset}
+          />
+        </AccordionDetails>
+      </Accordion>
     </Box>
   );
 }
