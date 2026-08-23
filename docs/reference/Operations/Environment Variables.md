@@ -74,7 +74,7 @@ All configuration is managed through environment variables, loaded from `.env.lo
 
 | Variable | Default | Description |
 |---|---|---|
-| `AUDIT_RETENTION_MONTHS` | `24` | How long `audit_logs` rows are kept. `AuditRetentionManager` deletes older rows on boot and daily at 03:00 UTC, and logs the row count it removed. |
+| `AUDIT_RETENTION_MONTHS` | `24` | How long `audit_logs` rows are kept. `AuditRetentionManager` deletes older rows in 10k batches on boot and daily at 03:00 UTC, and logs the row count it removed. A value that is not a positive integer is rejected with a warning and falls back to 24 — `0` would mean `timestamp < now()`, which erases the whole audit trail. |
 
 ## External Integrations
 

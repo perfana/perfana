@@ -132,11 +132,17 @@ the same shape.
 **What:**
 1. Two leftovers to sweep once their rows age out (or now, as owner): `audit_logs_2026_05..07`
    are empty ranges that exist only because the consolidated dump was taken while they did.
-   `DROP TABLE` as `perfana` whenever convenient; nothing reads them.
-2. If another partitioned table appears, it needs a DEFAULT partition in the consolidated schema
-   and RLS on every partition — `rls-policy-coverage.snapshot.spec.ts` now covers partitions, so
-   the RLS half fails the snapshot on its own, but nothing catches a missing default.
-3. Consider a boot-time assertion in the worker: if the connection's role cannot `CREATE` in
+   `DROP TABLE` as `perfana` whenever convenient; nothing reads them, the consolidated schema
+   no longer names them (it drives RLS off `pg_inherits`), and the coverage snapshot excludes
+   `audit_logs_YYYY_MM` by design, so dropping them breaks no test.
+2. Do NOT re-create monthly partitions casually. A new partition does not inherit the parent's
+   RLS — it comes out readable by any role holding the schema-wide grant — and ATTACH has to
+   full-scan `audit_logs_default` under ACCESS EXCLUSIVE now that it holds every row.
+3. If another partitioned table appears, it needs a DEFAULT partition in the consolidated schema
+   and RLS on every partition. `rls-policy-coverage.snapshot.spec.ts` asserts both for
+   `audit_logs` by shape (every partition RLS+FORCE with no policies of its own, and at least
+   one DEFAULT); a new partitioned table needs its own equivalent.
+4. Consider a boot-time assertion in the worker: if the connection's role cannot `CREATE` in
    `public`, say so once at startup rather than once per scheduled DDL attempt. Same family as
    "Fail fast when the API's DB role cannot bypass RLS" in Completed.
 

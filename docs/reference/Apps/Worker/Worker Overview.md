@@ -132,7 +132,7 @@ enableReadyCheck: false
 |---|---|---|
 | `IncrementalCollectionScheduler` | Every 2 min | Collect metrics for running tests |
 | `StuckJobScanner` | Every 2 min | Detect and recover stuck jobs |
-| `AuditRetentionManager` | On boot + 03:00 UTC daily | Delete `audit_logs` rows past `AUDIT_RETENTION_MONTHS` (default 24) |
+| `AuditRetentionManager` | On boot + 03:00 UTC daily | Delete `audit_logs` rows past `AUDIT_RETENTION_MONTHS` (default 24), 10k at a time. The boot pass is not awaited, so it never delays BullMQ worker registration. |
 
 > [!note] Schedulers cannot issue DDL
 > The worker's pool enters every connection as `perfana_system` (`createSystemDataSource`), which
