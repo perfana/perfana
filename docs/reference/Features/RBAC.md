@@ -293,6 +293,15 @@ Manual flush: `AuthorizationService.clearAllCaches()` (testing only — uses SCA
 
 See `CLAUDE.md` for the full burndown record and PR references.
 
+> [!warning] Partitioned tables need RLS on every partition
+> A policy on a partitioned parent covers parent-routed queries only. A partition with RLS off is
+> readable by name (`SELECT * FROM audit_logs_2026_07`) by any role holding its grants — and the
+> consolidated schema grants every partition to `perfana_app` and `perfana_system` explicitly.
+> Enable RLS (and FORCE) on each partition, with no policies of its own: parent-routed access keeps
+> using the parent's policies, direct access is deny-all. `audit_logs` was fixed this way in
+> v0.2.73.0. The `rls-policy-coverage.snapshot.spec.ts` gate covers partitions, so a new one with
+> RLS off fails the snapshot.
+
 ---
 
 ## Related

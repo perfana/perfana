@@ -46,6 +46,27 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 | `ApiKey` | Programmatic access tokens |
 | `AuditLog` | CRUD operation audit trail |
 
+> [!info] `audit_logs` is partitioned
+> `audit_logs` is RANGE-partitioned by month on `timestamp`. The consolidated schema ships the
+> months that existed when its dump was taken plus **`audit_logs_default`**, a DEFAULT partition
+> that accepts any date — nothing at runtime can add partitions, because the app roles hold
+> `USAGE` but not `CREATE` on schema `public`, so without the default a write past the last
+> shipped month would be rejected and the audit trail would go silently empty.
+>
+> Every partition has RLS enabled with no policies of its own. The policies live on the parent, so
+> parent-routed reads and writes work normally while `SELECT * FROM audit_logs_2026_07` is
+> deny-all — without this, a partition is directly readable by any role holding its grants.
+>
+> A partition does **not** inherit the parent's RLS. One created by hand comes out with
+> `relrowsecurity = false` while the schema-wide `GRANT ON ALL TABLES` already applies to it, so it
+> needs `ENABLE` + `FORCE ROW LEVEL SECURITY` immediately — and attaching it makes Postgres
+> full-scan `audit_logs_default` under ACCESS EXCLUSIVE to prove no row belongs to the incoming
+> range, which blocks audit writes for the duration.
+>
+> Retention is `AuditRetentionManager` in the worker: a nightly `DELETE` of rows past
+> `AUDIT_RETENTION_MONTHS` (default 24), in batches of 10k. Not `DROP TABLE` — that needs table
+> ownership the worker's `perfana_system` role does not have.
+
 ### Test Domain
 
 | Entity | Description |

@@ -8555,6 +8555,45 @@ ALTER DEFAULT PRIVILEGES FOR ROLE perfana IN SCHEMA public GRANT SELECT,INSERT,D
 
 
 --
+-- Name: audit_logs_default; Type: TABLE; Schema: public; Owner: -
+--
+-- Not part of the pg_dump above: the monthly partitions in this file are frozen at the
+-- date the dump was taken, and nothing at runtime can add more: the app roles hold USAGE
+-- but not CREATE on schema public. Without a default partition, every audit write past the
+-- last dumped month has nowhere to land and the trail goes silently empty. Created last so
+-- the partitioned indexes above already exist and Postgres builds matching ones here
+-- automatically.
+--
+
+CREATE TABLE IF NOT EXISTS public.audit_logs_default PARTITION OF public.audit_logs DEFAULT;
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_default TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_default TO perfana_system;
+
+-- Partitions need RLS of their own: audit_logs' policies apply to parent-routed queries,
+-- but a partition with RLS off is readable directly by any role holding the grants above.
+-- Enabled with no policy of its own, so direct access is deny-all.
+--
+-- Driven off pg_inherits rather than a hardcoded list of month names, matching
+-- 1797000000000-AddAuditLogsDefaultPartition. The months in this dump are whatever existed the
+-- day it was taken: name them literally and a regenerated dump (or an operator dropping the
+-- empty leftovers, which TODOS.md invites) leaves either a partition with RLS off or an ALTER
+-- against a table that no longer exists — 42P01, which ConsolidatedSchema does not treat as
+-- benign, so every greenfield install would fail to migrate.
+
+DO $$
+DECLARE part regclass;
+BEGIN
+  FOR part IN
+    SELECT inhrelid::regclass FROM pg_inherits WHERE inhparent = 'public.audit_logs'::regclass
+  LOOP
+    EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', part);
+    EXECUTE format('ALTER TABLE %s FORCE ROW LEVEL SECURITY', part);
+  END LOOP;
+END $$;
+
+
+--
 -- PostgreSQL database dump complete
 --
 

@@ -116,7 +116,7 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 | Phase 2 | Membership & ownership infrastructure | Completed |
 | Phase 3 | Service-layer authorization enforcement | Lint-enforced (allowlist empty) |
 | Phase 4 | Data migration — `organization_id` NOT NULL on owned resources | Completed (2026-05-02) |
-| Phase 5a | Audit logging | Completed (2026-05-04 — allowlist empty; 29 services migrated, 27 closed via `POLICY_EXEMPT`) |
+| Phase 5a | Audit logging | Completed (2026-05-04 — allowlist empty; 29 services migrated, 27 closed via `POLICY_EXEMPT`). On deploys upgraded before v0.2.73.0 the trail is empty from 2026-08-01 until the default-partition fix lands — the rows were rejected, not hidden. |
 | Phase 5b | Row-Level Security | Shipped — `RlsTransactionInterceptor` opens a per-request transaction, runs `SET LOCAL ROLE perfana_app`, and sets four `app.current_*` GUCs the policies read. Owned-resource repository calls go through `withRequestEm()` (`apps/api/.rls-em-migration-allowlist.json` is empty). `npm run preflight` runs `apps/api/src/test/rls/`. One deliberate carve-out — see "API-key organization resolution" below. |
 
 ### Role Hierarchy
@@ -142,7 +142,7 @@ Perfana implements a multi-tenant RBAC system for fine-grained access control ac
 All resource entities implement the `OwnedResource` interface with four ownership columns:
 - `created_by` - User ID (Keycloak sub or api-key:{id}) who created the resource
 - `updated_by` - User ID who last modified the resource
-- `organization_id` - Organization the resource belongs to (NOT NULL on all 26 owned-resource entities as of Phase 4; nullable only on `audit_logs` and `test_runs` for documented reasons)
+- `organization_id` - Organization the resource belongs to (NOT NULL on all 26 owned-resource entities as of Phase 4; nullable only on `audit_logs`, for system-level events with no org context. `test_runs.organization_id` is NOT NULL in the DDL — the service-layer check still reads the joined system's column)
 - `team_id` - Team the resource belongs to (nullable)
 
 **Entities with Ownership Tracking** (~25 entities):
@@ -225,6 +225,7 @@ All five denial causes return an indistinguishable refusal (404, or `null` from 
 
 - `organization_id` is **NOT NULL** on all 26 owned-resource entities (Phase 4, 2026-05-02). The "null org = visible to all authenticated users" backward-compat rule is gone.
 - Exception intentionally kept nullable: `audit_logs.organization_id` (system-level events with no org context). `test_runs.organization_id` is NOT NULL in the DDL and `rls_test_runs_select` reads it directly, but the service-layer per-resource check still goes through the joined `SystemUnderTest` (the TypeORM entity also still declares it `nullable: true` — drift against the DDL).
+- `audit_logs` is RANGE-partitioned by month and carries an `audit_logs_default` DEFAULT partition (v0.2.73.0). Nothing at runtime creates partitions — `perfana_app`/`perfana_system` hold `USAGE` but not `CREATE` on schema `public` — so the default is what keeps an audit write from being rejected once the shipped months run out, and it is where every row lands from here on. Every partition has RLS enabled with no policies of its own: the parent's policies cover parent-routed access, and direct access (`SELECT * FROM audit_logs_2026_07`) is deny-all. A partition does **not** inherit the parent's RLS, so one created by hand needs `ENABLE` + `FORCE` immediately, and attaching it full-scans `audit_logs_default` under ACCESS EXCLUSIVE. Retention is `AuditRetentionManager`'s nightly batched `DELETE` of rows past `AUDIT_RETENTION_MONTHS` (default 24), never `DROP TABLE` — that needs an ownership the worker's role lacks.
 - `team_id` remains nullable on all entities — teams are optional even on owned resources.
 - Authorization enforcement (Phase 3) is now lint-enforced and the data layer (Phase 4) prevents the escape hatch.
 
@@ -252,6 +253,7 @@ v0.2.47.66 + v0.2.47.67 fixed 18 sites with this pattern. New services should fo
 - `KEYCLOAK_REALM` - Keycloak realm name
 - `KEYCLOAK_CLIENT_ID` - Keycloak client ID
 - `KEYCLOAK_CLIENT_SECRET` - Keycloak client secret
+- `AUDIT_RETENTION_MONTHS` - How long `audit_logs` rows are kept, in months (default: `24`). Read by the **worker**: `AuditRetentionManager` deletes older rows on boot and daily at 03:00 UTC and logs the count. Retention is a `DELETE`, not a partition `DROP` — the worker's `perfana_system` role owns no tables.
 
 **Frontend:**
 - `NEXT_PUBLIC_API_URL` - Backend API base URL (defaults to localhost:3001/api)
@@ -494,7 +496,7 @@ Run all tests from the repo root: `npm run test`
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **perfana** (34969 symbols, 61143 relationships, 224 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **perfana** (34285 symbols, 59845 relationships, 208 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
