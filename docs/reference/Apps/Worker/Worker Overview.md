@@ -25,7 +25,7 @@ The Worker service is the core processing engine for performance analysis. It ru
 
 | Job | Queue | Description |
 |---|---|---|
-| `analyze-test` | perfana-analyze | Main pipeline (10 stages) |
+| `analyze-test` | perfana-analyze | Main pipeline (11 stages — 10 orchestrated + data sanity check) |
 | `metrics-collection` | perfana-analyze | Grafana/Dynatrace data extraction |
 | `statistics-pipeline` | perfana-analyze | Statistical aggregations |
 | `checks-evaluation` | perfana-analyze | SLO threshold evaluation |
@@ -35,9 +35,11 @@ The Worker service is the core processing engine for performance analysis. It ru
 | `collect-metrics-incremental` | perfana-analyze | Real-time collection for running tests |
 | `orchestrate-reevaluate-batch` | perfana-batch | Complex batch operations |
 
-## Analysis Pipeline (10 Stages)
+## Analysis Pipeline (11 Stages)
 
-When a test run completes, the `PipelineOrchestrator` executes these stages sequentially:
+When a test run completes, `analyzeTestWorker` reports 11 stages to the UI (10 when `adapt=false`,
+which drops stage 10). The orchestrated stages run first, inside `PipelineOrchestrator`; the data
+sanity check runs in the worker afterwards.
 
 ```
 Stage 1: Dynatrace Collection
@@ -75,11 +77,29 @@ Stage 9: Control Group Statistics
 Stage 10: ADAPT Analysis (optional — skipped when adapt=false)
   └── Automated regression detection
   └── Stores in ds_adapt_results
+
+Stage 11: Data Sanity Check (runs outside the orchestrator)
+  └── Flags a run invalid when no usable metrics were collected
+  └── Never fails the job — the verdict is returned as `dataSanity` in the job result
 ```
+
+> [!warning] Stage 11 is not an orchestrator stage
+> `PipelineOrchestrator.executeStage` can only dispatch the names in its exported
+> `ORCHESTRATED_STAGES` list (stages 1-10). Anything else falls through to the `default` branch,
+> returns `success: false`, and under `errorHandling: 'abort'` fails the whole run. Passing
+> `'data-sanity-check'` in the execution plan is exactly what made every analysis report
+> `'partial'` until v0.2.74.0. Type an execution plan as `OrchestratedStage[]` so a stage with no
+> case in the orchestrator is a compile error.
+>
+> The two lists are deliberately separate in `analyze.ts`: `orchestratedStages` is what runs,
+> `stages` is what the progress bar counts. The worker also passes `finalizeProgress: false` and
+> publishes `complete()` / `fail()` itself once the sanity check is done — the web client stops
+> accepting progress the moment `job:completed` arrives, so a stage reported after finalization is
+> never rendered.
 
 ## Pipeline Implementations
 
-11 pipeline classes in `apps/worker/src/pipelines/`:
+12 pipeline classes in `apps/worker/src/pipelines/`:
 
 | Pipeline | Purpose |
 |---|---|
@@ -94,14 +114,15 @@ Stage 10: ADAPT Analysis (optional — skipped when adapt=false)
 | `PerformanceTestMetricsPipeline` | JMeter/LoadRunner raw metrics |
 | `TransactionStatsRollupPipeline` | Per-test-run tdigest rollup for transactions / samplers (backs `/test-runs/:id/transactions`) |
 | `IncrementalMetricsPipeline` | Metrics for running tests |
+| `DataSanityCheckPipeline` | Post-analysis validation — the only pipeline the orchestrator does not own; `analyzeTestWorker` calls it directly |
 
 ## Key Services
 
 | Service | Purpose |
 |---|---|
-| `PipelineOrchestrator` | Coordinates all 11 pipeline implementations |
+| `PipelineOrchestrator` | Coordinates 11 pipeline implementations; dispatches the 10 stage names in `ORCHESTRATED_STAGES` |
 | `JobLockService` | Prevents concurrent jobs on same scope |
-| `ProgressReporter` | Redis pub/sub for real-time UI progress |
+| `ProgressReporter` | Redis pub/sub for real-time UI progress. `complete()` / `fail()` are terminal — publish them only after the last stage the UI lists, or that stage is never rendered |
 | `StuckJobScanner` | Scans every 2 min for jobs stuck >10 min |
 | `MetricCollectionGapService` | Detects and fills incomplete collections |
 | `DatabaseService` | TypeORM wrapper for all data access |

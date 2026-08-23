@@ -178,6 +178,20 @@ The system subscribes to the following Socket.IO events:
 - `job:blocked` - Job blocking notification
 - `job:stuck` - Stuck job detection
 
+### `job:completed` is terminal (contract for producers)
+
+On `job:completed`, `useJobProgress` clears `progress` and adds the job id to
+`completedJobsRef` for 30 seconds, which makes the hook ignore both later `job:progress` events
+and stale polling responses for that job. This exists to stop the polling fallback resurrecting a
+finished job — but it means **any stage a worker reports after publishing the terminal event is
+silently dropped**.
+
+Workers that do more work after their orchestrator returns must therefore publish `complete()` /
+`fail()` last. `analyzeTestWorker` passes `finalizeProgress: false` to
+`PipelineOrchestrator.executeSequentialPipeline` and publishes the terminal event itself once the
+data sanity check has run; before v0.2.74.0 it did not, and the progress bar's final frame was
+"Stage 10 of 11 — 91%" with the sanity stage never appearing.
+
 ## REST API Endpoints
 
 Fallback polling uses these endpoints:

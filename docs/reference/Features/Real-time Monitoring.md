@@ -36,9 +36,22 @@ Frontend (hooks) ──▶ UI updates
 | `test-run:deleted` | TestRun ID | Test run removed |
 
 ### Job Progress Events
+
+Emitted by `JobProgressGateway` (`apps/api/src/modules/data-science/gateways/job-progress.gateway.ts`):
+
 | Event | Payload | Description |
 |---|---|---|
-| `job-progress:update` | JobProgress | Pipeline stage progress |
+| `job:progress` | JobProgress | Pipeline stage progress |
+| `job:completed` | JobEvent | Job finished successfully — **terminal** |
+| `job:failed` | JobEvent | Job failed — **terminal** |
+| `job:blocked` | JobEvent | Blocked by another job on the same scope |
+| `job:stuck` | JobEvent | Detected by `StuckJobScanner` |
+
+> [!warning] Terminal events end the stream
+> `useJobProgress` clears its state on `job:completed` and ignores that job id for 30 seconds, so
+> any `job:progress` published afterwards is discarded and never rendered. A producer that runs
+> work after its orchestrator returns must delay the terminal event until every stage the UI lists
+> has been reported — see `finalizeProgress` in [[Worker Overview]].
 
 ## Job Progress Tracking
 
@@ -49,8 +62,8 @@ interface JobProgress {
   testRunId: string;
   jobType: 'analyze' | 'refresh' | 'reevaluate';
   status: 'waiting' | 'active' | 'completed' | 'failed' | 'stuck' | 'blocked';
-  currentStage: number;    // 1-9
-  totalStages: number;     // 9
+  currentStage: number;    // 1-11 for analyze-test
+  totalStages: number;     // 11 for analyze-test (10 when adapt=false)
   stageName: string;       // e.g., "ADAPT Analysis"
   stageProgress: number;   // 0-100%
   overallProgress: number; // 0-100%

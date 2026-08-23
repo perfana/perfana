@@ -66,6 +66,7 @@ Perfana uses **MUI (Material UI)** as the primary component library, supplemente
 - **Data fetching** happens client-side via `authenticatedFetch()` (the API requires auth headers from the browser session).
 - **Page components** live in `app/<route>/page.tsx`. Feature-specific components live in `app/<route>/components/`.
 - **Shared components** live in `components/`. Domain-specific API functions live in `lib/<domain>.ts`.
+- **Test-run detail cards** (Trends, Graphs, Compare in `app/test-runs/[id]/components/`) share one layout: a compact header with a labelled expand button, the dashboard/panel/series builder on a single row rather than stacked full-width pickers, and saved presets in a collapsed accordion at the bottom. Give that accordion `slotProps={{ transition: { unmountOnExit: true } }}` — MUI keeps `Accordion` children mounted otherwise, so every preset row renders into a hidden `height: 0` subtree.
 
 ## Environment Variables
 
@@ -94,3 +95,4 @@ Frontend env vars are defined in `lib/env.ts`:
 | Hardcoded `localhost:3001` | Use `env.API_URL` from `@/lib/env` |
 | `'use client'` on a page that doesn't need it | Only add when using hooks, event handlers, or browser APIs |
 | Importing MUI wrong | Use `@mui/material/ComponentName` path imports for tree-shaking |
+| Hardcoded `rgba(...)` / hex colours or gradients in `sx` | Use palette tokens (`action.hover`, `divider`, `action.disabledBackground`, `text.secondary`). Light-theme literals are invisible in dark mode — a near-white bar on a dark background, or near-black text on a light tint. This has been fixed twice now (v0.2.71.0, v0.2.74.0) |

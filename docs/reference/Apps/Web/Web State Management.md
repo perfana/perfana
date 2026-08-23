@@ -68,7 +68,9 @@ Socket.IO connection managed by `SocketManager` singleton.
 - `test-run:created` — New test run
 - `test-run:updated` — Status change
 - `test-run:deleted` — Deletion
-- `job-progress:update` — Pipeline stage progress
+- `job:progress` — Pipeline stage progress
+- `job:completed` / `job:failed` — Terminal. `useJobProgress` clears its state and then ignores that job id for 30 seconds, so any later `job:progress` (or stale poll response) for it is discarded
+- `job:blocked` / `job:stuck` — Blocked by another job on the scope, or detected stuck
 
 **Connection**: Exponential backoff reconnection (1s → 30s max).
 
