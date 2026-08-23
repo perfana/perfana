@@ -499,4 +499,95 @@ describe('TestRunsMetricsService', () => {
       expect(auditService.logUpdate).not.toHaveBeenCalled();
     });
   });
+
+  // -----------------------------------------------------------------
+  // organization_id inheritance (RLS: NOT NULL on ds_compare_config,
+  // and a NULL row would be invisible to every non-admin anyway)
+  // -----------------------------------------------------------------
+  describe('organization_id inheritance', () => {
+    it('createOrUpdateDsCompareConfig inherits organization_id and team_id from the parent SUT', async () => {
+      const systemQuery = {
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'sut-1', organization_id: 'org-inh-1', team_id: 'team-inh-1' }),
+      };
+      systemRepo.createQueryBuilder.mockReturnValue(systemQuery as any);
+      applicationDashboardRepo.findOne.mockResolvedValue({ id: 'ad-1' } as ApplicationDashboard);
+      compareConfigRepo.findOne.mockResolvedValue(null);
+      compareConfigRepo.create.mockImplementation((data) => data as any);
+      compareConfigRepo.save.mockImplementation((data) =>
+        Promise.resolve({
+          id: 'cmp-new',
+          ...data,
+          created_at: new Date('2026-08-23T10:00:00Z'),
+          updated_at: new Date('2026-08-23T10:00:00Z'),
+        } as any),
+      );
+
+      await service.createOrUpdateDsCompareConfig(
+        {
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'production',
+          workload: 'loadTest',
+          applicationDashboardId: 'ad-1',
+          panelId: '5',
+          metricName: 'p95',
+          configData: { thresholds: { iqr: 2 } },
+        } as never,
+        'user-1',
+        true,
+      );
+
+      expect(compareConfigRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ organization_id: 'org-inh-1', team_id: 'team-inh-1' }),
+      );
+      // the SUT lookup must actually select the ownership columns it inherits from
+      expect(systemQuery.select).toHaveBeenCalledWith(['sut.id', 'sut.organization_id', 'sut.team_id']);
+    });
+
+    it('applyGoldenPathClassifications inherits organization_id and team_id from the dashboard', async () => {
+      applicationDashboardRepo.find.mockResolvedValue([
+        {
+          id: 'dash-1',
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'production',
+          dashboardUid: 'gatling-overview-influxdb',
+          organizationId: 'org-dash-1',
+          teamId: 'team-dash-1',
+        },
+      ] as any);
+      templateRepo.find.mockResolvedValue([
+        {
+          id: 'tmpl-1',
+          system_under_test_id: null,
+          dashboard_uid: 'gatling-overview-influxdb',
+          panel_id: 6,
+          metric_classification: 'RED_rate',
+          higher_is_better: true,
+          regex: false,
+          config_overrides: null,
+        },
+      ] as any);
+      compareConfigRepo.findOne.mockResolvedValue(null);
+      compareConfigRepo.create.mockImplementation((data) => data as any);
+      compareConfigRepo.save.mockImplementation((data) => Promise.resolve({ id: 'new-cfg', ...data } as any));
+
+      await service.applyGoldenPathClassifications({
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'production',
+        workload: 'loadTest',
+      });
+
+      expect(compareConfigRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organization_id: 'org-dash-1',
+          team_id: 'team-dash-1',
+          created_by: 'system:golden-path',
+        }),
+      );
+    });
+  });
+
 });
