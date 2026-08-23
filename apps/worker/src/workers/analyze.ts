@@ -2,7 +2,7 @@ import type { Job } from 'bullmq';
 import type Redis from 'ioredis';
 import { getLogger, logPipelineStart, logPipelineSuccess as _logPipelineSuccess, logPipelineError } from '../lib/utils/logger.js';
 import { AnalyzeTestJobSchema, type AnalyzeTestJob, type JobResult } from '../types/jobs.js';
-import { PipelineOrchestrator } from '../services/PipelineOrchestrator.js';
+import { PipelineOrchestrator, type OrchestratedStage } from '../services/PipelineOrchestrator.js';
 import { getDatabaseService } from '../common/database-accessor.js';
 import { DataSanityCheckPipeline } from '../pipelines/DataSanityCheckPipeline.js';
 import { getRedisPool } from '../config/redis-pool.js';
@@ -103,29 +103,29 @@ export function analyzeTestWorker() {
         scope: `${testRunInfo.systemUnderTestId}:${testRunInfo.testEnvironment}:${testRunInfo.workload}`,
       });
 
-      // Stages the orchestrator knows how to run. Every name here must have a case in
-      // PipelineOrchestrator.executeStage — an unknown one returns success:false, which under
-      // errorHandling:'abort' fails the whole run.
-      const orchestratedStages = [
-        'dynatrace-collection',       // Step 1: External data collection (DQL metrics)
-        'panels-processing',          // Step 2: Panel document creation
-        'performance-test-metrics',   // Step 3: Performance test metrics extraction (raw test data)
-        'transaction-stats-rollup',   // Step 4: Per-test-run transaction/sampler stats rollup (#150, #151)
-        'metrics-collection',         // Step 5: CORE metrics from Grafana
-        'statistics-calculation',     // Step 6: Statistical aggregations
-        'checks-evaluation',          // Step 7: Performance evaluation (prerequisite for control groups)
-        'control-groups-creation',    // Step 8: Control groups creation (after checks)
-        'control-group-statistics',   // Step 9: Control group statistics calculation
-        ...(adapt ? ['adapt-analysis'] : []),  // Step 10: ADAPT (if enabled)
+      // Stages the orchestrator knows how to run. Typed as OrchestratedStage[] so a name with no
+      // case in PipelineOrchestrator.executeStage is a compile error rather than a run that
+      // reports 'partial' — which is exactly how data-sanity-check hid here.
+      const orchestratedStages: OrchestratedStage[] = [
+        'dynatrace-collection',       // External data collection (DQL metrics)
+        'panels-processing',          // Panel document creation
+        'performance-test-metrics',   // Performance test metrics extraction (raw test data)
+        'transaction-stats-rollup',   // Per-test-run transaction/sampler stats rollup (#150, #151)
+        'metrics-collection',         // CORE metrics from Grafana
+        'statistics-calculation',     // Statistical aggregations
+        'checks-evaluation',          // Performance evaluation (prerequisite for control groups)
+        'control-groups-creation',    // Control groups creation (after checks)
+        'control-group-statistics',   // Control group statistics calculation
+        ...(adapt ? (['adapt-analysis'] as const) : []),  // ADAPT (if enabled)
       ];
 
       // What the UI shows. data-sanity-check belongs here but NOT above: it runs after the
       // orchestrator returns (see below), and the orchestrator has no case for it. Passing it
       // as an execution stage made every run report "Unknown stage: data-sanity-check" and
       // finish as 'partial' even when all ten real stages succeeded.
-      const stages = [
+      const stages: string[] = [
         ...orchestratedStages,
-        'data-sanity-check',          // Step 11: Data sanity validation
+        'data-sanity-check',          // Data sanity validation, run below
       ];
 
       // Initialize progress reporter
@@ -144,16 +144,48 @@ export function analyzeTestWorker() {
         {
           stages: orchestratedStages,
           errorHandling: 'abort', // Stop pipeline if a critical stage fails
-          timeoutMs: 600000 // 10 minute total timeout
+          timeoutMs: 600000, // 10 minute total timeout
+          // We run the sanity check after this returns, so we publish the terminal progress
+          // event ourselves once that is done. Otherwise job:completed lands first and the web
+          // client discards the sanity stage entirely — it renders "Stage 10 of 11 / 91%" as the
+          // final frame, and the late publish also resets the progress key's post-mortem TTL
+          // from an hour back to five minutes.
+          finalizeProgress: false,
         },
         progressReporter // Pass progress reporter for real-time updates
       );
 
-      // Data sanity check — runs after the main pipeline, never fails the job
-      await progressReporter?.startStage('data-sanity-check');
-      const sanityPipeline = new DataSanityCheckPipeline(logger);
-      await sanityPipeline.execute({ testRunId });
-      await progressReporter?.completeStage();
+      // Data sanity check — runs after the main pipeline, never fails the job. The try/catch is
+      // what makes that true: without it a throw here lands in the outer catch and reports
+      // 'failed' for a run whose every real stage succeeded. DataSanityCheckPipeline currently
+      // swallows its own errors, but that is its invariant, not ours.
+      let dataSanity: { valid?: boolean; reasons?: string[] } | undefined;
+      try {
+        await progressReporter?.startStage('data-sanity-check');
+        const sanityPipeline = new DataSanityCheckPipeline(logger);
+        const sanityResult = await sanityPipeline.execute({ testRunId });
+        dataSanity = sanityResult?.data as { valid?: boolean; reasons?: string[] } | undefined;
+        await progressReporter?.completeStage();
+      } catch (sanityError) {
+        const msg = sanityError instanceof Error ? sanityError.message : String(sanityError);
+        logger.warn(`Data sanity check failed for ${testRunId}, analysis result stands: ${msg}`);
+      }
+
+      // The pipeline may have just marked this run invalid ("no metrics data collected"). Say so
+      // in the result rather than returning an unqualified green: the JobResult is all a CI
+      // caller sees, and the sanity verdict used to be invisible there.
+      if (dataSanity?.valid === false) {
+        logger.warn(
+          `Data sanity check marked ${testRunId} invalid: ${(dataSanity.reasons ?? []).join('; ') || 'no reason given'}`,
+        );
+      }
+
+      // Terminal progress event, after every stage the UI lists has been reported.
+      if (result.success) {
+        await progressReporter?.complete();
+      } else {
+        await progressReporter?.fail(`Analysis completed with failures for ${testRunId}`);
+      }
 
       const duration = Date.now() - startTime;
 
@@ -168,6 +200,7 @@ export function analyzeTestWorker() {
           duration: `${duration}ms`,
           adapt,
           benchmarksOnly,
+          dataSanity,
           pipeline: result.data
         }
       };

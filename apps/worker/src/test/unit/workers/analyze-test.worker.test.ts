@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { analyzeTestWorker, validateTestRun, hasExistingMetrics } from '../../../workers/analyze.js';
 import { PipelineOrchestrator } from '../../../services/PipelineOrchestrator.js';
+import { ProgressReporter } from '../../../services/ProgressReporter.js';
 import type { JobResult } from '../../../types/jobs.js';
 
 // Mock the logger functions
@@ -79,6 +80,7 @@ vi.mock('../../../services/ProgressReporter.js', () => ({
     reportStageFailed: vi.fn(),
     startStage: vi.fn().mockResolvedValue(undefined),
     completeStage: vi.fn().mockResolvedValue(undefined),
+    complete: vi.fn().mockResolvedValue(undefined),
     fail: vi.fn().mockResolvedValue(undefined),
     cleanup: vi.fn().mockResolvedValue(undefined),
   })),
@@ -150,9 +152,10 @@ describe('analyzeTestWorker', () => {
             { stage: 'control-groups-creation', result: { success: true }, duration: 6000 },
             { stage: 'control-group-statistics', result: { success: true }, duration: 3000 },
             { stage: 'adapt-analysis', result: { success: true }, duration: 4000 },
-            { stage: 'data-sanity-check', result: { success: true }, duration: 200 },
+            // No data-sanity-check entry: the orchestrator is never handed that stage, so it
+            // cannot report one. The worker runs it afterwards and counts it in data.stages.
           ],
-          completedStages: 9,
+          completedStages: 10,
           failedStages: 0,
         },
       };
@@ -482,7 +485,6 @@ describe('analyzeTestWorker', () => {
       // data-sanity-check has no case in PipelineOrchestrator.executeStage, so it came back
       // success:false with "Unknown stage", and errorHandling:'abort' turned that into
       // overallSuccess=false — every analysis reported 'partial' while all ten real stages passed.
-      const { ProgressReporter } = await import('../../../services/ProgressReporter.js');
       mockOrchestrator.executeSequentialPipeline.mockResolvedValue({
         success: true,
         duration: 40000,
@@ -492,7 +494,10 @@ describe('analyzeTestWorker', () => {
       await worker({ data: { testRunId: 'test-run-1', adapt: true } });
 
       const executionStages: string[] = mockOrchestrator.executeSequentialPipeline.mock.calls[0][1].stages;
-      const progressStages: string[] = (ProgressReporter as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][4] as string[];
+      // vi.mocked keeps this bound to the real constructor signature, so reordering
+      // ProgressReporter's parameters breaks compilation instead of silently reading a
+      // different argument.
+      const [, , , , progressStages] = vi.mocked(ProgressReporter).mock.calls[0];
 
       // Nothing in the execution plan that the orchestrator cannot dispatch.
       expect(executionStages).not.toContain('data-sanity-check');
@@ -500,6 +505,84 @@ describe('analyzeTestWorker', () => {
       expect(progressStages).toContain('data-sanity-check');
       // The progress list is the execution plan plus the sanity check, in that order.
       expect(progressStages).toEqual([...executionStages, 'data-sanity-check']);
+    });
+
+    it('only hands the orchestrator stages it can actually dispatch', async () => {
+      // The hardcoded not.toContain('data-sanity-check') above catches the exact bug that
+      // happened. This catches the NEXT one: any stage added to the execution plan without a
+      // case in PipelineOrchestrator.executeStage. ORCHESTRATED_STAGES is the real list the
+      // switch is written against, so this fails for a name the orchestrator cannot run.
+      mockOrchestrator.executeSequentialPipeline.mockResolvedValue({
+        success: true,
+        duration: 40000,
+        data: {},
+      });
+
+      await worker({ data: { testRunId: 'test-run-1', adapt: true } });
+
+      // importActual: the module is auto-mocked at the top of this file, so the real exported
+      // list has to be pulled in explicitly or the check passes vacuously against undefined.
+      const { ORCHESTRATED_STAGES } = await vi.importActual<
+        typeof import('../../../services/PipelineOrchestrator.js')
+      >('../../../services/PipelineOrchestrator.js');
+
+      const executionStages: string[] = mockOrchestrator.executeSequentialPipeline.mock.calls[0][1].stages;
+      const dispatchable = new Set<string>(ORCHESTRATED_STAGES);
+      expect(dispatchable.size).toBeGreaterThan(0);
+      expect(executionStages.filter(stage => !dispatchable.has(stage))).toEqual([]);
+    });
+
+    it('still reports success when the data sanity check throws', async () => {
+      // The sanity check runs outside the orchestrator and must never fail the job. It only
+      // held because DataSanityCheckPipeline swallows its own errors — an invariant of a
+      // different class.
+      const { DataSanityCheckPipeline } = await import('../../../pipelines/DataSanityCheckPipeline.js');
+      vi.mocked(DataSanityCheckPipeline).mockImplementationOnce(() => ({
+        execute: vi.fn().mockRejectedValue(new Error('db down')),
+      }) as never);
+      mockOrchestrator.executeSequentialPipeline.mockResolvedValue({
+        success: true,
+        duration: 40000,
+        data: {},
+      });
+
+      const result = await worker({ data: { testRunId: 'test-run-1', adapt: true } });
+      expect(result.status).toBe('success');
+    });
+
+    it('publishes the terminal progress event after the sanity stage, not before it', async () => {
+      // The web client stops accepting progress for a job once job:completed arrives, so a
+      // stage reported after finalization is never rendered — the UI's last frame would be
+      // "Stage 10 of 11 / 91%". The orchestrator therefore must not finalize.
+      mockOrchestrator.executeSequentialPipeline.mockResolvedValue({
+        success: true,
+        duration: 40000,
+        data: {},
+      });
+
+      await worker({ data: { testRunId: 'test-run-1', adapt: true } });
+
+      expect(mockOrchestrator.executeSequentialPipeline.mock.calls[0][1].finalizeProgress).toBe(false);
+
+      const reporter = vi.mocked(ProgressReporter).mock.results[0].value;
+      const lastStageCompleted = reporter.completeStage.mock.invocationCallOrder.at(-1);
+      const jobCompleted = reporter.complete.mock.invocationCallOrder[0];
+      expect(jobCompleted).toBeGreaterThan(lastStageCompleted);
+    });
+
+    it('fails the progress report when the pipeline came back unsuccessful', async () => {
+      mockOrchestrator.executeSequentialPipeline.mockResolvedValue({
+        success: false,
+        duration: 40000,
+        data: {},
+      });
+
+      const result = await worker({ data: { testRunId: 'test-run-1', adapt: true } });
+
+      const reporter = vi.mocked(ProgressReporter).mock.results[0].value;
+      expect(reporter.fail).toHaveBeenCalled();
+      expect(reporter.complete).not.toHaveBeenCalled();
+      expect(result.status).toBe('partial');
     });
 
     it('should use abort error handling strategy', async () => {

@@ -31,6 +31,30 @@ import type { DsMetricCollectionStatus } from '@perfana/shared/entities';
  *
  * All pipelines use TypeORM for database access via NestJS dependency injection
  */
+/**
+ * The stage names `executeStage` can dispatch, in pipeline order.
+ *
+ * Anything outside this list falls through to the `default` branch, which returns
+ * success:false — and under `errorHandling: 'abort'` that fails the whole run. That is not
+ * hypothetical: analyze.ts passed 'data-sanity-check' (which runs outside the orchestrator)
+ * in its execution plan, and every analysis reported 'partial' until v0.2.74.0. Callers should
+ * type their plan as OrchestratedStage[] so a stage with no case here is a compile error.
+ */
+export const ORCHESTRATED_STAGES = [
+  'dynatrace-collection',
+  'panels-processing',
+  'performance-test-metrics',
+  'transaction-stats-rollup',
+  'metrics-collection',
+  'statistics-calculation',
+  'checks-evaluation',
+  'control-groups-creation',
+  'control-group-statistics',
+  'adapt-analysis',
+] as const;
+
+export type OrchestratedStage = (typeof ORCHESTRATED_STAGES)[number];
+
 export class PipelineOrchestrator {
   private metricsPipeline: MetricsPipeline;
   private statisticsPipeline: StatisticsPipeline;
@@ -419,10 +443,19 @@ export class PipelineOrchestrator {
       stages: string[];
       errorHandling?: 'strict' | 'continue' | 'abort';
       timeoutMs?: number;
+      /**
+       * Whether this method publishes the terminal progress event. Default true.
+       *
+       * Pass false when the caller runs more work after the pipeline: the web client stops
+       * accepting progress for a job the moment `job:completed` arrives (useJobProgress drops
+       * later events for 30s), so a stage reported after finalization is never rendered and the
+       * UI's last frame is "Stage 10 of 11". The caller must then call complete()/fail() itself.
+       */
+      finalizeProgress?: boolean;
     },
     progressReporter?: ProgressReporter
   ): Promise<PipelineResult> {
-    const { stages, errorHandling = 'continue', timeoutMs = 600000 } = config;
+    const { stages, errorHandling = 'continue', timeoutMs = 600000, finalizeProgress = true } = config;
     const startTime = Date.now();
 
     logPipelineStart(this.logger, 'sequential-pipeline', {
@@ -545,7 +578,7 @@ export class PipelineOrchestrator {
 
       // Report pipeline completion to progress tracker. Best-effort — a failure to
       // finalize progress reporting must not escape the orchestrator (issue #294).
-      if (progressReporter) {
+      if (progressReporter && finalizeProgress) {
         try {
           await progressReporter.complete();
         } catch (reporterError) {
@@ -582,7 +615,7 @@ export class PipelineOrchestrator {
       // Report pipeline failure to progress tracker. Best-effort — a failure here
       // would otherwise become a second throw escaping the catch block, surface as
       // an unhandled rejection, and shut the worker down (issue #294).
-      if (progressReporter) {
+      if (progressReporter && finalizeProgress) {
         try {
           await progressReporter.fail(errorMessage);
         } catch (reporterError) {
@@ -729,6 +762,13 @@ ${results.map(r => {
         break;
 
       default:
+        // Programmer error, not a data problem: the caller asked for a stage this orchestrator
+        // has no case for. Returning success:false alone is what let analyze.ts quietly report
+        // 'partial' for months, so say it at error level too.
+        this.logger.error(
+          `BUG: no orchestrator case for stage '${stageName}' — it will fail the run under errorHandling:'abort'. ` +
+          `Valid stages: ${ORCHESTRATED_STAGES.join(', ')}`,
+        );
         return {
           success: false,
           stage: stageName,
