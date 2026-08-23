@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.73.0] - 2026-08-23
+
+### Fixed
+- **The audit trail was silently empty on any deploy running past its shipped months.** `audit_logs` is split into one table per month, and the worker was supposed to add each new month as it came. Since the row-level-security work, the worker connects under a restricted database role that is not allowed to create tables, so it had been failing every night since deploy — and once the last shipped month (July 2026) ran out, every audit write had nowhere to go. Provisioning, logins and re-evaluations that should have been recorded were not: the table held zero rows. Audit writes no longer depend on anything happening at runtime — there is now a catch-all partition that accepts any date, created by the migration that runs as the database owner, so a write can never again be rejected for want of a place to put it.
+- **Audit retention actually deletes something now.** Removing expired records meant dropping a month's table, which needs table ownership the worker likewise does not have — so `AUDIT_RETENTION_MONTHS` (default 24) had never once taken effect. The nightly job is now a plain delete of rows past the retention window, which the worker's role is permitted to run, and it logs how many rows it removed instead of failing quietly.
+- **Audit records could be read by users who were not allowed to see them.** Access rules were attached to the parent `audit_logs` table only, so querying a monthly partition by name returned rows that querying `audit_logs` correctly hid. Every partition now enforces the parent's rules, and the pre-ship check that snapshots this no longer skips partitions — which is why it had not caught the gap.
+
 ## [0.2.72.0] - 2026-08-23
 
 ### Fixed

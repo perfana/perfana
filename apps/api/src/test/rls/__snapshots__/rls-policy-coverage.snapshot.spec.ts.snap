@@ -37,6 +37,26 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     ],
     "rls": true,
   },
+  "audit_logs_2026_05": {
+    "force": true,
+    "policies": [],
+    "rls": true,
+  },
+  "audit_logs_2026_06": {
+    "force": true,
+    "policies": [],
+    "rls": true,
+  },
+  "audit_logs_2026_07": {
+    "force": true,
+    "policies": [],
+    "rls": true,
+  },
+  "audit_logs_default": {
+    "force": true,
+    "policies": [],
+    "rls": true,
+  },
   "awr_analysis": {
     "force": false,
     "policies": [],

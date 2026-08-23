@@ -12,8 +12,10 @@ import { AppDataSource } from '../../data-source';
  *   (b) has any RLS policy attached (catches subquery-policy tables like
  *       `generated_reports` that lack `organization_id` but delegate via a
  *       joined parent).
- * Excludes TimescaleDB hypertable child partitions and audit_logs partition
- * children.
+ * Excludes TimescaleDB hypertable child partitions. audit_logs partition children are
+ * deliberately included: policies live on the parent, so a child with RLS off is directly
+ * readable by any role holding its grants — which is what this snapshot is here to catch.
+ * They appear as rls/force true with no policies of their own (deny-all direct access).
  */
 describe('RLS policy coverage snapshot', () => {
   let ds: DataSource;
@@ -37,7 +39,6 @@ describe('RLS policy coverage snapshot', () => {
       WHERE n.nspname = 'public'
         AND c.relkind IN ('r', 'p')
         AND c.relname NOT LIKE '_hyper_%'
-        AND c.relname !~ '^audit_logs_\\d{4}_\\d{2}$'
         AND (
           EXISTS (
             SELECT 1 FROM information_schema.columns col
