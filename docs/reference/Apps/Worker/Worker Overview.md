@@ -79,7 +79,9 @@ Stage 10: ADAPT Analysis (optional — skipped when adapt=false)
   └── Stores in ds_adapt_results
 
 Stage 11: Data Sanity Check (runs outside the orchestrator)
-  └── Flags a run invalid when no usable metrics were collected
+  └── Collects invalidating reasons: no start/end time, no dashboard panels, no metrics
+      data, statistics not calculated, ADAPT ran but produced no results
+  └── valid = reasons.length === 0
   └── Never fails the job — the verdict is returned as `dataSanity` in the job result
 ```
 
@@ -88,8 +90,12 @@ Stage 11: Data Sanity Check (runs outside the orchestrator)
 > `ORCHESTRATED_STAGES` list (stages 1-10). Anything else falls through to the `default` branch,
 > returns `success: false`, and under `errorHandling: 'abort'` fails the whole run. Passing
 > `'data-sanity-check'` in the execution plan is exactly what made every analysis report
-> `'partial'` until v0.2.74.0. Type an execution plan as `OrchestratedStage[]` so a stage with no
-> case in the orchestrator is a compile error.
+> `'partial'` until v0.2.74.0. Declare an execution plan as `OrchestratedStage[]` so a stage with
+> no case in the orchestrator is a compile error — a caller-side discipline, not an enforced one:
+> `executeSequentialPipeline` still accepts `stages: string[]`.
+>
+> A third list, `PIPELINE_STAGES` in `packages/shared/src/types/job-progress.types.ts`, maps stage
+> ids to display names. A stage missing from it renders in the UI as its raw id.
 >
 > The two lists are deliberately separate in `analyze.ts`: `orchestratedStages` is what runs,
 > `stages` is what the progress bar counts. The worker also passes `finalizeProgress: false` and

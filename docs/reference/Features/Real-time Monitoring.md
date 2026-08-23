@@ -39,19 +39,26 @@ Frontend (hooks) ──▶ UI updates
 
 Emitted by `JobProgressGateway` (`apps/api/src/modules/data-science/gateways/job-progress.gateway.ts`):
 
+The gateway emits the `payload` of each `JobEvent` variant, not the `{ type, payload }` wrapper:
+
 | Event | Payload | Description |
 |---|---|---|
-| `job:progress` | JobProgress | Pipeline stage progress |
-| `job:completed` | JobEvent | Job finished successfully — **terminal** |
-| `job:failed` | JobEvent | Job failed — **terminal** |
-| `job:blocked` | JobEvent | Blocked by another job on the same scope |
-| `job:stuck` | JobEvent | Detected by `StuckJobScanner` |
+| `job:progress` | `JobProgress` | Pipeline stage progress |
+| `job:completed` | `JobCompletedEvent['payload']` | Job finished successfully — **terminal** |
+| `job:failed` | `JobFailedEvent['payload']` | Job failed |
+| `job:blocked` | `JobBlockedInfo` | Blocked by another job on the same scope |
+| `job:stuck` | `JobStuckEvent['payload']` | Detected by `StuckJobScanner` |
 
-> [!warning] Terminal events end the stream
-> `useJobProgress` clears its state on `job:completed` and ignores that job id for 30 seconds, so
-> any `job:progress` published afterwards is discarded and never rendered. A producer that runs
-> work after its orchestrator returns must delay the terminal event until every stage the UI lists
-> has been reported — see `finalizeProgress` in [[Worker Overview]].
+> [!warning] `job:completed` ends the stream
+> `useJobProgress` clears its state on `job:completed` **and** records the job id for 30 seconds,
+> so any `job:progress` published afterwards — or a stale polling response — is discarded and
+> never rendered. A producer that runs work after its orchestrator returns must delay
+> `job:completed` until every stage the UI lists has been reported; see `finalizeProgress` in
+> [[Worker Overview]].
+>
+> `job:failed` also clears the progress state, but it does **not** record the job id, so later
+> progress events for a failed job are still accepted. Do not rely on that asymmetry — it is
+> incidental, not designed.
 
 ## Job Progress Tracking
 
@@ -62,13 +69,24 @@ interface JobProgress {
   testRunId: string;
   jobType: 'analyze' | 'refresh' | 'reevaluate';
   status: 'waiting' | 'active' | 'completed' | 'failed' | 'stuck' | 'blocked';
-  currentStage: number;    // 1-11 for analyze-test
+  stage: string;           // stage id, e.g. 'adapt-analysis'
+  stageName: string;       // display name, e.g. 'ADAPT analysis'
+  stageIndex: number;      // 1-based; 1-11 for analyze-test
   totalStages: number;     // 11 for analyze-test (10 when adapt=false)
-  stageName: string;       // e.g., "ADAPT Analysis"
   stageProgress: number;   // 0-100%
   overallProgress: number; // 0-100%
+  message: string;
 }
 ```
+
+Abridged — see `JobProgress` in `packages/shared/src/types/job-progress.types.ts` for the full
+shape (`jobId`, the scope fields, `startedAt`, `lastProgressAt`).
+
+`stageName` comes from `getStageName(stage)`, which looks the id up in `PIPELINE_STAGES` — the
+canonical id-to-display-name list, and the third place the analyze stages are enumerated after
+`ORCHESTRATED_STAGES` and the worker's own UI-facing `stages` array. An id that is not in
+`PIPELINE_STAGES` falls back to the raw id rather than failing, so a new stage silently renders as
+`gap-analysis` instead of a human name.
 
 ## Incremental Metric Collection
 

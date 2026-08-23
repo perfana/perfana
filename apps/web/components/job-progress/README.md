@@ -186,6 +186,9 @@ and stale polling responses for that job. This exists to stop the polling fallba
 finished job — but it means **any stage a worker reports after publishing the terminal event is
 silently dropped**.
 
+`job:failed` clears `progress` too but does *not* populate `completedJobsRef`, so later progress
+events for a failed job are still accepted. Treat that as incidental rather than a guarantee.
+
 Workers that do more work after their orchestrator returns must therefore publish `complete()` /
 `fail()` last. `analyzeTestWorker` passes `finalizeProgress: false` to
 `PipelineOrchestrator.executeSequentialPipeline` and publishes the terminal event itself once the

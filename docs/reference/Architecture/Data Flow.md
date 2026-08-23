@@ -95,7 +95,8 @@ Stage 10: ADAPT Analysis
   └── Stores results in ds_adapt_results
 
 Stage 11: Data Sanity Check (run by analyzeTestWorker, not the orchestrator)
-  └── Marks the run invalid when no usable metrics were collected
+  └── Marks the run invalid on any of: no start/end time, no dashboard panels, no metrics
+      data, statistics not calculated, ADAPT ran but produced no results
   └── Never fails the job — the verdict comes back as `dataSanity` in the job result
 ```
 
@@ -119,12 +120,13 @@ API (RealtimeService)
 WebSocket ──▶ Frontend (progress bar, stage indicator)
 ```
 
-The terminal event (`job:completed` / `job:failed`) must be published **after** the last stage the
-UI lists. The web client stops accepting progress for a job the moment `job:completed` arrives, so
-anything reported later is dropped — and the late write also resets the progress key's post-mortem
-TTL from an hour back to five minutes. `analyzeTestWorker` therefore passes
-`finalizeProgress: false` to `executeSequentialPipeline` and publishes `complete()` / `fail()`
-itself once stage 11 is done.
+The terminal event must be published **after** the last stage the UI lists. The web client stops
+accepting progress for a job the moment `job:completed` arrives, so anything reported later is
+dropped. The late write also costs retention: `complete()` sets the progress key's TTL to 1 hour
+and `fail()` to 2 hours, but a stage reported afterwards rewrites the key at the ordinary 5-minute
+progress TTL, so the post-mortem record expires far sooner than intended.
+`analyzeTestWorker` therefore passes `finalizeProgress: false` to `executeSequentialPipeline` and
+publishes `complete()` / `fail()` itself once stage 11 is done.
 
 ### 5. Grafana Dashboard Sync
 
