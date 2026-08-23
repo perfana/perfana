@@ -19,8 +19,11 @@ with the version it landed in.
 **Origin:** the 0.2.68.7 incident — "deploying the last version deleted all application
 dashboards" (2026-08-21). Nothing was deleted.
 **Status:** parts 2 and 3 are built (v0.2.68.14) — `assertEntityColumns` at boot and
-`scripts/check-entity-migrations.mjs` in preflight. **Part 1, the constraint audit, is still
-open**, which is why this item stays P0. The outage itself is fixed by
+`scripts/check-entity-migrations.mjs` in preflight. v0.2.72.0 closed the known example:
+`1796000000000-BackfillOwnedResourceOrgIds` backfills and constrains `organization_id` on
+`check_results`, `ds_metric_collection_status` and `ds_compare_config` (state-blind, fail-loud),
+and every writer now stamps organization_id + team_id. **Part 1, the general constraint audit,
+is still open**, which is why this item stays P0. The outage itself is fixed by
 `1795000000000-AddApplicationDashboardDeletionStatus.ts` (v0.2.68.12). An automatic
 organization_id backfill shipped in 0.2.68.11 and was removed in .13 — it addressed a different,
 unreported condition and would have rewritten millions of rows during start-up.
@@ -69,11 +72,13 @@ column had been missing in production for a full release.
    a fresh one. Verified by running the gate against `deeb3990`, the commit that caused the
    incident: it fails, naming `application-dashboard.entity.ts → deletion_status`.
 
-**Left over from the backfill:** `ds_metric_collection_status` has no `system_under_test_id`, so
-the migration cannot infer its organization and leaves the column nullable with a warning. It
-needs a rule of its own. A greenfield database also shows null-org rows in `check_results`,
-`ds_change_points`, `ds_compare_config` and `ds_metric_collection_status`, so "NOT NULL on all 26
-owned entities" is not true even for new installs.
+**Left over from the backfill:** resolved for three of the four tables in v0.2.72.0 —
+`ds_metric_collection_status` inherits via its `test_runs` FK, and `check_results` /
+`ds_compare_config` / `ds_metric_collection_status` are NOT NULL on both greenfield (Phase 6)
+and existing databases (1796). Still open: `ds_change_points` — no writer exists anywhere in the
+code, its read path still carries an `OR organization_id IS NULL` escape
+(`ControlGroupsPipeline`), and legacy NULL rows there stay until someone decides whether to fold
+it into a follow-up backfill or leave it deliberate (owner call, raised 2026-08-23).
 
 ---
 
