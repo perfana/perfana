@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.74.0] - 2026-08-23
+
+### Fixed
+- **Every analysis has been reporting "completed with failures" since April, even when nothing failed.** The worker handed its pipeline a step the pipeline has no idea how to run — the data sanity check, which runs separately afterwards — so the run ended on an error nobody could see, and the job came back as a partial success. All ten real steps had passed. Runs now report success when they succeed, and the sanity check is no longer part of the plan the pipeline is given.
+- **The "Data sanity check" step is visible in the progress bar again.** It was being announced after the job had already been marked complete, and the page stops listening at that point, so the progress bar's last frame was "Stage 10 of 11 — 91%" and the step never appeared. The completion signal now comes last, after every step the progress bar lists. The same late signal was also cutting the retention of a job's progress record from an hour to five minutes, which made failed runs harder to inspect after the fact.
+- **A failing sanity check can no longer turn a good analysis into a failed one**, and if it marks the data invalid, the job result now says so instead of returning an unqualified green.
+- **The comparison table's magnitude bars were nearly white in dark mode.** They used fixed light-theme greys, as did the placeholder for an empty difference. Both now follow the theme.
+
+### Changed
+- **The Compare card matches the Trends and Graphs cards.** Dashboards, panels and series sit on one row instead of three stacked full-width pickers; saved presets moved from a large panel at the top into a collapsed "Saved presets" row at the bottom; the baseline you are comparing against is a single line next to the run picker rather than a five-line tinted box; and the header is the same compact one the other two cards use. With a baseline selected the expanded card fits in roughly a third of the height it needed before.
+- **Gradients and hardcoded blues are gone from the Compare card** — the add button, the series chips, the presets table and its empty state now use the same theme colours as everything else, which also makes them legible in dark mode.
+- **The expand button on the Compare card has a name and a tooltip**, so it is usable with a screen reader and no longer the only unlabelled control on the card.
+
 ## [0.2.73.0] - 2026-08-23
 
 ### Fixed
