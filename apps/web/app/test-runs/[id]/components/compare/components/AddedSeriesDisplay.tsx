@@ -50,21 +50,9 @@ export default function AddedSeriesDisplay({
                 label={`${s.panelTitle} → ${s.metricName}`}
                 onDelete={() => onRemoveSeries(s.id)}
                 deleteIcon={<Close fontSize="small" />}
-                sx={(theme) => ({
-                  background: theme.palette.mode === 'dark'
-                    ? 'linear-gradient(135deg, rgba(56, 142, 232, 0.18) 0%, rgba(30, 136, 229, 0.24) 100%)'
-                    : 'linear-gradient(135deg, rgba(25, 118, 210, 0.08) 0%, rgba(30, 136, 229, 0.12) 100%)',
-                  border: theme.palette.mode === 'dark'
-                    ? '1px solid rgba(56, 142, 232, 0.5)'
-                    : '1px solid rgba(25, 118, 210, 0.3)',
-                  color: theme.palette.mode === 'dark' ? '#90caf9' : theme.palette.primary.dark,
-                  '& .MuiChip-deleteIcon': {
-                    color: theme.palette.mode === 'dark' ? '#90caf9' : theme.palette.primary.main,
-                    '&:hover': {
-                      color: theme.palette.error.main,
-                    }
-                  }
-                })}
+                // Default chip: the selection panel's chips just lost the same gradient, and two
+                // chip languages in one view was the reason to drop it.
+                variant="outlined"
               />
             ))}
           </Box>

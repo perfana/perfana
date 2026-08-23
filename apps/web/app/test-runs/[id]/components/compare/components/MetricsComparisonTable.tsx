@@ -69,7 +69,7 @@ function DeltaChip({ diff, thresholds }: { diff: number | null; thresholds: Diff
   if (diff == null || diff === 0) {
     return (
       <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', px: 1, py: 0.25,
-        borderRadius: '999px', bgcolor: 'rgba(0,0,0,0.06)', color: 'text.secondary',
+        borderRadius: '999px', bgcolor: 'action.hover', color: 'text.secondary',
         fontSize: '0.72rem', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>—</Box>
     );
   }
@@ -92,8 +92,8 @@ function MagnitudeBar({ diff, band }: { diff: number | null; band: Band }) {
     if (diff >= 0) { left = 50; width = mag; } else { width = mag; left = 50 - mag; }
   }
   return (
-    <Box sx={{ position: 'relative', width: 110, height: 4, borderRadius: 2, bgcolor: '#edf0f3' }}>
-      <Box sx={{ position: 'absolute', left: '50%', top: -2, width: '1px', height: 8, bgcolor: '#ccd0d6' }} />
+    <Box sx={{ position: 'relative', width: 110, height: 4, borderRadius: 2, bgcolor: 'action.disabledBackground' }}>
+      <Box sx={{ position: 'absolute', left: '50%', top: -2, width: '1px', height: 8, bgcolor: 'divider' }} />
       <Box sx={{ position: 'absolute', top: 0, height: '100%', borderRadius: 2,
         left: `${left}%`, width: `${width}%`, bgcolor: BAND_COLORS[band] }} />
     </Box>

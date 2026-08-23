@@ -23,8 +23,6 @@ import { useCompareData, useCompareHandlers, useComparePresets } from './hooks';
 import { CompareCollapsedView, CompareExpandedContent } from './components';
 import SavePresetModal from './SavePresetModal';
 
-// Utils
-import {} from './utils/compare-utils';
 
 export default function CompareCard({
   testRun,
@@ -116,8 +114,6 @@ export default function CompareCard({
           transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
           position: 'relative',
           overflow: compareExpanded ? 'visible' : 'hidden',
-          outline: 'none',
-          '&:focus': { boxShadow: (theme) => `0 0 0 2px ${theme.palette.primary.main}33` },
           '&:hover': compareExpanded ? {} : {
             transform: 'translateY(-4px)',
             boxShadow: (theme) => theme.palette.mode === 'dark'
@@ -188,19 +184,22 @@ export default function CompareCard({
               }}>
                 Compare
               </Typography>
-              <IconButton
-                onClick={(e) => { e.stopPropagation(); handleCompareExpand(); }}
-                size="small"
-                sx={{
-                  position: 'absolute', right: 0, width: 32, height: 32, color: 'text.secondary',
-                  // action.selected rather than a hardcoded primary+alpha: it tracks the theme in
-                  // dark mode, and at 15 the hover tint was almost invisible. Matches Trends.
-                  '&:hover': { backgroundColor: 'action.selected', color: 'primary.main' },
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <ExpandMore />
-              </IconButton>
+              <Tooltip title="Expand">
+                <IconButton
+                  aria-label="Expand compare"
+                  onClick={(e) => { e.stopPropagation(); handleCompareExpand(); }}
+                  size="small"
+                  sx={{
+                    position: 'absolute', right: 0, width: 32, height: 32, color: 'text.secondary',
+                    // action.selected rather than a hardcoded primary+alpha: it tracks the theme in
+                    // dark mode, and at 15 the hover tint was almost invisible. Matches Trends.
+                    '&:hover': { backgroundColor: 'action.selected', color: 'primary.main' },
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <ExpandMore />
+                </IconButton>
+              </Tooltip>
             </Box>
           )}
 
