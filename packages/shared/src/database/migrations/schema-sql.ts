@@ -8573,15 +8573,24 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.audit_logs_default TO perfana_
 -- Partitions need RLS of their own: audit_logs' policies apply to parent-routed queries,
 -- but a partition with RLS off is readable directly by any role holding the grants above.
 -- Enabled with no policy of its own, so direct access is deny-all.
+--
+-- Driven off pg_inherits rather than a hardcoded list of month names, matching
+-- 1797000000000-AddAuditLogsDefaultPartition. The months in this dump are whatever existed the
+-- day it was taken: name them literally and a regenerated dump (or an operator dropping the
+-- empty leftovers, which TODOS.md invites) leaves either a partition with RLS off or an ALTER
+-- against a table that no longer exists — 42P01, which ConsolidatedSchema does not treat as
+-- benign, so every greenfield install would fail to migrate.
 
-ALTER TABLE public.audit_logs_2026_05 ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs_2026_05 FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs_2026_06 ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs_2026_06 FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs_2026_07 ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs_2026_07 FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs_default ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs_default FORCE ROW LEVEL SECURITY;
+DO $$
+DECLARE part regclass;
+BEGIN
+  FOR part IN
+    SELECT inhrelid::regclass FROM pg_inherits WHERE inhparent = 'public.audit_logs'::regclass
+  LOOP
+    EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', part);
+    EXECUTE format('ALTER TABLE %s FORCE ROW LEVEL SECURITY', part);
+  END LOOP;
+END $$;
 
 
 --
