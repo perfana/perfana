@@ -66,7 +66,7 @@ The `@perfana/shared` package is the central repository for domain models, types
 - `JobType`: `'analyze' | 'refresh' | 'reevaluate'`
 - `JobStatus`: `'waiting' | 'active' | 'completed' | 'failed' | 'stuck' | 'blocked'`
 - `JobProgress` — Stage-level and overall progress
-- Pipeline stages (9 total, indices 1-9)
+- `PIPELINE_STAGES` — the 11 analyze-test stages with their display names, and `getStageName()`, which falls back to the raw id for anything not listed (the reevaluate-batch stages currently hit that fallback)
 - Redis channel/key constants
 
 ### Test Run (`types/test-run.types.ts`)

@@ -176,7 +176,85 @@ not a P2 — and also what makes it easy to break without noticing.
 
 ---
 
+## Worker pipeline
+
+### The job lock expires long before a stage can time out
+
+**Priority:** P2
+**Origin:** adversarial + red-team review during /ship on `fix/analyze-unknown-stage` (2026-08-23).
+**Why:** `JOB_DEFAULTS.LOCK_TTL_SECONDS` is 300 while every orchestrator stage races a 600s
+timeout and a pipeline runs ten of them. `analyze.ts` acquires the lock and never calls
+`JobLockService.extendLock`, which exists. A slow run drops its lock five minutes in, so a second
+analyze for the same system/environment/workload can start while the first is still writing
+`ds_*` rows for the same test run. The `JobLockService` comment claims a 30-minute TTL, which is
+not what the constant says.
+**What:** renew the lock from the stage loop (the orchestrator already reports stage boundaries),
+or raise `LOCK_TTL_SECONDS` past the worst-case pipeline duration and fix the comment.
+
+---
+
+### Four reevaluate stages render as raw ids in the progress UI
+
+**Priority:** P3
+**Origin:** red-team review during /ship on `fix/analyze-unknown-stage` (2026-08-23).
+**Why:** `simple-orchestrate-reevaluate-batch.ts:279` pushes `gap-analysis`, `gap-filling`,
+`force-refetch` and `statistics-recalculation` into its progress list and none of the four is in
+`PIPELINE_STAGES` (`packages/shared/src/types/job-progress.types.ts`). `getStageName` falls
+through to the raw id, so the UI reads "Stage 2 of 5: gap-filling". Same registry-mismatch class
+as the data-sanity-check bug fixed in v0.2.74.0, one layer up.
+**What:** add the four ids with human names, and type both workers' progress lists against the
+registry so an unregistered id is a compile error rather than an ugly label.
+
+---
+
+### The data sanity check still runs after the pipeline aborts
+
+**Priority:** P3
+**Origin:** adversarial + red-team review during /ship on `fix/analyze-unknown-stage` (2026-08-23).
+**Why:** under `errorHandling: 'abort'` a failure at, say, `metrics-collection` breaks the stage
+loop, and `analyze.ts` then runs `DataSanityCheckPipeline` over a half-collected run and writes
+its verdict unconditionally. Re-running an analysis during a Grafana outage can downgrade a
+previously-good run to `valid=false` with reasons that blame data quality for an infrastructure
+abort.
+**What:** skip the check when `result.success` is false, or record the verdict with a qualifier
+saying the pipeline did not finish.
+
+---
+
 ## Compare card
+
+### Three cards hand-roll the same sticky header while a shared one sits unused
+
+**Priority:** P3
+**Origin:** design + maintainability + red-team review during /ship on
+`fix/analyze-unknown-stage` (2026-08-23), after Compare was aligned to Trends and Graphs.
+**Why:** the sticky expanded header (translucent `alpha(paper, 0.85)` + `backdropFilter`, h6 at
+1rem, tooltipped collapse button) is now byte-identical in `CompareCard.tsx`, `TrendsCard.tsx`
+and `GraphsCard.tsx`, as are the `onEntered` Plotly resize kick and the "Saved presets (N)"
+accordion. Three copies is where the next tweak starts drifting. Meanwhile
+`apps/web/app/test-runs/[id]/components/shared/CardHeader.tsx`, built for exactly this, has no
+production importer at all: its only reference is its own passing test, and knip cannot see that
+because every file under `apps/web/app/**` is an entry point.
+**What:** extract `ExpandableCardHeader` + `PlotlyCollapse` + `PresetsAccordion` into
+`components/shared/`, have the three cards consume them, then either migrate the ten other cards
+on the page (still on the old centred h5 + "Click to collapse" header) or delete the orphaned
+`CardHeader.tsx` and its test.
+
+---
+
+### CompareCard.test.tsx asserts against its own copy of the code
+
+**Priority:** P3
+**Origin:** testing + coverage review during /ship on `fix/analyze-unknown-stage` (2026-08-23).
+**Why:** the file has zero `import` statements. It re-implements the dashboard-option mapping
+inline ("Map options the same way CompareCard does (line 1545-1550)") and asserts on that copy,
+so all 15 tests pass no matter what the component does, and the line numbers it cites are stale.
+It is the only test named after the component.
+**What:** either render `CompareCard` with mocked hooks, or extract the mapping into a pure
+helper the test imports. `TrendsCard` has a ~1500-line render suite to copy the pattern from.
+
+---
+
 
 ### The series dropdown is not virtualised, so a whole-system selection renders every option
 

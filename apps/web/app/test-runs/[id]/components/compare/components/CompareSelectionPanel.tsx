@@ -65,6 +65,20 @@ interface CompareSelectionPanelProps {
   onPrimaryChange: (dashboard: ApplicationDashboard | null, panel: PanelOption | null) => void;
 }
 
+/** A bad timestamp renders as the literal string "Invalid Date", which survives filter(Boolean). */
+export function formatStartedAt(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
+}
+
+/** One caption line: a run with a dozen annotations would otherwise wrap into the row above. */
+export function summariseAnnotations(annotations: string[] | null | undefined): string | null {
+  if (!annotations?.length) return null;
+  const [first, ...rest] = annotations;
+  return rest.length > 0 ? `${first} (+${rest.length} more)` : first;
+}
+
 export function CompareSelectionPanel({
   relatedTestRuns,
   selectedTestRun,
@@ -158,6 +172,10 @@ export function CompareSelectionPanel({
   const allPanelsPicked = selectedPanels.length === panelOptions.length && panelOptions.length > 0;
   const allSeriesPicked = selectedSeries.length === seriesOptions.length && seriesOptions.length > 0;
 
+  // Trends/Graphs use default-size inputs with 56px buttons; 92 stops "Select all" from
+  // resizing when it toggles to "Clear".
+  const PICKER_BUTTON_SX = { height: '56px', minWidth: 92, flexShrink: 0 } as const;
+
   const dashboardCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const p of panelOptions) counts.set(p.dashboardLabel, (counts.get(p.dashboardLabel) ?? 0) + 1);
@@ -165,7 +183,7 @@ export function CompareSelectionPanel({
   }, [panelOptions]);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* Test Run Selection */}
       <Autocomplete
         options={relatedTestRuns}
@@ -178,11 +196,7 @@ export function CompareSelectionPanel({
             label="Select Test Run for Comparison"
             variant="outlined"
             fullWidth
-            helperText={
-              selectedTestRun
-                ? `Comparing with: ${selectedTestRun.test_run_id}`
-                : `Select from ${relatedTestRuns.length} available test runs`
-            }
+            helperText={`${relatedTestRuns.length} comparable run${relatedTestRuns.length === 1 ? '' : 's'}`}
           />
         )}
         renderOption={(props, option) => {
@@ -209,245 +223,243 @@ export function CompareSelectionPanel({
             </Box>
           );
         }}
-        sx={{ mb: 2 }}
       />
 
-      {/* Dashboards */}
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-        <Autocomplete
-          multiple
-          // Picking dashboards/panels/series is almost never one choice, and a popup that
-          // closes after each made "these six" six trips through the dropdown.
-          disableCloseOnSelect
-          limitTags={4}
-          options={allDashboards}
-          getOptionLabel={(option) => option.dashboard_label || ''}
-          isOptionEqualToValue={(option, value) => option.id === value.id}
-          value={selectedDashboards}
-          onChange={(_, newValue) => pickDashboards(newValue)}
-          loading={dashboardsLoading}
-          groupBy={(option) => getSourceDisplayInfo(option).groupLabel}
-          size="small"
-          sx={{ flex: 1 }}
-          renderGroup={(params) => {
-            const dashboardInGroup = allDashboards.find(
-              d => getSourceDisplayInfo(d).groupLabel === params.group
-            );
-            const color = dashboardInGroup
-              ? getSourceDisplayInfo(dashboardInGroup).color
-              : '#9E9E9E';
-            return (
-              <li key={params.key}>
-                <ListSubheader
-                  component="div"
-                  sx={{
-                    fontWeight: 700,
-                    color,
-                    backgroundColor: 'background.paper',
-                    lineHeight: '36px',
-                  }}
-                >
-                  {params.group}
-                </ListSubheader>
-                <ul style={{ padding: 0 }}>{params.children}</ul>
-              </li>
-            );
-          }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Dashboards"
-              variant="outlined"
-              fullWidth
-              helperText={dashboardsLoading ? 'Loading dashboards…' : `${allDashboards.length} available`}
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {dashboardsLoading ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key: _key, ...otherProps } = props;
-            const { color } = getSourceDisplayInfo(option);
-            return (
-              <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box aria-hidden="true" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
-                <Typography variant="body2">{option.dashboard_label}</Typography>
-              </Box>
-            );
-          }}
-        />
-        <Button
-          size="small"
-          onClick={() => pickDashboards(allDashboardsPicked ? [] : [...allDashboards])}
-          disabled={allDashboards.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
-        >
-          {allDashboardsPicked ? 'Clear' : 'Select all'}
-        </Button>
-      </Box>
+      {selectedTestRun && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: -1 }}>
+          {[
+            `Baseline: ${selectedTestRun.test_run_id}`,
+            formatStartedAt(selectedTestRun.start_time || selectedTestRun.created_at),
+            selectedTestRun.application_release,
+            summariseAnnotations(selectedTestRun.annotations),
+          ].filter(Boolean).join('  ·  ')}
+        </Typography>
+      )}
 
-      {/* Panels */}
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-        <Autocomplete
-          multiple
-          disableCloseOnSelect
-          limitTags={4}
-          options={panelOptions}
-          groupBy={(o) => o.dashboardLabel}
-          getOptionLabel={(o) => o.title}
-          isOptionEqualToValue={(o, v) => panelKey(o) === panelKey(v)}
-          value={selectedPanels}
-          onChange={(_, newValue) => pickPanels(newValue)}
-          disabled={selectedDashboards.length === 0}
-          loading={panelsLoading}
-          size="small"
-          sx={{ flex: 1 }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Panels"
-              variant="outlined"
-              fullWidth
-              helperText={
-                selectedDashboards.length === 0
-                  ? 'Select a dashboard to see its panels'
-                  : panelsLoading
-                    ? 'Loading panels…'
-                    : `${panelOptions.length} available across ${dashboardCounts.size} dashboard${dashboardCounts.size === 1 ? '' : 's'}`
-              }
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {panelsLoading ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
-          )}
-        />
-        <Button
-          size="small"
-          onClick={() => pickPanels(allPanelsPicked ? [] : [...panelOptions])}
-          disabled={panelOptions.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
-        >
-          {allPanelsPicked ? 'Clear' : 'Select all'}
-        </Button>
-      </Box>
-
-      {/* Series */}
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-        <Autocomplete
-          multiple
-          disableCloseOnSelect
-          limitTags={8}
-          options={seriesOptions}
-          groupBy={(o) => `${o.panel.dashboardLabel} / ${o.panel.title}`}
-          getOptionLabel={(o) => o.metricName}
-          isOptionEqualToValue={(o, v) => seriesKey(o) === seriesKey(v)}
-          value={selectedSeries}
-          onChange={(_, newValue) => setSelectedSeries(newValue)}
-          disabled={selectedPanels.length === 0}
-          loading={seriesLoading}
-          size="small"
-          sx={{ flex: 1 }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Series"
-              variant="outlined"
-              fullWidth
-              helperText={
-                selectedPanels.length === 0
-                  ? 'Select a panel to see its series'
-                  : seriesLoading
-                    ? 'Loading series…'
-                    : `${seriesOptions.length} available from ${selectedPanels.length} panel${selectedPanels.length === 1 ? '' : 's'}`
-              }
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {seriesLoading ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key, ...otherProps } = props;
-            const already = isAdded(option);
-            return (
-              <Box component="li" key={key} {...otherProps} sx={{
-                opacity: already ? 0.5 : 1,
-                backgroundColor: already ? 'action.disabledBackground' : 'inherit'
-              }}>
-                <Typography variant="body2">
-                  {option.metricName}
-                  {already && (
-                    <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-                      (already added)
-                    </Typography>
-                  )}
-                </Typography>
-              </Box>
-            );
-          }}
-          renderTags={(value, getTagProps) =>
-            value.map((option, index) => {
-              const tagProps = getTagProps({ index });
-              return (
-                <Chip
-                  {...tagProps}
-                  key={seriesKey(option)}
-                  label={option.metricName}
-                  size="small"
-                  sx={{
-                    background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.1) 0%, rgba(30, 136, 229, 0.15) 100%)',
-                    border: '1px solid rgba(25, 118, 210, 0.3)',
-                    color: 'primary.dark'
-                  }}
-                />
+      {/* Builder row — dashboards, panels and series side by side, the way Trends and Graphs
+          lay theirs out. Stacked full-width they pushed the added-series list and the
+          comparison table below the fold before you had picked anything. */}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 1.5 }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '2 1 260px' }}>
+          <Autocomplete
+            multiple
+            // Picking dashboards/panels/series is almost never one choice, and a popup that
+            // closes after each made "these six" six trips through the dropdown.
+            disableCloseOnSelect
+            limitTags={4}
+            options={allDashboards}
+            getOptionLabel={(option) => option.dashboard_label || ''}
+            isOptionEqualToValue={(option, value) => option.id === value.id}
+            value={selectedDashboards}
+            onChange={(_, newValue) => pickDashboards(newValue)}
+            loading={dashboardsLoading}
+            groupBy={(option) => getSourceDisplayInfo(option).groupLabel}
+            sx={{ flex: 1 }}
+            renderGroup={(params) => {
+              const dashboardInGroup = allDashboards.find(
+                d => getSourceDisplayInfo(d).groupLabel === params.group
               );
-            })
-          }
-        />
-        <Button
-          size="small"
-          onClick={() => setSelectedSeries(allSeriesPicked ? [] : [...seriesOptions])}
-          disabled={seriesOptions.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
-        >
-          {allSeriesPicked ? 'Clear' : 'Select all'}
-        </Button>
-        <Button
-          variant="contained"
-          onClick={addPicked}
-          disabled={selectedSeries.length === 0}
-          sx={{
-            minWidth: 140,
-            flexShrink: 0,
-            background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
-            boxShadow: '0 2px 8px rgba(25, 118, 210, 0.25)',
-            '&:hover': {
-              background: 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)',
-            },
-            '&:disabled': {
-              background: 'rgba(0, 0, 0, 0.12)',
+              const color = dashboardInGroup
+                ? getSourceDisplayInfo(dashboardInGroup).color
+                : '#9E9E9E';
+              return (
+                <li key={params.key}>
+                  <ListSubheader
+                    component="div"
+                    sx={{
+                      fontWeight: 700,
+                      color,
+                      backgroundColor: 'background.paper',
+                      lineHeight: '36px',
+                    }}
+                  >
+                    {params.group}
+                  </ListSubheader>
+                  <ul style={{ padding: 0 }}>{params.children}</ul>
+                </li>
+              );
+            }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Dashboards"
+                variant="outlined"
+                fullWidth
+                helperText={dashboardsLoading ? 'Loading dashboards…' : `${allDashboards.length} available`}
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {dashboardsLoading ? <CircularProgress size={20} /> : null}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+            renderOption={(props, option) => {
+              const { key: _key, ...otherProps } = props;
+              const { color } = getSourceDisplayInfo(option);
+              return (
+                <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box aria-hidden="true" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
+                  <Typography variant="body2">{option.dashboard_label}</Typography>
+                </Box>
+              );
+            }}
+          />
+          <Button
+            size="small"
+            onClick={() => pickDashboards(allDashboardsPicked ? [] : [...allDashboards])}
+            disabled={allDashboards.length === 0}
+            variant="outlined"
+            sx={PICKER_BUTTON_SX}
+          >
+            {allDashboardsPicked ? 'Clear' : 'Select all'}
+          </Button>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '2 1 260px' }}>
+          <Autocomplete
+            multiple
+            disableCloseOnSelect
+            limitTags={4}
+            options={panelOptions}
+            groupBy={(o) => o.dashboardLabel}
+            getOptionLabel={(o) => o.title}
+            isOptionEqualToValue={(o, v) => panelKey(o) === panelKey(v)}
+            value={selectedPanels}
+            onChange={(_, newValue) => pickPanels(newValue)}
+            disabled={selectedDashboards.length === 0}
+            loading={panelsLoading}
+            sx={{ flex: 1 }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Panels"
+                variant="outlined"
+                fullWidth
+                helperText={
+                  selectedDashboards.length === 0
+                    ? 'Select a dashboard to see its panels'
+                    : panelsLoading
+                      ? 'Loading panels…'
+                      : `${panelOptions.length} available across ${dashboardCounts.size} dashboard${dashboardCounts.size === 1 ? '' : 's'}`
+                }
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {panelsLoading ? <CircularProgress size={20} /> : null}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+          />
+          <Button
+            size="small"
+            onClick={() => pickPanels(allPanelsPicked ? [] : [...panelOptions])}
+            disabled={panelOptions.length === 0}
+            variant="outlined"
+            sx={PICKER_BUTTON_SX}
+          >
+            {allPanelsPicked ? 'Clear' : 'Select all'}
+          </Button>
+        </Box>
+
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '3 1 480px' }}>
+          <Autocomplete
+            multiple
+            disableCloseOnSelect
+            limitTags={8}
+            options={seriesOptions}
+            groupBy={(o) => `${o.panel.dashboardLabel} / ${o.panel.title}`}
+            getOptionLabel={(o) => o.metricName}
+            isOptionEqualToValue={(o, v) => seriesKey(o) === seriesKey(v)}
+            value={selectedSeries}
+            onChange={(_, newValue) => setSelectedSeries(newValue)}
+            disabled={selectedPanels.length === 0}
+            loading={seriesLoading}
+            sx={{ flex: 1 }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Series"
+                variant="outlined"
+                fullWidth
+                helperText={
+                  selectedPanels.length === 0
+                    ? 'Select a panel to see its series'
+                    : seriesLoading
+                      ? 'Loading series…'
+                      : `${seriesOptions.length} available from ${selectedPanels.length} panel${selectedPanels.length === 1 ? '' : 's'}`
+                }
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {seriesLoading ? <CircularProgress size={20} /> : null}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+            renderOption={(props, option) => {
+              const { key, ...otherProps } = props;
+              const already = isAdded(option);
+              return (
+                <Box component="li" key={key} {...otherProps} sx={{
+                  opacity: already ? 0.5 : 1,
+                  backgroundColor: already ? 'action.disabledBackground' : 'inherit'
+                }}>
+                  <Typography variant="body2">
+                    {option.metricName}
+                    {already && (
+                      <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                        (already added)
+                      </Typography>
+                    )}
+                  </Typography>
+                </Box>
+              );
+            }}
+            renderTags={(value, getTagProps) =>
+              value.map((option, index) => {
+                const tagProps = getTagProps({ index });
+                return (
+                  // Default chip: the gradient version hardcoded primary.dark on a translucent
+                  // blue, which is close to unreadable on the dark theme.
+                  <Chip
+                    {...tagProps}
+                    key={seriesKey(option)}
+                    label={option.metricName}
+                    size="small"
+                  />
+                );
+              })
             }
-          }}
-        >
-          Add {selectedSeries.length > 0 ? `${selectedSeries.length} ` : ''}series
-        </Button>
+          />
+          <Button
+            size="small"
+            onClick={() => setSelectedSeries(allSeriesPicked ? [] : [...seriesOptions])}
+            disabled={seriesOptions.length === 0}
+            variant="outlined"
+            sx={PICKER_BUTTON_SX}
+          >
+            {allSeriesPicked ? 'Clear' : 'Select all'}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={addPicked}
+            disabled={selectedSeries.length === 0}
+            sx={{ height: '56px', px: 3, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            Add {selectedSeries.length > 0 ? `${selectedSeries.length} ` : ''}series
+          </Button>
+        </Box>
       </Box>
     </Box>
   );

@@ -108,42 +108,15 @@ export default function ComparePresetsTable({
   if (presets.length === 0) {
     return (
       <Box sx={{
-        p: 4,
-        backgroundColor: 'rgba(25, 118, 210, 0.04)',
-        borderRadius: 2,
-        border: '1px solid rgba(25, 118, 210, 0.08)',
-        textAlign: 'center'
+        p: 3,
+        textAlign: 'center',
+        backgroundColor: 'action.hover',
+        borderRadius: 1,
+        border: '1px solid',
+        borderColor: 'divider'
       }}>
-        <Box sx={{
-          width: 48,
-          height: 48,
-          borderRadius: '50%',
-          background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.1) 0%, rgba(30, 136, 229, 0.15) 100%)',
-          color: 'primary.main',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '1.2rem',
-          fontWeight: 'bold',
-          mx: 'auto',
-          mb: 2,
-          border: '1px solid rgba(25, 118, 210, 0.2)'
-        }}>
-          📋
-        </Box>
-        <Typography variant="h6" sx={{ 
-          fontWeight: 600, 
-          color: 'text.primary',
-          mb: 1
-        }}>
-          No Saved Presets
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ 
-          lineHeight: 1.6,
-          maxWidth: 400,
-          mx: 'auto'
-        }}>
-          Create your first preset by configuring filters and clicking &quot;Save Preset&quot; to quickly reuse your comparison settings.
+        <Typography variant="body2" color="text.secondary">
+          No saved presets yet. Configure filters and save them as presets for quick access.
         </Typography>
       </Box>
     );
@@ -154,9 +127,10 @@ export default function ComparePresetsTable({
       <Box sx={{
         mt: 2,
         p: 3,
-        backgroundColor: 'rgba(25, 118, 210, 0.04)',
+        backgroundColor: 'action.hover',
         borderRadius: 2,
-        border: '1px solid rgba(25, 118, 210, 0.08)'
+        border: '1px solid',
+        borderColor: 'divider'
       }}>
         {/* Table Header - matching SLO table styling */}
         <Box sx={{ 

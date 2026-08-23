@@ -25,6 +25,7 @@ Background job processing service using **BullMQ** with Redis for queue manageme
 | PerformanceTestMetricsPipeline | `performance-test-metrics` | Perf test source metrics |
 | TransactionStatsRollupPipeline | `transaction-stats-rollup` | Per-test-run tdigest rollup for transactions/samplers (#150, #151) |
 | ReevaluateChecksPipeline | `reevaluate-checks` | Re-evaluate check results |
+| DataSanityCheckPipeline | _(none)_ | Post-analysis validation — no job name; called directly by `analyzeTestWorker` |
 
 ### Complex Workers (custom logic)
 
@@ -55,6 +56,37 @@ Grafana URLs and API tokens are fetched from the `grafana_instances` table.
 3. Register in `src/workers/pipeline-registrations.ts` via `registerPipeline()`
 
 See [Tutorial 2 in CLAUDE.md](../../CLAUDE.md) for the full walkthrough.
+
+### Adding a stage to the analyze-test pipeline
+
+A stage that runs inside `PipelineOrchestrator` needs **both** a `case` in `executeStage` and its
+name in the exported `ORCHESTRATED_STAGES` list. A name with no case there is not a runtime
+warning: it returns `success: false` and, under `errorHandling: 'abort'`, fails the whole run.
+That is how `'data-sanity-check'` sat in the analyze plan and made every analysis report
+`'partial'` until v0.2.74.0.
+
+Declare your execution plan as `OrchestratedStage[]` so a bad name is a compile error. Note this
+is a caller-side discipline, not something the orchestrator enforces — `executeSequentialPipeline`
+still takes `stages: string[]`, so an un-annotated caller can pass any string and get no type
+error at all.
+
+If the stage runs *outside* the orchestrator (like the data sanity check), add it to the worker's
+UI-facing `stages` list only, pass `finalizeProgress: false` to `executeSequentialPipeline`, and
+publish `complete()` / `fail()` yourself after it finishes — the web client discards progress once
+the terminal event lands.
+
+Either way, add the stage id to `PIPELINE_STAGES` in
+`packages/shared/src/types/job-progress.types.ts` or the UI shows the raw id: `getStageName()`
+falls back to the id it was given rather than failing.
+
+### The analyze-test job result
+
+`JobResult.data` for `analyze-test` carries `dataSanity`, the sanity check's verdict. At runtime it
+is `{ valid, reasons, warnings }` as returned by `DataSanityCheckPipeline`; `analyze.ts` narrows it
+to `{ valid?: boolean; reasons?: string[] }` inline, so `warnings` is present in the payload but
+absent from the type. `JobResult` in `src/types/jobs.ts` still types `data` as
+`Record<string, unknown>`, so a CI consumer reading `dataSanity` has no checked contract — treat
+the field as best-effort until it is typed properly.
 
 ## Key Base Class Methods
 

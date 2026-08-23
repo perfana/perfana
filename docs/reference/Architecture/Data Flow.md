@@ -52,7 +52,7 @@ When a test run completes, the API enqueues an `analyze-test` job to the Worker:
 API enqueues job ──▶ Redis (BullMQ) ──▶ Worker picks up
   │
   ▼
-PipelineOrchestrator executes 10 stages sequentially:
+PipelineOrchestrator executes stages 1-10 sequentially, then the worker runs stage 11:
 
 Stage 1: Dynatrace Collection
   └── Fetches service/host metrics from Dynatrace API
@@ -93,7 +93,17 @@ Stage 9: Control Group Statistics
 Stage 10: ADAPT Analysis
   └── Automated regression detection algorithm
   └── Stores results in ds_adapt_results
+
+Stage 11: Data Sanity Check (run by analyzeTestWorker, not the orchestrator)
+  └── Marks the run invalid on any of: no start/end time, no dashboard panels, no metrics
+      data, statistics not calculated, ADAPT ran but produced no results
+  └── Never fails the job — the verdict comes back as `dataSanity` in the job result
 ```
+
+The orchestrator only knows the ten stage names in its exported `ORCHESTRATED_STAGES` list. A
+name outside that list returns `success: false` and, under `errorHandling: 'abort'`, fails the
+whole run — which is why `analyze.ts` keeps `orchestratedStages` (what runs) separate from
+`stages` (what the progress bar counts).
 
 ### 4. Progress Reporting
 
@@ -109,6 +119,14 @@ API (RealtimeService)
   ▼
 WebSocket ──▶ Frontend (progress bar, stage indicator)
 ```
+
+The terminal event must be published **after** the last stage the UI lists. The web client stops
+accepting progress for a job the moment `job:completed` arrives, so anything reported later is
+dropped. The late write also costs retention: `complete()` sets the progress key's TTL to 1 hour
+and `fail()` to 2 hours, but a stage reported afterwards rewrites the key at the ordinary 5-minute
+progress TTL, so the post-mortem record expires far sooner than intended.
+`analyzeTestWorker` therefore passes `finalizeProgress: false` to `executeSequentialPipeline` and
+publishes `complete()` / `fail()` itself once stage 11 is done.
 
 ### 5. Grafana Dashboard Sync
 
