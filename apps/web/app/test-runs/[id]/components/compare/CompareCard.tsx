@@ -8,7 +8,8 @@ import {
   CardContent,
   IconButton,
   Collapse,
-  Divider,
+  Tooltip,
+  alpha,
 } from '@mui/material';
 import { ExpandMore, ExpandLess } from '@mui/icons-material';
 
@@ -149,32 +150,35 @@ export default function CompareCard({
                 position: 'sticky',
                 top: 0,
                 zIndex: 10,
-                bgcolor: 'background.paper',
+                // ponytail: translucent + short so it reads as chrome floating over the
+                // chart rather than a solid strip cut out of it while scrolling
+                bgcolor: (theme) => alpha(theme.palette.background.paper, 0.85),
+                backdropFilter: 'blur(8px)',
                 borderBottom: '1px solid',
                 borderColor: 'divider',
                 '&:hover': { backgroundColor: 'action.hover' }
               }}
               onClick={handleCompareExpand}
             >
-              <Box textAlign="center">
-                <Typography variant="h5" component="h2" sx={{
-                  fontWeight: 600, color: 'text.primary', fontSize: '1.25rem', lineHeight: 1.2
-                }}>
-                  Compare
-                </Typography>
-                <Typography variant="body2" color="text.secondary">Click to collapse</Typography>
-              </Box>
-              <IconButton
-                onClick={(e) => { e.stopPropagation(); handleCompareExpand(); }}
-                size="medium"
-                sx={{
-                  position: 'absolute', right: 0, backgroundColor: 'action.hover',
-                  '&:hover': { backgroundColor: 'primary.main', color: 'primary.contrastText' },
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                <ExpandLess />
-              </IconButton>
+              <Typography variant="h6" component="h2" sx={{
+                fontWeight: 600, color: 'text.primary', fontSize: '1rem', lineHeight: 1.4
+              }}>
+                Compare
+              </Typography>
+              <Tooltip title="Collapse">
+                <IconButton
+                  aria-label="Collapse compare"
+                  onClick={(e) => { e.stopPropagation(); handleCompareExpand(); }}
+                  size="small"
+                  sx={{
+                    position: 'absolute', right: 0, backgroundColor: 'action.hover',
+                    '&:hover': { backgroundColor: 'primary.main', color: 'primary.contrastText' },
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <ExpandLess />
+                </IconButton>
+              </Tooltip>
             </Box>
           ) : (
             <Box display="flex" justifyContent="center" alignItems="center" mb={2} position="relative">
@@ -189,7 +193,9 @@ export default function CompareCard({
                 size="small"
                 sx={{
                   position: 'absolute', right: 0, width: 32, height: 32, color: 'text.secondary',
-                  '&:hover': { backgroundColor: (theme) => `${theme.palette.primary.main}15`, color: 'primary.main' },
+                  // action.selected rather than a hardcoded primary+alpha: it tracks the theme in
+                  // dark mode, and at 15 the hover tint was almost invisible. Matches Trends.
+                  '&:hover': { backgroundColor: 'action.selected', color: 'primary.main' },
                   transition: 'all 0.2s ease',
                 }}
               >
@@ -210,49 +216,50 @@ export default function CompareCard({
           )}
 
           {/* Expanded Content */}
-          <Collapse in={compareExpanded}>
-            <Divider sx={{ my: 2 }} />
-            <Box sx={{ py: 2 }}>
-              <CompareExpandedContent
-                loading={compareData.loading}
-                presets={comparePresets.presets}
-                presetsLoading={comparePresets.presetsLoading}
-                currentUserId={comparePresets.currentUserId}
-                onApplyPreset={comparePresets.applyPreset}
-                onDeletePreset={comparePresets.deletePreset}
-                onSavePresetClick={() => comparePresets.setSavePresetModalOpen(true)}
-                relatedTestRuns={compareData.relatedTestRuns}
-                selectedTestRun={compareData.selectedTestRun}
-                onTestRunSelect={compareData.setSelectedTestRun}
-                allDashboards={compareData.getAllDashboardsMerged()}
-                dashboardsLoading={compareData.dashboardsLoading || compareData.dynatraceDashboardsLoading}
-                selectedDashboard={compareData.selectedDashboard}
-                selectedMetric={compareData.selectedMetric}
-                onPrimarySelectionChange={(dashboard, panel) => {
-                  // A preset stores one dashboard/panel; the cascade's first pick is it.
-                  compareData.setSelectedDashboard(dashboard);
-                  compareData.setSelectedMetric(panel);
-                  if (panel) compareData.setSelectedSource(panel.source);
-                }}
-                addedSeries={compareData.addedSeries}
-                onAddSeries={compareHandlers.handleAddSeries}
-                onRemoveSeries={compareHandlers.handleRemoveSeries}
-                onClearAllSeries={compareHandlers.handleClearAllSeries}
-                metricComparisons={compareData.metricComparisons}
-                metricsLoading={compareData.metricsLoading}
-                seriesSearchText={compareData.seriesSearchText}
-                onSeriesSearchChange={compareData.setSeriesSearchText}
-                displayConfig={compareData.displayConfig}
-                onDisplayConfigChange={compareData.setDisplayConfig}
-                showGraphs={compareData.showGraphs}
-                graphData={compareData.graphData}
-                graphLoading={compareData.graphLoading}
-                onToggleGraph={compareHandlers.toggleGraph}
-                testRun={testRun}
-                testRunId={testRunId}
-                showToast={showToast}
-              />
-            </Box>
+          {/* Kick a window resize once the Collapse settles: the Plotly comparison charts
+              measure their geometry mid-animation and useResizeHandler only listens to window
+              resize, so without this their hover tooltips stay misaligned. Same fix Trends and
+              Graphs already carry. */}
+          <Collapse in={compareExpanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
+            <CompareExpandedContent
+              loading={compareData.loading}
+              presets={comparePresets.presets}
+              presetsLoading={comparePresets.presetsLoading}
+              currentUserId={comparePresets.currentUserId}
+              onApplyPreset={comparePresets.applyPreset}
+              onDeletePreset={comparePresets.deletePreset}
+              onSavePresetClick={() => comparePresets.setSavePresetModalOpen(true)}
+              relatedTestRuns={compareData.relatedTestRuns}
+              selectedTestRun={compareData.selectedTestRun}
+              onTestRunSelect={compareData.setSelectedTestRun}
+              allDashboards={compareData.getAllDashboardsMerged()}
+              dashboardsLoading={compareData.dashboardsLoading || compareData.dynatraceDashboardsLoading}
+              selectedDashboard={compareData.selectedDashboard}
+              selectedMetric={compareData.selectedMetric}
+              onPrimarySelectionChange={(dashboard, panel) => {
+                // A preset stores one dashboard/panel; the cascade's first pick is it.
+                compareData.setSelectedDashboard(dashboard);
+                compareData.setSelectedMetric(panel);
+                if (panel) compareData.setSelectedSource(panel.source);
+              }}
+              addedSeries={compareData.addedSeries}
+              onAddSeries={compareHandlers.handleAddSeries}
+              onRemoveSeries={compareHandlers.handleRemoveSeries}
+              onClearAllSeries={compareHandlers.handleClearAllSeries}
+              metricComparisons={compareData.metricComparisons}
+              metricsLoading={compareData.metricsLoading}
+              seriesSearchText={compareData.seriesSearchText}
+              onSeriesSearchChange={compareData.setSeriesSearchText}
+              displayConfig={compareData.displayConfig}
+              onDisplayConfigChange={compareData.setDisplayConfig}
+              showGraphs={compareData.showGraphs}
+              graphData={compareData.graphData}
+              graphLoading={compareData.graphLoading}
+              onToggleGraph={compareHandlers.toggleGraph}
+              testRun={testRun}
+              testRunId={testRunId}
+              showToast={showToast}
+            />
           </Collapse>
         </CardContent>
       </Card>
