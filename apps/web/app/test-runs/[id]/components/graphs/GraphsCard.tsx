@@ -1,17 +1,7 @@
 'use client';
 
 import React, { useRef } from 'react';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  IconButton,
-  Collapse,
-  Tooltip,
-  alpha,
-} from '@mui/material';
-import { ExpandMore, ExpandLess } from '@mui/icons-material';
+import { Box, Card, CardContent, Collapse } from '@mui/material';
 
 // Types
 import { GraphsCardProps } from './types';
@@ -22,6 +12,7 @@ import { useGraphsData, useGraphsPresets } from './hooks';
 // Components
 import { GraphsCollapsedView, GraphsExpandedContent } from './components';
 import SaveGraphPresetModal from './SaveGraphPresetModal';
+import ExpandableCardHeader, { kickPlotlyResize } from '../shared/ExpandableCardHeader';
 
 export default function GraphsCard({
   testRun,
@@ -134,131 +125,21 @@ export default function GraphsCard({
           '&:last-child': { pb: graphsExpanded ? 2 : 3.5 }
         }}>
           {/* Header Section */}
-          {graphsExpanded ? (
-            <Box
-              display="flex"
-              justifyContent="center"
-              alignItems="center"
-              sx={{
-                cursor: 'pointer',
-                py: 1,
-                px: 1.25,
-                mx: -1.25,
-                borderRadius: 2,
-                transition: 'background-color 0.2s ease',
-                position: 'sticky',
-                top: 0,
-                zIndex: 10,
-                // ponytail: translucent + short so it reads as chrome floating over the
-                // chart rather than a solid strip cut out of it while scrolling
-                bgcolor: (theme) => alpha(theme.palette.background.paper, 0.85),
-                backdropFilter: 'blur(8px)',
-                borderBottom: '1px solid',
-                borderColor: 'divider',
-                '&:hover': {
-                  backgroundColor: 'action.hover'
-                }
-              }}
-              onClick={handleGraphsExpand}
-            >
-              <Typography
-                variant="h6"
-                component="h2"
-                sx={{
-                  fontWeight: 600,
-                  color: 'text.primary',
-                  fontSize: '1rem',
-                  lineHeight: 1.4
-                }}
-              >
-                Graphs
-              </Typography>
-              <Tooltip title="Collapse">
-                <IconButton
-                  aria-label="Collapse graphs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleGraphsExpand();
-                  }}
-                  size="small"
-                  sx={{
-                    position: 'absolute',
-                    right: 0,
-                    backgroundColor: 'action.hover',
-                    '&:hover': {
-                      backgroundColor: 'primary.main',
-                      color: 'primary.contrastText',
-                    },
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <ExpandLess />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          ) : (
-            <>
-              {/* Collapsed Header */}
-              <Box
-                display="flex"
-                justifyContent="center"
-                alignItems="center"
-                mb={2}
-                position="relative"
-              >
-                <Typography
-                  variant="subtitle1"
-                  component="h2"
-                  sx={{
-                    fontWeight: 600,
-                    color: 'text.secondary',
-                    fontSize: '0.875rem',
-                    letterSpacing: '0.01em',
-                    textTransform: 'uppercase',
-                    textAlign: 'center',
-                  }}
-                >
-                  Graphs
-                </Typography>
-                <IconButton
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleGraphsExpand();
-                  }}
-                  size="small"
-                  sx={{
-                    position: 'absolute',
-                    right: 0,
-                    width: 32,
-                    height: 32,
-                    color: 'text.secondary',
-                    '&:hover': {
-                      backgroundColor: (theme) => `${theme.palette.primary.main}26`,
-                      color: 'primary.main',
-                    },
-                    transition: 'all 0.2s ease',
-                  }}
-                >
-                  <ExpandMore />
-                </IconButton>
-              </Box>
+          <ExpandableCardHeader title="Graphs" expanded={graphsExpanded} onToggle={handleGraphsExpand} />
 
-              {/* Collapsed View Content */}
-              <GraphsCollapsedView
-                presets={graphsPresets.presets}
-                presetsLoading={graphsPresets.presetsLoading}
-                dashboards={graphsData.dashboards}
-                dashboardsLoading={graphsData.dashboardsLoading}
-                addedSeries={graphsData.addedSeries}
-              />
-            </>
+          {/* Collapsed View Content */}
+          {!graphsExpanded && (
+            <GraphsCollapsedView
+              presets={graphsPresets.presets}
+              presetsLoading={graphsPresets.presetsLoading}
+              dashboards={graphsData.dashboards}
+              dashboardsLoading={graphsData.dashboardsLoading}
+              addedSeries={graphsData.addedSeries}
+            />
           )}
 
           {/* Expandable detailed content */}
-          {/* Kick a window resize once the Collapse settles: GraphsChart measures its
-              width on mount and on window resize only, so a chart mounted mid-animation
-              keeps a stale width and its hover tooltips sit misaligned. */}
-          <Collapse in={graphsExpanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
+          <Collapse in={graphsExpanded} onEntered={kickPlotlyResize}>
             {/* Expanded Content */}
             <GraphsExpandedContent
               testRun={testRun}

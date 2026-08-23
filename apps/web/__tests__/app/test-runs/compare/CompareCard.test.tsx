@@ -1,368 +1,188 @@
 /**
- * Tests for CompareCard component
- * Focus: React key uniqueness to prevent duplicate key errors
+ * Tests for the Compare card's dashboard-option identity.
  *
- * Related bug fix: Dec 4, 2025 - Fixed duplicate keys for Dynatrace dashboards
- * See: apps/web/docs/REACT_KEY_BEST_PRACTICES.md
+ * Original bug (Dec 4, 2025): Dynatrace dashboards share labels, so keying the
+ * Autocomplete options by label produced duplicate React keys. The fix gives each
+ * one a synthetic index-based id.
+ *
+ * This file used to assert against its own inline re-implementation of that
+ * mapping and so passed no matter what the component did. It now drives the real
+ * hooks — `useCompareData.getAllDashboardsMerged` builds the options and
+ * `useCompareHandlers.handleAddSeries` resolves the dashboard id a series is
+ * fetched with — so a regression in either fails here.
  */
 
-describe('CompareCard - Unique Keys / React Key Constraints', () => {
-  describe('Dynatrace Dashboard Options', () => {
-    it('should generate unique ids for Dynatrace dashboards even with duplicate labels', () => {
-      // Simulate Dynatrace dashboards with duplicate labels
-      const mockDynatraceDashboards = [
-        { dashboardLabel: 'HTTP connection pool afterburner-be' },
-        { dashboardLabel: 'HTTP connection pool afterburner-be' }, // Duplicate!
-        { dashboardLabel: 'JVM Memory' },
-        { dashboardLabel: 'HTTP connection pool afterburner-be' }, // Another duplicate!
-      ];
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { useCompareData } from '@/app/test-runs/[id]/components/compare/hooks/useCompareData';
+import { useCompareHandlers } from '@/app/test-runs/[id]/components/compare/hooks/useCompareHandlers';
+import type { ApplicationDashboard, CompareSeries } from '@/app/test-runs/[id]/components/compare/types';
+import type { PanelOption } from '@/app/test-runs/[id]/components/compare/utils/metric-options';
 
-      // Map options the same way CompareCard does (line 1545-1550)
-      const mappedOptions = mockDynatraceDashboards.map((d, index) => ({
-        id: `dynatrace-${index}`,
-        dashboard_label: d.dashboardLabel,
-        dashboard_name: d.dashboardLabel,
-        dashboard_uid: '',
-      }));
+jest.mock('@/lib/api', () => ({ authenticatedFetch: jest.fn() }));
+jest.mock('@/lib/dynatrace', () => ({
+  ...jest.requireActual('@/lib/dynatrace'),
+  fetchDynatraceDashboards: jest.fn(),
+}));
 
-      const ids = mappedOptions.map((opt) => opt.id);
-      const uniqueIds = new Set(ids);
+import { authenticatedFetch } from '@/lib/api';
+import { fetchDynatraceDashboards } from '@/lib/dynatrace';
 
-      // All IDs should be unique
-      expect(uniqueIds.size).toBe(ids.length);
-      expect(ids).toEqual(['dynatrace-0', 'dynatrace-1', 'dynatrace-2', 'dynatrace-3']);
-    });
+const testRun = {
+  test_run_id: 'run-1',
+  system_under_test_id: 'sut-1',
+  test_environment: 'acc',
+  workload: 'load',
+} as never;
 
-    it('should NOT use dashboard_label as the id field', () => {
-      const mockDynatraceDashboards = [
-        { dashboardLabel: 'Same Label' },
-        { dashboardLabel: 'Same Label' },
-      ];
+const grafanaDashboard = {
+  id: '550e8400-e29b-41d4-a716-446655440000',
+  dashboard_label: 'Gatling Overview',
+  dashboard_name: 'Gatling Overview',
+  dashboard_uid: 'gatling-overview',
+  source_type: 'grafana',
+} as ApplicationDashboard;
 
-      const mappedOptions = mockDynatraceDashboards.map((d, index) => ({
-        id: `dynatrace-${index}`,
-        dashboard_label: d.dashboardLabel,
-        dashboard_name: d.dashboardLabel,
-        dashboard_uid: '',
-      }));
+/** Renders useCompareData with the given Dynatrace dashboards already loaded. */
+async function mergedDashboards(
+  dynatraceLabels: string[],
+  grafana: ApplicationDashboard[] = [],
+): Promise<ApplicationDashboard[]> {
+  (authenticatedFetch as jest.Mock).mockResolvedValue({
+    ok: true,
+    json: async () => grafana,
+  });
+  (fetchDynatraceDashboards as jest.Mock).mockResolvedValue(
+    dynatraceLabels.map(dashboardLabel => ({ dashboardLabel, metrics: [] })),
+  );
 
-      // Verify IDs are NOT equal to labels
-      expect(mappedOptions[0].id).not.toBe(mappedOptions[0].dashboard_label);
-      expect(mappedOptions[1].id).not.toBe(mappedOptions[1].dashboard_label);
+  const { result } = renderHook(() =>
+    useCompareData({ testRun, testRunId: 'run-1', compareExpanded: true }),
+  );
 
-      // Verify IDs are unique while labels are the same
-      expect(mappedOptions[0].id).not.toBe(mappedOptions[1].id);
-      expect(mappedOptions[0].dashboard_label).toBe(mappedOptions[1].dashboard_label);
-    });
+  await waitFor(() =>
+    expect(result.current.getAllDashboardsMerged().length).toBe(
+      dynatraceLabels.length + grafana.length,
+    ),
+  );
+  return result.current.getAllDashboardsMerged();
+}
 
-    it('should preserve dashboard_label for display while using unique id for keys', () => {
-      const mockDynatraceDashboards = [
-        { dashboardLabel: 'Dashboard A' },
-        { dashboardLabel: 'Dashboard B' },
-        { dashboardLabel: 'Dashboard A' }, // Duplicate label
-      ];
+beforeEach(() => jest.clearAllMocks());
 
-      const mappedOptions = mockDynatraceDashboards.map((d, index) => ({
-        id: `dynatrace-${index}`,
-        dashboard_label: d.dashboardLabel,
-        dashboard_name: d.dashboardLabel,
-        dashboard_uid: '',
-      }));
+describe('Dynatrace dashboard options', () => {
+  it('gives every dashboard a unique id even when the labels repeat', async () => {
+    const merged = await mergedDashboards([
+      'HTTP connection pool afterburner-be',
+      'HTTP connection pool afterburner-be',
+      'JVM Memory',
+      'HTTP connection pool afterburner-be',
+    ]);
 
-      // All IDs should be unique
-      const ids = mappedOptions.map((opt) => opt.id);
-      const uniqueIds = new Set(ids);
-      expect(uniqueIds.size).toBe(3);
-
-      // Labels should be preserved for display
-      expect(mappedOptions[0].dashboard_label).toBe('Dashboard A');
-      expect(mappedOptions[1].dashboard_label).toBe('Dashboard B');
-      expect(mappedOptions[2].dashboard_label).toBe('Dashboard A');
-    });
+    const ids = merged.map(d => d.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(['dynatrace-0', 'dynatrace-1', 'dynatrace-2', 'dynatrace-3']);
   });
 
-  describe('Grafana Dashboard Options', () => {
-    it('should have unique ids from database for Grafana dashboards', () => {
-      // Grafana dashboards come from database with UUID ids
-      const mockGrafanaDashboards = [
-        {
-          id: '550e8400-e29b-41d4-a716-446655440000',
-          dashboard_label: 'Gatling Overview',
-          dashboard_name: 'Gatling Overview',
-          dashboard_uid: 'gatling-overview',
-        },
-        {
-          id: '550e8400-e29b-41d4-a716-446655440001',
-          dashboard_label: 'JMeter Overview',
-          dashboard_name: 'JMeter Overview',
-          dashboard_uid: 'jmeter-overview',
-        },
-        {
-          id: '550e8400-e29b-41d4-a716-446655440002',
-          dashboard_label: 'Gatling Overview', // Same label, different ID
-          dashboard_name: 'Gatling Overview',
-          dashboard_uid: 'gatling-overview-2',
-        },
-      ];
+  it('never uses the label as the id — that is what produced duplicate React keys', async () => {
+    const merged = await mergedDashboards(['Same Label', 'Same Label']);
 
-      const ids = mockGrafanaDashboards.map((d) => d.id);
-      const uniqueIds = new Set(ids);
-
-      // Database IDs should always be unique
-      expect(uniqueIds.size).toBe(ids.length);
-      expect(uniqueIds.size).toBe(3);
-    });
+    expect(merged[0].id).not.toBe(merged[0].dashboard_label);
+    expect(merged[0].id).not.toBe(merged[1].id);
+    expect(merged[0].dashboard_label).toBe(merged[1].dashboard_label);
   });
 
-  describe('Material-UI Autocomplete Integration', () => {
-    it('should use isOptionEqualToValue to compare by id', () => {
-      // Simulate the isOptionEqualToValue function from CompareCard (line 1553)
-      const isOptionEqualToValue = (option: any, value: any) => option.id === value.id;
+  it('keeps the label for display while the id stays unique', async () => {
+    const merged = await mergedDashboards(['Dashboard A', 'Dashboard B', 'Dashboard A']);
 
-      const option1 = {
-        id: 'dynatrace-0',
-        dashboard_label: 'Same Label',
-        dashboard_name: 'Same Label',
-        dashboard_uid: '',
-      };
-
-      const option2 = {
-        id: 'dynatrace-1',
-        dashboard_label: 'Same Label', // Same label
-        dashboard_name: 'Same Label',
-        dashboard_uid: '',
-      };
-
-      const option1Copy = { ...option1 };
-
-      // Different IDs should not be equal even with same label
-      expect(isOptionEqualToValue(option1, option2)).toBe(false);
-
-      // Same ID should be equal
-      expect(isOptionEqualToValue(option1, option1Copy)).toBe(true);
-    });
-
-    it('should use option.id as the React key in renderOption', () => {
-      const mockDynatraceDashboards = [
-        { dashboardLabel: 'Dashboard A' },
-        { dashboardLabel: 'Dashboard A' },
-      ];
-
-      const mappedOptions = mockDynatraceDashboards.map((d, index) => ({
-        id: `dynatrace-${index}`,
-        dashboard_label: d.dashboardLabel,
-        dashboard_name: d.dashboardLabel,
-        dashboard_uid: '',
-      }));
-
-      // Simulate what React would see as keys in the rendered list
-      const reactKeys = mappedOptions.map((option) => option.id);
-
-      // Keys should be unique
-      const uniqueKeys = new Set(reactKeys);
-      expect(uniqueKeys.size).toBe(reactKeys.length);
-      expect(uniqueKeys.size).toBe(2);
-    });
+    expect(merged.map(d => d.dashboard_label)).toEqual(['Dashboard A', 'Dashboard B', 'Dashboard A']);
+    expect(new Set(merged.map(d => d.id)).size).toBe(3);
   });
 
-  describe('Edge Cases', () => {
-    it('should handle empty dashboard lists', () => {
-      const mockDynatraceDashboards: any[] = [];
-      const mappedOptions = mockDynatraceDashboards.map((d, index) => ({
-        id: `dynatrace-${index}`,
-        dashboard_label: d.dashboardLabel,
-        dashboard_name: d.dashboardLabel,
-        dashboard_uid: '',
-      }));
+  it('holds up across many repeats of one label', async () => {
+    const merged = await mergedDashboards(Array(10).fill('Repeated Label'));
 
-      expect(mappedOptions.length).toBe(0);
-    });
-
-    it('should handle single dashboard', () => {
-      const mockDynatraceDashboards = [{ dashboardLabel: 'Only Dashboard' }];
-
-      const mappedOptions = mockDynatraceDashboards.map((d, index) => ({
-        id: `dynatrace-${index}`,
-        dashboard_label: d.dashboardLabel,
-        dashboard_name: d.dashboardLabel,
-        dashboard_uid: '',
-      }));
-
-      expect(mappedOptions.length).toBe(1);
-      expect(mappedOptions[0].id).toBe('dynatrace-0');
-    });
-
-    it('should handle many duplicate labels', () => {
-      const mockDynatraceDashboards = Array(10).fill({
-        dashboardLabel: 'Repeated Label',
-      });
-
-      const mappedOptions = mockDynatraceDashboards.map((d, index) => ({
-        id: `dynatrace-${index}`,
-        dashboard_label: d.dashboardLabel,
-        dashboard_name: d.dashboardLabel,
-        dashboard_uid: '',
-      }));
-
-      const ids = mappedOptions.map((opt) => opt.id);
-      const uniqueIds = new Set(ids);
-
-      // All 10 IDs should be unique
-      expect(uniqueIds.size).toBe(10);
-      expect(ids).toEqual([
-        'dynatrace-0',
-        'dynatrace-1',
-        'dynatrace-2',
-        'dynatrace-3',
-        'dynatrace-4',
-        'dynatrace-5',
-        'dynatrace-6',
-        'dynatrace-7',
-        'dynatrace-8',
-        'dynatrace-9',
-      ]);
-    });
+    expect(new Set(merged.map(d => d.id)).size).toBe(10);
   });
 
-  describe('fetchGraphData - applicationDashboardId Resolution', () => {
-    /**
-     * Bug fix: Jan 2, 2026 - Dynatrace graph series not showing in CompareCard
-     *
-     * For Dynatrace metrics, the applicationDashboardId is stored on the metric object,
-     * not on the dashboard (which has a synthetic id like 'dynatrace-0').
-     *
-     * The fix uses: selectedMetric.applicationDashboardId || selectedDashboard.id
-     */
-
-    it('should use selectedMetric.applicationDashboardId for Dynatrace metrics', () => {
-      // Dynatrace dashboard has synthetic ID (not the real applicationDashboardId)
-      const selectedDashboard = {
-        id: 'dynatrace-0', // Synthetic ID from mapping
-        dashboard_label: 'HTTP Connection Pool',
-        dashboard_uid: '',
-      };
-
-      // Dynatrace metric has the actual applicationDashboardId
-      const selectedMetric = {
-        id: 100001,
-        title: 'Response Time',
-        type: 'dynatrace',
-        applicationDashboardId: 'real-uuid-from-database', // The actual ID we need
-      };
-
-      // Simulate the logic from fetchGraphData (line 721)
-      const applicationDashboardId =
-        selectedMetric.applicationDashboardId || selectedDashboard.id;
-
-      // Should use the metric's applicationDashboardId, NOT the dashboard's synthetic id
-      expect(applicationDashboardId).toBe('real-uuid-from-database');
-      expect(applicationDashboardId).not.toBe('dynatrace-0');
-    });
-
-    it('should fallback to selectedDashboard.id for regular Grafana metrics', () => {
-      // Grafana dashboard has real UUID from database
-      const selectedDashboard = {
-        id: '550e8400-e29b-41d4-a716-446655440000', // Real UUID
-        dashboard_label: 'Gatling Overview',
-        dashboard_uid: 'gatling-overview',
-      };
-
-      // Regular Grafana metric does not have applicationDashboardId
-      const selectedMetric = {
-        id: 12345,
-        title: 'Response Time',
-        type: 'timeseries',
-        // No applicationDashboardId property
-      };
-
-      // Simulate the logic from fetchGraphData (line 721)
-      const applicationDashboardId =
-        (selectedMetric as any).applicationDashboardId || selectedDashboard.id;
-
-      // Should fallback to dashboard's id
-      expect(applicationDashboardId).toBe('550e8400-e29b-41d4-a716-446655440000');
-    });
-
-    it('should handle undefined applicationDashboardId gracefully', () => {
-      const selectedDashboard = {
-        id: 'dashboard-uuid',
-        dashboard_label: 'Test Dashboard',
-        dashboard_uid: 'test-uid',
-      };
-
-      const selectedMetric = {
-        id: 1,
-        title: 'Metric',
-        type: 'gauge',
-        applicationDashboardId: undefined, // Explicitly undefined
-      };
-
-      const applicationDashboardId =
-        selectedMetric.applicationDashboardId || selectedDashboard.id;
-
-      // Should fallback to dashboard's id when applicationDashboardId is undefined
-      expect(applicationDashboardId).toBe('dashboard-uuid');
-    });
-
-    it('should handle empty string applicationDashboardId', () => {
-      const selectedDashboard = {
-        id: 'dashboard-uuid',
-        dashboard_label: 'Test Dashboard',
-        dashboard_uid: 'test-uid',
-      };
-
-      const selectedMetric = {
-        id: 1,
-        title: 'Metric',
-        type: 'gauge',
-        applicationDashboardId: '', // Empty string is falsy
-      };
-
-      const applicationDashboardId =
-        selectedMetric.applicationDashboardId || selectedDashboard.id;
-
-      // Should fallback to dashboard's id when applicationDashboardId is empty
-      expect(applicationDashboardId).toBe('dashboard-uuid');
-    });
+  it('produces nothing when there are no dashboards at all', async () => {
+    expect(await mergedDashboards([])).toEqual([]);
   });
 
-  describe('Metric Selection Options', () => {
-    it('should have unique panel ids for Dynatrace metrics', () => {
-      // Dynatrace metrics use panelId from backend
-      const mockDynatraceMetrics = [
-        { panelId: 100001, panelTitle: 'Response Time', applicationDashboardId: 'dash-1' },
-        { panelId: 100002, panelTitle: 'Throughput', applicationDashboardId: 'dash-1' },
-        { panelId: 100003, panelTitle: 'Response Time', applicationDashboardId: 'dash-2' }, // Same title, different ID
-      ];
+  it('leaves Grafana dashboards on their real database ids', async () => {
+    const merged = await mergedDashboards(['Dynatrace One'], [grafanaDashboard]);
 
-      const mappedPanels = mockDynatraceMetrics.map((m) => ({
-        id: m.panelId,
-        title: m.panelTitle,
-        type: 'dynatrace',
-        applicationDashboardId: m.applicationDashboardId,
-      }));
+    expect(merged.find(d => d.source_type === 'grafana')!.id).toBe(grafanaDashboard.id);
+    expect(merged.find(d => d.source_type === 'dynatrace')!.id).toBe('dynatrace-0');
+  });
+});
 
-      const ids = mappedPanels.map((p) => p.id);
-      const uniqueIds = new Set(ids);
+describe('applicationDashboardId resolution when a series is added', () => {
+  /**
+   * Bug fix (Jan 2, 2026): a Dynatrace dashboard's id is synthetic
+   * ('dynatrace-0'), so the series must be fetched with the real
+   * applicationDashboardId carried on the panel instead.
+   */
+  const addSeries = (dashboard: ApplicationDashboard, panel: PanelOption): CompareSeries[] => {
+    const setAddedSeries = jest.fn();
+    const { result } = renderHook(() =>
+      useCompareHandlers({
+        testRun,
+        testRunId: 'run-1',
+        showToast: jest.fn(),
+        addedSeries: [],
+        selectedTestRun: null,
+        showGraphs: {},
+        setAddedSeries,
+        setMetricComparisons: jest.fn(),
+        setCurrentMetrics: jest.fn(),
+        setSelectedMetrics: jest.fn(),
+        setShowGraphs: jest.fn(),
+        setGraphData: jest.fn(),
+        setGraphLoading: jest.fn(),
+      }),
+    );
 
-      // All IDs should be unique
-      expect(uniqueIds.size).toBe(ids.length);
-      expect(uniqueIds.size).toBe(3);
+    act(() => {
+      result.current.handleAddSeries([{ dashboard, panel, metricName: 'Response Time' }]);
     });
+    return setAddedSeries.mock.calls[0]![0]([]);
+  };
 
-    it('should use isOptionEqualToValue for metric comparison', () => {
-      // Simulate the isOptionEqualToValue function from CompareCard metric selection (line 1609)
-      const isOptionEqualToValue = (option: any, value: any) => option.id === value.id;
+  const dynatraceDashboard = {
+    id: 'dynatrace-0',
+    dashboard_label: 'HTTP Connection Pool',
+    dashboard_name: 'HTTP Connection Pool',
+    dashboard_uid: 'dynatrace-HTTP Connection Pool',
+    source_type: 'dynatrace',
+  } as ApplicationDashboard;
 
-      const panel1 = { id: 100001, title: 'Same Title', type: 'dynatrace' };
-      const panel2 = { id: 100002, title: 'Same Title', type: 'dynatrace' };
-      const panel1Copy = { ...panel1 };
+  const panelOf = (dashboard: ApplicationDashboard, applicationDashboardId?: string): PanelOption => ({
+    id: 100001,
+    title: 'Response Time',
+    type: 'dynatrace',
+    applicationDashboardId,
+    metricsSourceId: 'ms-1',
+    dashboard,
+    dashboardLabel: dashboard.dashboard_label,
+    source: 'dynatrace',
+  } as PanelOption);
 
-      // Different IDs should not be equal even with same title
-      expect(isOptionEqualToValue(panel1, panel2)).toBe(false);
+  it('uses the panel applicationDashboardId, not the synthetic dashboard id', () => {
+    const [series] = addSeries(dynatraceDashboard, panelOf(dynatraceDashboard, 'real-uuid-from-database'));
 
-      // Same ID should be equal
-      expect(isOptionEqualToValue(panel1, panel1Copy)).toBe(true);
-    });
+    expect(series.dashboardId).toBe('real-uuid-from-database');
+    expect(series.dashboardId).not.toBe('dynatrace-0');
+  });
+
+  it('falls back to the dashboard id when the panel carries none', () => {
+    const [series] = addSeries(grafanaDashboard, panelOf(grafanaDashboard, undefined));
+
+    expect(series.dashboardId).toBe(grafanaDashboard.id);
+  });
+
+  it('treats an empty applicationDashboardId as absent', () => {
+    const [series] = addSeries(grafanaDashboard, panelOf(grafanaDashboard, ''));
+
+    expect(series.dashboardId).toBe(grafanaDashboard.id);
   });
 });

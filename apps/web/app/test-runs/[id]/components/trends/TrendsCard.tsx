@@ -1,24 +1,7 @@
 'use client';
 
 import React, { useRef } from 'react';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  IconButton,
-  Collapse,
-  CircularProgress,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Tooltip,
-  alpha,
-} from '@mui/material';
-import {
-  ExpandMore,
-  ExpandLess,
-} from '@mui/icons-material';
+import { Box, Typography, Card, CardContent, Collapse, CircularProgress } from '@mui/material';
 
 // Types
 import { TrendsCardProps } from './types';
@@ -30,6 +13,8 @@ import { useTrendsData, useTrendsPresets, useTrendsPlot } from './hooks';
 import { TrendsCollapsedView, TrendsSelectionControls, TrendsChart } from './components';
 import TrendsPresetsTable from './TrendsPresetsTable';
 import SaveTrendsPresetModal from './SaveTrendsPresetModal';
+import ExpandableCardHeader, { kickPlotlyResize } from '../shared/ExpandableCardHeader';
+import PresetsAccordion from '../shared/PresetsAccordion';
 
 export default function TrendsCard({
   testRun,
@@ -147,113 +132,7 @@ export default function TrendsCard({
           '&:last-child': { pb: trendsExpanded ? 2 : 3.5 }
         }}>
           {/* Header Section */}
-          {!trendsExpanded ? (
-            <Box
-              display="flex"
-              justifyContent="center"
-              alignItems="center"
-              mb={2}
-              position="relative"
-            >
-              <Typography
-                variant="subtitle1"
-                component="h2"
-                sx={{
-                  fontWeight: 600,
-                  color: 'text.secondary',
-                  fontSize: '0.875rem',
-                  letterSpacing: '0.01em',
-                  textTransform: 'uppercase',
-                  textAlign: 'center',
-                }}
-              >
-                Trends
-              </Typography>
-              <IconButton
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleTrendsExpand();
-                }}
-                size="small"
-                sx={{
-                  position: 'absolute',
-                  right: 0,
-                  width: 32,
-                  height: 32,
-                  color: 'text.secondary',
-                  '&:hover': {
-                    backgroundColor: 'action.selected',
-                    color: 'primary.main',
-                  },
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <ExpandMore />
-              </IconButton>
-            </Box>
-          ) : (
-            <Box
-              display="flex"
-              justifyContent="center"
-              alignItems="center"
-              sx={{
-                cursor: 'pointer',
-                py: 1,
-                px: 1,
-                mx: -1,
-                borderRadius: 2,
-                transition: 'background-color 0.2s ease',
-                position: 'sticky',
-                top: 0,
-                zIndex: 10,
-                // ponytail: translucent + short so it reads as chrome floating over the
-                // chart rather than a solid strip cut out of it while scrolling
-                bgcolor: (theme) => alpha(theme.palette.background.paper, 0.85),
-                backdropFilter: 'blur(8px)',
-                borderBottom: '1px solid',
-                borderColor: 'divider',
-                '&:hover': {
-                  backgroundColor: 'action.hover'
-                }
-              }}
-              onClick={handleTrendsExpand}
-            >
-              <Typography
-                variant="h6"
-                component="h2"
-                sx={{
-                  fontWeight: 600,
-                  color: 'text.primary',
-                  fontSize: '1rem',
-                  lineHeight: 1.4
-                }}
-              >
-                Trends
-              </Typography>
-              <Tooltip title="Collapse">
-                <IconButton
-                  aria-label="Collapse trends"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleTrendsExpand();
-                  }}
-                  size="small"
-                  sx={{
-                    position: 'absolute',
-                    right: 0,
-                    backgroundColor: 'action.hover',
-                    '&:hover': {
-                      backgroundColor: 'primary.main',
-                      color: 'primary.contrastText',
-                    },
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <ExpandLess />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          )}
+          <ExpandableCardHeader title="Trends" expanded={trendsExpanded} onToggle={handleTrendsExpand} />
 
           {/* Collapsed View */}
           {!trendsExpanded && (
@@ -264,10 +143,7 @@ export default function TrendsCard({
           )}
 
           {/* Expanded Content */}
-          {/* Kick a window resize once the Collapse settles: the Plotly chart inside
-              measures its geometry mid-animation and useResizeHandler only listens to
-              window resize, so without this the hover tooltip stays misaligned. */}
-          <Collapse in={trendsExpanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
+          <Collapse in={trendsExpanded} onEntered={kickPlotlyResize}>
             <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
               {/* Builder row, then the view controls that sit right above the chart */}
               <TrendsSelectionControls
@@ -325,31 +201,26 @@ export default function TrendsCard({
                 onUpdateSeriesUnit={trendsData.handleUpdateSeriesUnit}
               />
 
-              {/* Presets — out of the way until you want one */}
-              <Accordion disableGutters elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}>
-                <AccordionSummary expandIcon={<ExpandMore />}>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    Saved presets{trendsPresets.presetsLoading ? '' : ` (${trendsPresets.presets.length})`}
-                  </Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  {trendsPresets.applyingPreset && (
-                    <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CircularProgress size={16} />
-                      <Typography variant="body2" color="text.secondary">
-                        Applying preset…
-                      </Typography>
-                    </Box>
-                  )}
-                  <TrendsPresetsTable
-                    presets={trendsPresets.presets}
-                    loading={trendsPresets.presetsLoading}
-                    currentUserId={trendsPresets.currentUserId}
-                    onSelectPreset={trendsPresets.applyPreset}
-                    onDeletePreset={trendsPresets.deletePreset}
-                  />
-                </AccordionDetails>
-              </Accordion>
+              <PresetsAccordion
+                count={trendsPresets.presets.length}
+                loading={trendsPresets.presetsLoading}
+              >
+                {trendsPresets.applyingPreset && (
+                  <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CircularProgress size={16} />
+                    <Typography variant="body2" color="text.secondary">
+                      Applying preset…
+                    </Typography>
+                  </Box>
+                )}
+                <TrendsPresetsTable
+                  presets={trendsPresets.presets}
+                  loading={trendsPresets.presetsLoading}
+                  currentUserId={trendsPresets.currentUserId}
+                  onSelectPreset={trendsPresets.applyPreset}
+                  onDeletePreset={trendsPresets.deletePreset}
+                />
+              </PresetsAccordion>
             </Box>
           </Collapse>
         </CardContent>

@@ -1,17 +1,7 @@
 'use client';
 
 import React, { useRef } from 'react';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  IconButton,
-  Collapse,
-  Tooltip,
-  alpha,
-} from '@mui/material';
-import { ExpandMore, ExpandLess } from '@mui/icons-material';
+import { Box, Card, CardContent, Collapse } from '@mui/material';
 
 // Types
 import { CompareCardProps } from './types';
@@ -22,6 +12,7 @@ import { useCompareData, useCompareHandlers, useComparePresets } from './hooks';
 // Components
 import { CompareCollapsedView, CompareExpandedContent } from './components';
 import SavePresetModal from './SavePresetModal';
+import ExpandableCardHeader, { kickPlotlyResize } from '../shared/ExpandableCardHeader';
 
 
 export default function CompareCard({
@@ -133,75 +124,7 @@ export default function CompareCard({
           '&:last-child': { pb: compareExpanded ? 2 : 3.5 }
         }}>
           {/* Header Section */}
-          {compareExpanded ? (
-            <Box
-              display="flex"
-              justifyContent="center"
-              alignItems="center"
-              sx={{
-                cursor: 'pointer',
-                py: 1, px: 1.25, mx: -1.25,
-                borderRadius: 2,
-                transition: 'background-color 0.2s ease',
-                position: 'sticky',
-                top: 0,
-                zIndex: 10,
-                // ponytail: translucent + short so it reads as chrome floating over the
-                // chart rather than a solid strip cut out of it while scrolling
-                bgcolor: (theme) => alpha(theme.palette.background.paper, 0.85),
-                backdropFilter: 'blur(8px)',
-                borderBottom: '1px solid',
-                borderColor: 'divider',
-                '&:hover': { backgroundColor: 'action.hover' }
-              }}
-              onClick={handleCompareExpand}
-            >
-              <Typography variant="h6" component="h2" sx={{
-                fontWeight: 600, color: 'text.primary', fontSize: '1rem', lineHeight: 1.4
-              }}>
-                Compare
-              </Typography>
-              <Tooltip title="Collapse">
-                <IconButton
-                  aria-label="Collapse compare"
-                  onClick={(e) => { e.stopPropagation(); handleCompareExpand(); }}
-                  size="small"
-                  sx={{
-                    position: 'absolute', right: 0, backgroundColor: 'action.hover',
-                    '&:hover': { backgroundColor: 'primary.main', color: 'primary.contrastText' },
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <ExpandLess />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          ) : (
-            <Box display="flex" justifyContent="center" alignItems="center" mb={2} position="relative">
-              <Typography variant="subtitle1" component="h2" sx={{
-                fontWeight: 600, color: 'text.secondary', fontSize: '0.875rem',
-                letterSpacing: '0.01em', textTransform: 'uppercase', textAlign: 'center',
-              }}>
-                Compare
-              </Typography>
-              <Tooltip title="Expand">
-                <IconButton
-                  aria-label="Expand compare"
-                  onClick={(e) => { e.stopPropagation(); handleCompareExpand(); }}
-                  size="small"
-                  sx={{
-                    position: 'absolute', right: 0, width: 32, height: 32, color: 'text.secondary',
-                    // action.selected rather than a hardcoded primary+alpha: it tracks the theme in
-                    // dark mode, and at 15 the hover tint was almost invisible. Matches Trends.
-                    '&:hover': { backgroundColor: 'action.selected', color: 'primary.main' },
-                    transition: 'all 0.2s ease',
-                  }}
-                >
-                  <ExpandMore />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          )}
+          <ExpandableCardHeader title="Compare" expanded={compareExpanded} onToggle={handleCompareExpand} />
 
           {/* Collapsed View */}
           {!compareExpanded && (
@@ -215,11 +138,7 @@ export default function CompareCard({
           )}
 
           {/* Expanded Content */}
-          {/* Kick a window resize once the Collapse settles: the Plotly comparison charts
-              measure their geometry mid-animation and useResizeHandler only listens to window
-              resize, so without this their hover tooltips stay misaligned. Same fix Trends and
-              Graphs already carry. */}
-          <Collapse in={compareExpanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
+          <Collapse in={compareExpanded} onEntered={kickPlotlyResize}>
             <CompareExpandedContent
               loading={compareData.loading}
               presets={comparePresets.presets}

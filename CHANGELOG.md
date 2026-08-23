@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.75.0] - 2026-08-23
+
+### Added
+- **The Graphs card now shows where the analysis window starts and ends**, the same way the Compare and SLO charts already did. The excluded run-up and run-down are dimmed and each boundary is marked with an amber dashed line, so a graph makes it obvious which part of the run the numbers were actually taken from. Previously the Graphs card shaded only the run-up, in flat grey with no boundary, and ignored the trailing exclusion entirely — so the same test run could look like it was analysed over a different window depending on which card you were looking at.
+
+### Fixed
+- **The "copy chart to clipboard" button no longer fails silently.** If the image could not be produced, the button simply did nothing and the only trace was an error in the browser console that no one sees. It now falls back to a download, and if that fails too it says so. The same button also crashed outright in browsers that support clipboard writing but not clipboard images; it now falls back cleanly instead.
+- **A long analysis can no longer lose its claim on a system part-way through.** Analyses reserve a system, environment and workload so two of them cannot write the same results at once, but the reservation expired after five minutes while a full analysis takes far longer — so a slow run quietly lost its claim and a second analysis could start on top of it. The reservation is now kept alive for as long as the job runs, and if it does lapse the job takes it back, unless another analysis has legitimately started in the meantime.
+- **Presets no longer render while their panel is closed** on the Trends and Graphs cards. The saved-presets list was being built on every redraw of the card even when collapsed and invisible.
+- The Graphs and Trends cards' expand buttons gained the tooltip and screen-reader label the Compare card already had, and their hover state now follows the theme instead of a fixed tint that was nearly invisible in dark mode.
+
+### Changed
+- Adding a new report section type now means editing one list instead of six. The section types, the ones that support accompanying text, and their display names are all derived from a single definition, so a type can no longer exist in one place and be silently rejected in another.
+- The Compare, Trends and Graphs cards now share one card header and one presets panel instead of three near-identical copies.
+
+### Removed
+- An unused card header component and its test suite, which had no callers.
+
 ## [0.2.74.0] - 2026-08-23
 
 ### Fixed

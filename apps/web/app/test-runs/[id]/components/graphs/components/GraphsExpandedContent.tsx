@@ -7,11 +7,8 @@ import {
   TextField,
   Button,
   CircularProgress,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
 } from '@mui/material';
-import { BookmarkBorder, ExpandMore } from '@mui/icons-material';
+import { BookmarkBorder } from '@mui/icons-material';
 
 import { SeriesConfig, ApplicationDashboard, Panel, MetricDataPoint, DataSource } from '../types';
 import type { TestRun } from '@/types/test-runs';
@@ -21,6 +18,7 @@ import { GraphsSeriesList } from './GraphsSeriesList';
 import { GraphsSelectionControls } from './GraphsSelectionControls';
 import GraphsChart from '../GraphsChart';
 import GraphPresetsTable from '../GraphPresetsTable';
+import PresetsAccordion from '../../shared/PresetsAccordion';
 
 interface GraphsExpandedContentProps {
   testRun: TestRun | null;
@@ -185,24 +183,16 @@ export function GraphsExpandedContent({
         />
       </Box>
 
-      {/* Presets — out of the way until you want one */}
-      <Accordion disableGutters elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}>
-        <AccordionSummary expandIcon={<ExpandMore />}>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            Saved presets{presetsLoading ? '' : ` (${presets.length})`}
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <GraphPresetsTable
-            presets={presets}
-            loading={presetsLoading}
-            currentUserId={currentUserId}
-            onSelectPreset={onLoadPreset}
-            onDeletePreset={onDeletePreset}
-            onDeleteAllPresets={onDeleteAllPresets}
-          />
-        </AccordionDetails>
-      </Accordion>
+      <PresetsAccordion count={presets.length} loading={presetsLoading}>
+        <GraphPresetsTable
+          presets={presets}
+          loading={presetsLoading}
+          currentUserId={currentUserId}
+          onSelectPreset={onLoadPreset}
+          onDeletePreset={onDeletePreset}
+          onDeleteAllPresets={onDeleteAllPresets}
+        />
+      </PresetsAccordion>
     </Box>
   );
 }

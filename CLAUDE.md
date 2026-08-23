@@ -541,6 +541,7 @@ Run all tests from the repo root: `npm run test`
 - test: turbo run test
 - deadcode: npx knip
 - shell: shellcheck $(git ls-files '*.sh') .githooks/pre-push — optional local tool (`brew install shellcheck`); not wired into preflight so a machine without it can still push.
+- schema constraints: `npm run check:schema-constraints -- --target <url> --reference <url>` — reports every NOT NULL / CHECK / UNIQUE / PK / FK a deployment is missing relative to a freshly migrated database, with the `ALTER TABLE` for each and the violating-row count for a NOT NULL. Read-only. Build the reference with `DB_NAME=perfana_ref npm run migration:run` on an empty database. Not in preflight — it needs two live databases, one of which is the deployment's.
 - **preflight (pre-push gate): npm run preflight** — runs lint + type-check across the monorepo, then the API RLS test suite (`apps/api/src/test/rls/` with `DB_ENABLE_RLS_ROLE=true`). Wired to `git push` via `.githooks/pre-push` (auto-installed by `npm install` via the `prepare` script). Local-only by design — turbo's cache makes warm runs sub-second, and the RLS suite is ~3s. The RLS step targets the local dev DB (`perfana` on `localhost:5432` by default; override with `DB_NAME`); it requires Phase 5b migrations to be applied (cluster roles `perfana_app`/`perfana_system` + per-DB RLS policies and helper functions). Bypass: `git push --no-verify` (use sparingly).
 
 <!-- gitnexus:start -->

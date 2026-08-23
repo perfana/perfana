@@ -1,6 +1,6 @@
 {
   "name": "perfana",
-  "version": "0.2.74.0",
+  "version": "0.2.75.0",
   "private": true,
   "description": "Open-source performance analysis platform",
   "workspaces": [
@@ -19,6 +19,7 @@
     "seed": "tsx scripts/seed.ts",
     "preflight": "turbo run lint type-check && node scripts/check-entity-migrations.mjs && npm run test:rls --workspace=@perfana/api",
     "check:entity-migrations": "node scripts/check-entity-migrations.mjs",
+    "check:schema-constraints": "node scripts/check-schema-constraints.mjs",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "test": "turbo run test",
     "test:coverage": "cd apps/api && npm test -- --coverage && cd ../.. && cd apps/web && npm test -- --coverage && cd ../.. && cd apps/grafana-sync && npm test -- --coverage && cd ../.. && cd apps/worker && npm test -- --coverage && cd ../..",

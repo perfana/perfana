@@ -35,8 +35,9 @@ interface LockMetadata {
  *
  * Lock Pattern:
  * - Lock key: job:lock:{systemUnderTestId}:{testEnvironment}:{workload}
- * - Lock TTL: 30 minutes (configurable)
- * - Auto-extend while job is running
+ * - Lock TTL: `JOB_DEFAULTS.LOCK_TTL_SECONDS` (5 minutes) — far shorter than a
+ *   pipeline runs, deliberately: a worker that dies holds the scope for at most
+ *   that long. Long jobs keep the lock alive with `startLockRenewal`.
  * - Stores metadata (jobId, testRunId, jobType, acquiredAt)
  *
  * This prevents race conditions and ensures only one analysis job
@@ -257,6 +258,164 @@ export class JobLockService {
   }
 
   /**
+   * Keep a lock alive for as long as the job holds it, and return a stop function.
+   *
+   * The TTL is 5 minutes while one analyze pipeline races a 600s timeout per stage
+   * across ten stages, so without this a slow run silently drops its lock partway
+   * through and a second job for the same system/environment/workload starts
+   * writing `ds_*` rows for the same test run. Renewing beats raising the TTL past
+   * the worst case: a TTL long enough to cover a 10-stage pipeline would also be
+   * how long a crashed worker blocks the scope.
+   *
+   * Renews at a third of the TTL so two consecutive failed renewals still leave
+   * margin. If the key expired anyway (a Redis blip or a GC pause spanning two
+   * intervals), the heartbeat RE-ACQUIRES it rather than beating uselessly for the
+   * remaining hours of the run: an absent key means no other job holds the scope,
+   * because a queued one would have taken it. Re-acquisition uses `SET NX`, so it
+   * can never steal a lock a successor legitimately owns — if the NX loses, that
+   * successor is real, and only then do we give up.
+   *
+   * Giving up is logged at ERROR but does NOT abort the job — the pipeline has no
+   * cancellation path, and killing a run mid-write would be worse than the overlap
+   * this is preventing.
+   *
+   * Call the returned function in a `finally`, before `releaseLock`.
+   */
+  startLockRenewal(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    workload: string,
+    jobId: string,
+    testRunId: string,
+    jobType: JobType
+  ): () => void {
+    const lockKey = generateLockKey(systemUnderTestId, testEnvironment, workload);
+    const intervalMs = Math.floor((JOB_DEFAULTS.LOCK_TTL_SECONDS * 1000) / 3);
+    // Once a successor legitimately owns the scope, stop trying — otherwise every
+    // tick for the rest of the run logs the same ERROR.
+    let surrendered = false;
+
+    const renew = async (): Promise<void> => {
+      if (surrendered) {
+        return;
+      }
+
+      const outcome = await this.extendLockOrReacquire(
+        systemUnderTestId,
+        testEnvironment,
+        workload,
+        jobId,
+        testRunId,
+        jobType
+      );
+
+      if (outcome === 'extended') {
+        return;
+      }
+
+      if (outcome === 'reacquired') {
+        // The key had expired. Nothing else held the scope, so exclusion is restored —
+        // but the gap was real, so say so loudly enough to correlate with any overlap.
+        logger.warn(
+          `🔒 Lock had expired and was re-acquired — scope was unprotected for up to ` +
+            `${Math.round(intervalMs / 1000)}s: ${lockKey}`,
+          { jobId, testRunId }
+        );
+        return;
+      }
+
+      surrendered = true;
+      logger.error(
+        `🔓 Lost lock to another job; this run continues UNPROTECTED and a second ` +
+          `job may now write the same scope: ${lockKey}`,
+        { jobId, testRunId }
+      );
+    };
+
+    const timer = setInterval(() => {
+      // Not awaited — this runs on a timer, not in the job's call stack.
+      renew().catch((error) => {
+        logger.error(`Lock renewal threw for ${lockKey}`, error);
+      });
+    }, intervalMs);
+
+    // Never hold the process open on the heartbeat alone.
+    timer.unref?.();
+
+    return () => clearInterval(timer);
+  }
+
+  /**
+   * One heartbeat beat: extend our lock, or re-take it if it expired.
+   *
+   * Separates the two cases `extendLock` collapses into `false`. The Lua is a single
+   * round-trip so the check and the write cannot interleave with another worker:
+   *   - key present and ours  -> EXPIRE, 'extended'
+   *   - key absent            -> SET with our metadata + TTL, 'reacquired'
+   *   - key present, not ours -> 'lost' (never overwrite; the successor is real)
+   */
+  private async extendLockOrReacquire(
+    systemUnderTestId: string,
+    testEnvironment: string,
+    workload: string,
+    jobId: string,
+    testRunId: string,
+    jobType: JobType
+  ): Promise<'extended' | 'reacquired' | 'lost'> {
+    const lockKey = generateLockKey(systemUnderTestId, testEnvironment, workload);
+
+    const luaScript = `
+      local lockKey = KEYS[1]
+      local jobId = ARGV[1]
+      local ttl = tonumber(ARGV[2])
+      local metadata = ARGV[3]
+      local lockData = redis.call('GET', lockKey)
+
+      if not lockData then
+        redis.call('SET', lockKey, metadata, 'EX', ttl)
+        return 2
+      end
+
+      local existing = cjson.decode(lockData)
+      if existing.jobId == jobId then
+        redis.call('EXPIRE', lockKey, ttl)
+        return 1
+      end
+
+      return 0
+    `;
+
+    const metadata: LockMetadata = {
+      jobId,
+      testRunId,
+      jobType,
+      // The scope was unheld a moment ago, so this genuinely is a fresh acquisition.
+      acquiredAt: new Date().toISOString(),
+      systemUnderTestId,
+      testEnvironment,
+      workload,
+    };
+
+    const result = await this.redis.eval(
+      luaScript,
+      1,
+      lockKey,
+      jobId,
+      JOB_DEFAULTS.LOCK_TTL_SECONDS.toString(),
+      JSON.stringify(metadata)
+    );
+
+    if (result === 1) {
+      logger.debug(`🔄 Lock extended: ${lockKey}`, { jobId });
+      return 'extended';
+    }
+    if (result === 2) {
+      return 'reacquired';
+    }
+    return 'lost';
+  }
+
+  /**
    * Extend lock TTL while job is still running
    * This should be called periodically to prevent lock expiration
    *
@@ -343,8 +502,9 @@ export class JobLockService {
    *
    * GET-then-DEL with an ownership check. There is a narrow race between the
    * GET and the DEL, but it is bounded by a single Redis round-trip while the
-   * default lock TTL is 30 min, so a successor lock being deleted out from
-   * under its owner is vanishingly unlikely in practice. A racy release is
+   * default lock TTL is `JOB_DEFAULTS.LOCK_TTL_SECONDS` (5 min — this comment
+   * said 30 min, which was never what the constant held), so a successor lock
+   * being deleted out from under its owner is unlikely in practice. A racy release is
    * also benign: the successor's work still runs to completion; the only cost
    * is that the next scheduler tick will be able to start instead of waiting.
    */

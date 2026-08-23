@@ -901,6 +901,10 @@ describe('TrendsCard', () => {
         expect(TrendsPresetsAPI.getAll).toHaveBeenCalled();
       });
 
+      // The presets accordion unmounts its children while collapsed, so the table
+      // only exists once it is opened.
+      fireEvent.click(screen.getByText(/Saved presets/i));
+
       // The TrendsPresetsTable shows "No saved presets yet" when presets array is empty
       await waitFor(() => {
         expect(screen.getByText(/No saved presets yet/i)).toBeInTheDocument();
