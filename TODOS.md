@@ -15,15 +15,15 @@ with the version it landed in.
 
 ### Schema changes reach new databases only, and the code assumes otherwise
 
-**Priority:** P0
+**Priority:** P3 (was P0 — part 1 shipped in v0.2.75.0; what is left is the dead-code cleanup at the bottom)
 **Origin:** the 0.2.68.7 incident — "deploying the last version deleted all application
 dashboards" (2026-08-21). Nothing was deleted.
 **Status:** parts 2 and 3 are built (v0.2.68.14) — `assertEntityColumns` at boot and
 `scripts/check-entity-migrations.mjs` in preflight. v0.2.72.0 closed the known example:
 `1796000000000-BackfillOwnedResourceOrgIds` backfills and constrains `organization_id` on
 `check_results`, `ds_metric_collection_status` and `ds_compare_config` (state-blind, fail-loud),
-and every writer now stamps organization_id + team_id. **Part 1, the general constraint audit,
-is still open**, which is why this item stays P0. The outage itself is fixed by
+and every writer now stamps organization_id + team_id. Part 1, the general constraint audit,
+shipped in v0.2.75.0 as `scripts/check-schema-constraints.mjs` — see below. The outage itself is fixed by
 `1795000000000-AddApplicationDashboardDeletionStatus.ts` (v0.2.68.12). An automatic
 organization_id backfill shipped in 0.2.68.11 and was removed in .13 — it addressed a different,
 unreported condition and would have rewritten millions of rows during start-up.
@@ -45,13 +45,36 @@ column had been missing in production for a full release.
 
 **What:** three parts.
 
-1. **STILL OPEN — audit the constraints.** `1700000000000-ConsolidatedSchema.ts` holds NOT NULL,
-   CHECK, UNIQUE and FK declarations with no corresponding incremental migration, so an existing
-   database does not have them while the code assumes it does. Columns are now covered by parts 2
-   and 3; constraints are not, and `organization_id NOT NULL` is the known example. The cheapest
-   enumeration is an `information_schema` diff between a fresh database and a restored production
-   dump — `docs/ops/2026-08-21-org-id-backfill-runbook.md` phase 0 does exactly that for one
-   column and can be widened.
+1. **DONE (v0.2.75.0) — audit the constraints.** `scripts/check-schema-constraints.mjs`
+   (`npm run check:schema-constraints`) diffs any database against a freshly migrated one and
+   reports every missing NOT NULL, CHECK, UNIQUE, PRIMARY KEY, FOREIGN KEY and unique index,
+   emitting the `ALTER TABLE` for each — and, for a NOT NULL, how many rows in the target would
+   violate it, which is the whole apply/backfill decision. Read-only against both databases.
+
+   ```bash
+   # 1. build the reference: every migration, on an empty database
+   createdb perfana_ref
+   DB_NAME=perfana_ref npm run migration:run
+   # 2. diff your deployment against it
+   npm run check:schema-constraints -- \
+     --target postgres://user:pass@prod-host:5432/perfana \
+     --reference postgres://user:pass@localhost:5432/perfana_ref
+   ```
+
+   **The enumeration this item asked for, measured 2026-08-23 against a fresh database:**
+   76 FOREIGN KEY + 76 PRIMARY KEY + 29 UNIQUE + 3 CHECK constraints and 586 NOT NULL columns —
+   770 constraint facts, of which exactly **one** incremental migration carries any to an existing
+   database (`1796000000000-BackfillOwnedResourceOrgIds`, 3 NOT NULLs on 3 tables). So the honest
+   answer is that essentially the entire constraint surface reaches new databases only, and the
+   response cannot be "write 770 migrations" — it has to be a tool the operator runs against the
+   database that actually has the history. That is what shipped.
+
+   Validated by pointing it at a database built from `schema-sql.ts` alone: it independently
+   reports exactly the three `organization_id` columns migration 1796 exists to fix, plus a
+   deliberately dropped FK and unique index. A database and its own reference report nothing.
+
+   Not wired into `preflight`: it needs two live databases, and the one it must see is the
+   deployment's, which CI does not have.
 
 2. **DONE (v0.2.68.14) — boot assertion.** `apps/api/src/common/db/assert-entity-columns.ts`
    compares TypeORM's entity metadata against `information_schema` on whatever database the
@@ -178,21 +201,6 @@ not a P2 — and also what makes it easy to break without noticing.
 
 ## Worker pipeline
 
-### The job lock expires long before a stage can time out
-
-**Priority:** P2
-**Origin:** adversarial + red-team review during /ship on `fix/analyze-unknown-stage` (2026-08-23).
-**Why:** `JOB_DEFAULTS.LOCK_TTL_SECONDS` is 300 while every orchestrator stage races a 600s
-timeout and a pipeline runs ten of them. `analyze.ts` acquires the lock and never calls
-`JobLockService.extendLock`, which exists. A slow run drops its lock five minutes in, so a second
-analyze for the same system/environment/workload can start while the first is still writing
-`ds_*` rows for the same test run. The `JobLockService` comment claims a 30-minute TTL, which is
-not what the constant says.
-**What:** renew the lock from the stage loop (the orchestrator already reports stage boundaries),
-or raise `LOCK_TTL_SECONDS` past the worst-case pipeline duration and fix the comment.
-
----
-
 ### Four reevaluate stages render as raw ids in the progress UI
 
 **Priority:** P3
@@ -222,38 +230,6 @@ saying the pipeline did not finish.
 ---
 
 ## Compare card
-
-### Three cards hand-roll the same sticky header while a shared one sits unused
-
-**Priority:** P3
-**Origin:** design + maintainability + red-team review during /ship on
-`fix/analyze-unknown-stage` (2026-08-23), after Compare was aligned to Trends and Graphs.
-**Why:** the sticky expanded header (translucent `alpha(paper, 0.85)` + `backdropFilter`, h6 at
-1rem, tooltipped collapse button) is now byte-identical in `CompareCard.tsx`, `TrendsCard.tsx`
-and `GraphsCard.tsx`, as are the `onEntered` Plotly resize kick and the "Saved presets (N)"
-accordion. Three copies is where the next tweak starts drifting. Meanwhile
-`apps/web/app/test-runs/[id]/components/shared/CardHeader.tsx`, built for exactly this, has no
-production importer at all: its only reference is its own passing test, and knip cannot see that
-because every file under `apps/web/app/**` is an entry point.
-**What:** extract `ExpandableCardHeader` + `PlotlyCollapse` + `PresetsAccordion` into
-`components/shared/`, have the three cards consume them, then either migrate the ten other cards
-on the page (still on the old centred h5 + "Click to collapse" header) or delete the orphaned
-`CardHeader.tsx` and its test.
-
----
-
-### CompareCard.test.tsx asserts against its own copy of the code
-
-**Priority:** P3
-**Origin:** testing + coverage review during /ship on `fix/analyze-unknown-stage` (2026-08-23).
-**Why:** the file has zero `import` statements. It re-implements the dashboard-option mapping
-inline ("Map options the same way CompareCard does (line 1545-1550)") and asserts on that copy,
-so all 15 tests pass no matter what the component does, and the line numbers it cites are stale.
-It is the only test named after the component.
-**What:** either render `CompareCard` with mocked hooks, or extract the mapping into a pure
-helper the test imports. `TrendsCard` has a ~1500-line render suite to copy the pattern from.
-
----
 
 
 ### The series dropdown is not virtualised, so a whole-system selection renders every option
@@ -303,54 +279,66 @@ consumed only by feature code. Suggested order: land the config change with the 
 captured in a baseline/ignore list, then burn the list down by directory so each PR stays
 reviewable.
 
-## Reports
-
-### A new report section type must be registered in six places
-
-**Priority:** P3
-
-Adding `error_analysis` in v0.2.69.0 required edits in six separate registries, and
-missing any one of them fails in a different way:
-
-- `packages/shared/src/entities/report-template.entity.ts` — the `ReportSectionType` union
-- `packages/shared/src/types/reports.types.ts` — `REPORT_SECTION_TYPES`, `SECTION_TYPES_WITH_TEXT`, `SECTION_TYPE_LABELS`
-- `apps/web/lib/api/reports.ts` — the web's own copy of all three
-- `apps/api/src/modules/reports/dto/create-report.dto.ts` — a third copy, used by `@IsEnum`
-- `apps/api/src/modules/reports/services/report-utils.service.ts` — `Record<ReportSectionType, string>`
-- `apps/api/src/modules/reports/services/report-template.service.ts` — `validTypes` (now derived)
-
-Only the two `Record<ReportSectionType, …>` maps fail at compile time. The array copies
-drift silently: `validTypes` rejected the new type at save time, and the test meant to
-catch that had itself drifted two types behind. Both are fixed by deriving from the
-canonical list — the remaining copies (web, DTO) should do the same, or the web should
-import from `@perfana/shared` rather than keeping its own registry.
-
-**Found:** v0.2.69.0 (2026-08-22)
-
-## Chart export
-
-### The shared copy-to-clipboard handler can leave an unhandled rejection
-
-**Priority:** P3
-
-`buildChartConfig` in `apps/web/app/test-runs/[id]/components/graphs/utils/chart-utils.ts`
-hands `navigator.clipboard.write` a `Promise<Blob>` synchronously — correct, that is what
-keeps the user-activation context. But if `renderExportPng` itself rejects (Plotly not yet
-on `window`, `toImage` throwing on a figure it cannot render), `clipboard.write` rejects,
-and the `.catch` handler calls `blobPromise.then(...)` on the *same already-rejected*
-promise. That second rejection has no handler, so the failure surfaces as an unhandled
-rejection in the console and the user gets no feedback at all — the button simply does
-nothing. The download fallback below it has the same shape.
-
-Fix: attach a `.catch` to the fallback chain, and surface a toast or a console warning so a
-failed copy is visible rather than silent.
-
-Affects every chart using `buildChartConfig`: the Graphs card, the Compare card, and (as of
-v0.2.71.0) the Error Analysis errors-over-time chart.
-
-**Found:** v0.2.71.0 (2026-08-22), during the /ship adversarial review
-
 ## Completed
+
+### Job locks are renewed for as long as the job runs
+
+Landed in v0.2.75.0 (2026-08-23).
+
+`JOB_DEFAULTS.LOCK_TTL_SECONDS` is 300 while every orchestrator stage races a 600s timeout and a
+pipeline runs ten of them, and `analyze.ts` never called `JobLockService.extendLock`. A slow run
+dropped its lock five minutes in and a second analyze for the same system/environment/workload
+could start while the first was still writing `ds_*` rows for the same test run.
+
+`JobLockService.startLockRenewal()` now heartbeats `extendLock` at a third of the TTL and returns
+a stop function the worker calls in its `finally`, before `releaseLock`. Both `acquireLock`
+callers use it — `analyze.ts` and `simple-orchestrate-reevaluate-batch.ts`, the batch being the
+longer-running of the two. Renewing rather than raising the TTL on purpose: a TTL long enough to
+cover a ten-stage pipeline is also how long a crashed worker would block the scope. A failed
+renewal logs at ERROR but does not abort — the pipeline has no cancellation path and killing a
+run mid-write is worse than the overlap. The class comment claiming a 30-minute TTL is fixed.
+
+### Graphs card analysis markers, chart-export rejections, section-type registries, shared card header
+
+Landed in v0.2.75.0 (2026-08-23).
+
+**Graphs card: analysis time range markers.** The Graphs chart shaded only the leading
+ramp-up with a flat grey rect and ignored `analysis_end_offset` entirely, so the ADAPT
+window it drew disagreed with the Compare and SLO charts. `calculateRampUpEndIndex` is
+now `calculateAnalysisWindowIndices` (start *and* end, in sample-index space) and
+`buildChartLayout` renders the same overlay `ComparisonPlot` does: dimmed excluded
+regions at both ends with an amber (`#f59e0b`) dashed boundary line at each edge.
+
+**Chart export: the copy-to-clipboard handler no longer leaks a rejection.**
+`buildChartConfig`'s clipboard fallback called `.then()` on the *same already-rejected*
+`blobPromise`, so a failed export surfaced as an unhandled rejection and a button that
+did nothing. The fallback now carries its own `.catch`, the download path's Plotly
+fallback is chained rather than fire-and-forget, both end at a `console.warn`, and
+`renderExportPng` defers its `window.Plotly` access so a missing Plotly rejects instead
+of throwing out of the modebar handler. `ClipboardItem` is feature-detected alongside
+`navigator.clipboard.write` — Firefox has the latter without the former, and the
+`ReferenceError` used to take the whole handler down. Covered by three tests that assert
+no `unhandledRejection` fires.
+
+**Reports: the section-type registry is down from six copies to two.**
+`SECTION_TYPE_LABELS` in `@perfana/shared` is now the single source — it is a
+`Record<ReportSectionType, string>`, so a new union member that misses it is a compile
+error, and `REPORT_SECTION_TYPES` / `SECTION_TYPES_WITH_TEXT` are derived from its keys.
+`create-report.dto.ts` re-exports the shared list instead of keeping a third copy behind
+`@IsEnum`. The web keeps its own copy on purpose — apps/web has no dependency on
+`@perfana/shared` and adding one would pull TypeORM into the browser bundle — but
+`apps/web/__tests__/lib/report-section-types.test.ts` now imports the shared *source*
+(test-only, never bundled) and fails the moment the two lists diverge.
+
+**Compare/Trends/Graphs: one sticky header, one presets accordion.**
+`shared/ExpandableCardHeader.tsx` (plus the exported `kickPlotlyResize` handler) and
+`shared/PresetsAccordion.tsx` replace the three byte-identical copies. Trends and Graphs
+picked up Compare's `unmountOnExit` on the accordion for free — their preset rows were
+rendering into a hidden `height:0` subtree on every card render. The orphaned
+`shared/CardHeader.tsx` and its 366-line test are deleted: they had no production
+importer, and knip could not see that because every file under `apps/web/app/**` is an
+entry point.
+
 
 ### Compare card: parallelised aggregate fetch, aggregate-row marker, legacy preset restore
 
