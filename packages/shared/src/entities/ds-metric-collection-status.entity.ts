@@ -44,8 +44,10 @@ export class DsMetricCollectionStatus {
   @Column({ type: 'integer', default: 0 })
   total_data_points!: number;
 
-  @Column({ type: 'uuid', nullable: true })
-  organization_id?: string;
+  // NOT NULL since 1796000000000-BackfillOwnedResourceOrgIds (Phase 4 shape) — a row
+  // without an organization is invisible under RLS, so the type must not permit omission.
+  @Column({ type: 'uuid', nullable: false })
+  organization_id!: string;
 
   @Column({ type: 'uuid', nullable: true })
   team_id?: string;

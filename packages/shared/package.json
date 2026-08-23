@@ -88,7 +88,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "tsc --watch",
     "lint": "eslint src --ext .ts,.tsx",
     "test": "jest --passWithNoTests",

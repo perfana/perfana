@@ -1,0 +1,15 @@
+{
+  // Build-only config: spec files must not reach dist. Dockerfile.migrations
+  // copies dist/database/migrations wholesale and TypeORM globs it as
+  // migrations/**/*.js, so a compiled *.spec.js in that tree is require()d by
+  // the migration runner and dies with "describe is not defined" before a
+  // single migration executes.
+  //
+  // The exclude lives HERE and not in tsconfig.json because `type-check`
+  // (tsc --noEmit) reads tsconfig.json and is the only gate that type-checks
+  // these specs at all — jest.config.js sets ts-jest isolatedModules: true,
+  // which is transpile-only. Excluding specs from tsconfig.json would leave
+  // them type-checked nowhere (the apps/web trap, resolved 2026-08-15).
+  "extends": "./tsconfig.json",
+  "exclude": ["**/*.spec.ts", "**/*.test.ts", "**/__tests__/**"]
+}
