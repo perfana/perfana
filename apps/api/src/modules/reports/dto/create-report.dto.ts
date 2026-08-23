@@ -15,31 +15,17 @@ import {
   IsObject,
   Matches,
 } from 'class-validator';
-import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
+import { MAX_REPORT_SECTIONS, REPORT_SECTION_TYPES } from '@perfana/shared/types';
+import type { ReportSectionType } from '@perfana/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { REPORT_DEFAULTS } from '@perfana/shared';
 
-/**
- * Report section types supported by the reporting system.
- * Uses underscores (not hyphens) as per project conventions.
- */
-export const REPORT_SECTION_TYPES = [
-  'header',
-  'text_block',
-  'slo',
-  'apdex',
-  'transaction_response_times',
-  'regressions',
-  'awr',
-  'trends',
-  'comparisons',
-  'graphs',
-  'top_10_lists',
-  'error_analysis',
-] as const;
-
-export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
+// The section-type registry lives in @perfana/shared (derived from
+// SECTION_TYPE_LABELS). Re-exported here only so the existing DTO importers keep
+// working — do not add a local copy back, it drifts silently past @IsEnum.
+export { REPORT_SECTION_TYPES };
+export type { ReportSectionType };
 
 /**
  * DTO for section configuration within a report

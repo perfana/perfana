@@ -13,6 +13,11 @@ import { env } from '../env';
 /**
  * Report section types supported by the reporting system.
  * Uses underscores (not hyphens) as per project conventions.
+ *
+ * ponytail: a deliberate copy of `REPORT_SECTION_TYPES` in `@perfana/shared` —
+ * apps/web has no dependency on that package and adding one would pull TypeORM
+ * into the browser bundle. `__tests__/lib/report-section-types.test.ts` pins the
+ * two lists together so the copy cannot drift unnoticed.
  */
 export const REPORT_SECTION_TYPES = [
   'header',
@@ -31,25 +36,14 @@ export const REPORT_SECTION_TYPES = [
 
 export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
 
+export type TextableSectionType = Exclude<ReportSectionType, 'text_block'>;
+
 /**
  * Section types that support accompanying text — every type except
- * text_block, whose `content` already is the text.
+ * text_block, whose `content` already is the text. Derived, not listed again.
  */
-export const SECTION_TYPES_WITH_TEXT = [
-  'header',
-  'slo',
-  'apdex',
-  'transaction_response_times',
-  'regressions',
-  'awr',
-  'trends',
-  'comparisons',
-  'graphs',
-  'top_10_lists',
-  'error_analysis',
-] as const;
-
-export type TextableSectionType = (typeof SECTION_TYPES_WITH_TEXT)[number];
+export const SECTION_TYPES_WITH_TEXT: readonly TextableSectionType[] =
+  REPORT_SECTION_TYPES.filter((t): t is TextableSectionType => t !== 'text_block');
 
 /**
  * Report status values

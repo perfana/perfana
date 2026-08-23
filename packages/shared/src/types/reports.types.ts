@@ -537,42 +537,12 @@ export interface ReportSummary {
 // ==================== Constants ====================
 
 /**
- * All available section types
- */
-export const REPORT_SECTION_TYPES: readonly ReportSectionType[] = [
-  'header',
-  'text_block',
-  'slo',
-  'apdex',
-  'transaction_response_times',
-  'regressions',
-  'awr',
-  'trends',
-  'comparisons',
-  'graphs',
-  'top_10_lists',
-  'error_analysis',
-] as const;
-
-/**
- * Section types that support accompanying text
- */
-export const SECTION_TYPES_WITH_TEXT: readonly TextableSectionType[] = [
-  'header',
-  'slo',
-  'apdex',
-  'transaction_response_times',
-  'regressions',
-  'awr',
-  'trends',
-  'comparisons',
-  'graphs',
-  'top_10_lists',
-  'error_analysis',
-] as const;
-
-/**
- * Section type display names
+ * Section type display names.
+ *
+ * This map is the single source of truth for the section-type registry: it is a
+ * `Record<ReportSectionType, string>`, so adding a member to the union without
+ * adding it here is a compile error, and the two arrays below are derived from
+ * its keys rather than hand-maintained alongside it.
  */
 export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   header: 'Header',
@@ -588,6 +558,21 @@ export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   top_10_lists: 'Top 10 Lists',
   error_analysis: 'Error Analysis',
 } as const;
+
+/**
+ * All available section types
+ */
+export const REPORT_SECTION_TYPES: readonly ReportSectionType[] =
+  Object.keys(SECTION_TYPE_LABELS) as ReportSectionType[];
+
+/**
+ * Section types that support accompanying text — every type except `text_block`,
+ * whose `content` already is the text.
+ */
+export const SECTION_TYPES_WITH_TEXT: readonly TextableSectionType[] =
+  REPORT_SECTION_TYPES.filter(
+    (t): t is TextableSectionType => t !== 'text_block',
+  );
 
 /**
  * Report status display labels
