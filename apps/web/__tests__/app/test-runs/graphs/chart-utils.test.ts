@@ -13,7 +13,7 @@ import {
   formatTimeLabel,
   buildTimestampMapping,
   calculateXAxisTicks,
-  calculateRampUpEndIndex,
+  calculateAnalysisWindowIndices,
   buildTrace,
   buildChartLayout,
   buildChartConfig,
@@ -587,45 +587,50 @@ describe('calculateXAxisTicks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// calculateRampUpEndIndex
+// calculateAnalysisWindowIndices
 // ---------------------------------------------------------------------------
 
-describe('calculateRampUpEndIndex', () => {
-  it('returns 0 when testRun is null', () => {
-    expect(calculateRampUpEndIndex(null, [T0, T1])).toBe(0);
+describe('calculateAnalysisWindowIndices', () => {
+  it('returns nulls when testRun is null', () => {
+    expect(calculateAnalysisWindowIndices(null, [T0, T1])).toEqual({ startIndex: null, endIndex: null });
   });
 
-  it('returns 0 when testRun has no analysis_start_offset', () => {
-    const run = makeTestRun({ analysis_start_offset: undefined });
-    expect(calculateRampUpEndIndex(run, [T0, T1])).toBe(0);
+  it('returns nulls when the run has no offsets', () => {
+    const run = makeTestRun({ analysis_start_offset: undefined, analysis_end_offset: undefined });
+    expect(calculateAnalysisWindowIndices(run, [T0, T1])).toEqual({ startIndex: null, endIndex: null });
   });
 
-  it('returns 0 when timestamps array is empty', () => {
+  it('returns nulls when timestamps array is empty', () => {
     const run = makeTestRun({ analysis_start_offset: 30 });
-    expect(calculateRampUpEndIndex(run, [])).toBe(0);
+    expect(calculateAnalysisWindowIndices(run, [])).toEqual({ startIndex: null, endIndex: null });
   });
 
-  it('returns correct index when ramp-up ends within the data range', () => {
-    // Timestamps are 10 seconds apart; analysis_start_offset = 15s → ends between T1 and T2
+  it('resolves the start offset to the first in-window sample', () => {
+    // Timestamps are 10 seconds apart; analysis_start_offset = 15s → T2 (20s) is first in-window
     const run = makeTestRun({ analysis_start_offset: 15 });
-    const timestamps = [T0, T1, T2, T3, T4];
-    const result = calculateRampUpEndIndex(run, timestamps);
-    // T2 (20s mark) is the first timestamp >= 15s after T0
-    expect(result).toBe(2);
+    expect(calculateAnalysisWindowIndices(run, [T0, T1, T2, T3, T4]).startIndex).toBe(2);
   });
 
-  it('returns last index when ramp-up duration extends beyond all data', () => {
+  it('clamps the start index when the offset extends beyond all data', () => {
     const run = makeTestRun({ analysis_start_offset: 9999 });
-    const timestamps = [T0, T1, T2];
-    const result = calculateRampUpEndIndex(run, timestamps);
-    // findIndex returns -1, so we get length - 1
-    expect(result).toBe(timestamps.length - 1);
+    expect(calculateAnalysisWindowIndices(run, [T0, T1, T2]).startIndex).toBe(2);
   });
 
-  it('returns 0 when analysis_start_offset is 0', () => {
-    const run = makeTestRun({ analysis_start_offset: 0 });
-    // analysis_start_offset is falsy (0) — guard at top returns 0
-    expect(calculateRampUpEndIndex(run, [T0, T1])).toBe(0);
+  it('resolves the end offset to the first excluded trailing sample', () => {
+    // Last timestamp is T4 (40s); analysis_end_offset = 15s → boundary at 25s, T3 (30s) is first excluded
+    const run = makeTestRun({ analysis_end_offset: 15 });
+    expect(calculateAnalysisWindowIndices(run, [T0, T1, T2, T3, T4]).endIndex).toBe(3);
+  });
+
+  it('never lets the end boundary precede the start boundary', () => {
+    const run = makeTestRun({ analysis_start_offset: 30, analysis_end_offset: 30 });
+    const { startIndex, endIndex } = calculateAnalysisWindowIndices(run, [T0, T1, T2, T3, T4]);
+    expect(endIndex).toBeGreaterThanOrEqual(startIndex!);
+  });
+
+  it('treats a 0 offset as untrimmed', () => {
+    const run = makeTestRun({ analysis_start_offset: 0, analysis_end_offset: 0 });
+    expect(calculateAnalysisWindowIndices(run, [T0, T1])).toEqual({ startIndex: null, endIndex: null });
   });
 });
 
@@ -752,7 +757,7 @@ describe('buildChartLayout', () => {
   it('returns an object with required layout keys', () => {
     const layout = buildChartLayout(
       themeColors, 'Test Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, 0, false, 800
+      [0, 5], ['00:00:00', '00:00:05'], 10, null, null, 800
     );
 
     expect(layout).toHaveProperty('xaxis');
@@ -764,7 +769,7 @@ describe('buildChartLayout', () => {
   it('does not set a plot title — the editable heading above the chart is the title', () => {
     const layout = buildChartLayout(
       themeColors, 'My Chart Title', leftConversion, null,
-      [], [], 0, 0, false, 800
+      [], [], 0, null, null, 800
     );
     expect(layout).not.toHaveProperty('title');
   });
@@ -772,7 +777,7 @@ describe('buildChartLayout', () => {
   it('uses leftConversion.label as the yaxis title', () => {
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      [], [], 5, 0, false, 800
+      [], [], 5, null, null, 800
     );
     const yaxis = layout.yaxis as { title: { text: string } };
     expect(yaxis.title.text).toBe('Time (ms)');
@@ -782,7 +787,7 @@ describe('buildChartLayout', () => {
     const rightConversion: UnitConversion = { factor: 1, label: 'Size (MB)' };
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, rightConversion,
-      [], [], 5, 0, false, 800
+      [], [], 5, null, null, 800
     );
     expect(layout).toHaveProperty('yaxis2');
     const yaxis2 = layout.yaxis2 as { title: { text: string } };
@@ -792,7 +797,7 @@ describe('buildChartLayout', () => {
   it('does not add yaxis2 when rightConversion is null', () => {
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      [], [], 5, 0, false, 800
+      [], [], 5, null, null, 800
     );
     expect(layout).not.toHaveProperty('yaxis2');
   });
@@ -801,47 +806,58 @@ describe('buildChartLayout', () => {
     const rightConversion: UnitConversion = { factor: 1, label: 'MB' };
     const withRight = buildChartLayout(
       themeColors, 'Chart', leftConversion, rightConversion,
-      [], [], 5, 0, false, 800
+      [], [], 5, null, null, 800
     ) as { margin: { r: number } };
     const withoutRight = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      [], [], 5, 0, false, 800
+      [], [], 5, null, null, 800
     ) as { margin: { r: number } };
 
     expect(withRight.margin.r).toBeGreaterThan(withoutRight.margin.r);
   });
 
-  it('includes ramp-up shape when hasRampUp is true and rampUpEndIndex > 0', () => {
+  it('dims the leading region and draws a boundary line for the start offset', () => {
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, 3, true, 800
+      [0, 5], ['00:00:00', '00:00:05'], 10, 3, null, 800
     );
-    const shapes = layout.shapes as unknown[];
-    expect(shapes).toHaveLength(1);
+    const shapes = layout.shapes as { type: string; x0: number; x1: number }[];
+    expect(shapes).toHaveLength(2);
+    expect(shapes[0]).toMatchObject({ type: 'rect', x0: 0, x1: 3 });
+    expect(shapes[1]).toMatchObject({ type: 'line', x0: 3, x1: 3 });
   });
 
-  it('excludes ramp-up shape when hasRampUp is false', () => {
+  it('dims the trailing region and draws a boundary line for the end offset', () => {
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, 3, false, 800
+      [0, 5], ['00:00:00', '00:00:05'], 10, null, 7, 800
     );
-    const shapes = layout.shapes as unknown[];
-    expect(shapes).toHaveLength(0);
+    const shapes = layout.shapes as { type: string; x0: number; x1: number }[];
+    expect(shapes).toHaveLength(2);
+    expect(shapes[0]).toMatchObject({ type: 'rect', x0: 7, x1: 9 });
+    expect(shapes[1]).toMatchObject({ type: 'line', x0: 7, x1: 7 });
   });
 
-  it('excludes ramp-up shape when rampUpEndIndex is 0', () => {
+  it('draws both boundaries when the window is trimmed at each end', () => {
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, 0, true, 800
+      [0, 5], ['00:00:00', '00:00:05'], 10, 2, 8, 800
     );
-    const shapes = layout.shapes as unknown[];
-    expect(shapes).toHaveLength(0);
+    expect(layout.shapes as unknown[]).toHaveLength(4);
+  });
+
+  it('emits no shapes when the window is untrimmed', () => {
+    const layout = buildChartLayout(
+      themeColors, 'Chart', leftConversion, null,
+      [0, 5], ['00:00:00', '00:00:05'], 10, null, null, 800
+    );
+    expect(layout.shapes as unknown[]).toHaveLength(0);
   });
 
   it('sets container width on the layout', () => {
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      [], [], 5, 0, false, 1200
+      [], [], 5, null, null, 1200
     );
     expect(layout.width).toBe(1200);
   });
@@ -849,7 +865,7 @@ describe('buildChartLayout', () => {
   it('applies theme colors to font, grid, and background', () => {
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      [], [], 5, 0, false, 800
+      [], [], 5, null, null, 800
     );
     const font = layout.font as { color: string };
     expect(font.color).toBe(themeColors.textColor);
@@ -862,7 +878,7 @@ describe('buildChartLayout', () => {
     const tickLabels = ['00:00:00', '00:00:20', '00:00:40'];
     const layout = buildChartLayout(
       themeColors, 'Chart', leftConversion, null,
-      tickValues, tickLabels, 5, 0, false, 800
+      tickValues, tickLabels, 5, null, null, 800
     );
     const xaxis = layout.xaxis as { tickvals: number[]; ticktext: string[] };
     expect(xaxis.tickvals).toEqual(tickValues);
@@ -987,6 +1003,70 @@ describe('buildChartConfig', () => {
     it('renders the clipboard copy at the size the chart is displayed at', async () => {
       await clickButton('Copy to Clipboard', 'My Chart');
       expect(toImage.mock.calls[0][1]).toMatchObject({ width: 900, height: 400, scale: 2 });
+    });
+
+    // A failed export used to leave the second rejection unhandled: the button did
+    // nothing and the only trace was an unhandled-rejection warning in the console.
+    describe('when the export fails', () => {
+      let unhandled: jest.Mock;
+      let warn: jest.SpyInstance;
+
+      beforeEach(() => {
+        unhandled = jest.fn();
+        process.on('unhandledRejection', unhandled);
+        warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      });
+
+      afterEach(() => {
+        process.off('unhandledRejection', unhandled);
+        warn.mockRestore();
+      });
+
+      // Let every queued microtask AND the macrotask that reports unhandled
+      // rejections run, so `unhandled` would have fired if one escaped.
+      const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+      it('warns instead of leaving an unhandled rejection when the clipboard path fails', async () => {
+        toImage.mockRejectedValue(new Error('toImage blew up'));
+        // jsdom ships neither, and the clipboard path needs both to be reachable
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).ClipboardItem = class { constructor(_items: unknown) {} };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (navigator as any).clipboard = { write: jest.fn().mockRejectedValue(new Error('denied')) };
+
+        await clickButton('Copy to Clipboard', 'My Chart');
+        await settle();
+
+        expect(unhandled).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalled();
+      });
+
+      it('warns instead of leaving an unhandled rejection when both download paths fail', async () => {
+        toImage.mockRejectedValue(new Error('toImage blew up'));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).Plotly.downloadImage = jest.fn(() => { throw new Error('no Plotly'); });
+
+        await clickButton('Download as PNG', 'My Chart');
+        await settle();
+
+        expect(unhandled).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalled();
+      });
+
+      it('rejects rather than throwing when Plotly is not on window yet', async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (window as any).Plotly;
+
+        expect(() => {
+          const config = buildChartConfig('My Chart');
+          const buttons = config.modeBarButtonsToAdd as Array<{ name: string; click: (gd: unknown) => void }>;
+          buttons.find(b => b.name === 'Download as PNG')!.click(gd);
+        }).not.toThrow();
+        await settle();
+
+        expect(unhandled).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalled();
+      });
     });
   });
 

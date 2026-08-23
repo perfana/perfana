@@ -18,7 +18,7 @@ import {
   getChartSeriesColor,
   buildTimestampMapping,
   calculateXAxisTicks,
-  calculateRampUpEndIndex,
+  calculateAnalysisWindowIndices,
   buildTrace,
   buildChartLayout,
   buildChartConfig,
@@ -43,7 +43,7 @@ const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
  * - Automatic color assignment from palette
  * - Smart Y-axis assignment (single or dual axis)
  * - Unit conversion (s/ms, percentunit)
- * - Ramp-up period shading
+ * - Analysis time range (ADAPT window) markers
  * - Interactive hover with unified mode
  * - Copy to clipboard support
  * - Responsive design
@@ -97,8 +97,9 @@ export default function GraphsChart({
     // Calculate tick values and labels
     const { tickValues, tickLabels } = calculateXAxisTicks(sortedTimestamps);
 
-    // Calculate ramp-up end index
-    const rampUpEndIndex = calculateRampUpEndIndex(testRun, sortedTimestamps);
+    // Analysis time range (ADAPT window) boundaries in sample-index space
+    const { startIndex: analysisStartIndex, endIndex: analysisEndIndex } =
+      calculateAnalysisWindowIndices(testRun, sortedTimestamps);
 
     // Determine unit conversions for left and right axes
     const leftAxisData = axisAssignment.leftAxisSeries.flatMap(s => seriesData.get(s.id) || []);
@@ -141,8 +142,8 @@ export default function GraphsChart({
       tickValues,
       tickLabels,
       sortedTimestamps.length,
-      rampUpEndIndex,
-      Boolean(testRun?.analysis_start_offset),
+      analysisStartIndex,
+      analysisEndIndex,
       containerWidth
     );
 

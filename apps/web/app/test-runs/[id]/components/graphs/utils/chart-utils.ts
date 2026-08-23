@@ -247,27 +247,69 @@ export function calculateXAxisTicks(
   return { tickValues, tickLabels };
 }
 
+// Amber dashed boundary, matching the SLO and Compare charts so the ADAPT
+// analysis window reads identically across every surface.
+const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
+
 /**
- * Calculate ramp-up end index based on test run ramp_up duration
+ * Analysis-window boundaries in sample-index space, derived from the test run's
+ * `analysis_start_offset` / `analysis_end_offset` (seconds trimmed off the head and
+ * tail). `startIndex` is the first in-window sample, `endIndex` the first excluded
+ * trailing sample; `null` means that edge is not trimmed.
  */
-export function calculateRampUpEndIndex(
+export function calculateAnalysisWindowIndices(
   testRun: TestRun | null,
   sortedTimestamps: string[]
-): number {
-  if (!testRun?.analysis_start_offset || sortedTimestamps.length === 0) {
-    return 0;
+): { startIndex: number | null; endIndex: number | null } {
+  const n = sortedTimestamps.length;
+  if (!testRun || n === 0) return { startIndex: null, endIndex: null };
+
+  const firstTime = new Date(sortedTimestamps[0]).getTime();
+  const lastTime = new Date(sortedTimestamps[n - 1]).getTime();
+
+  let startIndex: number | null = null;
+  if (testRun.analysis_start_offset) {
+    const boundary = firstTime + testRun.analysis_start_offset * 1000;
+    const found = sortedTimestamps.findIndex(ts => new Date(ts).getTime() >= boundary);
+    startIndex = found === -1 ? n - 1 : found;
   }
 
-  const testStartTime = new Date(sortedTimestamps[0]).getTime();
-  const rampUpEndTime = testStartTime + (testRun.analysis_start_offset * 1000); // Convert seconds to ms
+  let endIndex: number | null = null;
+  if (testRun.analysis_end_offset) {
+    const boundary = lastTime - testRun.analysis_end_offset * 1000;
+    const found = sortedTimestamps.findIndex(ts => new Date(ts).getTime() > boundary);
+    endIndex = found === -1 ? n - 1 : Math.max(startIndex ?? 0, found);
+  }
 
-  // Find the index of the first timestamp after ramp-up period
-  const rampUpEndIndex = sortedTimestamps.findIndex(ts =>
-    new Date(ts).getTime() >= rampUpEndTime
-  );
+  return { startIndex, endIndex };
+}
 
-  // If not found, it means ramp-up extends beyond all data
-  return rampUpEndIndex === -1 ? sortedTimestamps.length - 1 : rampUpEndIndex;
+/**
+ * Dim the excluded leading/trailing regions and mark each boundary with an amber
+ * dashed line. Mirrors `ComparisonPlot`'s overlay so both cards look the same.
+ */
+export function buildAnalysisWindowShapes(
+  startIndex: number | null,
+  endIndex: number | null,
+  n: number,
+  excludedColor: string
+): Record<string, unknown>[] {
+  const shapes: Record<string, unknown>[] = [];
+  const dimRect = (x0: number, x1: number) => ({
+    type: 'rect' as const, x0, x1, y0: 0, y1: 1, yref: 'paper' as const,
+    line: { width: 0 }, fillcolor: excludedColor, layer: 'below' as const, opacity: 0.3,
+  });
+  const boundaryLine = (x: number) => ({
+    type: 'line' as const, x0: x, x1: x, y0: 0, y1: 1, yref: 'paper' as const,
+    line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const }, layer: 'below' as const,
+  });
+  if (startIndex !== null && startIndex > 0) {
+    shapes.push(dimRect(0, startIndex), boundaryLine(startIndex));
+  }
+  if (endIndex !== null && endIndex < n - 1) {
+    shapes.push(dimRect(endIndex, n - 1), boundaryLine(endIndex));
+  }
+  return shapes;
 }
 
 /**
@@ -332,8 +374,8 @@ export function buildChartLayout(
   tickValues: number[],
   tickLabels: string[],
   timestampCount: number,
-  rampUpEndIndex: number,
-  hasRampUp: boolean,
+  analysisStartIndex: number | null,
+  analysisEndIndex: number | null,
   containerWidth: number
 ): Record<string, unknown> {
   const layout: Record<string, unknown> = {
@@ -421,18 +463,12 @@ export function buildChartLayout(
     margin: { t: 50, b: 100, l: 60, r: rightConversion ? 60 : 20 },
     width: containerWidth,
     height: 500,
-    shapes: hasRampUp && rampUpEndIndex > 0 ? [{
-      type: 'rect',
-      x0: 0,
-      y0: 0,
-      x1: rampUpEndIndex,
-      y1: 1,
-      yref: 'paper',
-      line: { width: 0 },
-      fillcolor: themeColors.gridColor,
-      layer: 'below',
-      opacity: 0.15
-    }] : []
+    shapes: buildAnalysisWindowShapes(
+      analysisStartIndex,
+      analysisEndIndex,
+      timestampCount,
+      themeColors.gridColor
+    )
   };
 
   // Add right Y-axis if needed
@@ -527,16 +563,23 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([arr], { type: mime });
 }
 
+/** Last resort when both the export and its fallback fail, so it is never silent. */
+function warnExportFailed(err: unknown): void {
+  console.warn('[chart-export] could not export the chart image', err);
+}
+
 /** Render the chart to a PNG blob with the export title applied. */
 function renderExportPng(
   gd: unknown,
   chartName: string | undefined,
   size: { width: number; height: number }
 ): Promise<Blob> {
+  // Deferred so a missing window.Plotly rejects rather than throwing synchronously
+  // out of the modebar click handler. clipboard.write still gets its promise inline.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (window as any).Plotly
+  return Promise.resolve().then(() => (window as any).Plotly
     .toImage(buildExportFigure(gd, chartName), { format: 'png', ...size, scale: 2 })
-    .then(dataUrlToBlob);
+    .then(dataUrlToBlob));
 }
 
 /**
@@ -577,14 +620,17 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
             .catch(() => {
               // Fall back to Plotly's own download so the button is never a dead end.
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (window as any).Plotly.downloadImage(gd, {
+              return (window as any).Plotly.downloadImage(gd, {
                 format: 'png',
                 filename: exportFilename(chartName),
                 width: 1200,
                 height: 600,
                 scale: 2
               });
-            });
+            })
+            // Both paths can fail (Plotly absent, toImage throwing). Without this the
+            // second rejection is unhandled and the button silently does nothing.
+            .catch(warnExportFailed);
         }
       },
       {
@@ -597,18 +643,20 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
         },
         click: function(gd: unknown) {
           const blobPromise = renderExportPng(gd, chartName, plotSize(gd));
+          // If renderExportPng rejected, blobPromise is ALREADY rejected here — the
+          // fallback must carry its own .catch or the second rejection is unhandled.
+          const fallbackToDownload = () =>
+            blobPromise.then((blob) => downloadBlob(blob, chartName)).catch(warnExportFailed);
 
           // clipboard.write must be called synchronously with the Promise<Blob> to
           // keep the user-activation context, otherwise the browser treats it as a
           // download instead.
-          if (navigator.clipboard && 'write' in navigator.clipboard) {
+          if (navigator.clipboard && 'write' in navigator.clipboard && typeof ClipboardItem !== 'undefined') {
             navigator.clipboard.write([
               new ClipboardItem({ 'image/png': blobPromise })
-            ]).catch(() => {
-              blobPromise.then((blob) => downloadBlob(blob, chartName));
-            });
+            ]).catch(fallbackToDownload);
           } else {
-            blobPromise.then((blob) => downloadBlob(blob, chartName));
+            fallbackToDownload();
           }
         }
       }
