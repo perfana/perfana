@@ -68,6 +68,8 @@ vi.mock('../../../services/JobLockService.js', () => ({
       lockKey: 'test-lock-key',
     }),
     releaseLock: vi.fn().mockResolvedValue(true),
+    // Returns the stop function the worker calls in its finally.
+    startLockRenewal: vi.fn().mockReturnValue(vi.fn()),
   })),
 }));
 

@@ -181,6 +181,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
     let lockService: JobLockService | null = null;
     let progressReporter: ProgressReporter | null = null;
     let lockAcquired = false;
+    let stopLockRenewal: (() => void) | null = null;
     let testRunInfo: { testRunId: string; systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
 
     try {
@@ -255,6 +256,17 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         testRunId: testRunInfo.testRunId,
         scope: `${testRunInfo.systemUnderTestId}:${testRunInfo.testEnvironment}:${testRunInfo.workload}`,
       });
+
+      // The lock TTL (5 min) is far shorter than this pipeline runs; renew it until
+      // we release, or a second job for the same scope starts mid-run.
+      stopLockRenewal = lockService.startLockRenewal(
+        testRunInfo.systemUnderTestId,
+        testRunInfo.testEnvironment,
+        testRunInfo.workload,
+        job.id!,
+        testRunInfo.testRunId,
+        'reevaluate' as JobType
+      );
 
       // Define stages for progress tracking
       const stages: string[] = [];
@@ -881,6 +893,10 @@ ${breakdown}
         }],
       };
     } finally {
+      // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
+      // of a lock we just handed back.
+      stopLockRenewal?.();
+
       // Always release lock and Redis connection in finally block
       if (lockAcquired && lockService && testRunInfo) {
         try {
