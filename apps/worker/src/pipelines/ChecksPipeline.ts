@@ -443,6 +443,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         test_environment,
         workload,
         organization_id,
+        team_id,
         start_time,
         end_time,
         ramp_up
@@ -462,6 +463,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       test_environment: row.test_environment,
       workload: row.workload,
       organization_id: row.organization_id,
+      team_id: row.team_id,
       start_time: row.start_time,
       end_time: row.end_time,
       ramp_up: row.ramp_up
@@ -672,11 +674,11 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         average_all, evaluate_type, exclude_ramp_up_time, ramp_up,
         match_pattern, requirement, panel_average, meets_requirement,
         targets, validate_with_default_if_no_data, validate_with_default_if_no_data_value,
-        tags, created_at, updated_at
+        tags, organization_id, team_id, created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
+        $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, NOW(), NOW()
       )
     `;
 
@@ -714,6 +716,8 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       false,                                     // validate_with_default_if_no_data
       0,                                         // validate_with_default_if_no_data_value
       [],                                        // tags
+      testRun.organization_id,                   // organization_id
+      testRun.team_id ?? null,                   // team_id
     ]);
 
     this.logger.debug(
@@ -750,11 +754,11 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         average_all, evaluate_type, exclude_ramp_up_time, ramp_up,
         match_pattern, requirement, panel_average, meets_requirement,
         targets, validate_with_default_if_no_data, validate_with_default_if_no_data_value,
-        tags, created_at, updated_at
+        tags, organization_id, team_id, created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, $23, $24, $25, $26, $27, $28, NOW(), NOW()
+        $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, NOW(), NOW()
       )
     `;
 
@@ -793,6 +797,8 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       false,                                       // validate_with_default_if_no_data
       0,                                           // validate_with_default_if_no_data_value
       [],                                          // tags
+      testRun.organization_id,                     // organization_id
+      testRun.team_id ?? null,                     // team_id
     ]);
 
     this.logger.debug(

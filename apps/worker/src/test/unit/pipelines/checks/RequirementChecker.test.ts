@@ -23,6 +23,7 @@ const createMockTestRun = (overrides?: Partial<TestRun>): TestRun => ({
   system_under_test_id: 'sut-1',
   test_environment: 'production',
   workload: 'load-test',
+  organization_id: 'org-1',
   ramp_up: 30,
   ...overrides,
 });
@@ -1048,6 +1049,7 @@ describe('RequirementChecker', () => {
         metric_name: null,
         metric_unit: 'ms',
         benchmark_id: 'bench-1',
+        organization_id: 'org-1',
         status: 'COMPLETE',
         message: 'All 1 targets meet requirements',
         average_all: false,
@@ -1073,6 +1075,12 @@ describe('RequirementChecker', () => {
       expect(sql).toContain('INSERT INTO check_results');
       expect(params).toContain('run-1');
       expect(params).toContain('bench-1');
+      expect(params).toContain('org-1');
+      // guards against column/placeholder/param drift (organization_id is NOT NULL)
+      const columns = sql.split('(')[1].split(')')[0].split(',').length;
+      const placeholders = (sql.match(/\$\d+/g) as string[]).length;
+      expect(columns).toBe(placeholders + 2); // created_at, updated_at use NOW()
+      expect(params).toHaveLength(placeholders);
     });
 
     it('should serialise requirement and targets as JSON when saving', async () => {
@@ -1242,4 +1250,40 @@ describe('RequirementChecker', () => {
       expect(result!.targets[0].meets_requirement).toBeNull();
     });
   });
+
+  // ─── organization_id propagation (RLS NOT NULL on check_results) ─────────────
+
+  describe('createCheckResult — organization_id', () => {
+    it('should propagate testRun.organization_id into the CheckResult', async () => {
+      // Arrange
+      const testRun = createMockTestRun({ organization_id: 'org-xyz' });
+      const benchmark = createMockBenchmark();
+      const aggregation = createMockAggregationResult([{ target: 't', value: 50 }]);
+
+      // Act
+      const result = await checker.createCheckResult(testRun, benchmark, aggregation);
+
+      // Assert
+      expect(result!.organization_id).toBe('org-xyz');
+    });
+
+    it('should propagate testRun.team_id into the CheckResult', async () => {
+      const testRun = createMockTestRun({ organization_id: 'org-xyz', team_id: 'team-7' });
+      const result = await checker.createCheckResult(
+        testRun, createMockBenchmark(), createMockAggregationResult([{ target: 't', value: 50 }]),
+      );
+      expect(result!.team_id).toBe('team-7');
+    });
+
+    it('should fail loud, naming the run, when testRun has no organization_id', async () => {
+      // legacy data the 1796 backfill refused to constrain — must not surface as a bare 23502
+      const testRun = createMockTestRun({ organization_id: undefined });
+      await expect(
+        checker.createCheckResult(
+          testRun, createMockBenchmark(), createMockAggregationResult([{ target: 't', value: 50 }]),
+        ),
+      ).rejects.toThrow(/test-run-abc has no organization_id/);
+    });
+  });
+
 });

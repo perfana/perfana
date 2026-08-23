@@ -1434,4 +1434,89 @@ describe('ChecksPipeline', () => {
       expect(result.failed_test_runs[0].test_run_id).toBe('test-run-1');
     });
   });
+
+  // ─── check_results organization_id (RLS NOT NULL) ──────────────────────────
+
+  describe('check_results organization_id', () => {
+    const testRun = {
+      test_run_id: 'run-1',
+      system_under_test_id: 'sut-1',
+      test_environment: 'production',
+      workload: 'load-test',
+      ramp_up: 30,
+      organization_id: 'org-1',
+    } as any;
+
+    // guards against column/placeholder/param drift (organization_id is NOT NULL)
+    const expectOrgAndNoDrift = (sql: string, params: unknown[]) => {
+      expect(sql).toContain('INSERT INTO check_results');
+      expect(sql).toContain('organization_id');
+      expect(params).toContain('org-1');
+      const columns = sql.split('(')[1].split(')')[0].split(',').length;
+      const placeholders = (sql.match(/\$\d+/g) as string[]).length;
+      expect(columns).toBe(placeholders + 2); // created_at, updated_at use NOW()
+      expect(params).toHaveLength(placeholders);
+    };
+
+    it('saveApdexCheckResult writes the test run organization_id', async () => {
+      // Arrange
+      const benchmark = {
+        id: 'bench-1',
+        transaction_name: 'homepage',
+        exclude_ramp_up_time: true,
+        include_failed_requests: false,
+      } as any;
+      const apdexResult = {
+        status: 'COMPLETE',
+        message: 'ok',
+        meets_requirement: true,
+        requirement: { min_score: 0.9, threshold_ms: 500 },
+        apdex_result: {
+          apdex_score: 0.95,
+          transaction_name: 'homepage',
+          satisfied_count: 9,
+          tolerating_count: 1,
+          frustrated_count: 0,
+          total_count: 10,
+          avg_response_time_ms: 120,
+        },
+      } as any;
+
+      // Act
+      await (pipeline as any).saveApdexCheckResult(mockManager, testRun, benchmark, apdexResult);
+
+      // Assert
+      expect(mockManager.query).toHaveBeenCalledOnce();
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expectOrgAndNoDrift(sql, params);
+    });
+
+    it('saveAggregatedCheckResult writes the test run organization_id', async () => {
+      // Arrange
+      const benchmark = {
+        id: 'bench-2',
+        exclude_ramp_up_time: false,
+        aggregate_metric: 'error_percentage',
+        aggregate_stat: 'mean',
+        requirement_operator: '<=',
+        requirement_value: 1,
+        panel_title: 'Error rate',
+      } as any;
+      const aggResult = {
+        status: 'COMPLETE',
+        message: 'ok',
+        meets_requirement: true,
+        actual_value: 0.4,
+      } as any;
+
+      // Act
+      await (pipeline as any).saveAggregatedCheckResult(mockManager, testRun, benchmark, aggResult);
+
+      // Assert
+      expect(mockManager.query).toHaveBeenCalledOnce();
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expectOrgAndNoDrift(sql, params);
+    });
+  });
+
 });

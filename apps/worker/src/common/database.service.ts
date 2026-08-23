@@ -573,8 +573,8 @@ export class WorkerDatabaseService implements OnModuleInit {
     // Ensure row exists atomically using the canonical unique key.
     await this.dataSource.query(
       `INSERT INTO ds_metric_collection_status
-         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, created_at, updated_at)
-       VALUES ($1, $2, $3, '[]'::jsonb, '[]'::jsonb, false, 0, NOW(), NOW())
+         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, organization_id, team_id, created_at, updated_at)
+       VALUES ($1::text, $2, $3, '[]'::jsonb, '[]'::jsonb, false, 0, (SELECT organization_id FROM test_runs WHERE test_run_id = $1::text), (SELECT team_id FROM test_runs WHERE test_run_id = $1::text), NOW(), NOW())
        ON CONFLICT (test_run_id, source_type, source_id) DO NOTHING`,
       [status.test_run_id, status.source_type, sourceId]
     );
@@ -659,8 +659,8 @@ export class WorkerDatabaseService implements OnModuleInit {
     // "failed collection ranges". See issue #136, Defect B.
     await this.dataSource.query(
       `INSERT INTO ds_metric_collection_status
-         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, last_collected_at, created_at, updated_at)
-       VALUES ($1, $2, $3, $4::jsonb, '[]'::jsonb, false, 0, NOW(), NOW(), NOW())
+         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, last_collected_at, organization_id, team_id, created_at, updated_at)
+       VALUES ($1::text, $2, $3, $4::jsonb, '[]'::jsonb, false, 0, NOW(), (SELECT organization_id FROM test_runs WHERE test_run_id = $1::text), (SELECT team_id FROM test_runs WHERE test_run_id = $1::text), NOW(), NOW())
        ON CONFLICT (test_run_id, source_type, source_id)
        DO UPDATE SET
          collected_ranges = ds_metric_collection_status.collected_ranges || $4::jsonb,
@@ -676,6 +676,8 @@ export class WorkerDatabaseService implements OnModuleInit {
            '[]'::jsonb
          ),
          last_collected_at = NOW(),
+         organization_id = COALESCE(ds_metric_collection_status.organization_id, EXCLUDED.organization_id),
+         team_id = COALESCE(ds_metric_collection_status.team_id, EXCLUDED.team_id),
          updated_at = NOW()`,
       [testRunId, sourceType, normalizedSourceId, `[${rangeJson}]`]
     );
@@ -706,8 +708,8 @@ export class WorkerDatabaseService implements OnModuleInit {
     // Ensure the row exists atomically (no duplicate creation race)
     await this.dataSource.query(
       `INSERT INTO ds_metric_collection_status
-         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, created_at, updated_at)
-       VALUES ($1, $2, $3, '[]'::jsonb, '[]'::jsonb, false, 0, NOW(), NOW())
+         (test_run_id, source_type, source_id, collected_ranges, failed_ranges, is_complete, total_data_points, organization_id, team_id, created_at, updated_at)
+       VALUES ($1::text, $2, $3, '[]'::jsonb, '[]'::jsonb, false, 0, (SELECT organization_id FROM test_runs WHERE test_run_id = $1::text), (SELECT team_id FROM test_runs WHERE test_run_id = $1::text), NOW(), NOW())
        ON CONFLICT (test_run_id, source_type, source_id) DO NOTHING`,
       [testRunId, sourceType, normalizedSourceId]
     );
