@@ -132,6 +132,13 @@ enableReadyCheck: false
 |---|---|---|
 | `IncrementalCollectionScheduler` | Every 2 min | Collect metrics for running tests |
 | `StuckJobScanner` | Every 2 min | Detect and recover stuck jobs |
+| `AuditRetentionManager` | On boot + 03:00 UTC daily | Delete `audit_logs` rows past `AUDIT_RETENTION_MONTHS` (default 24) |
+
+> [!note] Schedulers cannot issue DDL
+> The worker's pool enters every connection as `perfana_system` (`createSystemDataSource`), which
+> has `USAGE` but not `CREATE` on schema `public` and owns no table. A scheduled task can read and
+> write rows; it cannot create, alter or drop one. `AuditRetentionManager` replaced a partition
+> manager that had been failing silently on exactly this for months.
 
 ## Startup Sequence
 

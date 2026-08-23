@@ -46,6 +46,21 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 | `ApiKey` | Programmatic access tokens |
 | `AuditLog` | CRUD operation audit trail |
 
+> [!info] `audit_logs` is partitioned
+> `audit_logs` is RANGE-partitioned by month on `timestamp`. The consolidated schema ships the
+> months that existed when its dump was taken plus **`audit_logs_default`**, a DEFAULT partition
+> that accepts any date — nothing at runtime can add partitions, because the app roles hold
+> `USAGE` but not `CREATE` on schema `public`, so without the default a write past the last
+> shipped month would be rejected and the audit trail would go silently empty.
+>
+> Every partition has RLS enabled with no policies of its own. The policies live on the parent, so
+> parent-routed reads and writes work normally while `SELECT * FROM audit_logs_2026_07` is
+> deny-all — without this, a partition is directly readable by any role holding its grants.
+>
+> Retention is `AuditRetentionManager` in the worker: a nightly `DELETE` of rows past
+> `AUDIT_RETENTION_MONTHS` (default 24). Not `DROP TABLE` — that needs table ownership the worker's
+> `perfana_system` role does not have.
+
 ### Test Domain
 
 | Entity | Description |

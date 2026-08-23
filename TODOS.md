@@ -75,10 +75,23 @@ column had been missing in production for a full release.
 **Left over from the backfill:** resolved for three of the four tables in v0.2.72.0 —
 `ds_metric_collection_status` inherits via its `test_runs` FK, and `check_results` /
 `ds_compare_config` / `ds_metric_collection_status` are NOT NULL on both greenfield (Phase 6)
-and existing databases (1796). Still open: `ds_change_points` — no writer exists anywhere in the
-code, its read path still carries an `OR organization_id IS NULL` escape
-(`ControlGroupsPipeline`), and legacy NULL rows there stay until someone decides whether to fold
-it into a follow-up backfill or leave it deliberate (owner call, raised 2026-08-23).
+and existing databases (1796).
+
+`ds_change_points` — **the backfill question is moot** (checked 2026-08-23 against the running
+deploy): the column is already `NOT NULL` there, and the table holds 0 rows, so there is nothing
+to backfill and no owner call to make. What is actually left is dead code:
+
+- `ControlGroupsPipeline.ts:375` `(cp.organization_id = $5 OR cp.organization_id IS NULL)` and
+  `:449` (the same escape on `test_runs`) can never match — both columns are NOT NULL.
+  `ControlGroupStatisticsPipeline.ts` carries 8 more of the same shape on `application_dashboards`
+  (also NOT NULL) and the Dynatrace query table.
+- The only writers of `ds_change_points` anywhere are two worker integration tests
+  (`control-groups-pipeline`, `adapt-pipeline`), and their `INSERT` omits `organization_id`. Against
+  a Phase 4-shaped database that INSERT violates the NOT NULL constraint, so those cases only pass
+  where the test database is older than the constraint. Worth confirming before the next time
+  someone trusts them.
+
+P3 cleanup, no data risk either way.
 
 ---
 
@@ -100,6 +113,32 @@ on the path every page load waits for.
 Pass criterion (already encoded in the script): cold p99 < 200ms, warm p99 < 30ms.
 
 ---
+
+---
+
+### Nothing at runtime can create a table, so anything time-shaped must ship with the schema
+
+**Priority:** P3
+**Origin:** the empty-audit-trail bug (v0.2.73.0, 2026-08-23).
+**Status:** the instance is fixed — `audit_logs` has a DEFAULT partition and retention is a
+DELETE. The general rule is not enforced anywhere.
+**Why:** `AuditPartitionManager` was written when the worker connected as the database owner.
+Phase 5b moved every worker connection to `perfana_system`, which holds `USAGE` but not `CREATE`
+on schema `public` and owns no table, so both of its jobs — create next month's partition, drop
+the expired one — had been failing since that deploy. Nobody noticed for months because the
+failure surfaced as one ERROR line a day and an empty table, and an empty audit table looks
+exactly like a quiet system. Any future design that assumes a background job can issue DDL has
+the same shape.
+**What:**
+1. Two leftovers to sweep once their rows age out (or now, as owner): `audit_logs_2026_05..07`
+   are empty ranges that exist only because the consolidated dump was taken while they did.
+   `DROP TABLE` as `perfana` whenever convenient; nothing reads them.
+2. If another partitioned table appears, it needs a DEFAULT partition in the consolidated schema
+   and RLS on every partition — `rls-policy-coverage.snapshot.spec.ts` now covers partitions, so
+   the RLS half fails the snapshot on its own, but nothing catches a missing default.
+3. Consider a boot-time assertion in the worker: if the connection's role cannot `CREATE` in
+   `public`, say so once at startup rather than once per scheduled DDL attempt. Same family as
+   "Fail fast when the API's DB role cannot bypass RLS" in Completed.
 
 ---
 

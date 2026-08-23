@@ -70,6 +70,12 @@ All configuration is managed through environment variables, loaded from `.env.lo
 | `GRAFANA_DB_USE_DIRECT_ACCESS` | `false` | Direct DB access |
 | `GRAFANA_DB_TYPE` | — | `mysql` or `postgres` |
 
+## Worker
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUDIT_RETENTION_MONTHS` | `24` | How long `audit_logs` rows are kept. `AuditRetentionManager` deletes older rows on boot and daily at 03:00 UTC, and logs the row count it removed. |
+
 ## External Integrations
 
 | Variable | Description |
