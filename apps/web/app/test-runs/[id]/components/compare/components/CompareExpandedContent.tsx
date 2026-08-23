@@ -5,11 +5,7 @@ import {
   Box,
   Typography,
   CircularProgress,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
 } from '@mui/material';
-import { ExpandMore } from '@mui/icons-material';
 import {
   ApplicationDashboard,
   Panel,
@@ -29,6 +25,7 @@ import {
 import ComparePresetsTable from '../ComparePresetsTable';
 import { ComparePreset } from '../ComparePresetsTable';
 import { TestRun } from '@/types/test-runs';
+import PresetsAccordion from '../../shared/PresetsAccordion';
 
 interface CompareExpandedContentProps {
   // Loading state
@@ -193,31 +190,15 @@ export function CompareExpandedContent({
             </Box>
           )}
 
-        {/* Presets — out of the way until you want one, as in Trends */}
-        <Accordion
-          disableGutters
-          elevation={0}
-          // unmountOnExit or the claim above is only visual: MUI's Accordion wraps children in a
-          // Collapse that keeps them mounted, so every preset row would render into a hidden
-          // height:0 subtree on each render of this component.
-          slotProps={{ transition: { unmountOnExit: true } }}
-          sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, '&:before': { display: 'none' } }}
-        >
-          <AccordionSummary expandIcon={<ExpandMore />}>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              Saved presets{presetsLoading ? '' : ` (${presets.length})`}
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails>
-            <ComparePresetsTable
-              presets={presets}
-              loading={presetsLoading}
-              currentUserId={currentUserId}
-              onSelectPreset={onApplyPreset}
-              onDeletePreset={onDeletePreset}
-            />
-          </AccordionDetails>
-        </Accordion>
+        <PresetsAccordion count={presets.length} loading={presetsLoading}>
+          <ComparePresetsTable
+            presets={presets}
+            loading={presetsLoading}
+            currentUserId={currentUserId}
+            onSelectPreset={onApplyPreset}
+            onDeletePreset={onDeletePreset}
+          />
+        </PresetsAccordion>
         </>
       ) : (
         <Box sx={{ textAlign: 'center', py: 3 }}>
