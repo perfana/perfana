@@ -3,7 +3,32 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
 import { getDatabaseService } from '../common/database-accessor.js';
 
-const RETENTION_MONTHS = Number.parseInt(process.env.AUDIT_RETENTION_MONTHS ?? '24', 10);
+const DEFAULT_RETENTION_MONTHS = 24;
+const DEFAULT_BATCH_SIZE = 10_000;
+
+/**
+ * Validated, not just parsed. The value is bound into `make_interval(months => $1)`, so a typo
+ * has teeth in both directions: `forever` or `24m` yields NaN and every run throws into cron()'s
+ * catch (one ERROR line a day, retention silently never happens — the failure shape this file
+ * exists to end), while `0` makes the predicate `timestamp < now()` and erases the whole audit
+ * trail on the next boot. The partition manager this replaced only ever DROPped whole months
+ * strictly older than the cutoff, so it survived the same typo.
+ */
+export function parseRetentionMonths(raw: string | undefined): number {
+  if (raw === undefined) {
+    return DEFAULT_RETENTION_MONTHS;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    new Logger(`AuditRetentionManager`).warn(
+      `AUDIT_RETENTION_MONTHS='${raw}' is not a positive integer, falling back to ${DEFAULT_RETENTION_MONTHS}`,
+    );
+    return DEFAULT_RETENTION_MONTHS;
+  }
+  return parsed;
+}
+
+const RETENTION_MONTHS = parseRetentionMonths(process.env.AUDIT_RETENTION_MONTHS);
 
 /**
  * AuditRetentionManager (Phase 5a)
@@ -23,10 +48,9 @@ const RETENTION_MONTHS = Number.parseInt(process.env.AUDIT_RETENTION_MONTHS ?? '
  * retention is a DELETE, which this role is granted and which RLS permits (the system pool
  * carries a super-admin GUC, so rls_audit_logs_delete passes).
  *
- * ponytail: one unbatched DELETE. Fine while audit volume is modest; if the first run after
- * a long retention gap holds locks too long, chunk it with a LIMIT-ed CTE loop.
- * Any monthly partitions left over from before are empty once their rows age out and can be
- * dropped by hand as the table owner.
+ * Any monthly partitions left over from before are empty once their rows age out. Dropping them
+ * is an owner-only chore and not free: now that audit_logs_default holds rows, re-introducing a
+ * monthly range means ATTACH PARTITION full-scans the default under ACCESS EXCLUSIVE.
  */
 @Injectable()
 export class AuditRetentionManager implements OnModuleInit {
@@ -45,8 +69,12 @@ export class AuditRetentionManager implements OnModuleInit {
     return getDatabaseService().dataSource;
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.cron();
+  onModuleInit(): void {
+    // Deliberately not awaited. Nest awaits onModuleInit before worker.ts registers the BullMQ
+    // workers, so awaiting a retention pass would hold job consumption for as long as it takes —
+    // and the first pass after a long gap is the big one. Retention is never urgent. cron()
+    // catches its own errors, so this cannot reject unhandled.
+    void this.cron();
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM, { timeZone: 'UTC' })
@@ -62,22 +90,46 @@ export class AuditRetentionManager implements OnModuleInit {
     }
   }
 
-  async runOnce(opts: { retentionMonths: number }): Promise<void> {
+  async runOnce(opts: { retentionMonths: number; batchSize?: number }): Promise<void> {
     const ds = this.getDataSource();
-    // Counted via CTE: TypeORM's query() returns rows, not an affected-row count, and a
-    // retention pass that silently deletes nothing is the bug this file is replacing.
-    const rows = await ds.query<{ deleted: number }[]>(
-      `WITH expired AS (
-         DELETE FROM audit_logs
-         WHERE "timestamp" < now() - make_interval(months => $1)
-         RETURNING 1
-       )
-       SELECT count(*)::int AS deleted FROM expired`,
-      [opts.retentionMonths],
-    );
-    const deleted = rows?.[0]?.deleted ?? 0;
-    if (deleted > 0) {
-      this.logger.log(`deleted ${deleted} audit rows older than ${opts.retentionMonths} months`);
+    const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE;
+    let total = 0;
+
+    // Batched, because what this replaced was O(1) metadata (DROP TABLE on a whole month) and a
+    // row-level DELETE is not: each row costs a heap kill plus one kill per index — audit_logs
+    // carries seven — all WAL-logged. A single unbounded statement over a first-run backlog would
+    // hold locks and grow WAL for as long as it ran.
+    //
+    // Deleting by primary key (id, timestamp) rather than ctid: ctid is only unique within a
+    // partition, so `WHERE ctid IN (...)` against the parent can match an unrelated row in a
+    // sibling partition.
+    for (;;) {
+      // Counted via CTE: TypeORM's query() returns rows, not an affected-row count, and a
+      // retention pass that silently deletes nothing is the bug this file is replacing.
+      const rows = await ds.query<{ deleted: number }[]>(
+        `WITH victims AS (
+           SELECT id, "timestamp" FROM audit_logs
+           WHERE "timestamp" < now() - make_interval(months => $1)
+           ORDER BY "timestamp"
+           LIMIT $2
+         ), expired AS (
+           DELETE FROM audit_logs a
+           USING victims v
+           WHERE a.id = v.id AND a."timestamp" = v."timestamp"
+           RETURNING 1
+         )
+         SELECT count(*)::int AS deleted FROM expired`,
+        [opts.retentionMonths, batchSize],
+      );
+      const deleted = rows?.[0]?.deleted ?? 0;
+      total += deleted;
+      if (deleted < batchSize) {
+        break;
+      }
+    }
+
+    if (total > 0) {
+      this.logger.log(`deleted ${total} audit rows older than ${opts.retentionMonths} months`);
     } else {
       this.logger.debug(`no audit rows older than ${opts.retentionMonths} months`);
     }
