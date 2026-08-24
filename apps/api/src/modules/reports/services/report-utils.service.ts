@@ -90,6 +90,7 @@ export class ReportUtilsService {
       graphs: 'Custom Graphs',
       top_10_lists: 'Top 10 Lists',
       error_analysis: 'Error Analysis',
+      index: 'Index',
     };
     return titles[type] || type;
   }

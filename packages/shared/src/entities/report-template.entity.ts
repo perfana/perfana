@@ -23,7 +23,8 @@ export type ReportSectionType =
   | 'comparisons'
   | 'graphs'
   | 'top_10_lists'
-  | 'error_analysis';
+  | 'error_analysis'
+  | 'index';
 
 /**
  * Configuration for a report section.

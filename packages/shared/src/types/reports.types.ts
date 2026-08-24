@@ -557,6 +557,7 @@ export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   graphs: 'Custom Graphs',
   top_10_lists: 'Top 10 Lists',
   error_analysis: 'Error Analysis',
+  index: 'Index',
 } as const;
 
 /**
