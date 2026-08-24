@@ -122,6 +122,29 @@ describe('MarkdownField section links', () => {
     expect(html).toContain('Results ［v2］');
   });
 
+  it('truncates a title longer than renderMarkdown\'s label cap so the inserted link still resolves', () => {
+    // Section titles are allowed up to 255 chars (create-report.dto.ts), but
+    // renderMarkdown's inline link label caps out at 200 (markdown.ts) — and a
+    // label over that cap doesn't get clipped, it fails to match as a link at
+    // all, so `[title](#anchor)` prints as literal text in the report/PDF.
+    const longTitle = 'x'.repeat(230);
+    const { onChange } = setup({ linkTargets: [{ title: longTitle, anchor: 'long-anchor' }] });
+
+    fireEvent.click(screen.getByLabelText('Link to section'));
+    fireEvent.click(screen.getByText(longTitle));
+
+    const insertedMarkdown = onChange.mock.calls[0][0] as string;
+
+    // Assert on the RENDERED output, not the markdown string — the whole bug
+    // was that the markdown string looked fine and still failed to parse.
+    const html = renderMarkdown(insertedMarkdown, { styled: false });
+    expect(html).toContain('<a href="#long-anchor">');
+
+    // The anchor itself must be untouched — only the visible label shortens.
+    expect(insertedMarkdown).toContain('(#long-anchor)');
+    expect(insertedMarkdown).not.toContain(longTitle);
+  });
+
   it('disambiguates each duplicate-titled row by its own anchor', () => {
     setup({
       linkTargets: [

@@ -83,14 +83,24 @@ const SAFE_HREF = /^(https?:\/\/|mailto:|\/(?![/\\])|#)/i;
 // so an unsupported browser would fail to evaluate the whole chunk and take the
 // report builder down with it rather than degrading.
 //
-// The link label is bounded to one line and 200 chars on purpose: unbounded
-// `[^\]]+` backtracks char-by-char from every unclosed `[` to end-of-string,
-// which is O(n^2) (20k stray `[` measured at 582ms), and this runs on every
-// keystroke in the editor preview as well as server-side in the PDF render.
+// The link label is bounded to one line and MAX_INLINE_LINK_LABEL_LENGTH chars
+// on purpose: unbounded `[^\]]+` backtracks char-by-char from every unclosed
+// `[` to end-of-string, which is O(n^2) (20k stray `[` measured at 582ms), and
+// this runs on every keystroke in the editor preview as well as server-side in
+// the PDF render. Do not raise it — callers that build a label from
+// user-supplied text (e.g. the report builder's "Link to section" picker)
+// must pre-truncate to this cap instead, or the whole `[label](#anchor)`
+// silently prints as literal text rather than becoming a link.
 //
 // The href allows one level of balanced parens so Grafana/wiki URLs survive.
-const INLINE =
-  /`([^`]+)`|\*\*(?!\s)([^*\n]*[^\s*])\*\*|\*(?!\s)([^*\n]*[^\s*])\*|\[([^\]\n]{1,200})\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g;
+export const MAX_INLINE_LINK_LABEL_LENGTH = 200;
+// Built via the RegExp constructor (rather than a `{1,200}` literal) so the
+// enforced cap and the exported constant above can never drift apart.
+const INLINE = new RegExp(
+  '`([^`]+)`|\\*\\*(?!\\s)([^*\\n]*[^\\s*])\\*\\*|\\*(?!\\s)([^*\\n]*[^\\s*])\\*|' +
+    `\\[([^\\]\\n]{1,${MAX_INLINE_LINK_LABEL_LENGTH}})\\]\\(((?:[^()\\s]|\\([^()\\s]*\\))+)\\)`,
+  'g',
+);
 
 function inline(text: string, styled: boolean): string {
   return text.replace(INLINE, (match, code, bold, italic, label, href) => {

@@ -24,7 +24,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
-import { renderMarkdown, renderPlainText } from '@perfana/shared/utils';
+import { renderMarkdown, renderPlainText, MAX_INLINE_LINK_LABEL_LENGTH } from '@perfana/shared/utils';
 
 /**
  * Markdown input with a formatting toolbar and a live preview.
@@ -250,6 +250,18 @@ export function MarkdownField({
   const insertSectionLink = (target: { title: string; anchor: string }) => {
     setSectionMenuAnchor(null);
     const el = inputRef.current;
+    // renderMarkdown's link label is capped at MAX_INLINE_LINK_LABEL_LENGTH
+    // chars (see packages/shared/src/utils/markdown.ts). A section title is
+    // allowed up to 255 (create-report.dto.ts), well past that cap, and a
+    // label over the cap doesn't get clipped by the regex — it fails to
+    // match as a link AT ALL, so the whole `[title](#anchor)` prints as
+    // literal text instead of a link. Truncate comfortably under the cap
+    // (not right up against it) so the inserted label always parses.
+    const maxLabelLength = Math.floor(MAX_INLINE_LINK_LABEL_LENGTH * 0.8);
+    const truncatedTitle =
+      target.title.length > maxLabelLength
+        ? `${target.title.slice(0, maxLabelLength - 1)}…`
+        : target.title;
     // renderMarkdown's link label is `[^\]\n]{1,200}` (see
     // packages/shared/src/utils/markdown.ts) — a raw `]` anywhere in the label
     // ends it, with no backslash-escape support to put it back (the class
@@ -260,7 +272,7 @@ export function MarkdownField({
     // near-identical, but not the ASCII byte the regex excludes — rather than
     // widening the shared parser (which two other consumers, and its own
     // invariant test suite, would then need re-auditing against).
-    const safeLabel = target.title.replace(/\[/g, '［').replace(/\]/g, '］');
+    const safeLabel = truncatedTitle.replace(/\[/g, '［').replace(/\]/g, '］');
     const markdown = `[${safeLabel}](#${target.anchor})`;
 
     if (!el) {
