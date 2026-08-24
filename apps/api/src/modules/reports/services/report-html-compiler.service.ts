@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { TestRun, ReportSectionConfig, ReportStyling, GeneratedReport } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, ReportStyling, GeneratedReport, assignSectionAnchors } from '@perfana/shared';
 import { ReportUtilsService } from './report-utils.service';
 import { HeaderRenderer } from '../renderers/header-renderer';
 import { TextBlockRenderer } from '../renderers/text-block-renderer';
@@ -62,17 +62,39 @@ export class ReportHtmlCompilerService {
     roles: string[] = [],
   ): Promise<string> {
     const sortedSections = [...sections].sort((a, b) => a.order - b.order);
+
+    // Anchors are assigned over the sections that can be link TARGETS. A text
+    // block is where links are written from, never to, so it is excluded here —
+    // which also keeps it from consuming a slug a real section wants.
+    const targets = sortedSections.filter(s => s.type !== 'text_block');
+    const anchors = assignSectionAnchors(
+      targets,
+      s => s.title || this.utils.getSectionTitle(s.type),
+      s => s.type,
+    );
+
     const renderedSections: string[] = [];
 
     for (const section of sortedSections) {
       try {
-        const sectionHtml = await this.renderSection(section, testRun, report, userId, roles);
-        renderedSections.push(sectionHtml);
+        const sectionHtml = await this.renderSection(
+          section,
+          testRun,
+          report,
+          userId,
+          roles,
+          anchors,
+        );
+        const anchor = anchors.get(section);
+        renderedSections.push(
+          anchor
+            ? `<a id="${anchor}" class="section-anchor" aria-hidden="true"></a>\n${sectionHtml}`
+            : sectionHtml,
+        );
       } catch (error) {
         this.logger.warn(
           `Failed to render section ${section.type}: ${(error as Error).message}`,
         );
-        // Include error placeholder in report
         renderedSections.push(this.placeholderRenderer.renderErrorSection(section, (error as Error).message));
       }
     }
@@ -93,6 +115,10 @@ export class ReportHtmlCompilerService {
     _report: GeneratedReport | null,
     userId: string = '',
     roles: string[] = [],
+    // Threaded through for Task 4's `index` case; nothing in this switch reads
+    // it yet, so it's prefixed like `_report` above to satisfy
+    // noUnusedParameters until that case is wired in.
+    _anchors: Map<ReportSectionConfig, string> = new Map(),
   ): Promise<string> {
     const sectionTitle = section.title || this.utils.getSectionTitle(section.type);
 
@@ -437,6 +463,16 @@ export class ReportHtmlCompilerService {
       padding: 30px;
       margin-bottom: 30px;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+    }
+
+    /* One empty, invisible anchor stamped before each section by the compiler
+       (see ReportHtmlCompilerService.renderSections). display:block plus the
+       scroll-margin keeps a jump-to-anchor link from landing flush under the
+       fixed page header instead of at the section's actual top. */
+    .section-anchor {
+      display: block;
+      position: relative;
+      scroll-margin-top: 24px;
     }
 
     section h2 {

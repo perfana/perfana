@@ -1,0 +1,118 @@
+import { Test } from '@nestjs/testing';
+import { ReportHtmlCompilerService } from './report-html-compiler.service';
+import { ReportUtilsService } from './report-utils.service';
+import { ReportSectionConfig } from '@perfana/shared';
+import { HeaderRenderer } from '../renderers/header-renderer';
+import { TextBlockRenderer } from '../renderers/text-block-renderer';
+import { SloRenderer } from '../renderers/slo-renderer';
+import { ApdexRenderer } from '../renderers/apdex-renderer';
+import { TransactionResponseTimesRenderer } from '../renderers/transaction-response-times-renderer';
+import { RegressionsRenderer } from '../renderers/regressions-renderer';
+import { AwrRenderer } from '../renderers/awr-renderer';
+import { TrendsRenderer } from '../renderers/trends-renderer';
+import { ComparisonsRenderer } from '../renderers/comparisons-renderer';
+import { GraphsRenderer } from '../renderers/graphs-renderer';
+import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
+import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
+import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
+
+// Every renderer is stubbed: this suite is about the anchors the compiler emits
+// around section HTML, not about what any renderer produces. Each stub exposes
+// only the exact method renderSection() calls on that renderer, so a section
+// that fails to render falls through to the real placeholder path instead of
+// throwing on an unrelated mock shape.
+const stubRenderer = (marker: string) => ({
+  [marker]: jest.fn().mockResolvedValue(`<section class="${marker}"></section>`),
+});
+
+describe('ReportHtmlCompilerService anchors', () => {
+  let service: ReportHtmlCompilerService;
+
+  const section = (over: Partial<ReportSectionConfig>): ReportSectionConfig =>
+    ({ type: 'slo', order: 0, ...over }) as ReportSectionConfig;
+
+  beforeEach(async () => {
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        ReportHtmlCompilerService,
+        ReportUtilsService,
+        // Renderer providers are supplied by the module in production; the
+        // helper below replaces whichever ones each test needs.
+      ],
+    })
+      .useMocker((token) => {
+        if (token === ReportUtilsService) return undefined;
+        if (token === HeaderRenderer) return stubRenderer('renderHeaderSection');
+        if (token === TextBlockRenderer) return stubRenderer('renderTextBlockSection');
+        if (token === SloRenderer) return stubRenderer('renderSloSection');
+        if (token === ApdexRenderer) return stubRenderer('renderApdexSection');
+        if (token === TransactionResponseTimesRenderer)
+          return stubRenderer('renderTransactionResponseTimesSection');
+        if (token === RegressionsRenderer) return stubRenderer('renderRegressionsSection');
+        if (token === AwrRenderer) return stubRenderer('renderAwrSection');
+        if (token === TrendsRenderer) return stubRenderer('renderTrendsSection');
+        if (token === ComparisonsRenderer) return stubRenderer('renderComparisonsSection');
+        if (token === GraphsRenderer) return stubRenderer('renderGraphsSection');
+        if (token === Top10ListsRenderer) return stubRenderer('renderTop10ListsSection');
+        if (token === ErrorAnalysisRenderer) return stubRenderer('renderErrorAnalysisSection');
+        if (token === PlaceholderRenderer)
+          return {
+            renderPlaceholderSection: jest.fn().mockReturnValue('<section class="placeholder"></section>'),
+            renderErrorSection: jest.fn().mockReturnValue('<section class="error"></section>'),
+          };
+        return { render: jest.fn() };
+      })
+      .compile();
+
+    service = moduleRef.get(ReportHtmlCompilerService);
+  });
+
+  it('emits an anchor before a section, slugged from its title', async () => {
+    const html = await service.renderSections(
+      [section({ type: 'slo', order: 0, title: 'SLO Results' })],
+      null,
+      null,
+    );
+    expect(html).toContain('<a id="slo-results" class="section-anchor" aria-hidden="true"></a>');
+  });
+
+  it('uses the type default title when the section has none', async () => {
+    const html = await service.renderSections([section({ type: 'trends', order: 0 })], null, null);
+    expect(html).toContain('id="trends"');
+  });
+
+  it('emits no anchor for a text block', async () => {
+    const html = await service.renderSections(
+      [section({ type: 'text_block', order: 0, config: { content: 'hi' } })],
+      null,
+      null,
+    );
+    expect(html).not.toContain('class="section-anchor"');
+  });
+
+  it('suffixes a duplicate title in document order', async () => {
+    const html = await service.renderSections(
+      [
+        section({ type: 'graphs', order: 0, title: 'Graphs' }),
+        section({ type: 'graphs', order: 1, title: 'Graphs' }),
+      ],
+      null,
+      null,
+    );
+    expect(html).toContain('id="graphs"');
+    expect(html).toContain('id="graphs-2"');
+  });
+
+  it('anchors by sorted order, not array order', async () => {
+    const html = await service.renderSections(
+      [
+        section({ type: 'graphs', order: 5, title: 'Graphs' }),
+        section({ type: 'graphs', order: 1, title: 'Graphs' }),
+      ],
+      null,
+      null,
+    );
+    // The order:1 section renders first, so it owns the bare slug.
+    expect(html.indexOf('id="graphs"')).toBeLessThan(html.indexOf('id="graphs-2"'));
+  });
+});
