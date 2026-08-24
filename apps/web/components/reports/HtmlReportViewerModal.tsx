@@ -158,8 +158,18 @@ export function HtmlReportViewerModal({
   // inherits the PARENT document's URL), so in-report anchor links like
   // <a href="#slo-results"> resolve to a same-document fragment instead of navigating
   // the iframe to the app's own URL and destroying the report view.
+  //
+  // `open` is also a dependency, not just `htmlContent`: closing the modal only
+  // flips the parent's `open` flag, it does not necessarily clear `htmlContent`
+  // (that only happens in the reset-on-close effect below, and it deliberately
+  // skips clearing when content came in via the `htmlContent` prop). Without
+  // `open` here, a host that keeps this component mounted across opens — the
+  // normal shape for a reusable viewer — would retain the closed report's blob
+  // URL, and the memory behind it, for the tab's lifetime. Depending on `open`
+  // makes this effect's cleanup run on close too, same mechanism as the
+  // existing revoke-on-change and revoke-on-unmount behaviour.
   useEffect(() => {
-    if (!htmlContent) {
+    if (!htmlContent || !open) {
       setIframeBlobUrl(null);
       return;
     }
@@ -169,7 +179,7 @@ export function HtmlReportViewerModal({
     return () => {
       URL.revokeObjectURL(url);
     };
-  }, [htmlContent]);
+  }, [htmlContent, open]);
 
   // Snackbar helper
   const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' = 'info') => {

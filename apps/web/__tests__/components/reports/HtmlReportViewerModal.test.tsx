@@ -105,6 +105,40 @@ describe('HtmlReportViewerModal iframe delivery', () => {
     expect(screen.queryByTitle(/^Report:/)).not.toBeInTheDocument();
   });
 
+  it('revokes the blob URL when the viewer closes, even though the component stays mounted', async () => {
+    // The retention leak this guards: content supplied via the `htmlContent` prop is
+    // deliberately NOT cleared by the reset-on-close effect (so a re-open with the
+    // same prop doesn't re-fetch), so the ONLY thing that used to make this URL go
+    // away was the content changing or the component unmounting — a reusable host
+    // that keeps the viewer mounted across opens got neither.
+    const { rerender } = render(
+      <HtmlReportViewerModal
+        open
+        onClose={jest.fn()}
+        htmlContent={HTML_CONTENT}
+        reportName="Test Report"
+      />
+    );
+
+    const iframe = await screen.findByTitle('Report: Test Report');
+    const usedUrl = iframe.getAttribute('src');
+    expect(usedUrl).toBeTruthy();
+    expect(revokeObjectURL).not.toHaveBeenCalledWith(usedUrl);
+
+    rerender(
+      <HtmlReportViewerModal
+        open={false}
+        onClose={jest.fn()}
+        htmlContent={HTML_CONTENT}
+        reportName="Test Report"
+      />
+    );
+
+    await waitFor(() => {
+      expect(revokeObjectURL).toHaveBeenCalledWith(usedUrl);
+    });
+  });
+
   it('revokes the previous blob URL when the report content changes', async () => {
     const { rerender } = render(
       <HtmlReportViewerModal
