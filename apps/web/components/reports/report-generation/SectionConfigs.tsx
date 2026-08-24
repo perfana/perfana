@@ -6,14 +6,14 @@
  * Provides configuration UI for each report section type
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Autocomplete, Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton, ListItemText, OutlinedInput } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
 import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
-import type { ReportSectionType } from '@/lib/api/reports';
+import type { ReportSectionType, ReportSectionConfig } from '@/lib/api/reports';
 import { REPORT_LIMITS } from '@/lib/api/reports';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { isGrafana } from '@/lib/metrics-source-utils';
@@ -21,11 +21,37 @@ import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
 import { MarkdownField } from './MarkdownField';
-import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
+import { TEXT_BLOCK_MARKDOWN_DEFAULT, assignSectionAnchors } from '@perfana/shared/utils';
+import { SECTION_RENDER_TITLES } from '@perfana/shared/types';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
 const HtmlSectionPreview = dynamic(() => import('./preview/HtmlSectionPreview'), { ssr: false });
+
+/**
+ * Link targets a MarkdownField's toolbar can offer: every non-text_block
+ * section in the builder's current order, using the same effective-title
+ * rule the API applies when it renders the report (SECTION_RENDER_TITLES —
+ * see packages/shared/src/types/reports.types.ts) so the anchor computed
+ * here always matches the `id` the API stamps onto the rendered heading.
+ * text_block sections are excluded because they are never a link target —
+ * they render as body prose, not a heading with an id.
+ */
+export function buildLinkTargets(
+  allSections: ReportSectionConfig[] = [],
+): { title: string; anchor: string }[] {
+  const targets = allSections
+    .filter((s) => s.type !== 'text_block')
+    .sort((a, b) => a.order - b.order);
+
+  const titleOf = (s: ReportSectionConfig) => s.title || SECTION_RENDER_TITLES[s.type];
+  const anchors = assignSectionAnchors(targets, titleOf, (s) => s.type);
+
+  return targets.map((s) => ({
+    title: titleOf(s),
+    anchor: anchors.get(s) as string,
+  }));
+}
 
 // ==================== Shared Section Config Shell ====================
 
@@ -45,6 +71,7 @@ interface SectionConfigShellProps {
   text?: string;
   onTextChange?: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
   /** Extra per-form condition that disables the preview button */
   previewDisabled?: boolean;
   /** Tooltip shown when previewDisabled is true */
@@ -67,12 +94,15 @@ function SectionConfigShell({
   text,
   onTextChange,
   testRunId,
+  allSections,
   previewDisabled = false,
   previewDisabledReason,
   previewContent,
   children,
 }: SectionConfigShellProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
+
+  const linkTargets = useMemo(() => buildLinkTargets(allSections), [allSections]);
 
   // Local draft of the text so typing doesn't propagate to the parent (and
   // re-render every section card) on each keystroke; committed on blur and
@@ -113,6 +143,7 @@ function SectionConfigShell({
             rows={4}
             maxLength={REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH}
             helperText={`${localText.length} / ${REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH} characters`}
+            linkTargets={linkTargets}
           />
         )}
 
@@ -161,6 +192,7 @@ function SectionConfigShell({
         testRunId={testRunId}
         initialText={localText}
         onSaveText={onTextChange}
+        linkTargets={linkTargets}
       >
         {previewContent ?? (
           <HtmlSectionPreview
@@ -189,9 +221,10 @@ interface HeaderConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
 }
 
-export function HeaderConfigForm({ config, onChange, text, onTextChange, testRunId }: HeaderConfigFormProps) {
+export function HeaderConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: HeaderConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle={config.text || 'Header'}
@@ -201,6 +234,7 @@ export function HeaderConfigForm({ config, onChange, text, onTextChange, testRun
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       <TextField
         label="Header Text"
@@ -245,11 +279,14 @@ interface TextBlockConfigFormProps {
   config: TextBlockConfig;
   onChange: (config: TextBlockConfig) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
 }
 
 // A text block has no accompanying text — its Content field already is the
 // text, so the shell gets no text/onTextChange and renders no second editor.
-export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockConfigFormProps) {
+export function TextBlockConfigForm({ config, onChange, testRunId, allSections }: TextBlockConfigFormProps) {
+  const linkTargets = useMemo(() => buildLinkTargets(allSections), [allSections]);
+
   return (
     <SectionConfigShell
       sectionTitle="Text Block"
@@ -257,6 +294,7 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
       previewType="text_block"
       previewConfig={config}
       testRunId={testRunId}
+      allSections={allSections}
     >
       <MarkdownField
         label="Content"
@@ -264,6 +302,7 @@ export function TextBlockConfigForm({ config, onChange, testRunId }: TextBlockCo
         onChange={(content) => onChange({ ...config, content })}
         markdown={config.markdown ?? TEXT_BLOCK_MARKDOWN_DEFAULT}
         placeholder="Write your text here, or use the buttons above to format it"
+        linkTargets={linkTargets}
       />
       <Box sx={{ display: 'flex', gap: 2 }}>
         <TextField
@@ -314,9 +353,10 @@ interface SloConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
 }
 
-export function SloConfigForm({ config, onChange, text, onTextChange, testRunId }: SloConfigFormProps) {
+export function SloConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: SloConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="Service Level Objectives"
@@ -326,6 +366,7 @@ export function SloConfigForm({ config, onChange, text, onTextChange, testRunId 
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       <TextField
         label="Max Items"
@@ -365,9 +406,10 @@ interface ApdexConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string; // Optional test run ID for preview
+  allSections?: ReportSectionConfig[];
 }
 
-export function ApdexConfigForm({ config, onChange, text, onTextChange, testRunId }: ApdexConfigFormProps) {
+export function ApdexConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: ApdexConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="Apdex Score"
@@ -377,6 +419,7 @@ export function ApdexConfigForm({ config, onChange, text, onTextChange, testRunI
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
       previewContent={<ApdexSectionPreview testRunId={testRunId} config={config} text={text} />}
     >
       {/* Apply to analysis timerange only Toggle */}
@@ -428,9 +471,10 @@ interface TransactionResponseTimesConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string; // Optional test run ID for fetching scenarios and preview
+  allSections?: ReportSectionConfig[];
 }
 
-export function TransactionResponseTimesConfigForm({ config, onChange, text, onTextChange, testRunId }: TransactionResponseTimesConfigFormProps) {
+export function TransactionResponseTimesConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: TransactionResponseTimesConfigFormProps) {
   const [scenarios, setScenarios] = useState<string[]>([]);
   const [loadingScenarios, setLoadingScenarios] = useState(false);
 
@@ -507,6 +551,7 @@ export function TransactionResponseTimesConfigForm({ config, onChange, text, onT
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       {/* Scenarios (multi-select; empty = all) — dropdown when the run's
           scenarios are known, free text otherwise */}
@@ -610,9 +655,10 @@ interface Top10ListsConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
 }
 
-export function Top10ListsConfigForm({ config, onChange, text, onTextChange, testRunId }: Top10ListsConfigFormProps) {
+export function Top10ListsConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: Top10ListsConfigFormProps) {
   const [scenarios, setScenarios] = useState<string[]>([]);
 
   useEffect(() => {
@@ -647,6 +693,7 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       {/* Scope */}
       <Typography variant="caption" color="text.secondary">Scope</Typography>
@@ -746,9 +793,10 @@ interface ErrorAnalysisConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
 }
 
-export function ErrorAnalysisConfigForm({ config, onChange, text, onTextChange, testRunId }: ErrorAnalysisConfigFormProps) {
+export function ErrorAnalysisConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: ErrorAnalysisConfigFormProps) {
   const [scenarios, setScenarios] = useState<string[]>([]);
 
   useEffect(() => {
@@ -782,6 +830,7 @@ export function ErrorAnalysisConfigForm({ config, onChange, text, onTextChange, 
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       {scenarios.length > 0 && (
         <>
@@ -861,9 +910,10 @@ interface RegressionsConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
 }
 
-export function RegressionsConfigForm({ config, onChange, text, onTextChange, testRunId }: RegressionsConfigFormProps) {
+export function RegressionsConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: RegressionsConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="Anomaly Detection"
@@ -873,6 +923,7 @@ export function RegressionsConfigForm({ config, onChange, text, onTextChange, te
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       <TextField
         label="Max Items"
@@ -921,9 +972,10 @@ interface GraphsConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
 }
 
-export function GraphsConfigForm({ config, onChange, text, onTextChange, testRunId }: GraphsConfigFormProps) {
+export function GraphsConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: GraphsConfigFormProps) {
   const [presets, setPresets] = useState<GraphPreset[]>([]);
   const [loadingPresets, setLoadingPresets] = useState(false);
 
@@ -958,6 +1010,7 @@ export function GraphsConfigForm({ config, onChange, text, onTextChange, testRun
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       {/* Graph presets — the section's series selection. Empty means the
           renderer auto-discovers this run's panels, as it always has. */}
@@ -1060,9 +1113,10 @@ interface AwrConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
 }
 
-export function AwrConfigForm({ config, onChange, text, onTextChange, testRunId }: AwrConfigFormProps) {
+export function AwrConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: AwrConfigFormProps) {
   return (
     <SectionConfigShell
       sectionTitle="AWR Analysis"
@@ -1072,6 +1126,7 @@ export function AwrConfigForm({ config, onChange, text, onTextChange, testRunId 
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       <TextField
         label="Top SQL Count"
@@ -1148,13 +1203,14 @@ interface TrendsConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
   systemUnderTestId?: string;
   testEnvironment?: string;
   workload?: string;
 }
 
 export function TrendsConfigForm({
-  config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload,
+  config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload, allSections,
 }: TrendsConfigFormProps) {
   const source = config.source ?? 'performance-metrics';
   const dashboards = useSourceDashboards(source, systemUnderTestId, testEnvironment, workload);
@@ -1170,6 +1226,7 @@ export function TrendsConfigForm({
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
     >
       {/* Where the window starts. The default follows ADAPT: everything since the run at
           which it last saw the system change, because older runs describe a system that has
@@ -1255,12 +1312,13 @@ interface ComparisonsConfigFormProps {
   text?: string;
   onTextChange: (text: string) => void;
   testRunId?: string;
+  allSections?: ReportSectionConfig[];
   systemUnderTestId?: string;
   testEnvironment?: string;
   workload?: string;
 }
 
-export function ComparisonsConfigForm({ config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload }: ComparisonsConfigFormProps) {
+export function ComparisonsConfigForm({ config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload, allSections }: ComparisonsConfigFormProps) {
   const source = config.source ?? 'performance-metrics';
   const baselineCandidates = useBaselineCandidates(systemUnderTestId, testRunId, true);
   // The baseline run may live in a different environment/workload — its
@@ -1288,6 +1346,7 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
       text={text}
       onTextChange={onTextChange}
       testRunId={testRunId}
+      allSections={allSections}
       // Without a baseline the preview can only render the "no baseline configured" empty
       // state, so the button offers nothing but a round trip.
       previewDisabled={baselineCandidates.length === 0 || !config.baselineTestRunId}

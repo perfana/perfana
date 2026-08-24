@@ -1,5 +1,8 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MarkdownField } from '@/components/reports/report-generation/MarkdownField';
+import { assignSectionAnchors } from '@perfana/shared/utils';
+import { buildLinkTargets } from '@/components/reports/report-generation/SectionConfigs';
+import type { ReportSectionConfig } from '@/lib/api/reports';
 
 const targets = [
   { title: 'SLO Results', anchor: 'slo-results' },
@@ -106,5 +109,65 @@ describe('MarkdownField section links', () => {
     expect(screen.getByText(/duplicate title/i)).toBeInTheDocument();
     expect(screen.getByText('(#graphs)')).toBeInTheDocument();
     expect(screen.getByText('(#graphs-2)')).toBeInTheDocument();
+  });
+});
+
+describe('builder link targets', () => {
+  it('excludes text blocks and matches what the API will emit', () => {
+    const sections = [
+      { type: 'index', order: 0, title: '' },
+      { type: 'slo', order: 1, title: 'SLO Results' },
+      { type: 'text_block', order: 2, title: '' },
+      { type: 'graphs', order: 3, title: 'Graphs' },
+    ];
+
+    const targetsList = sections
+      .filter((s) => s.type !== 'text_block')
+      .sort((a, b) => a.order - b.order);
+
+    const anchors = assignSectionAnchors(
+      targetsList,
+      (s) => s.title || s.type,
+      (s) => s.type,
+    );
+
+    expect([...anchors.values()]).toEqual(['index', 'slo-results', 'graphs']);
+  });
+
+  it('buildLinkTargets (the builder\'s production helper) applies the same rule, using SECTION_RENDER_TITLES for an untitled section', () => {
+    // `header` is the one type whose builder label ("Header") and rendered
+    // title ("Report Header") diverge — see Part A. An untitled header
+    // section must anchor on "report-header", matching the API, not "header".
+    const sections: ReportSectionConfig[] = [
+      { type: 'header', order: 0 },
+      { type: 'slo', order: 1, title: 'SLO Results' },
+      { type: 'text_block', order: 2, title: 'ignored' },
+      { type: 'graphs', order: 3, title: 'Graphs' },
+    ];
+
+    expect(buildLinkTargets(sections)).toEqual([
+      { title: 'Report Header', anchor: 'report-header' },
+      { title: 'SLO Results', anchor: 'slo-results' },
+      { title: 'Graphs', anchor: 'graphs' },
+    ]);
+  });
+
+  it('sorts by order regardless of input order', () => {
+    const sections: ReportSectionConfig[] = [
+      { type: 'graphs', order: 2, title: 'Graphs' },
+      { type: 'index', order: 0, title: 'Index' },
+      { type: 'slo', order: 1, title: 'SLO Results' },
+    ];
+
+    expect(buildLinkTargets(sections).map((t) => t.title)).toEqual([
+      'Index',
+      'SLO Results',
+      'Graphs',
+    ]);
+  });
+
+  it('defaults to no targets when the builder has not supplied any sections', () => {
+    expect(buildLinkTargets(undefined)).toEqual([]);
+    expect(buildLinkTargets([])).toEqual([]);
   });
 });

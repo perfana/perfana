@@ -727,6 +727,7 @@ export function GenerateReportDialog({
                       systemUnderTestId={scope.systemId}
                       testEnvironment={scope.testEnvironment}
                       workload={scope.workload}
+                      allSections={sections}
                     />
                   ))}
 
@@ -848,9 +849,11 @@ interface LayoutSectionCardProps {
   systemUnderTestId?: string;
   testEnvironment?: string;
   workload?: string;
+  /** The builder's full, ordered section list — feeds the link-target picker in each MarkdownField. */
+  allSections?: ReportSectionConfig[];
 }
 
-function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTextChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload }: LayoutSectionCardProps) {
+function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTextChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload, allSections }: LayoutSectionCardProps) {
   // DB-stored templates can carry section types this build doesn't know about
   const config = SECTION_CONFIG[section.type] ?? { icon: null, label: section.type, description: '', color: '#9e9e9e' };
   const [expanded, setExpanded] = useState(false);
@@ -887,29 +890,29 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
 
     switch (section.type) {
       case 'header':
-        return <HeaderConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <HeaderConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'text_block':
-        return <TextBlockConfigForm config={sectionConfig} onChange={handleChange} testRunId={testRunId} />;
+        return <TextBlockConfigForm config={sectionConfig} onChange={handleChange} testRunId={testRunId} allSections={allSections} />;
       case 'slo':
-        return <SloConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <SloConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'apdex':
-        return <ApdexConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <ApdexConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'transaction_response_times':
-        return <TransactionResponseTimesConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <TransactionResponseTimesConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'regressions':
-        return <RegressionsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <RegressionsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'graphs':
-        return <GraphsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <GraphsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'awr':
-        return <AwrConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <AwrConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'trends':
-        return <TrendsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
+        return <TrendsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} allSections={allSections} />;
       case 'comparisons':
-        return <ComparisonsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} />;
+        return <ComparisonsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} allSections={allSections} />;
       case 'top_10_lists':
-        return <Top10ListsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <Top10ListsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'error_analysis':
-        return <ErrorAnalysisConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} />;
+        return <ErrorAnalysisConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       default:
         return null;
     }
