@@ -18,7 +18,7 @@ export function slugifySectionTitle(title: string, fallback: string): string {
     // up as "e" rather than being stripped along with the punctuation. The range
     // is written escaped because the literal characters are invisible in source.
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
