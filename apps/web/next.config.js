@@ -4,7 +4,12 @@
 // Additional frame sources can be configured via NEXT_PUBLIC_CSP_FRAME_SRC environment variable
 // (space-separated list of allowed origins, e.g., "https://grafana.example.com https://other.example.com")
 const getFrameSrc = () => {
-  const defaultFrameSrc = ["'self'"];
+  // `blob:` is load-bearing, and 'self' does NOT cover it: the report viewer and the
+  // public share page load report HTML into their iframe from a blob: URL, so omitting
+  // it blocks the iframe and the report never renders. img-src spells blob: out for the
+  // same reason. Keep this in sync with the runtime patcher in scripts/start-server.js,
+  // which rewrites frame-src at container startup and would otherwise drop it again.
+  const defaultFrameSrc = ["'self'", 'blob:'];
   const envFrameSrc = process.env.NEXT_PUBLIC_CSP_FRAME_SRC;
 
   if (envFrameSrc) {
@@ -16,12 +21,12 @@ const getFrameSrc = () => {
   // In development, allow all https sources for Grafana instances
   // In production, configure NEXT_PUBLIC_CSP_FRAME_SRC with specific allowed origins
   if (process.env.NODE_ENV === 'development') {
-    return "'self' http: https:";
+    return "'self' blob: http: https:";
   }
 
   // Production default: allow self and https sources
   // Use NEXT_PUBLIC_CSP_FRAME_SRC to allow specific HTTP origins (e.g. local Grafana)
-  return "'self' https:";
+  return "'self' blob: https:";
 };
 
 // Safely parse a URL origin, returning null if invalid (e.g. build-time placeholders)
