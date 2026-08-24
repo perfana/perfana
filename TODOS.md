@@ -253,6 +253,37 @@ the Series `Autocomplete`.
 ---
 
 
+## Quality gates
+
+### Three gates report success for code they never examine
+
+**Priority:** P3
+**Origin:** discovered while building the report index + anchors feature (v0.2.76.0). Each was
+found the hard way, by a defect the gate did not catch.
+**Why:** three of this repo's own checks are structurally blind to part of the codebase, and each
+one reports green for files it never looked at:
+
+1. **`packages/shared` jest runs ts-jest in transpile-only mode**, so it cannot see type errors.
+   A spec file with a genuine TS2345 sat green through a full task review; `npm run preflight`
+   would have blocked on it, but the suite said 15/15 passing the whole time.
+2. **`apps/web/tsconfig.json` excludes every test file** — `__tests__/**/*`, `*.test.ts(x)`,
+   `*.spec.ts(x)` — so `tsc --noEmit` type-checks no test code at all. A required prop can be
+   added and every test that omits it still compiles, then throws at runtime.
+3. **`apps/web`'s lint script is `eslint app lib`**, so the entire `components/` tree is unlinted.
+   Three pre-existing errors live there today, invisible to `npm run lint`.
+
+The shared thread is worse than any single gap: a green check is read as "this was verified", and
+in each case it means "this was not looked at". The knip entry below is the same family — a
+dead-code check whose entry globs exempt most of the frontend.
+
+**What:** each is its own piece of work and none should be bundled with a feature branch.
+For (1), either type-check specs in `packages/shared`'s own gate or drop transpile-only. For (2),
+add a second tsconfig that includes tests and run it in preflight. For (3), widen the lint script
+to `components/` and burn down whatever it surfaces. Doing (3) first is cheapest and will produce
+the smallest backlog.
+
+---
+
 ## Dead code detection
 
 ### knip treats every file under `apps/web/app/**` as an entry point, so nothing there is ever unused
