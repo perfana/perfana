@@ -63,7 +63,7 @@ import {
   type ReportStyling,
   getSectionText,
 } from '@/lib/api/reports';
-import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
+import { MAX_REPORT_SECTIONS, SECTION_RENDER_TITLES } from '@perfana/shared/types';
 import { SECTION_CONFIG } from './section-config';
 import { SectionPalette } from './SectionPalette';
 import {
@@ -317,15 +317,36 @@ export function GenerateReportDialog({
     setSections(newSections);
   };
 
+  // Handle section title change — a section-level field, like text above.
+  // Whitespace-only input stores undefined, not '': the effective-title
+  // fallback (`section.title || SECTION_RENDER_TITLES[type]`) treats '' as
+  // falsy already, but leaving '' in state would still make two blanked
+  // sections compare as "both titled ''" instead of "both defaulted", and
+  // would round-trip to the API as an explicit empty string. Non-blank input
+  // is stored as typed — trimming it here on every keystroke would strip a
+  // trailing space the instant it's typed, which fights a controlled input.
+  const handleTitleChange = (index: number, title: string) => {
+    const newSections = [...sections];
+    newSections[index] = { ...newSections[index], title: title.trim() === '' ? undefined : title };
+    setSections(newSections);
+  };
+
   // Handle add section
   const handleAddSection = (type: ReportSectionType) => {
     if (sections.length >= MAX_SECTIONS) {
       return;
     }
+    // No `title` stamped here — leaving it undefined lets the card fall back to
+    // config.label for display and the renderer fall back to SECTION_RENDER_TITLES
+    // for the heading/anchor, which is what "leave the title blank to use the
+    // default" means. Stamping the palette label here used to disagree with that
+    // default for `index` (palette label "Section Index" vs rendered heading
+    // "Index"), and it made every section of the same type start life
+    // indistinguishable, which is exactly the setup for the duplicate-title/anchor
+    // problem the title field below exists to let authors fix.
     const newSection: ReportSectionConfig = {
       type,
       order: sections.length,
-      title: SECTION_CONFIG[type].label,
     };
     setSections([...sections, newSection]);
   };
@@ -336,7 +357,6 @@ export function GenerateReportDialog({
       types.slice(0, MAX_SECTIONS).map((type, order) => ({
         type,
         order,
-        title: SECTION_CONFIG[type].label,
       })),
     );
   };
@@ -721,6 +741,7 @@ export function GenerateReportDialog({
                       onDelete={() => handleDelete(index)}
                       onConfigChange={(config) => handleConfigChange(index, config)}
                       onTextChange={(text) => handleTextChange(index, text)}
+                      onTitleChange={(title) => handleTitleChange(index, title)}
                       onMoveUp={index > 0 ? () => handleReorder(index, index - 1) : undefined}
                       onMoveDown={index < sections.length - 1 ? () => handleReorder(index, index + 1) : undefined}
                       testRunId={testRunId}
@@ -843,6 +864,7 @@ interface LayoutSectionCardProps {
   onDelete: () => void;
   onConfigChange: (config: Record<string, unknown>) => void;
   onTextChange: (text: string) => void;
+  onTitleChange: (title: string) => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
   testRunId?: string;
@@ -853,7 +875,7 @@ interface LayoutSectionCardProps {
   allSections?: ReportSectionConfig[];
 }
 
-function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTextChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload, allSections }: LayoutSectionCardProps) {
+function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTextChange, onTitleChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload, allSections }: LayoutSectionCardProps) {
   // DB-stored templates can carry section types this build doesn't know about
   const config = SECTION_CONFIG[section.type] ?? { icon: null, label: section.type, description: '', color: '#9e9e9e' };
   const [expanded, setExpanded] = useState(false);
@@ -1042,6 +1064,21 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
             bgcolor: 'background.default',
           }}
         >
+          {/* Section title — the only place an author can give a section a
+              distinct title, which is what makes duplicate-title anchors
+              (e.g. two "Custom Graphs" sections) avoidable rather than just
+              flagged. Blank means "use the default heading", so the
+              placeholder shows exactly that default. */}
+          <TextField
+            label="Section Title"
+            value={section.title ?? ''}
+            onChange={(e) => onTitleChange(e.target.value)}
+            placeholder={SECTION_RENDER_TITLES[section.type] ?? config.label}
+            helperText="Shown as the section heading and used to build its link anchor. Leave blank to use the default."
+            fullWidth
+            size="small"
+            sx={{ mb: 2 }}
+          />
           <Box
             sx={{
               display: 'flex',
