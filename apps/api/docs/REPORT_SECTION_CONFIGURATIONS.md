@@ -352,6 +352,47 @@ Displays custom graphs and visualizations.
 
 ---
 
+### 11. `index` - Section Index
+
+Renders a linked list of the report's sections, in the order they appear, so readers can jump straight to the one they want.
+
+**Configuration Options:**
+
+```typescript
+{
+  type: 'index',
+  order: 0,
+  title?: string;     // Default: 'Index'
+}
+```
+
+This section takes no configuration. Its list is built automatically from the other sections already in the report — there is nothing to set beyond where it sits in the running order and, optionally, a title override.
+
+**Features:**
+- One entry per linkable section, in report order
+- Each entry links to that section's anchor
+- Text blocks are never listed — they have no anchor of their own (see "Linking to Sections" below)
+
+---
+
+## Linking to Sections
+
+Any section can be linked from a text block or from a section's own accompanying text, using ordinary markdown:
+
+```markdown
+[See the SLO results](#slo-results)
+```
+
+The link target is a slug built from the section's title as the report renders it: lowercased, with accents stripped and every run of non-alphanumeric characters collapsed to a single `-`. "SLO Results" becomes `slo-results`. If a section has no title of its own, the anchor is built from its default type heading instead — an untitled `slo` section still anchors at `#slo-results`.
+
+**Text blocks cannot be linked to.** A text block is where you write links from, not something other sections can link to — it gets no anchor and never appears in the index.
+
+**Give sections distinct titles.** Two sections that share a title make their links ambiguous: the second one gets a numbered suffix (`-2`, `-3`, ...), and later deleting or reordering either section can silently repoint an existing link at the wrong one. Report generation warns about duplicate titles, but it does not block generation.
+
+You don't have to work the slug out by hand — the editor toolbar has a "Link to section" button that inserts the correct markdown for the section you pick. Links work the same way in both the HTML report and the generated PDF.
+
+---
+
 ## Complete Example Template
 
 ```typescript
