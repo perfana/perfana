@@ -363,10 +363,11 @@ Renders a linked list of the report's sections, in the order they appear, so rea
   type: 'index',
   order: 0,
   title?: string;     // Default: 'Index'
+  comment?: string;   // Optional stakeholder comment, rendered above the list
 }
 ```
 
-This section takes no configuration. Its list is built automatically from the other sections already in the report — there is nothing to set beyond where it sits in the running order and, optionally, a title override.
+This section has no settings of its own beyond the standard fields every section carries. Its list is built automatically from the other sections already in the report — there is nothing to set beyond where it sits in the running order, an optional title override, and the standard accompanying-text field (`comment`), which renders above its list.
 
 **Features:**
 - One entry per linkable section, in report order

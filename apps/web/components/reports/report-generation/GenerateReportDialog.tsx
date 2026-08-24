@@ -1001,6 +1001,17 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
           {config.icon}
         </Box>
         <Box sx={{ flex: 1, minWidth: 0 }}>
+          {/*
+            Deliberately `config.label` (the palette label, e.g. "Header"),
+            NOT `SECTION_RENDER_TITLES[type]` (the rendered heading, e.g.
+            "Report Header") used by the title field's placeholder below. This
+            card is the builder's own chrome — it names the section the way
+            the palette does — while the placeholder previews what the report
+            will actually show. They intentionally diverge for `header` and
+            `index`; see the `SECTION_RENDER_TITLES` doc comment in
+            packages/shared/src/types/reports.types.ts. Do not "fix" this to
+            match the placeholder — that breaks the placeholder's job instead.
+          */}
           <Typography variant="body2" fontWeight={600}>
             {section.title || config.label}
           </Typography>
