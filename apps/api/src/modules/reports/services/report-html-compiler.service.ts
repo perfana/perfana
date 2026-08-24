@@ -93,7 +93,7 @@ export class ReportHtmlCompilerService {
     const withAnchor = (section: ReportSectionConfig, html: string): string => {
       const anchor = anchors.get(section);
       return anchor
-        ? `<a id="${anchor}" class="section-anchor" aria-hidden="true"></a>\n${html}`
+        ? `<a id="${this.utils.escapeHtml(anchor)}" class="section-anchor" aria-hidden="true"></a>\n${html}`
         : html;
     };
 

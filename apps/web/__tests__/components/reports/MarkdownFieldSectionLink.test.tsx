@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MarkdownField } from '@/components/reports/report-generation/MarkdownField';
-import { assignSectionAnchors } from '@perfana/shared/utils';
+import { assignSectionAnchors, renderMarkdown } from '@perfana/shared/utils';
 import { isLinkableSectionType } from '@perfana/shared/types';
 import { buildLinkTargets } from '@/components/reports/report-generation/SectionConfigs';
 import type { ReportSectionConfig } from '@/lib/api/reports';
@@ -95,6 +95,31 @@ describe('MarkdownField section links', () => {
 
     fireEvent.click(screen.getByLabelText('Link to section'));
     expect(screen.getByText(/duplicate title/i)).toBeInTheDocument();
+  });
+
+  it('keeps a title containing "]" from breaking the inserted link', () => {
+    // renderMarkdown's link label is `[^\]\n]{1,200}` (packages/shared/src/utils/markdown.ts)
+    // — a raw ']' anywhere in the label ends it early, with no backslash-escape support, so
+    // `[Results [v2]](#anchor)` fails to match as a link at all and prints as literal text.
+    const { onChange } = setup({
+      linkTargets: [{ title: 'Results [v2]', anchor: 'results-v2' }],
+    });
+
+    fireEvent.click(screen.getByLabelText('Link to section'));
+    fireEvent.click(screen.getByText('Results [v2]'));
+
+    // Fullwidth lookalikes swapped in for the ASCII brackets, so the label carries no
+    // literal ']' and the link regex can still match the whole thing.
+    expect(onChange).toHaveBeenCalledWith('[Results ［v2］](#results-v2)');
+  });
+
+  it('renders as an actual link, not literal text, once inserted', () => {
+    // The regression this guards: before the fix, the markdown above rendered as
+    // plain text because the shared INLINE regex never matched it as a link.
+    const html = renderMarkdown('[Results ［v2］](#results-v2)', { styled: false });
+
+    expect(html).toContain('<a href="#results-v2">');
+    expect(html).toContain('Results ［v2］');
   });
 
   it('disambiguates each duplicate-titled row by its own anchor', () => {

@@ -372,6 +372,7 @@ This section takes no configuration. Its list is built automatically from the ot
 - One entry per linkable section, in report order
 - Each entry links to that section's anchor
 - Text blocks, headers, and other index sections are never listed — none of them have an anchor of their own (see "Linking to Sections" below)
+- An index with no linkable sections in the report, and no accompanying text of its own, renders nothing at all — not even its heading. A report made up of only an index and text blocks/headers would show no sign of the index; add a linkable section, or give the index some accompanying text, to make it appear.
 
 ---
 

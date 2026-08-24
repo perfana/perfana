@@ -82,7 +82,6 @@ describe('ReportHtmlCompilerService', () => {
   let top10ListsRenderer: jest.Mocked<Top10ListsRenderer>;
   let errorAnalysisRenderer: jest.Mocked<ErrorAnalysisRenderer>;
   let placeholderRenderer: jest.Mocked<PlaceholderRenderer>;
-  let indexRenderer: jest.Mocked<IndexRenderer>;
   // Real utils so we can verify escaping behaviour without extra mocking noise
   let utils: ReportUtilsService;
 
@@ -204,7 +203,6 @@ describe('ReportHtmlCompilerService', () => {
     top10ListsRenderer = module.get(Top10ListsRenderer);
     errorAnalysisRenderer = module.get(ErrorAnalysisRenderer);
     placeholderRenderer = module.get(PlaceholderRenderer);
-    indexRenderer = module.get(IndexRenderer);
   });
 
   afterEach(() => {

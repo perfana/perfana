@@ -250,7 +250,18 @@ export function MarkdownField({
   const insertSectionLink = (target: { title: string; anchor: string }) => {
     setSectionMenuAnchor(null);
     const el = inputRef.current;
-    const markdown = `[${target.title}](#${target.anchor})`;
+    // renderMarkdown's link label is `[^\]\n]{1,200}` (see
+    // packages/shared/src/utils/markdown.ts) — a raw `]` anywhere in the label
+    // ends it, with no backslash-escape support to put it back (the class
+    // excludes the literal character outright, escaped or not). A title
+    // containing `]` would otherwise insert markdown the regex can't match,
+    // so the whole `[title](#anchor)` prints as literal text instead of a
+    // link. Swap both brackets for their fullwidth Unicode lookalikes — visibly
+    // near-identical, but not the ASCII byte the regex excludes — rather than
+    // widening the shared parser (which two other consumers, and its own
+    // invariant test suite, would then need re-auditing against).
+    const safeLabel = target.title.replace(/\[/g, '［').replace(/\]/g, '］');
+    const markdown = `[${safeLabel}](#${target.anchor})`;
 
     if (!el) {
       onChange(value + markdown);
