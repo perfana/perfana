@@ -179,6 +179,7 @@ describe('ReportGenerationService', () => {
           provide: ReportGenerationValidatorService,
           useValue: {
             validateStatusTransition: jest.fn(),
+            warnOnAnchorProblems: jest.fn(),
           },
         },
         {

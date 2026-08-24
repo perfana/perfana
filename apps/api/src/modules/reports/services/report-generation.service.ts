@@ -1068,6 +1068,12 @@ export class ReportGenerationService {
       const styling = report.template.styling || this.utils.getDefaultStyling();
 
       const sectionsHtml = await this.htmlCompiler.renderSections(sections, testRun, report, userId, roles);
+
+      this.validator.warnOnAnchorProblems(
+        sectionsHtml,
+        sections.filter(s => s.type !== 'text_block').map(s => s.title || this.utils.getSectionTitle(s.type)),
+      );
+
       const html = this.htmlCompiler.compileHtml(report.name, sectionsHtml, styling);
 
       await this.storeHtmlContent(reportId, html, userId, roles);
