@@ -35,8 +35,9 @@ describe('slugifySectionTitle', () => {
 });
 
 describe('assignSectionAnchors', () => {
-  const titleOf = (s: { title: string }) => s.title;
-  const typeOf = (s: { type: string }) => s.type;
+  type Section = { title: string; type: string };
+  const titleOf = (s: Section) => s.title;
+  const typeOf = (s: Section) => s.type;
 
   it('gives each distinct title its own slug', () => {
     const a = { title: 'SLO Results', type: 'slo' };
