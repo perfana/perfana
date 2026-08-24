@@ -172,4 +172,48 @@ describe('builder link targets', () => {
     expect(buildLinkTargets(undefined)).toEqual([]);
     expect(buildLinkTargets([])).toEqual([]);
   });
+
+  it('falls back to the raw type, never undefined, for a section type this build does not know', () => {
+    // A DB-stored template can carry a `type` an older/newer build doesn't recognise
+    // (GenerateReportDialog guards this same case with `SECTION_CONFIG[type] ?? {...}`).
+    // TypeScript resists constructing this — the source of truth is a database row, not
+    // typed code — so the unknown type is cast here, same as the real data would arrive
+    // already past type-checking.
+    const sections = [
+      { type: 'not_a_real_type' as ReportSectionConfig['type'], order: 0 },
+      { type: 'slo', order: 1, title: 'SLO Results' },
+    ];
+
+    const targetsList = buildLinkTargets(sections);
+
+    expect(targetsList).toEqual([
+      { title: 'not_a_real_type', anchor: 'not-a-real-type' },
+      { title: 'SLO Results', anchor: 'slo-results' },
+    ]);
+  });
+
+  it('renders MarkdownField without throwing when a link target has an unknown section type', () => {
+    // Before the fix, an unknown type's title was `undefined`, and MarkdownField's
+    // duplicate-title check calls `.trim()` on every target's title on every render —
+    // not just when the "Link to section" menu opens — so this crashed every section
+    // card in the dialog, not merely the picker entry for the unknown section.
+    const unknownTypeTargets = buildLinkTargets([
+      { type: 'not_a_real_type' as ReportSectionConfig['type'], order: 0 },
+    ]);
+
+    expect(() =>
+      render(
+        <MarkdownField
+          label="Text"
+          value=""
+          onChange={jest.fn()}
+          markdown
+          linkTargets={unknownTypeTargets}
+        />,
+      ),
+    ).not.toThrow();
+
+    fireEvent.click(screen.getByLabelText('Link to section'));
+    expect(screen.getByText('not_a_real_type')).toBeInTheDocument();
+  });
 });

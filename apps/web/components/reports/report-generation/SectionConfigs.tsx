@@ -46,7 +46,13 @@ export function buildLinkTargets(
     .filter((s) => isLinkableSectionType(s.type))
     .sort((a, b) => a.order - b.order);
 
-  const titleOf = (s: ReportSectionConfig) => s.title || SECTION_RENDER_TITLES[s.type];
+  // DB-stored templates can carry a `type` this build doesn't know (see
+  // GenerateReportDialog's `SECTION_CONFIG[section.type] ?? {...}` guard for the same
+  // case), so SECTION_RENDER_TITLES[s.type] can be undefined here. Fall back to the
+  // type itself, matching the API's ReportUtilsService.getSectionTitle exactly — this
+  // must never produce undefined, since MarkdownField calls `.trim()` on every title
+  // on every render (not just when the link picker opens).
+  const titleOf = (s: ReportSectionConfig) => s.title || SECTION_RENDER_TITLES[s.type] || s.type;
   const anchors = assignSectionAnchors(targets, titleOf, (s) => s.type);
 
   return targets.map((s) => ({
