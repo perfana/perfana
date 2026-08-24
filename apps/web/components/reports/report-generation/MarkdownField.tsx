@@ -10,6 +10,8 @@ import {
   DialogTitle,
   IconButton,
   InputBase,
+  Menu,
+  MenuItem,
   Tooltip,
   Typography,
 } from '@mui/material';
@@ -19,6 +21,7 @@ import TitleIcon from '@mui/icons-material/Title';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import LinkIcon from '@mui/icons-material/Link';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
 import { renderMarkdown, renderPlainText } from '@perfana/shared/utils';
@@ -125,6 +128,12 @@ interface MarkdownFieldProps {
   helperText?: string;
   /** Offer the expand-to-modal button. */
   expandable?: boolean;
+  /**
+   * Sections this text can link to, already slugged by the caller. Empty or
+   * absent hides the button — a report with no target sections has nothing to
+   * link to, and a disabled button would just raise the question.
+   */
+  linkTargets?: { title: string; anchor: string }[];
 }
 
 export function MarkdownField({
@@ -138,9 +147,11 @@ export function MarkdownField({
   maxLength,
   helperText,
   expandable = true,
+  linkTargets,
 }: MarkdownFieldProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [sectionMenuAnchor, setSectionMenuAnchor] = useState<null | HTMLElement>(null);
 
   const applyTool = (tool: Tool) => {
     const el = inputRef.current;
@@ -236,6 +247,33 @@ export function MarkdownField({
     });
   };
 
+  const insertSectionLink = (target: { title: string; anchor: string }) => {
+    setSectionMenuAnchor(null);
+    const el = inputRef.current;
+    const markdown = `[${target.title}](#${target.anchor})`;
+
+    if (!el) {
+      onChange(value + markdown);
+      return;
+    }
+
+    const before = value.slice(0, el.selectionStart);
+    const after = value.slice(el.selectionEnd);
+    onChange(before + markdown + after);
+  };
+
+  // Duplicate titles make the menu ambiguous — flag them so authors don't pick
+  // the wrong section blind. Comparison is trim+lowercase to match how
+  // duplicate-title warnings are surfaced elsewhere in this feature.
+  const duplicateTargetTitles = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of linkTargets ?? []) {
+      const key = t.title.trim().toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts.entries()].filter(([, n]) => n > 1).map(([key]) => key);
+  }, [linkTargets]);
+
   // Memoised: this runs on every keystroke and the parent re-renders every
   // section card when the value propagates.
   const previewHtml = useMemo(
@@ -289,6 +327,43 @@ export function MarkdownField({
             </IconButton>
           </Tooltip>
         ))}
+
+        {(linkTargets?.length ?? 0) > 0 && (
+          <Tooltip title="Link to section" arrow>
+            <IconButton
+              size="small"
+              aria-label="Link to section"
+              onClick={(e) => setSectionMenuAnchor(e.currentTarget)}
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              <AccountTreeIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+        <Menu
+          anchorEl={sectionMenuAnchor}
+          open={Boolean(sectionMenuAnchor)}
+          onClose={() => setSectionMenuAnchor(null)}
+        >
+          {duplicateTargetTitles.length > 0 && (
+            <Typography
+              variant="caption"
+              sx={{ display: 'block', px: 2, py: 1, color: 'warning.main' }}
+            >
+              Sections with a duplicate title: rename them, or a link may open the wrong one.
+            </Typography>
+          )}
+          {(linkTargets ?? []).map((target) => (
+            <MenuItem key={target.anchor} onClick={() => insertSectionLink(target)}>
+              {target.title}
+              {duplicateTargetTitles.includes(target.title.trim().toLowerCase()) && (
+                <Typography variant="caption" sx={{ ml: 1, color: 'warning.main' }}>
+                  (#{target.anchor})
+                </Typography>
+              )}
+            </MenuItem>
+          ))}
+        </Menu>
 
         {expandable && (
           <Tooltip title={expanded ? 'Exit full screen' : 'Expand editor'} arrow>
