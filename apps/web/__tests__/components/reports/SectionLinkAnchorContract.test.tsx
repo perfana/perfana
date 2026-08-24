@@ -32,9 +32,9 @@ describe('builder link anchors match the anchors the API stamps', () => {
     ];
 
     expect(buildLinkTargets(sections)).toEqual([
-      { title: 'SLO Results', anchor: 'slo-results' },
-      { title: 'Custom Graphs', anchor: 'custom-graphs' },
-      { title: 'Error Analysis', anchor: 'error-analysis' },
+      { title: 'SLO Results', anchor: 'section-slo-results' },
+      { title: 'Custom Graphs', anchor: 'section-custom-graphs' },
+      { title: 'Error Analysis', anchor: 'section-error-analysis' },
     ]);
   });
 
@@ -46,8 +46,8 @@ describe('builder link anchors match the anchors the API stamps', () => {
     ];
 
     expect(buildLinkTargets(sections).map((t) => t.anchor)).toEqual([
-      'custom-graphs',
-      'custom-graphs-2',
+      'section-custom-graphs',
+      'section-custom-graphs-2',
     ]);
   });
 
@@ -58,8 +58,8 @@ describe('builder link anchors match the anchors the API stamps', () => {
     ];
 
     expect(buildLinkTargets(sections)).toEqual([
-      { title: 'Front-end Graphs', anchor: 'front-end-graphs' },
-      { title: 'Custom Graphs', anchor: 'custom-graphs' },
+      { title: 'Front-end Graphs', anchor: 'section-front-end-graphs' },
+      { title: 'Custom Graphs', anchor: 'section-custom-graphs' },
     ]);
   });
 
@@ -78,6 +78,6 @@ describe('builder link anchors match the anchors the API stamps', () => {
     fireEvent.click(screen.getByLabelText('Link to section'));
     fireEvent.click(screen.getByText('Custom Graphs'));
 
-    expect(onChange).toHaveBeenCalledWith('[Custom Graphs](#custom-graphs)');
+    expect(onChange).toHaveBeenCalledWith('[Custom Graphs](#section-custom-graphs)');
   });
 });

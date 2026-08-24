@@ -181,7 +181,7 @@ describe('builder link targets', () => {
       (s) => s.type,
     );
 
-    expect([...anchors.values()]).toEqual(['slo-results', 'graphs']);
+    expect([...anchors.values()]).toEqual(['section-slo-results', 'section-graphs']);
   });
 
   it('buildLinkTargets (the builder\'s production helper) excludes header and index, not just text_block', () => {
@@ -197,8 +197,8 @@ describe('builder link targets', () => {
     ];
 
     expect(buildLinkTargets(sections)).toEqual([
-      { title: 'SLO Results', anchor: 'slo-results' },
-      { title: 'Graphs', anchor: 'graphs' },
+      { title: 'SLO Results', anchor: 'section-slo-results' },
+      { title: 'Graphs', anchor: 'section-graphs' },
     ]);
   });
 
@@ -235,8 +235,8 @@ describe('builder link targets', () => {
     const targetsList = buildLinkTargets(sections);
 
     expect(targetsList).toEqual([
-      { title: 'not_a_real_type', anchor: 'not-a-real-type' },
-      { title: 'SLO Results', anchor: 'slo-results' },
+      { title: 'not_a_real_type', anchor: 'section-not-a-real-type' },
+      { title: 'SLO Results', anchor: 'section-slo-results' },
     ]);
   });
 

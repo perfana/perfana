@@ -37,11 +37,31 @@ export function slugifySectionTitle(title: string, fallback: string): string {
 }
 
 /**
+ * Namespace prefix for every anchor `assignSectionAnchors` produces.
+ *
+ * A section anchor is slugged from an author-supplied title, which the author
+ * does not know is sharing an id-space with anything else in the document.
+ * Other renderers stamp their own ids from unrelated data — e.g. drill-down
+ * table rows keyed off transaction names (`r-checkout`, `c-mid`, `b-reg`, see
+ * report-interactivity.ts / comparisons-renderer.ts) — and a title like
+ * "R Checkout" slugs to exactly `r-checkout`. Two elements sharing an id is
+ * invalid HTML, and a browser resolves `#r-checkout` to whichever comes first
+ * in DOM order, so a section link can silently land on a transaction row
+ * instead of the section it names. This prefix is applied in the one place
+ * that assigns section anchors, so the compiler's `id=`, the index renderer's
+ * `href=`, and the web picker's inserted markdown all agree without each
+ * having to know about the other id-producing renderers.
+ */
+export const SECTION_ANCHOR_PREFIX = 'section-';
+
+/**
  * Assign a unique anchor to every item, in document order.
  *
  * Duplicates get `-2`, `-3` … and the first occurrence keeps the bare slug. The
  * suffix is a fallback that keeps output deterministic; the contract is that
  * base slugs are unique, enforced by the warning `findAnchorProblems` drives.
+ * Every returned anchor carries `SECTION_ANCHOR_PREFIX` so it cannot collide
+ * with an id some other report renderer stamps from unrelated data.
  */
 export function assignSectionAnchors<T>(
   items: T[],
@@ -62,7 +82,7 @@ export function assignSectionAnchors<T>(
       candidate = `${base}-${n}`;
     }
     taken.add(candidate);
-    anchors.set(item, candidate);
+    anchors.set(item, `${SECTION_ANCHOR_PREFIX}${candidate}`);
   }
 
   return anchors;

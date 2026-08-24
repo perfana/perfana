@@ -79,12 +79,14 @@ describe('ReportHtmlCompilerService anchors', () => {
       null,
       null,
     );
-    expect(html).toContain('<a id="slo-results" class="section-anchor" aria-hidden="true"></a>');
+    expect(html).toContain(
+      '<a id="section-slo-results" class="section-anchor" aria-hidden="true"></a>',
+    );
   });
 
   it('uses the type default title when the section has none', async () => {
     const html = await service.renderSections([section({ type: 'trends', order: 0 })], null, null);
-    expect(html).toContain('id="trends"');
+    expect(html).toContain('id="section-trends"');
   });
 
   it('emits no anchor for a text block', async () => {
@@ -127,7 +129,9 @@ describe('ReportHtmlCompilerService anchors', () => {
     // The slug was reserved before rendering began, so the failed section
     // must still be a valid link target — it just resolves to the error
     // placeholder instead of the renderer's own markup.
-    expect(html).toContain('<a id="slo-results" class="section-anchor" aria-hidden="true"></a>');
+    expect(html).toContain(
+      '<a id="section-slo-results" class="section-anchor" aria-hidden="true"></a>',
+    );
     expect(html).toContain('<section class="error"></section>');
   });
 
@@ -140,8 +144,8 @@ describe('ReportHtmlCompilerService anchors', () => {
       null,
       null,
     );
-    expect(html).toContain('id="graphs"');
-    expect(html).toContain('id="graphs-2"');
+    expect(html).toContain('id="section-graphs"');
+    expect(html).toContain('id="section-graphs-2"');
   });
 
   it('anchors by sorted order, not array order', async () => {
@@ -154,7 +158,7 @@ describe('ReportHtmlCompilerService anchors', () => {
       null,
     );
     // The order:1 section renders first, so it owns the bare slug.
-    expect(html.indexOf('id="graphs"')).toBeLessThan(html.indexOf('id="graphs-2"'));
+    expect(html.indexOf('id="section-graphs"')).toBeLessThan(html.indexOf('id="section-graphs-2"'));
   });
 
   it('lists every target section but not itself, a header, or a text block', async () => {
@@ -168,7 +172,7 @@ describe('ReportHtmlCompilerService anchors', () => {
       null,
       null,
     );
-    expect(html).toContain('href="#slo-results"');
+    expect(html).toContain('href="#section-slo-results"');
     expect(html).not.toContain('href="#index"');
     expect(html).not.toContain('href="#text"');
     expect(html).not.toContain('href="#header"');

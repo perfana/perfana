@@ -382,10 +382,12 @@ This section has no settings of its own beyond the standard fields every section
 Any section can be linked from a text block or from a section's own accompanying text, using ordinary markdown:
 
 ```markdown
-[See the SLO results](#slo-results)
+[See the SLO results](#section-slo-results)
 ```
 
-The link target is a slug built from the section's title as the report renders it: lowercased, with accents stripped and every run of non-alphanumeric characters collapsed to a single `-`. "SLO Results" becomes `slo-results`. If a section has no title of its own, the anchor is built from its default type heading instead — an untitled `slo` section still anchors at `#slo-results`.
+The link target is a slug built from the section's title as the report renders it: lowercased, with accents stripped and every run of non-alphanumeric characters collapsed to a single `-`, then namespaced with a `section-` prefix. "SLO Results" becomes `section-slo-results`. If a section has no title of its own, the anchor is built from its default type heading instead — an untitled `slo` section still anchors at `#section-slo-results`.
+
+The `section-` prefix exists so a section's anchor can never collide with an id some other part of the report stamps from unrelated data — for example, drill-down table rows keyed off transaction names (`r-checkout`, `c-mid`, `b-reg`). Without it, a section titled "R Checkout" would slug to the bare `r-checkout` and silently share an id with such a row; the browser would then resolve `#r-checkout` to whichever element comes first in the document, which may not be the section at all.
 
 **Text blocks, headers, and indexes cannot be linked to.** A text block is where you write links from, not something other sections can link to. A header is the report's title block at the very top, so linking to it is pointless — you're already there. An index linking to an index is circular noise. All three get no anchor and never appear in the index.
 

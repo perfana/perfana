@@ -120,8 +120,16 @@ describe('report anchor contract (compiler id ⇄ index href)', () => {
       null,
     );
 
-    expect(idsIn(html)).toEqual(['slo-results', 'custom-graphs', 'error-analysis']);
-    expect(indexHrefsIn(html)).toEqual(['slo-results', 'custom-graphs', 'error-analysis']);
+    expect(idsIn(html)).toEqual([
+      'section-slo-results',
+      'section-custom-graphs',
+      'section-error-analysis',
+    ]);
+    expect(indexHrefsIn(html)).toEqual([
+      'section-slo-results',
+      'section-custom-graphs',
+      'section-error-analysis',
+    ]);
   });
 
   it('keeps id and href in step when two sections share a default title', async () => {
@@ -135,8 +143,8 @@ describe('report anchor contract (compiler id ⇄ index href)', () => {
       null,
     );
 
-    expect(idsIn(html)).toEqual(['custom-graphs', 'custom-graphs-2']);
-    expect(indexHrefsIn(html)).toEqual(['custom-graphs', 'custom-graphs-2']);
+    expect(idsIn(html)).toEqual(['section-custom-graphs', 'section-custom-graphs-2']);
+    expect(indexHrefsIn(html)).toEqual(['section-custom-graphs', 'section-custom-graphs-2']);
     expect(validator.findDeadAnchors(html)).toEqual([]);
   });
 
@@ -165,8 +173,8 @@ describe('report anchor contract (compiler id ⇄ index href)', () => {
       null,
     );
 
-    expect(html).toContain('id="slo-results"');
-    expect(html).toContain('href="#slo-results"');
+    expect(html).toContain('id="section-slo-results"');
+    expect(html).toContain('href="#section-slo-results"');
     expect(validator.findDeadAnchors(html)).toEqual([]);
   });
 });

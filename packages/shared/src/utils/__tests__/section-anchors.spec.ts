@@ -43,8 +43,8 @@ describe('assignSectionAnchors', () => {
     const a = { title: 'SLO Results', type: 'slo' };
     const b = { title: 'Trends', type: 'trends' };
     const map = assignSectionAnchors([a, b], titleOf, typeOf);
-    expect(map.get(a)).toBe('slo-results');
-    expect(map.get(b)).toBe('trends');
+    expect(map.get(a)).toBe('section-slo-results');
+    expect(map.get(b)).toBe('section-trends');
   });
 
   it('suffixes duplicates in document order, first keeps the bare slug', () => {
@@ -52,9 +52,9 @@ describe('assignSectionAnchors', () => {
     const b = { title: 'Graphs', type: 'graphs' };
     const c = { title: 'Graphs', type: 'graphs' };
     const map = assignSectionAnchors([a, b, c], titleOf, typeOf);
-    expect(map.get(a)).toBe('graphs');
-    expect(map.get(b)).toBe('graphs-2');
-    expect(map.get(c)).toBe('graphs-3');
+    expect(map.get(a)).toBe('section-graphs');
+    expect(map.get(b)).toBe('section-graphs-2');
+    expect(map.get(c)).toBe('section-graphs-3');
   });
 
   it('does not let a suffixed slug collide with a real title', () => {
@@ -63,13 +63,24 @@ describe('assignSectionAnchors', () => {
     const b = { title: 'Graphs 2', type: 'graphs' };
     const c = { title: 'Graphs', type: 'graphs' };
     const map = assignSectionAnchors([a, b, c], titleOf, typeOf);
-    expect(map.get(a)).toBe('graphs');
-    expect(map.get(b)).toBe('graphs-2');
+    expect(map.get(a)).toBe('section-graphs');
+    expect(map.get(b)).toBe('section-graphs-2');
     expect(new Set([map.get(a), map.get(b), map.get(c)]).size).toBe(3);
   });
 
   it('returns an empty map for no sections', () => {
     expect(assignSectionAnchors([], titleOf, typeOf).size).toBe(0);
+  });
+
+  it('namespaces every anchor so it cannot collide with an id another renderer stamps from unrelated data', () => {
+    // A section titled "R Checkout" slugs to the bare `r-checkout`, which is
+    // exactly the id format report-interactivity.ts / comparisons-renderer.ts
+    // stamp on drill-down rows keyed off transaction names. The prefix is the
+    // fix: it must show up on every anchor, not just the colliding one.
+    const a = { title: 'R Checkout', type: 'text_block' };
+    const map = assignSectionAnchors([a], titleOf, typeOf);
+    expect(map.get(a)).toBe('section-r-checkout');
+    expect(map.get(a)).not.toBe('r-checkout');
   });
 });
 
