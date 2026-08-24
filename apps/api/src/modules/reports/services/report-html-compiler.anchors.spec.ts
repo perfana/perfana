@@ -96,6 +96,24 @@ describe('ReportHtmlCompilerService anchors', () => {
     expect(html).not.toContain('class="section-anchor"');
   });
 
+  it('emits no anchor for a header section', async () => {
+    const html = await service.renderSections(
+      [section({ type: 'header', order: 0 })],
+      null,
+      null,
+    );
+    expect(html).not.toContain('class="section-anchor"');
+  });
+
+  it('emits no anchor for an index section', async () => {
+    const html = await service.renderSections(
+      [section({ type: 'index', order: 0 })],
+      null,
+      null,
+    );
+    expect(html).not.toContain('class="section-anchor"');
+  });
+
   it('still anchors a section whose renderer throws', async () => {
     const sloRenderer = moduleRef.get(SloRenderer);
     (sloRenderer.renderSloSection as jest.Mock).mockRejectedValueOnce(new Error('boom'));
@@ -139,12 +157,13 @@ describe('ReportHtmlCompilerService anchors', () => {
     expect(html.indexOf('id="graphs"')).toBeLessThan(html.indexOf('id="graphs-2"'));
   });
 
-  it('lists every target section but not itself or a text block', async () => {
+  it('lists every target section but not itself, a header, or a text block', async () => {
     const html = await service.renderSections(
       [
-        section({ type: 'index', order: 0 }),
-        section({ type: 'slo', order: 1, title: 'SLO Results' }),
-        section({ type: 'text_block', order: 2, config: { content: 'prose' } }),
+        section({ type: 'header', order: 0 }),
+        section({ type: 'index', order: 1 }),
+        section({ type: 'slo', order: 2, title: 'SLO Results' }),
+        section({ type: 'text_block', order: 3, config: { content: 'prose' } }),
       ],
       null,
       null,
@@ -152,5 +171,7 @@ describe('ReportHtmlCompilerService anchors', () => {
     expect(html).toContain('href="#slo-results"');
     expect(html).not.toContain('href="#index"');
     expect(html).not.toContain('href="#text"');
+    expect(html).not.toContain('href="#header"');
+    expect(html).not.toContain('href="#report-header"');
   });
 });

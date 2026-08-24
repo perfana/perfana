@@ -1,6 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MarkdownField } from '@/components/reports/report-generation/MarkdownField';
 import { assignSectionAnchors } from '@perfana/shared/utils';
+import { isLinkableSectionType } from '@perfana/shared/types';
 import { buildLinkTargets } from '@/components/reports/report-generation/SectionConfigs';
 import type { ReportSectionConfig } from '@/lib/api/reports';
 
@@ -113,16 +114,17 @@ describe('MarkdownField section links', () => {
 });
 
 describe('builder link targets', () => {
-  it('excludes text blocks and matches what the API will emit', () => {
+  it('excludes text blocks, headers and indexes, and matches what the API will emit', () => {
     const sections = [
-      { type: 'index', order: 0, title: '' },
-      { type: 'slo', order: 1, title: 'SLO Results' },
-      { type: 'text_block', order: 2, title: '' },
-      { type: 'graphs', order: 3, title: 'Graphs' },
+      { type: 'header', order: 0, title: '' },
+      { type: 'index', order: 1, title: '' },
+      { type: 'slo', order: 2, title: 'SLO Results' },
+      { type: 'text_block', order: 3, title: '' },
+      { type: 'graphs', order: 4, title: 'Graphs' },
     ];
 
     const targetsList = sections
-      .filter((s) => s.type !== 'text_block')
+      .filter((s) => isLinkableSectionType(s.type))
       .sort((a, b) => a.order - b.order);
 
     const anchors = assignSectionAnchors(
@@ -131,22 +133,22 @@ describe('builder link targets', () => {
       (s) => s.type,
     );
 
-    expect([...anchors.values()]).toEqual(['index', 'slo-results', 'graphs']);
+    expect([...anchors.values()]).toEqual(['slo-results', 'graphs']);
   });
 
-  it('buildLinkTargets (the builder\'s production helper) applies the same rule, using SECTION_RENDER_TITLES for an untitled section', () => {
-    // `header` is the one type whose builder label ("Header") and rendered
-    // title ("Report Header") diverge — see Part A. An untitled header
-    // section must anchor on "report-header", matching the API, not "header".
+  it('buildLinkTargets (the builder\'s production helper) excludes header and index, not just text_block', () => {
+    // header and index used to be link targets; they no longer are — a
+    // header is the top of the report (nothing to link to), and an index
+    // linking to an index is circular noise. Only slo/graphs remain.
     const sections: ReportSectionConfig[] = [
       { type: 'header', order: 0 },
-      { type: 'slo', order: 1, title: 'SLO Results' },
-      { type: 'text_block', order: 2, title: 'ignored' },
-      { type: 'graphs', order: 3, title: 'Graphs' },
+      { type: 'index', order: 1 },
+      { type: 'slo', order: 2, title: 'SLO Results' },
+      { type: 'text_block', order: 3, title: 'ignored' },
+      { type: 'graphs', order: 4, title: 'Graphs' },
     ];
 
     expect(buildLinkTargets(sections)).toEqual([
-      { title: 'Report Header', anchor: 'report-header' },
       { title: 'SLO Results', anchor: 'slo-results' },
       { title: 'Graphs', anchor: 'graphs' },
     ]);
@@ -155,13 +157,13 @@ describe('builder link targets', () => {
   it('sorts by order regardless of input order', () => {
     const sections: ReportSectionConfig[] = [
       { type: 'graphs', order: 2, title: 'Graphs' },
-      { type: 'index', order: 0, title: 'Index' },
-      { type: 'slo', order: 1, title: 'SLO Results' },
+      { type: 'slo', order: 0, title: 'SLO Results' },
+      { type: 'apdex', order: 1, title: 'Apdex' },
     ];
 
     expect(buildLinkTargets(sections).map((t) => t.title)).toEqual([
-      'Index',
       'SLO Results',
+      'Apdex',
       'Graphs',
     ]);
   });

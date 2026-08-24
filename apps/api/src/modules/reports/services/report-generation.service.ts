@@ -11,7 +11,7 @@ import {
   OwnedResource,
   SystemUnderTest,
 } from '@perfana/shared';
-import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
+import { MAX_REPORT_SECTIONS, isLinkableSectionType } from '@perfana/shared/types';
 import { withRequestEm } from '../../../common/db/request-em';
 import { findTestRunByEitherId } from './resolve-test-run';
 import {
@@ -1071,7 +1071,10 @@ export class ReportGenerationService {
 
       this.validator.warnOnAnchorProblems(
         sectionsHtml,
-        sections.filter(s => s.type !== 'text_block').map(s => s.title || this.utils.getSectionTitle(s.type)),
+        // Title set must match the compiler's link-target set exactly (see
+        // isLinkableSectionType), or the duplicate-title warning would flag
+        // titles on sections that never got an anchor in the first place.
+        sections.filter(s => isLinkableSectionType(s.type)).map(s => s.title || this.utils.getSectionTitle(s.type)),
       );
 
       const html = this.htmlCompiler.compileHtml(report.name, sectionsHtml, styling);

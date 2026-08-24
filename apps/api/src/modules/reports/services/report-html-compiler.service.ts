@@ -1,5 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { TestRun, ReportSectionConfig, ReportStyling, GeneratedReport, assignSectionAnchors } from '@perfana/shared';
+import {
+  TestRun,
+  ReportSectionConfig,
+  ReportStyling,
+  GeneratedReport,
+  assignSectionAnchors,
+  isLinkableSectionType,
+} from '@perfana/shared';
 import { ReportUtilsService } from './report-utils.service';
 import { HeaderRenderer } from '../renderers/header-renderer';
 import { TextBlockRenderer } from '../renderers/text-block-renderer';
@@ -66,9 +73,12 @@ export class ReportHtmlCompilerService {
     const sortedSections = [...sections].sort((a, b) => a.order - b.order);
 
     // Anchors are assigned over the sections that can be link TARGETS. A text
-    // block is where links are written from, never to, so it is excluded here —
-    // which also keeps it from consuming a slug a real section wants.
-    const targets = sortedSections.filter(s => s.type !== 'text_block');
+    // block is where links are written from, never to; a header is the title
+    // block at the very top, so linking to it is pointless; an index linking
+    // to an index is circular. All three are excluded via the single shared
+    // rule (isLinkableSectionType), which also keeps them from consuming a
+    // slug a real section wants.
+    const targets = sortedSections.filter(s => isLinkableSectionType(s.type));
     const anchors = assignSectionAnchors(
       targets,
       s => s.title || this.utils.getSectionTitle(s.type),

@@ -609,6 +609,43 @@ export const SECTION_TYPES_WITH_TEXT: readonly TextableSectionType[] =
   );
 
 /**
+ * Section types that can never be a link target: excluded from the report's
+ * index, never given an anchor `id` in the compiled HTML, and never offered
+ * by the builder's "Link to section" picker. This is the single authority for
+ * that rule — `ReportHtmlCompilerService.renderSections`,
+ * `ReportGenerationService`'s duplicate-title warning, and the web builder's
+ * `buildLinkTargets` all derive from it, so the picker can never offer a
+ * target the compiler did not anchor.
+ *
+ * - `text_block` — a text block IS the prose that link markdown is written
+ *   FROM. It renders as body text, not a heading, so it has nothing to link to.
+ * - `header` — the report's title block at the very top of the document.
+ *   Linking to it would point the reader back to where they already are.
+ * - `index` — the index itself. An index linking to another index is
+ *   circular noise, not navigation.
+ *
+ * Deliberately distinct from `SECTION_TYPES_WITH_TEXT` above: whether a
+ * section can carry accompanying prose is an unrelated question, and `header`
+ * / `index` both legitimately support text while being non-linkable.
+ */
+export const NON_LINKABLE_SECTION_TYPES = ['text_block', 'header', 'index'] as const;
+
+type NonLinkableSectionType = (typeof NON_LINKABLE_SECTION_TYPES)[number];
+
+/** Section types that can be linked to and listed in the report's index. */
+export type LinkableSectionType = Exclude<ReportSectionType, NonLinkableSectionType>;
+
+/**
+ * True when a section type can be linked to: it is eligible for an anchor
+ * `id`, for inclusion in the report's index, and for the builder's
+ * "Link to section" picker. See `NON_LINKABLE_SECTION_TYPES` for the excluded
+ * types and why.
+ */
+export function isLinkableSectionType(type: ReportSectionType): type is LinkableSectionType {
+  return !(NON_LINKABLE_SECTION_TYPES as readonly string[]).includes(type);
+}
+
+/**
  * Report status display labels
  */
 export const REPORT_STATUS_LABELS: Record<ReportStatus, string> = {

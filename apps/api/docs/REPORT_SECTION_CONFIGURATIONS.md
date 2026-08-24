@@ -371,7 +371,7 @@ This section takes no configuration. Its list is built automatically from the ot
 **Features:**
 - One entry per linkable section, in report order
 - Each entry links to that section's anchor
-- Text blocks are never listed — they have no anchor of their own (see "Linking to Sections" below)
+- Text blocks, headers, and other index sections are never listed — none of them have an anchor of their own (see "Linking to Sections" below)
 
 ---
 
@@ -385,7 +385,7 @@ Any section can be linked from a text block or from a section's own accompanying
 
 The link target is a slug built from the section's title as the report renders it: lowercased, with accents stripped and every run of non-alphanumeric characters collapsed to a single `-`. "SLO Results" becomes `slo-results`. If a section has no title of its own, the anchor is built from its default type heading instead — an untitled `slo` section still anchors at `#slo-results`.
 
-**Text blocks cannot be linked to.** A text block is where you write links from, not something other sections can link to — it gets no anchor and never appears in the index.
+**Text blocks, headers, and indexes cannot be linked to.** A text block is where you write links from, not something other sections can link to. A header is the report's title block at the very top, so linking to it is pointless — you're already there. An index linking to an index is circular noise. All three get no anchor and never appear in the index.
 
 **Give sections distinct titles.** Two sections that share a title make their links ambiguous: the second one gets a numbered suffix (`-2`, `-3`, ...), and later deleting or reordering either section can silently repoint an existing link at the wrong one. Report generation warns about duplicate titles, but it does not block generation.
 

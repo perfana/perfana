@@ -22,26 +22,28 @@ import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
 import { MarkdownField } from './MarkdownField';
 import { TEXT_BLOCK_MARKDOWN_DEFAULT, assignSectionAnchors } from '@perfana/shared/utils';
-import { SECTION_RENDER_TITLES } from '@perfana/shared/types';
+import { SECTION_RENDER_TITLES, isLinkableSectionType } from '@perfana/shared/types';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
 const HtmlSectionPreview = dynamic(() => import('./preview/HtmlSectionPreview'), { ssr: false });
 
 /**
- * Link targets a MarkdownField's toolbar can offer: every non-text_block
- * section in the builder's current order, using the same effective-title
- * rule the API applies when it renders the report (SECTION_RENDER_TITLES —
- * see packages/shared/src/types/reports.types.ts) so the anchor computed
- * here always matches the `id` the API stamps onto the rendered heading.
- * text_block sections are excluded because they are never a link target —
- * they render as body prose, not a heading with an id.
+ * Link targets a MarkdownField's toolbar can offer: every linkable section
+ * (per `isLinkableSectionType` — see packages/shared/src/types/reports.types.ts)
+ * in the builder's current order, using the same effective-title rule the API
+ * applies when it renders the report (SECTION_RENDER_TITLES — same file) so
+ * the anchor computed here always matches the `id` the API stamps onto the
+ * rendered heading. `text_block`, `header` and `index` sections are excluded:
+ * a text block renders as body prose, never a heading with an id; a header
+ * is the report's title block at the very top, so linking to it is pointless;
+ * an index linking to an index is circular noise.
  */
 export function buildLinkTargets(
   allSections: ReportSectionConfig[] = [],
 ): { title: string; anchor: string }[] {
   const targets = allSections
-    .filter((s) => s.type !== 'text_block')
+    .filter((s) => isLinkableSectionType(s.type))
     .sort((a, b) => a.order - b.order);
 
   const titleOf = (s: ReportSectionConfig) => s.title || SECTION_RENDER_TITLES[s.type];
