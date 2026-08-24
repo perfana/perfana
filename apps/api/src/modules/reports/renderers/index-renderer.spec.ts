@@ -29,6 +29,14 @@ describe('IndexRenderer', () => {
     expect(html).toContain('&lt;img');
   });
 
+  it('escapes an anchor that contains markup', () => {
+    const html = renderer.renderIndexSection(section, [
+      { title: 'Trends', anchor: '"><script>alert(1)</script>' },
+    ]);
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('href="#&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"');
+  });
+
   it('uses the section title override for its own heading', () => {
     const html = renderer.renderIndexSection(
       { type: 'index', order: 0, title: 'Contents' } as ReportSectionConfig,
