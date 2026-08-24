@@ -64,9 +64,16 @@ export class ReportGenerationValidatorService {
         );
       }
     } catch (error) {
-      const msg = error && typeof error === 'object' && 'message' in error
-        ? (error as Error).message : 'Unknown error';
-      this.logger.warn(`Anchor/duplicate-title check failed unexpectedly: ${msg}`);
+      // The logger call itself can fail (a down log transport is a real production
+      // mode), and this handler must not let that escape either — swallow silently
+      // rather than risk a second unguarded `this.logger.warn` call.
+      try {
+        const msg = error && typeof error === 'object' && 'message' in error
+          ? (error as Error).message : 'Unknown error';
+        this.logger.warn(`Anchor/duplicate-title check failed unexpectedly: ${msg}`);
+      } catch {
+        // Nothing left to do — generation must proceed regardless.
+      }
     }
   }
 

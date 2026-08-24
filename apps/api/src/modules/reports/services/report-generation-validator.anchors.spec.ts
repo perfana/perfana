@@ -68,5 +68,20 @@ describe('ReportGenerationValidatorService anchor checks', () => {
       expect(warn).not.toHaveBeenCalled();
       warn.mockRestore();
     });
+
+    it('does not let a logging failure fail report generation', () => {
+      const warn = jest
+        .spyOn(service['logger'], 'warn')
+        .mockImplementation(() => {
+          throw new Error('log transport is down');
+        });
+
+      // Must actually reach `warn` (dead anchor present), or this proves nothing.
+      expect(() =>
+        service.warnOnAnchorProblems('<a href="#gone">x</a>', ['Graphs', 'Graphs']),
+      ).not.toThrow();
+
+      warn.mockRestore();
+    });
   });
 });
