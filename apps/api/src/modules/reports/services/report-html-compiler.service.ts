@@ -14,6 +14,7 @@ import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
+import { IndexRenderer } from '../renderers/index-renderer';
 import {
   REPORT_INTERACTIVITY_CSS,
   REPORT_INTERACTIVITY_SCRIPT,
@@ -45,6 +46,7 @@ export class ReportHtmlCompilerService {
     private readonly top10ListsRenderer: Top10ListsRenderer,
     private readonly errorAnalysisRenderer: ErrorAnalysisRenderer,
     private readonly placeholderRenderer: PlaceholderRenderer,
+    private readonly indexRenderer: IndexRenderer,
   ) {}
 
   /**
@@ -127,10 +129,9 @@ export class ReportHtmlCompilerService {
     _report: GeneratedReport | null,
     userId: string = '',
     roles: string[] = [],
-    // Threaded through for Task 4's `index` case; nothing in this switch reads
-    // it yet, so it's prefixed like `_report` above to satisfy
-    // noUnusedParameters until that case is wired in.
-    _anchors: Map<ReportSectionConfig, string> = new Map(),
+    // Used by the `index` case below to build the entry list: every anchor
+    // target except the index section itself.
+    anchors: Map<ReportSectionConfig, string> = new Map(),
   ): Promise<string> {
     const sectionTitle = section.title || this.utils.getSectionTitle(section.type);
 
@@ -159,6 +160,16 @@ export class ReportHtmlCompilerService {
         return await this.top10ListsRenderer.renderTop10ListsSection(section, testRun, userId, roles);
       case 'error_analysis':
         return await this.errorAnalysisRenderer.renderErrorAnalysisSection(section, testRun, userId, roles);
+      case 'index':
+        return this.indexRenderer.renderIndexSection(
+          section,
+          [...anchors.entries()]
+            .filter(([target]) => target !== section)
+            .map(([target, anchor]) => ({
+              title: target.title || this.utils.getSectionTitle(target.type),
+              anchor,
+            })),
+        );
       default:
         return this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
     }

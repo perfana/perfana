@@ -33,6 +33,7 @@ import { GraphsRenderer } from './renderers/graphs-renderer';
 import { Top10ListsRenderer } from './renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from './renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from './renderers/placeholder-renderer';
+import { IndexRenderer } from './renderers/index-renderer';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { PlaceholderRenderer } from './renderers/placeholder-renderer';
     Top10ListsRenderer,
     ErrorAnalysisRenderer,
     PlaceholderRenderer,
+    IndexRenderer,
   ],
   exports: [
     ReportGenerationService,

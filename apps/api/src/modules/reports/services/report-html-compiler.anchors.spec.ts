@@ -15,6 +15,7 @@ import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
+import { IndexRenderer } from '../renderers/index-renderer';
 
 // Every renderer is stubbed: this suite is about the anchors the compiler emits
 // around section HTML, not about what any renderer produces. Each stub exposes
@@ -37,12 +38,16 @@ describe('ReportHtmlCompilerService anchors', () => {
       providers: [
         ReportHtmlCompilerService,
         ReportUtilsService,
+        // IndexRenderer is real too (not stubbed) — the Step 7 test below
+        // asserts on the actual anchors it renders, not on a marker string.
+        IndexRenderer,
         // Renderer providers are supplied by the module in production; the
         // helper below replaces whichever ones each test needs.
       ],
     })
       .useMocker((token) => {
         if (token === ReportUtilsService) return undefined;
+        if (token === IndexRenderer) return undefined;
         if (token === HeaderRenderer) return stubRenderer('renderHeaderSection');
         if (token === TextBlockRenderer) return stubRenderer('renderTextBlockSection');
         if (token === SloRenderer) return stubRenderer('renderSloSection');
@@ -132,5 +137,20 @@ describe('ReportHtmlCompilerService anchors', () => {
     );
     // The order:1 section renders first, so it owns the bare slug.
     expect(html.indexOf('id="graphs"')).toBeLessThan(html.indexOf('id="graphs-2"'));
+  });
+
+  it('lists every target section but not itself or a text block', async () => {
+    const html = await service.renderSections(
+      [
+        section({ type: 'index', order: 0 }),
+        section({ type: 'slo', order: 1, title: 'SLO Results' }),
+        section({ type: 'text_block', order: 2, config: { content: 'prose' } }),
+      ],
+      null,
+      null,
+    );
+    expect(html).toContain('href="#slo-results"');
+    expect(html).not.toContain('href="#index"');
+    expect(html).not.toContain('href="#text"');
   });
 });

@@ -23,6 +23,7 @@ import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
+import { IndexRenderer } from '../renderers/index-renderer';
 import {
   ReportSectionConfig,
   ReportStyling,
@@ -81,6 +82,7 @@ describe('ReportHtmlCompilerService', () => {
   let top10ListsRenderer: jest.Mocked<Top10ListsRenderer>;
   let errorAnalysisRenderer: jest.Mocked<ErrorAnalysisRenderer>;
   let placeholderRenderer: jest.Mocked<PlaceholderRenderer>;
+  let indexRenderer: jest.Mocked<IndexRenderer>;
   // Real utils so we can verify escaping behaviour without extra mocking noise
   let utils: ReportUtilsService;
 
@@ -177,6 +179,12 @@ describe('ReportHtmlCompilerService', () => {
               ),
           },
         },
+        {
+          provide: IndexRenderer,
+          useValue: {
+            renderIndexSection: jest.fn().mockReturnValue('<div>index</div>'),
+          },
+        },
       ],
     }).compile();
 
@@ -196,6 +204,7 @@ describe('ReportHtmlCompilerService', () => {
     top10ListsRenderer = module.get(Top10ListsRenderer);
     errorAnalysisRenderer = module.get(ErrorAnalysisRenderer);
     placeholderRenderer = module.get(PlaceholderRenderer);
+    indexRenderer = module.get(IndexRenderer);
   });
 
   afterEach(() => {
