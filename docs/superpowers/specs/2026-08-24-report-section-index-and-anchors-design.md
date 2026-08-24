@@ -44,6 +44,8 @@ generating it. It is unused and stays unused; this design does not adopt it.
 | What an anchor is named | Slug of the section's effective title | Stable stored id; author-assigned anchor |
 | Index depth | Flat, one entry per section | Nested under text-block headings; page numbers |
 | How an author links | A "Link to section" toolbar button | Hand-written markdown; extending the existing Link button |
+| Text blocks | Link source only — never a target, never listed | Anchoring them; listing titled ones |
+| Two sections sharing a title | Titles must be unique; warn when they are not | Silent positional suffixes; stable ids |
 
 ### Why title-slugs rather than stable ids
 
@@ -74,9 +76,28 @@ Slugging: lowercase, strip accents to ASCII, replace any run of non-alphanumeric
 characters with a single `-`, trim leading and trailing `-`. A title that slugs to
 the empty string (punctuation only) falls back to the type name.
 
-Duplicate slugs get `-2`, `-3` … assigned in document order. The first occurrence
-keeps the bare slug, so adding a second "Graphs" section later cannot change the
-anchor of the first.
+**Text blocks are never targets.** A `text_block` is where links are written
+*from*. It gets no anchor and is not listed in the index. Every other section type
+is a target.
+
+**Titles must be unique among target sections.** The title is the address, so two
+sections called "Graphs" is a conflict, not a case to paper over.
+
+Duplicates are still handled deterministically — `-2`, `-3` … in document order,
+so nothing crashes and the output is reproducible — but they also raise a warning
+(section 4) telling the author to retitle. This is a fallback, not the contract.
+
+The reason the contract matters is that positional suffixes are only stable
+against *adding*. Given "Graphs" → `#graphs` and "Graphs" → `#graphs-2`:
+
+- delete the first, and the survivor becomes `#graphs` — so an existing link to
+  `#graphs` now silently opens a different section, and `#graphs-2` dangles
+- reorder them, and both links quietly swap targets
+
+A dead link is a click that does nothing; this is a link that works and goes
+somewhere wrong. It is not detectable after the fact — the anchor still resolves —
+which is precisely why the warning fires at the point the duplicate is created
+rather than when a link later breaks.
 
 **Where it lives:** `packages/shared/src/utils/section-anchors.ts`, beside
 `markdown.ts` and for the same stated reason — two consumers must agree on the
@@ -96,7 +117,8 @@ and no `section h2` styling shifts. It is a valid PDF destination. A
 `scroll-margin-top` rule on `.section-anchor` keeps a jumped-to heading clear of
 the top edge in the HTML view.
 
-Every section gets an anchor, including ones the index does not list.
+Anchors and index entries are the same set: every section except `text_block`.
+There is no section that is linkable but unlisted, or listed but unlinkable.
 
 ### 2. The index section
 
@@ -106,17 +128,16 @@ A new `index` section type, ordered and placed by the author like any other.
 title/slug pairs once and passes them to the index renderer. Every other renderer
 keeps its current signature.
 
-The index renders an ordered list of links. It excludes itself. Every section is
-listed except one case: **a `text_block` with no author-set title is skipped**, because
-its only available label would be the generic "Text Block" and an index reading
-"Text Block, Text Block, Text Block" is noise. Every other type has a meaningful
-default label and is listed whether or not the author retitled it.
+The index renders an ordered list of links to every section except itself and
+`text_block`s — the same set that receives anchors, by construction, so the index
+cannot list something unreachable.
 
-Skipped sections still receive anchors and remain linkable; they are only absent
-from the list.
+Text blocks are excluded because they are the link *source*: they hold the prose an
+author writes, their only default label is the generic "Text Block", and an index
+reading "Text Block, Text Block, Text Block" tells a reader nothing.
 
-If the index is the only section, or every other section is skipped, it renders
-nothing rather than an empty list container.
+If the index is the only section, or every other section is a text block, it
+renders nothing rather than an empty list container.
 
 **Registration.** As of v0.2.75.0 the section-type registry is derived from a
 single definition, so this is three edits rather than six:
@@ -147,29 +168,45 @@ existing Link button. It opens a picker listing the report's sections and insert
 
 The picker computes slugs with the shared helper from section 1, over the sections
 currently in the builder — so it reflects unsaved edits, including a title the
-author just changed.
+author just changed. It lists target sections only; text blocks never appear,
+including the one being edited.
+
+When two listed sections share a title, the picker marks them rather than showing
+two identical rows, and repeats the retitle warning from section 4 — the author is
+choosing a link target at exactly the moment the ambiguity matters.
 
 `MarkdownField` backs both `text_block` sections and the per-section `text` prose
 field, so both gain the affordance from one change.
 
-### 4. Broken links
+### 4. Broken and ambiguous links
 
-`ReportGenerationValidatorService` scans the rendered HTML for `href="#…"` values
-and compares them against the set of anchors actually emitted. Unmatched targets
-are **logged as a warning and do not block generation**. A dead anchor is a click
-that does nothing, not a broken report — refusing to generate would be a worse
-outcome than the problem.
+Two warnings, neither of which blocks generation. A report with a bad link is
+still worth producing; refusing to generate would be a worse outcome than the
+problem.
 
+**Dead anchors.** `ReportGenerationValidatorService` scans the rendered HTML for
+`href="#…"` values and compares them against the set of anchors actually emitted.
 The warning names the section containing the dead link and the target it wanted,
 so the fix is obvious after a rename.
+
+**Duplicate titles.** Raised where the duplicate is created — inline in the
+builder — and again at generation. This one is the load-bearing warning: as
+section 1 sets out, a duplicate title makes a link's target depend on document
+order, and the resulting mis-navigation is undetectable afterwards because the
+anchor still resolves. Catching it at creation is the only point where it is
+catchable at all.
+
+The two warnings cover different failures and neither substitutes for the other: a
+dead link is found by looking at the report's output, an ambiguous one only by
+looking at its section titles.
 
 ### 5. Testing
 
 | Layer | Covers |
 |---|---|
-| `packages/shared` | Slug generation: collisions and their ordering, punctuation-only titles, accents, empty input, stability of the first occurrence |
-| `apps/api` | Index renderer output and exclusion rules; anchor stamping in `renderSections`; the empty-index case; validator warning on a dead anchor |
-| `apps/web` | The toolbar button inserts correct markdown for a chosen section; registry sync test guards drift |
+| `packages/shared` | Slug generation: collisions and their ordering, punctuation-only titles, accents, empty input, stability of the first occurrence; duplicate detection reports the right pair |
+| `apps/api` | Index renderer output and exclusion rules; `text_block` gets neither anchor nor entry; anchor stamping in `renderSections`; the empty-index case; validator warnings for a dead anchor and for duplicate titles |
+| `apps/web` | The toolbar button inserts correct markdown for a chosen section; text blocks absent from the picker; duplicate titles marked in it; registry sync test guards drift |
 
 All `apps/api` reports specs are mock-based and run without a database — verified,
 32 suites / 815 tests pass in a checkout with no `perfana_test`.
@@ -188,3 +225,6 @@ code it covers is broken.
   plus document-wide slug collision handling.
 - **Any change to `apps/perfana-report`.** Anchors work in the PDF unmodified.
 - **Retitle-safe links.** Explicitly traded away with the title-slug decision.
+- **Enforcing unique titles.** Duplicates warn, loudly and in two places, but still
+  generate. Blocking a report over a section title would be a worse failure than
+  the ambiguity it prevents.
