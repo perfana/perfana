@@ -546,6 +546,9 @@ export interface ReportSummary {
  */
 export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   header: 'Header',
+  // Key order matters: REPORT_SECTION_TYPES derives from Object.keys of this map, and
+  // that array is the order the builder's palette lists section types in.
+  index: 'Index',
   text_block: 'Text Block',
   slo: 'SLO Results',
   apdex: 'Apdex Report',
@@ -557,7 +560,6 @@ export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   graphs: 'Custom Graphs',
   top_10_lists: 'Top 10 Lists',
   error_analysis: 'Error Analysis',
-  index: 'Index',
 } as const;
 
 /**
@@ -583,6 +585,7 @@ export const REPORT_SECTION_TYPES: readonly ReportSectionType[] =
  */
 export const SECTION_RENDER_TITLES: Record<ReportSectionType, string> = {
   header: 'Report Header',
+  index: 'Index',
   text_block: 'Text',
   slo: 'SLO Results',
   apdex: 'Apdex Report',
@@ -594,7 +597,6 @@ export const SECTION_RENDER_TITLES: Record<ReportSectionType, string> = {
   graphs: 'Custom Graphs',
   top_10_lists: 'Top 10 Lists',
   error_analysis: 'Error Analysis',
-  index: 'Index',
 } as const;
 
 /**
