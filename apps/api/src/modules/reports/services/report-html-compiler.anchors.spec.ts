@@ -1,4 +1,4 @@
-import { Test } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { ReportHtmlCompilerService } from './report-html-compiler.service';
 import { ReportUtilsService } from './report-utils.service';
 import { ReportSectionConfig } from '@perfana/shared';
@@ -27,12 +27,13 @@ const stubRenderer = (marker: string) => ({
 
 describe('ReportHtmlCompilerService anchors', () => {
   let service: ReportHtmlCompilerService;
+  let moduleRef: TestingModule;
 
   const section = (over: Partial<ReportSectionConfig>): ReportSectionConfig =>
     ({ type: 'slo', order: 0, ...over }) as ReportSectionConfig;
 
   beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       providers: [
         ReportHtmlCompilerService,
         ReportUtilsService,
@@ -88,6 +89,23 @@ describe('ReportHtmlCompilerService anchors', () => {
       null,
     );
     expect(html).not.toContain('class="section-anchor"');
+  });
+
+  it('still anchors a section whose renderer throws', async () => {
+    const sloRenderer = moduleRef.get(SloRenderer);
+    (sloRenderer.renderSloSection as jest.Mock).mockRejectedValueOnce(new Error('boom'));
+
+    const html = await service.renderSections(
+      [section({ type: 'slo', order: 0, title: 'SLO Results' })],
+      null,
+      null,
+    );
+
+    // The slug was reserved before rendering began, so the failed section
+    // must still be a valid link target — it just resolves to the error
+    // placeholder instead of the renderer's own markup.
+    expect(html).toContain('<a id="slo-results" class="section-anchor" aria-hidden="true"></a>');
+    expect(html).toContain('<section class="error"></section>');
   });
 
   it('suffixes a duplicate title in document order', async () => {

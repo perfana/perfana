@@ -73,6 +73,18 @@ export class ReportHtmlCompilerService {
       s => s.type,
     );
 
+    // A section keeps the slug `anchors` reserved for it whether it renders or
+    // falls back to an error placeholder — a failed section is still a section
+    // in the document, and prose/index links pointing at it must resolve to
+    // where it landed, not to nothing. Both branches below go through this one
+    // prepend so they can never drift apart.
+    const withAnchor = (section: ReportSectionConfig, html: string): string => {
+      const anchor = anchors.get(section);
+      return anchor
+        ? `<a id="${anchor}" class="section-anchor" aria-hidden="true"></a>\n${html}`
+        : html;
+    };
+
     const renderedSections: string[] = [];
 
     for (const section of sortedSections) {
@@ -85,17 +97,17 @@ export class ReportHtmlCompilerService {
           roles,
           anchors,
         );
-        const anchor = anchors.get(section);
-        renderedSections.push(
-          anchor
-            ? `<a id="${anchor}" class="section-anchor" aria-hidden="true"></a>\n${sectionHtml}`
-            : sectionHtml,
-        );
+        renderedSections.push(withAnchor(section, sectionHtml));
       } catch (error) {
         this.logger.warn(
           `Failed to render section ${section.type}: ${(error as Error).message}`,
         );
-        renderedSections.push(this.placeholderRenderer.renderErrorSection(section, (error as Error).message));
+        renderedSections.push(
+          withAnchor(
+            section,
+            this.placeholderRenderer.renderErrorSection(section, (error as Error).message),
+          ),
+        );
       }
     }
 
