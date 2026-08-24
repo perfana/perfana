@@ -68,6 +68,7 @@ import { SECTION_CONFIG } from './section-config';
 import { SectionPalette } from './SectionPalette';
 import {
   HeaderConfigForm,
+  IndexConfigForm,
   TextBlockConfigForm,
   SloConfigForm,
   ApdexConfigForm,
@@ -913,6 +914,8 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
     switch (section.type) {
       case 'header':
         return <HeaderConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
+      case 'index':
+        return <IndexConfigForm text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'text_block':
         return <TextBlockConfigForm config={sectionConfig} onChange={handleChange} testRunId={testRunId} allSections={allSections} />;
       case 'slo':

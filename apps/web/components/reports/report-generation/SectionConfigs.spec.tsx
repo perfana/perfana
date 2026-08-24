@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { GraphPresetsAPI } from '@/lib/graph-presets';
 import {
   HeaderConfigForm,
+  IndexConfigForm,
   TextBlockConfigForm,
   SloConfigForm,
   ApdexConfigForm,
@@ -482,5 +483,37 @@ describe('ErrorAnalysisConfigForm', () => {
     );
 
     expect(screen.getByText(/response bodies, headers and cookies are never included/i)).toBeInTheDocument();
+  });
+});
+
+describe('IndexConfigForm', () => {
+  // The index carries no configuration of its own (see IndexConfigForm's doc
+  // comment) — this is the whole point of PART 2: before this form existed,
+  // an index section's accompanying text was reachable only via an
+  // API-created template, never from the builder.
+  it('exposes the accompanying-text field', () => {
+    render(<IndexConfigForm text="" onTextChange={jest.fn()} testRunId="run-1" />);
+
+    expect(screen.getByRole('textbox', { name: 'Text' })).toBeInTheDocument();
+  });
+
+  it('commits a typed text change to the section payload on blur', () => {
+    const onTextChange = jest.fn();
+    render(<IndexConfigForm text="" onTextChange={onTextChange} testRunId="run-1" />);
+
+    const textField = screen.getByRole('textbox', { name: 'Text' });
+    fireEvent.change(textField, { target: { value: 'Jump to any section below.' } });
+    expect(onTextChange).not.toHaveBeenCalled();
+
+    fireEvent.blur(textField);
+    expect(onTextChange).toHaveBeenCalledWith('Jump to any section below.');
+  });
+
+  it('renders a Preview Section button like every other section config form', () => {
+    render(<IndexConfigForm text="" onTextChange={jest.fn()} />);
+
+    const previewButton = screen.getByRole('button', { name: /preview section/i });
+    expect(previewButton).toBeInTheDocument();
+    expect(previewButton).toBeDisabled();
   });
 });

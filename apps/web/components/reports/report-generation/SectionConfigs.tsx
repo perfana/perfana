@@ -273,6 +273,36 @@ export function HeaderConfigForm({ config, onChange, text, onTextChange, testRun
   );
 }
 
+// ==================== Index Section Config ====================
+
+interface IndexConfigFormProps {
+  text?: string;
+  onTextChange: (text: string) => void;
+  testRunId?: string;
+  allSections?: ReportSectionConfig[];
+}
+
+// The index carries no configuration of its own — its entry list is built
+// automatically from the report's other linkable sections (see
+// IndexRenderer / ReportHtmlCompilerService). The only thing an author can
+// set is its accompanying text, so this is the shared shell with no extra
+// fields — do not add config controls here without a corresponding renderer
+// change.
+export function IndexConfigForm({ text, onTextChange, testRunId, allSections }: IndexConfigFormProps) {
+  return (
+    <SectionConfigShell
+      sectionTitle="Index"
+      sectionType="Index"
+      previewType="index"
+      previewConfig={{}}
+      text={text}
+      onTextChange={onTextChange}
+      testRunId={testRunId}
+      allSections={allSections}
+    />
+  );
+}
+
 // ==================== Text Block Section Config ====================
 
 /** @public */
