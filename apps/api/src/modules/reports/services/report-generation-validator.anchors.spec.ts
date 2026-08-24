@@ -36,22 +36,43 @@ describe('ReportGenerationValidatorService anchor checks', () => {
   });
 
   describe('warnOnAnchorProblems', () => {
+    const duplicateGraphs = [
+      { title: 'Graphs', type: 'graphs' },
+      { title: 'Graphs', type: 'graphs' },
+    ];
+
     it('never throws, whatever it finds', () => {
       expect(() =>
-        service.warnOnAnchorProblems('<a href="#gone">x</a>', ['Graphs', 'Graphs']),
+        service.warnOnAnchorProblems('<a href="#gone">x</a>', duplicateGraphs),
       ).not.toThrow();
     });
 
-    it('logs a dead anchor and a duplicate title', () => {
+    it('logs a dead anchor and a slug collision', () => {
       const warn = jest
         .spyOn(service['logger'], 'warn')
         .mockImplementation(() => undefined);
 
-      service.warnOnAnchorProblems('<a href="#gone">x</a>', ['Graphs', 'Graphs']);
+      service.warnOnAnchorProblems('<a href="#gone">x</a>', duplicateGraphs);
 
       const messages = warn.mock.calls.map(c => String(c[0])).join(' | ');
       expect(messages).toContain('gone');
-      expect(messages).toContain('Graphs');
+      expect(messages).toContain('graphs');
+      warn.mockRestore();
+    });
+
+    it('logs a titleless-section warning, distinct from the slug-collision one', () => {
+      const warn = jest
+        .spyOn(service['logger'], 'warn')
+        .mockImplementation(() => undefined);
+
+      service.warnOnAnchorProblems('', [
+        { title: '图表一', type: 'graphs' },
+        { title: '图表二', type: 'graphs' },
+      ]);
+
+      const messages = warn.mock.calls.map(c => String(c[0])).join(' | ');
+      expect(messages).toContain('cannot produce an anchor');
+      expect(messages).not.toContain('Give them distinct titles');
       warn.mockRestore();
     });
 
@@ -62,7 +83,10 @@ describe('ReportGenerationValidatorService anchor checks', () => {
 
       service.warnOnAnchorProblems(
         '<a id="trends"></a><a href="#trends">x</a>',
-        ['Trends', 'Graphs'],
+        [
+          { title: 'Trends', type: 'trends' },
+          { title: 'Graphs', type: 'graphs' },
+        ],
       );
 
       expect(warn).not.toHaveBeenCalled();
@@ -78,7 +102,7 @@ describe('ReportGenerationValidatorService anchor checks', () => {
 
       // Must actually reach `warn` (dead anchor present), or this proves nothing.
       expect(() =>
-        service.warnOnAnchorProblems('<a href="#gone">x</a>', ['Graphs', 'Graphs']),
+        service.warnOnAnchorProblems('<a href="#gone">x</a>', duplicateGraphs),
       ).not.toThrow();
 
       warn.mockRestore();

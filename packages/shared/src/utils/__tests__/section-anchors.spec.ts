@@ -1,7 +1,7 @@
 import {
   slugifySectionTitle,
   assignSectionAnchors,
-  findDuplicateTitles,
+  findAnchorProblems,
 } from '../section-anchors';
 
 describe('slugifySectionTitle', () => {
@@ -73,20 +73,108 @@ describe('assignSectionAnchors', () => {
   });
 });
 
-describe('findDuplicateTitles', () => {
-  it('reports a repeated title once', () => {
-    expect(findDuplicateTitles(['Graphs', 'Trends', 'Graphs'])).toEqual(['Graphs']);
+describe('findAnchorProblems', () => {
+  type Section = { title: string; type: string };
+  const titleOf = (s: Section) => s.title;
+  const typeOf = (s: Section) => s.type;
+
+  // Renamed from `findDuplicateTitles` and re-based on slug equality rather
+  // than title-string equality: the hazard is the shared SLUG (what forces
+  // the `-2` suffix and repoints links), not the title text. These first four
+  // cases are the old `findDuplicateTitles` suite, ported to the new
+  // slug-collision signal — a repeated title is still a slug collision, it's
+  // just no longer the only way to get one.
+
+  it('reports a repeated title once, as a slug collision', () => {
+    const sections = [
+      { title: 'Graphs', type: 'graphs' },
+      { title: 'Trends', type: 'trends' },
+      { title: 'Graphs', type: 'graphs' },
+    ];
+    const { slugCollisions, titlelessSections } = findAnchorProblems(sections, titleOf, typeOf);
+    expect(slugCollisions).toEqual(['graphs']);
+    expect(titlelessSections).toEqual([]);
   });
 
   it('reports nothing when all titles are distinct', () => {
-    expect(findDuplicateTitles(['Graphs', 'Trends'])).toEqual([]);
+    const sections = [
+      { title: 'Graphs', type: 'graphs' },
+      { title: 'Trends', type: 'trends' },
+    ];
+    expect(findAnchorProblems(sections, titleOf, typeOf).slugCollisions).toEqual([]);
   });
 
   it('compares case-insensitively, since the slug does', () => {
-    expect(findDuplicateTitles(['Graphs', 'graphs'])).toEqual(['Graphs']);
+    const sections = [
+      { title: 'Graphs', type: 'graphs' },
+      { title: 'graphs', type: 'graphs' },
+    ];
+    expect(findAnchorProblems(sections, titleOf, typeOf).slugCollisions).toEqual(['graphs']);
   });
 
   it('preserves first-appearance order across several duplicates', () => {
-    expect(findDuplicateTitles(['B', 'A', 'B', 'A'])).toEqual(['B', 'A']);
+    const sections = [
+      { title: 'B', type: 'graphs' },
+      { title: 'A', type: 'trends' },
+      { title: 'B', type: 'graphs' },
+      { title: 'A', type: 'trends' },
+    ];
+    expect(findAnchorProblems(sections, titleOf, typeOf).slugCollisions).toEqual(['b', 'a']);
+  });
+
+  // The case title-equality could never catch: different strings, same slug.
+  it('catches a slug collision that title-string comparison would miss', () => {
+    const sections = [
+      { title: 'Graphs', type: 'graphs' },
+      { title: 'graphs!', type: 'graphs' },
+    ];
+    const { slugCollisions, titlelessSections } = findAnchorProblems(sections, titleOf, typeOf);
+    expect(slugCollisions).toEqual(['graphs']);
+    expect(titlelessSections).toEqual([]);
+  });
+
+  // The other case title-equality could never catch: two DIFFERENT non-Latin
+  // titles that both collapse to '' and fall back to the same section type.
+  it('flags two distinct non-Latin titles that collide on the type fallback as titleless, not as a slug collision', () => {
+    const sections = [
+      { title: '图表一', type: 'graphs' }, // "Chart One"
+      { title: '图表二', type: 'graphs' }, // "Chart Two" — a different title
+    ];
+    const { slugCollisions, titlelessSections } = findAnchorProblems(sections, titleOf, typeOf);
+    // Not reported as a slug collision: renaming either title within the same
+    // script would collapse to 'graphs' again, so "give them distinct titles"
+    // would be wrong advice.
+    expect(slugCollisions).toEqual([]);
+    expect(titlelessSections).toEqual(sections);
+  });
+
+  it('reports a lone titleless section even with no collision', () => {
+    const sections = [{ title: '图表', type: 'graphs' }];
+    const { slugCollisions, titlelessSections } = findAnchorProblems(sections, titleOf, typeOf);
+    expect(slugCollisions).toEqual([]);
+    expect(titlelessSections).toEqual(sections);
+  });
+
+  it('reports neither signal for a clean report', () => {
+    const sections = [
+      { title: 'SLO Results', type: 'slo' },
+      { title: 'Trends', type: 'trends' },
+      { title: 'Custom Graphs', type: 'graphs' },
+    ];
+    const { slugCollisions, titlelessSections } = findAnchorProblems(sections, titleOf, typeOf);
+    expect(slugCollisions).toEqual([]);
+    expect(titlelessSections).toEqual([]);
+  });
+
+  it('does not blame a real title for colliding with an unrelated titleless fallback of a different type', () => {
+    // 'trends' titled section vs a titleless 'graphs' section: different
+    // fallback bases ('trends' vs 'graphs'), so no collision either way.
+    const sections = [
+      { title: 'Trends', type: 'trends' },
+      { title: '图表', type: 'graphs' },
+    ];
+    const { slugCollisions, titlelessSections } = findAnchorProblems(sections, titleOf, typeOf);
+    expect(slugCollisions).toEqual([]);
+    expect(titlelessSections).toEqual([sections[1]]);
   });
 });

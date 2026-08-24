@@ -1453,7 +1453,11 @@ describe('ReportGenerationService', () => {
       // literally in report-utils.service.spec.ts) and the explicit title survived.
       expect(validatorService.warnOnAnchorProblems).toHaveBeenCalledWith(
         '<div>Sections HTML</div>',
-        ['slo', 'graphs', 'Second Graphs'],
+        [
+          { title: 'slo', type: 'slo' },
+          { title: 'graphs', type: 'graphs' },
+          { title: 'Second Graphs', type: 'graphs' },
+        ],
       );
     });
 

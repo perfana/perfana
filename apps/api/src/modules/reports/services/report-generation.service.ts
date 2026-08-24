@@ -1071,10 +1071,12 @@ export class ReportGenerationService {
 
       this.validator.warnOnAnchorProblems(
         sectionsHtml,
-        // Title set must match the compiler's link-target set exactly (see
-        // isLinkableSectionType), or the duplicate-title warning would flag
-        // titles on sections that never got an anchor in the first place.
-        sections.filter(s => isLinkableSectionType(s.type)).map(s => s.title || this.utils.getSectionTitle(s.type)),
+        // Section set must match the compiler's link-target set exactly (see
+        // isLinkableSectionType), or the anchor-problem warnings would flag
+        // sections that never got an anchor in the first place.
+        sections
+          .filter(s => isLinkableSectionType(s.type))
+          .map(s => ({ title: s.title || this.utils.getSectionTitle(s.type), type: s.type })),
       );
 
       const html = this.htmlCompiler.compileHtml(report.name, sectionsHtml, styling);

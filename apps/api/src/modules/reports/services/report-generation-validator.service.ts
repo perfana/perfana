@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ReportStatus, findDuplicateTitles } from '@perfana/shared';
+import { ReportStatus, findAnchorProblems } from '@perfana/shared';
 import { InvalidStateException } from '../../../common/exceptions/business.exception';
+
+/** A section's effective title (blank-title already resolved) and its type. */
+export interface AnchorCheckedSection {
+  title: string;
+  type: string;
+}
 
 /**
  * Service for validating report generation operations
@@ -15,9 +21,9 @@ export class ReportGenerationValidatorService {
    * `#` link targets that no section emitted.
    *
    * Catches the common case: a section was renamed and the links pointing at its
-   * old slug now go nowhere. It CANNOT catch the worse case — a duplicate title
+   * old slug now go nowhere. It CANNOT catch the worse case — a slug collision
    * making a link resolve to the wrong section — because that anchor still
-   * exists. That is what the duplicate-title warning is for.
+   * exists. That is what the slug-collision warning is for.
    */
   findDeadAnchors(html: string): string[] {
     const defined = new Set<string>();
@@ -44,8 +50,15 @@ export class ReportGenerationValidatorService {
     return dead;
   }
 
-  /** Log link problems. Never throws — a report with a bad link still generates. */
-  warnOnAnchorProblems(html: string, titles: string[]): void {
+  /**
+   * Log link problems. Never throws — a report with a bad link still generates.
+   *
+   * `sections` must carry each linkable section's EFFECTIVE title (blank
+   * titles already resolved via `ReportUtilsService.getSectionTitle`) and its
+   * type — the type is what a titleless title falls back to, so it's needed
+   * to reproduce the same base slug `assignSectionAnchors` would compute.
+   */
+  warnOnAnchorProblems(html: string, sections: AnchorCheckedSection[]): void {
     try {
       const dead = this.findDeadAnchors(html);
       if (dead.length > 0) {
@@ -55,12 +68,29 @@ export class ReportGenerationValidatorService {
         );
       }
 
-      const duplicates = findDuplicateTitles(titles);
-      if (duplicates.length > 0) {
+      const { slugCollisions, titlelessSections } = findAnchorProblems(
+        sections,
+        s => s.title,
+        s => s.type,
+      );
+
+      if (slugCollisions.length > 0) {
         this.logger.warn(
-          `Report has sections sharing a title: ${duplicates.join(', ')}. ` +
+          `Report has sections that produce the same anchor slug: ${slugCollisions.join(', ')}. ` +
             `Anchors fall back to numbered suffixes, so reordering or deleting one of them ` +
             `silently repoints existing links. Give them distinct titles.`,
+        );
+      }
+
+      if (titlelessSections.length > 0) {
+        const described = titlelessSections
+          .map(s => `${s.type} ("${s.title}")`)
+          .join(', ');
+        this.logger.warn(
+          `Report has section(s) whose title cannot produce an anchor: ${described}. ` +
+            `Renaming will not fix this — any title with no a-z/0-9 characters collapses the ` +
+            `same way. Links to these sections fall back to a positional slug based on the ` +
+            `section type, so they may move if sections are reordered.`,
         );
       }
     } catch (error) {

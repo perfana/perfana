@@ -11,9 +11,16 @@
  * cost of a rename breaking existing links. See the design doc.
  */
 
-/** Slug a section title. `fallback` is used when the title has no alphanumerics. */
-export function slugifySectionTitle(title: string, fallback: string): string {
-  const slug = (title ?? '')
+/**
+ * The slug a title produces on its own, with no fallback applied — `''` when
+ * nothing alphanumeric survives (a non-Latin script, emoji, or pure
+ * punctuation). Exported so `findAnchorProblems` can tell "produced a real
+ * slug that happens to collide with another" apart from "produced no slug at
+ * all", a distinction `slugifySectionTitle` erases once it applies the
+ * fallback.
+ */
+export function rawSlugOf(title: string): string {
+  return (title ?? '')
     // Decompose accented characters, then drop the combining marks, so "é" ends
     // up as "e" rather than being stripped along with the punctuation. The range
     // is written escaped because the literal characters are invisible in source.
@@ -22,8 +29,11 @@ export function slugifySectionTitle(title: string, fallback: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
 
-  return slug || fallback;
+/** Slug a section title. `fallback` is used when the title has no alphanumerics. */
+export function slugifySectionTitle(title: string, fallback: string): string {
+  return rawSlugOf(title) || fallback;
 }
 
 /**
@@ -31,7 +41,7 @@ export function slugifySectionTitle(title: string, fallback: string): string {
  *
  * Duplicates get `-2`, `-3` … and the first occurrence keeps the bare slug. The
  * suffix is a fallback that keeps output deterministic; the contract is that
- * titles are unique, enforced by the warning `findDuplicateTitles` drives.
+ * base slugs are unique, enforced by the warning `findAnchorProblems` drives.
  */
 export function assignSectionAnchors<T>(
   items: T[],
@@ -59,25 +69,72 @@ export function assignSectionAnchors<T>(
 }
 
 /**
- * Titles that appear more than once, each reported once, in first-appearance
- * order. Case-insensitive because the slug is.
+ * The two distinct anchor hazards among a set of (already-effective, i.e.
+ * blank-title-resolved) section titles.
+ *
+ * `slugCollisions` — base slugs (pre `-2`/`-3` suffix) that two or more
+ * sections produce from a REAL slug (at least one `[a-z0-9]` survived), each
+ * reported once, in first-appearance order. This is the hazard comparing
+ * title STRINGS misses: "Graphs" and "graphs!" are different strings but the
+ * same slug, so the first section to reorder or get deleted silently
+ * repoints whatever links to the other. Actionable: give them distinct
+ * titles.
+ *
+ * `titlelessSections` — sections whose title produced NO slug at all
+ * (`rawSlugOf` returned `''`; a title written entirely in a non-Latin script,
+ * emoji, or punctuation collapses this way). These are deliberately excluded
+ * from `slugCollisions`: telling the author to "rename it" is not just
+ * unhelpful advice here, it's actively wrong — ANY other title with no
+ * `[a-z0-9]` characters collapses to the identical fallback, so two sections
+ * of the same type written in, say, Chinese collide no matter what either is
+ * renamed to (within that script). The real fact to report is that the
+ * section's anchor is the section TYPE, positionally suffixed by
+ * `assignSectionAnchors` — so it silently moves if a same-typed sibling is
+ * added, removed, or reordered, title changes notwithstanding.
  */
-export function findDuplicateTitles(titles: string[]): string[] {
-  const seen = new Set<string>();
-  const duplicated = new Set<string>();
+export interface AnchorProblems<T> {
+  slugCollisions: string[];
+  titlelessSections: T[];
+}
+
+export function findAnchorProblems<T>(
+  items: T[],
+  titleOf: (item: T) => string,
+  typeOf: (item: T) => string,
+): AnchorProblems<T> {
+  const titlelessSections: T[] = [];
+
+  // Group by the same base slug assignSectionAnchors would compute (real slug,
+  // or the type when the title produced none), tracking whether at least one
+  // member of the group has a real (non-empty) slug of its own.
+  const groups = new Map<string, { count: number; anyReal: boolean }>();
   const order: string[] = [];
 
-  for (const title of titles) {
-    const key = (title ?? '').trim().toLowerCase();
-    if (seen.has(key)) {
-      if (!duplicated.has(key)) {
-        duplicated.add(key);
-        order.push(titles.find(t => (t ?? '').trim().toLowerCase() === key) as string);
-      }
+  for (const item of items) {
+    const raw = rawSlugOf(titleOf(item));
+    if (!raw) {
+      titlelessSections.push(item);
+    }
+    const base = raw || typeOf(item);
+
+    const group = groups.get(base);
+    if (group) {
+      group.count += 1;
+      group.anyReal = group.anyReal || Boolean(raw);
     } else {
-      seen.add(key);
+      groups.set(base, { count: 1, anyReal: Boolean(raw) });
+      order.push(base);
     }
   }
 
-  return order;
+  // Only report a base as a slug collision when at least one contributing
+  // title actually produced it (as opposed to falling back to it) — that is
+  // the case a rename can fix. A base shared purely by titleless sections is
+  // reported solely through `titlelessSections`, whose advice is different.
+  const slugCollisions = order.filter(base => {
+    const group = groups.get(base);
+    return group !== undefined && group.count >= 2 && group.anyReal;
+  });
+
+  return { slugCollisions, titlelessSections };
 }
