@@ -567,6 +567,37 @@ export const REPORT_SECTION_TYPES: readonly ReportSectionType[] =
   Object.keys(SECTION_TYPE_LABELS) as ReportSectionType[];
 
 /**
+ * Section render titles — the heading a generated report shows for a section
+ * when the author left `section.title` blank.
+ *
+ * This is distinct from `SECTION_TYPE_LABELS`, which is the builder-facing
+ * label shown in the section-picker UI (e.g. `header` → "Header"). The two
+ * diverge for `header` ("Report Header" here vs "Header" in the builder) and
+ * for `text_block` (never rendered as a heading, since its `content` is the
+ * body). Anchor generation must use this map — not `SECTION_TYPE_LABELS` — so
+ * the slug the web app computes for a link matches the `id` the API stamps
+ * onto the rendered heading. Values are copied verbatim from
+ * `ReportUtilsService.getSectionTitle` in
+ * `apps/api/src/modules/reports/services/report-utils.service.ts`, which is
+ * the canonical source and now reads from this map instead of its own copy.
+ */
+export const SECTION_RENDER_TITLES: Record<ReportSectionType, string> = {
+  header: 'Report Header',
+  text_block: 'Text',
+  slo: 'SLO Results',
+  apdex: 'Apdex Report',
+  transaction_response_times: 'Transaction Response Times',
+  regressions: 'Anomaly Detection',
+  awr: 'AWR Analysis',
+  trends: 'Trends',
+  comparisons: 'Comparisons',
+  graphs: 'Custom Graphs',
+  top_10_lists: 'Top 10 Lists',
+  error_analysis: 'Error Analysis',
+  index: 'Index',
+} as const;
+
+/**
  * Section types that support accompanying text — every type except `text_block`,
  * whose `content` already is the text.
  */
