@@ -617,18 +617,19 @@ export const SECTION_TYPES_WITH_TEXT: readonly TextableSectionType[] =
  * `buildLinkTargets` all derive from it, so the picker can never offer a
  * target the compiler did not anchor.
  *
- * - `text_block` — a text block IS the prose that link markdown is written
- *   FROM. It renders as body text, not a heading, so it has nothing to link to.
  * - `header` — the report's title block at the very top of the document.
  *   Linking to it would point the reader back to where they already are.
  * - `index` — the index itself. An index linking to another index is
  *   circular noise, not navigation.
  *
+ * `text_block` is NOT excluded, but it is the one type whose linkability
+ * depends on the section rather than the type — see `isLinkableSection`.
+ *
  * Deliberately distinct from `SECTION_TYPES_WITH_TEXT` above: whether a
  * section can carry accompanying prose is an unrelated question, and `header`
  * / `index` both legitimately support text while being non-linkable.
  */
-export const NON_LINKABLE_SECTION_TYPES = ['text_block', 'header', 'index'] as const;
+export const NON_LINKABLE_SECTION_TYPES = ['header', 'index'] as const;
 
 type NonLinkableSectionType = (typeof NON_LINKABLE_SECTION_TYPES)[number];
 
@@ -636,13 +637,48 @@ type NonLinkableSectionType = (typeof NON_LINKABLE_SECTION_TYPES)[number];
 export type LinkableSectionType = Exclude<ReportSectionType, NonLinkableSectionType>;
 
 /**
- * True when a section type can be linked to: it is eligible for an anchor
- * `id`, for inclusion in the report's index, and for the builder's
- * "Link to section" picker. See `NON_LINKABLE_SECTION_TYPES` for the excluded
- * types and why.
+ * The type-level half of the question: is this KIND of section ever linkable?
+ *
+ * Not the one to call. `text_block` passes here and is still not a destination
+ * unless the section itself carries a title and a body — see `isLinkableSection`,
+ * which is what every anchor, index entry and picker target must be decided by.
  */
 export function isLinkableSectionType(type: ReportSectionType): type is LinkableSectionType {
   return !(NON_LINKABLE_SECTION_TYPES as readonly string[]).includes(type);
+}
+
+/**
+ * True when THIS section can be linked to. Prefer this over
+ * `isLinkableSectionType` — every anchor, index entry and link-picker target
+ * must be decided by the same rule, and for one type the type alone is not
+ * enough to decide.
+ *
+ * That type is `text_block`. Every other section renders a heading whether or
+ * not the author titled it, because each has a default title to fall back on.
+ * A text block has none: untitled it is bare prose, and giving that an anchor
+ * would put an entry in the index pointing at a paragraph with no visible
+ * heading to land on — and would burn a slug (`section-text-block`) that a
+ * later, titled block wants. Give it both a title and a body and it renders a
+ * real heading over real content, so it becomes a real destination.
+ */
+export function isLinkableSection(
+  // Structural rather than `Pick<ReportSectionConfig, …>`: the web builder has its
+  // own ReportSectionConfig whose `config` is a union of per-section shapes, and
+  // both must be able to call the one rule that decides linkability.
+  section: { type: ReportSectionType; title?: string; config?: unknown },
+): boolean {
+  if (!isLinkableSectionType(section.type)) return false;
+  if (section.type !== 'text_block') return true;
+  // Both halves are required. A title alone is not a destination: the renderer
+  // drops a text block with no body entirely, so anchoring on the title would
+  // put an index entry on an invisible anchor with nothing underneath it —
+  // precisely the outcome this rule exists to prevent.
+  const content = (section.config as { content?: unknown } | undefined)?.content;
+  return (
+    Boolean(section.title?.trim()) &&
+    typeof content === 'string' &&
+    content.trim().length > 0
+  );
 }
 
 /**
