@@ -1333,4 +1333,63 @@ describe('GenerateReportDialog', () => {
       expect(sloTitles).toEqual(['SLO — API', 'SLO — Web']);
     });
   });
+  /**
+   * The whole point of surfacing this in the builder: the API already detected
+   * the collision and could only write it to a server log the author never
+   * reads. These assert the author actually SEES it, which is the part that
+   * was missing — the detection itself is covered in SectionAnchorWarnings.
+   */
+  describe('anchor collision warnings', () => {
+    const collidingSections = [
+      { type: 'graphs' as const, order: 0, title: 'Latency' },
+      { type: 'slo' as const, order: 1, title: 'latency' },
+    ];
+
+    it('flags every colliding section on its collapsed card', () => {
+      render(
+        <GenerateReportDialog
+          {...defaultProps}
+          mode="template-builder"
+          initialSections={collidingSections}
+        />
+      );
+
+      // Collapsed is the default state, and it is where an author scanning the
+      // report would be — a warning only visible after expanding the offending
+      // card is a warning they never find.
+      expect(screen.getAllByLabelText('Link target problem')).toHaveLength(2);
+    });
+
+    it('shows no warning when the titles slug distinctly', () => {
+      render(
+        <GenerateReportDialog
+          {...defaultProps}
+          mode="template-builder"
+          initialSections={[
+            { type: 'graphs' as const, order: 0, title: 'Latency' },
+            { type: 'slo' as const, order: 1, title: 'Throughput' },
+          ]}
+        />
+      );
+
+      expect(screen.queryByLabelText('Link target problem')).not.toBeInTheDocument();
+    });
+
+    it('explains the conflict in the Section Title field once expanded', async () => {
+      render(
+        <GenerateReportDialog
+          {...defaultProps}
+          mode="template-builder"
+          initialSections={collidingSections}
+        />
+      );
+
+      fireEvent.click(screen.getAllByLabelText('Link target problem')[0]!);
+
+      await waitFor(() => {
+        // Names the actual anchor at stake, not a generic "titles must be unique".
+        expect(screen.getAllByText(/#section-latency/).length).toBeGreaterThan(0);
+      });
+    });
+  });
 });

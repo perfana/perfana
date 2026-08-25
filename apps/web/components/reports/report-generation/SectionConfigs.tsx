@@ -21,7 +21,13 @@ import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
 import { MarkdownField } from './MarkdownField';
-import { TEXT_BLOCK_MARKDOWN_DEFAULT, assignSectionAnchors } from '@perfana/shared/utils';
+import {
+  TEXT_BLOCK_MARKDOWN_DEFAULT,
+  assignSectionAnchors,
+  findAnchorProblems,
+  rawSlugOf,
+  SECTION_ANCHOR_PREFIX,
+} from '@perfana/shared/utils';
 import { SECTION_RENDER_TITLES, isLinkableSectionType } from '@perfana/shared/types';
 
 // Dynamically import preview components to reduce initial bundle size
@@ -29,36 +35,106 @@ const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'
 const HtmlSectionPreview = dynamic(() => import('./preview/HtmlSectionPreview'), { ssr: false });
 
 /**
- * Link targets a MarkdownField's toolbar can offer: every linkable section
- * (per `isLinkableSectionType` — see packages/shared/src/types/reports.types.ts)
- * in the builder's current order, using the same effective-title rule the API
- * applies when it renders the report (SECTION_RENDER_TITLES — same file) so
- * the anchor computed here always matches the `id` the API stamps onto the
- * rendered heading. `text_block`, `header` and `index` sections are excluded:
- * a text block renders as body prose, never a heading with an id; a header
- * is the report's title block at the very top, so linking to it is pointless;
- * an index linking to an index is circular noise.
+ * The title a section actually renders under, which is also what its anchor is
+ * slugged from.
+ *
+ * DB-stored templates can carry a `type` this build doesn't know (see
+ * GenerateReportDialog's `SECTION_CONFIG[section.type] ?? {...}` guard for the same
+ * case), so SECTION_RENDER_TITLES[s.type] can be undefined here. Fall back to the
+ * type itself, matching the API's ReportUtilsService.getSectionTitle exactly — this
+ * must never produce undefined, since MarkdownField calls `.trim()` on every title
+ * on every render (not just when the link picker opens).
+ *
+ * Shared by `buildLinkTargets` and `findSectionAnchorWarnings` so the title the
+ * picker links to is always the title the warning is computed from.
+ */
+export function effectiveSectionTitle(s: ReportSectionConfig): string {
+  return s.title || SECTION_RENDER_TITLES[s.type] || s.type;
+}
+
+/**
+ * The linkable sections, in the order the report renders them.
+ *
+ * `text_block`, `header` and `index` are excluded (per `isLinkableSectionType`
+ * — see packages/shared/src/types/reports.types.ts): a text block renders as
+ * body prose, never a heading with an id; a header is the report's title block
+ * at the very top, so linking to it is pointless; an index linking to an index
+ * is circular noise. Anything excluded here has no anchor at all, so it can
+ * neither be linked to nor collide with something that can.
+ */
+function linkableInOrder(allSections: ReportSectionConfig[]): ReportSectionConfig[] {
+  return allSections
+    .filter((s) => isLinkableSectionType(s.type))
+    .sort((a, b) => a.order - b.order);
+}
+
+/**
+ * Link targets a MarkdownField's toolbar can offer, using the same
+ * effective-title rule the API applies when it renders the report, so the
+ * anchor computed here always matches the `id` the API stamps onto the
+ * rendered heading.
  */
 export function buildLinkTargets(
   allSections: ReportSectionConfig[] = [],
 ): { title: string; anchor: string }[] {
-  const targets = allSections
-    .filter((s) => isLinkableSectionType(s.type))
-    .sort((a, b) => a.order - b.order);
-
-  // DB-stored templates can carry a `type` this build doesn't know (see
-  // GenerateReportDialog's `SECTION_CONFIG[section.type] ?? {...}` guard for the same
-  // case), so SECTION_RENDER_TITLES[s.type] can be undefined here. Fall back to the
-  // type itself, matching the API's ReportUtilsService.getSectionTitle exactly — this
-  // must never produce undefined, since MarkdownField calls `.trim()` on every title
-  // on every render (not just when the link picker opens).
-  const titleOf = (s: ReportSectionConfig) => s.title || SECTION_RENDER_TITLES[s.type] || s.type;
-  const anchors = assignSectionAnchors(targets, titleOf, (s) => s.type);
+  const targets = linkableInOrder(allSections);
+  const anchors = assignSectionAnchors(targets, effectiveSectionTitle, (s) => s.type);
 
   return targets.map((s) => ({
-    title: titleOf(s),
+    title: effectiveSectionTitle(s),
     anchor: anchors.get(s) as string,
   }));
+}
+
+/**
+ * Per-section anchor warnings, keyed by the section object itself.
+ *
+ * The API already detects both hazards at generation time, but it can only
+ * write them to a server log — the author editing the report never sees them
+ * and gets a plausible-looking report whose index has two entries pointing at
+ * the same place. This surfaces the same `findAnchorProblems` result in the one
+ * place the author can act on it: the Section Title field.
+ *
+ * Filtering and titling go through the same helpers `buildLinkTargets` uses, so
+ * a warning can never describe a section the picker links to differently.
+ */
+export function findSectionAnchorWarnings(
+  allSections: ReportSectionConfig[] = [],
+): Map<ReportSectionConfig, string> {
+  const targets = linkableInOrder(allSections);
+  const { slugCollisions, titlelessSections } = findAnchorProblems(
+    targets,
+    effectiveSectionTitle,
+    (s) => s.type,
+  );
+
+  const warnings = new Map<ReportSectionConfig, string>();
+  const collided = new Set(slugCollisions);
+
+  for (const s of targets) {
+    const raw = rawSlugOf(effectiveSectionTitle(s));
+    if (raw && collided.has(raw)) {
+      warnings.set(
+        s,
+        `Another section has the same link target (#${SECTION_ANCHOR_PREFIX}${raw}). ` +
+          'Links to it may land on the wrong one — give one of them a distinct title.',
+      );
+    }
+  }
+
+  // Set second: a titleless section is never in `slugCollisions` (it has no
+  // real slug to collide with), but the advice differs and must not be
+  // overwritten by the collision text if that ever changes.
+  for (const s of titlelessSections) {
+    warnings.set(
+      s,
+      'This title produces no link target, so the anchor falls back to the section ' +
+        'type and shifts if sections are added, removed or reordered. Include a Latin ' +
+        'letter or digit to give it a stable link.',
+    );
+  }
+
+  return warnings;
 }
 
 // ==================== Shared Section Config Shell ====================
