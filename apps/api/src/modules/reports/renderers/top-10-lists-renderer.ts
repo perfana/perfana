@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
+import { TestRun, ReportSectionConfig, getSectionText, formatImpactShare } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, Top10Row } from '../services/report-data-fetcher.service';
 import {
@@ -23,8 +23,11 @@ interface ListDef {
   key: ListKey;
   title: string;
   valueOf: (r: Top10Row) => number;
-  format: (v: number) => string;
+  /** `total` is the sum of valueOf over EVERY row in scope, not just the top ten. */
+  format: (v: number, total: number) => string;
   showErrorCount: boolean;
+  /** Column header over the value. */
+  valueHeader: string;
 }
 
 const SCOPE_LABELS: Record<Scope, string> = {
@@ -35,10 +38,22 @@ const SCOPE_LABELS: Record<Scope, string> = {
 
 // Order matches Performance Analysis display order.
 const LIST_DEFS: ListDef[] = [
-  { key: 'slowest', title: 'Slowest Average Response Times', valueOf: (r) => r.avgResponseTime, format: (v) => `${formatNum(v)} ms`, showErrorCount: false },
-  { key: 'throughput', title: 'Highest Throughput', valueOf: (r) => r.throughput, format: (v) => `${formatNum(v)}/s`, showErrorCount: false },
-  { key: 'impact', title: 'Highest Performance Impact', valueOf: (r) => r.impact, format: (v) => formatNum(v), showErrorCount: false },
-  { key: 'error_rate', title: 'Highest Error Rate', valueOf: (r) => r.errorRate, format: (v) => formatPercent(v), showErrorCount: true },
+  { key: 'slowest', title: 'Slowest Average Response Times', valueOf: (r) => r.avgResponseTime, format: (v) => `${formatNum(v)} ms`, showErrorCount: false, valueHeader: 'Avg response time' },
+  { key: 'throughput', title: 'Highest Throughput', valueOf: (r) => r.throughput, format: (v) => `${formatNum(v)}/s`, showErrorCount: false, valueHeader: 'Throughput' },
+  {
+    key: 'impact',
+    title: 'Performance Impact Ranking',
+    valueOf: (r) => r.impact,
+    // Raw impact is avg × count — a millisecond-calls product in the millions
+    // that means nothing on its own and cannot be compared between runs. The
+    // share of the run's total time can: "this transaction is 34% of all the
+    // time this test spent" ranks the same but is readable, and the column
+    // sums to 100 across everything in scope.
+    format: (v, total) => formatImpactShare(v, total),
+    showErrorCount: false,
+    valueHeader: 'Impact score',
+  },
+  { key: 'error_rate', title: 'Highest Error Rate', valueOf: (r) => r.errorRate, format: (v) => formatPercent(v), showErrorCount: true, valueHeader: 'Error rate' },
 ];
 
 /**
@@ -104,6 +119,9 @@ export class Top10ListsRenderer {
   private renderList(def: ListDef, rows: Top10Row[], scope: Scope, includeUrl: boolean): string {
     const nameHeader = scope === 'urls' ? 'URL' : scope === 'requests' ? 'Request' : 'Transaction';
     const top = [...rows].sort((a, b) => def.valueOf(b) - def.valueOf(a)).slice(0, 10);
+    // Over every row, not the top ten: the score answers "share of this run",
+    // and a denominator of the ten biggest would inflate every one of them.
+    const total = rows.reduce((sum, r) => sum + def.valueOf(r), 0);
 
     const bodyRows = top
       .map((r, idx) => {
@@ -121,7 +139,7 @@ export class Top10ListsRenderer {
       <tr style="background: ${rowBg};">
         <td style="${cell}">${this.utils.escapeHtml(r.label)}${secondary}</td>
         <td style="${cell}">${this.utils.escapeHtml(r.scenarioName)}</td>
-        <td style="${numCell} font-weight: 600;">${def.format(def.valueOf(r))}</td>
+        <td style="${numCell} font-weight: 600;">${def.format(def.valueOf(r), total)}</td>
         <td style="${numCell}">${formatInt(r.callCount)}</td>
         ${errorCol}
       </tr>`;
@@ -139,7 +157,7 @@ export class Top10ListsRenderer {
             <tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">${nameHeader}</th>
               <th style="${TH_TEXT}">Scenario</th>
-              <th style="${TH_NUM}">Value</th>
+              <th style="${TH_NUM}">${def.valueHeader}</th>
               <th style="${TH_NUM}">Count</th>
               ${errorHeader}
             </tr>

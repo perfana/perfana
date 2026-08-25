@@ -1,6 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { GeneratedReport, ReportTemplate, TestRun, SystemUnderTest } from '@perfana/shared';
+import { GeneratedReport, ReportTemplate, TestRun, SystemUnderTest, TestRunConfiguration } from '@perfana/shared';
 import { ReportGenerationController } from './controllers/report-generation.controller';
 import { ReportTemplateController } from './controllers/report-template.controller';
 import { ReportShareController } from './controllers/report-share.controller';
@@ -37,7 +37,7 @@ import { IndexRenderer } from './renderers/index-renderer';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([GeneratedReport, ReportTemplate, TestRun, SystemUnderTest]),
+    TypeOrmModule.forFeature([GeneratedReport, ReportTemplate, TestRun, SystemUnderTest, TestRunConfiguration]),
     CommonModule, // Provides AuthorizationService
     AuditModule, // Phase 5a — provides AuditService + AuditResourceRegistry
   ],

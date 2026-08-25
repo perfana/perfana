@@ -11,7 +11,7 @@ import {
   OwnedResource,
   SystemUnderTest,
 } from '@perfana/shared';
-import { MAX_REPORT_SECTIONS, isLinkableSectionType } from '@perfana/shared/types';
+import { MAX_REPORT_SECTIONS, isLinkableSection } from '@perfana/shared/types';
 import { withRequestEm } from '../../../common/db/request-em';
 import { findTestRunByEitherId } from './resolve-test-run';
 import {
@@ -1072,10 +1072,10 @@ export class ReportGenerationService {
       this.validator.warnOnAnchorProblems(
         sectionsHtml,
         // Section set must match the compiler's link-target set exactly (see
-        // isLinkableSectionType), or the anchor-problem warnings would flag
+        // isLinkableSection), or the anchor-problem warnings would flag
         // sections that never got an anchor in the first place.
         sections
-          .filter(s => isLinkableSectionType(s.type))
+          .filter(s => isLinkableSection(s))
           .map(s => ({ title: s.title || this.utils.getSectionTitle(s.type), type: s.type })),
       );
 

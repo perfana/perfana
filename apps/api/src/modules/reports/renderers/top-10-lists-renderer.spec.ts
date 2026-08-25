@@ -28,8 +28,56 @@ describe('Top10ListsRenderer', () => {
     expect(fetcher.getTop10TransactionRows).toHaveBeenCalled();
     expect(html).toContain('Slowest Average Response Times');
     expect(html).toContain('Highest Throughput');
-    expect(html).toContain('Highest Performance Impact');
+    expect(html).toContain('Performance Impact Ranking');
     expect(html).toContain('Highest Error Rate');
+  });
+
+  it('scores impact as a share of the total, not the raw avg x count product', async () => {
+    const { renderer } = makeRenderer(makeRows());
+    const section = { type: 'top_10_lists', order: 0, config: { lists: ['impact'] } } as ReportSectionConfig;
+    const html = await renderer.renderTop10ListsSection(section, testRun);
+
+    // 50000 and 30000 of an 80000 total → 62.5 and 37.5, summing to 100.
+    expect(html).toContain('62.5');
+    expect(html).toContain('37.5');
+    expect(html).not.toContain('50,000');
+    expect(html).toContain('Impact score');
+  });
+
+  it('names every value column after its own metric, not a generic "Value"', async () => {
+    const { renderer } = makeRenderer(makeRows());
+    const section = { type: 'top_10_lists', order: 0, config: {} } as ReportSectionConfig;
+    const html = await renderer.renderTop10ListsSection(section, testRun);
+    expect(html).toContain('Avg response time');
+    expect(html).toContain('Throughput');
+    expect(html).toContain('Impact score');
+    expect(html).toContain('Error rate');
+    expect(html).not.toContain('>Value<');
+  });
+
+  it('scores against ALL rows, not just the ten it displays', async () => {
+    // With <=10 rows "top ten" and "all rows" are the same set, so the denominator
+    // only becomes observable past the slice. 12 rows of 1000 each: every score is
+    // 1/12 of the total (8.3), NOT 1/10 of the displayed ten (10.0).
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      label: `T${i}`, secondaryLabel: undefined, scenarioName: 'Browse',
+      avgResponseTime: 100, callCount: 10, errorCount: 0, errorRate: 0,
+      throughput: 1, impact: 1000,
+    }));
+    const { renderer } = makeRenderer(many);
+    const section = { type: 'top_10_lists', order: 0, config: { lists: ['impact'] } } as ReportSectionConfig;
+    const html = await renderer.renderTop10ListsSection(section, testRun);
+    expect(html).toContain('8.3');
+    expect(html).not.toContain('10.0');
+  });
+
+  it('scores every row 0 when nothing consumed time, instead of dividing by zero', async () => {
+    const zeroed = makeRows().map((r) => ({ ...r, impact: 0 }));
+    const { renderer } = makeRenderer(zeroed);
+    const section = { type: 'top_10_lists', order: 0, config: { lists: ['impact'] } } as ReportSectionConfig;
+    const html = await renderer.renderTop10ListsSection(section, testRun);
+    expect(html).toContain('Impact score');
+    expect(html).not.toContain('NaN');
   });
 
   it('ranks the impact list by descending impact', async () => {

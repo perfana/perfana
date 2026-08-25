@@ -15,6 +15,38 @@ describe('TextBlockRenderer', () => {
     expect(html).toContain('<strong>p95</strong>');
   });
 
+  it('renders the section title as a heading, like every other section', () => {
+    const html = renderer.renderTextBlockSection(
+      section({ title: 'Executive summary', config: { content: 'Body copy' } }),
+    );
+    expect(html).toContain('<h2');
+    expect(html).toContain('Executive summary');
+  });
+
+  it('renders bare prose when the block has no title', () => {
+    const html = renderer.renderTextBlockSection(section({ config: { content: 'Body copy' } }));
+    expect(html).not.toContain('<h2');
+  });
+
+  it('treats a whitespace-only title as no title', () => {
+    const html = renderer.renderTextBlockSection(
+      section({ title: '   ', config: { content: 'Body copy' } }),
+    );
+    expect(html).not.toContain('<h2');
+  });
+
+  it('escapes the title rather than interpolating it', () => {
+    const html = renderer.renderTextBlockSection(
+      section({ title: '<img src=x onerror=alert(1)>', config: { content: 'Body copy' } }),
+    );
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+  });
+
+  it('renders nothing when a titled block has no content', () => {
+    expect(renderer.renderTextBlockSection(section({ title: 'Heading only', config: {} }))).toBe('');
+  });
+
   it('ignores a legacy comment — a text block has no accompanying text', () => {
     const html = renderer.renderTextBlockSection(
       section({ config: { content: 'Body copy' }, comment: 'legacy annotation' }),

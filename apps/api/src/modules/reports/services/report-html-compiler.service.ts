@@ -1,12 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { LessThan, Repository } from 'typeorm';
 import {
   TestRun,
+  TestRunConfiguration,
   ReportSectionConfig,
   ReportStyling,
   GeneratedReport,
   assignSectionAnchors,
-  isLinkableSectionType,
+  isLinkableSection,
+  buildReportVariableValues,
+  substituteReportVariables,
+  hasReportVariable,
+  isSecretishConfigKey,
+  REPORT_VARIABLES_NEEDING_LOOKUP,
 } from '@perfana/shared';
+import { withRequestEm } from '../../../common/db/request-em';
 import { ReportUtilsService } from './report-utils.service';
 import { HeaderRenderer } from '../renderers/header-renderer';
 import { TextBlockRenderer } from '../renderers/text-block-renderer';
@@ -54,6 +63,12 @@ export class ReportHtmlCompilerService {
     private readonly errorAnalysisRenderer: ErrorAnalysisRenderer,
     private readonly placeholderRenderer: PlaceholderRenderer,
     private readonly indexRenderer: IndexRenderer,
+    // Last on purpose: several suites construct this service positionally with
+    // just the collaborators they exercise, so new parameters go on the end.
+    @InjectRepository(TestRunConfiguration)
+    private readonly testRunConfigRepo: Repository<TestRunConfiguration>,
+    @InjectRepository(TestRun)
+    private readonly testRunRepo: Repository<TestRun>,
   ) {}
 
   /**
@@ -70,15 +85,18 @@ export class ReportHtmlCompilerService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<string> {
-    const sortedSections = [...sections].sort((a, b) => a.order - b.order);
+    const sortedSections = await this.resolveVariables(
+      [...sections].sort((a, b) => a.order - b.order),
+      testRun,
+    );
 
-    // Anchors are assigned over the sections that can be link TARGETS. A text
-    // block is where links are written from, never to; a header is the title
-    // block at the very top, so linking to it is pointless; an index linking
-    // to an index is circular. All three are excluded via the single shared
-    // rule (isLinkableSectionType), which also keeps them from consuming a
+    // Anchors are assigned over the sections that can be link TARGETS: a header
+    // is the title block at the very top, so linking to it is pointless, and an
+    // index linking to an index is circular. A text block qualifies only once it
+    // has a title to render as a heading. All of that is the single shared rule
+    // (isLinkableSection), which also keeps the excluded ones from consuming a
     // slug a real section wants.
-    const targets = sortedSections.filter(s => isLinkableSectionType(s.type));
+    const targets = sortedSections.filter(s => isLinkableSection(s));
     const anchors = assignSectionAnchors(
       targets,
       s => s.title || this.utils.getSectionTitle(s.type),
@@ -124,6 +142,142 @@ export class ReportHtmlCompilerService {
     }
 
     return renderedSections.join('\n');
+  }
+
+  /**
+   * Resolve `{perfana-…}` placeholders in every authored prose field, once, before
+   * anything renders — so all twelve renderers keep taking plain strings and none
+   * of them has to know variables exist.
+   *
+   * Copies rather than mutating: `sections` comes straight off the template/report
+   * entity, and writing resolved values back would persist them on the next save.
+   *
+   * Prose only — the accompanying text and a text block's body. NOT titles: a title
+   * is the section's address (see assignSectionAnchors), so resolving one would make
+   * anchors and every prose link pointing at them depend on the test run.
+   */
+  private async resolveVariables(
+    sections: ReportSectionConfig[],
+    testRun: TestRun | null,
+  ): Promise<ReportSectionConfig[]> {
+    // No test run (unsaved preview) means nothing to resolve against. Leaving the
+    // placeholders visible is the honest preview — an empty gap would read as if
+    // the author's text vanished.
+    if (!testRun) return sections;
+
+    const prose = sections.flatMap(s => [s.text, s.comment, s.config?.content])
+      .filter((v): v is string => typeof v === 'string');
+    // Nothing authored a placeholder — skip the two queries below entirely. Most
+    // reports never use a variable, and this runs on every render including every
+    // section preview keystroke-to-click. Tested for placeholder SHAPE rather than
+    // a bare `{`: markdown prose carries braces in fenced code, JSON snippets and
+    // CSS all the time, and every one of those used to fire the config query for a
+    // report that resolves nothing.
+    if (!prose.some(v => hasReportVariable(v))) return sections;
+
+    // Catalogue last: a test run configuration key is whatever the CI pipeline
+    // posted, and one named `perfana-workload` must not shadow the built-in.
+    const values = {
+      ...(await this.lookupVariableValues(testRun, prose)),
+      ...buildReportVariableValues(testRun),
+    };
+
+    // Each field is spread in only when it was there to begin with: `text: ''` is
+    // not the same as no `text` at all — getSectionText() treats a present '' as a
+    // deliberately cleared value that beats the legacy `comment`, so writing one
+    // unconditionally would blank the prose on every pre-2026-08-02 template.
+    return sections.map(section => {
+      const content = section.config?.content;
+      return {
+        ...section,
+        ...(typeof section.text === 'string'
+          ? { text: substituteReportVariables(section.text, values) }
+          : {}),
+        ...(typeof section.comment === 'string'
+          ? { comment: substituteReportVariables(section.comment, values) }
+          : {}),
+        ...(typeof content === 'string'
+          ? { config: { ...section.config, content: substituteReportVariables(content, values) } }
+          : {}),
+      };
+    });
+  }
+
+  /**
+   * The two variable groups that are a query rather than a column: this test run's
+   * configuration keys (deep links resolve these too, under the author's own key
+   * name) and the previous run's id.
+   *
+   * No org filtering here on purpose. `testRun` was already resolved and access-
+   * checked by the caller — previewSection through isTestRunAccessible, generation
+   * through the report's own run — so this is a system call on an authorized row,
+   * the same convention the section data fetchers use. The previous-run lookup is
+   * confined to the same system/environment/workload, so it cannot reach past what
+   * the caller could already see.
+   *
+   * Failures are logged and swallowed: an unresolved placeholder prints as itself,
+   * which is a far better outcome than a report that fails to render over a value
+   * used in one sentence.
+   */
+  private async lookupVariableValues(
+    testRun: TestRun,
+    prose: string[],
+  ): Promise<Record<string, string>> {
+    const values: Record<string, string> = {};
+
+    try {
+      const configs = await withRequestEm(this.testRunConfigRepo).find({
+        where: { testRunId: testRun.id },
+        select: ['key', 'value'],
+      });
+      for (const config of configs) {
+        // Secret-shaped keys never enter the map. A rendered report is served
+        // unauthenticated over share links, so resolving one would move a
+        // credential out of an org-scoped table onto a public page; leaving the
+        // placeholder literal keeps it where the author can see what happened.
+        if (isSecretishConfigKey(config.key)) continue;
+        // A config key that collides with a catalogue key must not shadow it —
+        // the catalogue is spread over this map, so the built-in wins.
+        values[config.key] = config.value || '';
+      }
+    } catch (error) {
+      this.logger.warn(`Could not resolve config variables: ${(error as Error).message}`);
+    }
+
+    // Driven off the shared list rather than a literal, so a second lookup-only
+    // variable cannot be added to the catalogue and silently never resolve.
+    const needsLookup = REPORT_VARIABLES_NEEDING_LOOKUP.some(key =>
+      prose.some(v => v.includes(`{${key}}`)),
+    );
+    if (needsLookup) {
+      try {
+        const previous = await withRequestEm(this.testRunRepo).findOne({
+          where: {
+            systemUnderTestId: testRun.systemUnderTestId,
+            testEnvironment: testRun.testEnvironment,
+            workload: testRun.workload,
+            completed: true,
+            // Strictly EARLIER, which is where this diverges from the deep-link
+            // resolver: that one takes the newest completed run and only rejects
+            // the current one, so re-opening an old deep link hands you a run that
+            // came AFTER it. A URL that quietly retargets is survivable; a report
+            // sentence reading "compared to <a later run>" is not.
+            ...(testRun.startTime ? { startTime: LessThan(testRun.startTime) } : {}),
+          },
+          select: ['testRunId'],
+          order: { startTime: 'DESC' },
+        });
+        // A run with no start time falls back to the deep-link behaviour, so still
+        // guard against naming the report's own run.
+        if (previous?.testRunId && previous.testRunId !== testRun.testRunId) {
+          values['perfana-previous-test-run-id'] = previous.testRunId;
+        }
+      } catch (error) {
+        this.logger.warn(`Could not resolve previous test run: ${(error as Error).message}`);
+      }
+    }
+
+    return values;
   }
 
   /**

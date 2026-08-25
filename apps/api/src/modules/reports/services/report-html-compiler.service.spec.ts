@@ -8,6 +8,8 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { TestRun, TestRunConfiguration } from '@perfana/shared';
 import { ReportHtmlCompilerService } from './report-html-compiler.service';
 import { ReportUtilsService } from './report-utils.service';
 import { HeaderRenderer } from '../renderers/header-renderer';
@@ -90,6 +92,16 @@ describe('ReportHtmlCompilerService', () => {
       providers: [
         ReportHtmlCompilerService,
         ReportUtilsService,
+        // Variable substitution reads these; no section here authors a
+        // placeholder, so both stay unused.
+        {
+          provide: getRepositoryToken(TestRunConfiguration),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: getRepositoryToken(TestRun),
+          useValue: { findOne: jest.fn().mockResolvedValue(null) },
+        },
         {
           provide: HeaderRenderer,
           useValue: {

@@ -89,13 +89,56 @@ describe('ReportHtmlCompilerService anchors', () => {
     expect(html).toContain('id="section-trends"');
   });
 
-  it('emits no anchor for a text block', async () => {
+  it('emits no anchor for an untitled text block', async () => {
     const html = await service.renderSections(
       [section({ type: 'text_block', order: 0, config: { content: 'hi' } })],
       null,
       null,
     );
     expect(html).not.toContain('class="section-anchor"');
+  });
+
+  it('anchors a text block once it has a title to land on', async () => {
+    const html = await service.renderSections(
+      [section({ type: 'text_block', order: 0, title: 'Executive summary', config: { content: 'hi' } })],
+      null,
+      null,
+    );
+    expect(html).toContain('id="section-executive-summary"');
+  });
+
+  it('does not anchor a titled text block with no body — nothing to land on', async () => {
+    // The renderer drops a contentless text block entirely, so an anchor here would
+    // put an index entry on an invisible marker with nothing underneath it.
+    const html = await service.renderSections(
+      [section({ type: 'text_block', order: 0, title: 'Executive summary', config: {} })],
+      null,
+      null,
+    );
+    expect(html).not.toContain('class="section-anchor"');
+  });
+
+  it('treats a whitespace-only title as no title, so no anchor', async () => {
+    const html = await service.renderSections(
+      [section({ type: 'text_block', order: 0, title: '   ', config: { content: 'hi' } })],
+      null,
+      null,
+    );
+    expect(html).not.toContain('class="section-anchor"');
+  });
+
+  it('lists a titled text block in the index, and leaves an untitled one out', async () => {
+    const html = await service.renderSections(
+      [
+        section({ type: 'index', order: 0 }),
+        section({ type: 'text_block', order: 1, title: 'Executive summary', config: { content: 'hi' } }),
+        section({ type: 'text_block', order: 2, config: { content: 'aside' } }),
+      ],
+      null,
+      null,
+    );
+    expect(html).toContain('href="#section-executive-summary"');
+    expect(html).not.toContain('href="#section-text-block"');
   });
 
   it('emits no anchor for a header section', async () => {
@@ -161,7 +204,7 @@ describe('ReportHtmlCompilerService anchors', () => {
     expect(html.indexOf('id="section-graphs"')).toBeLessThan(html.indexOf('id="section-graphs-2"'));
   });
 
-  it('lists every target section but not itself, a header, or a text block', async () => {
+  it('lists every target section but not itself, a header, or an untitled text block', async () => {
     const html = await service.renderSections(
       [
         section({ type: 'header', order: 0 }),

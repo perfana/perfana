@@ -5,6 +5,7 @@ import { ReportDataFetcherService, TrendRunSummary, MetricTrendSeries } from '..
 import { buildSelections } from './section-selections';
 import { bandColor, percentDiff } from './comparison-bands';
 import { formatValueWithUnit } from './unit-format';
+import { CHANGE_POINT_WINDOW } from '../services/trend-window';
 import {
   DEFAULT_THRESHOLDS,
   REPORT_COLORS,
@@ -55,9 +56,15 @@ export class TrendsRenderer {
     // timeRange.runCount is the older key; the form now picks where the window starts.
     const runCount = (config.timeRange as { runCount?: unknown } | undefined)?.runCount ?? config.maxRuns;
     const maxRuns = typeof runCount === 'number' ? runCount : 10;
+    // Absent means the author never touched the picker, and the picker shows
+    // "Most recent change point" as its selected value in that state — so that is
+    // what absent has to mean here too. Treating it as "no floor" made the default
+    // silently fall back to the run count, and MUI fires no change event when you
+    // pick the value already displayed, so re-selecting it in the form could not
+    // fix it either: the option was unreachable.
     const oldestTestRunId = typeof config.oldestTestRunId === 'string' && config.oldestTestRunId
       ? config.oldestTestRunId
-      : undefined;
+      : CHANGE_POINT_WINDOW;
 
     if (!testRun) {
       return this.renderNoDataSection(title, text, 'No test run data available for trends analysis.');
