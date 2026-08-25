@@ -282,6 +282,25 @@ add a second tsconfig that includes tests and run it in preflight. For (3), wide
 to `components/` and burn down whatever it surfaces. Doing (3) first is cheapest and will produce
 the smallest backlog.
 
+### `npm run test` and `npm run preflight` disagree about the RLS database
+
+**Priority:** P3
+**Origin:** /ship on `feat/report-dynamic-values-and-top10-impact` (2026-08-25). Ten API suites
+failed on a clean machine and nobody had noticed.
+**Why:** the jest setup points the RLS and sut-transfer suites at a `perfana_test` database, but
+nothing creates it and no doc mentions it, so `npm run test` fails 10 suites out of the box with
+`database "perfana_test" does not exist`. `npm run preflight` runs the same RLS suite against the
+dev database (`perfana`) instead, so the pre-push gate stayed green the whole time. Two commands
+that both claim to run the RLS suite disagree about what they run it against, and the one wired to
+the git hook is the one that never sees the failure. Same family as the three gates above: green
+means "not looked at".
+
+**What:** pick one database for the RLS suite and make both entry points use it. Then either add a
+bootstrap script (`create database` + `npm run migration:run` with `DB_NAME`) or document it in
+CLAUDE.md's Quick Start, so a fresh clone can run `npm run test` to green. Recovery for now:
+`docker exec perfana-postgres psql -U perfana -d postgres -c 'CREATE DATABASE perfana_test'` then
+`DB_NAME=perfana_test npm run migration:run`.
+
 ---
 
 ## Dead code detection

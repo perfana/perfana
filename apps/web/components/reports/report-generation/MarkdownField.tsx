@@ -10,6 +10,7 @@ import {
   DialogTitle,
   IconButton,
   InputBase,
+  ListSubheader,
   Menu,
   MenuItem,
   Tooltip,
@@ -22,9 +23,18 @@ import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered';
 import LinkIcon from '@mui/icons-material/Link';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import DataObjectIcon from '@mui/icons-material/DataObject';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
-import { renderMarkdown, renderPlainText, MAX_INLINE_LINK_LABEL_LENGTH } from '@perfana/shared/utils';
+import {
+  renderMarkdown,
+  renderPlainText,
+  MAX_INLINE_LINK_LABEL_LENGTH,
+  REPORT_VARIABLES,
+  CONFIG_VARIABLE_GROUP as CONFIG_GROUP,
+  type ReportVariable,
+} from '@perfana/shared/utils';
+import { useReportConfigKeys } from './ReportVariablesProvider';
 
 /**
  * Markdown input with a formatting toolbar and a live preview.
@@ -152,6 +162,17 @@ export function MarkdownField({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [sectionMenuAnchor, setSectionMenuAnchor] = useState<null | HTMLElement>(null);
+  const [variableMenuAnchor, setVariableMenuAnchor] = useState<null | HTMLElement>(null);
+
+  /** Drop literal text in at the caret (replacing any selection), appending if the textarea is gone. */
+  const insertAtCaret = (snippet: string) => {
+    const el = inputRef.current;
+    if (!el) {
+      onChange(value + snippet);
+      return;
+    }
+    onChange(value.slice(0, el.selectionStart) + snippet + value.slice(el.selectionEnd));
+  };
 
   const applyTool = (tool: Tool) => {
     const el = inputRef.current;
@@ -249,7 +270,6 @@ export function MarkdownField({
 
   const insertSectionLink = (target: { title: string; anchor: string }) => {
     setSectionMenuAnchor(null);
-    const el = inputRef.current;
     // renderMarkdown's link label is capped at MAX_INLINE_LINK_LABEL_LENGTH
     // chars (see packages/shared/src/utils/markdown.ts). A section title is
     // allowed up to 255 (create-report.dto.ts), well past that cap, and a
@@ -273,16 +293,7 @@ export function MarkdownField({
     // widening the shared parser (which two other consumers, and its own
     // invariant test suite, would then need re-auditing against).
     const safeLabel = truncatedTitle.replace(/\[/g, '［').replace(/\]/g, '］');
-    const markdown = `[${safeLabel}](#${target.anchor})`;
-
-    if (!el) {
-      onChange(value + markdown);
-      return;
-    }
-
-    const before = value.slice(0, el.selectionStart);
-    const after = value.slice(el.selectionEnd);
-    onChange(before + markdown + after);
+    insertAtCaret(`[${safeLabel}](#${target.anchor})`);
   };
 
   // Duplicate titles make the menu ambiguous — flag them so authors don't pick
@@ -296,6 +307,32 @@ export function MarkdownField({
     }
     return [...counts.entries()].filter(([, n]) => n > 1).map(([key]) => key);
   }, [linkTargets]);
+
+  // The built-in catalogue plus this test run's own configuration keys, which the
+  // renderer resolves under the author's key name exactly as deep links do. Config
+  // keys go last: they are the long, install-specific tail nobody scrolls for first.
+  const configKeys = useReportConfigKeys();
+  const variableGroups = useMemo(() => {
+    const groups = new Map<string, ReportVariable[]>();
+    for (const variable of REPORT_VARIABLES) {
+      groups.set(variable.group, [...(groups.get(variable.group) ?? []), variable]);
+    }
+    if (configKeys.length > 0) {
+      groups.set(
+        CONFIG_GROUP,
+        configKeys.map((key) => ({
+          key,
+          label: key,
+          // No per-item hint: the group header already says these are this run's
+          // configuration, and repeating one identical caption under every key
+          // doubled the height of the longest group for zero information.
+          hint: '',
+          group: CONFIG_GROUP,
+        })),
+      );
+    }
+    return [...groups.entries()];
+  }, [configKeys]);
 
   // Memoised: this runs on every keystroke and the parent re-renders every
   // section card when the value propagates.
@@ -328,7 +365,9 @@ export function MarkdownField({
         role="toolbar"
         aria-label={`${label} formatting`}
         sx={{
-          display: markdown ? 'flex' : 'none',
+          // Stays visible with markdown off: the formatting buttons go, but the
+          // value picker and the expand button still apply to plain text.
+          display: 'flex',
           gap: 0.5,
           px: 0.5,
           py: 0.25,
@@ -337,7 +376,7 @@ export function MarkdownField({
           bgcolor: 'action.hover',
         }}
       >
-        {TOOLS.map((tool) => (
+        {markdown && TOOLS.map((tool) => (
           <Tooltip key={tool.key} title={tool.title} arrow>
             <IconButton
               size="small"
@@ -351,7 +390,7 @@ export function MarkdownField({
           </Tooltip>
         ))}
 
-        {(linkTargets?.length ?? 0) > 0 && (
+        {markdown && (linkTargets?.length ?? 0) > 0 && (
           <Tooltip title="Link to section" arrow>
             <IconButton
               size="small"
@@ -386,6 +425,74 @@ export function MarkdownField({
               )}
             </MenuItem>
           ))}
+        </Menu>
+
+        <Tooltip title="Insert value" arrow>
+          <IconButton
+            size="small"
+            aria-label="Insert value"
+            onClick={(e) => setVariableMenuAnchor(e.currentTarget)}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <DataObjectIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Menu
+          anchorEl={variableMenuAnchor}
+          open={Boolean(variableMenuAnchor)}
+          onClose={() => setVariableMenuAnchor(null)}
+          // The catalogue plus a test run's configuration keys runs well past a
+          // screen; cap the list and let it scroll rather than overflow the viewport.
+          slotProps={{ paper: { sx: { maxHeight: 420 } } }}
+        >
+          <Typography
+            variant="caption"
+            sx={{ display: 'block', px: 2, py: 1, color: 'text.secondary' }}
+          >
+            Filled in from the test run when the report is rendered.
+          </Typography>
+          {/* Only while open: MUI does not keep a closed Menu mounted, but the
+              element objects were still allocated on every keystroke — three per
+              config key, and the config-key tail is unbounded CI-supplied data. */}
+          {Boolean(variableMenuAnchor) && variableGroups.map(([group, variables]) => [
+            // disableSticky: a sticky subheader parks itself on top of the first
+            // item of the group below it as you scroll, hiding that item's label.
+            // The type treatment is deliberate — at ListSubheader's defaults these
+            // were the same size and colour as the hint caption under every item,
+            // so the group boundaries read as one more hint line.
+            <ListSubheader
+              key={`h-${group}`}
+              disableSticky
+              sx={{
+                lineHeight: 2.4,
+                bgcolor: 'background.paper',
+                color: 'text.primary',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {group}
+            </ListSubheader>,
+            ...variables.map((variable) => (
+              <MenuItem
+                key={variable.key}
+                onClick={() => {
+                  setVariableMenuAnchor(null);
+                  insertAtCaret(`{${variable.key}}`);
+                }}
+                sx={{ display: 'block', py: 0.75 }}
+              >
+                <Typography variant="body2">{variable.label}</Typography>
+                {variable.hint && (
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    {variable.hint}
+                  </Typography>
+                )}
+              </MenuItem>
+            )),
+          ])}
         </Menu>
 
         {expandable && (

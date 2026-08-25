@@ -24,6 +24,8 @@ export interface Top10Dimension {
   icon: ReactNode;
   data: Top10Item[];
   valueField: keyof Top10Item;
+  /** Header over the value column; defaults to 'Value' when omitted. */
+  valueHeader?: string;
   valueFormatter: (val: number) => string;
   color: string;
   description?: string;

@@ -9,6 +9,11 @@ import {
 import { Top10TableSortField, Top10TableSortOrder } from '../types';
 
 export interface Top10TransactionTableHeaderProps {
+  /**
+   * Header over the value column. Defaults to 'Value'; each dimension names its
+   * own unit, because an unlabelled bare number (the impact score) reads as ms.
+   */
+  valueHeader?: string;
   dimensionIndex: number;
   sortField?: Top10TableSortField;
   sortOrder?: Top10TableSortOrder;
@@ -24,6 +29,7 @@ export function Top10TransactionTableHeader({
   hasDrillDownOptions,
   showErrorCount,
   onSort,
+  valueHeader = 'Value',
 }: Top10TransactionTableHeaderProps) {
   return (
     <TableHead>
@@ -67,7 +73,7 @@ export function Top10TransactionTableHeader({
               },
             }}
           >
-            Value
+            {valueHeader}
           </TableSortLabel>
         </TableCell>
         {hasDrillDownOptions && (

@@ -26,6 +26,7 @@ import {
 import { authenticatedFetch } from '@/lib/api';
 import { Top10Filter } from './components';
 import { ClippedUrl } from '@/components/ui/clipped-url';
+import { formatImpactShare, sumImpact } from '@perfana/shared/utils';
 
 interface TransactionStat {
   transaction_name: string;
@@ -288,15 +289,29 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
     icon: React.ReactNode;
     data: Top10Item[];
     valueField: keyof Top10Item;
+    /** Header over the value column; defaults to 'Value' when omitted. */
+    valueHeader?: string;
     valueFormatter: (val: number) => string;
     color: string;
     description?: string;
     showErrorCount?: boolean;
   };
 
+  // Denominator for the impact score: every row currently in view, not the ten
+  // that make the list — a top-ten denominator would inflate all ten.
+  //
+  // "Currently in view" includes the scenario and name filters, so this is a share
+  // of what you are looking at and it re-bases as you filter. That is deliberate
+  // here and it is NOT the same denominator the report uses: a report has no
+  // filter box, so it always scores against every row in the scope. Same run,
+  // same transaction, different number on the two surfaces once a filter is on —
+  // which is why the tooltip says "of the rows shown".
+  const impactTotal = sumImpact(top10Data);
+
   const dimensions: Top10Dimension[] = [
     {
       title: 'Slowest Average Response Times',
+      valueHeader: 'Avg response time',
       icon: <SpeedIcon />,
       data: getTop10(top10Data, (a, b) => b.avgResponseTime - a.avgResponseTime),
       valueField: 'avgResponseTime' as keyof Top10Item,
@@ -305,6 +320,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
     },
     {
       title: 'Highest Throughput',
+      valueHeader: 'Throughput',
       icon: <NetworkCheckIcon />,
       data: getTop10(top10Data, (a, b) => b.throughput - a.throughput),
       valueField: 'throughput' as keyof Top10Item,
@@ -312,16 +328,21 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
       color: '#4caf50',
     },
     {
-      title: 'Highest Performance Impact',
+      title: 'Performance Impact Ranking',
+      valueHeader: 'Impact score',
       icon: <TrendingUpIcon />,
       data: getTop10(top10Data, (a, b) => b.impact - a.impact),
       valueField: 'impact' as keyof Top10Item,
-      valueFormatter: (val: number) => formatNumber(val),
+      // Share of the run's total time rather than the raw avg x count product:
+      // the product is a number in the millions that means nothing on its own and
+      // cannot be compared between runs. The ranking is identical either way.
+      valueFormatter: (val: number) => formatImpactShare(val, impactTotal),
       color: '#f44336',
-      description: 'Performance Impact = Avg Response Time × Call Count. Higher values indicate URLs that consume more total time.',
+      description: `Impact score = this URL's share of the total time spent by the rows shown (avg response time × call count), on a 0-100 scale. Ranks identically to the raw product, but is readable and comparable between runs.`,
     },
     {
       title: 'Highest Error Rate',
+      valueHeader: 'Error rate',
       icon: <ErrorIcon />,
       data: getTop10(top10Data, (a, b) => b.errorRate - a.errorRate),
       valueField: 'errorRate' as keyof Top10Item,
@@ -416,7 +437,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
                           },
                         }}
                       >
-                        Value
+                        {dimension.valueHeader ?? 'Value'}
                       </TableSortLabel>
                     </TableCell>
                   </TableRow>

@@ -63,6 +63,7 @@ export function Top10TransactionDimensionCard({
       <TableContainer sx={{ maxHeight: 500 }}>
         <Table stickyHeader size="small">
           <Top10TransactionTableHeader
+            valueHeader={dimension.valueHeader}
             dimensionIndex={dimensionIndex}
             sortField={sortField}
             sortOrder={sortOrder}

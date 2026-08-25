@@ -268,25 +268,42 @@ describe('TextBlockConfigForm', () => {
     expect(onChange).toHaveBeenCalledWith({ alignment: 'center', content: '## Summary' });
   });
 
-  it('writes the Enable Markdown switch onto config and forwards it to the editor', () => {
-    // This wiring is what makes the switch functional at all — the renderer
-    // ignored config.markdown until now, so a dropped prop would silently
-    // restore the dead toggle with every suite still green.
+  it('always edits as markdown, with no switch to turn it off', () => {
+    // The switch is gone: markdown is the only mode a text block is authored in.
+    // It existed as an off ramp for blocks written before markdown rendering, and
+    // the renderer still honours a stored `markdown: false` — but nothing in the
+    // form can set one, so nothing in the form may write one either.
     const onChange = jest.fn();
-    const { rerender } = render(<TextBlockConfigForm config={{}} onChange={onChange} />);
+    render(<TextBlockConfigForm config={{}} onChange={onChange} />);
 
     expect(screen.getAllByLabelText('Bold')[0]).toBeVisible();
+    expect(screen.queryByRole('switch', { name: /enable markdown/i })).toBeNull();
+  });
 
-    const toggle = screen.getByRole('switch', { name: /enable markdown/i });
-    expect(toggle).toBeChecked();
+  it('never converts a legacy plain-text block, on load or on edit', () => {
+    // BackfillTextBlockMarkdownOff stamped `markdown: false` onto every text block
+    // authored before markdown rendering existed, precisely so their prose would
+    // not be reformatted, and documents itself as non-reversible. Clearing the
+    // flag here would silently rewrite published reports nobody edited.
+    const onChange = jest.fn();
+    render(
+      <TextBlockConfigForm config={{ markdown: false, content: 'old' }} onChange={onChange} />,
+    );
 
-    fireEvent.click(toggle);
-    expect(onChange).toHaveBeenCalledWith({ markdown: false });
+    // Nothing written just by rendering the form.
+    expect(onChange).not.toHaveBeenCalled();
+    // Edited in plain-text mode, so the preview matches what the report will print.
+    expect(screen.queryByLabelText('Bold')).toBeNull();
 
-    rerender(<TextBlockConfigForm config={{ markdown: false }} onChange={onChange} />);
-    // Only one editor now: the text block body — text blocks have no
-    // accompanying-text field.
-    expect(screen.getAllByLabelText('Bold')[0]).not.toBeVisible();
+    fireEvent.change(screen.getAllByLabelText('Content')[0], { target: { value: 'new' } });
+    expect(onChange).toHaveBeenCalledWith({ markdown: false, content: 'new' });
+  });
+
+  it('edits a block with no flag as markdown', () => {
+    const onChange = jest.fn();
+    render(<TextBlockConfigForm config={{ content: 'hi' }} onChange={onChange} />);
+    expect(screen.getAllByLabelText('Bold')[0]).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

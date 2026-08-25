@@ -139,7 +139,7 @@ describe('MarkdownField', () => {
     });
   });
 
-  it('hides the toolbar and previews raw text when markdown is disabled', () => {
+  it('drops the formatting buttons and previews raw text when markdown is disabled', () => {
     render(
       <MarkdownField label="Content" value={'- not a list'} onChange={jest.fn()} markdown={false} />,
     );
@@ -147,7 +147,12 @@ describe('MarkdownField', () => {
 
     expect(preview).toHaveTextContent('- not a list');
     expect(preview.querySelector('ul')).toBeNull();
-    expect(screen.getByLabelText('Bold')).not.toBeVisible();
+    // Not merely hidden — not rendered. Writing markdown syntax into a field
+    // that will print it literally is the one thing this mode must prevent.
+    expect(screen.queryByLabelText('Bold')).toBeNull();
+    // The toolbar itself stays, because the value picker still applies to plain
+    // text: `{perfana-workload}` is resolved by the renderer either way.
+    expect(screen.getByLabelText('Insert value')).toBeVisible();
   });
 
   it('preserves line breaks in the plain-text preview, matching the renderer', () => {

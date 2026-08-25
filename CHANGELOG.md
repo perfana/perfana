@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.78.0] - 2026-08-25
+
+### Added
+- **Report text can now carry values from the test run.** Write `{perfana-workload}` or `{perfana-start-datetime}` in a text block or in any section's accompanying text and it is filled in when the report renders, so one template reads correctly for every run instead of being retyped each time. A `{ }` button in the editor toolbar lists everything available, grouped and with an example of what each one produces, and inserts it at the cursor. The vocabulary is the one deep links already use — system under test, environment, workload, run id, release, CI build URL, tags, start and end time in readable, ISO 8601 and epoch form, duration, and the previous run's id — plus this run's own configuration keys, so `{java.runtime.version}` works too. A placeholder you mistype stays visible in the draft rather than vanishing, which is how you find it.
+- **A Top 10 Lists section can cover several scopes at once.** Tick any combination of transactions, requests and URLs and the section renders each one, with every list naming the scope it belongs to. A scope with no data says so rather than disappearing, and existing single-scope sections keep working untouched.
+- **A text block can have a heading.** Give a text block a section title and it renders with the same heading every other section gets, appears in the report's index, and can be linked to from prose. Leave the title empty and it stays bare paragraph text, which is what a note between two sections should look like.
+
+### Changed
+- **"Highest Performance Impact" is now "Performance Impact Ranking", scored out of 100.** The old number was average response time multiplied by call count — a figure in the millions that meant nothing on its own and could not be compared between two runs. Each row now shows its share of the total time the run spent, so "19.7" reads as "a fifth of everything this test did". The ranking is unchanged. Both the report and the Performance Analysis lists use it, every value column now names its own metric instead of saying "Value", and a row under a tenth of a percent reads `<0.1` rather than a rounded-away `0.0`.
+- **New text blocks are always written in markdown.** The "Enable Markdown" switch is gone; formatting simply works. Blocks written before markdown rendering existed keep printing as plain text and are never converted — that was pinned deliberately so their prose is not reformatted — and the editor now shows each block in the mode it will actually render in, so the preview and the report can no longer disagree.
+- **Generating a report from a template takes up much less of the dialog.** The template banner is now a chip on the title row and the "save as template" switch shares a line with the name field, which puts roughly 230px back — enough that a five-section template and the whole section palette are on screen at once.
+
+### Fixed
+- **The trends section's "Most recent change point" setting now does something.** It was shown as the default but never actually applied unless you picked another run and switched back, so trend charts silently fell back to a fixed run count. Charts left on the default now start where ADAPT last saw the system change, which for most reports means a different — and correct — set of runs.
+- **The section preview shows the section's real title.** It always rendered the type's default heading, so a renamed section previewed under the wrong name and a text block's heading did not appear at all.
+- Trend charts respect the configured run count again. Setting the window to start at the most recent change point used to discard the run count and compare up to fifty runs; the two settings now both apply, so "since the change point, at most ten runs" means what it reads like.
+- Test-run configuration values cannot smuggle anything into a shared report. A rendered report can be reached through a public link, so values are checked by name *and* by shape — a credential inside a `DATABASE_URL` or a `-Dspring.datasource.password=` argument is left unresolved just like an obviously-named one — and any markdown in a value is printed as text rather than becoming a link. A key that legitimately contains "author" or "pass_rate" works normally again.
+
 ## [0.2.77.0] - 2026-08-25
 
 ### Fixed

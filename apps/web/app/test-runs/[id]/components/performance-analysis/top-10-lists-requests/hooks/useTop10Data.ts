@@ -19,6 +19,7 @@ import {
   NetworkCheck as NetworkCheckIcon,
 } from '@mui/icons-material';
 import React from 'react';
+import { formatImpactShare, sumImpact } from '@perfana/shared/utils';
 
 export interface UseTop10DataProps {
   testRunId: string;
@@ -151,10 +152,22 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
       )
     : scenarioFiltered;
 
+  // Denominator for the impact score: every row currently in view, not the ten
+  // that make the list — a top-ten denominator would inflate all ten.
+  //
+  // "Currently in view" includes the scenario and name filters, so this is a share
+  // of what you are looking at and it re-bases as you filter. That is deliberate
+  // here and it is NOT the same denominator the report uses: a report has no
+  // filter box, so it always scores against every row in the scope. Same run,
+  // same transaction, different number on the two surfaces once a filter is on —
+  // which is why the tooltip says "of the rows shown".
+  const impactTotal = sumImpact(top10Data);
+
   // Build dimensions configuration
   const dimensions: Top10Dimension[] = [
     {
       title: 'Slowest Average Response Times',
+      valueHeader: 'Avg response time',
       icon: React.createElement(SpeedIcon),
       data: getTop10(top10Data, (a, b) => b.avgResponseTime - a.avgResponseTime),
       valueField: 'avgResponseTime',
@@ -163,6 +176,7 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
     },
     {
       title: 'Highest Throughput',
+      valueHeader: 'Throughput',
       icon: React.createElement(NetworkCheckIcon),
       data: getTop10(top10Data, (a, b) => b.throughput - a.throughput),
       valueField: 'throughput',
@@ -170,16 +184,21 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
       color: '#4caf50',
     },
     {
-      title: 'Highest Performance Impact',
+      title: 'Performance Impact Ranking',
+      valueHeader: 'Impact score',
       icon: React.createElement(TrendingUpIcon),
       data: getTop10(top10Data, (a, b) => b.impact - a.impact),
       valueField: 'impact',
-      valueFormatter: (val: number) => formatNumber(val),
+      // Share of the run's total time rather than the raw avg x count product:
+      // the product is a number in the millions that means nothing on its own and
+      // cannot be compared between runs. The ranking is identical either way.
+      valueFormatter: (val: number) => formatImpactShare(val, impactTotal),
       color: '#f44336',
-      description: 'Performance Impact = Avg Response Time × Call Count. Higher values indicate requests that consume more total time.',
+      description: `Impact score = this request's share of the total time spent by the rows shown (avg response time × call count), on a 0-100 scale. Ranks identically to the raw product, but is readable and comparable between runs.`,
     },
     {
       title: 'Highest Error Rate',
+      valueHeader: 'Error rate',
       icon: React.createElement(ErrorIcon),
       data: getTop10(top10Data, (a, b) => b.errorRate - a.errorRate),
       valueField: 'errorRate',

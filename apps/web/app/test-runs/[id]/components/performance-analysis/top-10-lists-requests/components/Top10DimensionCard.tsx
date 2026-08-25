@@ -63,6 +63,7 @@ export function Top10DimensionCard({
       <TableContainer>
         <Table size="small">
           <Top10TableHeader
+            valueHeader={dimension.valueHeader}
             dimensionIndex={dimensionIndex}
             sortField={sortField}
             sortOrder={sortOrder}

@@ -1418,7 +1418,7 @@ describe('ReportGenerationService', () => {
     });
 
     it("warns on anchor problems using only the linkable sections' effective titles", async () => {
-      // The third call site of isLinkableSectionType (after the compiler and the
+      // The third call site of isLinkableSection (after the compiler and the
       // web builder). If this filter drifts, the duplicate-title warning starts
       // flagging titles of sections that never got an anchor at all — a warning
       // an author cannot act on. Untitled sections resolve through

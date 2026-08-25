@@ -20,19 +20,21 @@ import { isGrafana } from '@/lib/metrics-source-utils';
 import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
+import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
 import { MarkdownField } from './MarkdownField';
+import { useSectionTitle } from './SectionTitleContext';
 import {
-  TEXT_BLOCK_MARKDOWN_DEFAULT,
   assignSectionAnchors,
   findAnchorProblems,
   rawSlugOf,
   SECTION_ANCHOR_PREFIX,
 } from '@perfana/shared/utils';
-import { SECTION_RENDER_TITLES, isLinkableSectionType } from '@perfana/shared/types';
+import { SECTION_RENDER_TITLES, isLinkableSection } from '@perfana/shared/types';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
 const HtmlSectionPreview = dynamic(() => import('./preview/HtmlSectionPreview'), { ssr: false });
+
 
 /**
  * The title a section actually renders under, which is also what its anchor is
@@ -55,16 +57,16 @@ export function effectiveSectionTitle(s: ReportSectionConfig): string {
 /**
  * The linkable sections, in the order the report renders them.
  *
- * `text_block`, `header` and `index` are excluded (per `isLinkableSectionType`
- * — see packages/shared/src/types/reports.types.ts): a text block renders as
- * body prose, never a heading with an id; a header is the report's title block
- * at the very top, so linking to it is pointless; an index linking to an index
- * is circular noise. Anything excluded here has no anchor at all, so it can
- * neither be linked to nor collide with something that can.
+ * Per `isLinkableSection` (see packages/shared/src/types/reports.types.ts): a
+ * header is the report's title block at the very top, so linking to it is
+ * pointless; an index linking to an index is circular noise; and an UNTITLED
+ * text block renders as bare prose with no heading to land on — title it and it
+ * becomes a target like any other. Anything excluded here has no anchor at all,
+ * so it can neither be linked to nor collide with something that can.
  */
 function linkableInOrder(allSections: ReportSectionConfig[]): ReportSectionConfig[] {
   return allSections
-    .filter((s) => isLinkableSectionType(s.type))
+    .filter((s) => isLinkableSection(s))
     .sort((a, b) => a.order - b.order);
 }
 
@@ -186,6 +188,10 @@ function SectionConfigShell({
 }: SectionConfigShellProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
 
+  // The title the author typed for THIS section, not the section type's name —
+  // the preview renders a real section, so it needs the real title.
+  const authoredTitle = useSectionTitle();
+
   const linkTargets = useMemo(() => buildLinkTargets(allSections), [allSections]);
 
   // Local draft of the text so typing doesn't propagate to the parent (and
@@ -284,6 +290,7 @@ function SectionConfigShell({
             sectionType={previewType}
             config={previewConfig}
             text={localText}
+            title={authoredTitle}
           />
         )}
       </SectionPreviewModal>
@@ -410,6 +417,16 @@ export function TextBlockConfigForm({ config, onChange, testRunId, allSections }
       testRunId={testRunId}
       allSections={allSections}
     >
+      {/* A block's stored `markdown` decides how it is edited, so the preview here
+          and the rendered report always agree. New blocks have no flag and default
+          to markdown. A block carrying `markdown: false` was pinned there by the
+          BackfillTextBlockMarkdownOff migration, which stamped every text block
+          authored before markdown rendering existed precisely so its prose would
+          NOT be reformatted — explicit ordered lists renumber, indentation
+          collapses, nested bullets flatten. That flag is never written and never
+          cleared from here: converting one silently rewrites a published report
+          nobody edited, and the migration is documented as non-reversible because
+          it cannot tell a backfilled false from a chosen one. */}
       <MarkdownField
         label="Content"
         value={config.content || ''}
@@ -440,15 +457,6 @@ export function TextBlockConfigForm({ config, onChange, testRunId, allSections }
           <MenuItem value="justify">Justify</MenuItem>
         </Select>
       </Box>
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.markdown ?? TEXT_BLOCK_MARKDOWN_DEFAULT}
-            onChange={(e) => onChange({ ...config, markdown: e.target.checked })}
-          />
-        }
-        label="Enable Markdown"
-      />
     </SectionConfigShell>
   );
 }
@@ -748,15 +756,26 @@ export function TransactionResponseTimesConfigForm({ config, onChange, text, onT
 const TOP10_LIST_OPTIONS: Array<{ key: NonNullable<Top10ListsConfig['lists']>[number]; label: string }> = [
   { key: 'slowest', label: 'Slowest Average Response Times' },
   { key: 'throughput', label: 'Highest Throughput' },
-  { key: 'impact', label: 'Highest Performance Impact' },
+  { key: 'impact', label: 'Performance Impact Ranking' },
   { key: 'error_rate', label: 'Highest Error Rate' },
 ];
 
 const ALL_TOP10_LIST_KEYS = TOP10_LIST_OPTIONS.map((o) => o.key);
 
+export type Top10Scope = 'transactions' | 'requests' | 'urls';
+
+/** Canonical order; the report renders scopes in this order however they were picked. */
+export const TOP10_SCOPE_OPTIONS: { key: Top10Scope; label: string }[] = [
+  { key: 'transactions', label: 'Transactions' },
+  { key: 'requests', label: 'Requests' },
+  { key: 'urls', label: 'URLs' },
+];
+
 /** @public */
 export interface Top10ListsConfig {
-  scope?: 'transactions' | 'requests' | 'urls';
+  scopes?: Top10Scope[];
+  /** @deprecated single-scope key from before a section could cover several. Read, never written. */
+  scope?: Top10Scope;
   lists?: Array<'slowest' | 'throughput' | 'impact' | 'error_rate'>;
   scenarios?: string[];
   excludeRampUp?: boolean;
@@ -794,7 +813,15 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
     fetchScenarios();
   }, [testRunId]);
 
-  const scope = config.scope ?? 'transactions';
+  // Mirrors the renderer's resolveScopes: `scopes` when present, else the legacy
+  // single `scope`, else transactions. Sections saved before this was multi-scope
+  // keep working, and the first edit writes the new shape.
+  const selectedScopes: Top10Scope[] =
+    config.scopes && config.scopes.length > 0
+      ? config.scopes
+      : config.scope
+        ? [config.scope]
+        : ['transactions'];
   const selectedLists = config.lists && config.lists.length > 0 ? config.lists : ALL_TOP10_LIST_KEYS;
   const selectedScenarios = config.scenarios ?? [];
 
@@ -809,17 +836,41 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
       testRunId={testRunId}
       allSections={allSections}
     >
-      {/* Scope */}
-      <Typography variant="caption" color="text.secondary">Scope</Typography>
+      {/* Scopes (multi-select) */}
+      <Typography variant="caption" color="text.secondary">Scopes</Typography>
       <Select
-        value={scope}
-        onChange={(e) => onChange({ ...config, scope: e.target.value as Top10ListsConfig['scope'] })}
+        multiple
+        value={selectedScopes}
+        onChange={(e) => {
+          const value = e.target.value as Top10Scope[];
+          const picked = Array.isArray(value) ? value : [];
+          // Never write an empty set: the renderer would fall back to transactions
+          // and the form would then disagree with the report. Dropping the legacy
+          // single-scope key leaves one shape behind after the first edit.
+          const { scope: _legacy, ...rest } = config;
+          onChange({
+            ...rest,
+            scopes:
+              picked.length > 0
+                ? TOP10_SCOPE_OPTIONS.filter((o) => picked.includes(o.key)).map((o) => o.key)
+                : ['transactions'],
+          });
+        }}
+        input={<OutlinedInput />}
+        renderValue={(selected) =>
+          TOP10_SCOPE_OPTIONS.filter((o) => (selected as Top10Scope[]).includes(o.key))
+            .map((o) => o.label)
+            .join(', ')
+        }
         fullWidth
         size="small"
       >
-        <MenuItem value="transactions">Transactions</MenuItem>
-        <MenuItem value="requests">Requests</MenuItem>
-        <MenuItem value="urls">URLs</MenuItem>
+        {TOP10_SCOPE_OPTIONS.map((o) => (
+          <MenuItem key={o.key} value={o.key}>
+            <Checkbox checked={selectedScopes.includes(o.key)} />
+            <ListItemText primary={o.label} />
+          </MenuItem>
+        ))}
       </Select>
 
       {/* Lists (multi-select) */}
@@ -872,8 +923,10 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
         </>
       )}
 
-      {/* includeUrl — requests scope only, mirrors the Compare/Perf-Analysis URL toggle */}
-      {scope === 'requests' && (
+      {/* includeUrl — applies to the requests scope only, mirrors the
+          Compare/Perf-Analysis URL toggle. Shown whenever requests is among the
+          selected scopes; the renderer ignores it for the others. */}
+      {selectedScopes.includes('requests') && (
         <FormControlLabel
           control={
             <Switch

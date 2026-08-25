@@ -28,6 +28,8 @@ export interface Top10TableDimension {
   icon: ReactNode;
   data: Top10TransactionItem[];
   valueField: keyof Top10TransactionItem;
+  /** Header over the value column; defaults to 'Value' when omitted. */
+  valueHeader?: string;
   valueFormatter: (val: number) => string;
   color: string;
   description?: string;

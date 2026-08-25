@@ -343,7 +343,7 @@ describe('TrendsRenderer', () => {
         ['user'],
       );
 
-      expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(expect.anything(), 7, 'user-1', ['user'], undefined);
+      expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(expect.anything(), 7, 'user-1', ['user'], 'changepoint');
     });
 
     it('should pass maxRuns config to data fetcher', async () => {
@@ -351,15 +351,28 @@ describe('TrendsRenderer', () => {
       await renderer.renderTrendsSection(section, makeTestRun(), 'user-1', ['user']);
 
       expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(
-        expect.anything(), 5, 'user-1', ['user'], undefined,
+        expect.anything(), 5, 'user-1', ['user'], 'changepoint',
       );
     });
 
-    it('should default maxRuns to 10', async () => {
+    it('should default maxRuns to 10, and the window to the change point the form shows', async () => {
+      // The picker displays "Most recent change point" when the config carries no
+      // oldestTestRunId, so an absent value must resolve to the sentinel — not to
+      // "no floor", which quietly fell back to the run count instead.
       await renderer.renderTrendsSection(makeSection(), makeTestRun());
 
       expect(dataFetcher.getTrendsData).toHaveBeenCalledWith(
-        expect.anything(), 10, '', [], undefined,
+        expect.anything(), 10, '', [], 'changepoint',
+      );
+    });
+
+    it('treats an empty oldestTestRunId as absent, not as a run id', async () => {
+      await renderer.renderTrendsSection(
+        makeSection({ config: { oldestTestRunId: '' } }),
+        makeTestRun(),
+      );
+      expect(dataFetcher.getTrendsData).toHaveBeenLastCalledWith(
+        expect.anything(), 10, '', [], 'changepoint',
       );
     });
 
