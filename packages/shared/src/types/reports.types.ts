@@ -546,6 +546,9 @@ export interface ReportSummary {
  */
 export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   header: 'Header',
+  // Key order matters: REPORT_SECTION_TYPES derives from Object.keys of this map, and
+  // that array is the order the builder's palette lists section types in.
+  index: 'Index',
   text_block: 'Text Block',
   slo: 'SLO Results',
   apdex: 'Apdex Report',
@@ -566,6 +569,37 @@ export const REPORT_SECTION_TYPES: readonly ReportSectionType[] =
   Object.keys(SECTION_TYPE_LABELS) as ReportSectionType[];
 
 /**
+ * Section render titles — the heading a generated report shows for a section
+ * when the author left `section.title` blank.
+ *
+ * This is distinct from `SECTION_TYPE_LABELS`, which is the builder-facing
+ * label shown in the section-picker UI (e.g. `header` → "Header"). The two
+ * diverge for `header` ("Report Header" here vs "Header" in the builder) and
+ * for `text_block` (never rendered as a heading, since its `content` is the
+ * body). Anchor generation must use this map — not `SECTION_TYPE_LABELS` — so
+ * the slug the web app computes for a link matches the `id` the API stamps
+ * onto the rendered heading. Values are copied verbatim from
+ * `ReportUtilsService.getSectionTitle` in
+ * `apps/api/src/modules/reports/services/report-utils.service.ts`, which is
+ * the canonical source and now reads from this map instead of its own copy.
+ */
+export const SECTION_RENDER_TITLES: Record<ReportSectionType, string> = {
+  header: 'Report Header',
+  index: 'Index',
+  text_block: 'Text',
+  slo: 'SLO Results',
+  apdex: 'Apdex Report',
+  transaction_response_times: 'Transaction Response Times',
+  regressions: 'Anomaly Detection',
+  awr: 'AWR Analysis',
+  trends: 'Trends',
+  comparisons: 'Comparisons',
+  graphs: 'Custom Graphs',
+  top_10_lists: 'Top 10 Lists',
+  error_analysis: 'Error Analysis',
+} as const;
+
+/**
  * Section types that support accompanying text — every type except `text_block`,
  * whose `content` already is the text.
  */
@@ -573,6 +607,43 @@ export const SECTION_TYPES_WITH_TEXT: readonly TextableSectionType[] =
   REPORT_SECTION_TYPES.filter(
     (t): t is TextableSectionType => t !== 'text_block',
   );
+
+/**
+ * Section types that can never be a link target: excluded from the report's
+ * index, never given an anchor `id` in the compiled HTML, and never offered
+ * by the builder's "Link to section" picker. This is the single authority for
+ * that rule — `ReportHtmlCompilerService.renderSections`,
+ * `ReportGenerationService`'s duplicate-title warning, and the web builder's
+ * `buildLinkTargets` all derive from it, so the picker can never offer a
+ * target the compiler did not anchor.
+ *
+ * - `text_block` — a text block IS the prose that link markdown is written
+ *   FROM. It renders as body text, not a heading, so it has nothing to link to.
+ * - `header` — the report's title block at the very top of the document.
+ *   Linking to it would point the reader back to where they already are.
+ * - `index` — the index itself. An index linking to another index is
+ *   circular noise, not navigation.
+ *
+ * Deliberately distinct from `SECTION_TYPES_WITH_TEXT` above: whether a
+ * section can carry accompanying prose is an unrelated question, and `header`
+ * / `index` both legitimately support text while being non-linkable.
+ */
+export const NON_LINKABLE_SECTION_TYPES = ['text_block', 'header', 'index'] as const;
+
+type NonLinkableSectionType = (typeof NON_LINKABLE_SECTION_TYPES)[number];
+
+/** Section types that can be linked to and listed in the report's index. */
+export type LinkableSectionType = Exclude<ReportSectionType, NonLinkableSectionType>;
+
+/**
+ * True when a section type can be linked to: it is eligible for an anchor
+ * `id`, for inclusion in the report's index, and for the builder's
+ * "Link to section" picker. See `NON_LINKABLE_SECTION_TYPES` for the excluded
+ * types and why.
+ */
+export function isLinkableSectionType(type: ReportSectionType): type is LinkableSectionType {
+  return !(NON_LINKABLE_SECTION_TYPES as readonly string[]).includes(type);
+}
 
 /**
  * Report status display labels

@@ -352,6 +352,51 @@ Displays custom graphs and visualizations.
 
 ---
 
+### 11. `index` - Section Index
+
+Renders a linked list of the report's sections, in the order they appear, so readers can jump straight to the one they want.
+
+**Configuration Options:**
+
+```typescript
+{
+  type: 'index',
+  order: 0,
+  title?: string;     // Default: 'Index'
+  comment?: string;   // Optional stakeholder comment, rendered above the list
+}
+```
+
+This section has no settings of its own beyond the standard fields every section carries. Its list is built automatically from the other sections already in the report — there is nothing to set beyond where it sits in the running order, an optional title override, and the standard accompanying-text field (`comment`), which renders above its list.
+
+**Features:**
+- One entry per linkable section, in report order
+- Each entry links to that section's anchor
+- Text blocks, headers, and other index sections are never listed — none of them have an anchor of their own (see "Linking to Sections" below)
+- An index with no linkable sections in the report, and no accompanying text of its own, renders nothing at all — not even its heading. A report made up of only an index and text blocks/headers would show no sign of the index; add a linkable section, or give the index some accompanying text, to make it appear.
+
+---
+
+## Linking to Sections
+
+Any section can be linked from a text block or from a section's own accompanying text, using ordinary markdown:
+
+```markdown
+[See the SLO results](#section-slo-results)
+```
+
+The link target is a slug built from the section's title as the report renders it: lowercased, with accents stripped and every run of non-alphanumeric characters collapsed to a single `-`, then namespaced with a `section-` prefix. "SLO Results" becomes `section-slo-results`. If a section has no title of its own, the anchor is built from its default type heading instead — an untitled `slo` section still anchors at `#section-slo-results`.
+
+The `section-` prefix exists so a section's anchor can never collide with an id some other part of the report stamps from unrelated data — for example, drill-down table rows keyed off transaction names (`r-checkout`, `c-mid`, `b-reg`). Without it, a section titled "R Checkout" would slug to the bare `r-checkout` and silently share an id with such a row; the browser would then resolve `#r-checkout` to whichever element comes first in the document, which may not be the section at all.
+
+**Text blocks, headers, and indexes cannot be linked to.** A text block is where you write links from, not something other sections can link to. A header is the report's title block at the very top, so linking to it is pointless — you're already there. An index linking to an index is circular noise. All three get no anchor and never appear in the index.
+
+**Give sections distinct titles.** Two sections that share a title make their links ambiguous: the second one gets a numbered suffix (`-2`, `-3`, ...), and later deleting or reordering either section can silently repoint an existing link at the wrong one. Report generation warns about duplicate titles, but it does not block generation.
+
+You don't have to work the slug out by hand — the editor toolbar has a "Link to section" button that inserts the correct markdown for the section you pick. Links work the same way in both the HTML report and the generated PDF.
+
+---
+
 ## Complete Example Template
 
 ```typescript

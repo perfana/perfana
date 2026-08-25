@@ -100,7 +100,7 @@ const SlideTransition = forwardRef(function Transition(
 
 /**
  * Iframe sandbox permissions - restrictive for security
- * - allow-same-origin: Required for srcdoc to work properly
+ * - allow-same-origin: Required for the report document to load/render properly
  * - allow-popups: Allows links to open in new windows/tabs
  *
  * NOT included for security:
@@ -146,9 +146,40 @@ export function HtmlReportViewerModal({
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error' | 'info'>('info');
+  // The blob URL currently assigned to the iframe's src (see the iframe render below
+  // for why we use a blob URL instead of srcDoc).
+  const [iframeBlobUrl, setIframeBlobUrl] = useState<string | null>(null);
 
   // Ref for the iframe
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Build a blob: URL for the iframe whenever the HTML content changes, and revoke the
+  // previous one. A blob document gets its own base URL (unlike about:srcdoc, which
+  // inherits the PARENT document's URL), so in-report anchor links like
+  // <a href="#slo-results"> resolve to a same-document fragment instead of navigating
+  // the iframe to the app's own URL and destroying the report view.
+  //
+  // `open` is also a dependency, not just `htmlContent`: closing the modal only
+  // flips the parent's `open` flag, it does not necessarily clear `htmlContent`
+  // (that only happens in the reset-on-close effect below, and it deliberately
+  // skips clearing when content came in via the `htmlContent` prop). Without
+  // `open` here, a host that keeps this component mounted across opens — the
+  // normal shape for a reusable viewer — would retain the closed report's blob
+  // URL, and the memory behind it, for the tab's lifetime. Depending on `open`
+  // makes this effect's cleanup run on close too, same mechanism as the
+  // existing revoke-on-change and revoke-on-unmount behaviour.
+  useEffect(() => {
+    if (!htmlContent || !open) {
+      setIframeBlobUrl(null);
+      return;
+    }
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    setIframeBlobUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [htmlContent, open]);
 
   // Snackbar helper
   const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' = 'info') => {
@@ -422,7 +453,9 @@ export function HtmlReportViewerModal({
 
   // Render iframe content
   const renderContent = () => {
-    if (!htmlContent) return null;
+    // Wait for the blob URL before mounting the iframe — an iframe with no src
+    // would otherwise briefly render about:blank.
+    if (!htmlContent || !iframeBlobUrl) return null;
 
     return (
       <Box
@@ -435,7 +468,7 @@ export function HtmlReportViewerModal({
       >
         <iframe
           ref={iframeRef}
-          srcDoc={htmlContent}
+          src={iframeBlobUrl}
           sandbox={IFRAME_SANDBOX}
           title={`Report: ${displayName}`}
           style={{

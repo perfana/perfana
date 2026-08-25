@@ -11,7 +11,7 @@ import {
   OwnedResource,
   SystemUnderTest,
 } from '@perfana/shared';
-import { MAX_REPORT_SECTIONS } from '@perfana/shared/types';
+import { MAX_REPORT_SECTIONS, isLinkableSectionType } from '@perfana/shared/types';
 import { withRequestEm } from '../../../common/db/request-em';
 import { findTestRunByEitherId } from './resolve-test-run';
 import {
@@ -1068,6 +1068,17 @@ export class ReportGenerationService {
       const styling = report.template.styling || this.utils.getDefaultStyling();
 
       const sectionsHtml = await this.htmlCompiler.renderSections(sections, testRun, report, userId, roles);
+
+      this.validator.warnOnAnchorProblems(
+        sectionsHtml,
+        // Section set must match the compiler's link-target set exactly (see
+        // isLinkableSectionType), or the anchor-problem warnings would flag
+        // sections that never got an anchor in the first place.
+        sections
+          .filter(s => isLinkableSectionType(s.type))
+          .map(s => ({ title: s.title || this.utils.getSectionTitle(s.type), type: s.type })),
+      );
+
       const html = this.htmlCompiler.compileHtml(report.name, sectionsHtml, styling);
 
       await this.storeHtmlContent(reportId, html, userId, roles);

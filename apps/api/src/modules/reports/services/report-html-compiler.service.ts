@@ -1,5 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { TestRun, ReportSectionConfig, ReportStyling, GeneratedReport } from '@perfana/shared';
+import {
+  TestRun,
+  ReportSectionConfig,
+  ReportStyling,
+  GeneratedReport,
+  assignSectionAnchors,
+  isLinkableSectionType,
+} from '@perfana/shared';
 import { ReportUtilsService } from './report-utils.service';
 import { HeaderRenderer } from '../renderers/header-renderer';
 import { TextBlockRenderer } from '../renderers/text-block-renderer';
@@ -14,6 +21,7 @@ import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
+import { IndexRenderer } from '../renderers/index-renderer';
 import {
   REPORT_INTERACTIVITY_CSS,
   REPORT_INTERACTIVITY_SCRIPT,
@@ -45,6 +53,7 @@ export class ReportHtmlCompilerService {
     private readonly top10ListsRenderer: Top10ListsRenderer,
     private readonly errorAnalysisRenderer: ErrorAnalysisRenderer,
     private readonly placeholderRenderer: PlaceholderRenderer,
+    private readonly indexRenderer: IndexRenderer,
   ) {}
 
   /**
@@ -62,18 +71,55 @@ export class ReportHtmlCompilerService {
     roles: string[] = [],
   ): Promise<string> {
     const sortedSections = [...sections].sort((a, b) => a.order - b.order);
+
+    // Anchors are assigned over the sections that can be link TARGETS. A text
+    // block is where links are written from, never to; a header is the title
+    // block at the very top, so linking to it is pointless; an index linking
+    // to an index is circular. All three are excluded via the single shared
+    // rule (isLinkableSectionType), which also keeps them from consuming a
+    // slug a real section wants.
+    const targets = sortedSections.filter(s => isLinkableSectionType(s.type));
+    const anchors = assignSectionAnchors(
+      targets,
+      s => s.title || this.utils.getSectionTitle(s.type),
+      s => s.type,
+    );
+
+    // A section keeps the slug `anchors` reserved for it whether it renders or
+    // falls back to an error placeholder — a failed section is still a section
+    // in the document, and prose/index links pointing at it must resolve to
+    // where it landed, not to nothing. Both branches below go through this one
+    // prepend so they can never drift apart.
+    const withAnchor = (section: ReportSectionConfig, html: string): string => {
+      const anchor = anchors.get(section);
+      return anchor
+        ? `<a id="${this.utils.escapeHtml(anchor)}" class="section-anchor" aria-hidden="true"></a>\n${html}`
+        : html;
+    };
+
     const renderedSections: string[] = [];
 
     for (const section of sortedSections) {
       try {
-        const sectionHtml = await this.renderSection(section, testRun, report, userId, roles);
-        renderedSections.push(sectionHtml);
+        const sectionHtml = await this.renderSection(
+          section,
+          testRun,
+          report,
+          userId,
+          roles,
+          anchors,
+        );
+        renderedSections.push(withAnchor(section, sectionHtml));
       } catch (error) {
         this.logger.warn(
           `Failed to render section ${section.type}: ${(error as Error).message}`,
         );
-        // Include error placeholder in report
-        renderedSections.push(this.placeholderRenderer.renderErrorSection(section, (error as Error).message));
+        renderedSections.push(
+          withAnchor(
+            section,
+            this.placeholderRenderer.renderErrorSection(section, (error as Error).message),
+          ),
+        );
       }
     }
 
@@ -93,6 +139,9 @@ export class ReportHtmlCompilerService {
     _report: GeneratedReport | null,
     userId: string = '',
     roles: string[] = [],
+    // Used by the `index` case below to build the entry list: every anchor
+    // target except the index section itself.
+    anchors: Map<ReportSectionConfig, string> = new Map(),
   ): Promise<string> {
     const sectionTitle = section.title || this.utils.getSectionTitle(section.type);
 
@@ -121,6 +170,16 @@ export class ReportHtmlCompilerService {
         return await this.top10ListsRenderer.renderTop10ListsSection(section, testRun, userId, roles);
       case 'error_analysis':
         return await this.errorAnalysisRenderer.renderErrorAnalysisSection(section, testRun, userId, roles);
+      case 'index':
+        return this.indexRenderer.renderIndexSection(
+          section,
+          [...anchors.entries()]
+            .filter(([target]) => target !== section)
+            .map(([target, anchor]) => ({
+              title: target.title || this.utils.getSectionTitle(target.type),
+              anchor,
+            })),
+        );
       default:
         return this.placeholderRenderer.renderPlaceholderSection(sectionTitle, section.type);
     }
@@ -437,6 +496,16 @@ export class ReportHtmlCompilerService {
       padding: 30px;
       margin-bottom: 30px;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
+    }
+
+    /* One empty, invisible anchor stamped before each section by the compiler
+       (see ReportHtmlCompilerService.renderSections). display:block plus the
+       scroll-margin keeps a jump-to-anchor link from landing flush under the
+       fixed page header instead of at the section's actual top. */
+    .section-anchor {
+      display: block;
+      position: relative;
+      scroll-margin-top: 24px;
     }
 
     section h2 {

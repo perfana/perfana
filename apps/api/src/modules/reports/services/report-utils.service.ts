@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ReportSectionType, ReportStyling } from '@perfana/shared';
+import { ReportSectionType, ReportStyling, SECTION_RENDER_TITLES } from '@perfana/shared';
 
 /**
  * Service for report utility functions
@@ -77,21 +77,7 @@ export class ReportUtilsService {
    * @returns Default title string
    */
   getSectionTitle(type: ReportSectionType): string {
-    const titles: Record<ReportSectionType, string> = {
-      header: 'Report Header',
-      text_block: 'Text',
-      slo: 'SLO Results',
-      apdex: 'Apdex Report',
-      transaction_response_times: 'Transaction Response Times',
-      regressions: 'Anomaly Detection',
-      awr: 'AWR Analysis',
-      trends: 'Trends',
-      comparisons: 'Comparisons',
-      graphs: 'Custom Graphs',
-      top_10_lists: 'Top 10 Lists',
-      error_analysis: 'Error Analysis',
-    };
-    return titles[type] || type;
+    return SECTION_RENDER_TITLES[type] || type;
   }
 
   /**

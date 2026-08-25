@@ -23,6 +23,7 @@ import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
+import { IndexRenderer } from '../renderers/index-renderer';
 import {
   ReportSectionConfig,
   ReportStyling,
@@ -175,6 +176,12 @@ describe('ReportHtmlCompilerService', () => {
                 (section: ReportSectionConfig, msg: string) =>
                   `<div class="error-section">${msg}</div>`,
               ),
+          },
+        },
+        {
+          provide: IndexRenderer,
+          useValue: {
+            renderIndexSection: jest.fn().mockReturnValue('<div>index</div>'),
           },
         },
       ],

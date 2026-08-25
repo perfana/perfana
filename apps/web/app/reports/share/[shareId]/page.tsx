@@ -47,7 +47,7 @@ import { getPublicReport, type PublicShareResponse } from '@/lib/api/reports';
 
 /**
  * Iframe sandbox permissions - restrictive for security
- * - allow-same-origin: Required for srcdoc to work properly
+ * - allow-same-origin: Required for the report document to load/render properly
  * - allow-popups: Allows links to open in new windows/tabs
  *
  * NOT included for security:
@@ -80,9 +80,31 @@ export default function PublicSharePage() {
   const [error, setError] = useState<ErrorState | null>(null);
   const [reportData, setReportData] = useState<PublicShareResponse | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(isMobile);
+  // The blob URL currently assigned to the iframe's src (see the iframe render below
+  // for why we use a blob URL instead of srcDoc).
+  const [iframeBlobUrl, setIframeBlobUrl] = useState<string | null>(null);
 
   // Ref for the iframe
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Build a blob: URL for the iframe whenever the HTML content changes, and revoke the
+  // previous one. A blob document gets its own base URL (unlike about:srcdoc, which
+  // inherits the PARENT document's URL), so in-report anchor links like
+  // <a href="#slo-results"> resolve to a same-document fragment instead of navigating
+  // the iframe to the app's own URL and destroying the report view.
+  useEffect(() => {
+    const htmlContent = reportData?.html_content;
+    if (!htmlContent) {
+      setIframeBlobUrl(null);
+      return;
+    }
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    setIframeBlobUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [reportData?.html_content]);
 
   // Fetch the report
   const fetchReport = useCallback(async () => {
@@ -370,24 +392,26 @@ export default function PublicSharePage() {
             position: 'relative',
           }}
         >
-          <iframe
-            ref={iframeRef}
-            srcDoc={reportData.html_content}
-            sandbox={IFRAME_SANDBOX}
-            title={`Report: ${reportData.name}`}
-            style={{
-              width: '100%',
-              height: '100%',
-              border: 'none',
-              display: 'block',
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-            }}
-            aria-label={`Shared report: ${reportData.name}`}
-          />
+          {iframeBlobUrl && (
+            <iframe
+              ref={iframeRef}
+              src={iframeBlobUrl}
+              sandbox={IFRAME_SANDBOX}
+              title={`Report: ${reportData.name}`}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                display: 'block',
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+              }}
+              aria-label={`Shared report: ${reportData.name}`}
+            />
+          )}
         </Box>
       </Box>
 

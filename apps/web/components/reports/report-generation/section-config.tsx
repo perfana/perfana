@@ -10,6 +10,7 @@ import {
   Storage as StorageIcon,
   TextFields as TextIcon,
   Timeline as TimelineIcon,
+  Toc as TocIcon,
   TrendingUp as TrendingIcon,
   Warning as WarningIcon,
 } from '@mui/icons-material';
@@ -22,7 +23,7 @@ import { ReportSectionType } from '@/lib/api/reports';
  * description per type and it is the only place a section explains itself to the reader.
  *
  * The accent and icon are the section's identity: the palette entry, the card avatar and the
- * order badge all key off them, so every one of the eleven must be distinguishable from every
+ * order badge all key off them, so every one of the thirteen must be distinguishable from every
  * other. They previously were not — `header` and `transaction_response_times` shared #2196f3,
  * `trends` and `top_10_lists` shared #ff9800, `trends` and `transaction_response_times` shared
  * an icon, and `text_block`/`slo` were the same icon rotated. The darker accents (brown #795548,
@@ -103,5 +104,11 @@ export const SECTION_CONFIG: Record<ReportSectionType, { icon: React.ReactNode; 
     label: 'Top 10 Lists',
     description: 'Ranked top-10 lists (slowest, throughput, impact, error rate) for transactions, requests, or URLs',
     color: '#7cb342',
+  },
+  index: {
+    icon: <TocIcon />,
+    label: 'Section Index',
+    description: "Clickable table of contents linking to the report's other sections",
+    color: '#3949ab',
   },
 };

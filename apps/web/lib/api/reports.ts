@@ -21,6 +21,9 @@ import { env } from '../env';
  */
 export const REPORT_SECTION_TYPES = [
   'header',
+  // Second on purpose: this array is the order the builder's section palette lists
+  // types in, and an index belongs near the top of a report, right after its header.
+  'index',
   'text_block',
   'slo',
   'apdex',
@@ -1074,6 +1077,7 @@ export function getSectionTypeLabel(type: ReportSectionType): string {
     graphs: 'Custom Graphs',
     top_10_lists: 'Top 10 Lists',
     error_analysis: 'Error Analysis',
+    index: 'Index',
   };
   return labels[type] || type;
 }

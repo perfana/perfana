@@ -156,7 +156,7 @@ export function isSystemTag(tag: string): boolean {
 
 /**
  * Merges multiple tag arrays and removes duplicates and system tags
- * 
+ *
  * @param tagArrays - Variable number of tag arrays to merge
  * @returns Array of unique filtered tags
  */
@@ -170,3 +170,6 @@ export function mergeAndFilterTags(...tagArrays: (string[] | undefined | null)[]
   const uniqueTags = Array.from(new Set(allTags));
   return filterSystemTags(uniqueTags);
 }
+
+// Export report section anchor slugs (used by API report HTML + web link picker)
+export * from './section-anchors';

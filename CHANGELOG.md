@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.76.0] - 2026-08-24
+
+### Added
+- **Reports can now have an index.** Add an "Index" section and the report gets a linked list of its own sections, so a long report is something you consult rather than scroll. It sits second in the section palette, right under the header, and takes no configuration.
+- **Prose in a report can link to a section.** Write `[See the SLO results](#section-slo-results)` in a text block or in a section's accompanying text and it becomes a working link, in the HTML report and in the PDF. The editor toolbar has a "Link to section" button that lists the report's sections and inserts the correct link for you, so you never have to work the anchor out by hand.
+- **Section titles are editable.** Every section now has a title field, with the default heading shown as the placeholder. This was always stored and rendered, but there was no way to set it in the builder — which mattered once links started depending on it, because two sections sharing a title make a link ambiguous.
+- **A warning when two sections would produce the same link target.** Reports still generate; the warning names the sections so you can give them distinct titles. If a title cannot produce a link target at all — for example one written entirely in a non-Latin script — the report says so plainly instead of advising a rename that would not help.
+
+### Fixed
+- **Clicking a link inside a report no longer wipes the report.** The in-app viewer and the public share page displayed report HTML in a way that made in-report links resolve against the app's own address, so following one navigated the frame away from the report and left a blank panel. Both surfaces now serve the report so its own links resolve within it.
+- The header section and the index itself are no longer listed in the index, and cannot be linked to. Linking to the header means linking to the top of the page you are already on, and an index entry pointing at the index is noise.
+- A report section whose content fails to render still gets a link target, so an index entry pointing at it goes somewhere rather than nowhere.
+- The index section's accompanying text is no longer discarded, and can now be written in the builder — previously the report knew how to render it but nothing in the interface let you enter it.
+- Adding a section no longer stamps the palette's label onto it as a title, which had made a section's heading differ from the name shown in the index.
+
+### Changed
+- Report section titles used for headings now come from one definition shared by the API and the report builder, so the name the builder shows and the heading the report renders can no longer drift apart.
+
 ## [0.2.75.0] - 2026-08-23
 
 ### Added

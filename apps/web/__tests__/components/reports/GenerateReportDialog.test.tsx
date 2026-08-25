@@ -1229,4 +1229,108 @@ describe('GenerateReportDialog', () => {
       expect(screen.getByText('15 / 20 sections')).toBeInTheDocument();
     });
   });
+
+  describe('section title field', () => {
+    // The palette label ("Header", "SLO Summary", ...) is deliberately NOT what
+    // gets stamped as the section's title any more — these tests exercise the
+    // Section Title field itself, which is what now lets an author give two
+    // same-type sections distinct titles (and therefore distinct anchors).
+    const navigate = async () => {
+      await waitFor(() => {
+        expect(screen.getByText('Start from Scratch')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Start from Scratch'));
+      await waitFor(() => {
+        expect(screen.getByText('Available Sections')).toBeInTheDocument();
+      });
+    };
+
+    it('adds a section with no title stamped, so the card shows the palette label as a fallback', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByText('Header'));
+
+      // The Section Title field starts empty — nothing was stamped onto section.title.
+      expect(screen.getByLabelText('Section Title')).toHaveValue('');
+    });
+
+    it("shows the section's default rendered heading as the field's placeholder", async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByText('Header'));
+
+      // SECTION_RENDER_TITLES.header is "Report Header" — distinct from the palette
+      // label "Header" shown on the card itself, so the placeholder proves this reads
+      // from the renderer's default, not the palette.
+      expect(screen.getByLabelText('Section Title')).toHaveAttribute('placeholder', 'Report Header');
+    });
+
+    it('lets an author set a distinct title, which flows into the generated payload', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByText('Header'));
+      fireEvent.change(screen.getByLabelText('Section Title'), {
+        target: { value: 'Executive Overview' },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Generate Report' }));
+
+      await waitFor(() => {
+        expect(reportsApi.generateAdHocReport).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sections: expect.arrayContaining([
+              expect.objectContaining({ type: 'header', title: 'Executive Overview' }),
+            ]),
+          })
+        );
+      });
+    });
+
+    it('stores undefined, not an empty string, when the title is cleared back to blank', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      fireEvent.click(screen.getByText('Header'));
+      const titleField = screen.getByLabelText('Section Title');
+      fireEvent.change(titleField, { target: { value: 'Executive Overview' } });
+      // Whitespace-only, not just '' — both must land on undefined, not on ''.
+      // The field is controlled from section.title, so once that's undefined the
+      // input reads back as empty rather than echoing the spaces back.
+      fireEvent.change(titleField, { target: { value: '   ' } });
+
+      expect(titleField).toHaveValue('');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Generate Report' }));
+
+      await waitFor(() => expect(reportsApi.generateAdHocReport).toHaveBeenCalled());
+      const payload = (reportsApi.generateAdHocReport as jest.Mock).mock.calls[0][0];
+      expect(payload.sections[0].title).toBeUndefined();
+    });
+
+    it('lets two sections of the same type carry distinct titles', async () => {
+      render(<GenerateReportDialog {...defaultProps} />);
+      await navigate();
+
+      const addSlo = screen.getByLabelText('Add SLO Summary section');
+      fireEvent.click(addSlo);
+      fireEvent.click(addSlo);
+
+      const titleFields = screen.getAllByLabelText('Section Title');
+      expect(titleFields).toHaveLength(2);
+      fireEvent.change(titleFields[0], { target: { value: 'SLO — API' } });
+      fireEvent.change(titleFields[1], { target: { value: 'SLO — Web' } });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Generate Report' }));
+
+      await waitFor(() => expect(reportsApi.generateAdHocReport).toHaveBeenCalled());
+      const payload = (reportsApi.generateAdHocReport as jest.Mock).mock.calls[0][0];
+      const sloTitles = payload.sections
+        .filter((s: { type: string }) => s.type === 'slo')
+        .map((s: { title?: string }) => s.title);
+      expect(sloTitles).toEqual(['SLO — API', 'SLO — Web']);
+    });
+  });
 });

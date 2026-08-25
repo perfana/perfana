@@ -143,8 +143,15 @@ function patchCspHeaders() {
       }
 
       // Patch frame-src
+      //
+      // `blob:` is load-bearing and NOT covered by 'self': the report viewer and the
+      // public share page load report HTML into their iframe from a blob: URL, so a
+      // frame-src without it blocks the iframe outright and the report never renders.
+      // (blob: rather than srcdoc because an about:srcdoc document inherits its base
+      // URL from the parent, which made in-report anchor links navigate the iframe away.)
+      // img-src already spells blob: out for the same reason — see next.config.js.
       if (frameSrc) {
-        const newFrameSrc = `'self' ${frameSrc} https:`;
+        const newFrameSrc = `'self' blob: ${frameSrc} https:`;
         directives.set('frame-src', newFrameSrc);
         console.log(`[csp-patch] frame-src → ${newFrameSrc}`);
         patched = true;

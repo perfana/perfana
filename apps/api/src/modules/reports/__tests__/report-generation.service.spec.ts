@@ -46,6 +46,7 @@ describe('ReportGenerationService', () => {
   let testRunRepo: jest.Mocked<Repository<TestRun>>;
   let authzService: jest.Mocked<AuthorizationService>;
   let auditService: jest.Mocked<AuditService>;
+  let validatorService: jest.Mocked<ReportGenerationValidatorService>;
 
   // ==================== Mock Factories ====================
 
@@ -179,6 +180,7 @@ describe('ReportGenerationService', () => {
           provide: ReportGenerationValidatorService,
           useValue: {
             validateStatusTransition: jest.fn(),
+            warnOnAnchorProblems: jest.fn(),
           },
         },
         {
@@ -219,6 +221,7 @@ describe('ReportGenerationService', () => {
     testRunRepo = module.get(getRepositoryToken(TestRun));
     authzService = module.get(AuthorizationService);
     auditService = module.get(AuditService);
+    validatorService = module.get(ReportGenerationValidatorService);
   });
 
   afterEach(() => {
@@ -1412,6 +1415,50 @@ describe('ReportGenerationService', () => {
       expect(result.html).toContain('<!DOCTYPE html>');
       expect(result.sectionCount).toBe(1);
       expect(result.generationTimeMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("warns on anchor problems using only the linkable sections' effective titles", async () => {
+      // The third call site of isLinkableSectionType (after the compiler and the
+      // web builder). If this filter drifts, the duplicate-title warning starts
+      // flagging titles of sections that never got an anchor at all — a warning
+      // an author cannot act on. Untitled sections resolve through
+      // SECTION_RENDER_TITLES, which is the default since handleAddSection
+      // stopped stamping the palette label onto new sections.
+      const mockTemplate = createMockTemplate({
+        sections: [
+          { type: 'header', order: 0 },
+          { type: 'index', order: 1 },
+          { type: 'slo', order: 2 },
+          { type: 'text_block', order: 3, config: { content: 'prose' } },
+          { type: 'graphs', order: 4 },
+          { type: 'graphs', order: 5, title: 'Second Graphs' },
+        ] as ReportSectionConfig[],
+      });
+      const mockTestRun = createMockTestRun();
+      const mockReport = createMockReport({
+        status: 'pending',
+        template: mockTemplate,
+        test_run: mockTestRun,
+      });
+
+      reportRepo.findOne.mockResolvedValue(mockReport);
+      reportRepo.save.mockResolvedValue(mockReport);
+      reportRepo.update.mockResolvedValue({ affected: 1 } as any);
+      testRunRepo.findOne.mockResolvedValue(mockTestRun);
+
+      await service.generateHtml(mockReport.id, 'test-user', ['admin']);
+
+      // header / index / text_block are gone; the two remaining defaults came from
+      // utils.getSectionTitle (stubbed here to echo the type — the real map is pinned
+      // literally in report-utils.service.spec.ts) and the explicit title survived.
+      expect(validatorService.warnOnAnchorProblems).toHaveBeenCalledWith(
+        '<div>Sections HTML</div>',
+        [
+          { title: 'slo', type: 'slo' },
+          { title: 'graphs', type: 'graphs' },
+          { title: 'Second Graphs', type: 'graphs' },
+        ],
+      );
     });
 
     it('should throw ResourceNotFoundException when report not found', async () => {

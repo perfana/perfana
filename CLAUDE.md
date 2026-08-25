@@ -261,6 +261,8 @@ All five denial causes return an indistinguishable refusal to the caller (404, o
 - `NEXT_PUBLIC_LOG_VIEWER_ENABLED` - Enable admin log viewer UI (default: `false`). Must match backend `LOG_VIEWER_ENABLED`.
 - `NEXT_PUBLIC_SUT_TRANSFER_ENABLED` - Enable the SUT export dialog + import page UI (default: `false`). Must match backend `SUT_TRANSFER_ENABLED`.
 
+**CSP note (not an env var, but a deploy footgun):** the report viewer and the public share page load report HTML into their iframe from a `blob:` URL rather than `srcDoc`, so `frame-src` must include `blob:` or the iframe never renders — see the comment in `apps/web/next.config.js`. This is baked into the CSP defaults and reapplied by the runtime patcher in `apps/web/scripts/start-server.js` (both keyed off `NEXT_PUBLIC_CSP_FRAME_SRC`), so a deploy that only sets env vars is fine. It breaks only if a reverse proxy or CDN in front of the web app sets or rewrites its own `Content-Security-Policy` header — that path bypasses both files, and the symptom is a report that silently fails to render with no error surfaced.
+
 ## Common Patterns
 
 ### Error Handling

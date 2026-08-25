@@ -34,9 +34,11 @@ export interface SectionPaletteProps {
  * The catalogue of section types you can add to a report.
  *
  * Deliberately small. This is a list you consult for seconds, next to a canvas you edit for
- * minutes, so it gives way rather than holding a fixed share of the dialog: one line per type
- * (all eleven fit without scrolling), the description on hover, and a collapse control that
- * hands the whole width to the canvas.
+ * minutes, so it gives way rather than holding a fixed share of the dialog: one line per type,
+ * the description on hover, and a collapse control that hands the whole width to the canvas.
+ * The list is now thirteen types long and the container scrolls (overflowY: 'auto') rather than
+ * guaranteeing every row fits on screen at once — unlike the original eleven, this hasn't been
+ * re-measured against a real viewport, so don't take "fits without scrolling" as still true.
  *
  * There are no drag handles here. Adding is a click — the previous grip icons and "drag sections
  * to the canvas" copy described an interaction that was never wired up, so anyone who tried it

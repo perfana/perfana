@@ -28,6 +28,8 @@ export interface SectionPreviewModalProps {
   initialText?: string;
   onSaveText?: (text: string) => void;
   testRunId?: string;
+  /** Sections this text can link to — same set and anchors the report itself will render. */
+  linkTargets?: { title: string; anchor: string }[];
 }
 
 /**
@@ -54,6 +56,7 @@ export default function SectionPreviewModal({
   initialText = '',
   onSaveText,
   testRunId: _testRunId,
+  linkTargets,
 }: SectionPreviewModalProps) {
   const [text, setText] = useState(initialText);
   const [hasChanges, setHasChanges] = useState(false);
@@ -178,6 +181,7 @@ export default function SectionPreviewModal({
                 rows={6}
                 maxLength={REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH}
                 helperText={`${text.length} / ${REPORT_LIMITS.MAX_SECTION_TEXT_LENGTH} characters`}
+                linkTargets={linkTargets}
               />
             </Paper>
           )}
