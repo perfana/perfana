@@ -152,9 +152,15 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
       )
     : scenarioFiltered;
 
-  // Denominator for the impact score: every row in the current filter, not the
-  // ten that make the list — a top-ten denominator would inflate all ten. Shared
-  // with the report renderer so the same run scores the same on both surfaces.
+  // Denominator for the impact score: every row currently in view, not the ten
+  // that make the list — a top-ten denominator would inflate all ten.
+  //
+  // "Currently in view" includes the scenario and name filters, so this is a share
+  // of what you are looking at and it re-bases as you filter. That is deliberate
+  // here and it is NOT the same denominator the report uses: a report has no
+  // filter box, so it always scores against every row in the scope. Same run,
+  // same transaction, different number on the two surfaces once a filter is on —
+  // which is why the tooltip says "of the rows shown".
   const impactTotal = sumImpact(top10Data);
 
   // Build dimensions configuration
@@ -188,7 +194,7 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
       // cannot be compared between runs. The ranking is identical either way.
       valueFormatter: (val: number) => formatImpactShare(val, impactTotal),
       color: '#f44336',
-      description: `Impact score = this request's share of the total time spent (avg response time × call count), on a 0-100 scale. Ranks identically to the raw product, but is readable and comparable between runs.`,
+      description: `Impact score = this request's share of the total time spent by the rows shown (avg response time × call count), on a 0-100 scale. Ranks identically to the raw product, but is readable and comparable between runs.`,
     },
     {
       title: 'Highest Error Rate',

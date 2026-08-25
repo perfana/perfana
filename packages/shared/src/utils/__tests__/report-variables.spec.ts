@@ -2,6 +2,8 @@ import {
   REPORT_VARIABLES,
   REPORT_VARIABLES_NEEDING_LOOKUP,
   isSecretishConfigKey,
+  isSecretishConfigValue,
+  escapeMarkdownValue,
   buildReportVariableValues,
   substituteReportVariables,
 } from '../report-variables';
@@ -90,6 +92,45 @@ describe('report variables', () => {
     expect(isSecretishConfigKey('private_key')).toBe(true);
     expect(isSecretishConfigKey('java.runtime.version')).toBe(false);
     expect(isSecretishConfigKey('build.number')).toBe(false);
+  });
+
+  it('does not swallow ordinary keys that merely contain a secret-ish stem', () => {
+    // A bare /auth/ matched `author`, and a bare /pass/ matched `pass_rate` —
+    // silently unresolvable and silently missing from the picker, with nothing
+    // in the UI to explain why.
+    expect(isSecretishConfigKey('author')).toBe(false);
+    expect(isSecretishConfigKey('authored_by')).toBe(false);
+    expect(isSecretishConfigKey('authoring_tool')).toBe(false);
+    expect(isSecretishConfigKey('pass_rate')).toBe(false);
+    expect(isSecretishConfigKey('passed_checks')).toBe(false);
+    expect(isSecretishConfigKey('certification')).toBe(false);
+    // Still caught when it really is the thing.
+    expect(isSecretishConfigKey('auth')).toBe(true);
+    expect(isSecretishConfigKey('AUTH_HEADER')).toBe(true);
+  });
+
+  it('catches a credential hiding inside a benignly-named value', () => {
+    // The shapes CI actually leaks: none of these keys look secret-ish.
+    expect(isSecretishConfigValue('postgres://svc:hunter2@db.internal:5432/app')).toBe(true);
+    // A JDBC url embeds the same scheme://user:pw@host shape, so it is caught too.
+    expect(isSecretishConfigValue('jdbc:postgresql://u:p@h/db')).toBe(true);
+    expect(isSecretishConfigValue('-Xmx2g -Dspring.datasource.password=hunter2')).toBe(true);
+    expect(isSecretishConfigValue('--token=abcdef123456')).toBe(true);
+    expect(isSecretishConfigValue('Bearer abcdefghijklmnop0123456789')).toBe(true);
+    expect(isSecretishConfigValue('-----BEGIN RSA PRIVATE KEY-----')).toBe(true);
+    // Ordinary values are untouched.
+    expect(isSecretishConfigValue('21.0.6+7-LTS')).toBe(false);
+    expect(isSecretishConfigValue('https://ci.example.com/job/123')).toBe(false);
+    expect(isSecretishConfigValue('4711')).toBe(false);
+  });
+
+  it('neutralises markdown syntax in a substituted value', () => {
+    // The value is written by anything with an API key; the rendered report is
+    // reachable unauthenticated, so a value must not be able to plant a link.
+    const escaped = escapeMarkdownValue('Click [here](https://elsewhere.example) now');
+    expect(escaped).not.toMatch(/\[here\]\(/);
+    expect(escapeMarkdownValue('**bold**')).toBe('\\*\\*bold\\*\\*');
+    expect(escapeMarkdownValue('plain text 1.2.3')).toContain('1\\.2\\.3');
   });
 
   it('never resolves a placeholder off the prototype chain', () => {

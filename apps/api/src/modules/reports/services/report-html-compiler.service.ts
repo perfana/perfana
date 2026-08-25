@@ -13,6 +13,8 @@ import {
   substituteReportVariables,
   hasReportVariable,
   isSecretishConfigKey,
+  isSecretishConfigValue,
+  escapeMarkdownValue,
   REPORT_VARIABLES_NEEDING_LOOKUP,
 } from '@perfana/shared';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -85,10 +87,7 @@ export class ReportHtmlCompilerService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<string> {
-    const sortedSections = await this.resolveVariables(
-      [...sections].sort((a, b) => a.order - b.order),
-      testRun,
-    );
+    const sortedSections = [...sections].sort((a, b) => a.order - b.order);
 
     // Anchors are assigned over the sections that can be link TARGETS: a header
     // is the title block at the very top, so linking to it is pointless, and an
@@ -96,12 +95,27 @@ export class ReportHtmlCompilerService {
     // has a title to render as a heading. All of that is the single shared rule
     // (isLinkableSection), which also keeps the excluded ones from consuming a
     // slug a real section wants.
+    //
+    // Computed from the AUTHORED sections, deliberately before variables are
+    // resolved. Whether a section is a destination is a property of the template,
+    // not of the run it was generated against — resolve first and a text block
+    // whose body is `{perfana-tags}` drops out of the target set on an untagged
+    // run, renumbering every later duplicate slug (`-2` becomes `-3`) so stored
+    // `[label](#section-x-2)` links land somewhere else for that run only. It also
+    // keeps this set identical to the one ReportGenerationService computes for its
+    // anchor-problem warnings, which reads the authored sections too.
     const targets = sortedSections.filter(s => isLinkableSection(s));
     const anchors = assignSectionAnchors(
       targets,
       s => s.title || this.utils.getSectionTitle(s.type),
       s => s.type,
     );
+
+    // Resolution happens after the addresses are fixed. Index is the join: the
+    // resolved array is built from sortedSections in order, so resolved[i] is the
+    // renderable form of sortedSections[i], and the anchor map stays keyed on the
+    // authored object.
+    const resolvedSections = await this.resolveVariables(sortedSections, testRun);
 
     // A section keeps the slug `anchors` reserved for it whether it renders or
     // falls back to an error placeholder — a failed section is still a section
@@ -117,7 +131,9 @@ export class ReportHtmlCompilerService {
 
     const renderedSections: string[] = [];
 
-    for (const section of sortedSections) {
+    for (let i = 0; i < sortedSections.length; i++) {
+      const authored = sortedSections[i]!;
+      const section = resolvedSections[i]!;
       try {
         const sectionHtml = await this.renderSection(
           section,
@@ -126,15 +142,16 @@ export class ReportHtmlCompilerService {
           userId,
           roles,
           anchors,
+          authored,
         );
-        renderedSections.push(withAnchor(section, sectionHtml));
+        renderedSections.push(withAnchor(authored, sectionHtml));
       } catch (error) {
         this.logger.warn(
           `Failed to render section ${section.type}: ${(error as Error).message}`,
         );
         renderedSections.push(
           withAnchor(
-            section,
+            authored,
             this.placeholderRenderer.renderErrorSection(section, (error as Error).message),
           ),
         );
@@ -229,6 +246,12 @@ export class ReportHtmlCompilerService {
       const configs = await withRequestEm(this.testRunConfigRepo).find({
         where: { testRunId: testRun.id },
         select: ['key', 'value'],
+        // Deterministic. The unique index on test_run_configs is
+        // (test_run_id, key, tags_hash(tags)), so ONE key can legally appear
+        // several times on a run with different tag sets. Unordered last-write-wins
+        // meant a published report could print a different value on a re-render
+        // than it did the first time, with nothing to explain the change.
+        order: { key: 'ASC', id: 'ASC' },
       });
       for (const config of configs) {
         // Secret-shaped keys never enter the map. A rendered report is served
@@ -236,9 +259,18 @@ export class ReportHtmlCompilerService {
         // credential out of an org-scoped table onto a public page; leaving the
         // placeholder literal keeps it where the author can see what happened.
         if (isSecretishConfigKey(config.key)) continue;
+        const raw = config.value || '';
+        // The key-name check cannot see a credential inside a benignly-named value
+        // (DATABASE_URL, JAVA_TOOL_OPTIONS); this one can, and it is why the
+        // picker's key-only filter is not the whole guard.
+        if (isSecretishConfigValue(raw)) continue;
+        // Escaped as markdown, not only as HTML: substitution feeds the markdown
+        // SOURCE, and these values are written by anything holding an API key while
+        // the rendered page is reachable unauthenticated. Built-in perfana-* values
+        // come from the test run row itself and are left alone.
         // A config key that collides with a catalogue key must not shadow it —
         // the catalogue is spread over this map, so the built-in wins.
-        values[config.key] = config.value || '';
+        values[config.key] = escapeMarkdownValue(raw);
       }
     } catch (error) {
       this.logger.warn(`Could not resolve config variables: ${(error as Error).message}`);
@@ -296,6 +328,10 @@ export class ReportHtmlCompilerService {
     // Used by the `index` case below to build the entry list: every anchor
     // target except the index section itself.
     anchors: Map<ReportSectionConfig, string> = new Map(),
+    // The same section BEFORE variable resolution. `anchors` is keyed on the
+    // authored objects, so the index has to exclude itself by that identity —
+    // `section` here is the resolved copy and would never match.
+    authored: ReportSectionConfig = section,
   ): Promise<string> {
     const sectionTitle = section.title || this.utils.getSectionTitle(section.type);
 
@@ -328,7 +364,7 @@ export class ReportHtmlCompilerService {
         return this.indexRenderer.renderIndexSection(
           section,
           [...anchors.entries()]
-            .filter(([target]) => target !== section)
+            .filter(([target]) => target !== authored)
             .map(([target, anchor]) => ({
               title: target.title || this.utils.getSectionTitle(target.type),
               anchor,

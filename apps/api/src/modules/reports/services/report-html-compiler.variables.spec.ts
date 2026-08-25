@@ -239,6 +239,69 @@ describe('ReportHtmlCompilerService variable substitution', () => {
     expect(html).not.toContain('hunter2');
   });
 
+  it('refuses a credential hiding in a benignly-named value', async () => {
+    // The key-name filter sees nothing wrong with DATABASE_URL.
+    findConfigs.mockResolvedValue([
+      { key: 'DATABASE_URL', value: 'postgres://svc:hunter2@db.internal/app' },
+      { key: 'build.number', value: '4711' },
+    ]);
+    const html = await service.renderSections(
+      [section({ type: 'text_block', config: { content: 'db {DATABASE_URL} build {build.number}' } })],
+      testRun,
+      null,
+    );
+    expect(html).toContain('{DATABASE_URL}');
+    expect(html).not.toContain('hunter2');
+    expect(html).toContain('4711');
+  });
+
+  it('cannot let a config value plant a link in a publicly-served report', async () => {
+    findConfigs.mockResolvedValue([
+      { key: 'build.note', value: 'Click [here](https://elsewhere.example) to view' },
+    ]);
+    const html = await service.renderSections(
+      [section({ type: 'text_block', config: { content: 'Note: {build.note}' } })],
+      testRun,
+      null,
+    );
+    // The text survives; the link does not.
+    expect(html).toContain('here');
+    expect(html).not.toContain('elsewhere.example"');
+    expect(html).not.toMatch(/<a [^>]*href="https:\/\/elsewhere\.example/);
+  });
+
+  it('resolves a duplicated config key deterministically', async () => {
+    // One key can legally exist several times on a run with different tag sets,
+    // so the query orders and the resolver must not depend on row arrival order.
+    await service.renderSections(
+      [section({ type: 'text_block', config: { content: '{build.number}' } })],
+      testRun,
+      null,
+    );
+    expect(findConfigs.mock.calls[0][0].order).toEqual({ key: 'ASC', id: 'ASC' });
+  });
+
+  it('fixes anchors from the authored template, not from what the run resolves to', async () => {
+    // A body of only placeholders resolves to '' on a run with no tags. If
+    // linkability were decided after substitution, this block would drop out of
+    // the target set for THAT run only, renumbering every later duplicate slug —
+    // so a stored [label](#section-summary-2) link would land somewhere else, and
+    // the anchor-problem validator (which reads the authored sections) would
+    // disagree with what actually got emitted.
+    const html = await service.renderSections(
+      [
+        section({ type: 'text_block', order: 0, title: 'Summary', config: { content: '{perfana-tags}' } }),
+        section({ type: 'slo', order: 1, title: 'Summary' }),
+      ],
+      { ...testRun, tags: [] } as unknown as TestRun,
+      null,
+    );
+
+    // Both are targets, and the duplicate keeps its positional suffix.
+    expect(html).toContain('id="section-summary"');
+    expect(html).toContain('id="section-summary-2"');
+  });
+
   it('keeps a deliberately cleared text as an empty string, not as absent', async () => {
     // getSectionText treats a PRESENT '' as "the author cleared this", which beats
     // a stale legacy `comment`. Writing undefined here would resurrect the comment.

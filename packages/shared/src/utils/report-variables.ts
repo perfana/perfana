@@ -95,11 +95,65 @@ export const REPORT_VARIABLES: readonly ReportVariable[] = [
  * somewhere the author cannot see. Built-in `perfana-*` variables are never
  * matched against this — they are a fixed catalogue with no secrets in it.
  */
-const SECRETISH_KEY = /pass|secret|token|credential|api[-_]?key|private[-_]?key|auth|cert/i;
+const SECRETISH_KEY =
+  // Word-ish boundaries on the short, ambiguous stems. A bare /auth/ also matched
+  // `author`, `authors`, `authored_by` and `authoring_tool`, and a bare /pass/
+  // matched `passengers`, `pass_rate` and `passed_checks` — all silently absent
+  // from the picker and silently unresolvable, with nothing in the UI to explain it.
+  /password|passwd|passphrase|secret|token|credential|api[-_]?key|private[-_]?key|(^|[^a-z])auth([^a-z]|$)|(^|[^a-z])cert([^a-z]|$)|signing[-_]?key|access[-_]?key/i;
+
+/**
+ * Value shapes that carry a credential regardless of what the key is called.
+ *
+ * The key-name filter alone is a low bar: the standard ways a CI pipeline leaks a
+ * secret into test run configuration do not use a secret-shaped key at all —
+ * `DATABASE_URL`/`JDBC_URL`/`connection_string` hold `scheme://user:pw@host`,
+ * `SENTRY_DSN` and signed webhook URLs embed the token in the URL, and
+ * `JAVA_TOOL_OPTIONS`/`jvm_args`/`command_line` carry `-Dspring.datasource.password=…`.
+ * Every one of those would have resolved into a report served from the public
+ * share and PDF endpoints.
+ */
+const SECRETISH_VALUE = [
+  // scheme://user:password@host
+  /[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]+@/i,
+  // -Dfoo.password=… / --token=… / PASSWORD=… inside a longer argument string
+  /(?:^|[\s-])(?:-D)?[\w.]*(?:password|passwd|secret|token|apikey|api[-_]key|credential)[\w.]*\s*=\s*\S/i,
+  // Bearer / Basic authorization headers pasted into a value
+  /\b(?:bearer|basic)\s+[a-z0-9._~+/=-]{16,}/i,
+  // PEM private key material
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+];
 
 /** True when a test run configuration key looks like it carries a secret. */
 export function isSecretishConfigKey(key: string): boolean {
   return SECRETISH_KEY.test(key);
+}
+
+/**
+ * True when a configuration VALUE looks like it carries a credential, whatever
+ * its key is called. Checked at resolve time, where the value is in hand — the
+ * picker only ever sees keys, so this is the half the picker cannot do.
+ */
+export function isSecretishConfigValue(value: string): boolean {
+  return SECRETISH_VALUE.some((re) => re.test(value));
+}
+
+/**
+ * Neutralise markdown syntax in a value before it is spliced into prose.
+ *
+ * Substitution happens on the markdown SOURCE, before renderMarkdown runs, so
+ * HTML in a value is escaped but markdown structure in one is interpreted. Report
+ * prose is written by an org member; these values are written by anything holding
+ * an API key that can POST to /test-runs/:id/configs, and the rendered page is
+ * reachable unauthenticated over a share link. Without this a config value of
+ * `Click [here](https://elsewhere.example) to view` becomes a real link in a
+ * published report — SAFE_HREF permits https, so nothing downstream stops it.
+ *
+ * Backslash-escapes the CommonMark punctuation that can start a construct. The
+ * escapes are consumed by the renderer, so the reader sees the literal text.
+ */
+export function escapeMarkdownValue(value: string): string {
+  return value.replace(/([\\`*_{}[\]()#+\-.!|>~])/g, '\\$1');
 }
 
 /** Keys the API resolves with a query rather than from the test run row. */

@@ -148,4 +148,30 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
     expect(await svc.getMetricTrends(['r1'], [])).toEqual([]);
     expect(dataSource.query).not.toHaveBeenCalled();
   });
+
+  it('applies the run count as well as the change-point floor', async () => {
+    // The floor used to replace the run count with a flat 51. That was survivable
+    // while a floor required an explicit choice; once the change-point window
+    // became the default it made every template's configured run count dead and
+    // quietly pulled up to 50 runs through the percentile LATERAL.
+    const dataSource = { query: jest.fn().mockResolvedValue([{ test_run_id: 'run-005' }]) };
+    const repo = {
+      query: jest.fn()
+        .mockResolvedValueOnce([{ start_time: '2026-08-14T07:50:20.413Z' }])
+        .mockResolvedValueOnce([runRow('run-009', '2026-08-18T10:00:00Z')]),
+    } as any;
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    await svc.getTrendsData(
+      { testRunId: 'run-009', systemUnderTestId: 's', testEnvironment: 'e', workload: 'w', startTime: new Date('2026-08-18T10:00:00Z') } as any,
+      10, '', [], 'changepoint',
+    );
+
+    // The windowed query is the second repo call; the first resolved the floor.
+    const windowedSql = repo.query.mock.calls[1][0] as string;
+    expect(windowedSql).toContain('LIMIT 11');
+    expect(windowedSql).not.toContain('LIMIT 51');
+    // ...and the floor is still applied.
+    expect(windowedSql).toContain('tr.start_time >=');
+  });
 });

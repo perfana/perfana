@@ -2281,7 +2281,14 @@ export class ReportDataFetcherService {
           ${floorTime ? `AND tr.start_time >= $${floorParamIndex}` : ''}
           ${orgFilter.clause}
         ORDER BY tr.start_time DESC
-        LIMIT ${floorTime ? 51 : safeMaxRuns + 1}
+        -- Both constraints, always. The floor used to replace the run count with a
+        -- flat 51, which was survivable while a floor required the author to pick
+        -- one explicitly; once the change-point window became the DEFAULT it made
+        -- every template's configured run count dead and quietly compared up to 50
+        -- runs, five times the rows through the percentile LATERAL above. "Oldest
+        -- run = change point" plus "run count = 10" now means what it reads like:
+        -- at most 10 runs, none older than the change point.
+        LIMIT ${safeMaxRuns + 1}
       `;
 
       const rows = await withRequestEm(this.testRunRepo).query(query, [

@@ -280,19 +280,30 @@ describe('TextBlockConfigForm', () => {
     expect(screen.queryByRole('switch', { name: /enable markdown/i })).toBeNull();
   });
 
-  it('drops a stale markdown:false off the config on the first edit', () => {
-    // A block someone switched off before the toggle was removed can no longer be
-    // switched back on, so editing it must clear the flag rather than preserve a
-    // setting the author has no way to reach.
+  it('never converts a legacy plain-text block, on load or on edit', () => {
+    // BackfillTextBlockMarkdownOff stamped `markdown: false` onto every text block
+    // authored before markdown rendering existed, precisely so their prose would
+    // not be reformatted, and documents itself as non-reversible. Clearing the
+    // flag here would silently rewrite published reports nobody edited.
     const onChange = jest.fn();
     render(
       <TextBlockConfigForm config={{ markdown: false, content: 'old' }} onChange={onChange} />,
     );
 
-    fireEvent.change(screen.getAllByLabelText('Content')[0], { target: { value: 'new' } });
+    // Nothing written just by rendering the form.
+    expect(onChange).not.toHaveBeenCalled();
+    // Edited in plain-text mode, so the preview matches what the report will print.
+    expect(screen.queryByLabelText('Bold')).toBeNull();
 
-    expect(onChange).toHaveBeenCalledWith({ content: 'new' });
-    expect(onChange.mock.calls[0][0]).not.toHaveProperty('markdown');
+    fireEvent.change(screen.getAllByLabelText('Content')[0], { target: { value: 'new' } });
+    expect(onChange).toHaveBeenCalledWith({ markdown: false, content: 'new' });
+  });
+
+  it('edits a block with no flag as markdown', () => {
+    const onChange = jest.fn();
+    render(<TextBlockConfigForm config={{ content: 'hi' }} onChange={onChange} />);
+    expect(screen.getAllByLabelText('Bold')[0]).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

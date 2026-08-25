@@ -20,6 +20,7 @@ import { isGrafana } from '@/lib/metrics-source-utils';
 import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
+import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
 import { MarkdownField } from './MarkdownField';
 import { useSectionTitle } from './SectionTitleContext';
 import {
@@ -407,19 +408,6 @@ interface TextBlockConfigFormProps {
 export function TextBlockConfigForm({ config, onChange, testRunId, allSections }: TextBlockConfigFormProps) {
   const linkTargets = useMemo(() => buildLinkTargets(allSections), [allSections]);
 
-  // Normalise a stale `markdown: false` as soon as the form loads, not on the
-  // first keystroke. The flag can no longer be set from anywhere, so a block
-  // carrying one is going to become markdown regardless; deferring that to the
-  // first edit left a window where this editor previewed markdown while the
-  // report printed raw syntax, and nothing on screen said so. Fires once —
-  // after it runs the flag is gone, so the guard is false on every later render.
-  useEffect(() => {
-    if (config.markdown === false) {
-      const { markdown: _stale, ...rest } = config;
-      onChange(rest);
-    }
-  }, [config, onChange]);
-
   return (
     <SectionConfigShell
       sectionTitle="Text Block"
@@ -429,20 +417,21 @@ export function TextBlockConfigForm({ config, onChange, testRunId, allSections }
       testRunId={testRunId}
       allSections={allSections}
     >
+      {/* A block's stored `markdown` decides how it is edited, so the preview here
+          and the rendered report always agree. New blocks have no flag and default
+          to markdown. A block carrying `markdown: false` was pinned there by the
+          BackfillTextBlockMarkdownOff migration, which stamped every text block
+          authored before markdown rendering existed precisely so its prose would
+          NOT be reformatted — explicit ordered lists renumber, indentation
+          collapses, nested bullets flatten. That flag is never written and never
+          cleared from here: converting one silently rewrites a published report
+          nobody edited, and the migration is documented as non-reversible because
+          it cannot tell a backfilled false from a chosen one. */}
       <MarkdownField
         label="Content"
         value={config.content || ''}
-        // Editing a text block always writes markdown, and `markdown` is dropped
-        // from the config rather than written as true: the flag only ever existed
-        // as an off switch for blocks authored before markdown rendering, and the
-        // renderer already defaults it on. Dropping it on the first edit is also
-        // what repairs a block someone had switched off — it can no longer be set
-        // from here, so it must not survive an edit either.
-        onChange={(content) => {
-          const { markdown: _dropped, ...rest } = config;
-          onChange({ ...rest, content });
-        }}
-        markdown
+        onChange={(content) => onChange({ ...config, content })}
+        markdown={config.markdown ?? TEXT_BLOCK_MARKDOWN_DEFAULT}
         placeholder="Write your text here, or use the buttons above to format it"
         linkTargets={linkTargets}
       />
@@ -773,9 +762,20 @@ const TOP10_LIST_OPTIONS: Array<{ key: NonNullable<Top10ListsConfig['lists']>[nu
 
 const ALL_TOP10_LIST_KEYS = TOP10_LIST_OPTIONS.map((o) => o.key);
 
+export type Top10Scope = 'transactions' | 'requests' | 'urls';
+
+/** Canonical order; the report renders scopes in this order however they were picked. */
+export const TOP10_SCOPE_OPTIONS: { key: Top10Scope; label: string }[] = [
+  { key: 'transactions', label: 'Transactions' },
+  { key: 'requests', label: 'Requests' },
+  { key: 'urls', label: 'URLs' },
+];
+
 /** @public */
 export interface Top10ListsConfig {
-  scope?: 'transactions' | 'requests' | 'urls';
+  scopes?: Top10Scope[];
+  /** @deprecated single-scope key from before a section could cover several. Read, never written. */
+  scope?: Top10Scope;
   lists?: Array<'slowest' | 'throughput' | 'impact' | 'error_rate'>;
   scenarios?: string[];
   excludeRampUp?: boolean;
@@ -813,7 +813,15 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
     fetchScenarios();
   }, [testRunId]);
 
-  const scope = config.scope ?? 'transactions';
+  // Mirrors the renderer's resolveScopes: `scopes` when present, else the legacy
+  // single `scope`, else transactions. Sections saved before this was multi-scope
+  // keep working, and the first edit writes the new shape.
+  const selectedScopes: Top10Scope[] =
+    config.scopes && config.scopes.length > 0
+      ? config.scopes
+      : config.scope
+        ? [config.scope]
+        : ['transactions'];
   const selectedLists = config.lists && config.lists.length > 0 ? config.lists : ALL_TOP10_LIST_KEYS;
   const selectedScenarios = config.scenarios ?? [];
 
@@ -828,17 +836,41 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
       testRunId={testRunId}
       allSections={allSections}
     >
-      {/* Scope */}
-      <Typography variant="caption" color="text.secondary">Scope</Typography>
+      {/* Scopes (multi-select) */}
+      <Typography variant="caption" color="text.secondary">Scopes</Typography>
       <Select
-        value={scope}
-        onChange={(e) => onChange({ ...config, scope: e.target.value as Top10ListsConfig['scope'] })}
+        multiple
+        value={selectedScopes}
+        onChange={(e) => {
+          const value = e.target.value as Top10Scope[];
+          const picked = Array.isArray(value) ? value : [];
+          // Never write an empty set: the renderer would fall back to transactions
+          // and the form would then disagree with the report. Dropping the legacy
+          // single-scope key leaves one shape behind after the first edit.
+          const { scope: _legacy, ...rest } = config;
+          onChange({
+            ...rest,
+            scopes:
+              picked.length > 0
+                ? TOP10_SCOPE_OPTIONS.filter((o) => picked.includes(o.key)).map((o) => o.key)
+                : ['transactions'],
+          });
+        }}
+        input={<OutlinedInput />}
+        renderValue={(selected) =>
+          TOP10_SCOPE_OPTIONS.filter((o) => (selected as Top10Scope[]).includes(o.key))
+            .map((o) => o.label)
+            .join(', ')
+        }
         fullWidth
         size="small"
       >
-        <MenuItem value="transactions">Transactions</MenuItem>
-        <MenuItem value="requests">Requests</MenuItem>
-        <MenuItem value="urls">URLs</MenuItem>
+        {TOP10_SCOPE_OPTIONS.map((o) => (
+          <MenuItem key={o.key} value={o.key}>
+            <Checkbox checked={selectedScopes.includes(o.key)} />
+            <ListItemText primary={o.label} />
+          </MenuItem>
+        ))}
       </Select>
 
       {/* Lists (multi-select) */}
@@ -891,8 +923,10 @@ export function Top10ListsConfigForm({ config, onChange, text, onTextChange, tes
         </>
       )}
 
-      {/* includeUrl — requests scope only, mirrors the Compare/Perf-Analysis URL toggle */}
-      {scope === 'requests' && (
+      {/* includeUrl — applies to the requests scope only, mirrors the
+          Compare/Perf-Analysis URL toggle. Shown whenever requests is among the
+          selected scopes; the renderer ignores it for the others. */}
+      {selectedScopes.includes('requests') && (
         <FormControlLabel
           control={
             <Switch
