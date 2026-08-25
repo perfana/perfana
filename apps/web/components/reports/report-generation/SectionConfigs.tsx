@@ -21,18 +21,19 @@ import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
 import { MarkdownField } from './MarkdownField';
+import { useSectionTitle } from './SectionTitleContext';
 import {
-  TEXT_BLOCK_MARKDOWN_DEFAULT,
   assignSectionAnchors,
   findAnchorProblems,
   rawSlugOf,
   SECTION_ANCHOR_PREFIX,
 } from '@perfana/shared/utils';
-import { SECTION_RENDER_TITLES, isLinkableSectionType } from '@perfana/shared/types';
+import { SECTION_RENDER_TITLES, isLinkableSection } from '@perfana/shared/types';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
 const HtmlSectionPreview = dynamic(() => import('./preview/HtmlSectionPreview'), { ssr: false });
+
 
 /**
  * The title a section actually renders under, which is also what its anchor is
@@ -55,16 +56,16 @@ export function effectiveSectionTitle(s: ReportSectionConfig): string {
 /**
  * The linkable sections, in the order the report renders them.
  *
- * `text_block`, `header` and `index` are excluded (per `isLinkableSectionType`
- * — see packages/shared/src/types/reports.types.ts): a text block renders as
- * body prose, never a heading with an id; a header is the report's title block
- * at the very top, so linking to it is pointless; an index linking to an index
- * is circular noise. Anything excluded here has no anchor at all, so it can
- * neither be linked to nor collide with something that can.
+ * Per `isLinkableSection` (see packages/shared/src/types/reports.types.ts): a
+ * header is the report's title block at the very top, so linking to it is
+ * pointless; an index linking to an index is circular noise; and an UNTITLED
+ * text block renders as bare prose with no heading to land on — title it and it
+ * becomes a target like any other. Anything excluded here has no anchor at all,
+ * so it can neither be linked to nor collide with something that can.
  */
 function linkableInOrder(allSections: ReportSectionConfig[]): ReportSectionConfig[] {
   return allSections
-    .filter((s) => isLinkableSectionType(s.type))
+    .filter((s) => isLinkableSection(s))
     .sort((a, b) => a.order - b.order);
 }
 
@@ -186,6 +187,10 @@ function SectionConfigShell({
 }: SectionConfigShellProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
 
+  // The title the author typed for THIS section, not the section type's name —
+  // the preview renders a real section, so it needs the real title.
+  const authoredTitle = useSectionTitle();
+
   const linkTargets = useMemo(() => buildLinkTargets(allSections), [allSections]);
 
   // Local draft of the text so typing doesn't propagate to the parent (and
@@ -284,6 +289,7 @@ function SectionConfigShell({
             sectionType={previewType}
             config={previewConfig}
             text={localText}
+            title={authoredTitle}
           />
         )}
       </SectionPreviewModal>
@@ -401,6 +407,19 @@ interface TextBlockConfigFormProps {
 export function TextBlockConfigForm({ config, onChange, testRunId, allSections }: TextBlockConfigFormProps) {
   const linkTargets = useMemo(() => buildLinkTargets(allSections), [allSections]);
 
+  // Normalise a stale `markdown: false` as soon as the form loads, not on the
+  // first keystroke. The flag can no longer be set from anywhere, so a block
+  // carrying one is going to become markdown regardless; deferring that to the
+  // first edit left a window where this editor previewed markdown while the
+  // report printed raw syntax, and nothing on screen said so. Fires once —
+  // after it runs the flag is gone, so the guard is false on every later render.
+  useEffect(() => {
+    if (config.markdown === false) {
+      const { markdown: _stale, ...rest } = config;
+      onChange(rest);
+    }
+  }, [config, onChange]);
+
   return (
     <SectionConfigShell
       sectionTitle="Text Block"
@@ -413,8 +432,17 @@ export function TextBlockConfigForm({ config, onChange, testRunId, allSections }
       <MarkdownField
         label="Content"
         value={config.content || ''}
-        onChange={(content) => onChange({ ...config, content })}
-        markdown={config.markdown ?? TEXT_BLOCK_MARKDOWN_DEFAULT}
+        // Editing a text block always writes markdown, and `markdown` is dropped
+        // from the config rather than written as true: the flag only ever existed
+        // as an off switch for blocks authored before markdown rendering, and the
+        // renderer already defaults it on. Dropping it on the first edit is also
+        // what repairs a block someone had switched off — it can no longer be set
+        // from here, so it must not survive an edit either.
+        onChange={(content) => {
+          const { markdown: _dropped, ...rest } = config;
+          onChange({ ...rest, content });
+        }}
+        markdown
         placeholder="Write your text here, or use the buttons above to format it"
         linkTargets={linkTargets}
       />
@@ -440,15 +468,6 @@ export function TextBlockConfigForm({ config, onChange, testRunId, allSections }
           <MenuItem value="justify">Justify</MenuItem>
         </Select>
       </Box>
-      <FormControlLabel
-        control={
-          <Switch
-            checked={config.markdown ?? TEXT_BLOCK_MARKDOWN_DEFAULT}
-            onChange={(e) => onChange({ ...config, markdown: e.target.checked })}
-          />
-        }
-        label="Enable Markdown"
-      />
     </SectionConfigShell>
   );
 }
@@ -748,7 +767,7 @@ export function TransactionResponseTimesConfigForm({ config, onChange, text, onT
 const TOP10_LIST_OPTIONS: Array<{ key: NonNullable<Top10ListsConfig['lists']>[number]; label: string }> = [
   { key: 'slowest', label: 'Slowest Average Response Times' },
   { key: 'throughput', label: 'Highest Throughput' },
-  { key: 'impact', label: 'Highest Performance Impact' },
+  { key: 'impact', label: 'Performance Impact Ranking' },
   { key: 'error_rate', label: 'Highest Error Rate' },
 ];
 

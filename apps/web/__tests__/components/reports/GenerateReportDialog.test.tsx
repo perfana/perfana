@@ -414,7 +414,7 @@ describe('GenerateReportDialog', () => {
       await navigateToBuilder();
 
       expect(
-        screen.getByText('Save as template for future use')
+        screen.getByText('Save as template')
       ).toBeInTheDocument();
     });
 
@@ -721,7 +721,7 @@ describe('GenerateReportDialog', () => {
       await navigateToBuilder();
 
       expect(
-        screen.getByText('Save as template for future use')
+        screen.getByText('Save as template')
       ).toBeInTheDocument();
     });
   });

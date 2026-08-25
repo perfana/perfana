@@ -17,6 +17,8 @@ interface HtmlSectionPreviewProps {
   config: object;
   /** Accompanying text, sent at the section level */
   text?: string;
+  /** The section's own title. Blank/absent → the renderer's default heading. */
+  title?: string;
 }
 
 /**
@@ -33,7 +35,7 @@ function sanitizeErrorMessage(message: string, maxLength = 200): string {
  * Fetches the actual HTML that will appear in the generated report via the
  * backend preview endpoint and renders it in a sandboxed iframe.
  */
-export default function HtmlSectionPreview({ testRunId, sectionType, config, text }: HtmlSectionPreviewProps) {
+export default function HtmlSectionPreview({ testRunId, sectionType, config, text, title }: HtmlSectionPreviewProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string>('');
@@ -58,6 +60,7 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config, tex
           {
             type: sectionType,
             order: 0,
+            title,
             text,
             config: configRef.current ?? {},
           },
@@ -93,7 +96,7 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config, tex
     return () => {
       controller.abort();
     };
-  }, [testRunId, sectionType, configKey, text]);
+  }, [testRunId, sectionType, configKey, text, title]);
 
   if (loading) {
     return (

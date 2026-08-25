@@ -77,14 +77,25 @@ describe('findSectionAnchorWarnings', () => {
   });
 
   it('ignores non-linkable sections, which never get an anchor to collide', () => {
-    // A text block titled the same as a real section is not a hazard: text
-    // blocks render as prose and are never link targets.
-    const textBlock: ReportSectionConfig = { type: 'text_block', order: 0, title: 'Summary' };
+    // An UNTITLED text block renders as bare prose with no anchor, so it cannot
+    // collide with anything — even a header/index sharing the same title.
+    const textBlock: ReportSectionConfig = { type: 'text_block', order: 0 };
+    const header: ReportSectionConfig = { type: 'header', order: 1, title: 'Summary' };
+    const slo: ReportSectionConfig = { type: 'slo', order: 2, title: 'Summary' };
+
+    const warnings = findSectionAnchorWarnings([textBlock, header, slo]);
+
+    expect(warnings.size).toBe(0);
+  });
+
+  it('flags a TITLED text block colliding with a real section — both are anchored now', () => {
+    const textBlock: ReportSectionConfig = { type: 'text_block', order: 0, title: 'Summary', config: { content: 'prose' } };
     const slo: ReportSectionConfig = { type: 'slo', order: 1, title: 'Summary' };
 
     const warnings = findSectionAnchorWarnings([textBlock, slo]);
 
-    expect(warnings.size).toBe(0);
+    expect(warnings.get(textBlock)).toMatch(/same link target/);
+    expect(warnings.get(slo)).toMatch(/same link target/);
   });
 
   it('detects a collision between two default (untitled) sections of the same type', () => {

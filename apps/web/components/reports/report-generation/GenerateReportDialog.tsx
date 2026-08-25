@@ -46,7 +46,6 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   Assignment as AssignmentIcon,
   Description as DescriptionIcon,
-  Info as InfoIcon,
   DragIndicator as DragIcon,
   Delete as DeleteIcon,
   Settings as SettingsIcon,
@@ -68,6 +67,8 @@ import {
 import { MAX_REPORT_SECTIONS, SECTION_RENDER_TITLES } from '@perfana/shared/types';
 import { SECTION_CONFIG } from './section-config';
 import { SectionPalette } from './SectionPalette';
+import { ReportVariablesProvider } from './ReportVariablesProvider';
+import { SectionTitleProvider } from './SectionTitleContext';
 import {
   HeaderConfigForm,
   IndexConfigForm,
@@ -446,6 +447,7 @@ export function GenerateReportDialog({
 
 
   return (
+    <ReportVariablesProvider testRunId={testRunId} enabled={open}>
     <Dialog
       open={open}
       onClose={onClose}
@@ -459,45 +461,61 @@ export function GenerateReportDialog({
       }}
     >
       {/* Title */}
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 2, px: 3 }}>
+      {/* component="div": MUI renders DialogTitle as an <h2>, and this row carries a
+          chip and a button. Nesting a control inside a heading also folded their text
+          into the heading's accessible name ("Generate Report Based on X Back to
+          Template"), so the heading moves to the Typography below and the rest are
+          its siblings. flexWrap because the chip label is an unbounded template name. */}
+      <DialogTitle
+        component="div"
+        sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5, py: 2, px: 3 }}
+      >
         <DescriptionIcon sx={{ color: 'primary.main', fontSize: 28 }} />
-        <Typography variant="h6" component="div" fontWeight={500}>
+        <Typography variant="h6" component="h2" fontWeight={500} noWrap sx={{ m: 0 }}>
           {isTemplateBuilder ? 'Configure Template Sections' : 'Generate Report'}
         </Typography>
+        {/* Provenance rides on the title row rather than a banner of its own: it is
+            a fact to glance at once, and a full-width Alert above the form pushed the
+            section list — the thing being worked on — most of the way off screen. */}
+        {!isTemplateBuilder && selectedTemplate && !showTemplateSelector && (
+          <>
+            <Tooltip
+              title="You are editing a copy. Changes will not affect the original template."
+              arrow
+            >
+              {/* "Copy of" carries the reassurance in the label itself. As a tooltip
+                  alone it was unreachable: a Chip with no onClick gets no tabIndex, so
+                  keyboard users never focused it and touch users never hovered it, and
+                  the only thing left for them was a name with no reassurance attached.
+                  maxWidth so an unbounded template name ellipsizes instead of pushing
+                  the Back to Template button off the row. */}
+              <Chip
+                size="small"
+                variant="outlined"
+                icon={<AssignmentIcon />}
+                label={`Copy of "${selectedTemplate.name}"`}
+                sx={{ maxWidth: 280, minWidth: 0 }}
+              />
+            </Tooltip>
+            <Button size="small" sx={{ ml: 'auto' }} onClick={() => setShowTemplateSelector(true)}>
+              Back to Template
+            </Button>
+          </>
+        )}
       </DialogTitle>
 
       {/* auto, not hidden: clipping made overflow unreachable instead of scrollable. */}
       <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
         {/* Top Section: Banner and Toggle */}
         <Box sx={{ flexShrink: 0 }}>
-          {/* Template Info Banner */}
-          {!isTemplateBuilder && selectedTemplate && !showTemplateSelector && (
-            <Alert
-              severity="info"
-              icon={<InfoIcon />}
-              sx={{ mx: 3, mt: 2, borderRadius: 2 }}
-              action={
-                <Button
-                  size="small"
-                  onClick={() => setShowTemplateSelector(true)}
-                >
-                  Back to Template
-                </Button>
-              }
-            >
-              <Typography variant="body2" fontWeight={600}>
-                Based on Template: &quot;{selectedTemplate.name}&quot;
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Modifying a copy of the selected template. Changes will not affect the original template.
-              </Typography>
-            </Alert>
-          )}
-
-          {/* Save as Template Toggle - only in report mode */}
+          {/* Save as Template Toggle - only in report mode.
+              Switch and name share one row: stacked, an off switch still reserved
+              the height of a full-width field plus its helper text, above the
+              section list that is the actual work surface. */}
           {!isTemplateBuilder && (
-            <Box sx={{ mx: 3, mt: 2 }}>
+            <Box sx={{ mx: 3, mt: 1.5, display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
               <FormControlLabel
+                sx={{ mr: 0, flexShrink: 0, height: 40 }}
                 control={
                   <Switch
                     checked={saveAsTemplate}
@@ -512,27 +530,33 @@ export function GenerateReportDialog({
                 label={
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <AssignmentIcon fontSize="small" />
-                    <Typography variant="body2">Save as template for future use</Typography>
+                    <Typography variant="body2">Save as template</Typography>
                   </Box>
                 }
               />
               {saveAsTemplate && (
                 <TextField
-                  fullWidth
+                  size="small"
                   label="Template Name"
                   value={templateName}
                   onChange={(e) => setTemplateName(e.target.value)}
                   placeholder="Enter template name..."
                   required
                   error={(saveAsTemplate && !templateName.trim()) || templateNameTaken}
+                  // Kept as visible helper text, not a tooltip: the Generate Report
+                  // button disables on both of these and says nothing about why, so
+                  // this is the only place the reason is written down. It costs a
+                  // line of height, and only in the error state.
                   helperText={
-                    saveAsTemplate && !templateName.trim()
+                    !templateName.trim()
                       ? 'Template name is required'
                       : templateNameTaken
                         ? 'A template with this name already exists — choose a different name'
                         : ''
                   }
-                  sx={{ mt: 2 }}
+                  // minWidth so the field drops to its own line on a narrow dialog
+                  // instead of collapsing below the width of its own floating label.
+                  sx={{ flex: 1, minWidth: 240 }}
                 />
               )}
             </Box>
@@ -856,6 +880,7 @@ export function GenerateReportDialog({
         </Box>
       </DialogActions>
     </Dialog>
+    </ReportVariablesProvider>
   );
 }
 
@@ -1134,7 +1159,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
               Section Configuration
             </Typography>
           </Box>
-          {renderConfigForm()}
+          <SectionTitleProvider value={section.title}>{renderConfigForm()}</SectionTitleProvider>
         </Box>
       </Collapse>
     </Box>

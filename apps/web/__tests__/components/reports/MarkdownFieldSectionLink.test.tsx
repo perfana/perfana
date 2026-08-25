@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MarkdownField } from '@/components/reports/report-generation/MarkdownField';
 import { assignSectionAnchors, renderMarkdown } from '@perfana/shared/utils';
-import { isLinkableSectionType } from '@perfana/shared/types';
+import { isLinkableSection } from '@perfana/shared/types';
 import { buildLinkTargets } from '@/components/reports/report-generation/SectionConfigs';
 import type { ReportSectionConfig } from '@/lib/api/reports';
 
@@ -162,17 +162,17 @@ describe('MarkdownField section links', () => {
 });
 
 describe('builder link targets', () => {
-  it('excludes text blocks, headers and indexes, and matches what the API will emit', () => {
+  it('excludes untitled text blocks, headers and indexes, and matches what the API will emit', () => {
     const sections = [
       { type: 'header', order: 0, title: '' },
       { type: 'index', order: 1, title: '' },
       { type: 'slo', order: 2, title: 'SLO Results' },
-      { type: 'text_block', order: 3, title: '' },
+      { type: 'text_block', order: 3, title: '', config: { content: 'prose' } },
       { type: 'graphs', order: 4, title: 'Graphs' },
     ];
 
     const targetsList = sections
-      .filter((s) => isLinkableSectionType(s.type))
+      .filter((s) => isLinkableSection(s))
       .sort((a, b) => a.order - b.order);
 
     const anchors = assignSectionAnchors(
@@ -184,21 +184,37 @@ describe('builder link targets', () => {
     expect([...anchors.values()]).toEqual(['section-slo-results', 'section-graphs']);
   });
 
-  it('buildLinkTargets (the builder\'s production helper) excludes header and index, not just text_block', () => {
+  it('buildLinkTargets (the builder\'s production helper) excludes header and index', () => {
     // header and index used to be link targets; they no longer are — a
     // header is the top of the report (nothing to link to), and an index
-    // linking to an index is circular noise. Only slo/graphs remain.
+    // linking to an index is circular noise. A TITLED text block is a target:
+    // it renders a real heading, so it is a real destination.
     const sections: ReportSectionConfig[] = [
       { type: 'header', order: 0 },
       { type: 'index', order: 1 },
       { type: 'slo', order: 2, title: 'SLO Results' },
-      { type: 'text_block', order: 3, title: 'ignored' },
+      { type: 'text_block', order: 3, title: 'Executive summary', config: { content: 'prose' } },
       { type: 'graphs', order: 4, title: 'Graphs' },
     ];
 
     expect(buildLinkTargets(sections)).toEqual([
       { title: 'SLO Results', anchor: 'section-slo-results' },
+      { title: 'Executive summary', anchor: 'section-executive-summary' },
       { title: 'Graphs', anchor: 'section-graphs' },
+    ]);
+  });
+
+  it('leaves an untitled text block out — bare prose has no heading to land on', () => {
+    const sections: ReportSectionConfig[] = [
+      { type: 'slo', order: 0, title: 'SLO Results' },
+      { type: 'text_block', order: 1, config: { content: 'prose' } },
+      { type: 'text_block', order: 2, title: '   ', config: { content: 'prose' } },
+      // Titled, but no body — the renderer drops it, so it is not a destination.
+      { type: 'text_block', order: 3, title: 'Heading only' },
+    ];
+
+    expect(buildLinkTargets(sections)).toEqual([
+      { title: 'SLO Results', anchor: 'section-slo-results' },
     ]);
   });
 

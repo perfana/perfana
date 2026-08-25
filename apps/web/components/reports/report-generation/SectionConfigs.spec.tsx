@@ -268,25 +268,31 @@ describe('TextBlockConfigForm', () => {
     expect(onChange).toHaveBeenCalledWith({ alignment: 'center', content: '## Summary' });
   });
 
-  it('writes the Enable Markdown switch onto config and forwards it to the editor', () => {
-    // This wiring is what makes the switch functional at all — the renderer
-    // ignored config.markdown until now, so a dropped prop would silently
-    // restore the dead toggle with every suite still green.
+  it('always edits as markdown, with no switch to turn it off', () => {
+    // The switch is gone: markdown is the only mode a text block is authored in.
+    // It existed as an off ramp for blocks written before markdown rendering, and
+    // the renderer still honours a stored `markdown: false` — but nothing in the
+    // form can set one, so nothing in the form may write one either.
     const onChange = jest.fn();
-    const { rerender } = render(<TextBlockConfigForm config={{}} onChange={onChange} />);
+    render(<TextBlockConfigForm config={{}} onChange={onChange} />);
 
     expect(screen.getAllByLabelText('Bold')[0]).toBeVisible();
+    expect(screen.queryByRole('switch', { name: /enable markdown/i })).toBeNull();
+  });
 
-    const toggle = screen.getByRole('switch', { name: /enable markdown/i });
-    expect(toggle).toBeChecked();
+  it('drops a stale markdown:false off the config on the first edit', () => {
+    // A block someone switched off before the toggle was removed can no longer be
+    // switched back on, so editing it must clear the flag rather than preserve a
+    // setting the author has no way to reach.
+    const onChange = jest.fn();
+    render(
+      <TextBlockConfigForm config={{ markdown: false, content: 'old' }} onChange={onChange} />,
+    );
 
-    fireEvent.click(toggle);
-    expect(onChange).toHaveBeenCalledWith({ markdown: false });
+    fireEvent.change(screen.getAllByLabelText('Content')[0], { target: { value: 'new' } });
 
-    rerender(<TextBlockConfigForm config={{ markdown: false }} onChange={onChange} />);
-    // Only one editor now: the text block body — text blocks have no
-    // accompanying-text field.
-    expect(screen.getAllByLabelText('Bold')[0]).not.toBeVisible();
+    expect(onChange).toHaveBeenCalledWith({ content: 'new' });
+    expect(onChange.mock.calls[0][0]).not.toHaveProperty('markdown');
   });
 });
 
