@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.77.0] - 2026-08-25
+
+### Fixed
+- **The report builder now tells you when two sections would share a link target.** The check existed, but it could only write to a server log the person writing the report never sees — so a report with two sections answering to the same anchor looked completely fine in the builder, and its index quietly sent two entries to the same place. The offending sections are now marked in the builder itself: a warning on the section card, and an explanation naming the exact anchor in the Section Title field. Sections whose title produces no link target at all (a title written entirely in a non-Latin script, say) get the different advice they need, since renaming within that script cannot fix it.
+
 ## [0.2.76.0] - 2026-08-24
 
 ### Added

@@ -6,7 +6,7 @@
  * Modern UI for building custom reports with template support
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -24,6 +24,7 @@ import {
   Collapse,
   TextField,
   useMediaQuery,
+  Tooltip,
 } from '@mui/material';
 import {
   DndContext,
@@ -51,6 +52,7 @@ import {
   Settings as SettingsIcon,
   ExpandMore as ExpandMoreIcon,
   Star as StarIcon,
+  WarningAmber as WarningAmberIcon,
 } from '@mui/icons-material';
 import {
   generateAdHocReport,
@@ -80,6 +82,7 @@ import {
   ComparisonsConfigForm,
   Top10ListsConfigForm,
   ErrorAnalysisConfigForm,
+  findSectionAnchorWarnings,
 } from './SectionConfigs';
 import { BaselineRunSelect, useBaselineCandidates, type BaselineCandidate } from './BaselineRunSelect';
 import { sectionSummary } from './section-summary';
@@ -881,6 +884,14 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
   const config = SECTION_CONFIG[section.type] ?? { icon: null, label: section.type, description: '', color: '#9e9e9e' };
   const [expanded, setExpanded] = useState(false);
 
+  // Keyed by section object identity, which holds because `allSections` is the
+  // very array this card's `section` came from. O(n) per card is fine — the
+  // section list is a handful of entries, never a large collection.
+  const anchorWarning = useMemo(
+    () => findSectionAnchorWarnings(allSections).get(section),
+    [allSections, section],
+  );
+
   // Setup drag and drop
   const {
     attributes,
@@ -1012,8 +1023,21 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
             packages/shared/src/types/reports.types.ts. Do not "fix" this to
             match the placeholder — that breaks the placeholder's job instead.
           */}
-          <Typography variant="body2" fontWeight={600}>
+          <Typography variant="body2" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             {section.title || config.label}
+            {/* The title field carrying the full explanation lives inside the
+                collapsed body, so without this the warning is invisible until
+                the author happens to expand the very card that has the problem. */}
+            {anchorWarning && (
+              <Tooltip title={anchorWarning}>
+                <WarningAmberIcon
+                  fontSize="inherit"
+                  color="error"
+                  aria-label="Link target problem"
+                  sx={{ flexShrink: 0 }}
+                />
+              </Tooltip>
+            )}
           </Typography>
           <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
             {sectionSummary(section) ?? config.description}
@@ -1088,7 +1112,11 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
             value={section.title ?? ''}
             onChange={(e) => onTitleChange(e.target.value)}
             placeholder={SECTION_RENDER_TITLES[section.type] ?? config.label}
-            helperText="Shown as the section heading and used to build its link anchor. Leave blank to use the default."
+            error={Boolean(anchorWarning)}
+            helperText={
+              anchorWarning ??
+              'Shown as the section heading and used to build its link anchor. Leave blank to use the default.'
+            }
             fullWidth
             size="small"
             sx={{ mb: 2 }}
