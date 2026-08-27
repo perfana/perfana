@@ -303,6 +303,62 @@ CLAUDE.md's Quick Start, so a fresh clone can run `npm run test` to green. Recov
 
 ---
 
+## TimescaleDB continuous aggregates
+
+### The consolidated schema's policy loops swallow errors that have already killed the transaction
+
+**Priority:** P2
+**Origin:** found while fixing the CAGG refresh windows in v0.2.84.0 — the new migration had the
+identical bug, caught by review before it shipped.
+**Why:** `ConsolidatedSchema1700000000000.up()` wraps each `add_continuous_aggregate_policy` and
+each `add_retention_policy` in a bare `try`/`catch` that logs `Warning: Could not add ... policy`
+and continues. Migrations run under `runMigrations({ transaction: 'each' })`, so that does not
+work: the first failing statement aborts the transaction, and every statement after it — the
+remaining 14 policies, all 15 retention policies, and TypeORM's own `INSERT` into the migrations
+table — fails with `25P02 current transaction is aborted, commands ignored until end of
+transaction block`. The catch turns one recoverable failure into a greenfield install that
+cannot bootstrap, while printing warnings that read like it degraded gracefully. Verified
+against Postgres directly:
+
+```
+BEGIN;
+SELECT remove_continuous_aggregate_policy('does_not_exist_5s', if_not_exists => TRUE);
+-- ERROR: relation "does_not_exist_5s" does not exist
+SELECT 1;
+-- ERROR: current transaction is aborted, commands ignored until end of transaction block
+```
+
+Not reachable in practice today, because on a greenfield install the CAGGs were created a few
+statements earlier in the same migration, so the policy calls do not fail. It becomes reachable
+the moment any of those calls can fail independently.
+
+**What:** wrap each iteration of the CAGG-creation, refresh-policy and retention-policy loops in
+`SAVEPOINT` / `RELEASE SAVEPOINT` / `ROLLBACK TO SAVEPOINT`, the way
+`1799000000000-WidenCaggRefreshWindows.ts` now does. Deliberately not bundled into that fix: it
+touches three more loops in a 900-line migration that only greenfield installs run, and it wants
+its own branch. Note that mock-based unit tests cannot catch this class of bug at all — the mock
+query runner happily continues after a throw — so any test must either drive a real transaction
+or assert the savepoint statements.
+
+### Runs older than the refresh window are never materialised
+
+**Priority:** P3
+**Origin:** v0.2.84.0, the same investigation.
+**Why:** widening `start_offset` to 7 days fixes every run from here on, and the first policy pass
+after the migration backfills anything ingested in the last week. A run older than that stays
+unmaterialised, so opening its details page still falls back to scanning the raw hypertable —
+2766 ms vs 521 ms on the run this was measured against. The data is all still there; nothing is
+lost, it is just slow, and slow with no error is exactly why this went unnoticed for so long.
+
+**What:** decide whether to backfill history once per deployment, with
+`CALL refresh_continuous_aggregate('<view>', NULL, now() - interval '1 minute');` for each of the
+15 views. It cannot go in a migration: `refresh_continuous_aggregate` cannot run inside a
+transaction, and the full-history form takes minutes to hours. Either an operator runbook step or
+a worker job that walks the views one at a time. Worth measuring the real cost on a production-
+sized database before committing to either.
+
+---
+
 ## Dead code detection
 
 ### knip treats every file under `apps/web/app/**` as an entry point, so nothing there is ever unused
