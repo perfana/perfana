@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.79.0] - 2026-08-27
+
+### Added
+- **Changing an Apdex threshold now asks what to do with the analysis.** Editing a transaction threshold from the SLO results view, or applying thresholds from Configure Apdex Thresholds, used to write straight to the database and leave the existing results stale with no indication. Both now open the same "Save SLO Configuration Changes" dialog the SLO editor uses — save only, re-evaluate this test run, or re-evaluate every run back to the last change point — and nothing is written until you choose. "Reset to Test Default" goes through the same dialog, since it changes the effective threshold just as much.
+- **A threshold can be calculated from fewer than ten samples.** A transaction with less than ten successful samples was reported as "Not Achievable" with no way to get a number out of it, which is what happens to any low-volume transaction, to one that mostly errored, and to one whose samples are split across scenarios. A "Min samples" field lowers that bar, and anything calculated below ten is labelled low confidence — with n samples the Apdex score moves in steps of 0.5/n, so a single slow outlier shifts the answer. Applying uses the same minimum the preview was shown with, so it can no longer skip the transactions you just approved.
+- **The baseline Apdex preview says why a threshold could not be calculated.** The table showed a bare "N/A" while the reason and the sample count were already being sent; the status chip now carries the explanation and the table has a sortable Samples column, marked amber below ten.
+- **A read-only SQL health report for a deployment's database** (`docs/ops/db-health-report.sql`): storage per logical table with TimescaleDB chunks folded back onto the table they belong to, compression ratios and the chunks the compression policy has not caught up with, background job failures, retention state including the audit log partitions, vacuum and transaction-id headroom, unused indexes, and current activity. Plain SQL with no psql-specific commands, so it runs in a GUI client as well, and each section is independent so a missing view skips that block instead of aborting the run.
+
+### Changed
+- **The "After Applying" radio buttons inside Configure Apdex Thresholds are gone.** They asked the same question the save dialog now asks, in a different place and with a different default, so the choice only existed in one of the two ways to change a threshold. The dialog now defaults to leaving the analysis alone, matching every other SLO configuration change.
+
 ## [0.2.78.0] - 2026-08-25
 
 ### Added
