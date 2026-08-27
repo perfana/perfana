@@ -26,6 +26,8 @@ import {
   ApdexTransactionTable,
 } from './components';
 import { SLOSaveDialog } from '@/app/systems/[id]/config/components/edit-slo/components';
+import { ApdexUnachievableNotice } from '@/components/ApdexUnachievableNotice';
+import { DEFAULT_MIN_SAMPLES } from './types/apdex-thresholds.types';
 
 export default function ApdexThresholdsManagementDialog({
   open,
@@ -62,6 +64,10 @@ export default function ApdexThresholdsManagementDialog({
     // Re-evaluation
     reEvaluateOption,
     setReEvaluateOption,
+
+    // Minimum samples
+    minSamples,
+    handleMinSamplesChange,
 
     // Sorting
     sortBy,
@@ -125,6 +131,8 @@ export default function ApdexThresholdsManagementDialog({
             targetApdex={targetApdex}
             onTargetApdexChange={setTargetApdex}
             onPreviewDataClear={handlePreviewDataClear}
+            minSamples={minSamples}
+            onMinSamplesChange={handleMinSamplesChange}
           />
 
           {/* Scope Selection */}
@@ -149,6 +157,13 @@ export default function ApdexThresholdsManagementDialog({
           {/* Preview Results */}
           {previewData && (
             <Box>
+              {/* Why some rows have no threshold, and what to do about it */}
+              <ApdexUnachievableNotice
+                items={previewData.items}
+                minSamples={minSamples}
+                defaultMinSamples={DEFAULT_MIN_SAMPLES}
+              />
+
               {/* Workload Summary Card */}
               {previewData.workload_summary && (
                 <ApdexWorkloadSummary

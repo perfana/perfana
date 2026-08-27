@@ -4,10 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.80.0] - 2026-08-27
+## [0.2.82.0] - 2026-08-27
 
 ### Fixed
 - **Test run analysis no longer times out while calculating statistics.** The statistics step filtered the raw metric data with a check that Postgres re-ran for every metric row instead of once for the test run — millions of rows measured against a few hundred dashboards. On a large run it exceeded the two-minute query timeout, and the analysis finished with a failed stage and no statistics, which in turn means no ADAPT comparison and no SLO check results for that run. The dashboards a run's metrics may come from are now resolved once up front. Measured on the same run and identical output, the filtering step went from 255ms to 23ms on a small dataset; the old form got disproportionately slower as a run got bigger, which is why it only failed on the large ones.
+
+## [0.2.81.0] - 2026-08-27
+
+### Fixed
+- **The "Min samples" control now exists in Configure Apdex Thresholds too.** Lowering the minimum-sample rule shipped in 0.2.79.0 but only reached the Set Baseline Apdex dialog in Performance Analysis, so the Apdex SLO's own threshold dialog still reported every low-volume transaction as "Not Achievable" with no way to get a number out of it — which is where you actually notice the problem. Both dialogs now carry the same control, send the same minimum on preview and on apply, and show the sample count and the reason a transaction was skipped. When a calculation leaves transactions without a threshold, the dialog now says so above the table, explains that they are below the sample minimum and why that is normal for a low-volume transaction, and names the value to set Min samples to in order to include them.
 
 ## [0.2.79.0] - 2026-08-27
 
