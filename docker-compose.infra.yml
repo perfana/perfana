@@ -24,6 +24,16 @@ services:
   postgres:
     image: timescale/timescaledb-ha:pg15
     container_name: perfana-postgres
+    # TimescaleDB needs max_worker_processes >= timescaledb.max_background_workers
+    # + max_parallel_workers + 1, and the image ships 8 against a default 16 + 8.
+    # The job scheduler then loses the race for a slot and logs "failed to start a
+    # background worker" instead of running the continuous-aggregate refreshes -
+    # the CAGGs silently stop being materialised and every query that reads one
+    # falls back to scanning the raw hypertable. Nothing errors; pages just crawl.
+    command:
+      - postgres
+      - -c
+      - max_worker_processes=32
     environment:
       POSTGRES_DB: perfana
       POSTGRES_USER: perfana

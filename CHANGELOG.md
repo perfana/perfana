@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.84.0] - 2026-08-27
+
+### Fixed
+- **Test run details no longer crawls on systems that run long tests.** Opening a run whose test lasted longer than an hour took seconds to settle, while runs from a system that tests every few minutes felt fine — and nothing in the logs said why, because nothing was failing. The peak throughput figures behind the page are read from TimescaleDB continuous aggregates, but the refresh policy only ever materialised the last hour of data. A test longer than that could never be covered in full, and results are ingested when a run finishes, by which point its early buckets have already aged out of the window. Because these are real-time aggregates the gap did not surface as an error or as missing numbers: the query silently fell back to re-aggregating the raw table on every page load. On a 1 h 53 m run that meant scanning 1.4 million rows with a 43 MB on-disk sort, every time the page was opened. The refresh window is now seven days on every aggregate, which matches how long the raw data stays uncompressed. Measured on the same run, the throughput request went from 2766 ms to 521 ms and returned identical figures. Runs older than seven days keep the old behaviour until their window is refreshed once by hand.
+- **The bundled Postgres now gives TimescaleDB enough background workers to run its refresh jobs at all.** The image ships `max_worker_processes=8` while TimescaleDB expects 16 background workers plus parallel workers on top, so the scheduler usually lost the race for a slot and logged "failed to start a background worker" instead of refreshing — one policy had built up 1807 failed runs. The aggregates then stopped being materialised entirely, producing the same slow page as above with no error anywhere to explain it. A deployment running its own Postgres needs the same setting: `max_worker_processes` must be at least `timescaledb.max_background_workers + max_parallel_workers + 1`.
+
 ## [0.2.83.0] - 2026-08-27
 
 ### Added
