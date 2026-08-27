@@ -2144,7 +2144,8 @@ CREATE TABLE public.dynatrace_queries (
     team_id uuid,
     created_by character varying(255),
     updated_by character varying(255),
-    metrics_source_id uuid
+    metrics_source_id uuid,
+    enabled boolean DEFAULT true NOT NULL
 );
 
 ALTER TABLE ONLY public.dynatrace_queries FORCE ROW LEVEL SECURITY;

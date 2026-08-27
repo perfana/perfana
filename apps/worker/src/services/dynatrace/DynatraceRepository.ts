@@ -68,6 +68,7 @@ export class DynatraceRepository {
       WHERE dq.system_under_test_id = $1
         AND dq.test_environment = $2
         AND dq.workload = $3
+        AND dq.enabled
     `;
 
     const params: unknown[] = [systemUnderTestId, testEnvironment, workload];

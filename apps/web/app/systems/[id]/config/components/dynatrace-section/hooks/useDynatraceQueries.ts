@@ -68,6 +68,8 @@ export function useDynatraceQueries({
         omitGroupByVariableFromMetricName: query.omitGroupByVariableFromMetricName,
         templateVariables: query.templateVariables,
         dynatraceConfigLabel: query.dynatraceConfig?.label,
+        // Pre-`enabled` API responses omit the field; treat that as collecting, which is what it was.
+        enabled: query.enabled ?? true,
         organizationId: query.organizationId,
         _permissions: query._permissions,
         createdAt: query.createdAt,
@@ -248,14 +250,50 @@ export function useDynatraceQueries({
     }
   }, [deletingQuery, fetchQueries]);
 
+  // Enable/disable handlers. Disabling parks the query: no collection path runs it and
+  // nothing lands in ds_metrics. The Dynatrace card's hosts tab is unaffected — it reads
+  // the Dynatrace API live rather than stored metrics.
+  const setEnabled = useCallback(
+    async (ids: string[], enabled: boolean) => {
+      try {
+        setActionError(null);
+        await Promise.all(ids.map((id) => updateDynatraceQuery(id, { enabled })));
+      } catch (err) {
+        setActionError(
+          err && typeof err === 'object' && 'message' in err
+            ? (err as Error).message
+            : `Failed to ${enabled ? 'enable' : 'disable'} Dynatrace queries`
+        );
+      } finally {
+        // Refetch either way: a partial failure must not leave the table showing the
+        // state we asked for rather than the state the server accepted.
+        await fetchQueries();
+      }
+    },
+    [fetchQueries]
+  );
+
+  const handleToggleEnabled = useCallback(
+    (query: DynatraceQueryLocal) => setEnabled([query.id], !query.enabled),
+    [setEnabled]
+  );
+
+  const handleBatchSetEnabled = useCallback(
+    (enabled: boolean) => setEnabled(Array.from(selectedQueryIds), enabled),
+    [setEnabled, selectedQueryIds]
+  );
+
   // Multi-select handlers
-  const handleSelectAll = useCallback(() => {
-    if (selectedQueryIds.size === queries.length) {
-      setSelectedQueryIds(new Set());
-    } else {
-      setSelectedQueryIds(new Set(queries.map((q) => q.id)));
-    }
-  }, [selectedQueryIds.size, queries]);
+  // Operates on the ids the table currently shows: with a filter applied, "select all"
+  // that reached past it would batch-delete rows the user cannot see.
+  const handleSelectAll = useCallback((visibleIds: string[]) => {
+    setSelectedQueryIds((prev) => {
+      const allSelected = visibleIds.length > 0 && visibleIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      visibleIds.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
+      return next;
+    });
+  }, []);
 
   const handleSelectOne = useCallback((id: string) => {
     setSelectedQueryIds((prev) => {
@@ -357,6 +395,8 @@ export function useDynatraceQueries({
     handleEditQuery,
     handleEditQuerySubmit,
     handleDeleteQuery,
+    handleToggleEnabled,
+    handleBatchSetEnabled,
     handleConfirmDelete,
     handleSelectAll,
     handleSelectOne,

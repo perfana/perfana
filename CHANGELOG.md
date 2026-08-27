@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.83.0] - 2026-08-27
+
+### Added
+- **A Dynatrace query can be switched off without deleting it.** A query you do not want collected — a host metric that is noise on this system, a panel that costs a lot and tells you nothing — had to be deleted, and adding it back meant recreating it by hand. Each row in Systems ▸ Dynatrace ▸ Queries now has an enable/disable action, the multi-select toolbar can switch a whole selection at once, and the table says which state each query is in. A disabled query is skipped by every collection path — the full fetch, a re-fetch and incremental collection — so it stores nothing in `ds_metrics` and produces no panel. The Dynatrace card's Hosts tab is unaffected: it reads the Dynatrace API live rather than stored metrics, so CPU, memory and problems still show for every mapped host.
+- **The Dynatrace card has a settings button.** The expanded card now carries the same cog every other card has, opening that system's Dynatrace configuration with the environment and workload already selected, instead of navigating there by hand.
+- **The Dynatrace card's Hosts tab sorts and filters.** Every column — host, CPU avg, memory avg, problems — is sortable, and a filter box narrows a long host list by name. A host Dynatrace returned no reading for stays at the bottom in either sort direction; it is "no data", not zero. The default order is unchanged: problems first, then CPU descending.
+- **The Dynatrace queries table sorts and filters.** Dropdowns filter by Dynatrace instance, by host/dashboard and by panel title, and the instance, dashboard, panel title and status columns are sortable. A dropdown with only one value to offer is not shown. With a filter applied, "select all" selects only what is visible — it can no longer batch-delete rows you cannot see.
+
 ## [0.2.82.0] - 2026-08-27
 
 ### Fixed

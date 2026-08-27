@@ -137,6 +137,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "templateVariables",
     "metricUnit",
     "metricName",
+    "enabled",
   ],
   "Event": null,
   "ExpectedConfigChange": [
