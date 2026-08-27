@@ -29,6 +29,23 @@ describe('HostsOverviewTable', () => {
     expect(onSelect).toHaveBeenCalledWith('HOST-A');
   });
 
+  it('filters rows by host name', () => {
+    render(<HostsOverviewTable hosts={hosts} rows={rows} loading={false} onSelectHost={jest.fn()} />);
+    fireEvent.change(screen.getByLabelText('Filter hosts'), { target: { value: 'web-2' } });
+    expect(screen.queryByText('web-1')).not.toBeInTheDocument();
+    expect(screen.getByText('web-2')).toBeInTheDocument();
+  });
+
+  it('sorts by CPU, keeping a host with no CPU reading last in both directions', () => {
+    render(<HostsOverviewTable hosts={hosts} rows={rows} loading={false} onSelectHost={jest.fn()} />);
+    const names = () => screen.getAllByRole('row').slice(1).map((r) => r.cells[0].textContent);
+
+    fireEvent.click(screen.getByText('CPU avg'));      // desc
+    expect(names()).toEqual(['web-1', 'web-2']);
+    fireEvent.click(screen.getByText('CPU avg'));      // asc — null still sinks
+    expect(names()).toEqual(['web-1', 'web-2']);
+  });
+
   it('shows an empty state when there are no hosts', () => {
     render(<HostsOverviewTable hosts={[]} rows={[]} loading={false} onSelectHost={jest.fn()} />);
     expect(screen.getByText('No hosts found')).toBeInTheDocument();

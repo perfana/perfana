@@ -1,12 +1,18 @@
 'use client';
 
 import { Paper, Toolbar, Typography, IconButton, Tooltip } from '@mui/material';
-import { Delete as DeleteIcon, Close as CloseIcon } from '@mui/icons-material';
+import {
+  Delete as DeleteIcon,
+  Close as CloseIcon,
+  Block as BlockIcon,
+  PlayArrow as PlayArrowIcon,
+} from '@mui/icons-material';
 import { QueriesToolbarProps } from '../types';
 
 export function QueriesToolbar({
   selectedCount,
   onBatchDelete,
+  onBatchSetEnabled,
   onClearSelection,
 }: QueriesToolbarProps) {
   if (selectedCount === 0) {
@@ -30,6 +36,16 @@ export function QueriesToolbar({
         >
           {selectedCount} quer{selectedCount > 1 ? 'ies' : 'y'} selected
         </Typography>
+        <Tooltip title="Enable selected">
+          <IconButton onClick={() => onBatchSetEnabled(true)} aria-label="Enable selected">
+            <PlayArrowIcon />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title="Disable selected">
+          <IconButton onClick={() => onBatchSetEnabled(false)} aria-label="Disable selected">
+            <BlockIcon />
+          </IconButton>
+        </Tooltip>
         <Tooltip title="Delete selected">
           <IconButton onClick={onBatchDelete} color="error">
             <DeleteIcon />

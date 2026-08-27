@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsUUID } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsUUID, IsBoolean } from 'class-validator';
 
 export class CreateDynatraceQueryDto {
   @ApiProperty()
@@ -70,4 +70,9 @@ export class CreateDynatraceQueryDto {
   @IsOptional()
   @IsString()
   metricName?: string;
+
+  @ApiProperty({ required: false, default: true, description: 'False parks the query: no collection path executes it and nothing is stored in ds_metrics' })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
 }

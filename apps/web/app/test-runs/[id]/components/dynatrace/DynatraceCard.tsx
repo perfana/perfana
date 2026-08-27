@@ -11,8 +11,11 @@ import {
   CircularProgress,
   Alert,
   IconButton,
+  Tooltip,
 } from '@mui/material';
-import { ExpandMore, ExpandLess } from '@mui/icons-material';
+import { ExpandMore, ExpandLess, Settings } from '@mui/icons-material';
+
+import { buildSystemConfigUrl } from '@/lib/system-config-url';
 
 // Types
 import { DynatraceCardProps } from './types';
@@ -151,6 +154,32 @@ export default function DynatraceCard({
                   Click to collapse
                 </Typography>
               </Box>
+              <Tooltip title="Configure Dynatrace settings" placement="top">
+                <IconButton
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(buildSystemConfigUrl({
+                      systemId: testRun.system_under_test_id,
+                      tab: 'dynatrace',
+                      environment: testRun.test_environment,
+                      workload: testRun.workload,
+                      fromTestRun: testRunId,
+                    }), '_blank');
+                  }}
+                  size="medium"
+                  sx={{
+                    position: 'absolute',
+                    right: 48,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    backgroundColor: 'action.hover',
+                    '&:hover': { backgroundColor: 'primary.main', color: 'primary.contrastText' },
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <Settings />
+                </IconButton>
+              </Tooltip>
               <IconButton
                 onClick={(e) => { e.stopPropagation(); handleExpand(); }}
                 size="medium"

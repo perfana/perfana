@@ -22,6 +22,7 @@ export class DynatraceQuery {
     'templateVariables',
     'metricUnit',
     'metricName',
+    'enabled',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -71,6 +72,14 @@ export class DynatraceQuery {
 
   @Column({ name: 'metric_name', type: 'varchar', length: 255, nullable: true })
   metricName?: string;
+
+  /**
+   * Disabled queries are skipped by every collection path (full fetch, re-fetch and
+   * incremental) and never reach ds_metrics. The Dynatrace card's hosts tab is
+   * unaffected — it reads the Dynatrace API live, not stored metrics.
+   */
+  @Column({ type: 'boolean', default: true })
+  enabled!: boolean;
 
   // Ownership tracking (RBAC Phase 2)
   @Column({ type: 'uuid', name: 'organization_id' })

@@ -17,6 +17,8 @@ export interface DynatraceQueryLocal {
   omitGroupByVariableFromMetricName?: string[];
   templateVariables?: Record<string, string>;
   dynatraceConfigLabel?: string;
+  /** False parks the query: no collection path executes it, nothing lands in ds_metrics. */
+  enabled: boolean;
   organizationId?: string;
   /**
    * Per-resource capability hint carried over from the API's DynatraceQuery.
@@ -43,10 +45,12 @@ export interface DynatraceSectionProps {
 export interface QueriesTableProps {
   queries: DynatraceQueryLocal[];
   selectedQueryIds: Set<string>;
-  onSelectAll: () => void;
+  /** Receives the currently visible (filtered) ids — select-all must not reach past the filter. */
+  onSelectAll: (visibleIds: string[]) => void;
   onSelectOne: (id: string) => void;
   onEditQuery: (query: DynatraceQueryLocal) => void;
   onDeleteQuery: (query: DynatraceQueryLocal) => void;
+  onToggleEnabled: (query: DynatraceQueryLocal) => void;
 }
 
 /**
@@ -55,6 +59,7 @@ export interface QueriesTableProps {
 export interface QueriesToolbarProps {
   selectedCount: number;
   onBatchDelete: () => void;
+  onBatchSetEnabled: (enabled: boolean) => void;
   onClearSelection: () => void;
 }
 
@@ -97,8 +102,10 @@ export interface UseDynatraceQueriesReturn {
   handleEditQuery: (query: DynatraceQueryLocal) => Promise<void>;
   handleEditQuerySubmit: (id: string, data: UpdateDynatraceQueryDto) => Promise<void>;
   handleDeleteQuery: (query: DynatraceQueryLocal) => void;
+  handleToggleEnabled: (query: DynatraceQueryLocal) => Promise<void>;
+  handleBatchSetEnabled: (enabled: boolean) => Promise<void>;
   handleConfirmDelete: () => Promise<void>;
-  handleSelectAll: () => void;
+  handleSelectAll: (visibleIds: string[]) => void;
   handleSelectOne: (id: string) => void;
   handleClearSelection: () => void;
   handleBatchDeleteClick: () => void;

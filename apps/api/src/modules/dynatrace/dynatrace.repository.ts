@@ -239,6 +239,7 @@ export class DynatraceRepository {
       templateVariables: entity.templateVariables || {},
       metricUnit: entity.metricUnit,
       metricName: entity.metricName,
+      enabled: entity.enabled,
       dynatraceConfig: entity.dynatraceConfig ? {
         id: entity.dynatraceConfig.id,
         host: entity.dynatraceConfig.host,
@@ -294,6 +295,7 @@ export class DynatraceRepository {
       templateVariables: dto.templateVariables,
       metricUnit: dto.metricUnit,
       metricName: dto.metricName,
+      enabled: dto.enabled ?? true,
       organizationId: resolvedOrgId,
       createdBy: ownership?.createdBy,
       updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
@@ -323,6 +325,7 @@ export class DynatraceRepository {
     if (dto.templateVariables !== undefined) updateData.templateVariables = dto.templateVariables;
     if (dto.metricUnit !== undefined) updateData.metricUnit = dto.metricUnit;
     if (dto.metricName !== undefined) updateData.metricName = dto.metricName;
+    if (dto.enabled !== undefined) updateData.enabled = dto.enabled;
 
     // If dashboardLabel or panelTitle are being updated but panelId is not explicitly provided, regenerate it
     if ((dto.dashboardLabel !== undefined || dto.panelTitle !== undefined) && dto.panelId === undefined) {
@@ -391,6 +394,7 @@ export class DynatraceRepository {
       templateVariables: dto.templateVariables,
       metricUnit: dto.metricUnit,
       metricName: dto.metricName,
+      enabled: dto.enabled ?? true,
       organizationId: resolvedOrgId,
       createdBy: ownership?.createdBy,
       updatedBy: ownership?.updatedBy ?? ownership?.createdBy,

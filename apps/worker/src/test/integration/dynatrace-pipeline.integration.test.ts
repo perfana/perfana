@@ -112,6 +112,7 @@ describe('DynatracePipeline Integration Tests', () => {
         panel_id INTEGER NOT NULL,
         metric_unit VARCHAR(50),
         metric_name VARCHAR(255),
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -278,6 +279,7 @@ describe('DynatracePipeline Integration Tests', () => {
     dashboardLabel?: string;
     panelTitle?: string;
     query?: string;
+    enabled?: boolean;
   }) {
     const sut = overrides?.systemUnderTestId || 'test-app';
     const workload = overrides?.workload || 'load-test';
@@ -301,9 +303,10 @@ describe('DynatracePipeline Integration Tests', () => {
       INSERT INTO dynatrace_queries (
         dynatrace_config_id, system_under_test_id, workload, test_environment,
         dashboard_label, panel_title, query,
-        application_dashboard_id, panel_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-    `, [configId, sut, workload, env, dashLabel, panelTitle, queryText, appDashId, panelId]);
+        application_dashboard_id, panel_id, enabled
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `, [configId, sut, workload, env, dashLabel, panelTitle, queryText, appDashId, panelId,
+        overrides?.enabled ?? true]);
   }
 
   async function setupGrafanaInstance(): Promise<string> {
@@ -325,6 +328,20 @@ describe('DynatracePipeline Integration Tests', () => {
       expect(result.success).toBe(true);
       expect(result.data.testRunCount).toBe(1);
       expect(result.data.totalQueries).toBeGreaterThan(0);
+    });
+
+    test('skips a disabled query: nothing is collected and nothing reaches ds_metrics', async () => {
+      const configId = await setupDynatraceConfig('saas');
+      await setupDynatraceQuery(configId, { enabled: false });
+
+      const result = await pipeline.execute({ testRunIds: [testRunId] });
+
+      expect(result.data.totalQueries).toBe(0);
+      const metrics = await testDb.query(
+        'SELECT COUNT(*) as count FROM ds_metrics WHERE test_run_id = $1',
+        [testRunId]
+      );
+      expect(Number(metrics.rows[0].count)).toBe(0);
     });
 
     test('should store metrics from Dynatrace queries', async () => {

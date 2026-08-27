@@ -46,6 +46,9 @@ export class DynatraceQueryDto {
   @ApiProperty({ required: false, description: 'Explicit metric name for storage (e.g., "CPU Usage")' })
   metricName?: string;
 
+  @ApiProperty({ description: 'False parks the query: no collection path executes it' })
+  enabled!: boolean;
+
   @ApiProperty()
   createdAt!: Date;
 

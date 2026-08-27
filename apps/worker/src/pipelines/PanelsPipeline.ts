@@ -245,7 +245,8 @@ export class PanelsPipeline extends BasePipelineTypeORM {
        WHERE system_under_test_id = $1
          AND test_environment = $2
          AND workload = $3
-         AND application_dashboard_id IS NOT NULL`,
+         AND application_dashboard_id IS NOT NULL
+         AND enabled`,
       [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload]
     );
 

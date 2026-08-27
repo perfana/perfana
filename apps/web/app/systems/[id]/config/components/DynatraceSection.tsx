@@ -155,6 +155,7 @@ export default function DynatraceSection({
               <QueriesToolbar
                 selectedCount={dynatraceQueries.selectedQueryIds.size}
                 onBatchDelete={dynatraceQueries.handleBatchDeleteClick}
+                onBatchSetEnabled={dynatraceQueries.handleBatchSetEnabled}
                 onClearSelection={dynatraceQueries.handleClearSelection}
               />
 
@@ -165,6 +166,7 @@ export default function DynatraceSection({
                 onSelectOne={dynatraceQueries.handleSelectOne}
                 onEditQuery={dynatraceQueries.handleEditQuery}
                 onDeleteQuery={dynatraceQueries.handleDeleteQuery}
+                onToggleEnabled={dynatraceQueries.handleToggleEnabled}
               />
             </>
           )}

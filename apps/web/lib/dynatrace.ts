@@ -172,6 +172,8 @@ export interface DynatraceQuery {
   templateVariables?: Record<string, string>
   /** Maps the dynatrace_queries.metric_unit column. */
   metricUnit?: string
+  /** False parks the query: no collection path executes it, nothing lands in ds_metrics. */
+  enabled: boolean
   dynatraceConfig?: DynatraceConfig
   organizationId?: string
   /**
@@ -198,6 +200,7 @@ export interface CreateDynatraceQueryDto {
   omitGroupByVariableFromMetricName?: string[]
   templateVariables?: Record<string, string>
   metricUnit?: string
+  enabled?: boolean
 }
 
 export interface UpdateDynatraceQueryDto {
@@ -214,6 +217,7 @@ export interface UpdateDynatraceQueryDto {
   omitGroupByVariableFromMetricName?: string[]
   templateVariables?: Record<string, string>
   metricUnit?: string
+  enabled?: boolean
 }
 
 export async function fetchDynatraceQueries(
