@@ -26,6 +26,8 @@ import {
   WorkloadSummaryCard,
   TransactionPreviewTable,
 } from './components';
+import { ApdexUnachievableNotice } from '@/components/ApdexUnachievableNotice';
+import { DEFAULT_MIN_SAMPLES } from './types';
 
 /**
  * Dialog for reverse-engineering Apdex thresholds from test run results.
@@ -137,6 +139,13 @@ export default function BaselineApdexDialog({
           {/* Preview Results Section */}
           {previewData && (
             <Box>
+              {/* Why some rows have no threshold, and what to do about it */}
+              <ApdexUnachievableNotice
+                items={previewData.items}
+                minSamples={minSamples}
+                defaultMinSamples={DEFAULT_MIN_SAMPLES}
+              />
+
               {/* Summary Card (Workload-level only) */}
               {previewData.scope === 'workload' && previewData.workload_summary && (
                 <WorkloadSummaryCard summary={previewData.workload_summary} />

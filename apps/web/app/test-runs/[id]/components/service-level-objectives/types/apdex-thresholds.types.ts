@@ -49,6 +49,12 @@ export interface ApdexThresholdsManagementDialogProps {
   onSuccess: () => void;
 }
 
+/**
+ * Default minimum samples per transaction — mirrors MIN_SAMPLES in
+ * test-runs-baseline-apdex.service.ts. Below it a threshold is a ballpark.
+ */
+export const DEFAULT_MIN_SAMPLES = 10;
+
 export type ApdexScope = 'workload' | 'transaction';
 export type ReEvaluateOption = 'none' | 'current' | 'all';
 export type SortField = keyof BaselinePreviewItem;
@@ -82,6 +88,8 @@ export interface UseApdexThresholdsReturn {
   // Re-evaluation (chosen in the save dialog before the write happens)
   reEvaluateOption: ReEvaluateOption;
   setReEvaluateOption: (option: ReEvaluateOption) => void;
+  minSamples: number;
+  handleMinSamplesChange: (value: number) => void;
   saveDialogOpen: boolean;
   handleOpenSaveDialog: () => void;
   handleCloseSaveDialog: () => void;

@@ -25,7 +25,7 @@ import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
 } from '@mui/icons-material';
-import { BaselinePreviewItem, ApdexScope } from '../types/apdex-thresholds.types';
+import { BaselinePreviewItem, ApdexScope, DEFAULT_MIN_SAMPLES } from '../types/apdex-thresholds.types';
 import { getThemedApdexColor } from '../utils/apdex-utils';
 
 type SortField = keyof BaselinePreviewItem;
@@ -119,6 +119,15 @@ export function ApdexTransactionTable({
                           onClick={() => onSort('calculated_threshold')}
                         >
                           {scope === 'transaction' ? 'Threshold (ms)' : 'Calculated (ms)'}
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell align="right">
+                        <TableSortLabel
+                          active={sortBy === 'sample_count'}
+                          direction={sortBy === 'sample_count' ? sortDirection : 'asc'}
+                          onClick={() => onSort('sample_count')}
+                        >
+                          Samples
                         </TableSortLabel>
                       </TableCell>
                       <TableCell align="center">Current Apdex</TableCell>
@@ -238,6 +247,15 @@ function TransactionRow({
           }}
         />
       </TableCell>
+      <TableCell align="right">
+        <Typography
+          variant="body2"
+          fontFamily="monospace"
+          color={item.sample_count < DEFAULT_MIN_SAMPLES ? 'warning.main' : 'text.primary'}
+        >
+          {item.sample_count}
+        </Typography>
+      </TableCell>
       <TableCell align="center">
         {item.projected_apdex !== null ? (
           <Chip
@@ -254,12 +272,15 @@ function TransactionRow({
         )}
       </TableCell>
       <TableCell align="center">
-        <Chip
-          label={item.achievable ? 'Achievable' : 'Not Achievable'}
-          size="small"
-          color={item.achievable ? 'success' : 'warning'}
-          variant={item.achievable ? 'filled' : 'outlined'}
-        />
+        {/* The API always sends a reason; without it "Not Achievable" is unexplainable. */}
+        <Tooltip title={item.message ?? ''}>
+          <Chip
+            label={item.achievable ? 'Achievable' : 'Not Achievable'}
+            size="small"
+            color={item.achievable ? 'success' : 'warning'}
+            variant={item.achievable ? 'filled' : 'outlined'}
+          />
+        </Tooltip>
       </TableCell>
     </TableRow>
   );

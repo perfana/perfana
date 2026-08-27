@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.81.0] - 2026-08-27
+
+### Fixed
+- **The "Min samples" control now exists in Configure Apdex Thresholds too.** Lowering the minimum-sample rule shipped in 0.2.79.0 but only reached the Set Baseline Apdex dialog in Performance Analysis, so the Apdex SLO's own threshold dialog still reported every low-volume transaction as "Not Achievable" with no way to get a number out of it — which is where you actually notice the problem. Both dialogs now carry the same control, send the same minimum on preview and on apply, and show the sample count and the reason a transaction was skipped. When a calculation leaves transactions without a threshold, the dialog now says so above the table, explains that they are below the sample minimum and why that is normal for a low-volume transaction, and names the value to set Min samples to in order to include them.
+
 ## [0.2.79.0] - 2026-08-27
 
 ### Added
