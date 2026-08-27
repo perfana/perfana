@@ -196,7 +196,17 @@ export function AddEntityDialog({
     : 'Add Entity';
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    // Top-anchored, not vertically centred: entity options arrive from Dynatrace
+    // seconds after the dialog opens, and a centred dialog moves every control
+    // up by half of whatever the content grew by — straight under a cursor that
+    // was already aimed at something. Growth now only ever pushes downward.
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      sx={{ '& .MuiDialog-container': { alignItems: 'flex-start' } }}
+    >
       <DialogTitle>Add Dynatrace Entity</DialogTitle>
       <DialogContent>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1 }}>
@@ -265,14 +275,31 @@ export function AddEntityDialog({
               for HOST and non-HOST types alike. */}
           {selectedEntityType && (
             <Box sx={{ display: 'flex', gap: 2 }}>
+              {/* Both are derived from `entities` and are therefore replaced wholesale when
+                  a fetch lands. Held shut while one is in flight: an open list that gets
+                  swapped under the pointer is the other way this dialog collects misclicks.
+                  A spinner in the adornment says why, and the field keeps its size. */}
               <Autocomplete
                 fullWidth
                 options={tagKeys}
                 value={tagKeys.includes(selectedTagKey) ? selectedTagKey : null}
                 onChange={(_, newValue) => onTagKeyChange(newValue || '')}
-                disabled={tagKeys.length === 0}
+                disabled={entitiesLoading || tagKeys.length === 0}
                 renderInput={(params) => (
-                  <TextField {...params} label="Tag" placeholder="Any tag" />
+                  <TextField
+                    {...params}
+                    label="Tag"
+                    placeholder="Any tag"
+                    InputProps={{
+                      ...params.InputProps,
+                      endAdornment: (
+                        <>
+                          {entitiesLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                          {params.InputProps.endAdornment}
+                        </>
+                      ),
+                    }}
+                  />
                 )}
               />
 
@@ -281,7 +308,7 @@ export function AddEntityDialog({
                 options={tagValues}
                 value={tagValues.includes(selectedTagValue) ? selectedTagValue : null}
                 onChange={(_, newValue) => onTagValueChange(newValue || '')}
-                disabled={!selectedTagKey || tagValues.length === 0}
+                disabled={entitiesLoading || !selectedTagKey || tagValues.length === 0}
                 renderInput={(params) => (
                   <TextField {...params} label="Value" placeholder="Any value" />
                 )}
@@ -330,7 +357,11 @@ export function AddEntityDialog({
                     }
                   />
                 </ListItemButton>
-                <List dense sx={{ maxHeight: 240, overflow: 'auto', pt: 0 }}>
+                {/* Fixed height, not maxHeight: the list is empty while the host fetch is
+                    in flight, and growing into its content on arrival is the jump. It now
+                    occupies its final size from the moment HOST is picked, and later
+                    changes (a tag filter narrowing the set) scroll instead of resize. */}
+                <List dense sx={{ height: 240, overflow: 'auto', pt: 0 }} data-testid="host-list">
                   {filteredHosts.map((host) => (
                     <ListItem key={host.entityId} disablePadding>
                       <ListItemButton onClick={() => toggleHost(host)}>
