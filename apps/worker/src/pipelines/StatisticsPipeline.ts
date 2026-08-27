@@ -220,7 +220,36 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     }
 
     const aggregationSQL = `
-      WITH metrics_filtered AS (
+      -- The runs being aggregated, read once. Everything below joins this
+      -- instead of test_runs, so the table is scanned a single time.
+      WITH run_orgs AS MATERIALIZED (
+          SELECT test_run_id, organization_id, team_id, start_time
+          FROM test_runs
+          WHERE test_run_id IN (${placeholders})
+      ),
+
+      -- Dashboards whose metrics belong in this run's statistics, resolved ONCE.
+      -- This used to be two correlated IN (...) subqueries on tr.organization_id
+      -- inside the ds_metrics filter below, so Postgres re-ran them across the
+      -- metric scan — millions of rows against a few hundred dashboards. Both
+      -- MATERIALIZED keywords are load-bearing: without them the planner is free
+      -- to inline these back into the scan and the correlation returns.
+      -- (The organization_id IS NULL arms look dead under Phase 4, but a
+      -- deployment mid-backfill still has null-org rows and dropping them here
+      -- would silently drop their metrics from every statistic.)
+      allowed_dashboards AS MATERIALIZED (
+          SELECT ad.id
+          FROM application_dashboards ad
+          WHERE ad.organization_id IN (SELECT organization_id FROM run_orgs)
+             OR ad.organization_id IS NULL
+          UNION
+          SELECT dq.application_dashboard_id
+          FROM dynatrace_queries dq
+          WHERE dq.organization_id IN (SELECT organization_id FROM run_orgs)
+             OR dq.organization_id IS NULL
+      ),
+
+      metrics_filtered AS (
           SELECT
               m.test_run_id,
               m.application_dashboard_id,
@@ -237,20 +266,11 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               tr.team_id,
               m.metrics_source_id
           FROM ds_metrics m
-          INNER JOIN test_runs tr ON m.test_run_id = tr.test_run_id
+          INNER JOIN run_orgs tr ON m.test_run_id = tr.test_run_id
           WHERE m.test_run_id IN (${placeholders})
             AND m.ramp_up = false
             AND m.value IS NOT NULL
-            AND (
-                m.application_dashboard_id IN (
-                  SELECT id FROM application_dashboards ad
-                  WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
-                )
-                OR m.application_dashboard_id IN (
-                  SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
-                  WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
-                )
-            )
+            AND m.application_dashboard_id IN (SELECT id FROM allowed_dashboards)
       ),
 
       statistics_aggregated AS (
@@ -392,7 +412,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               sa.metrics_source_id
 
           FROM statistics_aggregated sa
-          LEFT JOIN test_runs tr ON tr.test_run_id = sa.test_run_id
+          LEFT JOIN run_orgs tr ON tr.test_run_id = sa.test_run_id
           LEFT JOIN LATERAL (
               SELECT mf2.value
               FROM ds_metrics mf2

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.82.0] - 2026-08-27
+
+### Fixed
+- **Test run analysis no longer times out while calculating statistics.** The statistics step filtered the raw metric data with a check that Postgres re-ran for every metric row instead of once for the test run — millions of rows measured against a few hundred dashboards. On a large run it exceeded the two-minute query timeout, and the analysis finished with a failed stage and no statistics, which in turn means no ADAPT comparison and no SLO check results for that run. The dashboards a run's metrics may come from are now resolved once up front. Measured on the same run and identical output, the filtering step went from 255ms to 23ms on a small dataset; the old form got disproportionately slower as a run got bigger, which is why it only failed on the large ones.
+
 ## [0.2.81.0] - 2026-08-27
 
 ### Fixed
