@@ -8,15 +8,17 @@ import { BaselineApdexScope } from '../dto/baseline-apdex.dto';
  */
 describe('TestRunsBaselineApdexService — min_samples', () => {
   let service: TestRunsBaselineApdexService;
+  let setTransactionThreshold: jest.Mock;
 
   // 4 samples: below the default minimum, enough for a ballpark.
   const RESPONSE_TIMES = [100, 120, 140, 900];
 
   beforeEach(() => {
+    setTransactionThreshold = jest.fn().mockResolvedValue(undefined);
     service = new TestRunsBaselineApdexService(
       {} as never, // testRunRepo — unused, the queries below are stubbed
       {} as never, // systemRepo
-      {} as never, // apdexService
+      { setWorkloadTransactionApdexThreshold: setTransactionThreshold } as never,
       {} as never, // authzService
     );
 
@@ -73,5 +75,32 @@ describe('TestRunsBaselineApdexService — min_samples', () => {
     const result = await preview(5);
     expect(result.items[0]!.achievable).toBe(false);
     expect(result.items[0]!.message).toContain('Insufficient samples (4 < 5)');
+  });
+
+  // apply runs its own preview; without forwarding min_samples it would skip
+  // exactly the transactions the user just approved in the preview they saw.
+  it('applies the thresholds the lowered minimum made available', async () => {
+    const result = await service.applyBaselineApdex(
+      'run-1',
+      { target_apdex: 0.9, scope: BaselineApdexScope.TRANSACTION, min_samples: 3 },
+      'user-1',
+      [],
+    );
+
+    expect(result.transactions_updated).toBe(1);
+    expect(setTransactionThreshold).toHaveBeenCalledTimes(1);
+    expect(setTransactionThreshold.mock.calls[0]![3]).toBe('rare-call');
+  });
+
+  it('applies nothing at the default minimum', async () => {
+    const result = await service.applyBaselineApdex(
+      'run-1',
+      { target_apdex: 0.9, scope: BaselineApdexScope.TRANSACTION },
+      'user-1',
+      [],
+    );
+
+    expect(result.transactions_updated).toBe(0);
+    expect(setTransactionThreshold).not.toHaveBeenCalled();
   });
 });
