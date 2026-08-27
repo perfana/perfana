@@ -782,23 +782,34 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       }
     }
 
-    // Refresh policies: each CAGG refreshes on a schedule, offset by granularity
+    // Refresh policies: each CAGG refreshes on a schedule, offset by granularity.
+    //
+    // start_offset is 7 days on every tier, not one that tracks the bucket size.
+    // Results are ingested when a run finishes, so its early buckets are already
+    // hours old on arrival, and a run can itself outlast a short window. Anything
+    // the policy never reaches stays unmaterialised, and because these are
+    // real-time aggregates the query silently falls back to scanning the raw
+    // hypertable instead of returning nothing — slow, not broken, so it does not
+    // show up as an error. 7 days matches compress_after on the raw hypertables.
+    // Re-refreshing an already-materialised window is a no-op, so the wide window
+    // costs nothing at steady state. Kept in sync with
+    // WidenCaggRefreshWindows1799000000000, which applies this to existing deploys.
     const refreshPolicies = [
-      { view: 'requests_raw_5s',      start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
-      { view: 'requests_raw_1m',      start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
-      { view: 'requests_raw_5m',      start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
-      { view: 'transactions_5s',      start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
-      { view: 'transactions_1m',      start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
-      { view: 'transactions_5m',      start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
-      { view: 'requests_error_5s',    start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
-      { view: 'requests_error_1m',    start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
-      { view: 'requests_error_5m',    start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
-      { view: 'requests_raw_passed_5s',  start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
-      { view: 'requests_raw_passed_1m',  start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
-      { view: 'requests_raw_passed_5m',  start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
-      { view: 'transactions_passed_5s',  start: '1 hour',  end: '1 minute',  schedule: '30 seconds' },
-      { view: 'transactions_passed_1m',  start: '2 hours', end: '2 minutes', schedule: '1 minute'   },
-      { view: 'transactions_passed_5m',  start: '1 day',   end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'requests_raw_5s',      start: '7 days', end: '1 minute',  schedule: '30 seconds' },
+      { view: 'requests_raw_1m',      start: '7 days', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'requests_raw_5m',      start: '7 days', end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'transactions_5s',      start: '7 days', end: '1 minute',  schedule: '30 seconds' },
+      { view: 'transactions_1m',      start: '7 days', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'transactions_5m',      start: '7 days', end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'requests_error_5s',    start: '7 days', end: '1 minute',  schedule: '30 seconds' },
+      { view: 'requests_error_1m',    start: '7 days', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'requests_error_5m',    start: '7 days', end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'requests_raw_passed_5s',  start: '7 days', end: '1 minute',  schedule: '30 seconds' },
+      { view: 'requests_raw_passed_1m',  start: '7 days', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'requests_raw_passed_5m',  start: '7 days', end: '5 minutes', schedule: '5 minutes'  },
+      { view: 'transactions_passed_5s',  start: '7 days', end: '1 minute',  schedule: '30 seconds' },
+      { view: 'transactions_passed_1m',  start: '7 days', end: '2 minutes', schedule: '1 minute'   },
+      { view: 'transactions_passed_5m',  start: '7 days', end: '5 minutes', schedule: '5 minutes'  },
     ];
 
     for (const p of refreshPolicies) {
