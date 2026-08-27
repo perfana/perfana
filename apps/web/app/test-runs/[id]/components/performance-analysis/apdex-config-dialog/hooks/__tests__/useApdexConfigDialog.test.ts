@@ -181,8 +181,13 @@ describe('useApdexConfigDialog - excludeRampUpTime', () => {
         result.current.setIncludeFailedRequests(true);
       });
 
+      // handleSave only opens the re-evaluation dialog; the write happens on
+      // confirm. Two act() blocks so the pending-action state commits between.
       await act(async () => {
         await result.current.handleSave();
+      });
+      await act(async () => {
+        await result.current.handleSaveDialogConfirm('none');
       });
 
       const apdexCall = mockFetch.mock.calls.find(
@@ -228,8 +233,13 @@ describe('useApdexConfigDialog - excludeRampUpTime', () => {
         result.current.setExcludeRampUpTime(false);
       });
 
+      // handleSave only opens the re-evaluation dialog; the write happens on
+      // confirm. Two act() blocks so the pending-action state commits between.
       await act(async () => {
         await result.current.handleSave();
+      });
+      await act(async () => {
+        await result.current.handleSaveDialogConfirm('none');
       });
 
       const updateCall = mockFetch.mock.calls.find(
@@ -272,8 +282,13 @@ describe('useApdexConfigDialog - excludeRampUpTime', () => {
         result.current.setExcludeRampUpTime(false);
       });
 
+      // handleSave only opens the re-evaluation dialog; the write happens on
+      // confirm. Two act() blocks so the pending-action state commits between.
       await act(async () => {
         await result.current.handleSave();
+      });
+      await act(async () => {
+        await result.current.handleSaveDialogConfirm('none');
       });
 
       const disableCall = mockFetch.mock.calls.find(
@@ -306,8 +321,13 @@ describe('useApdexConfigDialog - excludeRampUpTime', () => {
 
       mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
 
+      // handleSave only opens the re-evaluation dialog; the write happens on
+      // confirm. Two act() blocks so the pending-action state commits between.
       await act(async () => {
         await result.current.handleSave();
+      });
+      await act(async () => {
+        await result.current.handleSaveDialogConfirm('none');
       });
 
       const apdexCall = mockFetch.mock.calls.find(

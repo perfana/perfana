@@ -1,8 +1,12 @@
+import { ReEvaluateOption } from '@/lib/slo-reevaluation';
+
 export interface TestRunDetails {
   system_under_test_id: string;
   system_name: string;
   test_environment: string;
   workload: string;
+  /** test_run_id key — needed to queue a re-evaluation of this run. */
+  test_run_id?: string;
 }
 
 export interface ExistingSlo {
@@ -36,6 +40,8 @@ export interface ApdexConfigState {
   existingSlo: ExistingSlo | null;
   loadingSlo: boolean;
   sloCheckFailed: boolean;
+  saveDialogOpen: boolean;
+  saveDialogOption: ReEvaluateOption;
 }
 
 export interface ApdexConfigActions {
@@ -46,4 +52,7 @@ export interface ApdexConfigActions {
   setExcludeRampUpTime: (value: boolean) => void;
   handleSave: () => Promise<void>;
   handleDelete: () => Promise<void>;
+  setSaveDialogOption: (option: ReEvaluateOption) => void;
+  handleSaveDialogConfirm: (option: ReEvaluateOption) => Promise<void>;
+  handleSaveDialogClose: () => void;
 }

@@ -5,6 +5,7 @@ import { authenticatedFetch } from '@/lib/api';
 import { Benchmark } from '@/lib/types';
 import { TestRunDetails, ExistingSlo, ApdexConfigState, ApdexConfigActions } from '../types';
 import { validateThreshold, validateApdexScore } from '../utils/apdex-utils';
+import { ReEvaluateOption, triggerSloReEvaluation } from '@/lib/slo-reevaluation';
 
 interface UseApdexConfigDialogParams {
   open: boolean;
@@ -36,6 +37,11 @@ export function useApdexConfigDialog({
   const [existingSlo, setExistingSlo] = useState<ExistingSlo | null>(null);
   const [loadingSlo, setLoadingSlo] = useState(false);
   const [sloCheckFailed, setSloCheckFailed] = useState(false);
+  // A threshold change invalidates existing analysis, so the write is gated
+  // behind the same save dialog the SLO editor uses.
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveDialogOption, setSaveDialogOption] = useState<ReEvaluateOption>('none');
+  const [pendingAction, setPendingAction] = useState<'save' | 'delete' | null>(null);
 
   const isTransactionLevel = !!transactionName;
 
@@ -50,6 +56,7 @@ export function useApdexConfigDialog({
           system_name: data.system_name || data.systems_under_test?.name || data.system_under_test_id,
           test_environment: data.test_environment,
           workload: data.workload,
+          test_run_id: data.test_run_id,
         });
       }
     } catch (err) {
@@ -120,6 +127,9 @@ export function useApdexConfigDialog({
       setTestRunDetails(null);
       setExistingSlo(null);
       setSloCheckFailed(false);
+      setSaveDialogOpen(false);
+      setSaveDialogOption('none');
+      setPendingAction(null);
       fetchTestRunDetails();
     }
     // `testRunId` is listed explicitly (Bug A guard) so a URL-level testRunId
@@ -157,6 +167,12 @@ export function useApdexConfigDialog({
       }
     }
 
+    setError(null);
+    setPendingAction('save');
+    setSaveDialogOpen(true);
+  }, [threshold, enableSlo, minApdexScore, isTransactionLevel, sloCheckFailed]);
+
+  const performSave = useCallback(async (option: ReEvaluateOption) => {
     const thresholdValue = parseInt(threshold, 10);
 
     try {
@@ -181,6 +197,13 @@ export function useApdexConfigDialog({
       if (testRunDetails && !isTransactionLevel) {
         await handleSloUpdate(thresholdValue);
       }
+
+      await triggerSloReEvaluation(option, {
+        testRunId: testRunDetails?.test_run_id || testRunId,
+        systemUnderTestId: testRunDetails?.system_under_test_id,
+        testEnvironment: testRunDetails?.test_environment,
+        workload: testRunDetails?.workload,
+      });
 
       setSuccess(true);
       setTimeout(() => {
@@ -250,7 +273,12 @@ export function useApdexConfigDialog({
 
   const handleDelete = useCallback(async () => {
     if (!isTransactionLevel) return;
+    setError(null);
+    setPendingAction('delete');
+    setSaveDialogOpen(true);
+  }, [isTransactionLevel]);
 
+  const performDelete = useCallback(async (option: ReEvaluateOption) => {
     try {
       setLoading(true);
       setError(null);
@@ -263,6 +291,13 @@ export function useApdexConfigDialog({
         throw new Error(errorData.message || 'Failed to delete threshold');
       }
 
+      await triggerSloReEvaluation(option, {
+        testRunId: testRunDetails?.test_run_id || testRunId,
+        systemUnderTestId: testRunDetails?.system_under_test_id,
+        testEnvironment: testRunDetails?.test_environment,
+        workload: testRunDetails?.workload,
+      });
+
       setSuccess(true);
       setTimeout(() => {
         onSuccess();
@@ -273,7 +308,20 @@ export function useApdexConfigDialog({
     } finally {
       setLoading(false);
     }
-  }, [isTransactionLevel, testRunId, transactionName, onSuccess, onClose]);
+  }, [testRunId, transactionName, testRunDetails, onSuccess, onClose]);
+
+  const handleSaveDialogConfirm = useCallback(async (option: ReEvaluateOption) => {
+    setSaveDialogOpen(false);
+    const action = pendingAction;
+    setPendingAction(null);
+    if (action === 'save') await performSave(option);
+    if (action === 'delete') await performDelete(option);
+  }, [pendingAction, performSave, performDelete]);
+
+  const handleSaveDialogClose = useCallback(() => {
+    setSaveDialogOpen(false);
+    setPendingAction(null);
+  }, []);
 
   return {
     threshold,
@@ -296,5 +344,10 @@ export function useApdexConfigDialog({
     setExcludeRampUpTime,
     handleSave,
     handleDelete,
+    saveDialogOpen,
+    saveDialogOption,
+    setSaveDialogOption,
+    handleSaveDialogConfirm,
+    handleSaveDialogClose,
   };
 }
