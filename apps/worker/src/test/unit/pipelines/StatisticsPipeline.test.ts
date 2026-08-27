@@ -359,7 +359,8 @@ describe('StatisticsPipeline', () => {
       const sqlQuery = aggregationCall[0];
 
       // Verify key SQL components
-      expect(sqlQuery).toContain('WITH metrics_filtered AS');
+      expect(sqlQuery).toContain('WITH run_orgs AS MATERIALIZED');
+      expect(sqlQuery).toContain('metrics_filtered AS');
       expect(sqlQuery).toContain('statistics_aggregated AS');
       expect(sqlQuery).toContain('final_statistics AS');
       expect(sqlQuery).toContain('INSERT INTO ds_metric_statistics');
@@ -483,9 +484,15 @@ describe('StatisticsPipeline', () => {
       const aggregationCall = mockEntityManager.query.mock.calls[3];
       const sqlQuery = aggregationCall[0];
 
-      // Check for the application_dashboard_id filter (may have extra whitespace/newlines)
-      expect(sqlQuery).toContain('application_dashboard_id IN');
-      expect(sqlQuery).toContain('SELECT id FROM application_dashboards');
+      // The dashboard set is resolved once in a MATERIALIZED CTE. MATERIALIZED is
+      // load-bearing: without it the planner may inline the CTE back into the
+      // ds_metrics scan, which is the correlated-subplan shape that timed out in
+      // production (statistics-calculation, 163s, 2026-08-27).
+      expect(sqlQuery).toContain('allowed_dashboards AS MATERIALIZED');
+      expect(sqlQuery).toContain('application_dashboard_id IN (SELECT id FROM allowed_dashboards)');
+      // ...and the filter must not correlate on the outer row again.
+      expect(sqlQuery).not.toContain('ad.organization_id = tr.organization_id');
+      expect(sqlQuery).not.toContain('dq.organization_id = tr.organization_id');
     });
 
     test('should use DELETE then INSERT pattern (not UPSERT)', async () => {
@@ -568,7 +575,8 @@ describe('StatisticsPipeline', () => {
       const aggregationCall = mockEntityManager.query.mock.calls[3];
       const sqlQuery = aggregationCall[0];
 
-      expect(sqlQuery).toContain('LEFT JOIN test_runs tr ON tr.test_run_id = sa.test_run_id');
+      // start_time comes from the run_orgs CTE, so test_runs is read once.
+      expect(sqlQuery).toContain('LEFT JOIN run_orgs tr ON tr.test_run_id = sa.test_run_id');
       expect(sqlQuery).toContain('tr.start_time as test_run_start');
     });
   });
