@@ -43,6 +43,12 @@ export interface BaselinePreviewResponse {
   workload_summary?: BaselineWorkloadSummary | null;
 }
 
+/**
+ * Default minimum samples per transaction — mirrors MIN_SAMPLES in
+ * test-runs-baseline-apdex.service.ts. Lowering it yields a ballpark threshold.
+ */
+export const DEFAULT_MIN_SAMPLES = 10;
+
 export type SortColumn = keyof BaselinePreviewItem;
 export type SortDirection = 'asc' | 'desc';
 export type Scope = 'workload' | 'transaction';
