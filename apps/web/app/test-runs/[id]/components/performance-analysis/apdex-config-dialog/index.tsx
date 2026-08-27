@@ -17,6 +17,7 @@ import {
 import { ApdexConfigDialogProps } from './types';
 import { useApdexConfigDialog } from './hooks/useApdexConfigDialog';
 import { SloConfigurationSection } from './components/SloConfigurationSection';
+import { SLOSaveDialog } from '@/app/systems/[id]/config/components/edit-slo/components';
 
 export default function ApdexConfigDialog({
   open,
@@ -47,6 +48,11 @@ export default function ApdexConfigDialog({
     setExcludeRampUpTime,
     handleSave,
     handleDelete,
+    saveDialogOpen,
+    saveDialogOption,
+    setSaveDialogOption,
+    handleSaveDialogConfirm,
+    handleSaveDialogClose,
   } = useApdexConfigDialog({
     open,
     testRunId,
@@ -62,6 +68,7 @@ export default function ApdexConfigDialog({
     : 'Configure Test-Level Apdex';
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
@@ -160,6 +167,17 @@ export default function ApdexConfigDialog({
         </Button>
       </DialogActions>
     </Dialog>
+
+    {/* A threshold change invalidates existing analysis — same choice the SLO editor offers. */}
+    <SLOSaveDialog
+      open={saveDialogOpen}
+      onClose={handleSaveDialogClose}
+      onConfirm={handleSaveDialogConfirm}
+      selectedOption={saveDialogOption}
+      onOptionChange={setSaveDialogOption}
+      loading={loading}
+    />
+    </>
   );
 }
 

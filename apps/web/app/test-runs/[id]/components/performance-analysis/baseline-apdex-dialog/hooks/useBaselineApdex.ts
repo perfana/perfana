@@ -9,6 +9,7 @@ import {
   Scope,
   SortColumn,
   SortDirection,
+  DEFAULT_MIN_SAMPLES,
 } from '../types';
 
 interface UseBaselineApdexProps {
@@ -27,6 +28,7 @@ export function useBaselineApdex({
   // Form state
   const [targetApdex, setTargetApdex] = useState<number>(0.85);
   const [scope, setScope] = useState<Scope>('workload');
+  const [minSamples, setMinSamples] = useState<number>(DEFAULT_MIN_SAMPLES);
 
   // Test run details state
   const [testRunDetails, setTestRunDetails] = useState<TestRunDetails | null>(null);
@@ -48,6 +50,7 @@ export function useBaselineApdex({
     if (open && testRunId) {
       setTargetApdex(0.85);
       setScope('workload');
+      setMinSamples(DEFAULT_MIN_SAMPLES);
       setPreviewData(null);
       setError(null);
       setSuccess(false);
@@ -92,6 +95,7 @@ export function useBaselineApdex({
           body: JSON.stringify({
             target_apdex: targetApdex,
             scope: scope,
+            min_samples: minSamples,
           }),
         }
       );
@@ -114,7 +118,7 @@ export function useBaselineApdex({
     } finally {
       setPreviewLoading(false);
     }
-  }, [testRunId, targetApdex, scope]);
+  }, [testRunId, targetApdex, scope, minSamples]);
 
   const handleApplyThresholds = useCallback(async () => {
     if (!previewData) return;
@@ -133,6 +137,9 @@ export function useBaselineApdex({
           body: JSON.stringify({
             target_apdex: previewData.target_apdex,
             scope: previewData.scope,
+            // Must match the preview the user is looking at, or apply would skip
+            // the low-sample transactions they just accepted.
+            min_samples: minSamples,
           }),
         }
       );
@@ -158,7 +165,7 @@ export function useBaselineApdex({
     } finally {
       setApplyLoading(false);
     }
-  }, [previewData, testRunId, onSuccess, onClose]);
+  }, [previewData, testRunId, minSamples, onSuccess, onClose]);
 
   const handleSort = useCallback((column: SortColumn) => {
     setSortDirection((prev) => (sortBy === column && prev === 'asc' ? 'desc' : 'asc'));
@@ -167,6 +174,11 @@ export function useBaselineApdex({
 
   const handleTargetApdexChange = useCallback((value: number) => {
     setTargetApdex(value);
+    setPreviewData(null);
+  }, []);
+
+  const handleMinSamplesChange = useCallback((value: number) => {
+    setMinSamples(value);
     setPreviewData(null);
   }, []);
 
@@ -238,6 +250,7 @@ export function useBaselineApdex({
     // Form state
     targetApdex,
     scope,
+    minSamples,
 
     // Test run details
     testRunDetails,
@@ -261,6 +274,7 @@ export function useBaselineApdex({
 
     // Handlers
     handleTargetApdexChange,
+    handleMinSamplesChange,
     handleScopeChange,
     handleCalculatePreview,
     handleApplyThresholds,

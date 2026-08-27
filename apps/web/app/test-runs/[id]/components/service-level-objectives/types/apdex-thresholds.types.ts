@@ -79,9 +79,12 @@ export interface UseApdexThresholdsReturn {
   handleThresholdOverride: (transactionName: string, value: string) => void;
   handleWorkloadThresholdOverride: (value: string) => void;
 
-  // Re-evaluation
+  // Re-evaluation (chosen in the save dialog before the write happens)
   reEvaluateOption: ReEvaluateOption;
   setReEvaluateOption: (option: ReEvaluateOption) => void;
+  saveDialogOpen: boolean;
+  handleOpenSaveDialog: () => void;
+  handleCloseSaveDialog: () => void;
 
   // Sorting
   sortBy: SortField;
@@ -90,7 +93,7 @@ export interface UseApdexThresholdsReturn {
 
   // Actions
   handleCalculatePreview: () => Promise<void>;
-  handleApplyThresholds: () => Promise<void>;
+  handleApplyThresholds: (option?: ReEvaluateOption) => Promise<void>;
 
   // Utilities
   getSortedItems: (items: BaselinePreviewItem[]) => BaselinePreviewItem[];

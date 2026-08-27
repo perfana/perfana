@@ -12,7 +12,6 @@ export { ApdexTargetSelector } from './ApdexTargetSelector';
 export { ApdexScopeSelector } from './ApdexScopeSelector';
 export { ApdexWorkloadSummary } from './ApdexWorkloadSummary';
 export { ApdexTransactionTable } from './ApdexTransactionTable';
-export { ApdexReEvaluationOptions } from './ApdexReEvaluationOptions';
 
 // SLO Metrics Chart components
 export { ChartLoadingState, ChartErrorState, ChartEmptyState } from './slo-chart';
