@@ -63,6 +63,10 @@ export default function ApdexThresholdsManagementDialog({
     reEvaluateOption,
     setReEvaluateOption,
 
+    // Minimum samples
+    minSamples,
+    handleMinSamplesChange,
+
     // Sorting
     sortBy,
     sortDirection,
@@ -125,6 +129,8 @@ export default function ApdexThresholdsManagementDialog({
             targetApdex={targetApdex}
             onTargetApdexChange={setTargetApdex}
             onPreviewDataClear={handlePreviewDataClear}
+            minSamples={minSamples}
+            onMinSamplesChange={handleMinSamplesChange}
           />
 
           {/* Scope Selection */}

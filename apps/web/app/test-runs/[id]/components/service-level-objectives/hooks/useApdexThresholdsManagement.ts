@@ -11,6 +11,7 @@ import {
   ApdexScope,
   ReEvaluateOption,
   UseApdexThresholdsReturn,
+  DEFAULT_MIN_SAMPLES,
 } from '../types/apdex-thresholds.types';
 
 interface UseApdexThresholdsManagementProps {
@@ -52,6 +53,7 @@ export function useApdexThresholdsManagement({
 
   // Re-evaluation option
   const [reEvaluateOption, setReEvaluateOption] = useState<ReEvaluateOption>('none');
+  const [minSamples, setMinSamples] = useState<number>(DEFAULT_MIN_SAMPLES);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 
   // Table sorting state
@@ -91,6 +93,7 @@ export function useApdexThresholdsManagement({
       setSuccess(false);
       setReEvaluateOption('none');
       setSaveDialogOpen(false);
+      setMinSamples(DEFAULT_MIN_SAMPLES);
       setThresholdOverrides({});
       setWorkloadThresholdOverride(null);
       fetchTestRunDetails();
@@ -111,7 +114,7 @@ export function useApdexThresholdsManagement({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target_apdex: targetApdex, scope }),
+          body: JSON.stringify({ target_apdex: targetApdex, scope, min_samples: minSamples }),
         }
       );
 
@@ -131,7 +134,7 @@ export function useApdexThresholdsManagement({
     } finally {
       setPreviewLoading(false);
     }
-  }, [testRunId, targetApdex, scope]);
+  }, [testRunId, targetApdex, scope, minSamples]);
 
   // Trigger re-evaluation
   const triggerReEvaluation = useCallback(async (option: 'current' | 'all') => {
@@ -195,7 +198,11 @@ export function useApdexThresholdsManagement({
         const response = await authenticatedFetch(`/test-runs/${testRunId}/baseline-apdex/apply`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target_apdex: previewData.target_apdex, scope: previewData.scope }),
+          body: JSON.stringify({
+            target_apdex: previewData.target_apdex,
+            scope: previewData.scope,
+            min_samples: minSamples,
+          }),
         });
 
         if (!response.ok) {
@@ -223,7 +230,7 @@ export function useApdexThresholdsManagement({
     } finally {
       setApplyLoading(false);
     }
-  }, [previewData, workloadThresholdOverride, thresholdOverrides, scope, testRunId, reEvaluateOption, triggerReEvaluation, onSuccess, onClose]);
+  }, [previewData, workloadThresholdOverride, thresholdOverrides, scope, testRunId, minSamples, reEvaluateOption, triggerReEvaluation, onSuccess, onClose]);
 
   // Handle sorting
   const handleSort = useCallback((column: SortField) => {
@@ -252,6 +259,11 @@ export function useApdexThresholdsManagement({
   }, [sortBy, sortDirection]);
 
   // Handle scope change
+  const handleMinSamplesChange = useCallback((value: number) => {
+    setMinSamples(value);
+    setPreviewData(null);
+  }, []);
+
   const handleScopeChange = useCallback((newScope: ApdexScope) => {
     setScope(newScope);
     setPreviewData(null);
@@ -344,6 +356,8 @@ export function useApdexThresholdsManagement({
     // Re-evaluation
     reEvaluateOption,
     setReEvaluateOption,
+    minSamples,
+    handleMinSamplesChange,
     saveDialogOpen,
     handleOpenSaveDialog,
     handleCloseSaveDialog,

@@ -120,6 +120,41 @@ describe('useApdexThresholdsManagement — save dialog gate', () => {
       .toEqual(['run-key-1', 'run-key-0']);
   });
 
+  it('sends the caller\'s min_samples on preview and on apply', async () => {
+    routeFetch({
+      '/test-runs/run-1/baseline-apdex/apply': { transactions_updated: 1 },
+      '/test-runs/run-1/baseline-apdex/preview': previewResponse,
+      '/test-runs/': testRunDetails,
+      '/data/reevaluate/batch': {},
+    });
+    const hook = renderHook(() => useApdexThresholdsManagement(props));
+    await waitFor(() => expect(hook.result.current.testRunDetails).not.toBeNull());
+
+    act(() => {
+      hook.result.current.handleMinSamplesChange(3);
+    });
+    await act(async () => {
+      await hook.result.current.handleCalculatePreview();
+    });
+    await act(async () => {
+      await hook.result.current.handleApplyThresholds('none');
+    });
+
+    const preview = callsTo('/test-runs/run-1/baseline-apdex/preview');
+    const apply = callsTo('/test-runs/run-1/baseline-apdex/apply');
+    expect(JSON.parse((preview[0]![1] as RequestInit).body as string).min_samples).toBe(3);
+    // apply re-runs the preview server-side; without the same minimum it would
+    // skip exactly the transactions the user just approved.
+    expect(JSON.parse((apply[0]![1] as RequestInit).body as string).min_samples).toBe(3);
+  });
+
+  it('defaults min_samples to 10', async () => {
+    const { result } = await renderWithPreview();
+    expect(result.current.minSamples).toBe(10);
+    const preview = callsTo('/test-runs/run-1/baseline-apdex/preview');
+    expect(JSON.parse((preview[0]![1] as RequestInit).body as string).min_samples).toBe(10);
+  });
+
   it('applies without re-evaluating on "none"', async () => {
     routeFetch({
       '/test-runs/run-1/baseline-apdex/apply': { transactions_updated: 1 },

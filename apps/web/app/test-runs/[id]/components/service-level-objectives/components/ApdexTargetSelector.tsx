@@ -1,19 +1,31 @@
 'use client';
 
-import { Box, Typography, Slider, TextField, Chip } from '@mui/material';
+import { Box, Typography, Slider, TextField, Chip, Tooltip } from '@mui/material';
 import { getApdexColor, getApdexLabel } from '../utils/apdex-utils';
+import { DEFAULT_MIN_SAMPLES } from '../types/apdex-thresholds.types';
 
 interface ApdexTargetSelectorProps {
   targetApdex: number;
   onTargetApdexChange: (value: number) => void;
   onPreviewDataClear: () => void;
+  minSamples: number;
+  onMinSamplesChange: (value: number) => void;
 }
 
 export function ApdexTargetSelector({
   targetApdex,
   onTargetApdexChange,
   onPreviewDataClear,
+  minSamples,
+  onMinSamplesChange,
 }: ApdexTargetSelectorProps) {
+  const handleMinSamplesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseInt(e.target.value, 10);
+    if (!isNaN(val) && val >= 1 && val <= 1000) {
+      onMinSamplesChange(val);
+    }
+  };
+
   const handleSliderChange = (_: Event, value: number | number[]) => {
     onTargetApdexChange(value as number);
     onPreviewDataClear();
@@ -80,6 +92,25 @@ export function ApdexTargetSelector({
             }}
           />
         </Box>
+      </Box>
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 3 }}>
+        <Tooltip title="Transactions with fewer successful samples than this are skipped as Not Achievable. Lower it to get a ballpark threshold for rare transactions — with n samples the Apdex moves in steps of 0.5/n, so one slow outlier shifts the result.">
+          <TextField
+            label="Min samples"
+            type="number"
+            value={minSamples}
+            onChange={handleMinSamplesChange}
+            inputProps={{ min: 1, max: 1000, step: 1 }}
+            size="small"
+            sx={{ width: 140 }}
+          />
+        </Tooltip>
+        {minSamples < DEFAULT_MIN_SAMPLES && (
+          <Typography variant="caption" color="warning.main">
+            Below {DEFAULT_MIN_SAMPLES} samples the calculated thresholds are ballpark figures.
+          </Typography>
+        )}
       </Box>
     </Box>
   );
