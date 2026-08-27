@@ -3,6 +3,7 @@ import { CheckResult } from '@/lib/types';
 
 import { useState, useEffect, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
+import { triggerSloReEvaluation } from '@/lib/slo-reevaluation';
 import {
   TestRunDetails,
   BaselinePreviewItem,
@@ -50,7 +51,8 @@ export function useApdexThresholdsManagement({
   const [workloadThresholdOverride, setWorkloadThresholdOverride] = useState<number | null>(null);
 
   // Re-evaluation option
-  const [reEvaluateOption, setReEvaluateOption] = useState<ReEvaluateOption>('current');
+  const [reEvaluateOption, setReEvaluateOption] = useState<ReEvaluateOption>('none');
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 
   // Table sorting state
   const [sortBy, setSortBy] = useState<SortField>('transaction_name');
@@ -87,7 +89,8 @@ export function useApdexThresholdsManagement({
       setPreviewData(null);
       setError(null);
       setSuccess(false);
-      setReEvaluateOption('current');
+      setReEvaluateOption('none');
+      setSaveDialogOpen(false);
       setThresholdOverrides({});
       setWorkloadThresholdOverride(null);
       fetchTestRunDetails();
@@ -132,42 +135,30 @@ export function useApdexThresholdsManagement({
 
   // Trigger re-evaluation
   const triggerReEvaluation = useCallback(async (option: 'current' | 'all') => {
-    try {
-      const testRunIdForReeval = testRunDetails?.test_run_id || testRunId;
-
-      if (option === 'current') {
-        await authenticatedFetch('/data/reevaluate/batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ testRunIds: [testRunIdForReeval], checks: true, adapt: true }),
-        });
-      } else if (option === 'all') {
-        const { system_under_test_id, test_environment, workload } = testRunDetails || {};
-        if (!system_under_test_id || !test_environment || !workload) return;
-
-        const testRunsResponse = await authenticatedFetch(
-          `/test-runs/test-runs-after-changepoint?systemUnderTestId=${encodeURIComponent(system_under_test_id)}&testEnvironment=${encodeURIComponent(test_environment)}&workload=${encodeURIComponent(workload)}`
-        );
-        if (!testRunsResponse.ok) return;
-
-        const testRunsData = await testRunsResponse.json();
-        const testRunIds = testRunsData.testRunIds || [];
-        if (testRunIds.length > 0) {
-          await authenticatedFetch('/data/reevaluate/batch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ testRunIds, checks: true, adapt: true }),
-          });
-        }
-      }
-    } catch (err) {
-      // Silent error for re-evaluation
-    }
+    await triggerSloReEvaluation(option, {
+      testRunId: testRunDetails?.test_run_id || testRunId,
+      systemUnderTestId: testRunDetails?.system_under_test_id,
+      testEnvironment: testRunDetails?.test_environment,
+      workload: testRunDetails?.workload,
+    });
   }, [testRunDetails, testRunId]);
 
   // Apply thresholds
-  const handleApplyThresholds = useCallback(async () => {
+  // The Apply button only opens the save dialog — the write happens on confirm,
+  // once the user has chosen what to do with the existing analysis.
+  const handleOpenSaveDialog = useCallback(() => {
     if (!previewData) return;
+    setReEvaluateOption('none');
+    setSaveDialogOpen(true);
+  }, [previewData]);
+
+  const handleCloseSaveDialog = useCallback(() => {
+    setSaveDialogOpen(false);
+  }, []);
+
+  const handleApplyThresholds = useCallback(async (option: ReEvaluateOption = reEvaluateOption) => {
+    if (!previewData) return;
+    setSaveDialogOpen(false);
 
     setApplyLoading(true);
     setError(null);
@@ -213,8 +204,8 @@ export function useApdexThresholdsManagement({
         }
       }
 
-      if (reEvaluateOption !== 'none') {
-        await triggerReEvaluation(reEvaluateOption);
+      if (option !== 'none') {
+        await triggerReEvaluation(option);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
 
@@ -353,6 +344,9 @@ export function useApdexThresholdsManagement({
     // Re-evaluation
     reEvaluateOption,
     setReEvaluateOption,
+    saveDialogOpen,
+    handleOpenSaveDialog,
+    handleCloseSaveDialog,
 
     // Sorting
     sortBy,

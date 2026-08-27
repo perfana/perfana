@@ -104,7 +104,11 @@ export class TestRunsBaselineApdexService {
     userId: string,
     roles: string[],
   ): Promise<BaselinePreviewResponseDto> {
-    this.logger.log(`Preview baseline Apdex for test run ${testRunId}, target: ${dto.target_apdex}, scope: ${dto.scope}`);
+    const minSamples = dto.min_samples ?? this.MIN_SAMPLES;
+    this.logger.log(
+      `Preview baseline Apdex for test run ${testRunId}, target: ${dto.target_apdex}, ` +
+      `scope: ${dto.scope}, minSamples: ${minSamples}`,
+    );
 
     // Validate target Apdex
     if (dto.target_apdex < 0 || dto.target_apdex > 1) {
@@ -131,7 +135,7 @@ export class TestRunsBaselineApdexService {
     let achievableCount = 0;
 
     for (const txData of transactionData) {
-      if (txData.response_times.length < this.MIN_SAMPLES) {
+      if (txData.response_times.length < minSamples) {
         previewItems.push({
           transaction_name: txData.transaction_name,
           scenario_name: txData.scenario_name,
@@ -141,13 +145,21 @@ export class TestRunsBaselineApdexService {
           projected_apdex: null,
           sample_count: txData.response_times.length,
           achievable: false,
-          message: `Insufficient samples (${txData.response_times.length} < ${this.MIN_SAMPLES})`,
+          message: `Insufficient samples (${txData.response_times.length} < ${minSamples})`,
         });
         continue;
       }
 
       // Calculate optimal threshold using binary search
       const result = this.findThresholdForTargetApdex(txData.response_times, dto.target_apdex);
+
+      // Below the default minimum the answer is a ballpark: Apdex moves in steps
+      // of 0.5/n, so the "optimal" threshold is whichever sample sits on the
+      // boundary. Say so rather than presenting it as an exact number.
+      const lowConfidence = txData.response_times.length < this.MIN_SAMPLES;
+      const message = lowConfidence && result.achievable
+        ? `${result.message} (low confidence: ${txData.response_times.length} samples)`
+        : result.message;
 
       previewItems.push({
         transaction_name: txData.transaction_name,
@@ -158,7 +170,7 @@ export class TestRunsBaselineApdexService {
         projected_apdex: result.projected_apdex,
         sample_count: txData.response_times.length,
         achievable: result.achievable,
-        message: result.message,
+        message,
       });
 
       if (result.achievable && result.optimal_threshold !== null) {
@@ -215,6 +227,7 @@ export class TestRunsBaselineApdexService {
     const preview = await this.previewBaselineApdex(testRunId, {
       target_apdex: dto.target_apdex,
       scope: dto.scope,
+      min_samples: dto.min_samples,
     }, userId, roles);
 
     // Get test run details

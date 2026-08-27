@@ -15,6 +15,7 @@ import {
   TableHead,
   TableRow,
   TableSortLabel,
+  Tooltip,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
@@ -22,6 +23,7 @@ import {
   SortColumn,
   SortDirection,
   getApdexColor,
+  DEFAULT_MIN_SAMPLES,
 } from '../types';
 
 interface TransactionPreviewTableProps {
@@ -104,6 +106,15 @@ export function TransactionPreviewTable({
                           Calculated (ms)
                         </TableSortLabel>
                       </TableCell>
+                      <TableCell align="right">
+                        <TableSortLabel
+                          active={sortBy === 'sample_count'}
+                          direction={sortBy === 'sample_count' ? sortDirection : 'asc'}
+                          onClick={() => onSort('sample_count')}
+                        >
+                          Samples
+                        </TableSortLabel>
+                      </TableCell>
                       <TableCell align="center">Current Apdex</TableCell>
                       <TableCell align="center">Projected Apdex</TableCell>
                       <TableCell align="center">Status</TableCell>
@@ -144,6 +155,19 @@ export function TransactionPreviewTable({
                             {item.calculated_threshold ?? 'N/A'}
                           </Typography>
                         </TableCell>
+                        <TableCell align="right">
+                          <Typography
+                            variant="body2"
+                            fontFamily="monospace"
+                            color={
+                              item.sample_count < DEFAULT_MIN_SAMPLES
+                                ? 'warning.main'
+                                : 'text.primary'
+                            }
+                          >
+                            {item.sample_count}
+                          </Typography>
+                        </TableCell>
                         <TableCell align="center">
                           <Chip
                             label={item.current_apdex?.toFixed(3) ?? 'N/A'}
@@ -167,12 +191,15 @@ export function TransactionPreviewTable({
                           />
                         </TableCell>
                         <TableCell align="center">
-                          <Chip
-                            label={item.achievable ? 'OK' : 'N/A'}
-                            size="small"
-                            color={item.achievable ? 'success' : 'default'}
-                            variant={item.achievable ? 'filled' : 'outlined'}
-                          />
+                          {/* The API always sends a reason; without it "N/A" is unexplainable. */}
+                          <Tooltip title={item.message ?? ''}>
+                            <Chip
+                              label={item.achievable ? 'OK' : 'N/A'}
+                              size="small"
+                              color={item.achievable ? 'success' : 'default'}
+                              variant={item.achievable ? 'filled' : 'outlined'}
+                            />
+                          </Tooltip>
                         </TableCell>
                       </TableRow>
                     ))}

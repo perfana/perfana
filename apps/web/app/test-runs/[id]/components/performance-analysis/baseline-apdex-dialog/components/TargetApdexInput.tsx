@@ -1,20 +1,31 @@
 'use client';
 
 import React from 'react';
-import { Box, Typography, Slider, TextField, Chip } from '@mui/material';
-import { getApdexColor, getApdexLabel, APDEX_SLIDER_MARKS } from '../types';
+import { Box, Typography, Slider, TextField, Chip, Tooltip } from '@mui/material';
+import { getApdexColor, getApdexLabel, APDEX_SLIDER_MARKS, DEFAULT_MIN_SAMPLES } from '../types';
 
 interface TargetApdexInputProps {
   targetApdex: number;
   onTargetApdexChange: (value: number) => void;
+  minSamples: number;
+  onMinSamplesChange: (value: number) => void;
 }
 
 export function TargetApdexInput({
   targetApdex,
   onTargetApdexChange,
+  minSamples,
+  onMinSamplesChange,
 }: TargetApdexInputProps) {
   const handleSliderChange = (_: Event, value: number | number[]) => {
     onTargetApdexChange(value as number);
+  };
+
+  const handleMinSamplesInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseInt(e.target.value, 10);
+    if (!isNaN(val) && val >= 1 && val <= 1000) {
+      onMinSamplesChange(val);
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -79,6 +90,27 @@ export function TargetApdexInput({
             }}
           />
         </Box>
+      </Box>
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 3 }}>
+        <Tooltip title="Transactions with fewer successful samples than this are skipped. Lower it to get a ballpark threshold for rare transactions — with n samples the Apdex moves in steps of 0.5/n, so one slow outlier shifts the result.">
+          <Box sx={{ width: 140 }}>
+            <TextField
+              label="Min samples"
+              type="number"
+              value={minSamples}
+              onChange={handleMinSamplesInputChange}
+              inputProps={{ min: 1, max: 1000, step: 1 }}
+              size="small"
+              fullWidth
+            />
+          </Box>
+        </Tooltip>
+        {minSamples < DEFAULT_MIN_SAMPLES && (
+          <Typography variant="caption" color="warning.main">
+            Below {DEFAULT_MIN_SAMPLES} samples the calculated thresholds are ballpark figures.
+          </Typography>
+        )}
       </Box>
     </Box>
   );

@@ -24,8 +24,8 @@ import {
   ApdexScopeSelector,
   ApdexWorkloadSummary,
   ApdexTransactionTable,
-  ApdexReEvaluationOptions,
 } from './components';
+import { SLOSaveDialog } from '@/app/systems/[id]/config/components/edit-slo/components';
 
 export default function ApdexThresholdsManagementDialog({
   open,
@@ -71,6 +71,9 @@ export default function ApdexThresholdsManagementDialog({
     // Actions
     handleCalculatePreview,
     handleApplyThresholds,
+    saveDialogOpen,
+    handleOpenSaveDialog,
+    handleCloseSaveDialog,
 
     // Utilities
     getGroupedItems,
@@ -90,6 +93,7 @@ export default function ApdexThresholdsManagementDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
         Configure Apdex Thresholds
@@ -182,13 +186,6 @@ export default function ApdexThresholdsManagementDialog({
             </Alert>
           )}
 
-          {/* Re-evaluation Options */}
-          {previewData && (
-            <ApdexReEvaluationOptions
-              reEvaluateOption={reEvaluateOption}
-              onReEvaluateOptionChange={setReEvaluateOption}
-            />
-          )}
         </Box>
       </DialogContent>
 
@@ -197,7 +194,7 @@ export default function ApdexThresholdsManagementDialog({
           Cancel
         </Button>
         <Button
-          onClick={handleApplyThresholds}
+          onClick={handleOpenSaveDialog}
           variant="contained"
           color={hasAnyOverrides ? 'warning' : 'primary'}
           disabled={!previewData || applyLoading || success}
@@ -211,5 +208,16 @@ export default function ApdexThresholdsManagementDialog({
         </Button>
       </DialogActions>
     </Dialog>
+
+    {/* Applying thresholds invalidates existing analysis — same choice the SLO editor offers. */}
+    <SLOSaveDialog
+      open={saveDialogOpen}
+      onClose={handleCloseSaveDialog}
+      onConfirm={handleApplyThresholds}
+      selectedOption={reEvaluateOption}
+      onOptionChange={setReEvaluateOption}
+      loading={applyLoading}
+    />
+    </>
   );
 }

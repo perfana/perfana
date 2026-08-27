@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNumber, IsEnum, Min, Max } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsNumber, IsEnum, Min, Max, IsInt, IsOptional } from 'class-validator';
 
 /**
  * Scope for baseline Apdex calculation
@@ -31,6 +31,22 @@ export class BaselineApdexPreviewDto {
   })
   @IsEnum(BaselineApdexScope)
   scope: BaselineApdexScope;
+
+  @ApiPropertyOptional({
+    description:
+      'Minimum samples a transaction needs before a threshold is calculated. ' +
+      'Below the default of 10 the result is a ballpark: Apdex moves in steps of ' +
+      '0.5/n, so one slow outlier shifts the threshold a lot.',
+    example: 10,
+    minimum: 1,
+    maximum: 1000,
+    default: 10,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  min_samples?: number;
 }
 
 /**
@@ -55,6 +71,22 @@ export class BaselineApdexApplyDto {
   })
   @IsEnum(BaselineApdexScope)
   scope: BaselineApdexScope;
+
+  @ApiPropertyOptional({
+    description:
+      'Minimum samples a transaction needs before a threshold is calculated. ' +
+      'Below the default of 10 the result is a ballpark: Apdex moves in steps of ' +
+      '0.5/n, so one slow outlier shifts the threshold a lot.',
+    example: 10,
+    minimum: 1,
+    maximum: 1000,
+    default: 10,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  min_samples?: number;
 }
 
 /**

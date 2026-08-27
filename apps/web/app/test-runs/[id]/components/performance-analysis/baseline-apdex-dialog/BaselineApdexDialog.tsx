@@ -41,6 +41,7 @@ export default function BaselineApdexDialog({
     // Form state
     targetApdex,
     scope,
+    minSamples,
 
     // Test run details
     testRunDetails,
@@ -63,6 +64,7 @@ export default function BaselineApdexDialog({
 
     // Handlers
     handleTargetApdexChange,
+    handleMinSamplesChange,
     handleScopeChange,
     handleCalculatePreview,
     handleApplyThresholds,
@@ -112,6 +114,8 @@ export default function BaselineApdexDialog({
           <TargetApdexInput
             targetApdex={targetApdex}
             onTargetApdexChange={handleTargetApdexChange}
+            minSamples={minSamples}
+            onMinSamplesChange={handleMinSamplesChange}
           />
 
           {/* Scope Selection Section */}
