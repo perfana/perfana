@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useRef } from 'react';
-import { useScrollParentVirtualizer } from '@/hooks/useScrollParentVirtualizer';
+import React from 'react';
 import {
   Box,
   Typography,
@@ -94,10 +93,6 @@ interface ConfigDiffRowProps {
   testRunConfigs: { key: string; tags?: string[] }[];
   expectedChangesLoading: boolean;
   onToggleExpectedChange: (configKey: string, isExpected: boolean) => void;
-  /** Virtualiser callback ref; measures this row's real height after wrapping. */
-  measureRef?: (el: HTMLElement | null) => void;
-  /** Index the virtualiser keys its measurement cache on. */
-  dataIndex?: number;
 }
 
 /**
@@ -109,8 +104,6 @@ function ConfigDiffRow({
   testRunConfigs,
   expectedChangesLoading,
   onToggleExpectedChange,
-  measureRef,
-  dataIndex,
 }: ConfigDiffRowProps) {
   const effectiveTags = getEffectiveTags(comparison);
   const config = testRunConfigs.find(c => c.key === comparison.key);
@@ -119,22 +112,8 @@ function ConfigDiffRow({
 
   return (
     <Box
-      ref={measureRef}
-      data-index={dataIndex}
       sx={{
-        // Subgrid rather than the original `display: contents`: a contents row
-        // generates no box, so the virtualiser would have nothing to attach its
-        // measuring ref to. Subgrid gives the row a real box while keeping the
-        // five columns aligned to the parent grid exactly as before.
-        //
-        // Deliberately NOT content-visibility here. It would report the
-        // contain-intrinsic-size placeholder for any row scrolled out of view,
-        // and measureElement would cache that instead of the row's real height -
-        // which is exactly what the virtualiser needs to get right for rows whose
-        // config values wrap.
-        display: 'grid',
-        gridColumn: '1 / -1',
-        gridTemplateColumns: 'subgrid',
+        display: 'contents',
         '& > *': {
           backgroundColor: getRowBackgroundColor(comparison.status, index),
           borderTop: '1px solid',
@@ -344,27 +323,8 @@ export function ConfigDiffTable({
   expectedChangesLoading,
   onToggleExpectedChange,
 }: ConfigDiffTableProps) {
-  // Window-virtualised: a run with a few hundred config changes used to mount
-  // every row up front, which is what made expanding this card block the main
-  // thread for over a second. Only the rows near the viewport are rendered; the
-  // rest are represented by two spacer rows so the grid keeps its full height
-  // and the page scrollbar does not jump.
-  //
-  // The virtualiser measures rows rather than assuming a height, because a long
-  // config value wraps and a short one does not. estimateSize is only the
-  // first guess before measureElement corrects it.
-  const parentRef = useRef<HTMLDivElement>(null);
-  const { rows: virtualRows, padTop: paddingTop, padBottom: paddingBottom } =
-    useScrollParentVirtualizer({
-      parentRef,
-      count: comparisons.length,
-      estimateSize: 57,
-      overscan: 8,
-    });
-
   return (
     <Box
-      ref={parentRef}
       sx={{
         border: '1px solid',
         borderColor: 'divider',
@@ -427,25 +387,17 @@ export function ConfigDiffTable({
         </Typography>
       </Box>
 
-      {/* Data Rows (virtualised — spacers keep the grid's full scroll height) */}
-      {paddingTop > 0 && <Box sx={{ gridColumn: '1 / -1', height: `${paddingTop}px` }} />}
-      {virtualRows.map((virtualRow) => {
-        const comparison = comparisons[virtualRow.index];
-        if (!comparison) return null;
-        return (
-          <ConfigDiffRow
-            key={`${comparison.key}-${getEffectiveTags(comparison).join(',')}-${virtualRow.index}`}
-            comparison={comparison}
-            index={virtualRow.index}
-            testRunConfigs={testRunConfigs}
-            expectedChangesLoading={expectedChangesLoading}
-            onToggleExpectedChange={onToggleExpectedChange}
-            measureRef={virtualRow.measureRef}
-            dataIndex={virtualRow.index}
-          />
-        );
-      })}
-      {paddingBottom > 0 && <Box sx={{ gridColumn: '1 / -1', height: `${paddingBottom}px` }} />}
+      {/* Data Rows */}
+      {comparisons.map((comparison, index) => (
+        <ConfigDiffRow
+          key={`${comparison.key}-${getEffectiveTags(comparison).join(',')}-${index}`}
+          comparison={comparison}
+          index={index}
+          testRunConfigs={testRunConfigs}
+          expectedChangesLoading={expectedChangesLoading}
+          onToggleExpectedChange={onToggleExpectedChange}
+        />
+      ))}
     </Box>
   );
 }
