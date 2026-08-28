@@ -190,7 +190,12 @@ export default function ConfigurationComparisonSection({
           )}
 
           {/* Expanded Content */}
-          <Collapse in={configExpanded}>
+          {/* unmountOnExit: this Collapse wraps the whole comparison table, and a
+              run with 371 config changes leaves ~8.2k nodes mounted in a card
+              nobody has opened. They are not free while hidden - every layout on
+              the page reflows them, so expanding an unrelated card downstream
+              paid for this one. */}
+          <Collapse in={configExpanded} unmountOnExit>
             <Divider sx={{ my: 2 }} />
 
             <ConfigFilterControls

@@ -244,11 +244,19 @@ to type in. Nothing breaks; it degrades, and only for a selection the user opted
 fan-out behind those levels is already bounded (`OPTION_FETCH_CONCURRENCY` in
 `apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts`) — this is rendering, not
 fetching.
-**What:** Either a `ListboxComponent` backed by `react-window` (the pattern MUI documents for large
+**What:** Either a `ListboxComponent` backed by a virtualiser (the pattern MUI documents for large
 option sets), or a cheaper cap: stop rendering past N options and tell the user to type to narrow.
 Measure before choosing — the threshold where it actually hurts has not been established.
 **Where:** `apps/web/app/test-runs/[id]/components/compare/components/CompareSelectionPanel.tsx`,
 the Series `Autocomplete`.
+
+**Update (v0.2.85.0):** `@tanstack/react-virtual` is now a dependency and
+`apps/web/hooks/useScrollParentVirtualizer.ts` exists, so the virtualising half of this is no longer
+a from-scratch job. Two cautions that cost real time on the SLO and config tables, both of which
+apply here: `useWindowVirtualizer` is wrong for this app (the window never scrolls,
+`main.content-area` does), and a virtualiser's `scrollMargin` has to be re-measured — anything above
+the list that expands slides it down without re-rendering it. An `Autocomplete` popup is its own
+scroll container, which may make the shared hook unnecessary; check before reaching for it.
 
 ---
 

@@ -488,7 +488,13 @@ export function SLOList({
             </Box>
 
             {/* Expanded Content */}
-            <Collapse in={expandedSloRows.has(resultKey)}>
+            {/* unmountOnExit: MUI keeps Collapse children mounted when closed, so
+                without it every SLO row builds its whole detail table on load. A
+                Workload Apdex SLO with 261 transactions put ~12.7k hidden nodes in
+                the DOM, and opening the card paid 460ms of layout for a subtree
+                nobody had asked to see. The children are props-driven, so
+                unmounting loses no state. */}
+            <Collapse in={expandedSloRows.has(resultKey)} unmountOnExit>
               <Box sx={(thm) => ({
                 mt: 0.75,
                 border: '1px solid',
