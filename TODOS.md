@@ -229,6 +229,68 @@ saying the pipeline did not finish.
 
 ---
 
+## Test run detail tables
+
+### Redo the long-table virtualisation that was reverted in v0.2.86.0
+
+**Priority:** P2
+**Origin:** shipped in v0.2.85.0, reverted in v0.2.86.0 after a four-specialist review
+(performance / testing / maintainability / design) found 9 CRITICAL issues, and a live
+reproduction showed 208 of 218 Environment Configuration rows unreachable.
+**Why:** `unmountOnExit` (kept) fixed the reported card-open freeze and cut page-load DOM from
+~20,000 nodes to ~1,300. What it does not fix is the cost of opening a card containing a very long
+table: Environment Configuration ~293ms on a 218-row run, and a large Apdex SLO row is worse.
+Virtualisation is still the right answer; the implementation was wrong.
+
+**The unexplained fault - start here.** The config table's virtualiser held its scroll element
+(`hasScrollEl: true`) and the correct `scrollMargin` (810), yet reported ~10 items
+(`first: 0, last: 9`) and did not change after scrolling 6,000px. Ten items is roughly
+`overscan(8) + 2`, which is what virtual-core yields when the viewport measures zero. The Apdex
+table used the same hook on the same page and tracked scroll correctly, so it is specific to that
+call site. Ruled out by isolation builds: the ResizeObserver (stubbed, no change) and `padBottom`
+(fixed, scroll height grew 810px, no change).
+
+**Defects already found and fixed on the reverted branch - re-apply, do not rediscover:**
+
+1. **`padBottom` mixed coordinate systems.** An item's `start`/`end` INCLUDE `scrollMargin`
+   (`runningStart = paddingStart + scrollMargin`), but `getTotalSize()` SUBTRACTS it
+   (`end - scrollMargin + paddingEnd`), so `getTotalSize() - last.end` is short by exactly
+   `scrollMargin`. Correct: `getTotalSize() - (last.end - scrollMargin)`.
+   `padTop = first.start - scrollMargin` is already right.
+2. **A measured element must not carry a margin.** `measureElement` reads the border box, which
+   excludes margins, so `sx={{ mb: 3 }}` on the measured Box recorded every Apdex group 24px short
+   (~400px over 17 groups). Use padding inside the measured box, or the virtualiser's `gap` option.
+3. **`useWindowVirtualizer` is wrong here and fails silently.** The window never scrolls;
+   `main.content-area` owns the overflow, so window `scrollY` stays 0 and the list appears to end
+   after a dozen rows.
+4. **`scrollMargin` is not stable.** A card expanding above the list slides it down without
+   re-rendering it - measured 12,260px of drift - so it must be re-measured, not measured once.
+5. **`measureRef` has an undocumented `data-index` requirement.** virtual-core reads
+   `node.getAttribute('data-index')`; without it measurement silently no-ops and rows keep the
+   estimate. Return a spreadable props bag rather than a bare ref.
+6. **A row needs a box to be measured.** `display: contents` generates none - the config rows had
+   to become subgrid. `content-visibility` on a measured row is also wrong: off-screen rows report
+   the `contain-intrinsic-size` placeholder and poison `measureElement`.
+7. **Gate on the right count.** The Apdex table virtualises 17 scenario groups but pays for the
+   ~292 rows inside them; gating on its own item count switched virtualisation off exactly where it
+   was needed.
+
+**Testing, which is the part that actually failed.** The reverted branch had 4109 green tests and
+they caught none of this. A mutation run against the new hook showed all 6 mutations surviving -
+zeroing `padTop`, zeroing `padBottom`, inverting the scroll-parent predicate, gutting the
+ResizeObserver. Reverting both `unmountOnExit` props also left 238 tests green. jsdom performs no
+layout, so the virtualised path is structurally untestable there, and there is a hard cliff at the
+threshold: 59 rows render fully under jsdom, 60 render zero. A redo needs a browser runner
+(Playwright) for the windowing, plus jsdom tests asserting a collapsed card's children are absent
+from the DOM.
+
+**Also outstanding from the same review, independent of virtualisation:** with `unmountOnExit` on
+the SLO row Collapse, collapsing and re-expanding a *metric* SLO now refetches its chart -
+`useSLOMetricsChart` holds `useState` + an uncached `authenticatedFetch` with no dedupe. Apdex SLOs
+are unaffected. Either scope `unmountOnExit` to the Apdex branch or give the chart a cache.
+
+---
+
 ## Compare card
 
 
