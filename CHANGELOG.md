@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.86.0] - 2026-08-28
+
+### Fixed
+- **The Environment Configuration table shows all of its rows again.** 0.2.85.0 changed both long tables to draw only the rows near your screen. On the configuration table that went wrong: it drew the first ten rows and then stopped responding to scrolling, so on a test run with 218 configuration changes the other 208 could not be reached at all. Scrolling to the bottom of the card simply showed empty space. That part of 0.2.85.0 has been taken back out, and the table again renders every row.
+- The rest of 0.2.85.0 is unaffected. Opening the Service Level Objectives card still does not freeze the page, and the page still starts with roughly 1,300 elements instead of 20,000, because that improvement came from not building a card's contents until you open it — which is unchanged. What returns is the cost of opening a card that holds a very long table: Environment Configuration takes about 0.3s to open on a 218-row run, and opening a large Apdex SLO is slower again than it was in 0.2.85.0.
+
 ## [0.2.85.0] - 2026-08-28
 
 ### Fixed
