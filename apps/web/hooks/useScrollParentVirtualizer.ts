@@ -71,9 +71,31 @@ export function useScrollParentVirtualizer({
     }
 
     setScrollElement(el);
-    setScrollMargin(
-      el ? list.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop : 0,
-    );
+
+    const measure = () => {
+      const next = el
+        ? list.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+        : 0;
+      // Only set when it actually moved, or the ResizeObserver below and this
+      // state update feed each other forever.
+      setScrollMargin((prev) => (Math.abs(prev - next) > 1 ? next : prev));
+    };
+    measure();
+
+    // The offset is not fixed for the life of the list. Anything above it that
+    // grows or shrinks - another card on this page expanding - slides the list
+    // down without re-rendering it, and a stale margin makes the virtualiser
+    // window the wrong rows: measured 12,260px of drift after expanding the
+    // configuration card, which left the Apdex table showing groups 14-16 while
+    // the viewport sat at group 0, so the visible area was blank.
+    //
+    // Observe the scroller's content box rather than the scroller itself: the
+    // scroller's own border-box never changes, only what it contains.
+    const content = el?.firstElementChild ?? el;
+    if (!content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
   }, [parentRef, count, virtualized]);
 
   const getScrollElement = useCallback(() => scrollElement, [scrollElement]);
