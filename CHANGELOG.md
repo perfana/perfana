@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.86.1] - 2026-08-28
+
+### Fixed
+- **The Docker image build no longer fails at random.** The 0.2.86.0 build broke with `Module '"@perfana/shared"' has no exported member 'Benchmark'` in grafana-sync, on code that had not changed in months. Two of the six packages never declared `@perfana/shared` as a dependency, so the build runner did not know it had to compile the shared package before them — and one of those two, the API, rebuilt the shared package itself as a side effect of its own compile. That meant a second compiler was rewriting the shared package's output directory while the other services were reading it, and whichever service happened to read a half-written file failed. The two missing dependencies are now declared and the API no longer rebuilds the shared package, so there is exactly one writer and the build is deterministic. As a side effect the shared package's compiled output no longer contains 21 stray test files that the API's build was putting there.
+
 ## [0.2.86.0] - 2026-08-28
 
 ### Fixed

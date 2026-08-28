@@ -4,7 +4,7 @@
   "private": true,
   "description": "Perfana NestJS API backend",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc",
     "dev": "tsc -b --watch & sleep 3 && nodemon dist/main.js",
     "start": "node dist/main.js",
     "start:debug": "nest start --debug --watch",
@@ -26,6 +26,7 @@
     "migration:show": "npx ts-node -r tsconfig-paths/register ../../node_modules/typeorm/cli.js migration:show -d src/data-source.ts"
   },
   "dependencies": {
+    "@perfana/shared": "*",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.1.24",
     "@nestjs/config": "^4.0.4",
