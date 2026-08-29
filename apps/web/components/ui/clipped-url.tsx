@@ -62,16 +62,26 @@ function UrlViewer({ url }: { url: string }) {
 }
 
 /**
- * Put this on the TableCell that holds a URL.
+ * Put this on the TableCell that holds a URL — it is what stops one long URL from widening the
+ * table. In an auto-layout table a nowrap cell reports its full text width as the column's
+ * intrinsic width, so the table grows until the measurements are pushed off screen and
+ * `text-overflow: ellipsis` never gets a chance to apply. Declaring a max-width replaces that
+ * contribution, and 0 removes it entirely.
  *
- * `maxWidth: 0` is the part that fixes the layout: in an auto-layout table a nowrap cell reports
- * its full text width as the column's intrinsic width, so one long URL widens the table until the
- * measurements are pushed off screen — `text-overflow: ellipsis` never gets a chance to apply.
- * Declaring a max-width replaces that contribution, and 0 removes it entirely. `width: '100%'`
- * then hands the column all the space the other columns did not claim, so the URL truncates to
- * the real available width rather than to some guessed pixel count.
+ * Use this alone in a table whose header already assigns every column a width — there the
+ * percentages decide the layout and a competing `width` from the body only distorts them.
  */
-export const URL_CELL_SX = { maxWidth: 0, width: '100%' } as const;
+export const URL_CELL_MAX_WIDTH_SX = { maxWidth: 0 } as const;
+
+/**
+ * The above plus `width: '100%'`, which hands the column all the space the other columns did not
+ * claim, so the URL truncates to the real available width rather than to some guessed pixel count.
+ *
+ * Use this in a table that declares no column widths of its own, and on at most one cell per row:
+ * `width: '100%'` claims the whole leftover budget, so a second cell asking for the same is left
+ * with its min-content width and clips its URL to about one character.
+ */
+export const URL_CELL_SX = { ...URL_CELL_MAX_WIDTH_SX, width: '100%' } as const;
 
 interface ClippedUrlProps {
   url: string;
