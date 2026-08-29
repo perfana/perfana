@@ -11,6 +11,30 @@ interface ExportContext {
   appDashboardIds: string[];
 }
 
+/**
+ * How often the gzip stream is force-flushed while the bundle is being written.
+ *
+ * zlib holds output until ~16 kB has accumulated, so on a slow table the client sees no bytes
+ * at all — the browser cannot distinguish that from a hang, and a reverse proxy sitting in
+ * front of the API sees an idle socket and applies its own read timeout (nginx: 60 s by
+ * default). A periodic sync-flush costs a little compression ratio and keeps both honest.
+ */
+const GZIP_FLUSH_INTERVAL_MS = 2000;
+
+/** Node's shapes for "the reader went away", as opposed to the export itself going wrong. */
+const CLIENT_HANGUP_CODES = new Set([
+  'ERR_STREAM_DESTROYED',
+  'ERR_STREAM_PREMATURE_CLOSE',
+  'ERR_STREAM_WRITE_AFTER_END',
+  'EPIPE',
+  'ECONNRESET',
+]);
+
+function isClientHangup(err: unknown): boolean {
+  const code = (err as { code?: string } | undefined)?.code;
+  return code !== undefined && CLIENT_HANGUP_CODES.has(code);
+}
+
 @Injectable()
 export class SutExportService {
   private readonly logger = new Logger(SutExportService.name);
@@ -45,11 +69,23 @@ export class SutExportService {
     };
 
     const gzip = createGzip();
+    const heartbeat = setInterval(() => {
+      if (!gzip.destroyed) gzip.flush();
+    }, GZIP_FLUSH_INTERVAL_MS);
     // Fire-and-forget writer; errors destroy the stream so the controller surfaces them.
-    void this.writeBundle(gzip, sutName, ctx, opts).catch((err) => {
-      this.logger.error(`SUT export failed for ${sutId}: ${(err as Error).message}`);
-      gzip.destroy(err as Error);
-    });
+    void this.writeBundle(gzip, sutName, ctx, opts)
+      .catch((err) => {
+        // A cancelled download lands here too: the controller destroys this stream when the client
+        // hangs up, so the in-flight write rejects. That is the user pressing Cancel, not a
+        // failure, and logging it at ERROR would fill the log with routine actions.
+        if (isClientHangup(err)) {
+          this.logger.log(`SUT export for ${sutId} cancelled by the client`);
+        } else {
+          this.logger.error(`SUT export failed for ${sutId}: ${(err as Error).message}`);
+        }
+        gzip.destroy(err as Error);
+      })
+      .finally(() => clearInterval(heartbeat));
     return gzip;
   }
 

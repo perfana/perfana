@@ -56,6 +56,10 @@ export class SutTransferController {
       'Content-Disposition': `attachment; filename="sut-${safeId}-${date}.ndjson.gz"`,
     });
     stream.pipe(res);
+    // The client hung up (Cancel, closed tab, dead proxy). Without this the writer keeps going
+    // against a gzip nobody reads: its buffer fills, the write callback never fires, and the
+    // export stalls forever holding an open cursor. Destroying the source unblocks and releases it.
+    res.on('close', () => stream.destroy());
     stream.on('error', (err) => {
       this.logger.error(`Export stream failed: ${err.message}`);
       if (!res.headersSent) res.status(500);
