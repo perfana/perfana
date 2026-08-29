@@ -12,6 +12,11 @@ export const TABLE_HEADER_CELL_SX: SxProps<Theme> = {
   fontWeight: 700,
   textTransform: 'uppercase',
   letterSpacing: '0.05em',
+  // These are short measurement labels — "Avg Response (ms)", "95th Pct (ms)" — and the request
+  // column beside them claims the leftover width, which squeezes every other column down to its
+  // longest single word. Without this the labels answer by stacking one word per line and the
+  // header grows to three rows.
+  whiteSpace: 'nowrap',
 };
 
 /** The same, for a header cell that also needs its own overrides merged in. */

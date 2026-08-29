@@ -25,7 +25,7 @@ import {
 } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
 import { Top10Filter } from './components';
-import { ClippedUrl } from '@/components/ui/clipped-url';
+import { ClippedUrl, URL_CELL_MAX_WIDTH_SX } from '@/components/ui/clipped-url';
 import { formatImpactShare, sumImpact } from '@perfana/shared/utils';
 
 interface TransactionStat {
@@ -481,7 +481,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
                               }}
                             />
                           </TableCell>
-                          <TableCell sx={{ maxWidth: 0 }}>
+                          <TableCell sx={URL_CELL_MAX_WIDTH_SX}>
                             <ClippedUrl url={item.url} variant="body2" color="text.primary" sx={{ fontSize: '0.85rem' }} />
                           </TableCell>
                           {dimension.showErrorCount && (

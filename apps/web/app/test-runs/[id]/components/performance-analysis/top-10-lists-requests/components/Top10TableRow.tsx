@@ -11,7 +11,7 @@ import {
 import { MoreVert as MoreVertIcon } from '@mui/icons-material';
 import { Top10Item, Top10Dimension } from '../types';
 import { getRankingChipStyles } from '../utils';
-import { ClippedUrl } from '@/components/ui/clipped-url';
+import { ClippedUrl, URL_CELL_MAX_WIDTH_SX } from '@/components/ui/clipped-url';
 
 export interface Top10TableRowProps {
   item: Top10Item;
@@ -72,7 +72,7 @@ export function Top10TableRow({
       >
         {item.transactionName}
       </TableCell>
-      <TableCell sx={{ wordBreak: 'break-all' }}>
+      <TableCell sx={{ wordBreak: 'break-all', ...URL_CELL_MAX_WIDTH_SX }}>
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="body2" fontFamily="monospace" sx={{ fontSize: '0.85rem' }}>
             {item.requestName}

@@ -17,7 +17,7 @@ import {
 import { alpha } from '@mui/material/styles';
 import { MoreVert } from '@mui/icons-material';
 import type { RequestsBreakdownTableProps } from '../../types';
-import { ClippedUrl } from '@/components/ui/clipped-url';
+import { ClippedUrl, URL_CELL_SX } from '@/components/ui/clipped-url';
 
 export function RequestsBreakdownTable({
   samples,
@@ -45,14 +45,14 @@ export function RequestsBreakdownTable({
       <Table size="small">
         <TableHead>
           <TableRow sx={{ backgroundColor: 'action.hover' }}>
-            <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Request Name</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Avg Response (ms)</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>95th Pct (ms)</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>99th Pct (ms)</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Passed</TableCell>
-            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Failed</TableCell>
+            <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Request Name</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Avg Response (ms)</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>95th Pct (ms)</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>99th Pct (ms)</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Passed</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Failed</TableCell>
             {showActionsColumn && (
-              <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem' }}>Actions</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Actions</TableCell>
             )}
           </TableRow>
         </TableHead>
@@ -65,7 +65,7 @@ export function RequestsBreakdownTable({
                 '&:nth-of-type(odd)': { backgroundColor: alpha(theme.palette.text.primary, 0.02) }
               })}
             >
-              <TableCell component="th" scope="row">
+              <TableCell component="th" scope="row" sx={URL_CELL_SX}>
                 <Box sx={{ minWidth: 0 }}>
                   <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
                     {sampler.sampler_name}
