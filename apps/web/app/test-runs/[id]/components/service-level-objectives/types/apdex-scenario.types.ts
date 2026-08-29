@@ -60,6 +60,9 @@ export interface ScenarioHeaderProps {
   scenario: string;
   transactionCount: number;
   failedCount: number;
+  /** Omitted when the header is not collapsible (single scenario). */
+  expanded?: boolean;
+  onToggle?: () => void;
 }
 
 // Props for sortable table header

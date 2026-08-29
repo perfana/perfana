@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Box, Collapse, useTheme } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 
@@ -43,6 +43,8 @@ export default function ApdexScenarioTable({
   hasDynatrace = false,
 }: ApdexScenarioTableProps) {
   const theme = useTheme();
+  /** Scenario -> explicit user choice. Absent means "use the default for this group count". */
+  const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
 
   if (!result.targets || result.targets.length === 0) {
     return null;
@@ -57,11 +59,18 @@ export default function ApdexScenarioTable({
   const totalTargets = result.targets.length;
   const excludeRampUp = result.exclude_ramp_up_time !== false;
   let globalIdx = 0;
+  /* With several scenarios the page opens as a scannable index of scenario headers; a single
+     scenario has nothing to index, so it stays open. */
+  const collapsible = groupedByScenario.size > 1;
 
   return (
     <Box sx={{ mb: 3 }}>
       {Array.from(groupedByScenario.entries()).map(([scenario, targets], groupIdx) => {
         const failedCount = targets.filter((t) => t.meets_requirement === false).length;
+        // Fall back to the default whenever the header is not collapsible: without this, a group
+        // the user collapsed while several existed stays shut forever if a refresh drops the data
+        // to a single scenario, because there is no longer a control to reopen it.
+        const isOpen = collapsible ? (openOverrides[scenario] ?? false) : true;
 
         return (
           <Box key={scenario} sx={{ mb: groupIdx < groupedByScenario.size - 1 ? 3 : 0 }}>
@@ -70,9 +79,15 @@ export default function ApdexScenarioTable({
               scenario={scenario}
               transactionCount={targets.length}
               failedCount={failedCount}
+              expanded={collapsible ? isOpen : undefined}
+              onToggle={collapsible ? () => setOpenOverrides((prev) => ({ ...prev, [scenario]: !isOpen })) : undefined}
             />
 
-            {/* Scenario Table Container */}
+            {/* Scenario Table Container.
+                Not unmountOnExit: the rows below are built during this render either way (the
+                map runs inline), and globalIdx — which keys every transaction — must keep
+                counting across collapsed groups or the keys shift when one is reopened. */}
+            <Collapse in={isOpen}>
             <Box sx={{
               maxHeight: '800px',
               overflow: 'auto',
@@ -140,6 +155,7 @@ export default function ApdexScenarioTable({
                 );
               })}
             </Box>
+            </Collapse>
           </Box>
         );
       })}
