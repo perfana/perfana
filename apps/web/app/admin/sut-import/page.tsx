@@ -33,6 +33,9 @@ interface ImportSummary {
   sutId: string;
   sutName: string;
   rowCounts: Record<string, number>;
+  skippedCounts?: Record<string, number>;
+  droppedCounts?: Record<string, number>;
+  mergedIntoExisting?: boolean;
 }
 
 export default function SutImportPage() {
@@ -150,13 +153,29 @@ export default function SutImportPage() {
               <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
                 Imported &ldquo;{summary.sutName}&rdquo;.
               </Typography>
+              {summary.mergedIntoExisting && (
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  This system was already here — the bundle was merged into it. Rows that already
+                  existed were left untouched, so you can import an export in several parts.
+                </Typography>
+              )}
               <Divider sx={{ mb: 1 }} />
               <List dense disablePadding>
                 {Object.entries(summary.rowCounts).map(([table, count]) => (
                   <ListItem key={table} disablePadding sx={{ py: 0.25 }}>
                     <ListItemText
                       primary={table}
-                      secondary={count}
+                      secondary={[
+                        `${count} added`,
+                        summary.skippedCounts?.[table]
+                          ? `${summary.skippedCounts[table]} already present`
+                          : null,
+                        summary.droppedCounts?.[table]
+                          ? `${summary.droppedCounts[table]} skipped (missing parent)`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(', ')}
                       primaryTypographyProps={{ variant: 'body2' }}
                       secondaryTypographyProps={{ variant: 'body2', sx: { textAlign: 'right' } }}
                       sx={{ display: 'flex', justifyContent: 'space-between' }}

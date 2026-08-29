@@ -86,10 +86,98 @@ describe('SutImportService (integration)', () => {
     expect(appDash[0].organization_id).toBe(targetOrg); // org remap covers app dashboards too
   });
 
-  it('rejects import when the SUT already exists', async () => {
-    const stream = await exportService.export(sutId, { testRunIds: [runUuid], includeOptional: false, includeRaw: false });
+  // The point of idempotency: one SUT can be exported a few test runs at a time and the parts
+  // imported one after another, in any order, without the second bundle colliding with the first.
+  it('merges bundles into an existing SUT so one SUT can arrive in several parts', async () => {
+    const runUuid2 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    const runKey2 = 'roundtrip-run-2';
+    const exportRuns = (ids: string[]) =>
+      exportService
+        .export(sutId, { testRunIds: ids, includeOptional: false, includeRaw: false })
+        .then(streamToBuffer);
+
+    try {
+      await dataSource.query(
+        `INSERT INTO test_runs (id, test_run_id, system_under_test_id, test_environment, workload, organization_id) VALUES ($1,$2,$3,'test','wl-1',$4)`,
+        [runUuid2, runKey2, sutId, targetOrg],
+      );
+      const partA = await exportRuns([runUuid]);
+      const partB = await exportRuns([runUuid2]);
+      // Target has part A only — part B is the follow-up bundle.
+      await dataSource.query(`DELETE FROM test_runs WHERE id = $1`, [runUuid2]);
+
+      // Part A is entirely present already: merged, nothing written, nothing thrown.
+      const a = await importService.import(partA, targetOrg);
+      expect(a.mergedIntoExisting).toBe(true);
+      expect(a.rowCounts['test_runs']).toBe(0);
+      expect(a.skippedCounts['test_runs']).toBe(1);
+
+      // Part B adds its run to the same SUT.
+      const b = await importService.import(partB, targetOrg);
+      expect(b.mergedIntoExisting).toBe(true);
+      expect(b.rowCounts['test_runs']).toBe(1);
+
+      // Replaying part B is a no-op, not a duplicate and not a 23505.
+      const replay = await importService.import(partB, targetOrg);
+      expect(replay.rowCounts['test_runs']).toBe(0);
+      expect(replay.skippedCounts['test_runs']).toBe(1);
+
+      const runs = await dataSource.query(
+        `SELECT count(*)::int AS n FROM test_runs WHERE system_under_test_id = $1`,
+        [sutId],
+      );
+      expect(runs[0].n).toBe(2);
+    } finally {
+      await dataSource.query(`DELETE FROM test_runs WHERE id = $1`, [runUuid2]);
+    }
+  });
+
+  // Both guards below replace a 23505 that the blanket ON CONFLICT DO NOTHING would otherwise
+  // swallow. Swallowing them is what makes them dangerous: the row is silently skipped and
+  // counted as "already present" while the rest of the bundle writes on top of a foreign run.
+  it('refuses a bundle whose test run key belongs to a different run here', async () => {
+    const foreignUuid = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+    const stream = await exportService.export(sutId, {
+      testRunIds: [runUuid],
+      includeOptional: false,
+      includeRaw: false,
+    });
     const bundle = await streamToBuffer(stream);
-    await expect(importService.import(bundle, targetOrg)).rejects.toThrow(/already exists/i);
+
+    try {
+      // Same run KEY, different uuid — exactly what two environments running one suite produce.
+      await dataSource.query(`DELETE FROM test_runs WHERE id = $1`, [runUuid]);
+      await dataSource.query(
+        `INSERT INTO test_runs (id, test_run_id, system_under_test_id, test_environment, workload, organization_id) VALUES ($1,$2,$3,'test','wl-1',$4)`,
+        [foreignUuid, runKey, sutId, targetOrg],
+      );
+
+      await expect(importService.import(bundle, targetOrg)).rejects.toThrow(
+        /already belong to a different test run/i,
+      );
+    } finally {
+      await dataSource.query(`DELETE FROM test_runs WHERE id = $1`, [foreignUuid]);
+      await dataSource.query(
+        `INSERT INTO test_runs (id, test_run_id, system_under_test_id, test_environment, workload, organization_id) VALUES ($1,$2,$3,'test','wl-1',$4)`,
+        [runUuid, runKey, sutId, targetOrg],
+      );
+    }
+  });
+
+  it('refuses to merge an existing SUT into a different organization', async () => {
+    const otherOrg = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+    const stream = await exportService.export(sutId, {
+      testRunIds: [runUuid],
+      includeOptional: false,
+      includeRaw: false,
+    });
+    const bundle = await streamToBuffer(stream);
+
+    // The SUT row would keep org targetOrg while its new runs got otherOrg — a split that hides
+    // the runs from both organizations at once.
+    await expect(importService.import(bundle, otherOrg)).rejects.toThrow(
+      /already exists in organization/i,
+    );
   });
 
   it('assigns a fresh serial id for ds_panels instead of colliding on the source id', async () => {
