@@ -11,18 +11,18 @@
  * tags. Two deliberate differences from deep links, both because prose is not
  * a query string:
  *
- *  - `perfana-*-iso8601-offset` resolves with a literal `+`, not `%2B`. Same
- *    instant, same format; the URL-encoding exists so the value survives a
- *    query parser, and printing `%2B02:00` in a sentence is just wrong.
+ *  - No epoch or ISO 8601 spellings. Those exist so a value survives a query
+ *    parser; printing `1787664180000` or `2026-08-25T14:03:00.000Z` in a
+ *    sentence is machine output in a document meant to be read.
  *  - The legacy tool-named aliases (`perfana-start-dynatrace`,
  *    `perfana-start-elasticsearch`) are not offered. They exist so deep links
  *    saved before the rename keep resolving; no report text predates this
  *    feature, so there is nothing to keep working.
  *
- * Two keys are NOT resolved from the test run row and so are absent from
- * buildReportVariableValues: `perfana-previous-test-run-id` (a query) and any
- * test run configuration key (also a query). The API adds both to the values
- * map before substituting — see ReportHtmlCompilerService.resolveVariables.
+ * The Comparison group and any test run configuration key are NOT resolved from
+ * the test run row and so are absent from buildReportVariableValues — they are
+ * queries. The API adds both to the values map before substituting — see
+ * ReportHtmlCompilerService.resolveVariables.
  */
 
 /**
@@ -61,19 +61,29 @@ export const REPORT_VARIABLES: readonly ReportVariable[] = [
   { key: 'perfana-start-datetime', label: 'Start time', hint: 'e.g. 25 August 2026, 14:03 UTC', group: 'Timing' },
   { key: 'perfana-end-datetime', label: 'End time', hint: 'e.g. 25 August 2026, 14:33 UTC', group: 'Timing' },
   { key: 'perfana-duration', label: 'Duration', hint: 'e.g. 30m 0s', group: 'Timing' },
-  { key: 'perfana-start-iso8601-utc', label: 'Start time (ISO 8601, UTC)', hint: '2026-08-25T14:03:00.000Z', group: 'Timing' },
-  { key: 'perfana-end-iso8601-utc', label: 'End time (ISO 8601, UTC)', hint: '2026-08-25T14:33:00.000Z', group: 'Timing' },
-  { key: 'perfana-start-iso8601-offset', label: 'Start time (ISO 8601, offset)', hint: '2026-08-25T16:03:00+02:00', group: 'Timing' },
-  { key: 'perfana-end-iso8601-offset', label: 'End time (ISO 8601, offset)', hint: '2026-08-25T16:33:00+02:00', group: 'Timing' },
-  { key: 'perfana-start-epoch-milliseconds', label: 'Start time (epoch ms)', hint: '1787664180000', group: 'Timing' },
-  { key: 'perfana-start-epoch-seconds', label: 'Start time (epoch s)', hint: '1787664180', group: 'Timing' },
-  { key: 'perfana-end-epoch-milliseconds', label: 'End time (epoch ms)', hint: '1787665980000', group: 'Timing' },
-  { key: 'perfana-end-epoch-seconds', label: 'End time (epoch s)', hint: '1787665980', group: 'Timing' },
 
   {
     key: 'perfana-previous-test-run-id',
     label: 'Previous test run ID',
     hint: 'The run before this one, same system/environment/workload',
+    group: 'Comparison',
+  },
+  {
+    key: 'perfana-previous-start-datetime',
+    label: 'Previous start time',
+    hint: 'e.g. 24 August 2026, 14:03 UTC',
+    group: 'Comparison',
+  },
+  {
+    key: 'perfana-previous-end-datetime',
+    label: 'Previous end time',
+    hint: 'e.g. 24 August 2026, 14:33 UTC',
+    group: 'Comparison',
+  },
+  {
+    key: 'perfana-previous-application-release',
+    label: 'Previous application release',
+    hint: 'Release of the previous run, if recorded',
     group: 'Comparison',
   },
 ] as const;
@@ -156,8 +166,16 @@ export function escapeMarkdownValue(value: string): string {
   return value.replace(/([\\`*_{}[\]()#+\-.!|>~])/g, '\\$1');
 }
 
-/** Keys the API resolves with a query rather than from the test run row. */
-export const REPORT_VARIABLES_NEEDING_LOOKUP = ['perfana-previous-test-run-id'] as const;
+/**
+ * Keys the API resolves with a query rather than from the test run row — the whole
+ * Comparison group, all four answered by the same previous-run lookup.
+ */
+export const REPORT_VARIABLES_NEEDING_LOOKUP = [
+  'perfana-previous-test-run-id',
+  'perfana-previous-start-datetime',
+  'perfana-previous-end-datetime',
+  'perfana-previous-application-release',
+] as const;
 
 /** Shape the resolver needs — a TestRun satisfies it structurally. */
 export interface ReportVariableSource {
@@ -203,23 +221,6 @@ function readableUtc(d: Date | null): string {
   );
 }
 
-/**
- * ISO 8601 at the server's UTC offset, seconds precision — the same value the
- * deep-link resolver produces, minus the `%2B` encoding (see the file header).
- */
-function iso8601Offset(d: Date | null): string {
-  if (!d) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const offsetMinutes = -d.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const abs = Math.abs(offsetMinutes);
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
-    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
-  );
-}
-
 function humanDuration(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '';
   const total = Math.max(0, Math.round(seconds));
@@ -241,9 +242,6 @@ export function buildReportVariableValues(run: ReportVariableSource | null | und
   // same sentence in a live report reads as elapsed-so-far rather than blank.
   const end = toDate(r.endTime) ?? (r.completed ? null : new Date());
 
-  const epoch = (d: Date | null, unit: 'ms' | 's') =>
-    d ? String(unit === 'ms' ? d.getTime() : Math.round(d.getTime() / 1000)) : '';
-
   return {
     'perfana-system-under-test': r.systemUnderTest?.name ?? '',
     'perfana-test-environment': r.testEnvironment ?? '',
@@ -256,14 +254,25 @@ export function buildReportVariableValues(run: ReportVariableSource | null | und
     'perfana-start-datetime': readableUtc(start),
     'perfana-end-datetime': readableUtc(end),
     'perfana-duration': humanDuration(r.duration),
-    'perfana-start-iso8601-utc': start ? start.toISOString() : '',
-    'perfana-end-iso8601-utc': end ? end.toISOString() : '',
-    'perfana-start-iso8601-offset': iso8601Offset(start),
-    'perfana-end-iso8601-offset': iso8601Offset(end),
-    'perfana-start-epoch-milliseconds': epoch(start, 'ms'),
-    'perfana-start-epoch-seconds': epoch(start, 's'),
-    'perfana-end-epoch-milliseconds': epoch(end, 'ms'),
-    'perfana-end-epoch-seconds': epoch(end, 's'),
+  };
+}
+
+/**
+ * The Comparison group's values, from the previous run the API looked up.
+ *
+ * Lives here rather than in the compiler so the readable-UTC spelling is the one
+ * the reported run's own timestamps use — two formatters would drift, and the two
+ * dates sit in the same sentence.
+ */
+export function buildPreviousRunVariableValues(
+  previous: ReportVariableSource | null | undefined,
+): Record<string, string> {
+  if (!previous) return {};
+  return {
+    'perfana-previous-test-run-id': previous.testRunId ?? '',
+    'perfana-previous-start-datetime': readableUtc(toDate(previous.startTime)),
+    'perfana-previous-end-datetime': readableUtc(toDate(previous.endTime)),
+    'perfana-previous-application-release': previous.applicationRelease ?? '',
   };
 }
 

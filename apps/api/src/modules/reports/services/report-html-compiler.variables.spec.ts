@@ -168,6 +168,24 @@ describe('ReportHtmlCompilerService variable substitution', () => {
     expect(findPreviousRun.mock.calls[0][0].where.startTime).toBeDefined();
   });
 
+  it('resolves the previous run\'s timestamps and release from the same lookup', async () => {
+    findPreviousRun.mockResolvedValue({
+      testRunId: 'run-41',
+      startTime: new Date('2026-08-24T14:03:00.000Z'),
+      endTime: new Date('2026-08-24T14:33:00.000Z'),
+      applicationRelease: '1.4.2',
+    });
+    const html = await service.renderSections(
+      [section({ type: 'text_block', config: { content:
+        'from {perfana-previous-start-datetime} to {perfana-previous-end-datetime} on {perfana-previous-application-release}' } })],
+      testRun,
+      null,
+    );
+    expect(html).toContain('from 24 August 2026, 14:03 UTC to 24 August 2026, 14:33 UTC on 1.4.2');
+    // One query answers all four Comparison keys.
+    expect(findPreviousRun).toHaveBeenCalledTimes(1);
+  });
+
   it('leaves the previous-run placeholder when the previous run is this one', async () => {
     findPreviousRun.mockResolvedValue({ testRunId: 'run-42' });
     const html = await service.renderSections(

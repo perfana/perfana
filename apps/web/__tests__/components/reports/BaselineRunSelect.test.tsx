@@ -15,6 +15,7 @@ import '@testing-library/jest-dom';
 import {
   BaselineRunSelect,
   PREVIOUS_RUN_BASELINE,
+  PREVIOUS_SUCCESSFUL_RUN_BASELINE,
   type BaselineCandidate,
 } from '@/components/reports/report-generation/BaselineRunSelect';
 
@@ -39,7 +40,9 @@ describe('BaselineRunSelect previous-run option', () => {
     const options = within(openDropdown()).getAllByRole('option');
     expect(options[0]).toHaveTextContent('Previous run');
     expect(options[0]).toHaveTextContent(/never goes stale/i);
-    expect(options[1]).toHaveTextContent('EA-acc-loadtest-00019');
+    expect(options[1]).toHaveTextContent('Previous successful run (SLOs passed)');
+    expect(options[1]).toHaveTextContent(/service level objectives/i);
+    expect(options[2]).toHaveTextContent('EA-acc-loadtest-00019');
   });
 
   it('is offered even when the system has no other runs to pin', () => {
@@ -48,8 +51,35 @@ describe('BaselineRunSelect previous-run option', () => {
     render(<BaselineRunSelect candidates={[]} onChange={jest.fn()} />);
 
     const options = within(openDropdown()).getAllByRole('option');
-    expect(options).toHaveLength(1);
+    expect(options).toHaveLength(2);
     expect(options[0]).toHaveTextContent('Previous run');
+    expect(options[1]).toHaveTextContent('Previous successful run (SLOs passed)');
+  });
+
+  it('hands the caller the SLO-passed sentinel from the second option', () => {
+    const onChange = jest.fn();
+    render(<BaselineRunSelect candidates={[candidate()]} onChange={onChange} />);
+
+    fireEvent.click(within(openDropdown()).getAllByRole('option')[1]!);
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ test_run_id: PREVIOUS_SUCCESSFUL_RUN_BASELINE }),
+    );
+  });
+
+  it('explains what "previous successful" resolves to instead of naming a run', () => {
+    render(
+      <BaselineRunSelect
+        candidates={[candidate()]}
+        value={PREVIOUS_SUCCESSFUL_RUN_BASELINE}
+        onChange={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('combobox')).toHaveValue('Previous successful run (SLOs passed)');
+    expect(
+      screen.getByText('Each report compares against the last run that passed its SLOs'),
+    ).toBeInTheDocument();
   });
 
   it('hands the caller the sentinel the API resolves per report', () => {

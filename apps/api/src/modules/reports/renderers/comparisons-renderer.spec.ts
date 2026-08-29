@@ -321,6 +321,31 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('1 warnings'); // shared summary chip
   });
 
+  it('suffixes the row values with the panel unit, converting percentunit to percent', async () => {
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / Heap', dashboardLabel: 'JVM', panelTitle: 'Heap', label: 'heap used', unit: 'ms',
+        metrics: [{ key: 'avg', current: 1200.456, baseline: 1000, diffPercent: 20 }] },
+      { group: 'JVM / CPU', dashboardLabel: 'JVM', panelTitle: 'CPU', label: 'cpu', unit: 'percentunit',
+        metrics: [{ key: 'avg', current: 0.42, baseline: 0.4, diffPercent: 5 }] },
+      { group: 'JVM / Threads', dashboardLabel: 'JVM', panelTitle: 'Threads', label: 'threads', unit: null,
+        metrics: [{ key: 'avg', current: 12, baseline: 12, diffPercent: 0 }] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('1,200.46 ms');
+    expect(html).toContain('vs 1,000 ms');
+    // 0.0-1.0 is read as a percentage, and % hugs the number.
+    expect(html).toContain('42%');
+    expect(html).not.toContain('0.42');
+    // A row with no recorded unit is left exactly as it rendered before.
+    expect(html).toContain('>12<');
+  });
+
   it('shows a Current → Baseline caption when a dashboard mapping is in effect', async () => {
     const data = { source: 'grafana', rows: [
       { group: 'JVM (acc) / Heap', dashboardLabel: 'JVM (acc)', panelTitle: 'Heap', label: 'heap used', metrics: [
@@ -687,6 +712,30 @@ describe('ComparisonsRenderer previous-run baseline', () => {
     expect(dataFetcher.getBaselineRunComparison).not.toHaveBeenCalled();
     expect(html).toContain('first run for its system, environment and workload');
   });
+
+  it('asks for an SLO-passed predecessor when the baseline is "previous-successful"', async () => {
+    await renderer.renderComparisonsSection(sectionWith('previous-successful'), makeTestRun());
+
+    expect(dataFetcher.getPreviousTestRun).toHaveBeenCalledWith(
+      expect.anything(),
+      { sloPassedOnly: true },
+    );
+    const [, baselineId] = dataFetcher.getBaselineRunComparison.mock.calls[0]!;
+    expect(baselineId).toBe('EA-acc-loadtest-00019');
+  });
+
+  it('says no earlier run passed its SLOs, rather than "first run in its scope"', async () => {
+    // Two different facts; the plain-previous wording would send the reader looking
+    // for runs that do exist.
+    dataFetcher.getPreviousTestRun.mockResolvedValue(null);
+
+    const html = await renderer.renderComparisonsSection(
+      sectionWith('previous-successful'), makeTestRun());
+
+    expect(html).toContain('passed its SLOs');
+    expect(html).not.toContain('first run for its system');
+  });
+
   it('resolves "previous" for a config that still carries the old comparisonMode key', async () => {
     // Sections saved before the mode switch was removed keep the key; it must simply be ignored.
     await renderer.renderComparisonsSection(

@@ -947,6 +947,8 @@ export class ReportDataFetcherService {
         dashboardLabel: sel.dashboardLabel,
         panelTitle: perfPanelTitle(sel.panelId ?? null, ''),
         label: ALL_AGGREGATED_SERIES,
+        // Both aggregate kinds are response times.
+        unit: 'ms',
         metrics: opts.metrics.map((k) => ({
           key: k, current: cur[k], baseline: base[k], diffPercent: percentDiff(cur[k], base[k]),
         })),
@@ -1855,8 +1857,11 @@ export class ReportDataFetcherService {
    * Scope and completed-only match the baseline dropdown in the UI (getBaselineCandidates), so
    * "previous" resolves to the run a person would have picked from the top of that list.
    */
-  async getPreviousTestRun(testRun: TestRun): Promise<TestRun | null> {
-    return withRequestEm(this.testRunRepo)
+  async getPreviousTestRun(
+    testRun: TestRun,
+    opts: { sloPassedOnly?: boolean } = {},
+  ): Promise<TestRun | null> {
+    const qb = withRequestEm(this.testRunRepo)
       .createQueryBuilder('tr')
       .where('tr.systemUnderTestId = :systemUnderTestId', {
         systemUnderTestId: testRun.systemUnderTestId,
@@ -1871,8 +1876,15 @@ export class ReportDataFetcherService {
       // report is generated for anything but the newest.
       .andWhere('tr.startTime < :startTime', { startTime: testRun.startTime })
       .orderBy('tr.startTime', 'DESC')
-      .limit(1)
-      .getOne();
+      .limit(1);
+    // "SLOs passed" is consolidated_result.meetsRequirement — the same field the
+    // notifications call "Service Level Objectives". A run that never had its
+    // requirements evaluated has no key at all, so `= 'true'` skips it, which is
+    // what "known good" has to mean here.
+    if (opts.sloPassedOnly) {
+      qb.andWhere(`tr.consolidatedResult ->> 'meetsRequirement' = 'true'`);
+    }
+    return qb.getOne();
   }
 
 
@@ -2750,6 +2762,7 @@ export class ReportDataFetcherService {
           dashboardLabel: sel.dashboardLabel,
           panelTitle: spec.title,
           label: url,
+          unit: spec.unit,
           metrics: opts.metrics.map((k) => {
             const cv = pick(c, k);
             const bv = pick(b, k);
@@ -2849,6 +2862,8 @@ export class ReportDataFetcherService {
         return {
           group: c.scenario_name ?? 'default',
           label: c.transaction_name,
+          // transactions.response_time is milliseconds.
+          unit: 'ms',
           metrics: opts.metrics.map((k) => {
             const cv = num(c[fieldByKey[k]]);
             const bv = b != null ? num(b[fieldByKey[k]]) : null;
@@ -2971,6 +2986,7 @@ export class ReportDataFetcherService {
         dashboardLabel: c.dashboard_label ?? 'Other',
         panelTitle,
         ...(c.metric_name && urlByMetricName[c.metric_name] ? { url: urlByMetricName[c.metric_name] } : {}),
+        unit: c.unit,
         metrics: opts.metrics.map((k) => {
           const cv = c[fieldByKey[k]];
           const bv = b ? b[fieldByKey[k]] : null;

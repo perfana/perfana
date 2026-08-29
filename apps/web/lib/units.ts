@@ -101,6 +101,24 @@ const formatNumber = (value: number): string => {
   }
 };
 
+/**
+ * `percentunit` is stored 0.0-1.0 but always read as 0-100%. Every other unit is
+ * already in the scale it is displayed in.
+ */
+export const toUnitScale = (value: number, unitId?: string): number =>
+  (unitId === 'percentunit' ? value * 100 : value);
+
+/**
+ * Append a unit's suffix to an already-formatted number, so a caller keeps its own
+ * number formatting (thousands grouping, em-dash for null) and only gains the unit.
+ * `%` hugs the number; everything else is spaced.
+ */
+export const withUnitSuffix = (formatted: string, unitId?: string): string => {
+  const { format } = getUnit(unitId);
+  if (!format) return formatted;
+  return unitId === 'percent' || unitId === 'percentunit' ? `${formatted}${format}` : `${formatted} ${format}`;
+};
+
 export const formatValueWithUnit = (value: number | string | null | undefined, unitId?: string): string => {
   // Handle null, undefined, or empty values
   if (value === null || value === undefined || value === '') {

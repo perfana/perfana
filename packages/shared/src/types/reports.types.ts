@@ -783,6 +783,16 @@ export function getReportStatusLabel(status: ReportStatus): string {
 export const PREVIOUS_RUN_BASELINE = 'previous';
 
 /**
+ * Same idea as PREVIOUS_RUN_BASELINE, but skips back to the most recent earlier run whose
+ * SLOs passed (`consolidated_result.meetsRequirement`).
+ *
+ * The plain previous run is whatever ran last, failures included — and comparing against a
+ * run that already breached its objectives makes a still-broken report look flat. This one
+ * always compares against a run that was known good.
+ */
+export const PREVIOUS_SUCCESSFUL_RUN_BASELINE = 'previous-successful';
+
+/**
  * Most sections one report may contain.
  *
  * The builder enforces this while composing, and the ad-hoc generate DTO enforces it at the

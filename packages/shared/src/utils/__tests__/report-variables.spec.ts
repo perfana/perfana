@@ -4,6 +4,7 @@ import {
   isSecretishConfigKey,
   isSecretishConfigValue,
   escapeMarkdownValue,
+  buildPreviousRunVariableValues,
   buildReportVariableValues,
   substituteReportVariables,
 } from '../report-variables';
@@ -35,21 +36,12 @@ describe('report variables', () => {
     expect(values['perfana-tags']).toBe('a, b');
   });
 
-  it('covers the deep-link timing vocabulary', () => {
+  it('offers no machine timestamp spellings — report prose is read, not parsed', () => {
     const values = buildReportVariableValues(run);
-    expect(values['perfana-start-epoch-milliseconds']).toBe('1787666580000');
-    expect(values['perfana-start-epoch-seconds']).toBe('1787666580');
-    expect(values['perfana-end-epoch-milliseconds']).toBe('1787668380000');
-    // Offset form matches the deep-link resolver except for the URL-encoded '+'.
-    // Asserted as an instant, not as a literal local date: the value is rendered in
-    // the RUNNER's timezone, so a hardcoded 2026-08-25 fails for anyone at +10 or
-    // beyond, where 14:03Z has already rolled over to the 26th.
-    expect(values['perfana-start-iso8601-offset']).toMatch(
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00[+-]\d{2}:\d{2}$/,
-    );
-    expect(new Date(values['perfana-start-iso8601-offset']!).toISOString()).toBe(
-      '2026-08-25T14:03:00.000Z',
-    );
+    for (const key of Object.keys(values)) {
+      expect(key).not.toMatch(/epoch|iso8601/);
+    }
+    expect(REPORT_VARIABLES.some((v) => /epoch|iso8601/.test(v.key))).toBe(false);
   });
 
   it('has no value for keys the API resolves with a query', () => {
@@ -144,8 +136,7 @@ describe('report variables', () => {
   it('formats the helper edges', () => {
     const empty = buildReportVariableValues({ completed: true });
     expect(empty['perfana-start-datetime']).toBe('');
-    expect(empty['perfana-start-iso8601-offset']).toBe('');
-    expect(empty['perfana-start-epoch-milliseconds']).toBe('');
+    expect(empty['perfana-end-datetime']).toBe('');
     expect(empty['perfana-duration']).toBe('');
     expect(empty['perfana-tags']).toBe('');
     // An unparseable date is dropped, not rendered as "Invalid Date".
@@ -174,12 +165,36 @@ describe('report variables', () => {
 
     it('reads end-time as now, so a live report says elapsed-so-far', () => {
       const v = buildReportVariableValues({ completed: false, startTime: new Date('2026-08-25T14:03:00.000Z') });
-      expect(v['perfana-end-iso8601-utc']).toBe('2026-08-25T14:33:00.000Z');
+      expect(v['perfana-end-datetime']).toBe('25 August 2026, 14:33 UTC');
     });
 
     it('leaves end-time blank for a completed run that never recorded one', () => {
       const v = buildReportVariableValues({ completed: true, endTime: null });
-      expect(v['perfana-end-iso8601-utc']).toBe('');
+      expect(v['perfana-end-datetime']).toBe('');
+    });
+  });
+
+  describe('the previous run the API looks up', () => {
+    it('resolves every Comparison key the catalogue publishes', () => {
+      const v = buildPreviousRunVariableValues({
+        testRunId: 'run-2026-08-24-01',
+        startTime: new Date('2026-08-24T14:03:00.000Z'),
+        endTime: new Date('2026-08-24T14:33:00.000Z'),
+        applicationRelease: '1.4.2',
+      });
+      expect(v).toEqual({
+        'perfana-previous-test-run-id': 'run-2026-08-24-01',
+        'perfana-previous-start-datetime': '24 August 2026, 14:03 UTC',
+        'perfana-previous-end-datetime': '24 August 2026, 14:33 UTC',
+        'perfana-previous-application-release': '1.4.2',
+      });
+      for (const key of REPORT_VARIABLES_NEEDING_LOOKUP) {
+        expect(v[key]).toBeDefined();
+      }
+    });
+
+    it('resolves nothing at all when there is no previous run', () => {
+      expect(buildPreviousRunVariableValues(null)).toEqual({});
     });
   });
 });

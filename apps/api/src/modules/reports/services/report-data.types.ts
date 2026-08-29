@@ -235,6 +235,11 @@ export interface BaselineComparisonRow {
   panelTitle?: string;
   /** Normalized URL behind a request row (Request RT panels only) — shown as sub-text under the label. */
   url?: string;
+  /**
+   * Grafana unit code for this row's values (`ms`, `percent`, `reqps`, …), so the report
+   * prints "412 ms" rather than a bare number. Absent when the source never recorded one.
+   */
+  unit?: string | null;
   metrics: {        // one entry per selected metric key
     key: 'avg' | 'p90' | 'p95' | 'p99';
     current: number | null;

@@ -1,5 +1,19 @@
 import { RelatedTestRun, CompareSeries, MetricComparison } from '../types/compare.types';
 import { DiffThresholds } from './compare-bands';
+import { toUnitScale, withUnitSuffix } from '@/lib/units';
+
+/**
+ * Format a comparison value for display: grouped thousands, at most 2 decimals,
+ * plus the panel's own unit ("1,200.46 ms") so the number is not left to be guessed at.
+ */
+export const formatCompareNumber = (
+  value: number | null | undefined,
+  panelYAxesFormat?: string,
+): string => {
+  if (value === null || value === undefined) return 'N/A';
+  const scaled = toUnitScale(value, panelYAxesFormat);
+  return withUnitSuffix(scaled.toLocaleString(undefined, { maximumFractionDigits: 2 }), panelYAxesFormat);
+};
 
 /**
  * Calculate percentage difference between current and baseline values
@@ -12,36 +26,6 @@ export const calculatePercentageDifference = (
     return null;
   }
   return ((current - selected) / selected) * 100;
-};
-
-/**
- * Apply unit conversion based on panel format
- */
-export const applyUnitConversion = (
-  value: number | null | undefined,
-  panelYAxesFormat?: string
-): number | null => {
-  if (value === null || value === undefined) return null;
-
-  // If unit is 'percentunit' convert to percentage
-  if (panelYAxesFormat === 'percentunit') {
-    return value * 100;
-  }
-
-  return value;
-};
-
-/**
- * Format number for display
- */
-export const formatCompareNumber = (
-  value: number | null | undefined,
-  panelYAxesFormat?: string
-): string => {
-  if (value === null || value === undefined) return 'N/A';
-  const convertedValue = applyUnitConversion(value, panelYAxesFormat);
-  if (convertedValue === null) return 'N/A';
-  return convertedValue.toLocaleString(undefined, { maximumFractionDigits: 2 });
 };
 
 /**

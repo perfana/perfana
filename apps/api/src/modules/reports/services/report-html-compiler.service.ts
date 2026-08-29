@@ -9,6 +9,7 @@ import {
   GeneratedReport,
   assignSectionAnchors,
   isLinkableSection,
+  buildPreviousRunVariableValues,
   buildReportVariableValues,
   substituteReportVariables,
   hasReportVariable,
@@ -223,7 +224,7 @@ export class ReportHtmlCompilerService {
   /**
    * The two variable groups that are a query rather than a column: this test run's
    * configuration keys (deep links resolve these too, under the author's own key
-   * name) and the previous run's id.
+   * name) and the previous run's id, timestamps and release.
    *
    * No org filtering here on purpose. `testRun` was already resolved and access-
    * checked by the caller — previewSection through isTestRunAccessible, generation
@@ -296,13 +297,13 @@ export class ReportHtmlCompilerService {
             // sentence reading "compared to <a later run>" is not.
             ...(testRun.startTime ? { startTime: LessThan(testRun.startTime) } : {}),
           },
-          select: ['testRunId'],
+          select: ['testRunId', 'startTime', 'endTime', 'applicationRelease'],
           order: { startTime: 'DESC' },
         });
         // A run with no start time falls back to the deep-link behaviour, so still
         // guard against naming the report's own run.
         if (previous?.testRunId && previous.testRunId !== testRun.testRunId) {
-          values['perfana-previous-test-run-id'] = previous.testRunId;
+          Object.assign(values, buildPreviousRunVariableValues(previous));
         }
       } catch (error) {
         this.logger.warn(`Could not resolve previous test run: ${(error as Error).message}`);
