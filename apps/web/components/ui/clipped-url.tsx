@@ -61,6 +61,9 @@ function UrlViewer({ url }: { url: string }) {
   );
 }
 
+/** ponytail: one fixed cap for every table; make it a prop if a caller ever needs a wider one. */
+const URL_MAX_WIDTH_PX = 360;
+
 interface ClippedUrlProps {
   url: string;
   /** MUI Typography variant for the clipped text (default 'caption'). */
@@ -71,10 +74,17 @@ interface ClippedUrlProps {
   sx?: SxProps<Theme>;
 }
 
-/** Single-line, ellipsis-clipped URL followed by a UrlViewer icon (full URL + copy). */
+/**
+ * Single-line, ellipsis-clipped URL followed by a UrlViewer icon (full URL + copy).
+ *
+ * The hard maxWidth is what actually keeps the clipping honest: inside an auto-layout table a
+ * nowrap cell contributes its full text width to the column, so `text-overflow: ellipsis` alone
+ * lets one long URL widen the table until the measurement columns are pushed off screen. An
+ * explicit max-width caps that intrinsic contribution; the eye icon is where the full URL lives.
+ */
 export function ClippedUrl({ url, variant = 'caption', color = 'text.secondary', sx }: ClippedUrlProps) {
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0, maxWidth: URL_MAX_WIDTH_PX }}>
       <Typography
         variant={variant}
         color={color}
