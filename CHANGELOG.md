@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.87.1] - 2026-08-29
+
+### Fixed
+- **The URL column now uses the space it has.** 0.2.87.0 stopped a long URL from widening the table by capping it at a fixed 360 pixels, which was the wrong instrument: in the top-10 lists that cut the URL off while most of a very wide column sat empty. The cap is gone. The limit now lives on the table cell instead, where it can be expressed as "take whatever the other columns did not claim" rather than as a guessed number of pixels, so a URL is shown in full when there is room and truncated only when there genuinely is not. The eye icon still shows the whole URL with a copy button.
+- The 0.2.87.0 release did not update the VERSION file — the bump was written to the wrong path and the CHANGELOG went out on its own. VERSION now names this release.
+
 ## [0.2.87.0] - 2026-08-29
 
 ### Added
