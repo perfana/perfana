@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.87.0] - 2026-08-29
+
+### Added
+- **A system under test can now be imported in several parts.** Exporting a system with hundreds of test runs in one go is impractical, but importing a second bundle for a system that was already here was refused outright: "SUT already exists — delete it first". Import now merges instead. Rows that are already present are left exactly as they are and each bundle contributes only what it carries, so you can export a few runs at a time and import them one after another, in any order, and replay a bundle you are not sure landed. The import summary now says per table how many rows were added, how many were already present, and how many were skipped for a missing parent, and it tells you when it merged into a system that was already here.
+- **The export dialog shows what it is doing.** Exporting a large system looked like the application had hung: the button spinner was the only sign of life, and the export can take minutes. The dialog now shows a progress bar and, once bytes start arriving, how much of the bundle has been downloaded. It also distinguishes the two phases, because they fail differently — collecting the data on the server, then downloading it. There is a Cancel button: cancelling closes the connection, and the server stops querying rather than finishing an export nobody is reading.
+- **Apdex SLO scenario groups can be collapsed**, and start collapsed when a result covers more than one scenario, so a run with several scenarios opens as a short index of scenario headers instead of pages of transactions. A single scenario has nothing to index and stays open. The headers work by keyboard as well as by mouse.
+
+### Fixed
+- **A long URL no longer pushes the measurements off the scenario table.** One request with a very long URL widened its column until the response times and percentiles were out of view. The URL is now capped and truncated, and the eye icon beside it still shows the full URL with a copy button. The same fix covers the top-10 lists, the errors table, the Apdex request breakdown and the compare table.
+- **Exports no longer sit silent long enough for a proxy to hang up on them.** The bundle is gzipped as it streams, and gzip holds its output until roughly 16 kB has built up, so a slow export sent nothing for long stretches. A reverse proxy in front of the API reads that as an idle connection and applies its own timeout — nginx gives up after 60s by default. The stream is now flushed every two seconds, which also means the download counter starts moving early.
+- **A cancelled export is no longer recorded as a failure**, and no longer leaves the server working. Cancelling now tears down the query feeding the export instead of leaving it to fill a buffer nobody drains, which previously left the export stalled on an open database cursor until the connection dropped.
+
+### Security
+- **Importing a bundle can no longer split one system across two organizations.** Because the existing system row is kept as it is on a merge while the incoming rows are moved to the organization you selected, importing into a different organization would have left the system in one and its new test runs in the other — where neither organization could see them, since row-level security reads the run's own organization and the application reads the system's. The import now refuses this and names the organization the system is already in. The same check catches a different system that already holds this name in the target organization, which would otherwise have failed with an unexplained database error part-way through.
+- **A test run key that already belongs to a different run is now refused.** Run keys are unique across the whole environment and are generated from the system, environment and workload, so two environments running the same suite produce the same key under different ids. Merging one onto the other would have written the incoming run's metrics, samples and check results onto an unrelated run and deleted that run's analysis first. The import stops and names the keys instead.
+
 ## [0.2.86.1] - 2026-08-28
 
 ### Fixed

@@ -1,15 +1,46 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  Button, Typography, Box, CircularProgress, Alert,
+  Button, Typography, Box, CircularProgress, LinearProgress, Alert,
   Checkbox, FormControlLabel, FormGroup, List, ListItem, ListItemButton, ListItemText,
   Divider,
 } from '@mui/material';
 import { FileDownload as FileDownloadIcon } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
+
+/**
+ * The export is a piped gzip stream with no Content-Length, so there is no percentage to show —
+ * only how much has arrived. Reading it chunk by chunk (instead of response.blob()) is what turns
+ * a dialog that looks hung into one that visibly counts up.
+ */
+export async function readWithProgress(response: Response, onBytes: (bytes: number) => void): Promise<Blob> {
+  if (!response.body) return response.blob(); // no streams (old browser / jsdom) — fall back
+  const reader = response.body.getReader();
+  const chunks: BlobPart[] = [];
+  let total = 0;
+  let reported = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value as BlobPart);
+    total += value.byteLength;
+    // ponytail: 256 kB step keeps a 1 GB export at ~4k renders instead of ~16k chunk renders.
+    if (total - reported >= 256 * 1024) {
+      reported = total;
+      onBytes(total);
+    }
+  }
+  onBytes(total);
+  return new Blob(chunks);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 interface TestRunRow {
   id: string;
@@ -33,6 +64,8 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
   const [includeRaw, setIncludeRaw] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportedBytes, setExportedBytes] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchRuns = useCallback(async () => {
     setRunsLoading(true);
@@ -65,10 +98,15 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
     }
   }, [systemName]);
 
+  // Navigating away mid-export would otherwise leave the request — and the server-side cursor
+  // feeding it — running until the socket happens to close.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   useEffect(() => {
     if (open) {
       setSelected(new Set());
       setExportError(null);
+      setExportedBytes(0);
       setIncludeOptional(true);
       setIncludeRaw(false);
       fetchRuns();
@@ -92,11 +130,15 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
   };
 
   const handleExport = async () => {
+    const controller = new AbortController();
+    abortRef.current = controller;
     setExporting(true);
     setExportError(null);
+    setExportedBytes(0);
     try {
       const response = await authenticatedFetch(`/systems-under-test/${systemId}/export`, {
         method: 'POST',
+        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           testRunIds: Array.from(selected),
@@ -108,7 +150,7 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
         const body = await response.json().catch(() => null);
         throw new Error(body?.message || `Export failed: ${response.statusText}`);
       }
-      const blob = await response.blob();
+      const blob = await readWithProgress(response, setExportedBytes);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -119,14 +161,27 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
       URL.revokeObjectURL(url);
       onClose();
     } catch (err) {
-      setExportError(
-        err && typeof err === 'object' && 'message' in err
-          ? (err as Error).message
-          : 'Failed to export system',
-      );
+      // A cancel is a choice, not a failure — abort surfaces here as an AbortError. Read `name`
+      // off the value rather than gating on `instanceof Error`: jsdom's DOMException does not
+      // inherit from Error, so the instanceof form makes the cancel path untestable.
+      if ((err as { name?: string } | undefined)?.name !== 'AbortError') {
+        setExportError(
+          err && typeof err === 'object' && 'message' in err
+            ? (err as Error).message
+            : 'Failed to export system',
+        );
+      }
     } finally {
+      abortRef.current = null;
       setExporting(false);
     }
+  };
+
+  /* Aborting closes the socket, which the API turns into a stream teardown — the server stops
+     querying too, rather than finishing an export nobody is reading. */
+  const handleCancel = () => {
+    if (exporting) abortRef.current?.abort();
+    else onClose();
   };
 
   const allSelected = runs.length > 0 && selected.size === runs.length;
@@ -147,6 +202,18 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
 
         {runsError && <Alert severity="error" sx={{ mb: 2 }}>{runsError}</Alert>}
         {exportError && <Alert severity="error" sx={{ mb: 2 }}>{exportError}</Alert>}
+
+        {exporting && (
+          <Box sx={{ mb: 2 }}>
+            <LinearProgress />
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              {exportedBytes === 0
+                ? 'Collecting data on the server… this can take a while for large test runs.'
+                : `Downloading bundle… ${formatBytes(exportedBytes)} received.`}
+              {' '}You can cancel at any time.
+            </Typography>
+          </Box>
+        )}
 
         {!runsLoading && !runsError && (
           <>
@@ -223,8 +290,8 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={onClose} disabled={exporting}>
-          Cancel
+        <Button onClick={handleCancel} color={exporting ? 'error' : 'primary'}>
+          {exporting ? 'Cancel export' : 'Cancel'}
         </Button>
         <Button
           onClick={handleExport}
