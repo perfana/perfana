@@ -27,7 +27,7 @@ import {
 import FancyChip from '../../../shared/FancyChip';
 import { ErrorByTransaction, ErrorByTransactionGroup } from '../types';
 import { groupErrorsByTransactionSampler } from '../utils/error-formatters';
-import { ClippedUrl } from '@/components/ui/clipped-url';
+import { ClippedUrl, URL_CELL_SX } from '@/components/ui/clipped-url';
 
 interface ErrorsTableProps {
   errorsByTransaction: ErrorByTransaction[];
@@ -116,7 +116,7 @@ function GroupRow({
                       <TableCell>
                         <FancyChip label={child.responseCode || 'N/A'} colorTheme="red" />
                       </TableCell>
-                      <TableCell sx={{ maxWidth: 320 }}>
+                      <TableCell sx={URL_CELL_SX}>
                         {child.url ? (
                           <ClippedUrl url={child.url} variant="body2" sx={{ fontSize: '0.75rem' }} />
                         ) : (

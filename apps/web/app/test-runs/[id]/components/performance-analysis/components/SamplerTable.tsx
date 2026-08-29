@@ -32,7 +32,7 @@ import {
   SamplerSection,
 } from '../utils/controller-sections';
 import { TABLE_HEADER_CELL_SX } from '../utils/table-header-style';
-import { ClippedUrl } from '@/components/ui/clipped-url';
+import { ClippedUrl, URL_CELL_SX } from '@/components/ui/clipped-url';
 
 /** Width of one nesting level, and of the guide line drawn at that level. */
 const INDENT_PX = 16;
@@ -121,7 +121,7 @@ function SamplerRow({
       {/* The guides live inside the name cell, not as a border on it: a border would stop at
           the cell edge, while these run the full height of the row and line up with the band
           header above. */}
-      <TableCell component="th" scope="row" sx={{ fontWeight: 500, pl: 1, pr: 2 }}>
+      <TableCell component="th" scope="row" sx={{ fontWeight: 500, pl: 1, pr: 2, ...URL_CELL_SX }}>
         <Box sx={{ display: 'flex', alignItems: 'stretch', minWidth: 0 }}>
           <Guides colors={ancestors} />
           <Box sx={{ minWidth: 0, pl: ancestors.length > 0 ? 1.5 : 1 }}>

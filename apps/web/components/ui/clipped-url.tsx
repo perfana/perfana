@@ -61,8 +61,17 @@ function UrlViewer({ url }: { url: string }) {
   );
 }
 
-/** ponytail: one fixed cap for every table; make it a prop if a caller ever needs a wider one. */
-const URL_MAX_WIDTH_PX = 360;
+/**
+ * Put this on the TableCell that holds a URL.
+ *
+ * `maxWidth: 0` is the part that fixes the layout: in an auto-layout table a nowrap cell reports
+ * its full text width as the column's intrinsic width, so one long URL widens the table until the
+ * measurements are pushed off screen — `text-overflow: ellipsis` never gets a chance to apply.
+ * Declaring a max-width replaces that contribution, and 0 removes it entirely. `width: '100%'`
+ * then hands the column all the space the other columns did not claim, so the URL truncates to
+ * the real available width rather than to some guessed pixel count.
+ */
+export const URL_CELL_SX = { maxWidth: 0, width: '100%' } as const;
 
 interface ClippedUrlProps {
   url: string;
@@ -77,14 +86,13 @@ interface ClippedUrlProps {
 /**
  * Single-line, ellipsis-clipped URL followed by a UrlViewer icon (full URL + copy).
  *
- * The hard maxWidth is what actually keeps the clipping honest: inside an auto-layout table a
- * nowrap cell contributes its full text width to the column, so `text-overflow: ellipsis` alone
- * lets one long URL widen the table until the measurement columns are pushed off screen. An
- * explicit max-width caps that intrinsic contribution; the eye icon is where the full URL lives.
+ * This fills whatever width its container gives it and imposes no cap of its own — a fixed pixel
+ * cap here would truncate mid-URL while most of a wide column sat empty. Constraining is the
+ * cell's job: put `URL_CELL_SX` on the TableCell.
  */
 export function ClippedUrl({ url, variant = 'caption', color = 'text.secondary', sx }: ClippedUrlProps) {
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0, maxWidth: URL_MAX_WIDTH_PX }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0, width: '100%' }}>
       <Typography
         variant={variant}
         color={color}
