@@ -383,6 +383,10 @@ export class AdaptValidator {
     // (baseline has data but under a different source — e.g. scenario/workload naming
     // differs between ingestion paths) from "baseline too short/aborted" (no data at all).
     const statCountMap = new Map<string, number>();
+    // Count per-run metric statistics for the control runs to distinguish
+    // "the baseline aggregation failed" (#552 — baseline has stats, the pooled
+    // control-group aggregation timed out) from "baseline too short/aborted".
+    const metricStatCountMap = new Map<string, number>();
     if (emptyControlGroups.length > 0) {
       const cgPlaceholders = emptyControlGroups.map((_: string, i: number) => `$${i + 1}`).join(', ');
       const cgRows = await manager.query(
@@ -401,6 +405,17 @@ export class AdaptValidator {
       );
       for (const row of statRows) {
         statCountMap.set(row.control_group_id, row.stat_count);
+      }
+      const metricStatRows = await manager.query(
+        `SELECT cg.control_group_id, COUNT(*)::int AS metric_stat_count
+         FROM ds_control_groups cg
+         JOIN ds_metric_statistics ms ON ms.test_run_id = ANY(cg.test_runs)
+         WHERE cg.control_group_id IN (${cgPlaceholders})
+         GROUP BY cg.control_group_id`,
+        emptyControlGroups
+      );
+      for (const row of metricStatRows) {
+        metricStatCountMap.set(row.control_group_id, row.metric_stat_count);
       }
     }
 
@@ -441,6 +456,14 @@ export class AdaptValidator {
             'different metrics sources — usually different scenario/workload naming between ingestion paths ' +
             '(e.g. JTL upload vs the jmeter-timescale listener). Verify both runs use the same ' +
             'system-under-test / environment / workload.';
+        } else if ((metricStatCountMap.get(testRunId) ?? 0) > 0) {
+          // The baseline does have metric statistics — the pooled control-group
+          // aggregation is what failed (usually a statement timeout). Never blame
+          // the baseline for being short or aborted here (#552).
+          message =
+            `ADAPT could not build a baseline. The ${runsClause} do have metric statistics, but aggregating ` +
+            'them into control-group statistics failed — most often a query timeout on an older baseline. ' +
+            'Run "Recalculate statistics" on the control run(s), then re-evaluate this run.';
         } else {
           message =
             `ADAPT requires valid baseline data. The ${runsClause} contained insufficient metrics — ` +
