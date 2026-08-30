@@ -577,6 +577,49 @@ export class BullMQClientService implements OnModuleDestroy {
   }
 
   /**
+   * Enqueue a standalone statistics-calculation job (#552).
+   *
+   * StatisticsPipeline reads only `ds_metrics` and rewrites `ds_metric_statistics`,
+   * so this recomputes from data already in the database — no datasource fetch, safe
+   * on old runs whose Grafana window has expired. It is the escape hatch for a
+   * baseline whose rows predate the `pct_agg` sketch (#289): without the sketch the
+   * control-group aggregation falls back to a raw scan that times out, and ADAPT
+   * dead-ends on INSUFFICIENT_DATA.
+   *
+   * Targets `perfana-analyze` (not the batch queue that `addJob` uses).
+   */
+  async enqueueStatisticsCalculation(testRunId: string): Promise<string> {
+    try {
+      this.checkRedisAvailability();
+      this.logger.log(`Enqueuing statistics-calculation for test run: ${testRunId}`);
+
+      // Deterministic jobId so repeated clicks coalesce into one pending job.
+      // The job record must NOT be retained after it settles: BullMQ refuses an
+      // `add` whose jobId still exists, so a retained record would make every
+      // later click a silent no-op behind a "started" toast.
+      const job = await this.analysisQueue!.add(
+        'statistics-calculation',
+        { testRunIds: [testRunId] },
+        {
+          jobId: `statistics-${testRunId}`,
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      );
+
+      this.logger.log(`Statistics job created with ID: ${job.id}`);
+      return job.id!;
+    } catch (error) {
+      const errorMessage = error && typeof error === 'object' && 'message' in error
+        ? (error as Error).message : 'Unknown error';
+      this.logger.error(`Failed to enqueue statistics-calculation for ${testRunId}: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  /**
    * Generic method to add a job to the batch queue
    * Used for custom job types like 're-evaluate-adapt-conclusion'
    */

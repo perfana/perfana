@@ -11,6 +11,8 @@ import {
   ConflictException,
   ForbiddenException,
   Logger,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiBody } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -42,10 +44,15 @@ export class DataScienceController {
 
   /**
    * Verify the user can access the given test run(s).
+   *
+   * Accepts either the UUID `id` or the `test_run_id`, and returns the canonical
+   * `test_run_id`. Callers that pass the value on to a pipeline must use the return
+   * value: every pipeline filters on `test_run_id`, so forwarding a UUID yields a
+   * job that matches zero rows and reports success.
    */
-  private async verifyTestRunAccess(testRunId: string, userId: string, roles: string[]): Promise<void> {
+  private async verifyTestRunAccess(testRunId: string, userId: string, roles: string[]): Promise<string> {
     const result = await this.dataSource.query(
-      `SELECT organization_id, created_by FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
+      `SELECT test_run_id, organization_id, created_by FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
       [testRunId],
     );
     if (result.length === 0) {
@@ -60,6 +67,8 @@ export class DataScienceController {
     if (!accessResult.allowed) {
       throw new ForbiddenException('Access denied to this test run');
     }
+
+    return result[0].test_run_id;
   }
 
   @Post('analyzeTest/:testRunId')
@@ -185,6 +194,40 @@ export class DataScienceController {
       const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
       this.logger.error(`Failed to analyze test ${testRunId}: ${errorMessage}`);
       throw new BadRequestException(`Failed to initiate analysis: ${errorMessage}`);
+    }
+  }
+
+  @Post('recalculate-statistics/:testRunId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Recompute metric statistics for a test run',
+    description:
+      'Enqueues statistics-calculation for this run. It recomputes ds_metric_statistics from ds_metrics ' +
+      'already in the database — no datasource fetch — which also rebuilds the pct_agg sketches an older ' +
+      'baseline may be missing. Use it on a baseline run when ADAPT reports that the control-group ' +
+      'aggregation failed.',
+  })
+  @ApiResponse({ status: 200, description: 'Statistics recalculation enqueued' })
+  @ApiResponse({ status: 400, description: 'Invalid test run ID' })
+  @ApiResponse({ status: 403, description: 'Access denied to this test run' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  async recalculateStatistics(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+  ) {
+    if (!testRunId || testRunId.trim().length === 0) {
+      throw new BadRequestException('Test run ID is required');
+    }
+
+    const resolvedTestRunId = await this.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
+
+    try {
+      const jobId = await this.bullmqClient.enqueueStatisticsCalculation(resolvedTestRunId);
+      return { status: 'initiated', jobId, testRunId: resolvedTestRunId };
+    } catch (error) {
+      const errorMessage = error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error';
+      this.logger.error(`Failed to enqueue statistics recalculation for ${testRunId}: ${errorMessage}`);
+      throw new BadRequestException(`Failed to enqueue statistics recalculation: ${errorMessage}`);
     }
   }
 
