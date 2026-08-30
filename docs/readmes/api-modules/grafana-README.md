@@ -1,6 +1,10 @@
 # Grafana Module
 
-Manages all Grafana integration concerns and the universal MetricsSource adapter.
+Manages Grafana integration concerns: instances, dashboard references, and the
+application dashboards that link them to systems under test.
+
+> The `MetricsSource` adapter lives in its own module
+> (`apps/api/src/modules/metrics-sources/`), not here.
 
 ## Entities
 
@@ -8,27 +12,43 @@ Manages all Grafana integration concerns and the universal MetricsSource adapter
 |--------|-------|---------|
 | `GrafanaInstance` | `grafana_instances` | Connection config for a Grafana server (encrypted API key / password) |
 | `GrafanaDashboard` | `grafana_dashboards` | Local mirror of Grafana dashboard metadata — **mixed table**, see below |
-| `MetricsSource` | `metrics_sources` | Universal metrics adapter (replaces legacy ApplicationDashboard) |
+| `ApplicationDashboard` | `application_dashboards` | Links a dashboard to a system-under-test + environment |
 
 ### `grafana_dashboards` is a mixed table
 
 Not every row is a real Grafana dashboard. Non-Grafana metrics sources need
 somewhere to hang their panels, so `ensureArtificialDashboardExists()` in
 `apps/api/src/modules/dynatrace/dynatrace.repository.ts` writes *artificial*
-placeholder rows: synthetic `grafana_id` in the 800000+ range for Dynatrace,
-900000+ reserved for performance-test metrics. Artificial rows have
-`grafana_json` NULL, have no counterpart in Grafana, and must never be pushed
-to one.
+placeholder rows with a synthetic `grafana_id` in the 800000+ range for
+Dynatrace. Artificial rows have `grafana_json` NULL, have no counterpart in
+Grafana, and must never be pushed to one.
 
-Two things to know before writing code against this table:
+**Never use `grafana_id` to tell artificial rows apart.** The comment at that
+insert reads as a range convention (800000+ Dynatrace, 900000+ performance-test
+metrics), and it holds in neither direction. Nothing emits the 900000+ range —
+the perf-test path creates no synthetic row at all
+(`apps/worker/src/pipelines/helpers/dashboard-manager.ts`). And real Grafana ids
+are snowflake-style and enormous, so they land far above both ranges: on the dev
+database 40 of 46 rows sit above 900000 and every one is a real dashboard. A
+`grafana_id >= 800000` test would classify the whole table as artificial. Use
+`grafana_json` and the `metrics_sources` join instead.
 
-- `GrafanaDashboardsService.findAll` hides artificial rows with a `NOT EXISTS`
-  on `metrics_sources.source_type != 'grafana'`. That predicate does **not**
-  match artificial application dashboards that arrived through a SUT import —
-  those have `metrics_source_id` NULL, so they join to no source type. If your
-  filter has to be airtight, test `grafana_json` as well.
-- A dashboard `uid` is unique only *within* a Grafana instance. Any lookup by
-  uid must also scope by `grafana_instance_id`.
+Three things to know before writing code against this table:
+
+- **`findAll`'s artificial-row filter is deliberately loose. Do not tighten
+  it.** The `NOT EXISTS` on `metrics_sources.source_type != 'grafana'` is
+  wrapped in `if (!query.uid)`, so `GET /grafana/dashboards?uid=…` returns
+  artificial rows on purpose: the SLO dialog and `useAddSLOForm`'s by-uid
+  lookup both depend on them (an SLO on a Dynatrace host metric is the point).
+  The picker-side filter belongs in the client — `isArtificialDashboard` in
+  `apps/web/lib/metrics-source-utils.ts`, applied in `useDashboardManagement`.
+  `useDashboardManagement.artificialDashboards.test.ts` guards this.
+- The `source_type` predicate also misses artificial application dashboards
+  that arrived through a SUT import — those have `metrics_source_id` NULL, so
+  they join to no source type. Where a filter genuinely has to hold (the
+  grafana-sync restore sweep), `grafana_json` is the reliable signal.
+- A dashboard `uid` is unique only *within* a Grafana instance, so a lookup by
+  uid must also scope by `grafana_instance_id` — `remove()` included.
 
 The same rules govern the restore sweep in `apps/grafana-sync` — see
 `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md`.
@@ -57,16 +77,22 @@ The same rules govern the restore sweep in `apps/grafana-sync` — see
 | PATCH | `/grafana/dashboards/:id` | Update a dashboard reference |
 | DELETE | `/grafana/dashboards/:id` | Delete a dashboard reference — **409** if still in use |
 
-### `MetricsSourcesController` — `/metrics-sources`
+### `ApplicationDashboardsController` — `/grafana/application-dashboards`
+
+Links dashboards to systems under test. This is the endpoint that removes the
+references a `DELETE /grafana/dashboards/:id` 409 is complaining about.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/metrics-sources` | List sources (filters: systemId, environment, sourceType) |
-| GET | `/metrics-sources/:id` | Get a single source |
-| POST | `/metrics-sources` | Create a source |
-| PUT | `/metrics-sources/:id` | Full update of a source |
-| DELETE | `/metrics-sources/:id` | Delete a source |
-| POST | `/metrics-sources/copy` | Copy sources between scopes |
+| GET | `/grafana/application-dashboards` | List application dashboards |
+| GET | `/grafana/application-dashboards/:id` | Get a single application dashboard |
+| POST | `/grafana/application-dashboards` | Create |
+| PUT | `/grafana/application-dashboards/:id` | Update |
+| DELETE | `/grafana/application-dashboards/:id` | Delete (may run in the background) |
+| GET | `/grafana/application-dashboards/:id/delete-info` | Preview what a delete would remove |
+| POST | `/grafana/application-dashboards/batch-delete-info` | Preview for many |
+| POST | `/grafana/application-dashboards/batch-delete` | Queue a batch delete |
+| POST | `/grafana/application-dashboards/copy` | Copy to another scope |
 
 ## Services
 
@@ -97,28 +123,32 @@ Connection tests call `/api/health` on the configured URL.
 CRUD for `GrafanaDashboard` records and template-variable resolution. Variable
 resolution delegates datasource calls to `GrafanaClientService`.
 
-**Delete refuses when the dashboard is still referenced.** `remove()` counts the
+**`remove()` refuses when the dashboard is still referenced.** It counts the
 `application_dashboards` pointing at the dashboard — by `grafana_dashboard_id`
 *or* by `dashboard_uid`, since a row can be linked by uid with a NULL foreign
 key and is just as much "in use" — and throws `ConflictException` (409) naming
 the count. It deliberately does **not** cascade: Grafana dashboards are shared
 between systems, and a SUT delete leaves them behind on purpose, so cascading
-would strip configuration from systems the caller was not looking at.
+would strip configuration from systems the caller was not looking at. The fix
+is to delete the referencing rows via `/grafana/application-dashboards` first.
 
-The pre-check count runs inside the RLS transaction, so a referencing row the
-caller cannot see counts as zero and the `DELETE` reaches the foreign key
-(`application_dashboards.grafana_dashboard_id` is `ON DELETE NO ACTION`). The
-catch block translates Postgres `23503` into the same 409 rather than letting it
-surface as an opaque 500. `GrafanaDashboardsController` rethrows any
-`HttpException` untouched so these deliberate status codes survive its own
-error handler.
+Three caveats:
 
-### `MetricsSourcesService`
+- The pre-check count runs inside the RLS transaction, so a referencing row the
+  caller cannot see counts as zero and the `DELETE` reaches the foreign key
+  (`application_dashboards.grafana_dashboard_id` is `ON DELETE NO ACTION`). The
+  catch block translates Postgres `23503` into the same 409 rather than letting
+  it surface as an opaque 500.
+- The `dashboardUid` match is scoped to the dashboard's Grafana instance, since a
+  uid is only unique within one. v0.2.89.0 shipped it unscoped, so a same-uid
+  application dashboard on a different instance counted and refused a delete that
+  nothing referenced — a false 409, fixed in v0.2.89.1.
+- Rows already queued for background deletion (`deletion_status` of `queued` or
+  `deleting`) still count and still block.
 
-CRUD for `MetricsSource` records. Supports filtering by `sourceType`
-(grafana, dynatrace, prometheus, influxdb, performance_test). Includes a
-`copyToScope` operation for duplicating source configurations between
-system-under-test + environment pairs.
+`GrafanaDashboardsController` rethrows any `HttpException` untouched so these
+deliberate status codes survive its own error handler. The 409 is declared with
+`@ApiResponse`, so it appears in `/api/docs`.
 
 ## Authorization
 
@@ -127,12 +157,12 @@ All services inline the same authorization pattern as the rest of the project
 
 - **Global admins** (`perfana-admin`, `admin` roles) bypass all checks.
 - **Non-admins** see only records belonging to their accessible organizations.
-  (`organization_id` is `NOT NULL` on these tables since RBAC Phase 4 — the old
-  "legacy records with `organization_id IS NULL` are visible to everyone" rule
-  is gone.)
+  There is no null-org allowance: `organization_id` has been NOT NULL on every
+  owned resource since RBAC Phase 4, so an `IS NULL` escape could only ever match
+  a dangling join — a row another tenant must not see.
 - **Mutations** on `GrafanaInstance` require org-admin in at least one
-  organization. `GrafanaDashboard` and `MetricsSource` currently allow any
-  authenticated user to mutate (legacy data pattern).
+  organization. `GrafanaDashboard` and `ApplicationDashboard` currently allow
+  any authenticated user to mutate (legacy data pattern).
 
 ## Security
 

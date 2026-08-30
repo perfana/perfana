@@ -780,6 +780,35 @@ describe('GrafanaDashboardsService', () => {
         expect(repository.delete).not.toHaveBeenCalled();
       });
 
+      // Regression: the uid arm of the conflict count was unscoped, so an
+      // application dashboard on a DIFFERENT instance sharing the uid was counted
+      // and a delete nothing referenced was refused with a false 409. Observed on
+      // real data: uid "span-metrics" exists on two instances, and the copy with
+      // zero references counted the other instance's 65.
+      it('should scope the uid half of the conflict count to the instance', async () => {
+        // Arrange
+        repository.findOne.mockResolvedValue(mockDashboardEntity);
+        (repository.manager.count as jest.Mock).mockResolvedValue(0);
+        repository.delete.mockResolvedValue({ affected: 1 } as any);
+
+        // Act
+        await service.remove(mockDashboardEntity.id, mockUserId, mockRoles);
+
+        // Assert
+        expect(repository.manager.count).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            where: [
+              { grafanaDashboardId: mockDashboardEntity.id },
+              {
+                dashboardUid: mockDashboardEntity.uid,
+                grafanaInstanceId: mockDashboardEntity.grafanaInstanceId,
+              },
+            ],
+          })
+        );
+      });
+
       // The pre-check counts inside the RLS transaction, so a referencing row the
       // caller cannot see counts as zero and the DELETE still hits the FK. Same for
       // a row created between the count and the delete. Both must read as 409.
