@@ -52,7 +52,9 @@ export interface GrafanaDashboard {
  *
  * Authorization:
  * - All methods accept userId and roles parameters for authorization
- * - findAll filters by organization: users see dashboards in their orgs + unowned (NULL org) dashboards
+ * - findAll filters by organization: users see dashboards in their accessible orgs.
+ *   There is no null-org allowance — `organization_id` has been NOT NULL on every
+ *   owned resource since RBAC Phase 4.
  * - Global admins bypass all authorization checks
  */
 @Injectable()
