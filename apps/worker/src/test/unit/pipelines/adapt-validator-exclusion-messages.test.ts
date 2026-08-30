@@ -49,8 +49,10 @@ function makeManager(metricStatCount: number): { manager: EntityManager; conclus
   return { manager: { query } as unknown as EntityManager, conclusions };
 }
 
-const messageOf = (conclusions: unknown[][]): string =>
-  JSON.parse(conclusions[0]?.[1] as string).message;
+const detailsOf = (conclusions: unknown[][]): { message: string; cause: string; controlRuns: string[] } =>
+  JSON.parse(conclusions[0]?.[1] as string);
+
+const messageOf = (conclusions: unknown[][]): string => detailsOf(conclusions).message;
 
 describe('writeExclusionConclusions (#552)', () => {
   let validator: AdaptValidator;
@@ -65,9 +67,13 @@ describe('writeExclusionConclusions (#552)', () => {
 
     await validator.writeExclusionConclusions(manager, [], [], ['run-3']);
 
-    const message = messageOf(conclusions);
-    expect(message).not.toContain('too short or aborted');
-    expect(message).toContain('Recalculate statistics');
+    const details = detailsOf(conclusions);
+    expect(details.message).not.toContain('too short or aborted');
+    expect(details.message).toContain('Recalculate the statistics');
+    // The UI keys the recovery action off `cause`, and applies it to `controlRuns`
+    // rather than to the run showing the message.
+    expect(details.cause).toBe('baseline-aggregation-failed');
+    expect(details.controlRuns).toEqual(['run-1']);
   });
 
   test('still prefers the metrics-source explanation when control-group statistics exist', async () => {
@@ -111,6 +117,10 @@ describe('writeExclusionConclusions (#552)', () => {
 
     await validator.writeExclusionConclusions(manager, [], [], ['run-3']);
 
-    expect(messageOf(conclusions)).toContain('too short or aborted');
+    const details = detailsOf(conclusions);
+    expect(details.message).toContain('too short or aborted');
+    // No remedy the user can trigger, so the UI must not offer the action.
+    expect(details.cause).toBe('baseline-insufficient-data');
+    expect(details.controlRuns).toEqual([]);
   });
 });

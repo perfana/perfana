@@ -291,7 +291,7 @@ Not every row is a real Grafana dashboard. `ensureArtificialDashboardExists()` i
 `ds_metric_statistics.pct_agg` is the per-run t-digest from #289; `ControlGroupStatisticsPipeline` pools the sketches with `rollup(pct_agg)`. Rows written before #289 — or restored from a backup or SUT transfer — have `pct_agg = NULL`, forcing a raw scan over `ds_metrics` that exceeds `ANALYTICS_STATEMENT_TIMEOUT_MS` (default 120s) on a large baseline. `ds_control_group_statistics` stays empty and ADAPT reports INSUFFICIENT_DATA against a baseline that is fine.
 
 - **Self-heal first (v0.2.90.0, #552).** `backfillMissingSketches()` reruns `StatisticsPipeline` on control runs missing `pct_agg` *before* the aggregation transaction. Best-effort by contract: a failure is caught and the legacy raw scan still runs. `StatisticsPipeline` can succeed while writing nothing (no `ds_metrics` rows left), so the code checks `processedRecords` rather than trusting `success`.
-- **Manual escape hatch:** `POST /api/data/recalculate-statistics/:testRunId` → `enqueueStatisticsCalculation()` on the **`perfana-analyze`** queue, jobId `statistics-<testRunId>`, not retained after it settles (a retained record would make every later click a silent no-op). In the UI: "Recalculate statistics" in both `ActionsMenu` and `TestRunActionsMenu`. **Apply it to the baseline run, not the run showing the error.**
+- **Manual escape hatch:** `POST /api/data/recalculate-statistics/:testRunId` → `enqueueStatisticsCalculation()` on the **`perfana-analyze`** queue, jobId `statistics-<testRunId>`, not retained after it settles (a retained record would make every later click a silent no-op). In the UI: the **Recalculate baseline statistics** button beside the ADAPT message (`AnomalyDetectionSubsection` in `EvaluationResultsSection.tsx`), shown only for `details.cause === 'baseline-aggregation-failed'`. It posts for each id in `details.controlRuns`, so it targets the **baseline** runs, not the run showing the error.
 - It fetches nothing — `StatisticsPipeline` reads only `ds_metrics`, so it is safe on runs whose Grafana window has expired.
 - **Pass a pipeline the canonical `test_run_id`, never the UUID.** `verifyTestRunAccess` accepts either and returns `test_run_id`; pipelines filter on that column, so a UUID enqueues a job that matches zero rows and reports success.
 - `control-group-statistics` is registered with `softFail`, so a failed aggregation still completes its BullMQ job. The reevaluate orchestrator checks the return value via the exported `assertStageSucceeded()`; any new stage waiting on a `softFail` pipeline must do the same.
@@ -302,7 +302,7 @@ Not every row is a real Grafana dashboard. `ensureArtificialDashboardExists()` i
 2. **401 Unauthorized** → Expired token, Keycloak handles refresh
 3. **403 Forbidden** → Wrong auth type for admin endpoints
 4. **409 deleting a Grafana dashboard** → Application dashboards still reference it; remove those first.
-5. **ADAPT could not build a baseline / INSUFFICIENT_DATA on a healthy baseline** → the baseline's `ds_metric_statistics` rows are missing `pct_agg`. Run "Recalculate statistics" on the control run, then re-evaluate.
+5. **ADAPT could not build a baseline / INSUFFICIENT_DATA on a healthy baseline** → the baseline's `ds_metric_statistics` rows are missing `pct_agg`. The pipeline self-heals; if it could not, use the **Recalculate baseline statistics** button beside the message, then re-evaluate.
 
 ## How-To Tutorials
 

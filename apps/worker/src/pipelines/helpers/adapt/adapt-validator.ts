@@ -424,12 +424,25 @@ export class AdaptValidator {
       const isChangepoint = changepoints.includes(testRunId);
       const isTooShort = tooShortTestRuns.includes(testRunId);
 
+      // `cause` is the machine-readable counterpart of `message`. The UI keys the
+      // "Recalculate baseline statistics" action off `baseline-aggregation-failed`
+      // so the action only appears where it can actually help (#552); the other
+      // causes have no remedy the user can trigger from this run.
+      let cause:
+        | 'changepoint'
+        | 'run-too-short'
+        | 'metrics-source-mismatch'
+        | 'baseline-aggregation-failed'
+        | 'baseline-insufficient-data';
       let message: string;
+      let controlRunsForRemedy: string[] = [];
       if (isChangepoint) {
+        cause = 'changepoint';
         message =
           'This test run is a changepoint — a new baseline was established. ' +
           'ADAPT comparison starts fresh from this run.';
       } else if (isTooShort) {
+        cause = 'run-too-short';
         if (info?.ramp_up !== null && info?.ramp_up !== undefined && info?.duration !== null && info?.duration !== undefined) {
           message =
             `This test run is too short to analyze — the analysis start offset (${info.ramp_up}s ramp-up) ` +
@@ -451,6 +464,7 @@ export class AdaptValidator {
 
         if ((statCountMap.get(testRunId) ?? 0) > 0) {
           // Baseline has data, but none of it matched this run's metrics source.
+          cause = 'metrics-source-mismatch';
           message =
             `ADAPT found no comparable metrics: this run and its baseline (${runsClause}) resolved to ` +
             'different metrics sources — usually different scenario/workload naming between ingestion paths ' +
@@ -459,12 +473,17 @@ export class AdaptValidator {
         } else if ((metricStatCountMap.get(testRunId) ?? 0) > 0) {
           // The baseline does have metric statistics — the pooled control-group
           // aggregation is what failed (usually a statement timeout). Never blame
-          // the baseline for being short or aborted here (#552).
+          // the baseline for being short or aborted here (#552). The control runs go
+          // out with the conclusion because the remedy applies to THEM, not to this
+          // run, and nothing else in the UI knows which runs those are.
+          cause = 'baseline-aggregation-failed';
+          controlRunsForRemedy = controlRuns;
           message =
             `ADAPT could not build a baseline. The ${runsClause} do have metric statistics, but aggregating ` +
             'them into control-group statistics failed — most often a query timeout on an older baseline. ' +
-            'Run "Recalculate statistics" on the control run(s), then re-evaluate this run.';
+            'Recalculate the statistics for the control run(s), then re-evaluate this run.';
         } else {
+          cause = 'baseline-insufficient-data';
           message =
             `ADAPT requires valid baseline data. The ${runsClause} contained insufficient metrics — ` +
             'they may have been too short or aborted. Run at least one full-duration test to establish a baseline.';
@@ -482,7 +501,7 @@ export class AdaptValidator {
           details    = EXCLUDED.details,
           updated_at = EXCLUDED.updated_at,
           updated_by = EXCLUDED.updated_by`,
-        [testRunId, JSON.stringify({ message }), info?.organization_id ?? null, info?.team_id ?? null]
+        [testRunId, JSON.stringify({ message, cause, controlRuns: controlRunsForRemedy }), info?.organization_id ?? null, info?.team_id ?? null]
       );
     }
 

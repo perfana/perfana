@@ -68,28 +68,6 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
     handleClose();
   };
 
-  // Recompute ds_metric_statistics from metrics already stored (#552). This is the
-  // escape hatch when ADAPT reports the control-group aggregation failed: the fix has
-  // to be applied to the *baseline* run, whose statistics predate the pct_agg sketch.
-  const handleRecalculateStatistics = async () => {
-    try {
-      const response = await authenticatedFetch(
-        `/data/recalculate-statistics/${encodeURIComponent(testRun.test_run_id)}`,
-        { method: 'POST' },
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to start statistics recalculation');
-      }
-
-      showToast('Statistics recalculation started');
-    } catch (err) {
-      console.error('Failed to start statistics recalculation:', err);
-      showToast('Failed to start statistics recalculation');
-    }
-    handleClose();
-  };
-
   const handleRefreshClick = async () => {
     handleClose();
     const scopes = [getTestRunScope(testRun)];
@@ -322,7 +300,6 @@ export function ActionsMenu({ testRun, onDelete, showToast, onRefresh }: Actions
       >
         <MenuItem onClick={handleReEvaluate}>Re-evaluate</MenuItem>
         <MenuItem onClick={handleRefreshClick}>Re-fetch</MenuItem>
-        <MenuItem onClick={handleRecalculateStatistics}>Recalculate statistics</MenuItem>
         {testRun.is_changepoint ? (
           <MenuItem onClick={handleRemoveChangepoint}>Remove changepoint</MenuItem>
         ) : (

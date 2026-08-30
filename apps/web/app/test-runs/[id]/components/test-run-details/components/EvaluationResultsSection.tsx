@@ -97,7 +97,7 @@ export function EvaluationResultsSection({ testRun, onRefreshTriggered, showToas
         <ServiceLevelObjectivesSubsection testRun={testRun} />
 
         {/* Anomaly Detection */}
-        <AnomalyDetectionSubsection testRun={testRun} />
+        <AnomalyDetectionSubsection testRun={testRun} showToast={showToast} />
 
         {/* Data Quality Errors */}
         {testRun.valid === false && testRun.reasons_not_valid && testRun.reasons_not_valid.length > 0 && (
@@ -280,12 +280,59 @@ function ServiceLevelObjectivesSubsection({ testRun }: { testRun: TestRun }) {
   );
 }
 
-function AnomalyDetectionSubsection({ testRun }: { testRun: TestRun }) {
+/**
+ * Shape of `ds_adapt_conclusion.details` for an INSUFFICIENT_DATA conclusion.
+ * `cause` is written by the worker's adapt-validator alongside `message`.
+ */
+interface AdaptConclusion {
+  details?: {
+    message?: string;
+    cause?: string;
+    controlRuns?: string[];
+  };
+}
+
+function AnomalyDetectionSubsection({ testRun, showToast }: { testRun: TestRun; showToast?: (message: string) => void }) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
   const isError = testRun.status?.evaluatingAdapt === 'ERROR' || testRun.status?.evaluatingAdapt === 'FAILED';
   const sectionColor = isDark ? '#ffcc80' : '#ff9800';
-  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<{ details?: { message?: string } } | null>(null);
+  const [dsAdaptConclusion, setDsAdaptConclusion] = useState<AdaptConclusion | null>(null);
+  const [isRecalculating, setIsRecalculating] = useState(false);
+
+  // Only the `baseline-aggregation-failed` cause has a remedy the user can trigger,
+  // and it applies to the control runs rather than to this one (#552). Everything
+  // else — a changepoint, a run that was too short, a metrics-source mismatch —
+  // gets the message alone, so the action never appears where it cannot help.
+  const controlRuns = dsAdaptConclusion?.details?.cause === 'baseline-aggregation-failed'
+    ? dsAdaptConclusion.details.controlRuns ?? []
+    : [];
+
+  const handleRecalculateBaseline = async () => {
+    try {
+      setIsRecalculating(true);
+      const results = await Promise.all(
+        controlRuns.map(runId =>
+          authenticatedFetch(`/data/recalculate-statistics/${encodeURIComponent(runId)}`, { method: 'POST' })
+            .then(res => res.ok)
+            .catch(() => false)
+        )
+      );
+
+      const succeeded = results.filter(Boolean).length;
+      if (succeeded === 0) {
+        showToast?.('Failed to start baseline statistics recalculation');
+        return;
+      }
+      showToast?.(
+        succeeded === controlRuns.length
+          ? `Recalculating statistics for ${succeeded} control run${succeeded === 1 ? '' : 's'} — re-evaluate this run once it finishes`
+          : `Started ${succeeded} of ${controlRuns.length} control runs — the rest could not be started`
+      );
+    } finally {
+      setIsRecalculating(false);
+    }
+  };
 
   useEffect(() => {
     if (testRun.status?.evaluatingAdapt !== 'NO_BASELINES_FOUND') return;
@@ -322,6 +369,21 @@ function AnomalyDetectionSubsection({ testRun }: { testRun: TestRun }) {
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
           {dsAdaptConclusion?.details?.message ?? 'No previous results to compare with'}
         </Typography>
+        {controlRuns.length > 0 && (
+          <Box sx={{ mt: 2 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              color="warning"
+              disabled={isRecalculating}
+              onClick={handleRecalculateBaseline}
+            >
+              {isRecalculating
+                ? 'Starting…'
+                : `Recalculate baseline statistics (${controlRuns.length} run${controlRuns.length === 1 ? '' : 's'})`}
+            </Button>
+          </Box>
+        )}
       </Box>
     );
   }

@@ -91,7 +91,7 @@ ADAPT needs `ds_control_group_statistics` — the pooled figures for the control
 |---|---|---|
 | The control runs contained insufficient metrics — too short or aborted | The baseline really has no per-run statistics | Run a longer baseline test |
 | The runs come from different metrics sources | The baseline has statistics, but under a different `metrics_source_id` — usually different scenario/workload naming between ingestion paths | Align system-under-test / environment / workload naming |
-| The runs do have metric statistics, but aggregating them failed | The pooling query failed, most often a statement timeout | **Recalculate statistics** on the control run, then re-evaluate |
+| The runs do have metric statistics, but aggregating them failed | The pooling query failed, most often a statement timeout | Use the **Recalculate baseline statistics** button beside the message, then re-evaluate |
 
 The third case is the one that used to be reported as the first, which sent people off to run another full-duration test that could not help.
 
@@ -101,11 +101,11 @@ The third case is the one that used to be reported as the first, which sent peop
 
 Since v0.2.90.0 the pipeline repairs this itself: before aggregating, it reruns `StatisticsPipeline` on any control run missing `pct_agg`, which rebuilds the sketches from `ds_metrics` already in the database. It is best-effort — if the rebuild fails, the legacy scan still runs and says so in the log.
 
-### Recalculate statistics (manual)
+### Recalculate baseline statistics (manual)
 
 The same repair is available on demand, for a baseline the automatic pass could not fix:
 
-- **UI** — "Recalculate statistics" in the test-run list row menu and in the run detail header menu. Apply it to the **baseline** run, not the run showing the error.
+- **UI** — a **Recalculate baseline statistics** button rendered next to the ADAPT message on the run detail page. It appears only when the conclusion's `details.cause` is `baseline-aggregation-failed`, because that is the only cause it can repair, and it posts for each run in `details.controlRuns` — so it targets the **baseline** runs and the user never has to work out that the remedy belongs elsewhere.
 - **API** — `POST /api/data/recalculate-statistics/:testRunId`, which enqueues `statistics-calculation` on the `perfana-analyze` queue.
 
 It recomputes from measurements already stored and fetches nothing from Grafana or Dynatrace, so it works on old runs whose dashboards no longer cover the time window.
