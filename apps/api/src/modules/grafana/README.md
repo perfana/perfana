@@ -43,8 +43,7 @@ Three things to know before writing code against this table:
   they join to no source type. Where a filter genuinely has to hold (the
   grafana-sync restore sweep), `grafana_json` is the reliable signal.
 - A dashboard `uid` is unique only *within* a Grafana instance, so a lookup by
-  uid should also scope by `grafana_instance_id`. `remove()` does not yet — see
-  the caveat under `GrafanaDashboardsService` below.
+  uid must also scope by `grafana_instance_id` — `remove()` included.
 
 The same rules govern the restore sweep in `apps/grafana-sync` — see
 `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md`.
@@ -135,9 +134,10 @@ Three caveats:
   (`application_dashboards.grafana_dashboard_id` is `ON DELETE NO ACTION`). The
   catch block translates Postgres `23503` into the same 409 rather than letting
   it surface as an opaque 500.
-- The `dashboardUid` match is **not scoped to the Grafana instance**, and a uid
-  is only unique within one. A same-uid application dashboard on a *different*
-  instance therefore counts, and can produce a false 409.
+- The `dashboardUid` match is scoped to the dashboard's Grafana instance, since a
+  uid is only unique within one. v0.2.89.0 shipped it unscoped, so a same-uid
+  application dashboard on a different instance counted and refused a delete that
+  nothing referenced — a false 409, fixed in v0.2.89.1.
 - Rows already queued for background deletion (`deletion_status` of `queued` or
   `deleting`) still count and still block.
 

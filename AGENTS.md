@@ -281,7 +281,7 @@ Not every row is a real Grafana dashboard. `ensureArtificialDashboardExists()` i
 
 - **Do not tighten the API's `findAll` filter.** Its `source_type != 'grafana'` exclusion is skipped when a `uid` is supplied, on purpose: the SLO dialog and `useAddSLOForm`'s by-uid lookup both need artificial rows. A test (`useDashboardManagement.artificialDashboards.test.ts`) guards this. Filter client-side with `isArtificialDashboard` (`apps/web/lib/metrics-source-utils.ts`) instead.
 - That predicate also misses artificial application dashboards from a SUT import — those have `metrics_source_id` NULL. Where a filter must hold (grafana-sync restore), `grafana_json` is the reliable signal.
-- A dashboard `uid` is unique only within a Grafana instance, so a lookup by uid should also scope by `grafana_instance_id`. `GrafanaDashboardsService.remove` does not yet, so a same-uid row on another instance can cause a false 409.
+- A dashboard `uid` is unique only within a Grafana instance, so every lookup by uid must also scope by `grafana_instance_id`. Both the grafana-sync restore sweep and the uid arm of `GrafanaDashboardsService.remove`'s pre-check do — the latter shipped unscoped in v0.2.89.0 and caused a false 409, fixed in v0.2.89.1.
 - `DELETE /api/grafana/dashboards/:id` returns **409** when application dashboards still reference the dashboard. It does not cascade: Grafana dashboards are shared and a SUT delete leaves them behind on purpose. Remove the references via `/api/grafana/application-dashboards` first.
 
 ### Common Issues
