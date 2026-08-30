@@ -236,10 +236,19 @@ export interface BaselineComparisonRow {
   /** Normalized URL behind a request row (Request RT panels only) — shown as sub-text under the label. */
   url?: string;
   /**
-   * Grafana unit code for this row's values (`ms`, `percent`, `reqps`, …), so the report
-   * prints "412 ms" rather than a bare number. Absent when the source never recorded one.
+   * Grafana unit code for this row's values (`ms`, `percent`, `reqps`, …). Used to scale the
+   * value (`percentunit` is stored 0.0-1.0) and to print ONE unit chip in the heading above
+   * the table — the cell values themselves are bare, not "412 ms". Absent when the source
+   * never recorded one.
    */
   unit?: string | null;
+  /**
+   * The BASELINE row's own unit code, when it differs from `unit`. Rows pair on
+   * dashboard/panel/metric name, which does not include the unit, so a dashboardMap that
+   * pairs differently-named dashboards can legitimately match an `s` panel against an `ms`
+   * one. Scaling the baseline with the current row's unit would silently misreport it.
+   */
+  baselineUnit?: string | null;
   metrics: {        // one entry per selected metric key
     key: 'avg' | 'p90' | 'p95' | 'p99';
     current: number | null;
