@@ -24,7 +24,7 @@ import {
   sectionHeader,
   splitHostLabel,
 } from './report-style';
-import { toUnitScale, withUnitSuffix } from './unit-format';
+import { toUnitScale, unitLabel } from './unit-format';
 
 /**
  * The value a template stores when the baseline should follow the run being reported on rather
@@ -81,10 +81,21 @@ export class ComparisonsRenderer {
     }
     const previous = await this.dataFetcher.getPreviousTestRun(testRun, { sloPassedOnly });
     if (previous?.testRunId) return { id: previous.testRunId };
+    const firstRun =
+      'this is the first run for its system, environment and workload — there is no previous run behind it.';
+    if (!sloPassedOnly) return { reason: firstRun };
+    // A run whose SLOs were never evaluated has no `meetsRequirement` key, so the
+    // SLO-passed query skips it exactly as it skips a run that failed. Saying "none passed"
+    // for the first case asserts they FAILED — the opposite conclusion, in a document that
+    // is served unauthenticated over share links. Ask which of the three it actually was.
+    const miss = await this.dataFetcher.previousRunSloMiss(testRun);
     return {
-      reason: sloPassedOnly
-        ? 'no earlier run for its system, environment and workload passed its SLOs.'
-        : 'this is the first run for its system, environment and workload — there is no previous run behind it.',
+      reason:
+        miss === 'none'
+          ? firstRun
+          : miss === 'not-evaluated'
+            ? 'earlier runs exist for its system, environment and workload, but none of them had its SLOs evaluated — so none could be selected as a known-good baseline.'
+            : 'no earlier run for its system, environment and workload passed its SLOs.',
     };
   }
 
@@ -163,13 +174,38 @@ export class ComparisonsRenderer {
     const rowBackground = (rank: number, idx: number): string =>
       (rank === 2 ? '#fff7f6' : (idx % 2 === 1 ? '#fbfcfd' : '#ffffff'));
 
-    // `unit` is the row's Grafana unit code — the values are the panel's own, so the report
-    // prints "412 ms" instead of a bare number the reader has to guess the scale of. Formatting
-    // stays formatNum's (grouped thousands, em-dash for a missing value); only the suffix is new.
-    const withUnit = (v: number | null, unit?: string | null): string =>
-      (v == null ? formatNum(v) : withUnitSuffix(formatNum(toUnitScale(v, unit ?? undefined)), unit ?? undefined));
+    // Values are BARE — the unit is printed once in the heading above the table, not repeated
+    // on every number in every cell. The scaling still has to happen here, though: `percentunit`
+    // is stored 0.0-1.0, and an unscaled 0.42 sitting under a "%" heading is simply wrong.
+    const scaled = (v: number | null, unit?: string | null): string =>
+      (v == null ? formatNum(v) : formatNum(toUnitScale(v, unit ?? undefined)));
 
-    const renderCell = (m: { current: number | null; baseline: number | null; diffPercent: number | null }, leftBorder: boolean, unit?: string | null): string => {
+    /**
+     * The one unit label every row under a heading shares, or '' when they do not share one.
+     *
+     * Printing the unit once means it has to be true of EVERY row it sits above. Rows pair on
+     * dashboard/panel/metric name, which excludes the unit, so a group CAN hold an `s` row next
+     * to an `ms` one — and there the honest thing is no chip at all rather than one row's unit
+     * implied over the rest. `unitLabel` yields '' for a unitless or unrecognised code, which
+     * collapses to the same "say nothing" outcome.
+     */
+    const sharedUnitLabel = (rows: BaselineComparisonRow[]): string => {
+      const labels = new Set(rows.map((r) => unitLabel(r.unit)));
+      return labels.size === 1 ? [...labels][0] ?? '' : '';
+    };
+
+    /** The heading's unit chip, or '' — groupHeader/panel headings drop empty strings. */
+    const unitChip = (rows: BaselineComparisonRow[]): string => {
+      const label = sharedUnitLabel(rows);
+      return label ? chip(label, 'neutral') : '';
+    };
+
+    const renderCell = (
+      m: { current: number | null; baseline: number | null; diffPercent: number | null },
+      leftBorder: boolean,
+      unit?: string | null,
+      baselineUnit?: string | null,
+    ): string => {
       const d = effDiff(m);
       const dot = bandColor(d, thresholds);
       let left = 50, width = 0;
@@ -180,8 +216,8 @@ export class ComparisonsRenderer {
       return `<td style="padding:14px 16px; border-bottom:1px solid ${REPORT_COLORS.rowBorder};${leftBorder ? ' border-left:1px solid #eef1f5;' : ''}">
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
           <div style="display:flex; align-items:baseline; gap:8px;">
-            <span style="font-size:15px; font-weight:700; color:${REPORT_COLORS.ink}; font-variant-numeric:tabular-nums;">${escapeHtml(withUnit(m.current, unit))}</span>
-            <span style="font-size:12px; font-weight:600; color:${REPORT_COLORS.mutedInk}; font-variant-numeric:tabular-nums;">vs ${escapeHtml(withUnit(m.baseline, unit))}</span>
+            <span style="font-size:15px; font-weight:700; color:${REPORT_COLORS.ink}; font-variant-numeric:tabular-nums;">${escapeHtml(scaled(m.current, unit))}</span>
+            <span style="font-size:12px; font-weight:600; color:${REPORT_COLORS.mutedInk}; font-variant-numeric:tabular-nums;">vs ${escapeHtml(scaled(m.baseline, baselineUnit ?? unit))}</span>
           </div>
           ${deltaChip(d, thresholds)}
           <div style="position:relative; width:110px; height:4px; border-radius:2px; background:#edf0f3;">
@@ -288,7 +324,7 @@ export class ComparisonsRenderer {
           const rowsHtml = rows.map((row, idx) => {
             const rank = worstRank(row);
             if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
-            const cells = row.metrics.map((m) => renderCell(m, true, row.unit)).join('');
+            const cells = row.metrics.map((m) => renderCell(m, true, row.unit, row.baselineUnit)).join('');
             let metric = row.label;
             if (hasHost) {
               const parsed = splitHostLabel(row.label);
@@ -300,11 +336,12 @@ export class ComparisonsRenderer {
               ${cells}</tr>`;
           }).join('');
 
-          // The panel heads its own table, so it is not repeated down a column.
+          // The panel heads its own table, so neither it nor the unit is repeated down a column.
           return `<div style="margin-top:18px;">
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
               <h4 style="margin:0; font-size:13px; font-weight:700; color:${REPORT_COLORS.mutedInk}; text-transform:uppercase; letter-spacing:0.05em;">${this.utils.escapeHtml(panel)}</h4>
               ${chip(`${formatInt(rows.length)} metrics`, 'neutral')}
+              ${unitChip(rows)}
             </div>
             <div class="table-scroll">
               <table style="width:100%; border-collapse:collapse;">
@@ -345,14 +382,14 @@ export class ComparisonsRenderer {
         const body = rows.map((row, idx) => {
           const rank = worstRank(row);
           if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
-          const cells = row.metrics.map((m, gi) => renderCell(m, gi > 0, row.unit)).join('');
+          const cells = row.metrics.map((m, gi) => renderCell(m, gi > 0, row.unit, row.baselineUnit)).join('');
           return `<tr data-band="${BAND_FOR_RANK[rank]}" style="background:${rowBackground(rank, idx)};">
             ${labelCell(row.label, rank, row.url)}
             ${cells}</tr>`;
         }).join('');
 
         return `<div data-band-scope style="margin-top:38px;">
-          ${groupHeader(group, [chip(`${formatInt(rows.length)} transactions`, 'neutral')], summaryChips(reg, warn, ok))}
+          ${groupHeader(group, [chip(`${formatInt(rows.length)} transactions`, 'neutral'), unitChip(rows)], summaryChips(reg, warn, ok))}
           <div class="table-scroll">
             <table style="width:100%; border-collapse:collapse;">
             <thead><tr style="${THEAD_ROW}">

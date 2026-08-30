@@ -186,14 +186,115 @@ describe('ReportHtmlCompilerService variable substitution', () => {
     expect(findPreviousRun).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves the previous-run placeholder when the previous run is this one', async () => {
+  it('blanks the previous-run key when the previous run is this one', async () => {
+    // Blank, not literal: the four Comparison keys are seeded before the lookup, so
+    // they behave like every other built-in — a value that could not be established
+    // reads as an empty gap rather than as the author's own placeholder printed into
+    // a customer-facing PDF.
     findPreviousRun.mockResolvedValue({ testRunId: 'run-42' });
     const html = await service.renderSections(
-      [section({ type: 'text_block', config: { content: 'vs {perfana-previous-test-run-id}' } })],
+      [section({ type: 'text_block', config: { content: 'vs [{perfana-previous-test-run-id}]' } })],
       testRun,
       null,
     );
-    expect(html).toContain('{perfana-previous-test-run-id}');
+    expect(html).toContain('vs []');
+    expect(html).not.toContain('{perfana-previous-test-run-id}');
+  });
+
+  it('blanks every Comparison key when there is no previous run at all', async () => {
+    // The first run of a system is the ordinary case, not an edge one:
+    // buildPreviousRunVariableValues returns {} and nothing was assigned, so all four
+    // placeholders used to survive into the published HTML verbatim.
+    findPreviousRun.mockResolvedValue(null);
+    const html = await service.renderSections(
+      [section({ type: 'text_block', config: { content:
+        'a[{perfana-previous-test-run-id}] b[{perfana-previous-start-datetime}] ' +
+        'c[{perfana-previous-end-datetime}] d[{perfana-previous-application-release}]' } })],
+      testRun,
+      null,
+    );
+    expect(html).toContain('a[] b[] c[] d[]');
+    expect(html).not.toMatch(/\{perfana-previous-/);
+  });
+
+  it('never lets a config key shadow a Comparison key', async () => {
+    // These four are absent from buildReportVariableValues, so — unlike every other
+    // catalogue key — the spread in resolveVariables does not re-assert them. Without
+    // the seed, a test_run_configs row (writable by anything holding an API key that
+    // can POST /test-runs/:id/configs) forged the baseline provenance line of a report
+    // served unauthenticated over a share link.
+    findConfigs.mockResolvedValue([
+      { key: 'perfana-previous-start-datetime', value: '1 January 1970, 00:00 UTC' },
+      { key: 'perfana-previous-test-run-id', value: 'FORGED' },
+    ]);
+    findPreviousRun.mockResolvedValue(null);
+    const html = await service.renderSections(
+      [section({ type: 'text_block', config: { content:
+        'vs [{perfana-previous-test-run-id}] at [{perfana-previous-start-datetime}]' } })],
+      testRun,
+      null,
+    );
+    expect(html).toContain('vs [] at []');
+    expect(html).not.toContain('FORGED');
+    expect(html).not.toContain('1970');
+  });
+
+  it('blanks every Comparison key when the previous run is this one', async () => {
+    // The self-match guard covers the id; the three timestamp/release keys resolve from the
+    // same row, so a guard that only skipped the id would print this run's own start time
+    // as the previous run's.
+    findPreviousRun.mockResolvedValue({
+      testRunId: 'run-42',
+      startTime: new Date('2026-08-25T14:03:00.000Z'),
+      endTime: new Date('2026-08-25T14:33:00.000Z'),
+      applicationRelease: '2.0.0',
+    });
+    const html = await service.renderSections(
+      [section({ type: 'text_block', config: { content:
+        'vs {perfana-previous-start-datetime} on {perfana-previous-application-release}' } })],
+      testRun,
+      null,
+    );
+    expect(html).not.toContain('{perfana-previous-start-datetime}');
+    expect(html).not.toContain('{perfana-previous-application-release}');
+    expect(html).not.toContain('2.0.0');
+    expect(html).not.toContain('25 August 2026');
+  });
+
+  it('runs the previous-run lookup for a new Comparison key used on its own', async () => {
+    // The trigger is driven off REPORT_VARIABLES_NEEDING_LOOKUP, so a text block that names
+    // only the release — never the id — still has to reach the query.
+    findPreviousRun.mockResolvedValue({ testRunId: 'run-41', applicationRelease: '1.4.2' });
+    const html = await service.renderSections(
+      [section({ type: 'text_block', config: { content: 'was {perfana-previous-application-release}' } })],
+      testRun,
+      null,
+    );
+    expect(findPreviousRun).toHaveBeenCalledTimes(1);
+    expect(html).toContain('was 1.4.2');
+  });
+
+  it('selects the columns the Comparison keys are resolved from', async () => {
+    // A key added to the catalogue without its column in the select resolves to '' forever,
+    // which reads as a blank in the sentence rather than as an error.
+    await service.renderSections(
+      [section({ type: 'text_block', config: { content: '{perfana-previous-end-datetime}' } })],
+      testRun,
+      null,
+    );
+    expect(findPreviousRun.mock.calls[0][0].select).toEqual(
+      expect.arrayContaining(['testRunId', 'startTime', 'endTime', 'applicationRelease']),
+    );
+  });
+
+  it('blanks a previous run that recorded no release, without failing the report', async () => {
+    findPreviousRun.mockResolvedValue({ testRunId: 'run-41', applicationRelease: null });
+    const html = await service.renderSections(
+      [section({ type: 'text_block', config: { content: 'release [{perfana-previous-application-release}]' } })],
+      testRun,
+      null,
+    );
+    expect(html).toContain('release []');
   });
 
   it('renders the section anyway when a lookup fails', async () => {
@@ -233,13 +334,15 @@ describe('ReportHtmlCompilerService variable substitution', () => {
   });
 
   it('renders the section anyway when the previous-run lookup fails', async () => {
+    // The seed is written outside the try, so a thrown lookup blanks the key rather
+    // than leaving it for a same-named config row to answer.
     findPreviousRun.mockRejectedValue(new Error('db down'));
     const html = await service.renderSections(
-      [section({ type: 'text_block', config: { content: 'vs {perfana-previous-test-run-id}' } })],
+      [section({ type: 'text_block', config: { content: 'vs [{perfana-previous-test-run-id}]' } })],
       testRun,
       null,
     );
-    expect(html).toContain('vs {perfana-previous-test-run-id}');
+    expect(html).toContain('vs []');
   });
 
   it('leaves a secret-shaped config key literal — reports are served unauthenticated', async () => {
