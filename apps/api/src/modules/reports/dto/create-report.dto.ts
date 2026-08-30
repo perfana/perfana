@@ -66,16 +66,21 @@ export class ReportSectionConfigDto {
   /**
    * Section-specific configuration.
    *
-   * Comparison sections additionally accept the reserved value `'previous'` for
-   * `baselineTestRunId` — see the Swagger description below.
+   * Comparison sections additionally accept the reserved values `'previous'` and
+   * `'previous-successful'` for `baselineTestRunId` — see the Swagger description
+   * below, and PREVIOUS_RUN_BASELINE / PREVIOUS_SUCCESSFUL_RUN_BASELINE in
+   * @perfana/shared for the strings themselves.
    */
   @ApiPropertyOptional({
     description:
-      'Section-specific configuration options. Comparison sections additionally accept the ' +
-      "reserved value 'previous' for baselineTestRunId, which resolves per report to the run " +
+      'Section-specific configuration options. Comparison sections additionally accept two ' +
+      "reserved values for baselineTestRunId. 'previous' resolves per report to the run " +
       'immediately before this one in the same system, environment and workload — so a template ' +
-      'compares each report against its own predecessor rather than a pinned run.',
-    example: { baselineTestRunId: 'previous', source: 'performance-metrics' },
+      'compares each report against its own predecessor rather than a pinned run. ' +
+      "'previous-successful' is the same idea but skips back to the most recent earlier run " +
+      'whose SLOs passed (consolidated_result.meetsRequirement), so a still-broken report is not ' +
+      'compared against a run that had already breached its objectives and made to look flat.',
+    example: { baselineTestRunId: 'previous-successful', source: 'performance-metrics' },
   })
   @IsOptional()
   @IsObject()

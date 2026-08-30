@@ -9,6 +9,7 @@ import {
   GeneratedReport,
   assignSectionAnchors,
   isLinkableSection,
+  buildPreviousRunVariableValues,
   buildReportVariableValues,
   substituteReportVariables,
   hasReportVariable,
@@ -223,7 +224,7 @@ export class ReportHtmlCompilerService {
   /**
    * The two variable groups that are a query rather than a column: this test run's
    * configuration keys (deep links resolve these too, under the author's own key
-   * name) and the previous run's id.
+   * name) and the previous run's id, timestamps and release.
    *
    * No org filtering here on purpose. `testRun` was already resolved and access-
    * checked by the caller — previewSection through isTestRunAccessible, generation
@@ -232,9 +233,11 @@ export class ReportHtmlCompilerService {
    * confined to the same system/environment/workload, so it cannot reach past what
    * the caller could already see.
    *
-   * Failures are logged and swallowed: an unresolved placeholder prints as itself,
-   * which is a far better outcome than a report that fails to render over a value
-   * used in one sentence.
+   * Failures are logged and swallowed rather than failing a whole report over a
+   * value used in one sentence. A configuration key that could not be read prints
+   * as itself, so the author can see what happened; a Comparison key resolves to
+   * blank instead, because it is seeded (see below) and a report whose predecessor
+   * is unknown is the ordinary case, not an authoring mistake.
    */
   private async lookupVariableValues(
     testRun: TestRun,
@@ -282,6 +285,25 @@ export class ReportHtmlCompilerService {
       prose.some(v => v.includes(`{${key}}`)),
     );
     if (needsLookup) {
+      // Seeded BEFORE the query, and after the config loop above, for two reasons.
+      //
+      // 1. The first run of a system has no predecessor, which is the normal case,
+      //    not an edge one. buildPreviousRunVariableValues returns {} on a miss and
+      //    the assign below only happens on a hit, so without this seed all four
+      //    keys stayed absent and substituteReportVariables printed a literal
+      //    `{perfana-previous-application-release}` into a customer-facing PDF.
+      //    Every other built-in resolves to '' when its data is missing; these now
+      //    behave the same. A failed or self-matching lookup lands here too — the
+      //    seed is outside the try on purpose.
+      // 2. It closes the shadowing hole. These four are absent from
+      //    buildReportVariableValues, so unlike every other catalogue key they were
+      //    NOT re-asserted by the spread in resolveVariables — a test_run_configs
+      //    row named `perfana-previous-start-datetime`, writable by anything with an
+      //    API key, resolved into the prose and forged the baseline provenance of a
+      //    publicly-shared report. Writing the seed after the config loop makes the
+      //    built-in win, exactly as the catalogue spread does for the others.
+      for (const key of REPORT_VARIABLES_NEEDING_LOOKUP) values[key] = '';
+
       try {
         const previous = await withRequestEm(this.testRunRepo).findOne({
           where: {
@@ -296,13 +318,13 @@ export class ReportHtmlCompilerService {
             // sentence reading "compared to <a later run>" is not.
             ...(testRun.startTime ? { startTime: LessThan(testRun.startTime) } : {}),
           },
-          select: ['testRunId'],
+          select: ['testRunId', 'startTime', 'endTime', 'applicationRelease'],
           order: { startTime: 'DESC' },
         });
         // A run with no start time falls back to the deep-link behaviour, so still
         // guard against naming the report's own run.
         if (previous?.testRunId && previous.testRunId !== testRun.testRunId) {
-          values['perfana-previous-test-run-id'] = previous.testRunId;
+          Object.assign(values, buildPreviousRunVariableValues(previous));
         }
       } catch (error) {
         this.logger.warn(`Could not resolve previous test run: ${(error as Error).message}`);

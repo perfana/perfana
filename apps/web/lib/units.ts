@@ -101,6 +101,25 @@ const formatNumber = (value: number): string => {
   }
 };
 
+/**
+ * `percentunit` is stored 0.0-1.0 but always read as 0-100%. Every other unit is
+ * already in the scale it is displayed in.
+ */
+export const toUnitScale = (value: number, unitId?: string): number =>
+  (unitId === 'percentunit' ? value * 100 : value);
+
+/**
+ * The display label for a KNOWN Grafana unit code — 'ms', '%', 'req/s' — or '' when the
+ * code is absent, unitless (`none`/`short`), or not in the table.
+ *
+ * Deliberately does NOT fall back to echoing the raw id the way `getUnit` does. The units
+ * table covers ~50 of Grafana's ~200 codes, and a panel using `dateTimeAsIso` or
+ * `currencyUSD` would otherwise label a column with the raw code, which reads as a real
+ * unit in a customer-facing report rather than as a miss.
+ */
+export const unitLabel = (unitId?: string | null): string =>
+  (unitId ? units.find((u) => u.id === unitId)?.format ?? '' : '');
+
 export const formatValueWithUnit = (value: number | string | null | undefined, unitId?: string): string => {
   // Handle null, undefined, or empty values
   if (value === null || value === undefined || value === '') {

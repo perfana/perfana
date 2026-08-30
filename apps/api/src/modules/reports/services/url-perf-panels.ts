@@ -13,16 +13,18 @@ interface UrlPanelSpec {
   metric: UrlMetric;
   /** Response time carries a full distribution; the rest are a single number per URL. */
   hasPercentiles: boolean;
+  /** Grafana unit code for the panel's values. Mirrors `yAxesFormat` in the web copy. */
+  unit: string;
 }
 
 const URL_PANELS: Record<number, UrlPanelSpec> = {
   // Spelled out for the report: a section heading has the room the compare card's
   // dropdown does not, and "URL RT" reads as an abbreviation nobody has to decode.
-  210: { title: 'URL Response Times', metric: 'response_time', hasPercentiles: true },
-  214: { title: 'URL Error Rate', metric: 'error_percentage', hasPercentiles: false },
-  215: { title: 'URL Throughput', metric: 'throughput', hasPercentiles: false },
-  217: { title: 'URL Latency', metric: 'latency', hasPercentiles: false },
-  218: { title: 'URL Connect Time', metric: 'connect_time', hasPercentiles: false },
+  210: { title: 'URL Response Times', metric: 'response_time', hasPercentiles: true, unit: 'ms' },
+  214: { title: 'URL Error Rate', metric: 'error_percentage', hasPercentiles: false, unit: 'percent' },
+  215: { title: 'URL Throughput', metric: 'throughput', hasPercentiles: false, unit: 'reqps' },
+  217: { title: 'URL Latency', metric: 'latency', hasPercentiles: false, unit: 'ms' },
+  218: { title: 'URL Connect Time', metric: 'connect_time', hasPercentiles: false, unit: 'ms' },
 };
 
 export function isUrlPanel(panelId: number | undefined): boolean {

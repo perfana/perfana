@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, SelectQueryBuilder } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { SeriesConfig } from '@perfana/shared/entities';
 import { ControllerRef } from '../renderers/controller-sections';
@@ -947,6 +947,10 @@ export class ReportDataFetcherService {
         dashboardLabel: sel.dashboardLabel,
         panelTitle: perfPanelTitle(sel.panelId ?? null, ''),
         label: ALL_AGGREGATED_SERIES,
+        // Both aggregate kinds are response times. No `baselineUnit`: the unit is fixed by
+        // construction here, so both sides of the comparison are milliseconds by definition —
+        // unlike the ds_metric_statistics path, where each side carries its panel's own code.
+        unit: 'ms',
         metrics: opts.metrics.map((k) => ({
           key: k, current: cur[k], baseline: base[k], diffPercent: percentDiff(cur[k], base[k]),
         })),
@@ -1855,7 +1859,63 @@ export class ReportDataFetcherService {
    * Scope and completed-only match the baseline dropdown in the UI (getBaselineCandidates), so
    * "previous" resolves to the run a person would have picked from the top of that list.
    */
-  async getPreviousTestRun(testRun: TestRun): Promise<TestRun | null> {
+  async getPreviousTestRun(
+    testRun: TestRun,
+    opts: { sloPassedOnly?: boolean } = {},
+  ): Promise<TestRun | null> {
+    const qb = this.previousRunScopeQb(testRun)
+      .orderBy('tr.startTime', 'DESC')
+      .limit(1);
+    // "SLOs passed" is consolidated_result.meetsRequirement — the same field the
+    // notifications call "Service Level Objectives". A run that never had its
+    // requirements evaluated has no key at all, so `= 'true'` skips it, which is
+    // what "known good" has to mean here. `previousRunSloMiss` is what tells those
+    // two apart afterwards, so the empty state does not report the wrong one.
+    //
+    // snake_case is deliberate. TypeORM rewrites a camelCase entity property inside a raw
+    // fragment only when it is preceded by ` `/`=`/`(` AND followed by ` `/`=`/`)`/`,`/EOL —
+    // so `tr.consolidatedResult ->> …` survives ONLY because of the space before `->>`.
+    // Closing that space in a tidy-up would send `tr.consolidatedResult` to Postgres and
+    // throw at render time. The column name has no such dependency, and matches the one
+    // prior site (test-runs-dashboard-query.service.ts).
+    if (opts.sloPassedOnly) {
+      qb.andWhere(`tr.consolidated_result ->> 'meetsRequirement' = 'true'`);
+    }
+    return qb.getOne();
+  }
+
+  /**
+   * Why an SLO-passing predecessor could not be found: 'none' when the run has no earlier
+   * run at all, 'not-evaluated' when earlier runs exist but none of them recorded a
+   * requirements verdict, 'all-failed' when they did and none passed.
+   *
+   * `consolidated_result` is nullable jsonb and `meetsRequirement` is optional, so
+   * `consolidated_result ->> 'meetsRequirement' = 'true'` is NULL — not false — for a run
+   * whose SLOs were never evaluated, and the run is excluded. Reporting that as "no earlier
+   * run passed its SLOs" asserts they FAILED, which is the opposite conclusion, printed into
+   * a document served unauthenticated over a share link.
+   */
+  async previousRunSloMiss(testRun: TestRun): Promise<'none' | 'not-evaluated' | 'all-failed'> {
+    const anyPredecessor = await this.previousRunScopeQb(testRun).limit(1).getOne();
+    if (!anyPredecessor) return 'none';
+    // `-> 'k' IS NOT NULL` rather than the `?` key-exists operator: `?` is a placeholder to
+    // several drivers and has to be escaped, and the arrow form answers the same question
+    // here (a NULL consolidated_result and an absent key both yield SQL NULL).
+    const evaluated = await this.previousRunScopeQb(testRun)
+      .andWhere(`tr.consolidated_result -> 'meetsRequirement' IS NOT NULL`)
+      .getCount();
+    return evaluated === 0 ? 'not-evaluated' : 'all-failed';
+  }
+
+  /**
+   * The candidate set both predecessor lookups share: same system, environment and workload,
+   * completed, and strictly earlier than the run being reported on — see getPreviousTestRun
+   * for why "earlier" is relative to that run rather than to the newest run there is.
+   *
+   * Shared so the empty-state verdict is drawn from exactly the candidate set the lookup
+   * searched; a scope that drifted between the two would explain a miss that never happened.
+   */
+  private previousRunScopeQb(testRun: TestRun): SelectQueryBuilder<TestRun> {
     return withRequestEm(this.testRunRepo)
       .createQueryBuilder('tr')
       .where('tr.systemUnderTestId = :systemUnderTestId', {
@@ -1867,12 +1927,7 @@ export class ReportDataFetcherService {
       .andWhere('tr.workload = :workload', { workload: testRun.workload })
       .andWhere('tr.completed = :completed', { completed: true })
       .andWhere('tr.id != :id', { id: testRun.id })
-      // Strictly earlier: ordering by start time alone would return a LATER run when the
-      // report is generated for anything but the newest.
-      .andWhere('tr.startTime < :startTime', { startTime: testRun.startTime })
-      .orderBy('tr.startTime', 'DESC')
-      .limit(1)
-      .getOne();
+      .andWhere('tr.startTime < :startTime', { startTime: testRun.startTime });
   }
 
 
@@ -2750,6 +2805,7 @@ export class ReportDataFetcherService {
           dashboardLabel: sel.dashboardLabel,
           panelTitle: spec.title,
           label: url,
+          unit: spec.unit,
           metrics: opts.metrics.map((k) => {
             const cv = pick(c, k);
             const bv = pick(b, k);
@@ -2849,6 +2905,8 @@ export class ReportDataFetcherService {
         return {
           group: c.scenario_name ?? 'default',
           label: c.transaction_name,
+          // transactions.response_time is milliseconds.
+          unit: 'ms',
           metrics: opts.metrics.map((k) => {
             const cv = num(c[fieldByKey[k]]);
             const bv = b != null ? num(b[fieldByKey[k]]) : null;
@@ -2971,6 +3029,12 @@ export class ReportDataFetcherService {
         dashboardLabel: c.dashboard_label ?? 'Other',
         panelTitle,
         ...(c.metric_name && urlByMetricName[c.metric_name] ? { url: urlByMetricName[c.metric_name] } : {}),
+        unit: c.unit,
+        // The pairing identity is dashboard/panel/metric name — the unit is NOT part of it,
+        // so a dashboardMap can legitimately pair an `s` panel against an `ms` one. Carry the
+        // baseline's own code rather than scaling and labelling its number with the current
+        // row's; the renderer falls back to `unit` when this is null.
+        baselineUnit: b?.unit ?? null,
         metrics: opts.metrics.map((k) => {
           const cv = c[fieldByKey[k]];
           const bv = b ? b[fieldByKey[k]] : null;

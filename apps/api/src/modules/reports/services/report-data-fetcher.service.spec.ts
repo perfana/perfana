@@ -1273,6 +1273,7 @@ describe('ReportDataFetcherService getPreviousTestRun', () => {
       orderBy: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
       getOne: jest.fn().mockResolvedValue({ testRunId: 'EA-acc-loadtest-00019' }),
+      getCount: jest.fn().mockResolvedValue(0),
     };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -1326,5 +1327,213 @@ describe('ReportDataFetcherService getPreviousTestRun', () => {
     qb.getOne.mockResolvedValue(null);
 
     expect(await service.getPreviousTestRun(testRun)).toBeNull();
+  });
+
+  it('narrows to SLO-passed predecessors on the consolidated result when asked', async () => {
+    // "previous-successful" is only worth anything if it actually filters — comparing a
+    // still-broken run against a run that already breached its objectives reads as flat.
+    await service.getPreviousTestRun(testRun, { sloPassedOnly: true });
+
+    const clauses = qb.andWhere.mock.calls.map((c) => c[0]);
+    expect(clauses).toContain(`tr.consolidated_result ->> 'meetsRequirement' = 'true'`);
+  });
+
+  it('spells the jsonb column snake_case, not as the camelCase entity property', async () => {
+    // TypeORM rewrites a camelCase property inside a raw fragment only when it is preceded
+    // by ` `/`=`/`(` AND followed by ` `/`=`/`)`/`,`/EOL — so `tr.consolidatedResult ->> …`
+    // survives ONLY on the space before `->>`. Closing that space in a tidy-up would send
+    // `tr.consolidatedResult` to Postgres and throw at render time. The column name has no
+    // such dependency.
+    await service.getPreviousTestRun(testRun, { sloPassedOnly: true });
+
+    const clauses = qb.andWhere.mock.calls.map((c) => c[0]);
+    expect(clauses.some((c: string) => /consolidatedResult/.test(c))).toBe(false);
+  });
+
+  it('leaves plain "previous" unfiltered, so a failed run is still a valid baseline', async () => {
+    // Regression guard: the SLO clause must stay behind the opt-in. Leaking it into the
+    // default would silently retarget every existing "previous" baseline.
+    await service.getPreviousTestRun(testRun);
+
+    const clauses = qb.andWhere.mock.calls.map((c) => c[0]);
+    expect(clauses.some((c: string) => /meetsRequirement/.test(c))).toBe(false);
+  });
+
+  it('treats an explicit sloPassedOnly:false the same as omitting it', async () => {
+    await service.getPreviousTestRun(testRun, { sloPassedOnly: false });
+
+    const clauses = qb.andWhere.mock.calls.map((c) => c[0]);
+    expect(clauses.some((c: string) => /meetsRequirement/.test(c))).toBe(false);
+  });
+
+  it('keeps the scope and ordering when the SLO filter is on', async () => {
+    // The filter narrows the candidates; it must not replace the same-system/environment/
+    // workload scope or the "strictly earlier, newest first" ordering.
+    await service.getPreviousTestRun(testRun, { sloPassedOnly: true });
+
+    const clauses = [...qb.where.mock.calls, ...qb.andWhere.mock.calls].map((c) => c[0]);
+    expect(clauses).toEqual(
+      expect.arrayContaining([
+        'tr.systemUnderTestId = :systemUnderTestId',
+        'tr.testEnvironment = :testEnvironment',
+        'tr.workload = :workload',
+        'tr.completed = :completed',
+        'tr.startTime < :startTime',
+      ]),
+    );
+    expect(qb.orderBy).toHaveBeenCalledWith('tr.startTime', 'DESC');
+    expect(qb.limit).toHaveBeenCalledWith(1);
+  });
+
+  it('returns null when no earlier run ever passed its SLOs', async () => {
+    qb.getOne.mockResolvedValue(null);
+
+    expect(await service.getPreviousTestRun(testRun, { sloPassedOnly: true })).toBeNull();
+  });
+
+  describe('previousRunSloMiss', () => {
+    it('reports "none" when the run has no earlier run at all', async () => {
+      qb.getOne.mockResolvedValue(null);
+
+      expect(await service.previousRunSloMiss(testRun)).toBe('none');
+      // No point counting verdicts among a candidate set that is empty.
+      expect(qb.getCount).not.toHaveBeenCalled();
+    });
+
+    it('reports "not-evaluated" when predecessors exist but none recorded a verdict', async () => {
+      // The whole point of the split: `->> 'meetsRequirement' = 'true'` is NULL for these
+      // runs, so the SLO lookup skips them exactly as it skips a run that failed. Calling
+      // that "none passed" asserts they FAILED — the opposite conclusion.
+      qb.getCount.mockResolvedValue(0);
+
+      expect(await service.previousRunSloMiss(testRun)).toBe('not-evaluated');
+    });
+
+    it('reports "all-failed" only when predecessors did record a verdict', async () => {
+      qb.getCount.mockResolvedValue(3);
+
+      expect(await service.previousRunSloMiss(testRun)).toBe('all-failed');
+    });
+
+    it('counts on the key existing, not on it being true', async () => {
+      // A run that failed still HAS the key; the count is "was this ever evaluated".
+      await service.previousRunSloMiss(testRun);
+
+      const clauses = qb.andWhere.mock.calls.map((c) => c[0]);
+      expect(clauses).toContain(`tr.consolidated_result -> 'meetsRequirement' IS NOT NULL`);
+      expect(clauses.some((c: string) => /= 'true'/.test(c))).toBe(false);
+    });
+
+    it('searches exactly the candidate set the SLO lookup searched', async () => {
+      // A scope that drifted between the two would explain a miss that never happened.
+      await service.previousRunSloMiss(testRun);
+
+      const clauses = [...qb.where.mock.calls, ...qb.andWhere.mock.calls].map((c) => c[0]);
+      expect(clauses).toEqual(
+        expect.arrayContaining([
+          'tr.systemUnderTestId = :systemUnderTestId',
+          'tr.testEnvironment = :testEnvironment',
+          'tr.workload = :workload',
+          'tr.completed = :completed',
+          'tr.id != :id',
+          'tr.startTime < :startTime',
+        ]),
+      );
+    });
+  });
+});
+
+describe('ReportDataFetcherService getBaselineRunComparison baselineUnit', () => {
+  // Rows pair on `dashboard_label || panel_title || metric_name`. The unit is NOT part of
+  // that identity, and a dashboardMap deliberately pairs differently-named dashboards — so a
+  // same-titled panel can legitimately be `s` on one side and `ms` on the other. Taking the
+  // current row's unit for both would scale and label the baseline number wrong, silently.
+  let service: ReportDataFetcherService;
+  let dsQuery: jest.Mock;
+
+  const statRow = (over: Record<string, unknown>) => ({
+    test_run_id: 'cur',
+    dashboard_label: 'JVM (acc)',
+    panel_title: 'Latency',
+    panel_id: 7,
+    metric_name: 'p95',
+    unit: 'ms',
+    mean: 1200,
+    q90: null,
+    q95: null,
+    q99: null,
+    ...over,
+  });
+
+  beforeEach(async () => {
+    dsQuery = jest.fn().mockResolvedValue([]);
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ReportDataFetcherService,
+        {
+          provide: getRepositoryToken(TestRun),
+          useValue: { query: jest.fn().mockResolvedValue([]), findOne: jest.fn() },
+        },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            isGlobalAdmin: jest.fn().mockReturnValue(true),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+          },
+        },
+        { provide: DataSource, useValue: { query: dsQuery } },
+      ],
+    }).compile();
+    service = module.get(ReportDataFetcherService);
+  });
+
+  const run = (dashboardMap?: { current: string; baseline: string }[]) =>
+    service.getBaselineRunComparison('cur', 'base', 'grafana', {
+      metrics: ['avg'],
+      userId: '',
+      roles: [],
+      ...(dashboardMap ? { dashboardMap } : {}),
+    });
+
+  it("carries the baseline row's own unit when the mapped pair disagrees", async () => {
+    dsQuery.mockResolvedValue([
+      statRow({ unit: 's', mean: 1.2 }),
+      statRow({ test_run_id: 'base', dashboard_label: 'JVM (prod)', unit: 'ms', mean: 1000 }),
+    ]);
+
+    const data = await run([{ current: 'JVM (acc)', baseline: 'JVM (prod)' }]);
+
+    expect(data!.rows[0]).toMatchObject({ unit: 's', baselineUnit: 'ms' });
+  });
+
+  it('carries the baseline unit even when it matches, so the renderer never has to guess', async () => {
+    dsQuery.mockResolvedValue([
+      statRow({}),
+      statRow({ test_run_id: 'base', mean: 1000 }),
+    ]);
+
+    const data = await run();
+
+    expect(data!.rows[0]).toMatchObject({ unit: 'ms', baselineUnit: 'ms' });
+  });
+
+  it('leaves baselineUnit null when the row paired with nothing', async () => {
+    // Null means "no distinct baseline unit"; the renderer then falls back to `unit`.
+    dsQuery.mockResolvedValue([statRow({})]);
+
+    const data = await run();
+
+    expect(data!.rows[0]!.baselineUnit).toBeNull();
+  });
+
+  it('leaves baselineUnit null when the baseline row recorded no unit', async () => {
+    dsQuery.mockResolvedValue([
+      statRow({}),
+      statRow({ test_run_id: 'base', unit: null, mean: 1000 }),
+    ]);
+
+    const data = await run();
+
+    expect(data!.rows[0]!.baselineUnit).toBeNull();
   });
 });

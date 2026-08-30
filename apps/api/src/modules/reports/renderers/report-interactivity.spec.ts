@@ -105,6 +105,49 @@ describe('report interactivity script', () => {
     expect(leaderOrder()).toEqual(['c-low', 'c-mid', 'c-high']);
   });
 
+  it('sorts a comparison cell whose leading value carries grouped thousands', () => {
+    // The unit lives in the panel heading now, so the cells read "1,510.3 vs 516.4 ...".
+    // The sorter reads the LEADING number out of the cell text, and it has to read the
+    // separator as grouping rather than stopping at it — truncating "1,510.3" to 1 would
+    // sink the worst row to the top of the column.
+    document.body.innerHTML = `
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Metric</th><th>P95</th></tr></thead>
+          <tbody>
+            <tr id="u-mid"><td>cpu</td><td>47.9 vs 50.1 ▼ -4.4%</td></tr>
+            <tr id="u-high"><td>mem</td><td>1,510.3 vs 516.4 ▲ 192.5%</td></tr>
+            <tr id="u-low"><td>io</td><td>5 vs 47.9 ▼ -89.6%</td></tr>
+          </tbody>
+        </table>
+      </div>`;
+    runScript();
+    header(1).click();
+
+    expect(leaderOrder()).toEqual(['u-low', 'u-mid', 'u-high']);
+  });
+
+  it('sorts a percentunit column by its value, not by the delta chip trailing the cell', () => {
+    // percentunit values are scaled into 0-100 and rendered bare ("42 vs 40"), with the
+    // only "%" left in the cell belonging to the delta at the end. Sorting must key on the
+    // leading value — keying on the delta would order these p-high, p-mid, p-low.
+    document.body.innerHTML = `
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Metric</th><th>Avg</th></tr></thead>
+          <tbody>
+            <tr id="p-mid"><td>cpu</td><td>42 vs 40 ▲ 5%</td></tr>
+            <tr id="p-high"><td>heap</td><td>91.5 vs 88 ▲ 4%</td></tr>
+            <tr id="p-low"><td>io</td><td>3 vs 9 ▼ -66.7%</td></tr>
+          </tbody>
+        </table>
+      </div>`;
+    runScript();
+    header(1).click();
+
+    expect(leaderOrder()).toEqual(['p-low', 'p-mid', 'p-high']);
+  });
+
   it('filters rows and updates the counter', () => {
     const input = filterInput();
     input.value = 'log';

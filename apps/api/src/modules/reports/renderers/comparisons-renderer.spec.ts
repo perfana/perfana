@@ -33,6 +33,7 @@ describe('ComparisonsRenderer', () => {
             getBaselineRunComparison: jest.fn().mockResolvedValue(null),
             getAggregatedScalars: jest.fn(),
             getPreviousTestRun: jest.fn().mockResolvedValue(null),
+            previousRunSloMiss: jest.fn().mockResolvedValue('none'),
           },
         },
       ],
@@ -319,6 +320,163 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('heap used');
     expect(html).toContain('1,200.46'); // thousands-grouped, 2 dp
     expect(html).toContain('1 warnings'); // shared summary chip
+  });
+
+  it('prints the unit once in the panel heading, not on every value', async () => {
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / Heap', dashboardLabel: 'JVM', panelTitle: 'Heap', label: 'heap used', unit: 'ms',
+        metrics: [{ key: 'avg', current: 1200.456, baseline: 1000, diffPercent: 20 }] },
+      { group: 'JVM / CPU', dashboardLabel: 'JVM', panelTitle: 'CPU', label: 'cpu', unit: 'percentunit',
+        metrics: [{ key: 'avg', current: 0.42, baseline: 0.4, diffPercent: 5 }] },
+      { group: 'JVM / Threads', dashboardLabel: 'JVM', panelTitle: 'Threads', label: 'threads', unit: null,
+        metrics: [{ key: 'avg', current: 12, baseline: 12, diffPercent: 0 }] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    // Values are bare — the reader gets the unit from the heading above the table.
+    expect(html).toContain('>1,200.46<');
+    expect(html).toContain('vs 1,000<');
+    expect(html).not.toContain('1,200.46 ms');
+    expect(html).not.toContain('vs 1,000 ms');
+    // ...and it is there exactly once, as a chip beside the Heap panel's metric count.
+    expect(html).toContain('>ms</span>');
+    expect(html.match(/>ms<\/span>/g)).toHaveLength(1);
+    // percentunit is still lifted out of its 0.0-1.0 storage: an unscaled 0.42 under a
+    // "%" heading would be off by two orders of magnitude.
+    expect(html).toContain('>42<');
+    expect(html).not.toContain('0.42');
+    expect(html).toContain('>%</span>');
+    // A row with no recorded unit gets no chip and keeps its bare number.
+    expect(html).toContain('>12<');
+  });
+
+  it('withholds the unit chip when the rows under one heading disagree', async () => {
+    // A dashboardMap pairs differently-named dashboards, so a same-titled panel can hold an
+    // `s` series next to an `ms` one. Picking either would imply the other row shares it.
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / Latency', dashboardLabel: 'JVM', panelTitle: 'Latency', label: 'p95 (s)', unit: 's',
+        metrics: [{ key: 'avg', current: 1.2, baseline: 1, diffPercent: 20 }] },
+      { group: 'JVM / Latency', dashboardLabel: 'JVM', panelTitle: 'Latency', label: 'p95 (ms)', unit: 'ms',
+        metrics: [{ key: 'avg', current: 1200, baseline: 1000, diffPercent: 20 }] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).not.toContain('>ms</span>');
+    expect(html).not.toContain('>s</span>');
+    // The panel heading itself is still there — only the unit chip is withheld.
+    expect(html).toContain('Latency');
+    expect(html).toContain('2 metrics');
+  });
+
+  it('scales the baseline with its OWN unit when the pairing crossed a unit boundary', async () => {
+    // Rows pair on dashboard/panel/metric name, which does not include the unit. Scaling a
+    // 0.42 percentunit baseline with the current row's `percent` would print it as 0.42
+    // beside a 42 — a 99% "improvement" that never happened.
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / CPU', dashboardLabel: 'JVM', panelTitle: 'CPU', label: 'cpu',
+        unit: 'percent', baselineUnit: 'percentunit',
+        metrics: [{ key: 'avg', current: 42, baseline: 0.4, diffPercent: 5 }] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('>42<');
+    expect(html).toContain('vs 40<');
+    expect(html).not.toContain('vs 0.4<');
+  });
+
+  it('falls back to the row unit when no distinct baseline unit was recorded', async () => {
+    // baselineUnit is null on every builder whose two sides share a unit by construction.
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / CPU', dashboardLabel: 'JVM', panelTitle: 'CPU', label: 'cpu',
+        unit: 'percentunit', baselineUnit: null,
+        metrics: [{ key: 'avg', current: 0.42, baseline: 0.4, diffPercent: 5 }] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('>42<');
+    expect(html).toContain('vs 40<');
+  });
+
+  it('prints the unit once in the scenario-grouped heading too, not only the dashboard one', async () => {
+    // Rows with no dashboardLabel take the other layout branch entirely — the transaction
+    // comparison, where the fetcher hard-codes `ms`. It has its own heading and call site.
+    dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      source: 'performance-metrics',
+      rows: [{
+        group: 'checkout',
+        label: 'login',
+        unit: 'ms',
+        metrics: [
+          { key: 'avg', current: 1200.456, baseline: 1000, diffPercent: 20 },
+          { key: 'p95', current: 2400, baseline: 2000, diffPercent: 20 },
+        ],
+      }],
+    } as never);
+    const html = await renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'base-1', metrics: ['avg', 'p95'] } }),
+      makeTestRun());
+    expect(html).toContain('>1,200.46<');
+    expect(html).toContain('vs 1,000<');
+    expect(html).toContain('>2,400<');
+    expect(html).toContain('vs 2,000<');
+    expect(html).not.toContain(' ms');
+    // One chip in the group heading carries it for all four numbers.
+    expect(html.match(/>ms<\/span>/g)).toHaveLength(1);
+  });
+
+  it('leaves the em-dash for a missing value alone rather than printing "\u2014 ms"', async () => {
+    // A row present in the current run and absent from the baseline has a null baseline.
+    dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      source: 'performance-metrics',
+      rows: [{
+        group: 'checkout',
+        label: 'login',
+        unit: 'ms',
+        metrics: [{ key: 'avg', current: 110, baseline: null, diffPercent: null }],
+      }],
+    } as never);
+    const html = await renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'base-1', metrics: ['avg'] } }), makeTestRun());
+    expect(html).toContain('>110<');
+    expect(html).not.toMatch(/(&mdash;|&#8212;|\u2014|-) ms/);
+  });
+
+  it('drops a unit code the panel supplied that the units table does not know', async () => {
+    // ds_metric_statistics.unit is whatever the Grafana panel carried, so it is
+    // author-supplied text. unitLabel yields '' for anything off the table, so it never
+    // reaches the heading at all — nothing to escape, and no raw code shown as a unit.
+    dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      source: 'grafana',
+      rows: [{
+        group: 'JVM / Heap', dashboardLabel: 'JVM', panelTitle: 'Heap', label: 'heap',
+        unit: '<img src=x onerror=alert(1)>',
+        metrics: [{ key: 'avg', current: 5, baseline: 5, diffPercent: 0 }],
+      }],
+    } as never);
+    const html = await renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'base-1', metrics: ['avg'] } }), makeTestRun());
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('&lt;img');
   });
 
   it('shows a Current → Baseline caption when a dashboard mapping is in effect', async () => {
@@ -646,6 +804,7 @@ describe('ComparisonsRenderer previous-run baseline', () => {
             getPreviousTestRun: jest
               .fn()
               .mockResolvedValue({ testRunId: 'EA-acc-loadtest-00019' }),
+            previousRunSloMiss: jest.fn().mockResolvedValue('all-failed'),
           },
         },
       ],
@@ -687,6 +846,76 @@ describe('ComparisonsRenderer previous-run baseline', () => {
     expect(dataFetcher.getBaselineRunComparison).not.toHaveBeenCalled();
     expect(html).toContain('first run for its system, environment and workload');
   });
+
+  it('asks for an SLO-passed predecessor when the baseline is "previous-successful"', async () => {
+    await renderer.renderComparisonsSection(sectionWith('previous-successful'), makeTestRun());
+
+    expect(dataFetcher.getPreviousTestRun).toHaveBeenCalledWith(
+      expect.anything(),
+      { sloPassedOnly: true },
+    );
+    const [, baselineId] = dataFetcher.getBaselineRunComparison.mock.calls[0]!;
+    expect(baselineId).toBe('EA-acc-loadtest-00019');
+  });
+
+  it('says no earlier run passed its SLOs when they were evaluated and all failed', async () => {
+    // Two different facts; the plain-previous wording would send the reader looking
+    // for runs that do exist.
+    dataFetcher.getPreviousTestRun.mockResolvedValue(null);
+    dataFetcher.previousRunSloMiss.mockResolvedValue('all-failed');
+
+    const html = await renderer.renderComparisonsSection(
+      sectionWith('previous-successful'), makeTestRun());
+
+    expect(html).toContain('passed its SLOs');
+    expect(html).not.toContain('first run for its system');
+    expect(html).not.toContain('evaluated');
+  });
+
+  it('says the earlier runs were never EVALUATED, rather than that they failed', async () => {
+    // `consolidated_result ->> 'meetsRequirement' = 'true'` is NULL for a run whose SLOs
+    // were never evaluated, so it is excluded exactly as a failing run is. Reporting that
+    // as "none passed" asserts the opposite conclusion, in a document served
+    // unauthenticated over a share link.
+    dataFetcher.getPreviousTestRun.mockResolvedValue(null);
+    dataFetcher.previousRunSloMiss.mockResolvedValue('not-evaluated');
+
+    const html = await renderer.renderComparisonsSection(
+      sectionWith('previous-successful'), makeTestRun());
+
+    expect(html).toContain('none of them had its SLOs evaluated');
+    expect(html).not.toContain('passed its SLOs');
+    expect(html).not.toContain('first run for its system');
+  });
+
+  it('falls back to the first-run wording when there is no predecessor at all', async () => {
+    // "previous-successful" on the very first run of a system is not an SLO fact.
+    dataFetcher.getPreviousTestRun.mockResolvedValue(null);
+    dataFetcher.previousRunSloMiss.mockResolvedValue('none');
+
+    const html = await renderer.renderComparisonsSection(
+      sectionWith('previous-successful'), makeTestRun());
+
+    expect(html).toContain('first run for its system, environment and workload');
+    expect(html).not.toContain('passed its SLOs');
+  });
+
+  it('does not ask why the SLO lookup missed when a baseline was actually found', async () => {
+    await renderer.renderComparisonsSection(sectionWith('previous-successful'), makeTestRun());
+
+    expect(dataFetcher.previousRunSloMiss).not.toHaveBeenCalled();
+  });
+
+  it('never asks the SLO question for a plain "previous" baseline', async () => {
+    // Plain "previous" has one empty state, and it is the first-run one.
+    dataFetcher.getPreviousTestRun.mockResolvedValue(null);
+
+    const html = await renderer.renderComparisonsSection(sectionWith('previous'), makeTestRun());
+
+    expect(dataFetcher.previousRunSloMiss).not.toHaveBeenCalled();
+    expect(html).toContain('first run for its system, environment and workload');
+  });
+
   it('resolves "previous" for a config that still carries the old comparisonMode key', async () => {
     // Sections saved before the mode switch was removed keep the key; it must simply be ignored.
     await renderer.renderComparisonsSection(

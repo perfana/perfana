@@ -205,13 +205,17 @@ export function GenerateReportDialog({
   // A comparisons section with no baseline renders one empty state and nothing else, so
   // generating the report is a wasted round trip. Templates are configured without a test
   // run in hand, so they are exempt — a template may legitimately be saved unpinned.
+  //
+  // The block is "no baseline SELECTED", never "no candidate to pin". The picker always
+  // offers the resolved-per-report sentinels, so a run with no earlier run of its own can
+  // still be given a perfectly good baseline; an empty candidate list is also what a failed
+  // fetch produces. Gating on the list disabled Generate on both. Same rule as the section's
+  // own preview button — see previewDisabled in SectionConfigs.tsx.
   const baselineBlockReason = isTemplateBuilder || baselineSectionCount === 0
     ? null
-    : baselineCandidates.length === 0
-      ? 'This test run has no earlier run in its system, environment and workload to compare against. Remove the comparison section to generate the report.'
-      : baselineSections.some((s) => !(s.config as Record<string, unknown> | undefined)?.baselineTestRunId)
-        ? 'Select a baseline run for every comparison section before generating the report.'
-        : null;
+    : baselineSections.some((s) => !(s.config as Record<string, unknown> | undefined)?.baselineTestRunId)
+      ? 'Select a baseline run for every comparison section before generating the report.'
+      : null;
 
   // "Save as template" name conflict: template summaries are scoped to the
   // same (system, environment, workload) as the DB unique constraint, so a

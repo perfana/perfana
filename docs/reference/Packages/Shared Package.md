@@ -74,7 +74,7 @@ The `@perfana/shared` package is the central repository for domain models, types
 
 ### Reports (`types/reports.types.ts`)
 - Report generation types — section types, statuses, defaults
-- `PREVIOUS_RUN_BASELINE` (`'previous'`) — reserved value for a comparison section's `baselineTestRunId`. The API resolves it in the comparisons renderer, the builder offers it as a synthetic option; declared once so a rename fails the build instead of silently no longer resolving. See [[Templates]]
+- `PREVIOUS_RUN_BASELINE` (`'previous'`) and `PREVIOUS_SUCCESSFUL_RUN_BASELINE` (`'previous-successful'`) — the two reserved values for a comparison section's `baselineTestRunId`. `'previous'` is the run immediately before this one in the same system / environment / workload; `'previous-successful'` is the most recent earlier run whose SLOs passed (`consolidated_result.meetsRequirement`). The API resolves both in the comparisons renderer, the builder offers both as synthetic options under a "Resolved per report" group; declared once each so a rename fails the build instead of silently no longer resolving. See [[Templates]]
 - `MAX_REPORT_SECTIONS` (`20`) — most sections one report may hold. The builder enforces it while composing, the ad-hoc generate DTO enforces it at the API boundary
 
 ### Other Types
@@ -105,6 +105,7 @@ The `@perfana/shared` package is the central repository for domain models, types
 | `safe-regex.ts` | Safe regex pattern evaluation |
 | `url-validator.ts` | Deep-link URL validation |
 | `markdown.ts` | Markdown subset renderer for report text blocks (`renderMarkdown`, `renderPlainText`, `RenderMarkdownOptions`, `TEXT_BLOCK_MARKDOWN_DEFAULT`) |
+| `report-variables.ts` | `{perfana-*}` placeholders a report's prose can use (`REPORT_VARIABLES`, `buildReportVariableValues`, `buildPreviousRunVariableValues`, `substituteReportVariables`, `escapeMarkdownValue`) |
 
 > [!note] Why `markdown.ts` lives in shared
 > Two places must agree on the output structure: the API renders text blocks into
@@ -117,6 +118,30 @@ The `@perfana/shared` package is the central repository for domain models, types
 > underscores). Typography is not shared — `styled: true` (the default) bakes the
 > print-oriented inline styles the PDF needs; the web preview passes
 > `styled: false` and styles the tags via the theme so it reads in dark mode.
+
+> [!note] How `report-variables.ts` resolves a placeholder
+> Most keys come straight off the test run row. The **Comparison** group does not —
+> `{perfana-previous-test-run-id}`, `{perfana-previous-start-datetime}`,
+> `{perfana-previous-end-datetime}` and `{perfana-previous-application-release}` need a query,
+> so they are listed in `REPORT_VARIABLES_NEEDING_LOOKUP` and filled in by
+> `ReportHtmlCompilerService.resolveVariables` from the same previous-run lookup a comparison
+> section's `previous` baseline uses. The two lookup groups fail differently on purpose: a
+> Comparison key that resolves to nothing renders **blank**, because a report whose predecessor
+> is unknown is the ordinary case, while a test run **configuration** key that could not be read
+> prints as itself so the author can see what happened.
+>
+> The ISO 8601 and epoch timestamp spellings are still resolved but no longer offered in the
+> picker. They shipped in v0.2.78.0 and saved report text still refers to them, so dropping the
+> resolver would start printing a literal `{perfana-start-epoch-milliseconds}` into a report the
+> share link already served correctly — but machine timestamps do not belong in a sentence, so
+> new prose should use the readable `{perfana-start-datetime}` spelling.
+>
+> Free-text values are run through `escapeMarkdownValue` on the way out, deliberately narrowly:
+> it splits `](` and neutralises line-leading heading and list markers, so a CI-supplied value
+> cannot close an author's link and open its own. It does **not** escape emphasis or inline code
+> — `renderMarkdown` never consumes backslashes, so escaping those printed stray backslashes
+> around text that still came out bold. The residue is cosmetic: a substituted value can restyle
+> a phrase, but it cannot emit an href or any HTML.
 
 ## Database Configuration
 

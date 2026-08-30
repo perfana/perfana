@@ -24,6 +24,7 @@ import {
   sectionHeader,
   splitHostLabel,
 } from './report-style';
+import { toUnitScale, unitLabel } from './unit-format';
 
 /**
  * The value a template stores when the baseline should follow the run being reported on rather
@@ -33,8 +34,8 @@ import {
  * the day after it is chosen — every nightly report keeps comparing against the same old run.
  * Storing this instead makes each report resolve its own predecessor at render time.
  */
-import { PREVIOUS_RUN_BASELINE } from '@perfana/shared/types';
-export { PREVIOUS_RUN_BASELINE };
+import { PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE } from '@perfana/shared/types';
+export { PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE };
 
 /** The only metric keys the baseline-run comparison understands. */
 const ALLOWED_BASELINE_METRICS = ['avg', 'p90', 'p95', 'p99'] as const;
@@ -71,16 +72,31 @@ export class ComparisonsRenderer {
     if (typeof configured !== 'string' || configured === '') {
       return { reason: 'no baseline run is configured for this section.' };
     }
-    if (configured !== PREVIOUS_RUN_BASELINE) {
+    const sloPassedOnly = configured === PREVIOUS_SUCCESSFUL_RUN_BASELINE;
+    if (configured !== PREVIOUS_RUN_BASELINE && !sloPassedOnly) {
       return { id: configured };
     }
     if (!testRun) {
       return { reason: 'this section was rendered without a test run.' };
     }
-    const previous = await this.dataFetcher.getPreviousTestRun(testRun);
-    return previous?.testRunId
-      ? { id: previous.testRunId }
-      : { reason: 'this is the first run for its system, environment and workload — there is no previous run behind it.' };
+    const previous = await this.dataFetcher.getPreviousTestRun(testRun, { sloPassedOnly });
+    if (previous?.testRunId) return { id: previous.testRunId };
+    const firstRun =
+      'this is the first run for its system, environment and workload — there is no previous run behind it.';
+    if (!sloPassedOnly) return { reason: firstRun };
+    // A run whose SLOs were never evaluated has no `meetsRequirement` key, so the
+    // SLO-passed query skips it exactly as it skips a run that failed. Saying "none passed"
+    // for the first case asserts they FAILED — the opposite conclusion, in a document that
+    // is served unauthenticated over share links. Ask which of the three it actually was.
+    const miss = await this.dataFetcher.previousRunSloMiss(testRun);
+    return {
+      reason:
+        miss === 'none'
+          ? firstRun
+          : miss === 'not-evaluated'
+            ? 'earlier runs exist for its system, environment and workload, but none of them had its SLOs evaluated — so none could be selected as a known-good baseline.'
+            : 'no earlier run for its system, environment and workload passed its SLOs.',
+    };
   }
 
   /**
@@ -158,7 +174,38 @@ export class ComparisonsRenderer {
     const rowBackground = (rank: number, idx: number): string =>
       (rank === 2 ? '#fff7f6' : (idx % 2 === 1 ? '#fbfcfd' : '#ffffff'));
 
-    const renderCell = (m: { current: number | null; baseline: number | null; diffPercent: number | null }, leftBorder: boolean): string => {
+    // Values are BARE — the unit is printed once in the heading above the table, not repeated
+    // on every number in every cell. The scaling still has to happen here, though: `percentunit`
+    // is stored 0.0-1.0, and an unscaled 0.42 sitting under a "%" heading is simply wrong.
+    const scaled = (v: number | null, unit?: string | null): string =>
+      (v == null ? formatNum(v) : formatNum(toUnitScale(v, unit ?? undefined)));
+
+    /**
+     * The one unit label every row under a heading shares, or '' when they do not share one.
+     *
+     * Printing the unit once means it has to be true of EVERY row it sits above. Rows pair on
+     * dashboard/panel/metric name, which excludes the unit, so a group CAN hold an `s` row next
+     * to an `ms` one — and there the honest thing is no chip at all rather than one row's unit
+     * implied over the rest. `unitLabel` yields '' for a unitless or unrecognised code, which
+     * collapses to the same "say nothing" outcome.
+     */
+    const sharedUnitLabel = (rows: BaselineComparisonRow[]): string => {
+      const labels = new Set(rows.map((r) => unitLabel(r.unit)));
+      return labels.size === 1 ? [...labels][0] ?? '' : '';
+    };
+
+    /** The heading's unit chip, or '' — groupHeader/panel headings drop empty strings. */
+    const unitChip = (rows: BaselineComparisonRow[]): string => {
+      const label = sharedUnitLabel(rows);
+      return label ? chip(label, 'neutral') : '';
+    };
+
+    const renderCell = (
+      m: { current: number | null; baseline: number | null; diffPercent: number | null },
+      leftBorder: boolean,
+      unit?: string | null,
+      baselineUnit?: string | null,
+    ): string => {
       const d = effDiff(m);
       const dot = bandColor(d, thresholds);
       let left = 50, width = 0;
@@ -169,8 +216,8 @@ export class ComparisonsRenderer {
       return `<td style="padding:14px 16px; border-bottom:1px solid ${REPORT_COLORS.rowBorder};${leftBorder ? ' border-left:1px solid #eef1f5;' : ''}">
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end;">
           <div style="display:flex; align-items:baseline; gap:8px;">
-            <span style="font-size:15px; font-weight:700; color:${REPORT_COLORS.ink}; font-variant-numeric:tabular-nums;">${formatNum(m.current)}</span>
-            <span style="font-size:12px; font-weight:600; color:${REPORT_COLORS.mutedInk}; font-variant-numeric:tabular-nums;">vs ${formatNum(m.baseline)}</span>
+            <span style="font-size:15px; font-weight:700; color:${REPORT_COLORS.ink}; font-variant-numeric:tabular-nums;">${escapeHtml(scaled(m.current, unit))}</span>
+            <span style="font-size:12px; font-weight:600; color:${REPORT_COLORS.mutedInk}; font-variant-numeric:tabular-nums;">vs ${escapeHtml(scaled(m.baseline, baselineUnit ?? unit))}</span>
           </div>
           ${deltaChip(d, thresholds)}
           <div style="position:relative; width:110px; height:4px; border-radius:2px; background:#edf0f3;">
@@ -277,7 +324,7 @@ export class ComparisonsRenderer {
           const rowsHtml = rows.map((row, idx) => {
             const rank = worstRank(row);
             if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
-            const cells = row.metrics.map((m) => renderCell(m, true)).join('');
+            const cells = row.metrics.map((m) => renderCell(m, true, row.unit, row.baselineUnit)).join('');
             let metric = row.label;
             if (hasHost) {
               const parsed = splitHostLabel(row.label);
@@ -289,11 +336,12 @@ export class ComparisonsRenderer {
               ${cells}</tr>`;
           }).join('');
 
-          // The panel heads its own table, so it is not repeated down a column.
+          // The panel heads its own table, so neither it nor the unit is repeated down a column.
           return `<div style="margin-top:18px;">
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
               <h4 style="margin:0; font-size:13px; font-weight:700; color:${REPORT_COLORS.mutedInk}; text-transform:uppercase; letter-spacing:0.05em;">${this.utils.escapeHtml(panel)}</h4>
               ${chip(`${formatInt(rows.length)} metrics`, 'neutral')}
+              ${unitChip(rows)}
             </div>
             <div class="table-scroll">
               <table style="width:100%; border-collapse:collapse;">
@@ -334,14 +382,14 @@ export class ComparisonsRenderer {
         const body = rows.map((row, idx) => {
           const rank = worstRank(row);
           if (rank === 2) reg++; else if (rank === 1) warn++; else ok++;
-          const cells = row.metrics.map((m, gi) => renderCell(m, gi > 0)).join('');
+          const cells = row.metrics.map((m, gi) => renderCell(m, gi > 0, row.unit, row.baselineUnit)).join('');
           return `<tr data-band="${BAND_FOR_RANK[rank]}" style="background:${rowBackground(rank, idx)};">
             ${labelCell(row.label, rank, row.url)}
             ${cells}</tr>`;
         }).join('');
 
         return `<div data-band-scope style="margin-top:38px;">
-          ${groupHeader(group, [chip(`${formatInt(rows.length)} transactions`, 'neutral')], summaryChips(reg, warn, ok))}
+          ${groupHeader(group, [chip(`${formatInt(rows.length)} transactions`, 'neutral'), unitChip(rows)], summaryChips(reg, warn, ok))}
           <div class="table-scroll">
             <table style="width:100%; border-collapse:collapse;">
             <thead><tr style="${THEAD_ROW}">

@@ -8,7 +8,7 @@
  * Based on Grafana unit formats for consistency across performance metrics.
  */
 
-import { getUnit, formatValueWithUnit } from '@/lib/units';
+import { getUnit, formatValueWithUnit, toUnitScale, unitLabel } from '@/lib/units';
 
 describe('Unit Utilities', () => {
   describe('getUnit()', () => {
@@ -389,6 +389,52 @@ describe('Unit Utilities', () => {
         expect(formatValueWithUnit(99.95, 'percent')).toBe('99.95%');
         expect(formatValueWithUnit(100, 'percent')).toBe('100%');
       });
+    });
+  });
+
+  describe('toUnitScale()', () => {
+    it('should lift percentunit from 0.0-1.0 into the scale it is read in', () => {
+      expect(toUnitScale(0.42, 'percentunit')).toBeCloseTo(42, 10);
+      expect(toUnitScale(1, 'percentunit')).toBe(100);
+      expect(toUnitScale(0, 'percentunit')).toBe(0);
+      expect(toUnitScale(-0.5, 'percentunit')).toBe(-50);
+    });
+
+    it('should leave every other unit at its stored scale', () => {
+      // `percent` is already 0-100; scaling it too would show 42% as 4200%.
+      expect(toUnitScale(42, 'percent')).toBe(42);
+      expect(toUnitScale(1200.456, 'ms')).toBe(1200.456);
+      expect(toUnitScale(42, 'short')).toBe(42);
+      expect(toUnitScale(42, 'unknown-unit')).toBe(42);
+      expect(toUnitScale(42)).toBe(42);
+    });
+  });
+
+  describe('unitLabel()', () => {
+    it('should return the display label of a known unit code', () => {
+      expect(unitLabel('ms')).toBe('ms');
+      expect(unitLabel('percent')).toBe('%');
+      expect(unitLabel('percentunit')).toBe('%');
+      expect(unitLabel('reqps')).toBe('req/s');
+      expect(unitLabel('mbytes')).toBe('MiB');
+    });
+
+    it('should return nothing for the unitless and absent codes', () => {
+      expect(unitLabel('none')).toBe('');
+      expect(unitLabel('short')).toBe('');
+      expect(unitLabel('')).toBe('');
+      expect(unitLabel(undefined)).toBe('');
+      expect(unitLabel(null)).toBe('');
+    });
+
+    it('should return nothing for an unknown code rather than echoing it', () => {
+      // The units table covers ~50 of Grafana's ~200 codes. Echoing the raw id here would
+      // label a panel header 'dateTimeAsIso', which reads as a real unit rather than a miss.
+      expect(unitLabel('dateTimeAsIso')).toBe('');
+      expect(unitLabel('currencyUSD')).toBe('');
+      expect(unitLabel('furlongs')).toBe('');
+      // getUnit deliberately still echoes — the two are not interchangeable.
+      expect(getUnit('furlongs').format).toBe('furlongs');
     });
   });
 
