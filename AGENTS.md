@@ -277,7 +277,9 @@ catch (err) {
 
 ### `grafana_dashboards` is a mixed table
 
-Not every row is a real Grafana dashboard. `ensureArtificialDashboardExists()` in `apps/api/src/modules/dynatrace/dynatrace.repository.ts` writes **artificial** placeholder rows so non-Grafana sources have somewhere to hang their panels: synthetic `grafana_id` 800000+ for Dynatrace. (A comment reserves 900000+ for performance-test metrics, but nothing emits it — that path creates no synthetic row.) Artificial rows have `grafana_json` NULL and must never be pushed to Grafana.
+Not every row is a real Grafana dashboard. `ensureArtificialDashboardExists()` in `apps/api/src/modules/dynatrace/dynatrace.repository.ts` writes **artificial** placeholder rows so non-Grafana sources have somewhere to hang their panels, with a synthetic `grafana_id` from an 800000+ range for Dynatrace. Artificial rows have `grafana_json` NULL and must never be pushed to Grafana.
+
+**Never classify by `grafana_id`.** The range convention in that comment (800000+ Dynatrace, 900000+ perf-test) holds in neither direction: nothing emits 900000+, and real Grafana ids are snowflake-style and far larger than both ranges — 40 of 46 rows on the dev database sit above 900000 and are all real. A `grafana_id >= 800000` test would call the whole table artificial. Use `grafana_json` and the `metrics_sources` join.
 
 - **Do not tighten the API's `findAll` filter.** Its `source_type != 'grafana'` exclusion is skipped when a `uid` is supplied, on purpose: the SLO dialog and `useAddSLOForm`'s by-uid lookup both need artificial rows. A test (`useDashboardManagement.artificialDashboards.test.ts`) guards this. Filter client-side with `isArtificialDashboard` (`apps/web/lib/metrics-source-utils.ts`) instead.
 - That predicate also misses artificial application dashboards from a SUT import — those have `metrics_source_id` NULL. Where a filter must hold (grafana-sync restore), `grafana_json` is the reliable signal.

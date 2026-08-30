@@ -23,10 +23,15 @@ placeholder rows with a synthetic `grafana_id` in the 800000+ range for
 Dynatrace. Artificial rows have `grafana_json` NULL, have no counterpart in
 Grafana, and must never be pushed to one.
 
-A code comment reserves 900000+ for performance-test metrics, but nothing
-currently emits it — the perf-test path creates no synthetic row at all
-(`apps/worker/src/pipelines/helpers/dashboard-manager.ts`). Treat that range as
-legacy data.
+**Never use `grafana_id` to tell artificial rows apart.** The comment at that
+insert reads as a range convention (800000+ Dynatrace, 900000+ performance-test
+metrics), and it holds in neither direction. Nothing emits the 900000+ range —
+the perf-test path creates no synthetic row at all
+(`apps/worker/src/pipelines/helpers/dashboard-manager.ts`). And real Grafana ids
+are snowflake-style and enormous, so they land far above both ranges: on the dev
+database 40 of 46 rows sit above 900000 and every one is a real dashboard. A
+`grafana_id >= 800000` test would classify the whole table as artificial. Use
+`grafana_json` and the `metrics_sources` join instead.
 
 Three things to know before writing code against this table:
 
@@ -142,8 +147,8 @@ Three caveats:
   `deleting`) still count and still block.
 
 `GrafanaDashboardsController` rethrows any `HttpException` untouched so these
-deliberate status codes survive its own error handler. Note the 409 is not yet
-declared with `@ApiResponse`, so it does not appear in `/api/docs`.
+deliberate status codes survive its own error handler. The 409 is declared with
+`@ApiResponse`, so it appears in `/api/docs`.
 
 ## Authorization
 

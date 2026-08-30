@@ -321,7 +321,9 @@ v0.2.47.66 + v0.2.47.67 fixed 18 sites that hit this gotcha across `grafana-sync
 
 ### `grafana_dashboards` is a mixed table (not every row is a Grafana dashboard)
 
-Non-Grafana metrics sources need somewhere to hang their panels, so `ensureArtificialDashboardExists()` in `apps/api/src/modules/dynatrace/dynatrace.repository.ts` writes **artificial** placeholder rows into `grafana_dashboards`: a synthetic `grafana_id` in the 800000+ range for Dynatrace. (A code comment reserves 900000+ for performance-test metrics, but nothing emits it — the perf-test path creates no synthetic row at all. Rows in that range are legacy data.) Artificial rows have `grafana_json` NULL, have no counterpart in any Grafana, and must never be pushed to one.
+Non-Grafana metrics sources need somewhere to hang their panels, so `ensureArtificialDashboardExists()` in `apps/api/src/modules/dynatrace/dynatrace.repository.ts` writes **artificial** placeholder rows into `grafana_dashboards`, with a synthetic `grafana_id` drawn from an 800000+ range for Dynatrace. Artificial rows have `grafana_json` NULL, have no counterpart in any Grafana, and must never be pushed to one.
+
+**Never use `grafana_id` to tell them apart.** The comment at that insert reads as a range convention (800000+ Dynatrace, 900000+ performance-test metrics), but it does not hold in either direction: nothing emits the 900000+ range — the perf-test path creates no synthetic row at all — and real Grafana ids are snowflake-style and enormous, so they land far above both ranges. On the dev database 40 of 46 rows sit above 900000 and every one of them is a real dashboard. A `grafana_id >= 800000` test would classify the entire table as artificial. Use `grafana_json` and the `metrics_sources` join, as below.
 
 Anything that reads this table has to decide whether it means "real dashboards" or "all rows". Four traps:
 

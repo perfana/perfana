@@ -31,8 +31,8 @@ The Grafana Sync service keeps Perfana's dashboard definitions synchronized with
 
 `grafana_dashboards` is a **mixed table**. It holds real Grafana dashboards next to *artificial* placeholder rows created for non-Grafana metrics sources, so Perfana's own metrics have somewhere to hang: `ensureArtificialDashboardExists()` in `apps/api/src/modules/dynatrace/dynatrace.repository.ts` writes them with a synthetic `grafana_id` in the 800000+ range for Dynatrace. Artificial rows have `grafana_json` NULL — there is no dashboard behind them and pushing one to Grafana would create an empty shell.
 
-> [!note] The 900000+ range is documented, not written
-> A code comment reserves 900000+ for performance-test metrics, but nothing currently emits it. The perf-test path creates no synthetic `grafana_dashboards` row at all — see `apps/worker/src/pipelines/helpers/dashboard-manager.ts` ("grafana columns are NULL for perf-test sources"). Treat rows in that range as legacy data, not as something the code produces.
+> [!warning] Never classify a row by its `grafana_id`
+> The comment at that insert reads as a range convention — 800000+ Dynatrace, 900000+ performance-test metrics — and it holds in neither direction. Nothing emits the 900000+ range: the perf-test path creates no synthetic `grafana_dashboards` row at all (see `apps/worker/src/pipelines/helpers/dashboard-manager.ts`, "grafana columns are NULL for perf-test sources"). And real Grafana ids are snowflake-style and enormous, so they sit far above both ranges — on the dev database 40 of 46 rows are above 900000 and every one is a real dashboard. A `grafana_id >= 800000` test would call the whole table artificial. `grafana_json` and the `metrics_sources` join are the signals to use.
 
 The restore sweep compares what Perfana holds against what Grafana holds, so every artificial row looks "missing" on every cycle. `RestoreDashboardService.getDashboardsToRestore()` filters them out. A dashboard is restored only when it is referenced by an application dashboard on **this instance** (or carries the Perfana template tag) **and**:
 
