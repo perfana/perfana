@@ -54,15 +54,20 @@ Accessible at `/settings/profiles`:
 - Preview functionality for report sections
 - Collapsed section cards summarize their own configuration (header level and text, text-block content, response-time scenario, baseline-run dashboard/panel count) so multiple sections of the same type can be told apart without expanding them
 
-#### Comparison sections: pinned baseline or previous run
+#### Comparison sections: pinned baseline, previous run, or previous SLO-passing run
 
-A comparison section's `baselineTestRunId` takes either a specific run, or the reserved value
-`previous` (`PREVIOUS_RUN_BASELINE` in [[Shared Package]] — both sides must agree on the exact
-string, so it is declared once).
+A comparison section's `baselineTestRunId` takes either a specific run, or one of **two** reserved
+values — `previous` (`PREVIOUS_RUN_BASELINE`) and `previous-successful`
+(`PREVIOUS_SUCCESSFUL_RUN_BASELINE`), both in [[Shared Package]]. Both sides must agree on the
+exact string, so each is declared once.
 
 - **A pinned run** made sense the day the template was written and ages from then on: every nightly report keeps comparing against the same run.
 - **`previous`** resolves per report to the most recent **completed** run that started strictly before the reported one, in the same system, environment and workload (ordered by `start_time`) — so a template compares each report against its own predecessor. Offered as "Previous run" at the top of the baseline picker, and documented in Swagger for templates created through the API.
-- The first run in a scope has nothing behind it, so its comparison section stays empty rather than comparing the run against itself.
+- **`previous-successful`** is the same lookup narrowed to runs whose SLOs passed (`consolidated_result.meetsRequirement` is true). The plain previous run is whatever ran last, failures included, and comparing a still-broken run against one that had already breached its objectives makes the report look flat. Offered as "Previous SLO-passing run".
+- Both reserved values sit under a **"Resolved per report"** group at the top of the picker, above the "Specific runs" group. Selecting one is a valid baseline even when the run has no earlier run to pin, so neither the section preview nor the Generate dialog is blocked by an empty candidate list.
+- When `previous` resolves to nothing, the run is the first in its scope, and the section says so rather than comparing the run against itself.
+- When `previous-successful` resolves to nothing, the section says **which** of three things happened rather than showing one blank empty state: the run is the first for its system, environment and workload; earlier runs exist but none had its SLOs evaluated; or earlier runs were evaluated and none passed. The middle case is kept distinct on purpose — a run that was never evaluated has no `meetsRequirement` key at all, and reporting that as "none passed" would assert a failure that never happened, in a document served unauthenticated over a share link.
+- Comparison table values are printed **bare**, with the unit shown once as a chip in the heading above the table instead of repeated on every number. A `percentunit` metric is scaled on the way out, so `0.42` reads as `42%`. When the rows under one heading do not all share a unit — rows pair on dashboard/panel/metric name, which excludes the unit — no unit is claimed at all rather than one row's implied over the rest. The compare card's panel header follows the same rule, so a panel is not described one way in the report and another in the card it was previewed from.
 
 #### Text block sections
 

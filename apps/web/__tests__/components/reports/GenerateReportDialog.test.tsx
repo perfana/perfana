@@ -1042,6 +1042,36 @@ describe('GenerateReportDialog', () => {
       await waitFor(() => expect(screen.getByRole('button', { name: /generate report/i })).toBeEnabled());
     });
 
+    // The run this report is generated for may have no earlier run to pin — a first run in a
+    // new environment, or simply a baseline-candidates fetch that failed. Neither is a reason
+    // to refuse the report: the picker still offers the resolved-per-report sentinels, and the
+    // renderer resolves them at generation time. Blocking on the candidate list took the
+    // feature away in exactly the case it exists for.
+    it('generates against a resolved-per-report baseline when there is no run to pin', async () => {
+      (reportsApi.getTemplate as jest.Mock).mockResolvedValue(baselineTemplate);
+      (global.fetch as jest.Mock).mockImplementation((url: string) =>
+        url.includes('/test-runs/baseline-candidates')
+          ? Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
+          : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }));
+
+      render(<GenerateReportDialog {...defaultProps} />);
+
+      fireEvent.click(await screen.findByText('Performance Summary'));
+      await screen.findByText(/set it once here/i);
+
+      // No candidates, so the old gate refused outright. The only block now is "nothing chosen".
+      expect(
+        screen.queryByText(/remove the comparison section to generate the report/i)
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /generate report/i })).toBeDisabled();
+
+      const input = screen.getAllByLabelText(/baseline test run/i)[0]!;
+      fireEvent.mouseDown(input);
+      fireEvent.click(await screen.findByText('Previous run'));
+
+      await waitFor(() => expect(screen.getByRole('button', { name: /generate report/i })).toBeEnabled());
+    });
+
     it('shows one picker for baseline sections and applies the choice to all of them', async () => {
       (reportsApi.getTemplate as jest.Mock).mockResolvedValue(baselineTemplate);
       render(<GenerateReportDialog {...defaultProps} />);

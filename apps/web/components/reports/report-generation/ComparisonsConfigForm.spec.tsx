@@ -1,6 +1,9 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { ComparisonsConfigForm } from './SectionConfigs';
+// The sentinel by name, not the literal 'previous' — a rename becomes a compile error here
+// rather than a test that silently stops exercising the resolved-per-report path.
+import { PREVIOUS_RUN_BASELINE } from './BaselineRunSelect';
 import { authenticatedFetch } from '@/lib/api';
 
 const CANDIDATES = [
@@ -44,17 +47,31 @@ it('disables the preview button until a baseline run is chosen', async () => {
   await waitFor(() => expect(button()).toBeEnabled());
 });
 
-it('keeps the preview button disabled when the run has no earlier runs to compare against', async () => {
+// An empty candidate list means "nothing to PIN", which is not the same as "no baseline
+// possible": the sentinels resolve per report, and the fetch also yields [] when it fails.
+// Gating preview on the list would disable a perfectly good baseline on a transient error.
+it('still allows preview on a resolved-per-report baseline when there is no run to pin', async () => {
   (authenticatedFetch as jest.Mock).mockImplementation(() =>
     Promise.resolve({ ok: true, json: () => Promise.resolve([]) }));
 
   render(
     <ComparisonsConfigForm
-      config={{ baselineTestRunId: 'previous' }}
+      config={{ baselineTestRunId: PREVIOUS_RUN_BASELINE }}
       onChange={jest.fn()}
       systemUnderTestId="sut-1"
       testRunId="run-1"
     />
+  );
+
+  await waitFor(() => expect(screen.getByRole('button', { name: /preview/i })).toBeEnabled());
+});
+
+it('keeps the preview button disabled when no baseline is chosen at all', async () => {
+  (authenticatedFetch as jest.Mock).mockImplementation(() =>
+    Promise.resolve({ ok: true, json: () => Promise.resolve([]) }));
+
+  render(
+    <ComparisonsConfigForm config={{}} onChange={jest.fn()} systemUnderTestId="sut-1" testRunId="run-1" />
   );
 
   await waitFor(() => expect(screen.getByRole('button', { name: /preview/i })).toBeDisabled());

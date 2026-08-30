@@ -28,6 +28,7 @@ import {
   DiffThresholds,
 } from '../utils/compare-bands';
 import ComparisonPlot from './ComparisonPlot';
+import { unitLabel } from '@/lib/units';
 import { isUrlPanel } from '@/lib/url-perf-panels';
 import { ClippedUrl } from '@/components/ui/clipped-url';
 import { TestRun } from '@/types/test-runs';
@@ -308,6 +309,19 @@ export default function MetricsComparisonTable({
             // Hide panels with nothing matching the active filter.
             if (bandFilter.size && visibleRows.length === 0) return null;
 
+            // The unit is a property of the panel, not of the value, so it is printed once
+            // here instead of on every cell. Only when the panel's rows agree on exactly one
+            // known unit: if they disagree, or the code is unknown/unitless, showing one
+            // label would imply the other rows share it. `unitLabel` returns '' for a code
+            // that is not in the units table rather than echoing it.
+            // NOT filtered: an unlabelled row is a row this unit is not true of, so it has to
+            // count against the "they all share one" test the same way a different unit does.
+            // Filtering it out would print one row's unit over rows that never had it — and
+            // would disagree with sharedUnitLabel in comparisons-renderer.ts, so the report and
+            // the card it was previewed from would label the same panel differently.
+            const panelUnits = new Set(rows.map(r => unitLabel(r.yAxesFormat)));
+            const panelUnit = panelUnits.size === 1 ? [...panelUnits][0] : '';
+
             const statChip = (band: Band, count: number, label: string) => {
               const active = bandFilter.has(band);
               const dimmed = bandFilter.size > 0 && !active;
@@ -330,7 +344,14 @@ export default function MetricsComparisonTable({
                 {/* Panel header */}
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   gap: 1, px: 2, py: 1.25, bgcolor: 'action.hover', borderBottom: '1px solid', borderColor: 'divider' }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{panelLabel || 'Metrics'}</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{panelLabel || 'Metrics'}</Typography>
+                    {panelUnit && (
+                      <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', px: 0.75, py: 0.125,
+                        borderRadius: '999px', bgcolor: 'action.hover', color: 'text.secondary',
+                        fontSize: '0.7rem', fontWeight: 700, flexShrink: 0 }}>{panelUnit}</Box>
+                    )}
+                  </Box>
                   <Box sx={{ display: 'flex', gap: 0.75 }}>
                     {reg > 0 && statChip('bad', reg, 'regressions')}
                     {warn > 0 && statChip('warn', warn, 'warnings')}

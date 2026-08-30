@@ -10,6 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Panels from a synced Grafana dashboard now carry their unit.** The unit was only picked up from dashboards stored in Perfana's own simplified shape; anything written by a Grafana sync — which is most of them — served its panels with no unit at all. Nothing failed visibly, so the effect was simply that values went unlabelled wherever the app relies on the panel's unit, including the Compare card. Units defined the way current Grafana writes them, and the way Grafana 6 wrote them, are both understood now.
 - **The "add Grafana dashboard" picker no longer offers dashboards that do not exist in Grafana.** Dynatrace host metrics and performance-test metrics appear in the dashboard list as synthetic entries so Perfana's own metrics have somewhere to live. They were offered alongside real dashboards when adding one to a system, where choosing one gets you a dashboard that resolves to nothing. They are configured from the Dynatrace section instead. The SLO dialog is unchanged and still offers them, since an SLO on a Dynatrace host metric is exactly what that dropdown is for.
 
+## [0.2.88.0] - 2026-08-30
+
+### Added
+- **A report can compare against the most recent run that passed its SLOs.** The baseline picker now offers "Previous SLO-passing run" alongside "Previous run". Both are resolved each time a report is generated rather than pinned, so a nightly report keeps comparing against something meaningful instead of an ageing run chosen months ago. When there is no such run, the report says which of the three reasons applies — the run is the first of its kind, no earlier run was ever evaluated, or every earlier run failed — instead of one blank empty state.
+- **Comparison values carry their unit.** The unit is printed once above the table rather than repeated on every number, and a value stored as a fraction is shown the way it reads: a `percentunit` metric now says 42% instead of 0.42. Where the rows under one heading do not share a unit, no unit is claimed at all, which is the honest answer rather than one row's unit implied over the rest.
+- **More of a test run is available as text in a report.** A section's prose can now refer to the previous run — its id, release, date and how it did — so a written summary stays true across generations instead of naming a run that has since been superseded.
+- The compare card shows the panel's unit in its header, matching what the report renders.
+
+### Fixed
+- **A run with nothing to compare against can still be given a baseline.** Reports for the first run in an environment refused to generate at all: the comparison section demanded a baseline while the picker had no earlier run to offer. The two resolved-per-report options were always valid there and are now accepted, both in the section's preview and in the Generate dialog. The same refusal also fired whenever the list of candidate runs simply failed to load.
+- The compare card no longer labels a panel with one row's unit when the other rows in it have none — it now withholds the unit exactly as the report does, so a panel is not described one way in the report and another in the card it was previewed from.
+- A percentage value formatted through the report's shared helper is written `90%` again rather than `90 %`.
+
 ## [0.2.87.1] - 2026-08-29
 
 ### Fixed

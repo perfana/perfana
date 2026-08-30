@@ -316,7 +316,7 @@ Displays performance trends over multiple test runs.
 
 ### 9. `comparisons` - Test Run Comparisons
 
-Displays comparisons between test runs.
+Compares the reported run against a baseline run, metric by metric.
 
 **Configuration Options:**
 
@@ -324,12 +324,25 @@ Displays comparisons between test runs.
 {
   type: 'comparisons',
   order: 10,
-  title?: string;     // Default: 'Comparisons'
-  comment?: string;   // Optional stakeholder comment
+  title?: string;              // Default: 'Comparisons'
+  comment?: string;            // Optional stakeholder comment
+  baselineTestRunId?: string;  // A run id, or one of the two reserved values below
 }
 ```
 
-**TODO:** Implement data fetching and rendering
+`baselineTestRunId` takes either a specific run id, or one of two reserved values that are
+resolved each time a report is generated instead of pinning a run that ages:
+
+| Value | Constant (`@perfana/shared`) | Resolves to |
+|---|---|---|
+| `previous` | `PREVIOUS_RUN_BASELINE` | The most recent completed run that started strictly before this one, in the same system, environment and workload |
+| `previous-successful` | `PREVIOUS_SUCCESSFUL_RUN_BASELINE` | The same lookup, narrowed to runs whose SLOs passed (`consolidated_result.meetsRequirement`) |
+
+Values in the rendered tables are printed bare, with the unit shown once in the heading above
+each table — and withheld entirely when the rows under that heading do not share one.
+
+See the "Comparison sections" section of `docs/reference/Features/Templates.md` for the empty
+states each reserved value produces when nothing resolves.
 
 ---
 
