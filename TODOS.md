@@ -323,6 +323,134 @@ scroll container, which may make the shared hook unnecessary; check before reach
 ---
 
 
+## Reports
+
+### Prose `{perfana-previous-*}` and a `previous-successful` comparison name different runs
+
+**Priority:** P2
+**Origin:** adversarial review during /ship on `chore/misc-improvements` (2026-08-30), finding F3.
+**Why:** the four Comparison variables are resolved ONCE per report by
+`ReportHtmlCompilerService.lookupVariableValues`, which always takes the immediately preceding
+run. A comparisons section set to `previous-successful` resolves its own, potentially older,
+SLO-passing baseline through `getPreviousTestRun(testRun, { sloPassedOnly: true })`. So prose
+reading "Compared against {perfana-previous-test-run-id} ({perfana-previous-start-datetime})"
+names one run while the table under it compares against another. Before this release only the
+run id was exposed and the mismatch was one token; the release adds start time, end time and
+release, which makes the sentence read as a full and confident provenance claim that is wrong.
+**Why it was not just fixed:** the variables are document-scoped and the baseline is
+section-scoped, and one report may hold several comparison sections with different baselines —
+so there is no single "the previous run" for the document to resolve. That is a design question,
+not a bug to patch.
+**What:** either (a) document the variables explicitly as "the run before this one", never "this
+section's baseline", and say so in the picker hint, or (b) add a second set of section-scoped
+variables that resolve against the section's own baseline. (a) is cheap and honest; (b) is what
+an author actually wants when writing a sentence about a comparison.
+**Where:** `apps/api/src/modules/reports/services/report-html-compiler.service.ts`
+(`lookupVariableValues`), `packages/shared/src/utils/report-variables.ts` (the Comparison group
+hints), `apps/api/src/modules/reports/renderers/comparisons-renderer.ts` (`resolveBaseline`).
+
+### The minimum-absolute-change gate compares raw values against a scaled display
+
+**Priority:** P3
+**Origin:** adversarial review during /ship on `chore/misc-improvements` (2026-08-30), finding F8.
+Pre-existing — not introduced by that release, but it became easier to see once the unit was
+printed next to the number.
+**Why:** `comparison-bands.ts` documents `minAbsolute` as "minimum absolute change (in the
+metric's own units)", and `gatedDiffPercent` compares `|current - baseline|` on the RAW stored
+values. For a `percentunit` metric the cell shows `42% vs 40%` — a change of 2 in the units the
+reader sees — while the gate tests `0.02` against the number the user typed. Every percentunit
+row is therefore gated out unless `minAbsolute` is below 0.01, and the user has no way to tell
+from the UI. Same divergence in the web compare table, which gates on `c.current_value` while
+`fmt` shows the scaled value.
+**What:** scale both sides of the comparison with `toUnitScale` before the gate, so the threshold
+means what its label says. Changing it moves rows in and out of view for anyone already using
+`minAbsolute` on a percentunit panel, so it wants a CHANGELOG line rather than a silent fix.
+**Where:** `apps/api/src/modules/reports/renderers/comparison-bands.ts` (`gatedDiffPercent`),
+`apps/web/app/test-runs/[id]/components/compare/utils/compare-bands.ts`,
+`apps/web/app/test-runs/[id]/components/compare/components/MetricsComparisonTable.tsx`.
+
+### The comparison delta is computed from raw values the reader never sees
+
+**Priority:** P2
+**Origin:** pre-landing review during /ship on `chore/misc-improvements` (2026-08-30). Introduced
+by that release; shipped knowingly.
+**Why:** `baselineUnit` lets the two sides of a pairing carry different unit codes, and the
+renderer's `scaled()` helper formats each side with its OWN unit. `diffPercent`, though, is still
+`percentDiff(cv, bv)` over the raw pair. For a `percent` row (current 42) paired against a
+`percentunit` one (baseline 0.4) the cell reads `42 vs 40` beside a `+10400%` chip, and because
+that same `diffPercent` feeds the band, the row is ranked a severe regression. The two numbers
+the reader sees and the delta printed next to them are computed from different scales. Sibling
+of the `minAbsolute` divergence above (F8) — same root cause, different call site.
+**What:** scale both sides with `toUnitScale` before `percentDiff`, at all three
+`diffPercent: percentDiff(cv, bv)` sites. Add a renderer test that asserts the chip agrees with
+the pair it sits beside — the current cross-unit fixture hard-codes `diffPercent: 5`, a value the
+producer would never emit, which is why no test caught this.
+**Where:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts` (lines ~955,
+~2812, ~2913, ~3041), `apps/api/src/modules/reports/renderers/comparisons-renderer.spec.ts`.
+
+### A Comparisons section reads another organization's run through the statistics path
+
+**Priority:** P1
+**Origin:** pre-landing review during /ship on `chore/misc-improvements` (2026-08-30).
+Pre-existing — present on `main` at two sites before that release, which only added a comment in
+the function.
+**Why:** `getBaselineRunComparisonFromStatistics` issues `this.dataSource.query` on the plain
+pooled connection. That is neither org-filtered nor under RLS — the API's login role is
+`rolbypassrls`, so the policies do not apply to it — and `opts.userId` / `opts.roles` are never
+consulted on this branch. `config.baselineTestRunId` is arbitrary caller-supplied JSON, and only
+the CURRENT run id is access-checked. A member of org A can preview or generate a Comparisons
+section with `source: 'grafana'` and a guessed `test_run_id` from org B and read back that run's
+dashboard labels, panel titles, metric names and mean/q90/q95/q99 values. The sibling
+performance-metrics branch ~100 lines above is the model for how it should look: it resolves an
+org filter and runs through `withRequestEm`.
+**What:** mirror the transactions branch — `resolveOrgFilter(opts.userId ?? '', opts.roles ?? [],
+params.length + 1, 'tr')`, join `test_runs tr ON tr.test_run_id = s.test_run_id`, append
+`orgFilter.clause`, and issue it via `withRequestEm(this.testRunRepo).query(...)` so RLS is in
+force too. Wants its own branch and its own review: it is auth-sensitive query construction, and
+the empty-userId system-call convention has to keep working for background report generation.
+**Where:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts` (the two
+`ds_metric_statistics` reads, ~line 2595 and ~line 2972).
+
+### An SLO-passing predecessor lookup scans the whole scope when nothing ever passed
+
+**Priority:** P4
+**Origin:** performance + adversarial review during /ship on `chore/misc-improvements`
+(2026-08-30), findings F11 and the performance specialist's index note. Both judged it acceptable
+as shipped; recorded so the shape is known rather than surprising.
+**Why:** `consolidated_result ->> 'meetsRequirement' = 'true'` is not indexable, so it becomes a
+per-row heap filter. `idx_test_runs_system_env_workload_start` still carries the three equality
+columns and the `ORDER BY start_time DESC`, so the planner walks that index backwards and stops
+at the first passing row — cheap in the normal case. The pathological case is the one the feature
+exists for: a system/environment/workload where nothing ever passed walks the entire history for
+that scope and returns nothing, on every report render and every section preview.
+**What:** if a deploy is seen spending time here, add the partial index
+`CREATE INDEX CONCURRENTLY idx_test_runs_sew_start_slo_ok ON public.test_runs
+(system_under_test_id, test_environment, workload, start_time) WHERE completed AND
+(consolidated_result ->> 'meetsRequirement') = 'true';` — or put a start_time floor on the
+lookup. Measure first; run counts per scope are in the hundreds today.
+**Where:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts`
+(`getPreviousTestRun`, `previousRunSloMiss`).
+
+### Report values can still be restyled by a CI-supplied config value
+
+**Priority:** P3
+**Origin:** the escaping work during /ship on `chore/misc-improvements` (2026-08-30).
+**Why:** `renderMarkdown` does not consume backslash escapes — it HTML-escapes and then
+pattern-matches — so a backslash inserted by `escapeMarkdownValue` survives verbatim into the
+published HTML. That forced the escaper to be narrowed to the constructs a backslash genuinely
+breaks (the `](` link join, line-leading heading and list markers); escaping every CommonMark
+character printed `Release 1\.2\.3` into reports, and escaping `` ` `` and `*` never neutralised
+anything because the inline patterns do not look at the preceding character. What remains is that
+emphasis and code spans inside a test-run configuration value can restyle a phrase in a report
+served unauthenticated over a share link. No href, no HTML — defacement, not injection.
+**What:** teach `renderMarkdown` to consume backslash escapes. That closes the gap and lets the
+escaper go back to being broad without printing artifacts.
+**Where:** `packages/shared/src/utils/markdown.ts` (the `INLINE` pattern in `inline()`),
+`packages/shared/src/utils/report-variables.ts` (`escapeMarkdownValue`).
+
+---
+
+
 ## Quality gates
 
 ### Three gates report success for code they never examine
