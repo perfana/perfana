@@ -73,8 +73,8 @@ export class GrafanaDashboardsService {
 
   /**
    * Verify the user has access to a dashboard by organization membership.
-   * Dashboards with no organization_id (legacy/shared) are accessible to all.
-   * Delegates the admin / legacy-null-org / membership decision to AuthorizationService.
+   * Delegates the admin / membership decision to AuthorizationService. There is no
+   * null-org allowance — organization_id has been NOT NULL since RBAC Phase 4.
    * team_id is omitted to preserve the prior behavior of not checking team membership.
    * created_by is unused by canAccessResource.
    */
@@ -91,8 +91,13 @@ export class GrafanaDashboardsService {
   /**
    * Find all Grafana dashboards accessible to the user.
    *
-   * Non-admin users see dashboards belonging to their organizations plus
-   * dashboards with no organization_id (legacy/shared). Admins see all.
+   * Non-admin users see dashboards belonging to their organizations. Admins see all.
+   *
+   * Artificial rows (placeholders for non-Grafana sources) are excluded via the
+   * source_type NOT EXISTS below — but only when no `uid` is supplied. A by-uid
+   * lookup deliberately still returns them: the SLO dialog and useAddSLOForm
+   * depend on it. Do not tighten this without reading
+   * apps/web/.../__tests__/useDashboardManagement.artificialDashboards.test.ts.
    */
   async findAll(userId: string, roles: string[], query: GrafanaDashboardQuery = {}): Promise<GrafanaDashboard[]> {
     // Resolve accessible org IDs: null means global admin (no filter needed)
@@ -463,10 +468,18 @@ export class GrafanaDashboardsService {
       // Match on the uid as well as the foreign key: an application dashboard can be
       // linked by dashboard_uid with a NULL grafana_dashboard_id, and those rows are
       // just as much "in use" even though no FK would stop the delete orphaning them.
+      //
+      // The uid arm MUST also match the instance. A uid is unique only within a
+      // Grafana instance and the same uid routinely exists on several, so an
+      // unscoped uid match counts another instance's application dashboards and
+      // refuses a delete that nothing actually references.
       const referencingApplicationDashboards = await withRequestEm(
         this.grafanaDashboardRepo,
       ).manager.count(ApplicationDashboardEntity, {
-        where: [{ grafanaDashboardId: id }, { dashboardUid: entity.uid }],
+        where: [
+          { grafanaDashboardId: id },
+          { dashboardUid: entity.uid, grafanaInstanceId: entity.grafanaInstanceId },
+        ],
       });
 
       if (referencingApplicationDashboards > 0) {
