@@ -127,6 +127,11 @@ export class GrafanaDashboardsController {
   @ApiParam({ name: 'id', description: 'Grafana dashboard ID' })
   @ApiResponse({ status: 200, description: 'The Grafana dashboard has been deleted' })
   @ApiResponse({ status: 404, description: 'Grafana dashboard not found' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Application dashboards still reference this dashboard. Remove them via /grafana/application-dashboards first — the delete does not cascade.',
+  })
   async remove(
     @Param('id') id: string,
     @UserCtx() ctx: UserContext,
