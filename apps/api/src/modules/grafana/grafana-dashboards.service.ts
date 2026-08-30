@@ -170,11 +170,28 @@ export class GrafanaDashboardsService {
         const rowJson = row.grafanaJson as GrafanaJsonData | undefined;
         let panels = rowJson?.dashboard?.panels || row.panels;
 
-        // If using simplified panels, ensure y_axes_format is transformed to yAxesFormat
-        if (panels === row.panels && panels) {
+        // Every panel leaves here with `yAxesFormat`, whichever shape it arrived in.
+        //
+        // Grafana itself never uses that name: a synced dashboard carries the unit at
+        // `fieldConfig.defaults.unit`, and only our own simplified rows use `y_axes_format`.
+        // Transforming just the simplified branch meant a dashboard with grafanaJson — the
+        // majority, since that is what a sync writes — served panels with no unit at all, and
+        // every consumer reading `panel.yAxesFormat` silently got undefined. Nothing errored:
+        // the compare card just stopped labelling its values.
+        //
+        // `yaxes[0].format` is the Grafana 6 spelling, kept because a dashboard imported from
+        // an old export still carries it and costs one `??` to support.
+        if (panels) {
           panels = (panels as unknown[]).map((panel) => {
             const p = panel as Record<string, unknown>;
-            return { ...p, yAxesFormat: p['y_axes_format'] };
+            const defaults = (p['fieldConfig'] as Record<string, unknown> | undefined)?.['defaults'] as
+              | Record<string, unknown>
+              | undefined;
+            const legacyYaxis = (p['yaxes'] as Array<Record<string, unknown>> | undefined)?.[0];
+            return {
+              ...p,
+              yAxesFormat: p['yAxesFormat'] ?? p['y_axes_format'] ?? defaults?.['unit'] ?? legacyYaxis?.['format'],
+            };
           });
         }
 

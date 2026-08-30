@@ -329,6 +329,69 @@ describe('GrafanaDashboardsService', () => {
         await expect(service.findAll()).rejects.toThrow('Database connection failed');
       });
     });
+
+    // Every consumer reads `panel.yAxesFormat`, a name Grafana itself never writes. Whichever
+    // shape a dashboard arrived in has to end up under it, or the unit is silently absent and
+    // a card stops labelling its values without anything erroring.
+    describe('panel unit normalisation', () => {
+      const dashboardWithJsonPanels = (panel: Record<string, unknown>) => ({
+        ...mockDashboardEntity,
+        grafanaJson: { dashboard: { panels: [panel] } },
+      });
+
+      it('reads the unit from fieldConfig.defaults on a synced dashboard', async () => {
+        // This is what a Grafana sync actually writes, and the majority of rows in practice.
+        queryBuilder.getMany.mockResolvedValue([
+          dashboardWithJsonPanels({ id: 1, title: 'Latency', fieldConfig: { defaults: { unit: 'ms' } } }),
+        ]);
+
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        expect(result[0]!.panels![0]).toMatchObject({ title: 'Latency', yAxesFormat: 'ms' });
+      });
+
+      it('falls back to the Grafana 6 yaxes spelling', async () => {
+        queryBuilder.getMany.mockResolvedValue([
+          dashboardWithJsonPanels({ id: 1, title: 'Old', yaxes: [{ format: 'percentunit' }] }),
+        ]);
+
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        expect(result[0]!.panels![0]).toMatchObject({ yAxesFormat: 'percentunit' });
+      });
+
+      it('still maps y_axes_format on the simplified panels', async () => {
+        queryBuilder.getMany.mockResolvedValue([
+          { ...mockDashboardEntity, grafanaJson: undefined, panels: [{ id: 1, y_axes_format: 'reqps' }] },
+        ]);
+
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        expect(result[0]!.panels![0]).toMatchObject({ yAxesFormat: 'reqps' });
+      });
+
+      it('leaves yAxesFormat undefined when the panel carries no unit anywhere', async () => {
+        // Not every panel has one — a table or a text panel legitimately does not. Undefined
+        // must stay undefined rather than become a string a consumer would try to label with.
+        queryBuilder.getMany.mockResolvedValue([
+          dashboardWithJsonPanels({ id: 1, title: 'Text', fieldConfig: { defaults: {} } }),
+        ]);
+
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        expect(result[0]!.panels![0]!['yAxesFormat']).toBeUndefined();
+      });
+
+      it('does not overwrite a unit the panel already states as yAxesFormat', async () => {
+        queryBuilder.getMany.mockResolvedValue([
+          dashboardWithJsonPanels({ id: 1, yAxesFormat: 's', fieldConfig: { defaults: { unit: 'ms' } } }),
+        ]);
+
+        const result = await service.findAll(mockUserId, mockRoles);
+
+        expect(result[0]!.panels![0]).toMatchObject({ yAxesFormat: 's' });
+      });
+    });
   });
 
   describe('findOne', () => {

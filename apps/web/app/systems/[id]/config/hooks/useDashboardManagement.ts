@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { ApplicationDashboard } from '@/lib/types';
 import { authenticatedFetch } from '@/lib/api';
 import { GrafanaDashboard, VariableValue } from '../components/types';
+import { isArtificialDashboard } from '@/lib/metrics-source-utils';
 
 interface DeleteInfo {
   canDeleteFromGrafana: boolean;
@@ -185,7 +186,24 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
         }
       }
 
-      setAvailableGrafanaDashboards(allDashboards);
+      // Only dashboards that really exist in Grafana can be ADDED to a system. The Dynatrace
+      // and performance-test entries in this table are synthetic — Perfana writes them so its
+      // own metrics have somewhere to hang, and they are configured through the Dynatrace
+      // section, not picked from this list. Offering them here invites choosing one and
+      // getting a dashboard that resolves to nothing in Grafana.
+      //
+      // Scoped to this picker deliberately. The SLO dialog reads a different endpoint
+      // (/grafana/application-dashboards) and MUST keep offering the artificial ones, since an
+      // SLO on a Dynatrace host metric is the point; and the by-uid lookup in useAddSLOForm
+      // hits /grafana/dashboards for those same rows. A filter in the API's findAll would
+      // break both.
+      //
+      // `dashboard_uid` because getSourceType reads that name; this endpoint returns `uid`.
+      // The helper prefers a linked MetricsSource's source_type and only falls back to the
+      // uid prefix for legacy rows that have no MetricsSource.
+      setAvailableGrafanaDashboards(
+        allDashboards.filter((d) => !isArtificialDashboard({ dashboard_uid: d.uid })),
+      );
     } catch (err) {
       // Same failure class, quieter blast radius: this one feeds the "add dashboard" picker,
       // so it surfaces as an empty dropdown rather than a missing list. Still not silent —

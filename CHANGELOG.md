@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.88.1] - 2026-08-30
+
+### Fixed
+- **Panels from a synced Grafana dashboard now carry their unit.** The unit was only picked up from dashboards stored in Perfana's own simplified shape; anything written by a Grafana sync — which is most of them — served its panels with no unit at all. Nothing failed visibly, so the effect was simply that values went unlabelled wherever the app relies on the panel's unit, including the Compare card. Units defined the way current Grafana writes them, and the way Grafana 6 wrote them, are both understood now.
+- **The "add Grafana dashboard" picker no longer offers dashboards that do not exist in Grafana.** Dynatrace host metrics and performance-test metrics appear in the dashboard list as synthetic entries so Perfana's own metrics have somewhere to live. They were offered alongside real dashboards when adding one to a system, where choosing one gets you a dashboard that resolves to nothing. They are configured from the Dynatrace section instead. The SLO dialog is unchanged and still offers them, since an SLO on a Dynatrace host metric is exactly what that dropdown is for.
+
 ## [0.2.88.0] - 2026-08-30
 
 ### Added
