@@ -14,7 +14,7 @@ import {
   Tooltip,
   Divider,
 } from '@mui/material';
-import { MoreVert, Sync, PlaylistAddCheck, Delete as DeleteIcon, Flag, LayersClear } from '@mui/icons-material';
+import { MoreVert, Sync, PlaylistAddCheck, Delete as DeleteIcon, Flag, LayersClear, Calculate } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
@@ -103,6 +103,32 @@ export default function TestRunActionsMenu({
     } catch (err) {
       console.error('Failed to start re-evaluation:', err);
       onError?.('Failed to start re-evaluation');
+    } finally {
+      setIsLoading(false);
+      handleClose();
+    }
+  };
+
+  // Recompute ds_metric_statistics from metrics already stored (#552). This is the
+  // action the ADAPT "could not build a baseline" message points at, and it has to be
+  // applied to the *baseline* run, whose statistics predate the pct_agg sketch.
+  const handleRecalculateStatistics = async () => {
+    try {
+      setIsLoading(true);
+      const response = await authenticatedFetch(
+        `/data/recalculate-statistics/${encodeURIComponent(testRun.test_run_id)}`,
+        { method: 'POST' },
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to start statistics recalculation');
+      }
+
+      onJobTriggered?.();
+      onSuccess?.('Statistics recalculation started');
+    } catch (err) {
+      console.error('Failed to start statistics recalculation:', err);
+      onError?.('Failed to start statistics recalculation');
     } finally {
       setIsLoading(false);
       handleClose();
@@ -373,6 +399,10 @@ export default function TestRunActionsMenu({
             </MenuItem>
           </span>
         </Tooltip>
+        <MenuItem onClick={handleRecalculateStatistics} disabled={isLoading}>
+          <Calculate sx={{ mr: 1.5, fontSize: '1.2rem' }} />
+          Recalculate statistics
+        </MenuItem>
         <Divider />
         <Tooltip
           title={
