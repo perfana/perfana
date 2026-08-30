@@ -319,12 +319,25 @@ const entity = this.repo.create({ ...dto, organizationId: orgId });
 
 v0.2.47.66 + v0.2.47.67 fixed 18 sites that hit this gotcha across `grafana-sync` and 17 API services. New services must follow these patterns from day one.
 
+### `grafana_dashboards` is a mixed table (not every row is a Grafana dashboard)
+
+Non-Grafana metrics sources need somewhere to hang their panels, so `ensureArtificialDashboardExists()` in `apps/api/src/modules/dynatrace/dynatrace.repository.ts` writes **artificial** placeholder rows into `grafana_dashboards`: a synthetic `grafana_id` in the 800000+ range for Dynatrace, 900000+ reserved for performance-test metrics. Artificial rows have `grafana_json` NULL, have no counterpart in any Grafana, and must never be pushed to one.
+
+Anything that reads this table has to decide whether it means "real dashboards" or "all rows". Three traps:
+
+1. **`source_type != 'grafana'` is not airtight.** The established predicate (`GrafanaDashboardsService.findAll` in `apps/api/src/modules/grafana/grafana-dashboards.service.ts`, joined through `metrics_sources`) misses artificial application dashboards that arrived via a **SUT import** — those have `metrics_source_id` NULL, so they join to no source type and slip through. Test `grafana_json` too when the filter has to hold.
+2. **A dashboard `uid` is unique only within a Grafana instance.** The same uid routinely exists on several. Every lookup by uid must also scope by `grafana_instance_id`, or one instance's rows vouch for another's.
+3. **Deleting one is not free.** `application_dashboards.grafana_dashboard_id` is `ON DELETE NO ACTION`, and app dashboards can also reference by `dashboard_uid` with a NULL foreign key. `DELETE /api/grafana/dashboards/:id` refuses with **409** rather than cascading, because Grafana dashboards are shared and a SUT delete deliberately leaves them behind.
+
+v0.2.89.0 fixed two symptoms of this: the grafana-sync restore sweep re-pushing artificial rows every 30s forever, and the API delete returning an opaque 500. See `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md` and `docs/readmes/api-modules/grafana-README.md`.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls
 2. **401 Unauthorized** → Expired token, Keycloak handles refresh
 3. **403 Forbidden** → Wrong auth type for admin endpoints
 4. **`null value in column "organization_id" violates not-null constraint`** → You passed `organization_id` (snake_case) to `repo.create()`. Use `organizationId` (camelCase). See "Resource creation" pattern above.
+5. **409 deleting a Grafana dashboard** → Application dashboards still reference it. Remove those first; the API will not cascade. See "`grafana_dashboards` is a mixed table" above.
 
 ## How-To Tutorials
 
