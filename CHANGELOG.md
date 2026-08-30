@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.89.1] - 2026-08-30
+
+### Fixed
+- **Deleting a Grafana dashboard is no longer refused for work another instance is doing.** 0.2.89.0 started counting the application dashboards that point at a dashboard so it could explain itself instead of failing with a server error, and counted them by name as well as by link. A dashboard's name is only unique within one Grafana, and the same name routinely exists in several, so the count picked up dashboards belonging to a different Grafana entirely: a dashboard nothing referenced could be refused as "still used by 65". The count now looks only at the Grafana the dashboard actually belongs to.
+
 ## [0.2.89.0] - 2026-08-30
 
 ### Fixed
