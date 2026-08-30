@@ -80,18 +80,59 @@ export class RestoreDashboardService {
 
       for (const missingDashboard of missingDashboards) {
         try {
-          // Check if used by application dashboards
-          const applicationDashboards = await this.applicationDashboardRepo.find({
-            where: { dashboardUid: missingDashboard.uid },
-          });
+          // Check if used by application dashboards, and through which metrics source.
+          // grafana_dashboards holds synthetic placeholder rows for non-Grafana sources
+          // (Dynatrace, performance-test metrics) alongside real Grafana dashboards.
+          //
+          // Scoped to THIS instance: a uid is only unique within a Grafana instance,
+          // and the same uid routinely exists on several. Matching on uid alone lets
+          // one instance's application dashboards vouch for another's copy, so a row
+          // with no references of its own looks used and gets pushed into the wrong
+          // Grafana on every cycle.
+          const applicationDashboards = await this.applicationDashboardRepo
+            .createQueryBuilder('ad')
+            .leftJoin('metrics_sources', 'ms', 'ms.id = ad.metrics_source_id')
+            .select('ms.source_type', 'sourceType')
+            .where('ad.dashboardUid = :uid', { uid: missingDashboard.uid })
+            .andWhere('ad.grafanaInstanceId = :instanceId', { instanceId: grafanaInstance.id })
+            .getRawMany<{ sourceType: string | null }>();
 
           const isUsedByApplications = applicationDashboards.length > 0;
 
           const isTemplate = missingDashboard.tags?.includes(PERFANA_TEMPLATE_TAG);
 
+          // Artificial dashboards have no Grafana counterpart, so restoring one would
+          // push an empty placeholder into Grafana. Skip anything sourced elsewhere.
+          //
+          // `every`, not `some`: a real Grafana dashboard is shared across systems and
+          // can carry many application dashboards. One mislinked to a non-Grafana
+          // MetricsSource must not permanently block restoring it for everyone else.
+          // Requiring ALL of them to be non-Grafana keeps this filter fail-safe, and
+          // costs nothing — the placeholders it targets have exactly one reference each,
+          // and the isRestorable check below is what actually catches them today.
+          const isNonGrafanaSource =
+            applicationDashboards.length > 0 &&
+            applicationDashboards.every(
+              (ad) => ad.sourceType != null && ad.sourceType !== 'grafana',
+            );
+
+          // Synthetic rows predating the metrics_source link have no source_type to
+          // check, but they also carry no restorable grafanaJson — which is the same
+          // condition restoreDashboard refuses on. Filter here so the sync stops
+          // requeueing them every cycle forever.
+          const isRestorable = this.parseRestorableJson(missingDashboard) !== null;
+
           // Restore if used by applications OR is a template
-          if (isUsedByApplications || isTemplate) {
+          if ((isUsedByApplications || isTemplate) && !isNonGrafanaSource && isRestorable) {
             dashboardsToRestore.push(missingDashboard);
+          } else if ((isUsedByApplications || isTemplate) && !isNonGrafanaSource) {
+            // Was a candidate and is sourced from Grafana, but has nothing to restore
+            // from. Debug, not warn: this is the steady state for placeholder rows and
+            // logging it at info is the every-cycle noise this filter exists to stop.
+            // It stays available for an operator asking why a dashboard never comes back.
+            this.logger.debug(
+              `Dashboard "${missingDashboard.name}" (${missingDashboard.uid}) is missing from Grafana but has no restorable grafanaJson — not restoring`,
+            );
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.stack : String(error);
@@ -122,27 +163,52 @@ export class RestoreDashboardService {
   }
 
   /**
-   * Restore a dashboard to Grafana
+   * Parse the stored Grafana JSON, returning null when the dashboard cannot be
+   * restored (no JSON, unparseable JSON, or no `dashboard` property). Synthetic
+   * rows created for non-Grafana sources always land here.
    */
-  async restoreDashboard(
-    grafanaInstance: GrafanaInstance,
-    dashboard: GrafanaDashboard,
-  ): Promise<void> {
-    this.logger.log(`Restoring dashboard: ${dashboard.name} to ${grafanaInstance.label}`);
-
+  private parseRestorableJson(dashboard: GrafanaDashboard): {
+    dashboard: Record<string, unknown>;
+    meta?: { folderId?: number; folderUid?: string };
+  } | null {
     try {
-      // Parse stored Grafana JSON
       const grafanaJson =
         typeof dashboard.grafanaJson === 'string'
           ? JSON.parse(dashboard.grafanaJson)
           : dashboard.grafanaJson;
 
+      return grafanaJson && grafanaJson.dashboard ? grafanaJson : null;
+    } catch {
+      // Unparseable JSON is unrestorable, not a reason to abort the whole sweep.
+      // Absent JSON is the expected case for a placeholder and stays quiet, but
+      // corrupt JSON on a real dashboard means it silently stops being restorable
+      // — say so once per sweep rather than filtering it away invisibly.
+      this.logger.warn(
+        `Dashboard "${dashboard.name}" has unparseable grafanaJson, treating as unrestorable`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Restore a dashboard to Grafana.
+   * Returns true only when Grafana actually accepted the dashboard.
+   */
+  async restoreDashboard(
+    grafanaInstance: GrafanaInstance,
+    dashboard: GrafanaDashboard,
+  ): Promise<boolean> {
+    this.logger.log(`Restoring dashboard: ${dashboard.name} to ${grafanaInstance.label}`);
+
+    try {
+      const grafanaJson = this.parseRestorableJson(dashboard);
+
       // Validate grafanaJson has required structure
-      if (!grafanaJson || !grafanaJson.dashboard) {
+      if (!grafanaJson) {
         this.logger.warn(
           `Dashboard "${dashboard.name}" has invalid grafanaJson (missing dashboard property), skipping restore`,
         );
-        return;
+        return false;
       }
 
       // Prepare dashboard for restoration.
@@ -164,6 +230,7 @@ export class RestoreDashboardService {
       await this.grafanaApiService.createDashboard(grafanaInstance.id, restorePayload);
 
       this.logger.log(`Restored dashboard: ${dashboard.name} to ${grafanaInstance.label}`);
+      return true;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : String(error);
@@ -182,6 +249,8 @@ export class RestoreDashboardService {
             removeError instanceof Error ? removeError.stack : String(removeError);
           this.logger.error('Failed to remove dashboard from Perfana database', removeErrorMessage);
         }
+
+        return false;
       } else {
         this.logger.error(`Failed to restore dashboard "${dashboard.name}"`, errorStack);
         throw error;
@@ -196,8 +265,22 @@ export class RestoreDashboardService {
       const dashboardsToRestore = await this.getDashboardsToRestore(instance);
 
       for (const dashboard of dashboardsToRestore) {
-        await this.restoreDashboard(instance, dashboard);
-        restoredCount++;
+        // Isolate each dashboard: restoreDashboard rethrows anything that is not a
+        // 412, and one dashboard Grafana rejects would otherwise abort the loop and
+        // starve every dashboard behind it, on every cycle.
+        try {
+          // Only count dashboards Grafana actually accepted — a skipped or dropped
+          // dashboard reported as restored makes the sync log claim work it never did.
+          if (await this.restoreDashboard(instance, dashboard)) {
+            restoredCount++;
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.stack : String(error);
+          this.logger.error(
+            `Failed to restore dashboard "${dashboard.name}", continuing with the rest`,
+            errorMessage,
+          );
+        }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.stack : String(error);
