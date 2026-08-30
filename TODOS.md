@@ -173,6 +173,28 @@ the same shape.
 
 ## Grafana dashboards
 
+### A 412 on a referenced dashboard is a second, untouched restore loop
+
+**Priority:** P2
+**Origin:** Adversarial review during /ship on
+`fix/grafana-dashboard-restore-loop-and-delete-conflict` (2026-08-30), which fixed the
+placeholder restore loop but not this one.
+**Why:** `RestoreDashboardService.restoreDashboard` treats a 412 from Grafana as "this
+dashboard cannot come back" and drops the row with
+`this.grafanaDashboardRepo.remove(dashboard)`. But
+`application_dashboards.grafana_dashboard_id` is `ON DELETE NO ACTION`, so for any
+dashboard that is actually referenced that remove raises 23503. The error is caught and
+logged, the row survives, it is still missing from Grafana, and the next cycle tries
+again — the same every-30-seconds loop v0.2.89.0 closed for placeholders, reached by a
+different door. The API half of that release grew a 23503 guard; grafana-sync did not.
+**Why it is P2 and not P1:** it needs Grafana to answer 412, which the placeholder rows
+never reached (they were refused earlier, for missing JSON). No occurrence has been
+observed in a live log. It is latent, not active.
+**What to do:** decide what "cannot restore and cannot drop" should mean. Deleting the
+referencing `application_dashboards` is wrong for the same reason the API refuses to
+cascade — Grafana dashboards are shared. Most likely: catch 23503 around the remove, mark
+the row so the sweep stops reconsidering it, and surface it once rather than every cycle.
+
 ### `concurrency: 1` deletion queues are per-process, not per-cluster
 
 **Priority:** P3
