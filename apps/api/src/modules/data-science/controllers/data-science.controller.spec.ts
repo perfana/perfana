@@ -86,6 +86,7 @@ const makeBullmqClientMock = () => ({
   refreshBatch: jest.fn().mockResolvedValue(mockBatchResult),
   reevaluateBatch: jest.fn().mockResolvedValue(mockReevalResult),
   getJobStatus: jest.fn().mockResolvedValue({ jobId: 'job-abc123', status: 'completed' }),
+  enqueueStatisticsCalculation: jest.fn().mockResolvedValue('statistics-run-001'),
 });
 
 const makeJobProgressServiceMock = () => ({
@@ -1072,6 +1073,205 @@ describe('DataScienceController', () => {
         await expect(
           controller.releaseLock('sys-001', 'production', 'loadTest', mockAdminContext),
         ).rejects.toThrow(BadRequestException);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recalculateStatistics (#552)
+  // -------------------------------------------------------------------------
+  describe('recalculateStatistics', () => {
+    describe('Happy Path', () => {
+      it('should enqueue statistics recalculation and echo the job id', async () => {
+        const { controller, bullmqClient, dataSource } = await buildModule({
+          bullmqClient: {
+            enqueueStatisticsCalculation: jest.fn().mockResolvedValue('statistics-run-001'),
+          },
+        });
+
+        dataSource.query.mockResolvedValueOnce([
+          { test_run_id: 'run-001', organization_id: null },
+        ]); // verifyTestRunAccess
+
+        const result = await controller.recalculateStatistics('run-001', mockUserContext);
+
+        expect(result).toEqual({
+          status: 'initiated',
+          jobId: 'statistics-run-001',
+          testRunId: 'run-001',
+        });
+        expect(bullmqClient.enqueueStatisticsCalculation).toHaveBeenCalledWith('run-001');
+      });
+
+      it('should enqueue the canonical test_run_id when addressed by UUID', async () => {
+        // Every pipeline filters on `test_run_id`, so forwarding the UUID would queue a
+        // job that matches zero rows and still reports success.
+        const { controller, bullmqClient, dataSource } = await buildModule({
+          bullmqClient: {
+            enqueueStatisticsCalculation: jest.fn().mockResolvedValue('statistics-run-001'),
+          },
+        });
+
+        dataSource.query.mockResolvedValueOnce([
+          { test_run_id: 'run-001', organization_id: null },
+        ]);
+
+        const result = await controller.recalculateStatistics(
+          '3f0e5d1a-0000-4000-8000-000000000001',
+          mockUserContext,
+        );
+
+        expect(bullmqClient.enqueueStatisticsCalculation).toHaveBeenCalledWith('run-001');
+        expect(bullmqClient.enqueueStatisticsCalculation).not.toHaveBeenCalledWith(
+          '3f0e5d1a-0000-4000-8000-000000000001',
+        );
+        expect(result.testRunId).toBe('run-001');
+      });
+
+      it('should look the run up by either id column', async () => {
+        const { controller, dataSource } = await buildModule({
+          bullmqClient: {
+            enqueueStatisticsCalculation: jest.fn().mockResolvedValue('statistics-run-001'),
+          },
+        });
+
+        dataSource.query.mockResolvedValueOnce([
+          { test_run_id: 'run-001', organization_id: null },
+        ]);
+
+        await controller.recalculateStatistics('run-001', mockUserContext);
+
+        const lookup = dataSource.query.mock.calls.at(0);
+        expect(lookup).toBeDefined();
+        const [sql, params] = lookup as [string, unknown[]];
+        expect(sql).toContain('id::text = $1 OR test_run_id = $1');
+        expect(sql).toContain('SELECT test_run_id');
+        expect(params).toEqual(['run-001']);
+      });
+
+      it('should not pass surrounding whitespace through to the lookup result', async () => {
+        const { controller, bullmqClient, dataSource } = await buildModule({
+          bullmqClient: {
+            enqueueStatisticsCalculation: jest.fn().mockResolvedValue('statistics-run-001'),
+          },
+        });
+
+        dataSource.query.mockResolvedValueOnce([
+          { test_run_id: 'run-001', organization_id: null },
+        ]);
+
+        const result = await controller.recalculateStatistics('  run-001  ', mockUserContext);
+
+        expect(bullmqClient.enqueueStatisticsCalculation).toHaveBeenCalledWith('run-001');
+        expect(result.testRunId).toBe('run-001');
+      });
+    });
+
+    describe('Input Validation', () => {
+      it.each([
+        ['empty string', ''],
+        ['whitespace only', '   '],
+      ])('should throw BadRequestException for a %s test run id', async (_label, testRunId) => {
+        const { controller, bullmqClient, dataSource } = await buildModule({
+          bullmqClient: { enqueueStatisticsCalculation: jest.fn() },
+        });
+
+        await expect(
+          controller.recalculateStatistics(testRunId, mockUserContext),
+        ).rejects.toThrow(BadRequestException);
+
+        // Refuse before touching the database or the queue.
+        expect(dataSource.query).not.toHaveBeenCalled();
+        expect(bullmqClient.enqueueStatisticsCalculation).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('Authorization', () => {
+      it('should throw NotFoundException when the test run does not exist', async () => {
+        const { controller, bullmqClient, dataSource } = await buildModule({
+          bullmqClient: { enqueueStatisticsCalculation: jest.fn() },
+        });
+
+        dataSource.query.mockResolvedValueOnce([]); // verifyTestRunAccess — no row
+
+        await expect(
+          controller.recalculateStatistics('missing-run', mockUserContext),
+        ).rejects.toThrow(NotFoundException);
+
+        expect(bullmqClient.enqueueStatisticsCalculation).not.toHaveBeenCalled();
+      });
+
+      it('should throw ForbiddenException when the caller cannot access the test run', async () => {
+        const { controller, bullmqClient, dataSource } = await buildModule({
+          bullmqClient: { enqueueStatisticsCalculation: jest.fn() },
+          authzService: {
+            canAccessResource: jest
+              .fn()
+              .mockResolvedValue({ allowed: false, reason: 'not a member' }),
+          },
+        });
+
+        dataSource.query.mockResolvedValueOnce([
+          { organization_id: 'restricted-org', created_by: 'someone-else' },
+        ]);
+
+        await expect(
+          controller.recalculateStatistics('run-001', mockUserContext),
+        ).rejects.toThrow(ForbiddenException);
+
+        expect(bullmqClient.enqueueStatisticsCalculation).not.toHaveBeenCalled();
+      });
+
+      it('should not swallow the authorization failure into a 400', async () => {
+        // The try/catch only wraps the enqueue, so an access denial must stay a 403.
+        const { controller, dataSource } = await buildModule({
+          bullmqClient: { enqueueStatisticsCalculation: jest.fn() },
+          authzService: {
+            canAccessResource: jest.fn().mockResolvedValue({ allowed: false, reason: 'denied' }),
+          },
+        });
+
+        dataSource.query.mockResolvedValueOnce([{ organization_id: 'other-org' }]);
+
+        await expect(
+          controller.recalculateStatistics('run-001', mockUserContext),
+        ).rejects.not.toThrow(BadRequestException);
+      });
+    });
+
+    describe('Error Scenarios', () => {
+      it('should wrap an enqueue failure in a BadRequestException carrying the cause', async () => {
+        const { controller, dataSource } = await buildModule({
+          bullmqClient: {
+            enqueueStatisticsCalculation: jest
+              .fn()
+              .mockRejectedValue(new Error('Redis/BullMQ is not available.')),
+          },
+        });
+
+        dataSource.query.mockResolvedValueOnce([
+          { test_run_id: 'run-001', organization_id: null },
+        ]);
+
+        await expect(
+          controller.recalculateStatistics('run-001', mockUserContext),
+        ).rejects.toThrow(/Failed to enqueue statistics recalculation: Redis\/BullMQ is not available\./);
+      });
+
+      it('should report Unknown error when the rejection is not an Error', async () => {
+        const { controller, dataSource } = await buildModule({
+          bullmqClient: {
+            enqueueStatisticsCalculation: jest.fn().mockRejectedValue('boom'),
+          },
+        });
+
+        dataSource.query.mockResolvedValueOnce([
+          { test_run_id: 'run-001', organization_id: null },
+        ]);
+
+        await expect(
+          controller.recalculateStatistics('run-001', mockUserContext),
+        ).rejects.toThrow('Failed to enqueue statistics recalculation: Unknown error');
       });
     });
   });

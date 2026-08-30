@@ -527,9 +527,13 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     `;
 
     const deleteResult = await manager.query(deleteSQL, testRunIds);
-    const deletedRows = (deleteResult).rowCount || 0;
+    // TypeORM surfaces a DELETE as [rows, rowCount]; `.rowCount` on that array is
+    // always undefined, so the old log claimed 0 even when rows were removed.
+    const deletedRows = Array.isArray(deleteResult) ? (deleteResult[1] ?? undefined) : undefined;
 
-    this.logger.info(`✅ Deleted ${deletedRows} existing statistic records for test runs: ${testRunIds.join(', ')}`);
+    this.logger.info(
+      `✅ Deleted ${deletedRows ?? 'an unknown number of'} existing statistic records for test runs: ${testRunIds.join(', ')}`
+    );
 
     // Step 2: INSERT new statistics (no ON CONFLICT needed since we deleted existing records)
     this.logger.info(`🚀 Executing statistics aggregation INSERT...`);
@@ -561,7 +565,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     const actualCount = actualCountResult[0]?.count || 0;
 
     this.logger.info(`✅ Statistics aggregation completed`);
-    this.logger.info(`   🧹 Deleted: ${deletedRows} existing records (allowing re-analysis)`);
+    this.logger.info(`   🧹 Deleted: ${deletedRows ?? 'an unknown number of'} existing records (allowing re-analysis)`);
     this.logger.info(`   📝 Expected: ${expectedRows} unique metrics`);
     this.logger.info(`   📝 Actual: ${actualCount} statistic records in database`);
     this.logger.info(`   📊 Source: ${totalMetrics} total data points`);

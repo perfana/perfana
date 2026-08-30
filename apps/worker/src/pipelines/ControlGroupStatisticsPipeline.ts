@@ -1,4 +1,5 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
+import { StatisticsPipeline } from './StatisticsPipeline.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
 
@@ -132,6 +133,9 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['ds_control_group_statistics']);
 
+      // Self-heal before aggregating (#552). See backfillMissingSketches.
+      await this.backfillMissingSketches(groupIds);
+
       const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
         // Process statistics for each control group
         let totalStatisticsCreated = 0;
@@ -166,6 +170,81 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
         { controlGroupIds, testRunIds },
         duration
       );
+    }
+  }
+
+  /**
+   * Rebuild missing `pct_agg` sketches on the control runs before aggregating (#552).
+   *
+   * A control run whose `ds_metric_statistics` rows predate #289 (or were restored
+   * from a backup / SUT transfer) has `pct_agg = NULL`, which forces the legacy
+   * raw-scan path below. On a large baseline that scan blows through
+   * ANALYTICS_STATEMENT_TIMEOUT_MS, leaves `ds_control_group_statistics` empty, and
+   * ADAPT then reports INSUFFICIENT_DATA blaming the baseline — with no way out from
+   * the UI. StatisticsPipeline rebuilds the sketches from `ds_metrics` already in the
+   * database in seconds, so do that instead of walking into a known timeout.
+   *
+   * Best-effort: a failure here just leaves the legacy fallback in play.
+   */
+  private async backfillMissingSketches(controlGroupIds: string[]): Promise<void> {
+    try {
+      // ponytail: this detection SELECT runs outside withAnalyticsTransaction, so it is
+      // the one scan in this file not capped by ANALYTICS_STATEMENT_TIMEOUT_MS — only by
+      // the 10-minute server default. It filters on the leading column of
+      // uniq_ds_metric_statistics(test_run_id, …) so it should be an index nested loop,
+      // and the catch below means a slow run costs time, not the batch. Move it inside
+      // an analytics transaction if it ever shows up as slow.
+      const rows = (await this.query<{ test_run_id: string }>(
+        `SELECT DISTINCT ms.test_run_id
+         FROM ds_metric_statistics ms
+         WHERE ms.pct_agg IS NULL
+           AND ms.test_run_id IN (
+             SELECT unnest(cg.test_runs)
+             FROM ds_control_groups cg
+             WHERE cg.control_group_id = ANY($1::varchar[])
+           )`,
+        [controlGroupIds]
+      )) ?? [];
+
+      const testRunIds = rows.map((r) => r.test_run_id);
+      if (testRunIds.length === 0) { return; }
+
+      this.logger.warn(
+        `🔧 ${testRunIds.length} control run(s) missing pct_agg — recomputing statistics before aggregation (#552): ${testRunIds.join(', ')}`
+      );
+
+      const result = await new StatisticsPipeline(this.logger).execute({ testRunIds });
+      if (!result.success) {
+        this.logger.error(
+          `❌ Sketch backfill failed for ${testRunIds.join(', ')} — falling back to the legacy raw-scan path, which may time out`
+        );
+        return;
+      }
+
+      // A run with no `ds_metrics` rows left (retention, a partial delete) makes
+      // StatisticsPipeline succeed while writing nothing, so success alone does not
+      // mean the sketches now exist. Say which happened rather than logging a false
+      // green — the legacy path still runs below and the next evaluation retries this.
+      const repaired = (result.data as { processedRecords?: number } | undefined)?.processedRecords ?? 0;
+      if (repaired > 0) {
+        this.logger.info(
+          `✅ Sketch backfill completed: ${repaired} statistic record(s) rewritten across ${testRunIds.length} control run(s)`
+        );
+      } else {
+        // ponytail: no negative cache, so this re-attempts on every evaluation of this
+        // control group. StatisticsPipeline returns early without deleting anything when
+        // there are no metrics, so the cost is one indexed SELECT and an early return —
+        // add a marker column if a deployment ever accumulates enough of these to matter.
+        this.logger.warn(
+          `⚠️ Sketch backfill wrote no statistics for ${testRunIds.join(', ')} — no ds_metrics rows left to aggregate, so pct_agg stays NULL`
+        );
+      }
+    } catch (error) {
+      // Best-effort by contract: never let the self-heal fail the aggregation it
+      // was only meant to speed up. The legacy raw-scan path still runs below.
+      const message = error && typeof error === 'object' && 'message' in error
+        ? (error as Error).message : 'Unknown error';
+      this.logger.error(`❌ Sketch backfill errored — continuing with the legacy raw-scan path: ${message}`);
     }
   }
 
@@ -261,7 +340,7 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
     if (useFastPath) {
       this.logger.info(`⚡ Fast path: pooling ${totalMetricStats} per-run sketches via rollup(pct_agg)`);
     } else {
-      this.logger.warn(`🐢 Legacy path: ${missingSketches} ds_metric_statistics rows missing pct_agg — re-run StatisticsPipeline on the control runs to enable the fast path (#289)`);
+      this.logger.warn(`🐢 Legacy path: ${missingSketches} ds_metric_statistics rows missing pct_agg — the automatic backfill (#552) did not repair them; this raw scan may exceed ANALYTICS_STATEMENT_TIMEOUT_MS`);
     }
 
     // Fast path — pool persisted per-run sketches with `rollup(pct_agg)` and

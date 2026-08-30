@@ -334,6 +334,19 @@ Anything that reads this table has to decide whether it means "real dashboards" 
 
 v0.2.89.0 fixed three symptoms of this: the grafana-sync restore sweep re-pushing artificial rows every 30s forever, one rejected dashboard aborting the whole sweep, and the API delete returning an opaque 500. See `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md` and `apps/api/src/modules/grafana/README.md`.
 
+### ADAPT's baseline depends on the `pct_agg` sketch
+
+`ds_metric_statistics.pct_agg` is the per-run t-digest added in #289. `ControlGroupStatisticsPipeline` pools those sketches with `rollup(pct_agg)` — the fast path. Rows written before #289, or restored from a backup or a SUT transfer, have `pct_agg = NULL`, which forces the legacy path: a raw scan over `ds_metrics`. On a large baseline that scan exceeds `ANALYTICS_STATEMENT_TIMEOUT_MS` (default 120s, `apps/worker/src/config/environment.ts`), `ds_control_group_statistics` is left empty, and ADAPT reports INSUFFICIENT_DATA against a baseline that is actually fine.
+
+Four things to know before touching this path:
+
+1. **The pipeline self-heals first (v0.2.90.0, #552).** `backfillMissingSketches()` runs *before* the aggregation transaction: it finds control runs whose `ds_metric_statistics` rows have `pct_agg IS NULL` and reruns `StatisticsPipeline` on them, so the fast path applies instead of walking into a known timeout. It is **best-effort by contract** — any failure is caught and the legacy raw scan still runs, which is why the legacy-path warning now says the backfill did not repair the rows. `StatisticsPipeline` can also succeed while writing nothing (no `ds_metrics` rows left), so success alone does not mean the sketches exist; the code checks `processedRecords` and logs which happened.
+2. **The manual escape hatch is `POST /api/data/recalculate-statistics/:testRunId`** → `BullMQClientService.enqueueStatisticsCalculation()` on the **`perfana-analyze`** queue (not the batch queue `addJob` uses), jobId `statistics-<testRunId>` so repeated clicks coalesce. The job record is *not* retained after it settles — BullMQ refuses an `add` whose jobId still exists, so retention would make every later click a silent no-op behind a "started" toast. In the UI it is the **Recalculate baseline statistics** button rendered by `AnomalyDetectionSubsection` (`EvaluationResultsSection.tsx`) beside the ADAPT message itself — deliberately not a permanent menu item, since it helps for exactly one cause. It posts for each id in the conclusion's `details.controlRuns`, so it repairs the **baseline** runs rather than the run showing the error, and the user never has to know that.
+3. **Recalculating fetches nothing.** `StatisticsPipeline` reads only `ds_metrics` and rewrites `ds_metric_statistics`, so it is safe on old runs whose Grafana/Dynatrace window has long expired.
+4. **Pass the canonical `test_run_id` to a pipeline, never the UUID.** `verifyTestRunAccess` accepts either and now *returns* `test_run_id`; every pipeline filters on that column, so forwarding the UUID enqueues a job that matches zero rows and reports success.
+
+Related: `control-group-statistics` is registered with `softFail`, so a failed aggregation still completes its BullMQ job. The reevaluate orchestrator reads the job's return value through the exported `assertStageSucceeded()` (`apps/worker/src/workers/simple-orchestrate-reevaluate-batch.ts`) instead of logging a green tick and running ADAPT on an empty baseline. Any new stage waiting on a `softFail` pipeline has to do the same.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls
@@ -341,6 +354,7 @@ v0.2.89.0 fixed three symptoms of this: the grafana-sync restore sweep re-pushin
 3. **403 Forbidden** → Wrong auth type for admin endpoints
 4. **`null value in column "organization_id" violates not-null constraint`** → You passed `organization_id` (snake_case) to `repo.create()`. Use `organizationId` (camelCase). See "Resource creation" pattern above.
 5. **409 deleting a Grafana dashboard** → Application dashboards still reference it. Remove those first; the API will not cascade. See "`grafana_dashboards` is a mixed table" above.
+6. **ADAPT says it could not build a baseline / INSUFFICIENT_DATA on a healthy baseline** → the baseline's `ds_metric_statistics` rows are missing `pct_agg` and the control-group aggregation timed out. The pipeline now repairs this itself; if it could not, use the **Recalculate baseline statistics** button beside the message, then re-evaluate. See "ADAPT's baseline depends on the `pct_agg` sketch" above.
 
 ## How-To Tutorials
 

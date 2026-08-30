@@ -30,6 +30,20 @@ const logger = getLogger('simple-orchestrate-reevaluate-batch');
 const JOB_WAIT_TIMEOUT_MS = 600_000;
 
 /**
+ * Throw when a soft-failing child pipeline reported failure (#552).
+ *
+ * Pipelines registered with `softFail` return `{ status: 'failed' }` instead of
+ * throwing, so BullMQ marks the job completed. Without this check the orchestrator
+ * logs a green tick and walks into the next stage on empty data.
+ */
+export function assertStageSucceeded(stage: string, returnValue: unknown): void {
+  const result = returnValue as { status?: string; errors?: { message?: string }[] } | undefined;
+  if (result?.status === 'failed') {
+    throw new Error(`${stage} failed: ${result.errors?.[0]?.message ?? 'unknown error'}`);
+  }
+}
+
+/**
  * Create a simple queue instance (NO priority, NO rate limiting)
  */
 function createSimpleQueue(queueName: string): Queue {
@@ -785,6 +799,15 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
           logger.info(`Waiting for control group statistics job ${controlStatsJob.id}...`);
           await waitForJobs(analyzeEvents, [controlStatsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+
+          // control-group-statistics is registered with softFail, so a failed
+          // aggregation still completes the BullMQ job. Read the return value or we
+          // walk into ADAPT with an empty baseline and blame the baseline (#552).
+          assertStageSucceeded(
+            'Control group statistics',
+            (await analyzeQueue.getJob(controlStatsJob.id!))?.returnvalue
+          );
+
           const controlStatsDuration = Date.now() - controlStatsStart;
           logger.info('✅ Control group statistics completed');
           stageTiming.push({ stage: 'control-group-statistics', duration: controlStatsDuration });

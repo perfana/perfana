@@ -127,6 +127,19 @@ a silently shortened list returns an aggregate that looks complete but omits run
 | `GET` | `/api/test-runs/:id/errors` | Error analysis |
 | `GET` | `/api/test-runs/:id/error-statistics` | Grouped error statistics |
 
+## Analysis jobs (`/api/data`)
+
+Job control for the worker pipelines. Only the endpoints referenced elsewhere in these docs are
+listed; the full `/api/data` surface (batch refresh, batch re-evaluate, job status and progress,
+active-job locks) is in Swagger.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/data/analyzeTest/:testRunId` | Run the full analysis pipeline for a test run |
+| `POST` | `/api/data/recalculate-statistics/:testRunId` | Recompute `ds_metric_statistics` from stored `ds_metrics` — no datasource fetch. The escape hatch when [[ADAPT Algorithm]] cannot build a baseline; apply it to the **baseline** run |
+| `GET` | `/api/data/jobs/:jobId/status` | Job status |
+| `GET` | `/api/data/jobs/:jobId/progress` | Job progress |
+
 ## API Keys
 
 | Method | Path | Description |
