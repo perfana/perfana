@@ -27,6 +27,25 @@ Background job processing service using **BullMQ** with Redis for queue manageme
 | ReevaluateChecksPipeline | `reevaluate-checks` | Re-evaluate check results |
 | DataSanityCheckPipeline | _(none)_ | Post-analysis validation — no job name; called directly by `analyzeTestWorker` |
 
+`statistics-calculation` is also enqueued on its own, outside an analysis run: the API's
+`POST /data/recalculate-statistics/:testRunId` puts it on `perfana-analyze` so a run's
+`ds_metric_statistics` can be rebuilt from `ds_metrics` already in the database. It fetches nothing
+from Grafana or Dynatrace, so it is safe on a run whose dashboard window has expired.
+
+### The control-group fast path needs `pct_agg`
+
+`ControlGroupStatisticsPipeline` pools per-run t-digests with `rollup(pct_agg)` (#289). A control
+run whose `ds_metric_statistics` rows predate that column — or that came from a backup or a SUT
+transfer — has `pct_agg = NULL` and falls back to a raw scan over `ds_metrics` that exceeds
+`ANALYTICS_STATEMENT_TIMEOUT_MS` on a large baseline, leaving `ds_control_group_statistics` empty
+and ADAPT reporting INSUFFICIENT_DATA against a baseline that is fine.
+
+`backfillMissingSketches()` runs before the aggregation transaction and reruns `StatisticsPipeline`
+on those control runs so the fast path applies (#552). It is **best-effort**: any failure is caught
+and the legacy scan still runs. `StatisticsPipeline` can also succeed while writing nothing (no
+`ds_metrics` rows left), so check `processedRecords`, not `success`, before calling the sketches
+repaired.
+
 ### Complex Workers (custom logic)
 
 - `analyzeTestWorker` — orchestrates full test analysis (`analyze-test`)
@@ -78,6 +97,15 @@ the terminal event lands.
 Either way, add the stage id to `PIPELINE_STAGES` in
 `packages/shared/src/types/job-progress.types.ts` or the UI shows the raw id: `getStageName()`
 falls back to the id it was given rather than failing.
+
+### Waiting on a `softFail` pipeline
+
+A pipeline registered with `softFail: true` returns `{ status: 'failed' }` instead of throwing, so
+BullMQ marks the job **completed**. Waiting for the job to finish therefore proves nothing about
+whether the work succeeded. Read the job's `returnvalue` — `simple-orchestrate-reevaluate-batch.ts`
+exports `assertStageSucceeded(stage, returnValue)` for exactly this — or the orchestrator logs a
+green tick and the next stage runs on empty data. That is how a failed `control-group-statistics`
+used to reach ADAPT with no baseline and get the baseline blamed (#552).
 
 ### The analyze-test job result
 
