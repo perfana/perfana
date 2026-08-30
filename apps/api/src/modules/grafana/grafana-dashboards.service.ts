@@ -1,4 +1,11 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+  ConflictException,
+  HttpException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GrafanaClientService } from './grafana-client.service';
@@ -8,7 +15,7 @@ import {
   GrafanaDashboardQuery,
   TemplatingVariableDto
 } from './dto/grafana-dashboard.dto';
-import { GrafanaDashboard as GrafanaDashboardEntity, GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
+import { GrafanaDashboard as GrafanaDashboardEntity, GrafanaInstance as GrafanaInstanceEntity, ApplicationDashboard as ApplicationDashboardEntity } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
@@ -158,10 +165,10 @@ export class GrafanaDashboardsService {
         const panelsLength = firstJson?.dashboard?.panels?.length || 0;
         const simplePanelsLength = first.panels?.length || 0;
 
-        this.logger.log(`findAll first result ${first.uid}: grafanaJson=${hasGrafanaJson}, dashboard=${hasDashboard}, panels=${hasPanels}, panelsCount=${panelsLength}, simplePanelsCount=${simplePanelsLength}`);
+        this.logger.debug(`findAll first result ${first.uid}: grafanaJson=${hasGrafanaJson}, dashboard=${hasDashboard}, panels=${hasPanels}, panelsCount=${panelsLength}, simplePanelsCount=${simplePanelsLength}`);
 
         if (hasPanels && panelsLength > 0 && firstJson?.dashboard?.panels?.[0]) {
-          this.logger.log(`First panel keys: ${Object.keys(firstJson.dashboard.panels[0]).join(', ')}`);
+          this.logger.debug(`First panel keys: ${Object.keys(firstJson.dashboard.panels[0]).join(', ')}`);
         }
       }
 
@@ -433,15 +440,38 @@ export class GrafanaDashboardsService {
   async remove(id: string, userId: string, roles: string[]): Promise<void> {
     this.logger.debug(`remove: id=${id}, userId=${userId}`);
 
+    // Declared outside the try so the 23503 handler below can name the dashboard.
+    let entity: GrafanaDashboardEntity | null = null;
+
     try {
       // Load the entity directly so we have the prototype (for auditableFields
       // resolution). Replaces `findOne(id, userId, roles)` — same DB round-trip
       // but keeps the entity instance instead of the mapped DTO.
-      const entity = await withRequestEm(this.grafanaDashboardRepo).findOne({ where: { id } });
+      entity = await withRequestEm(this.grafanaDashboardRepo).findOne({ where: { id } });
       if (!entity) {
         throw new NotFoundException(`Grafana dashboard with ID ${id} not found`);
       }
       await this.verifyOrgAccess(entity, userId, roles);
+
+      // application_dashboards.grafana_dashboard_id is ON DELETE NO ACTION, so
+      // deleting a dashboard that is still referenced raises 23503 and surfaces as
+      // an opaque 500. Grafana dashboards are shared (a SUT delete deliberately
+      // leaves them behind), so cascading here would strip other systems' config —
+      // refuse with a reason the caller can act on instead.
+      // Match on the uid as well as the foreign key: an application dashboard can be
+      // linked by dashboard_uid with a NULL grafana_dashboard_id, and those rows are
+      // just as much "in use" even though no FK would stop the delete orphaning them.
+      const referencingApplicationDashboards = await withRequestEm(
+        this.grafanaDashboardRepo,
+      ).manager.count(ApplicationDashboardEntity, {
+        where: [{ grafanaDashboardId: id }, { dashboardUid: entity.uid }],
+      });
+
+      if (referencingApplicationDashboards > 0) {
+        throw new ConflictException(
+          `Grafana dashboard "${entity.name}" is still used by ${referencingApplicationDashboards} application dashboard(s). Remove those first.`,
+        );
+      }
 
       // logDelete fires BEFORE the row is removed so the diff captures the
       // pre-delete state.
@@ -453,6 +483,30 @@ export class GrafanaDashboardsService {
 
       this.logger.log(`Deleted Grafana dashboard: ${id} by user: ${userId}`);
     } catch (error) {
+      // The count above runs inside the RLS transaction, so a referencing
+      // application_dashboards row this caller cannot see counts as zero and the
+      // DELETE still reaches the FK. A row created between the count and the
+      // delete does the same. Both surface as 23503; translate it to the answer
+      // the pre-check would have given rather than letting it become a 500.
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error as { code?: string }).code === '23503'
+      ) {
+        this.logger.warn(
+          `Grafana dashboard ${id} is still referenced; delete refused by foreign key`,
+        );
+        throw new ConflictException(
+          `Grafana dashboard "${entity?.name ?? id}" is still used by application dashboards. Remove those first.`,
+        );
+      }
+
+      // A deliberate refusal is not a server fault — log it without the stack so
+      // the routine 409 does not read as an incident.
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
       this.logger.error(`Error deleting Grafana dashboard ${id}:`, error);
       throw error;
     }

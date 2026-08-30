@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { GrafanaDashboardsService } from './grafana-dashboards.service';
 import { GrafanaClientService } from './grafana-client.service';
 import { GrafanaDashboard as GrafanaDashboardEntity, GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
@@ -760,6 +760,56 @@ describe('GrafanaDashboardsService', () => {
         await expect(service.remove(mockDashboardEntity.id, mockUserId, mockRoles)).rejects.toThrow(
           'Foreign key constraint violation'
         );
+      });
+
+      // Regression: application_dashboards.grafana_dashboard_id is ON DELETE NO
+      // ACTION. Without this pre-check Postgres raised 23503 and the controller
+      // flattened it into an opaque 500.
+      it('should throw ConflictException when application dashboards still reference it', async () => {
+        // Arrange
+        repository.findOne.mockResolvedValue(mockDashboardEntity);
+        (repository.manager.count as jest.Mock).mockResolvedValue(3);
+
+        // Act & Assert
+        await expect(service.remove(mockDashboardEntity.id, mockUserId, mockRoles)).rejects.toThrow(
+          ConflictException
+        );
+        await expect(service.remove(mockDashboardEntity.id, mockUserId, mockRoles)).rejects.toThrow(
+          /still used by 3 application dashboard/
+        );
+        expect(repository.delete).not.toHaveBeenCalled();
+      });
+
+      // The pre-check counts inside the RLS transaction, so a referencing row the
+      // caller cannot see counts as zero and the DELETE still hits the FK. Same for
+      // a row created between the count and the delete. Both must read as 409.
+      it('should convert a foreign-key violation into ConflictException, not 500', async () => {
+        // Arrange
+        repository.findOne.mockResolvedValue(mockDashboardEntity);
+        (repository.manager.count as jest.Mock).mockResolvedValue(0);
+        const fkError = Object.assign(new Error('violates foreign key constraint'), {
+          code: '23503',
+        });
+        repository.delete.mockRejectedValue(fkError);
+
+        // Act & Assert
+        await expect(service.remove(mockDashboardEntity.id, mockUserId, mockRoles)).rejects.toThrow(
+          ConflictException
+        );
+      });
+
+      it('should not audit a delete that was refused', async () => {
+        // Arrange
+        repository.findOne.mockResolvedValue(mockDashboardEntity);
+        (repository.manager.count as jest.Mock).mockResolvedValue(1);
+
+        // Act
+        await expect(
+          service.remove(mockDashboardEntity.id, mockUserId, mockRoles)
+        ).rejects.toThrow(ConflictException);
+
+        // Assert
+        expect(auditService.logDelete).not.toHaveBeenCalled();
       });
     });
   });
