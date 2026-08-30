@@ -1515,11 +1515,14 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
       testRunId={testRunId}
       allSections={allSections}
       // Without a baseline the preview can only render the "no baseline configured" empty
-      // state, so the button offers nothing but a round trip.
-      previewDisabled={baselineCandidates.length === 0 || !config.baselineTestRunId}
+      // state, so the button offers nothing but a round trip. An empty candidate list is NOT
+      // that case: the picker still offers the "previous run" / "previous SLO-passing run"
+      // sentinels, which the renderer resolves per report, so a selected sentinel is a
+      // perfectly good baseline even when this SUT has no other runs to pin.
+      previewDisabled={!config.baselineTestRunId}
       previewDisabledReason={
         baselineCandidates.length === 0
-          ? 'No baseline run available — this run has no earlier runs in its system, environment and workload'
+          ? 'No earlier run to pin — select a baseline that is resolved per report to enable preview'
           : 'Select a baseline run to enable preview'
       }
     >

@@ -43,21 +43,46 @@ const formatCandidateTime = (c: BaselineCandidate): string =>
  */
 export { PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE };
 
-/** The synthetic options, in the order the list offers them. */
-const SYNTHETIC: Record<string, { label: string; hint: string }> = {
-  [PREVIOUS_RUN_BASELINE]: {
-    label: 'Previous run',
-    hint: 'Resolved when each report is generated, so it never goes stale',
-  },
-  [PREVIOUS_SUCCESSFUL_RUN_BASELINE]: {
-    label: 'Previous successful run (SLOs passed)',
-    hint: 'The most recent earlier run that met its service level objectives',
-  },
-};
+/**
+ * The synthetic options, in the order the list offers them.
+ *
+ * A Map, not an object literal, because every lookup here is keyed by a `test_run_id` — a
+ * CI-supplied string. On an object literal, a run genuinely named `constructor`, `toString`
+ * or `hasOwnProperty` inherits a truthy value from `Object.prototype` and is mistaken for a
+ * synthetic option: it renders as a blank dropdown row and, as a `value`, resolves to nothing
+ * and silently clears the picker. `packages/shared/src/utils/report-variables.ts` guards the
+ * same bug class with `Object.prototype.hasOwnProperty.call`; a Map has no prototype keys to
+ * inherit, so it cannot regress the next time someone adds a lookup.
+ *
+ * `hint` is the single canonical wording of what each sentinel resolves to — it is the option's
+ * secondary line AND the field's helper text, so the same fact is never phrased two ways.
+ */
+const SYNTHETIC = new Map<string, { label: string; hint: string }>([
+  [
+    PREVIOUS_RUN_BASELINE,
+    {
+      label: 'Previous run',
+      hint: 'Each report compares against the run before it, so it never goes stale',
+    },
+  ],
+  [
+    PREVIOUS_SUCCESSFUL_RUN_BASELINE,
+    {
+      // Front-loaded: the control is size="small" in a narrow config column, so a trailing
+      // qualifier is exactly what the collapsed input truncates away.
+      label: 'Previous SLO-passing run',
+      hint: 'Each report compares against the most recent earlier run that passed its SLOs',
+    },
+  ],
+]);
+
+/** Autocomplete group headers — the sentinels are a different kind of thing from a pinned run. */
+const GROUP_SYNTHETIC = 'Resolved per report';
+const GROUP_RUNS = 'Specific runs';
 
 const getCandidateDisplayText = (c: BaselineCandidate): string =>
   // The synthetic entries have no run behind them, so they have no timestamp to format.
-  SYNTHETIC[c.test_run_id]?.label ?? `${c.test_run_id} - ${formatCandidateTime(c)}`;
+  SYNTHETIC.get(c.test_run_id)?.label ?? `${c.test_run_id} - ${formatCandidateTime(c)}`;
 
 const getCandidateSecondaryInfo = (c: BaselineCandidate): string => {
   const parts = [`${c.test_environment} / ${c.workload}`];
@@ -102,7 +127,7 @@ export function useBaselineCandidates(
  * template. A template is generated from for months; the run chosen today is stale tomorrow, and
  * every nightly report then compares against the same ageing baseline. These follow along.
  */
-const SYNTHETIC_OPTIONS: BaselineCandidate[] = Object.keys(SYNTHETIC).map(
+const SYNTHETIC_OPTIONS: BaselineCandidate[] = Array.from(SYNTHETIC.keys()).map(
   // The list renders these; a synthetic option has no real values to show.
   (test_run_id) => ({ test_run_id }) as BaselineCandidate,
 );
@@ -116,16 +141,19 @@ interface BaselineRunSelectProps {
 }
 
 export function BaselineRunSelect({ candidates, value, onChange, label = 'Baseline Test Run', helperText }: BaselineRunSelectProps) {
+  const options = [...SYNTHETIC_OPTIONS, ...candidates];
+  // One lookup for both the selected option and its helper text; an unknown id (a pinned run
+  // that has since been deleted) resolves to nothing and leaves the picker empty.
+  const selected = value ? (options.find((o) => o.test_run_id === value) ?? null) : null;
+  const selectedSynthetic = value ? SYNTHETIC.get(value) : undefined;
+
   return (
     <Autocomplete
-      options={[...SYNTHETIC_OPTIONS, ...candidates]}
+      options={options}
       getOptionLabel={getCandidateDisplayText}
       isOptionEqualToValue={(option, v) => option.test_run_id === v.test_run_id}
-      value={
-        (value && SYNTHETIC[value]
-          ? SYNTHETIC_OPTIONS.find((o) => o.test_run_id === value)
-          : candidates.find((c) => c.test_run_id === value)) ?? null
-      }
+      groupBy={(option) => (SYNTHETIC.has(option.test_run_id) ? GROUP_SYNTHETIC : GROUP_RUNS)}
+      value={selected}
       onChange={(_, newValue) => onChange(newValue)}
       size="small"
       renderInput={(params) => (
@@ -135,20 +163,18 @@ export function BaselineRunSelect({ candidates, value, onChange, label = 'Baseli
           variant="outlined"
           fullWidth
           helperText={
+            // The sentinel's own hint is the single source of this copy — see SYNTHETIC.
             helperText ??
-            (value === PREVIOUS_RUN_BASELINE
-              ? 'Each report compares against the run before it'
-              : value === PREVIOUS_SUCCESSFUL_RUN_BASELINE
-                ? 'Each report compares against the last run that passed its SLOs'
-                : value
-                  ? `Comparing with: ${value}`
-                  : `Select from ${candidates.length} available test runs`)
+            selectedSynthetic?.hint ??
+            (value
+              ? `Comparing with: ${value}`
+              : `Select from ${candidates.length} available test runs`)
           }
         />
       )}
       renderOption={(props, option) => {
         const { key, ...otherProps } = props;
-        const synthetic = SYNTHETIC[option.test_run_id];
+        const synthetic = SYNTHETIC.get(option.test_run_id);
         if (synthetic) {
           return (
             <Box component="li" key={key} {...otherProps}>
