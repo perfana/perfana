@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.89.0] - 2026-08-30
+
+### Fixed
+- **The dashboard sync stops trying to restore dashboards that were never in Grafana.** Dynatrace host metrics and performance-test metrics are held as placeholder entries so Perfana's own metrics have somewhere to live; there is no Grafana dashboard behind them. The sync compared everything it had against what Grafana held, decided these placeholders had gone missing, and tried to put them back every thirty seconds, forever. Each attempt was refused, and each refusal was logged twice per entry, which on a system with a handful of them is well over a thousand lines an hour of a problem that does not exist. An entry with no dashboard definition behind it, or one belonging to a source other than Grafana, is now left out of the sweep, so the log is quiet and a dashboard that genuinely went missing is easier to spot. A dashboard whose stored definition is corrupt says so once instead of disappearing from the sweep silently.
+- **The sync no longer reports work it did not do.** A dashboard that was skipped, or that Grafana refused and was dropped instead, was still counted as restored: the run summary claimed "6 restored" while restoring none. The count now only includes dashboards Grafana actually accepted.
+- **Deleting a Grafana dashboard that is still in use explains itself.** The delete failed with a bare "Failed to delete Grafana dashboard" and a server error, with nothing to say why or what to do about it. It now says how many application dashboards still point at the dashboard, so you can remove those first. Nothing is deleted on your behalf — a Grafana dashboard is shared between systems, and removing what depends on it would take configuration away from systems you were not looking at.
+
 ## [0.2.88.1] - 2026-08-30
 
 ### Fixed

@@ -136,6 +136,11 @@ export class GrafanaDashboardsController {
       return { message: 'Grafana dashboard deleted successfully' };
     } catch (error) {
       this.logger.error(`Failed to delete Grafana dashboard ${id}:`, error);
+      // Preserve deliberate status codes (e.g. 409 when the dashboard is still
+      // referenced by application dashboards) instead of flattening them to 500.
+      if (error instanceof HttpException) {
+        throw error;
+      }
       if (error && typeof error === 'object' && 'message' in error && (error as Error).message.includes('not found')) {
         throw new HttpException('Grafana dashboard not found', HttpStatus.NOT_FOUND);
       }

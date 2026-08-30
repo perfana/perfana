@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, ConflictException, NotFoundException } from '@nestjs/common';
 import { GrafanaDashboardsController } from './grafana-dashboards.controller';
 import { GrafanaDashboardsService, GrafanaDashboard } from './grafana-dashboards.service';
 import {
@@ -837,6 +837,37 @@ describe('GrafanaDashboardsController', () => {
     });
 
     describe('remove', () => {
+      // Regression: the catch block flattened every non-"not found" error into a
+      // 500, so the "still in use" conflict reached the user as an opaque server
+      // error with no indication of what to do about it.
+      it('should preserve a 409 ConflictException instead of returning 500', async () => {
+        // Arrange
+        const dashboardId = mockDashboard.id;
+        service.remove.mockRejectedValue(
+          new ConflictException('Grafana dashboard "X" is still used by 3 application dashboard(s). Remove those first.'),
+        );
+
+        // Act & Assert
+        await expect(controller.remove(dashboardId, mockUserContext)).rejects.toMatchObject({
+          status: HttpStatus.CONFLICT,
+        });
+      });
+
+      // The service throws NotFoundException, which is an HttpException and so takes
+      // the rethrow path rather than the string-matching branch. Same 404 either way,
+      // but this pins the arm the service actually exercises.
+      it('should return 404 for a NotFoundException from the service', async () => {
+        // Arrange
+        service.remove.mockRejectedValue(
+          new NotFoundException(`Grafana dashboard with ID ${mockDashboard.id} not found`),
+        );
+
+        // Act & Assert
+        await expect(controller.remove(mockDashboard.id, mockUserContext)).rejects.toMatchObject({
+          status: HttpStatus.NOT_FOUND,
+        });
+      });
+
       it('should throw 404 HttpException when dashboard not found', async () => {
         // Arrange
         const dashboardId = 'non-existent-id';

@@ -275,11 +275,20 @@ catch (err) {
 }
 ```
 
+### `grafana_dashboards` is a mixed table
+
+Not every row is a real Grafana dashboard. `ensureArtificialDashboardExists()` in `apps/api/src/modules/dynatrace/dynatrace.repository.ts` writes **artificial** placeholder rows so non-Grafana sources have somewhere to hang their panels: synthetic `grafana_id` 800000+ for Dynatrace, 900000+ reserved for performance-test metrics. They have `grafana_json` NULL and must never be pushed to Grafana.
+
+- The `source_type != 'grafana'` predicate (`GrafanaDashboardsService.findAll`) does **not** catch artificial application dashboards from a SUT import — those have `metrics_source_id` NULL. Test `grafana_json` as well when the filter has to hold.
+- A dashboard `uid` is unique only within a Grafana instance, so any lookup by uid must also scope by `grafana_instance_id`.
+- `DELETE /api/grafana/dashboards/:id` returns **409** when application dashboards still reference the dashboard. It does not cascade: Grafana dashboards are shared and a SUT delete leaves them behind on purpose.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls
 2. **401 Unauthorized** → Expired token, Keycloak handles refresh
 3. **403 Forbidden** → Wrong auth type for admin endpoints
+4. **409 deleting a Grafana dashboard** → Application dashboards still reference it; remove those first.
 
 ## How-To Tutorials
 
