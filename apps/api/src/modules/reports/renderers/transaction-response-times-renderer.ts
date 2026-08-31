@@ -20,7 +20,9 @@ import {
 
 /**
  * What a band is telling the reader. `transaction` is unlabelled: the band is already inside a
- * transaction's own request table, so naming it that twice says nothing.
+ * transaction's own request table, so naming it that twice says nothing. `other` is currently
+ * unreachable — `meaningfulChain` drops those controllers before a band is built — but stays so
+ * the Record remains exhaustive.
  */
 const CONTROLLER_LABEL: Record<ControllerKind, string> = {
   parallel: 'parallel',

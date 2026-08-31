@@ -35,6 +35,9 @@ const KIND_BY_CLASS: Record<string, ControllerKind> = {
   IfController: 'conditional',
   ThroughputController: 'conditional',
   RunTime: 'conditional',
+  // First iteration only, so its children show a count of 1 against neighbours showing N. That
+  // needs the same explanation a conditional does, or the count reads as an anomaly.
+  OnceOnlyController: 'conditional',
 
   // One child per pass rather than all of them, which is why a band's count is split across
   // its members instead of repeated on each: 29 + 21 = 50, not 50 + 50.
@@ -49,8 +52,8 @@ const KIND_BY_CLASS: Record<string, ControllerKind> = {
 
 /**
  * Classified by the last segment of the fully-qualified class, never by the controller's name:
- * names are free text a test plan can reuse. An unrecognised controller still gets a band, it
- * just gets the neutral one.
+ * names are free text a test plan can reuse. Anything not listed is `other`, and `other` is not
+ * rendered at all (see `meaningfulChain`) — to give a new controller type a band, add it here.
  */
 export function controllerKind(controllerClass: string): ControllerKind {
   return KIND_BY_CLASS[controllerClass.split('.').pop() ?? ''] ?? 'other';
@@ -78,14 +81,21 @@ export type SampleSection<T> = SampleGroupSection<T> | SampleSingleSection<T>;
 
 /**
  * Drops the chain entries that carry no information inside this transaction's table: the Thread
- * Group, which is the same for every row in the run, and the Transaction Controller the table is
- * already headed by.
+ * Group, which is the same for every row in the run; the Transaction Controller the table is
+ * already headed by; and every `other` controller — Module, Test Fragment, Simple Controller and
+ * friends only organise the test plan, they say nothing about how the requests underneath them
+ * executed, and a real plan nests three or four of them above every row.
  *
  * Deliberately not "strip the longest common prefix": that rule erases the parallel band from a
  * transaction whose requests ALL ran in one group, which is exactly the case the band exists for.
  */
 function meaningfulChain(chain: ControllerRef[], transactionName: string): ControllerRef[] {
-  return chain.filter((c) => !c.class.endsWith('ThreadGroup') && c.name !== transactionName);
+  return chain.filter(
+    (c) =>
+      !c.class.endsWith('ThreadGroup') &&
+      c.name !== transactionName &&
+      controllerKind(c.class) !== 'other',
+  );
 }
 
 /**

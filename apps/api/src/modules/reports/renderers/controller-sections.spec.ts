@@ -5,6 +5,10 @@ const TC = 'org.apache.jmeter.control.TransactionController';
 const PC = 'org.apache.jmeter.control.ParallelController';
 const LC = 'org.apache.jmeter.control.LoopController';
 const IF = 'org.apache.jmeter.control.IfController';
+// Plan structure: nests above every row and says nothing about how it executed.
+const GC = 'org.apache.jmeter.control.GenericController';
+const MC = 'org.apache.jmeter.control.ModuleController';
+const TF = 'org.apache.jmeter.control.TestFragmentController';
 
 const sample = (name: string, firstSeen: number, chain: Array<{ name: string; class: string; occurrence?: number }>) =>
   ({ name, firstSeen, parentControllers: chain });
@@ -22,13 +26,47 @@ describe('controllerKind', () => {
     expect(controllerKind(PC)).toBe('parallel');
     expect(controllerKind(LC)).toBe('loop');
     expect(controllerKind(IF)).toBe('conditional');
+    // Survives the `other` filter only because it is classified: a count of 1 against
+    // neighbours showing N needs the band to explain it.
+    expect(controllerKind('org.apache.jmeter.control.OnceOnlyController')).toBe('conditional');
     expect(controllerKind('org.apache.jmeter.control.InterleaveControl')).toBe('alternating');
     expect(controllerKind(TC)).toBe('transaction');
   });
 
-  it('gives an unrecognised controller the neutral band rather than dropping it', () => {
+  it('classifies an unrecognised controller as other, which is not banded', () => {
     expect(controllerKind('com.example.MyCustomController')).toBe('other');
     expect(controllerKind('')).toBe('other');
+  });
+});
+
+describe('plan-structure controllers', () => {
+  // Module / Test Fragment / Simple Controller nest three deep above every row of a real plan.
+  it('drops them instead of banding, keeping the loop inside them', () => {
+    const chain = [
+      { name: 'Debug', class: TG },
+      { name: 'Module Controller', class: MC },
+      { name: 'Test Script', class: TF },
+      { name: 'StartPagina', class: GC },
+      { name: 'T01', class: TC },
+    ];
+    const sections = buildSampleSections(
+      [
+        sample('a', 1, chain),
+        sample('b', 2, [...chain, { name: 'Loop Controller x 5', class: LC }]),
+      ],
+      'T01',
+    );
+
+    expect(flatten(sections)).toEqual(['a', '[Loop Controller x 5]', 'b']);
+  });
+
+  it('flattens a chain made only of plan structure', () => {
+    const sections = buildSampleSections(
+      [sample('a', 1, [{ name: 'Debug', class: TG }, { name: 'Klikpad', class: GC }])],
+      'T01',
+    );
+
+    expect(flatten(sections)).toEqual(['a']);
   });
 });
 
