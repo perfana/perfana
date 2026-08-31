@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.91.0] - 2026-08-31
+
+### Changed
+- **The request table in Performance Analysis now only groups requests by controllers that explain their numbers.** A JMeter plan organises itself with Module Controllers, Test Fragments and Simple Controllers, and a real script nests three or four of them above every single request. All of them were drawn as grouping bands, so a transaction's requests sat several levels deep inside boxes labelled "Module Controller" and "Test Script" that were identical for every row and said nothing about how the requests ran. Those bands are gone. What remains are the controllers whose presence actually explains what you are reading: a parallel group, because its requests overlap and their response times do not add up to the time the user waited; a loop, because its requests repeat and their counts are a multiple of their neighbours'; a conditional, because its requests only sometimes ran and their counts are lower and ragged; an alternating controller, because it runs one of its requests per pass rather than all of them; and a sub-transaction. A run whose plan holds none of these now shows a flat list, which is what it always was underneath. The same applies to the request tables in a generated report.
+- **A Once Only Controller is now recognised.** It runs on the first iteration only, so the requests under it show a count of one against neighbours showing hundreds. It is now labelled as a conditional, which is what explains that count.
+
 ## [0.2.90.0] - 2026-08-30
 
 ### Fixed
