@@ -272,6 +272,8 @@ function GroupStatCell({
   );
 }
 
+// `other` is currently unreachable — `meaningfulChain` drops those controllers before a band is
+// built. Kept so the Record stays exhaustive, and so giving a kind a band is a one-line change.
 const KIND_LABEL: Record<ControllerKind, string> = {
   parallel: 'Parallel group',
   loop: 'Loop',

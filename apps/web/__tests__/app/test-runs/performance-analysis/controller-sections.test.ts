@@ -35,6 +35,19 @@ const C = {
     name,
     class: 'org.apache.jmeter.control.IfController',
   }),
+  // Plan-structure only: nests above every row and says nothing about how it executed.
+  simple: (name: string): ControllerRef => ({
+    name,
+    class: 'org.apache.jmeter.control.GenericController',
+  }),
+  module: (name = 'Module Controller'): ControllerRef => ({
+    name,
+    class: 'org.apache.jmeter.control.ModuleController',
+  }),
+  fragment: (name = 'Test Script'): ControllerRef => ({
+    name,
+    class: 'org.apache.jmeter.control.TestFragmentController',
+  }),
 };
 
 function sampler(name: string, overrides: Partial<SamplerStat> = {}): SamplerStat {
@@ -74,11 +87,50 @@ describe('controllerKind', () => {
     expect(controllerKind('org.apache.jmeter.control.ForeachController')).toBe('loop');
     expect(controllerKind('org.apache.jmeter.control.WhileController')).toBe('loop');
     expect(controllerKind('org.apache.jmeter.control.IfController')).toBe('conditional');
+    // Survives the `other` filter only because it is classified: a count of 1 against
+    // neighbours showing N needs the band to explain it.
+    expect(controllerKind('org.apache.jmeter.control.OnceOnlyController')).toBe('conditional');
     expect(controllerKind('org.apache.jmeter.control.TransactionController')).toBe('transaction');
   });
 
-  it('gives an unrecognised controller a neutral band rather than dropping the level', () => {
+  it('classifies an unrecognised controller as other, which is not banded', () => {
     expect(controllerKind('com.example.custom.MagicController')).toBe('other');
+  });
+});
+
+describe('plan-structure controllers', () => {
+  // Module / Test Fragment / Simple Controller nest three deep above every row of a real plan.
+  it('drops them instead of banding, keeping the loops and conditionals inside them', () => {
+    const chain = [
+      C.threadGroup(),
+      C.module(),
+      C.fragment(),
+      C.simple('Simple Controller - Login'),
+      C.simple('StartPagina'),
+      C.transaction('BemVac_01_Starten'),
+    ];
+    const sections = buildSamplerSections(
+      [
+        sampler('BemVac_01_Starten', { parent_controllers: chain }),
+        sampler('BemVac_01_Starten_02', {
+          parent_controllers: [...chain, C.loop('Loop Controller x 5')],
+        }),
+      ],
+      'BemVac_01_Starten',
+    );
+
+    expect(names(sections)).toEqual(['BemVac_01_Starten', 'Loop Controller x 5']);
+    expect(asGroup(sections[1]!).controller).toBe('loop');
+  });
+
+  it('flattens a chain made only of plan structure', () => {
+    const sections = buildSamplerSections(
+      [sampler('a', { parent_controllers: [C.threadGroup(), C.module(), C.simple('Klikpad')] })],
+      'T01',
+    );
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0]!.kind).toBe('single');
   });
 });
 
