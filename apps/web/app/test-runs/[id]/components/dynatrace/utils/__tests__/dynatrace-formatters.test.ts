@@ -1,5 +1,5 @@
-import { buildDeepLinkUrl, buildMDAUrl, buildServiceFilterParam, createPlatformUrl, deepLinkBaseUrl } from '../dynatrace-formatters';
-import { DynatraceConfig, DynatraceEntity } from '../../types';
+import { buildComparisonUrl, buildDeepLinkUrl, buildMDAUrl, buildServiceFilterParam, createPlatformUrl, deepLinkBaseUrl } from '../dynatrace-formatters';
+import { DynatraceConfig, DynatraceEntity, RelatedTestRun } from '../../types';
 import { TestRun } from '@/types/test-runs';
 
 const managedConfig = {
@@ -139,5 +139,104 @@ describe('client URL overrides the server URL in deep links', () => {
   it('leaves a client URL that already names the apps host alone', () => {
     expect(createPlatformUrl('https://xyz99999.apps.dynatrace.com'))
       .toBe('https://xyz99999.apps.dynatrace.com');
+  });
+
+  // Regression: createPlatformUrl used to strip 'https://' and graft
+  // '.apps.dynatrace.com' onto whatever was left, so the proxy / split-DNS
+  // address this whole feature exists for became
+  // 'https://dt-proxy.corp.example.com.apps.dynatrace.com' — a host that does
+  // not resolve. Every SaaS deep link was broken for exactly the intended case.
+  it.each([
+    'https://dt-proxy.corp.example.com',
+    'http://dynatrace.internal:9999',
+    'https://dynatrace.example.com',
+    'https://internal.apps.dynatrace.com.corp.example.com',
+  ])('leaves the non-tenant client URL %s untouched', (proxy) => {
+    expect(createPlatformUrl(proxy)).toBe(proxy);
+  });
+
+  it('SaaS deep links through a proxy client URL stay on the proxy host', () => {
+    const url = buildDeepLinkUrl(
+      'pure-paths',
+      entity,
+      { ...saasConfig, clientUrl: 'https://dt-proxy.corp.example.com' } as DynatraceConfig,
+      testRun,
+      '',
+    );
+    expect(url).toContain('https://dt-proxy.corp.example.com/ui/apps/');
+    expect(url).not.toContain('.com.apps.dynatrace.com');
+  });
+});
+
+describe('client URL edge cases and the remaining link builders', () => {
+  const saasConfig = {
+    ...managedConfig,
+    dynatraceType: 'saas',
+    host: 'https://abc12345.live.dynatrace.com',
+  } as DynatraceConfig;
+
+  it('treats an empty clientUrl as unset and falls back to host', () => {
+    // The edit dialog clears the field by PATCHing '', and the API stores ''
+    // verbatim — so the read side has to treat '' as "not configured".
+    expect(deepLinkBaseUrl({ ...managedConfig, clientUrl: '' }))
+      .toBe('https://dt-managed.example.com/e/env-1');
+  });
+
+  it('returns an empty string when neither clientUrl nor host is set', () => {
+    expect(deepLinkBaseUrl({ host: '', clientUrl: '' })).toBe('');
+    expect(deepLinkBaseUrl({} as DynatraceConfig)).toBe('');
+  });
+
+  it('managed MDA links point at the client URL', () => {
+    const url = buildMDAUrl(
+      'response-times',
+      entity,
+      { ...managedConfig, clientUrl: 'https://dt.example.com/' } as DynatraceConfig,
+      testRun,
+      serviceFilterParam,
+    );
+    expect(url).toContain('https://dt.example.com/ui/services/SERVICE-123/mda?');
+    expect(url).not.toContain('dt-managed.example.com');
+  });
+
+  it('SaaS MDA links derive the apps host from the client URL', () => {
+    const url = buildMDAUrl(
+      'response-times',
+      entity,
+      { ...saasConfig, clientUrl: 'https://xyz99999.live.dynatrace.com' } as DynatraceConfig,
+      testRun,
+      serviceFilterParam,
+    );
+    expect(url).toContain('https://xyz99999.apps.dynatrace.com/ui/apps/dynatrace.classic.mda/');
+    expect(url).not.toContain('abc12345');
+  });
+
+  it('the comparison link uses the client URL, and bails out when there is no base URL', () => {
+    const comparisonRun = { test_run_id: 'run-0', start_time: '2026-07-15T10:00:00.000Z', created_at: '2026-07-15T09:00:00.000Z' } as RelatedTestRun;
+
+    const url = buildComparisonUrl(
+      'SERVICE-123',
+      { ...managedConfig, clientUrl: 'https://dt.example.com' } as DynatraceConfig,
+      testRun,
+      comparisonRun,
+      null,
+      '',
+      '',
+    );
+    expect(url).toContain('https://dt.example.com/#serviceComparison');
+    expect(url).not.toContain('dt-managed.example.com');
+
+    // Guard preserved from the old `config.host?.replace(...)` shape
+    expect(
+      buildComparisonUrl(
+        'SERVICE-123',
+        { ...managedConfig, host: '', clientUrl: '' } as DynatraceConfig,
+        testRun,
+        comparisonRun,
+        null,
+        '',
+        '',
+      ),
+    ).toBe('');
   });
 });

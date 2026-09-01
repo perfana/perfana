@@ -25,17 +25,18 @@ export function deepLinkBaseUrl(config: Pick<DynatraceConfig, 'host' | 'clientUr
 }
 
 /**
- * Convert classic Dynatrace URL to modern platform URL
+ * Convert a Dynatrace SaaS tenant URL to its modern platform (apps) URL.
+ *
+ * Only a real `<tenant>.live.dynatrace.com` / `<tenant>.dynatrace.com` address has a
+ * platform twin. Anything else is returned unchanged: a proxy or split-DNS client URL
+ * is already the address the browser should use, and a URL that already names the
+ * platform host must not be rewritten to `<tenant>.apps.apps.dynatrace.com`.
  */
 export function createPlatformUrl(baseUrl: string): string {
-  // A client URL may already point at the platform host; rewriting it again
-  // would yield `<tenant>.apps.apps.dynatrace.com`.
-  if (baseUrl.includes('.apps.dynatrace.com')) return baseUrl;
-  const hostname = baseUrl
-    .replace('https://', '')
-    .replace('.live.dynatrace.com', '')
-    .replace('.dynatrace.com', '');
-  return `https://${hostname}.apps.dynatrace.com`;
+  // `[^./]+` on purpose: the tenant is a single label, so `<tenant>.apps.dynatrace.com`
+  // and any deeper name simply fail to match and come back untouched.
+  const tenant = /^https?:\/\/([^./]+)(?:\.live)?\.dynatrace\.com$/.exec(baseUrl)?.[1];
+  return tenant ? `https://${tenant}.apps.dynatrace.com` : baseUrl;
 }
 
 // Dynatrace's sentinel for an open-ended max duration (microseconds).

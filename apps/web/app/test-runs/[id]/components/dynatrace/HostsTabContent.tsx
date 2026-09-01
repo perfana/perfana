@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Box, Button } from '@mui/material';
+import { Box, Button, Typography } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { TestRun } from '@/types/test-runs';
 import { DynatraceConfig, fetchHostsOverview, HostOverviewRow } from '@/lib/dynatrace';
@@ -67,9 +67,15 @@ export default function HostsTabContent({ hostEntities, testRun, configs }: Host
   if (selectedHost) {
     return (
       <Box>
-        <Button startIcon={<ArrowBackIcon />} onClick={() => setSelectedHostId(null)} sx={{ mb: 2 }}>
-          Back to hosts
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+          <Button startIcon={<ArrowBackIcon />} onClick={() => setSelectedHostId(null)}>
+            Back to hosts
+          </Button>
+          {/* Same name the hosts list shows, so the drill-down says which host it is. */}
+          <Typography variant="h6" sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>
+            {selectedHost.entityDisplayName}
+          </Typography>
+        </Box>
         <HostDetailPanel
           host={selectedHost}
           testRun={testRun}

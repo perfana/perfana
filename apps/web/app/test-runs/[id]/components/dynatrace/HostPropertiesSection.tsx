@@ -47,10 +47,13 @@ export default function HostPropertiesSection({
   };
 
   const handleOpenInDynatrace = () => {
-    const platformBaseUrl = createPlatformUrl(deepLinkBaseUrl(config));
+    // Only SaaS has a platform (apps) host; a managed cluster serves the route
+    // itself. buildDeepLinkUrl branches the same way.
+    const baseUrl = deepLinkBaseUrl(config);
+    const linkBase = config.dynatraceType === 'saas' ? createPlatformUrl(baseUrl) : baseUrl;
     const timeFilter = createTimeFilter();
-    const url = `${platformBaseUrl}/ui/apps/dynatrace.classic.hosts/ui/entity/${hostId}?${timeFilter}&gf=all`;
-    window.open(url, '_blank');
+    const url = `${linkBase}/ui/apps/dynatrace.classic.hosts/ui/entity/${hostId}?${timeFilter}&gf=all`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   return (
