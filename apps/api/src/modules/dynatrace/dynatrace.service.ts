@@ -267,12 +267,32 @@ export class DynatraceService {
    * @param roles - The user's roles for authorization checks
    *
    * Note: DynatraceConfig entity does not have organization_id or created_by/updated_by yet,
-   * so ownership tracking is not applied. Full ownership assignment will be enabled when
-   * Phase 4 adds the ownership columns.
+   * The caller may name a target organization in the body. That is checked here:
+   * RLS cannot backstop it, because `rls_dynatrace_configs_insert`'s
+   * `can_access_resource` creator branch passes for any row the caller created,
+   * whatever organization_id it carries. Without this check any authenticated user
+   * could plant a config — and its browser-facing clientUrl, which members then
+   * follow out of Perfana — into an organization they do not belong to.
    */
-  async create(dto: CreateDynatraceConfigDto, userId: string, _roles: string[]) {
+  async create(dto: CreateDynatraceConfigDto, userId: string, roles: string[]) {
     // Log authorization context for debugging
     this.logger.debug(`create: userId=${userId}`);
+
+    // The body may name a target organization; default to the caller's own.
+    const organizationId =
+      dto.organizationId ?? (await this.authzService.getAccessibleOrganizations(userId))[0];
+    if (!organizationId) {
+      throw new ForbiddenException('User has no accessible organization');
+    }
+
+    // getCapabilities is scoped to that organization and already grants global
+    // admins the full set, so this is the whole check.
+    const caps = await this.authzService.getCapabilities(userId, roles, organizationId);
+    if (!caps.includes(Capability.IntegrationDynatraceCreate)) {
+      throw new ForbiddenException(
+        'You do not have permission to create a Dynatrace configuration in this organization',
+      );
+    }
 
     // Normalize URL by removing trailing slash for consistency
     const normalizedHost = this.normalizeUrl(dto.host);
@@ -305,7 +325,7 @@ export class DynatraceService {
       use_proxy: dto.useProxy || false,
       created_by: userId,
       updated_by: userId,
-      organization_id: dto.organizationId || undefined,
+      organization_id: organizationId,
     });
 
     // Phase 5a: DynatraceConfig.organization_id column maps to camelCase property
@@ -356,7 +376,10 @@ export class DynatraceService {
 
     // Update the configuration with the provided attributes
     const updated = await this.repository.update(id, {
-      client_url: dto.clientUrl?.replace(/\/+$/, ''),
+      // null and '' both mean "clear it": a client that GETs a config (where an
+      // unset value reads back as null) and PATCHes it back must not silently
+      // no-op. Only an absent key leaves the stored value alone.
+      client_url: dto.clientUrl === null ? '' : dto.clientUrl?.replace(/\/+$/, ''),
       perfana_test_run_id_attribute: dto.perfanaTestRunIdAttribute,
       perfana_request_name_attribute: dto.perfanaRequestNameAttribute,
       label: dto.label,
