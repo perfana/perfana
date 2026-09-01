@@ -2075,6 +2075,7 @@ CREATE TABLE public.ds_tracked_differences (
 CREATE TABLE public.dynatrace_configs (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
     host character varying(500) NOT NULL,
+    client_url character varying(500),
     api_token text NOT NULL,
     dynatrace_type character varying(20) DEFAULT 'saas'::character varying NOT NULL,
     label character varying(255) NOT NULL,

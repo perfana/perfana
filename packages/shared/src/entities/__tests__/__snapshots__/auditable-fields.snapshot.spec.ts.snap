@@ -106,6 +106,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
   "DsPanels": null,
   "DynatraceConfig": [
     "host",
+    "clientUrl",
     "label",
     "dynatraceType",
     "perfanaTestRunIdAttribute",
