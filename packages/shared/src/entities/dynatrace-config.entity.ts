@@ -28,6 +28,10 @@ export class DynatraceConfig {
   /**
    * Browser-facing URL for deep links, when it differs from `host` (proxy, split DNS).
    * Falls back to `host` when unset — see `deepLinkBaseUrl` in the web app.
+   *
+   * Note the polarity is deliberately the opposite of GrafanaInstance, where
+   * `client_url` is required and `server_url` is the optional override: here the
+   * server URL (`host`) is the required one, since it is what the API actually calls.
    */
   @Column({ name: 'client_url', type: 'varchar', length: 500, nullable: true, transformer: stripTrailingSlashTransformer })
   clientUrl?: string;

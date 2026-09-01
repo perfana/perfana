@@ -17,7 +17,7 @@ export class AddDynatraceClientUrl1800000000000 implements MigrationInterface {
     );
     await queryRunner.query(`
       COMMENT ON COLUMN "dynatrace_configs"."client_url" IS
-        'Browser-facing base URL for deep links. NULL means deep links use host.'
+        'Browser-facing base URL for deep links. NULL means deep links use host; the API normalises a cleared value to NULL.'
     `);
   }
 
