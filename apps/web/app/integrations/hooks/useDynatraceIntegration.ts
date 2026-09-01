@@ -46,6 +46,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
     defaultValues: {
       label: '',
       host: '',
+      clientUrl: '',
       apiToken: '',
       platformApiToken: '',
       dynatraceType: 'saas' as const,
@@ -59,6 +60,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
       form.reset({
         label: selectedConfig.label || '',
         host: selectedConfig.host,
+        clientUrl: selectedConfig.clientUrl || '',
         apiToken: '', // Don't pre-fill secrets — blank means "keep existing"
         platformApiToken: '',
         dynatraceType: selectedConfig.dynatraceType,
@@ -96,6 +98,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
       const createData: CreateDynatraceConfigDto = {
         label: data.label!,
         host: data.host!,
+        ...(data.clientUrl && { clientUrl: data.clientUrl }),
         apiToken: data.apiToken!,
         dynatraceType: data.dynatraceType!,
         ...(data.platformApiToken && { platformApiToken: data.platformApiToken }),
@@ -131,6 +134,9 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
 
     try {
       const updateData: UpdateDynatraceConfigDto = {
+        label: data.label,
+        // Always sent, '' included: that is how the user clears it.
+        clientUrl: data.clientUrl ?? '',
         perfanaTestRunIdAttribute: selectedTestRunIdAttribute || undefined,
         perfanaRequestNameAttribute: selectedRequestNameAttribute || undefined,
         useProxy: data.useProxy,

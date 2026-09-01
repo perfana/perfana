@@ -1,4 +1,4 @@
-import { buildDeepLinkUrl, buildMDAUrl, buildServiceFilterParam } from '../dynatrace-formatters';
+import { buildDeepLinkUrl, buildMDAUrl, buildServiceFilterParam, createPlatformUrl, deepLinkBaseUrl } from '../dynatrace-formatters';
 import { DynatraceConfig, DynatraceEntity } from '../../types';
 import { TestRun } from '@/types/test-runs';
 
@@ -94,5 +94,50 @@ describe('buildServiceFilterParam ui format (managed /ui/services/* routes)', ()
     expect(param).toBe(
       '0%1E15%114633f5c1-3735-4f19-bd45-d44e5b89e54e%14run%5C01%140%14%14%14%14'
     );
+  });
+});
+
+describe('client URL overrides the server URL in deep links', () => {
+  const saasConfig = {
+    ...managedConfig,
+    dynatraceType: 'saas',
+    host: 'https://abc12345.live.dynatrace.com',
+  } as DynatraceConfig;
+
+  it('falls back to host when no clientUrl is set', () => {
+    expect(deepLinkBaseUrl(managedConfig)).toBe('https://dt-managed.example.com/e/env-1');
+  });
+
+  it('uses clientUrl and strips its trailing slash', () => {
+    expect(deepLinkBaseUrl({ ...managedConfig, clientUrl: 'https://dt.example.com/' }))
+      .toBe('https://dt.example.com');
+  });
+
+  it('managed classic links point at the client URL', () => {
+    const url = buildDeepLinkUrl(
+      'method-hotspots',
+      entity,
+      { ...managedConfig, clientUrl: 'https://dt.example.com' } as DynatraceConfig,
+      testRun,
+      '',
+    );
+    expect(url).toContain('https://dt.example.com/#methodhotspots');
+    expect(url).not.toContain('dt-managed.example.com');
+  });
+
+  it('SaaS platform links derive the apps host from the client URL', () => {
+    const url = buildDeepLinkUrl(
+      'pure-paths',
+      entity,
+      { ...saasConfig, clientUrl: 'https://xyz99999.live.dynatrace.com' } as DynatraceConfig,
+      testRun,
+      '',
+    );
+    expect(url).toContain('https://xyz99999.apps.dynatrace.com/ui/apps/');
+  });
+
+  it('leaves a client URL that already names the apps host alone', () => {
+    expect(createPlatformUrl('https://xyz99999.apps.dynatrace.com'))
+      .toBe('https://xyz99999.apps.dynatrace.com');
   });
 });

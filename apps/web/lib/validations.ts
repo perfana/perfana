@@ -54,6 +54,7 @@ export const createDynatraceConfigSchema = z.object({
       },
       { message: 'Invalid URL format' }
     ),
+  clientUrl: z.string().url('Invalid URL format').optional().or(z.literal('')),
   apiToken: z.string()
     .min(1, 'API token is required')
     .min(10, 'API token must be at least 10 characters'),

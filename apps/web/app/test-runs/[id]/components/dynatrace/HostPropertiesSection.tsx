@@ -11,6 +11,7 @@ import {
 } from '@mui/icons-material';
 import { HostPropertiesResponse, DynatraceConfig } from '@/lib/dynatrace';
 import { formatBytes } from '@/lib/format-units';
+import { createPlatformUrl, deepLinkBaseUrl } from './utils/dynatrace-formatters';
 
 interface HostPropertiesSectionProps {
   properties: HostPropertiesResponse;
@@ -45,15 +46,8 @@ export default function HostPropertiesSection({
     return `gtf=c_${start}_${end}`;
   };
 
-  // Convert classic Dynatrace URL to modern platform URL
-  const createPlatformUrl = (baseUrl: string) => {
-    const hostname = baseUrl.replace('https://', '').replace('.live.dynatrace.com', '').replace('.dynatrace.com', '');
-    return `https://${hostname}.apps.dynatrace.com`;
-  };
-
   const handleOpenInDynatrace = () => {
-    const baseUrl = config.host.replace(/\/$/, '');
-    const platformBaseUrl = createPlatformUrl(baseUrl);
+    const platformBaseUrl = createPlatformUrl(deepLinkBaseUrl(config));
     const timeFilter = createTimeFilter();
     const url = `${platformBaseUrl}/ui/apps/dynatrace.classic.hosts/ui/entity/${hostId}?${timeFilter}&gf=all`;
     window.open(url, '_blank');
