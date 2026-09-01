@@ -19,6 +19,8 @@ export interface TimeSeriesDataPoint {
 export interface TimeSeriesResponse {
   transaction_data: TimeSeriesDataPoint[];
   sampler_data: Record<string, TimeSeriesDataPoint[]>;
+  /** Bucket size the server actually used. Throughput traces divide by it. */
+  aggregation_seconds: number;
 }
 
 export interface TransactionGraphModalProps {
