@@ -71,3 +71,68 @@ describe('DynatraceRepository — createDsCompareConfigForMetric', () => {
     expect(manager.query.mock.calls[0][0]).toContain('SELECT id FROM ds_compare_config');
   });
 });
+
+/**
+ * `client_url` (the repository's snake_case input) must be mapped onto the
+ * entity's camelCase `clientUrl` property. TypeORM silently drops unknown
+ * properties, so a snake_case key here would compile, run, and persist nothing —
+ * the field would just never save, with no error anywhere.
+ *
+ * `withRequestEm` returns the repository unchanged when no request-scoped
+ * EntityManager is bound, so a plain mock repo is enough here.
+ */
+describe('DynatraceRepository — clientUrl column mapping', () => {
+  let configRepo: { create: jest.Mock; save: jest.Mock; update: jest.Mock; findOne: jest.Mock };
+  let repository: DynatraceRepository;
+
+  const stubRepo = () => ({}) as never;
+
+  beforeEach(() => {
+    configRepo = {
+      create: jest.fn((v: unknown) => v),
+      save: jest.fn(async (v: unknown) => v),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      findOne: jest.fn().mockResolvedValue({ id: 'config-1' }),
+    };
+    repository = new DynatraceRepository(
+      configRepo as never,
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      { transaction: jest.fn() } as never,
+    );
+  });
+
+  it('create() maps client_url onto the camelCase clientUrl property', async () => {
+    await repository.create({
+      host: 'https://example.live.dynatrace.com',
+      client_url: 'https://dynatrace.example.com',
+      api_token: 'dt0c01.test',
+      label: 'Production',
+    });
+
+    const created = configRepo.create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(created.clientUrl).toBe('https://dynatrace.example.com');
+    // The snake_case key must NOT survive — TypeORM would drop it without a word
+    expect(created).not.toHaveProperty('client_url');
+  });
+
+  it('update() normalises an empty string to NULL, so the field has one unset value', async () => {
+    await repository.update('config-1', { client_url: '' });
+
+    const [, updateData] = configRepo.update.mock.calls[0] as [string, Record<string, unknown>];
+    expect(updateData).toHaveProperty('clientUrl', null);
+  });
+
+  it('update() omits clientUrl entirely when the caller did not send one', async () => {
+    await repository.update('config-1', { label: 'Renamed' });
+
+    const [, updateData] = configRepo.update.mock.calls[0] as [string, Record<string, unknown>];
+    // Present-but-undefined would be harmless for TypeORM, but absent is the
+    // contract the service relies on to distinguish "leave it" from "clear it".
+    expect(updateData).not.toHaveProperty('clientUrl');
+    expect(updateData).toHaveProperty('label', 'Renamed');
+  });
+});

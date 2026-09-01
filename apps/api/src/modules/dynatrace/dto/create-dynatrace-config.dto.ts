@@ -1,4 +1,4 @@
-import { IsUrl, IsNotEmpty, IsString, IsIn, IsOptional, IsBoolean } from 'class-validator';
+import { IsUrl, IsNotEmpty, IsString, IsIn, IsOptional, IsBoolean, ValidateIf, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateDynatraceConfigDto {
@@ -8,6 +8,7 @@ export class CreateDynatraceConfigDto {
   })
   @IsUrl({ require_tld: false }, { message: 'Host must be a valid URL' })
   @IsNotEmpty()
+  @MaxLength(500)
   host!: string;
 
   @ApiPropertyOptional({
@@ -15,7 +16,18 @@ export class CreateDynatraceConfigDto {
     example: 'https://dynatrace.example.com',
   })
   @IsOptional()
-  @IsUrl({ require_tld: false }, { message: 'Client URL must be a valid URL' })
+  // Same '' tolerance as the update DTO, so a client can POST back a config it
+  // GET'd without special-casing a cleared field. The service collapses it.
+  @ValidateIf((_, value) => value !== '')
+  // Scheme pinned explicitly: with require_protocol off, validator.js never consults
+  // the protocol list, so 'evil.com' and 'ftp://evil.com' would both pass. The value
+  // is only ever handed to window.open, so http(s) is the whole contract.
+  // require_tld stays false for internal hostnames — nothing fetches this server-side.
+  @IsUrl(
+    { protocols: ['http', 'https'], require_protocol: true, require_tld: false },
+    { message: 'Client URL must be a valid http(s) URL' },
+  )
+  @MaxLength(500)
   clientUrl?: string;
 
   @ApiProperty({

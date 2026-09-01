@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsBoolean, IsUrl, ValidateIf } from 'class-validator';
+import { IsOptional, IsString, IsBoolean, IsUrl, ValidateIf, MaxLength, IsNotEmpty } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateDynatraceConfigDto {
@@ -8,7 +8,15 @@ export class UpdateDynatraceConfigDto {
   })
   @IsOptional()
   @ValidateIf((_, value) => value !== '')
-  @IsUrl({ require_tld: false }, { message: 'Client URL must be a valid URL' })
+  // Scheme pinned explicitly: with require_protocol off, validator.js never consults
+  // the protocol list, so 'evil.com' and 'ftp://evil.com' would both pass. The value
+  // is only ever handed to window.open, so http(s) is the whole contract.
+  // require_tld stays false for internal hostnames — nothing fetches this server-side.
+  @IsUrl(
+    { protocols: ['http', 'https'], require_protocol: true, require_tld: false },
+    { message: 'Client URL must be a valid http(s) URL' },
+  )
+  @MaxLength(500)
   clientUrl?: string;
 
   @ApiPropertyOptional({
@@ -33,6 +41,11 @@ export class UpdateDynatraceConfigDto {
   })
   @IsOptional()
   @IsString()
+  // The web client now sends label on every update, so an empty one would blank
+  // the config's display name in the integrations list, the deep-link picker and
+  // the entity-mapping labels. '' satisfies the NOT NULL column on its own.
+  @IsNotEmpty()
+  @MaxLength(255)
   label?: string;
 
   @ApiPropertyOptional({

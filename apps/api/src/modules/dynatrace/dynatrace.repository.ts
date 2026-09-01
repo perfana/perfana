@@ -168,10 +168,10 @@ export class DynatraceRepository {
     const updateData: Partial<DynatraceConfig> = {};
 
     if (dto.client_url !== undefined) {
-      // Stored verbatim: '' clears it in practice, since every read site is
-      // `clientUrl || host`. TypeORM's update() skips undefined, so we cannot
-      // write a NULL here without casting.
-      updateData.clientUrl = dto.client_url;
+      // '' is the wire signal for "clear it", stored as NULL so the column has a
+      // single unset representation. TypeORM's update() skips undefined but does
+      // write null, hence the cast past the non-nullable property type.
+      updateData.clientUrl = dto.client_url === '' ? (null as unknown as undefined) : dto.client_url;
     }
     if (dto.perfana_test_run_id_attribute !== undefined) {
       updateData.perfanaTestRunIdAttribute = dto.perfana_test_run_id_attribute;
