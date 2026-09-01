@@ -77,6 +77,53 @@ export class TestRunsTimeSeriesQueryService {
   }
 
   /**
+   * Bucket sizes the server will pick on its own. All are multiples of 5 (the
+   * CAGG floor) so `validateAggregationSeconds` accepts every one of them.
+   * A caller may still ask for any other legal multiple of 5 explicitly.
+   */
+  private static readonly AGGREGATION_LADDER = [5, 10, 15, 20, 30, 60, 120, 180, 300];
+
+  /** Points per series to aim for when the server picks the bucket size. */
+  private static readonly TARGET_BUCKETS = 360;
+
+  /**
+   * Pick a bucket size from the run's duration.
+   *
+   * At the 5 s floor a 3 h run is 2160 buckets per series — six points per
+   * screen pixel, and a response that grows linearly with a number nobody can
+   * see. Aiming at ~360 points keeps the chart at roughly one point per pixel
+   * and keeps a long run's payload flat instead of proportional to duration.
+   *
+   * The rungs are spaced so no step drops resolution by more than 2x. A sparser
+   * ladder puts a cliff at every rung boundary: with [5,10,30,60,300] a run one
+   * second past 6 h fell from 360 points to 72, and one second past 1 h from
+   * 360 to 120. A test does not get meaningfully less readable for lasting a
+   * second longer.
+   *
+   * Falls back to the floor when the run has no usable end_time (still running,
+   * or aborted). That run charts empty either way — `bounds.end_time` is NULL,
+   * so both generate_series and the agg window yield nothing — so the fallback
+   * only keeps this from throwing; it does not rescue the chart.
+   */
+  private async resolveAggregationSeconds(testRunId: string): Promise<number> {
+    const ladder = TestRunsTimeSeriesQueryService.AGGREGATION_LADDER;
+    const floor = ladder[0]!;
+
+    const result = await withRequestEm(this.testRunRepo).query(
+      `SELECT EXTRACT(EPOCH FROM (end_time - start_time)) AS seconds
+       FROM test_runs WHERE test_run_id = $1`,
+      [testRunId],
+    );
+
+    const seconds = Number(result?.[0]?.seconds);
+    if (!Number.isFinite(seconds) || seconds <= 0) return floor;
+
+    const wanted = seconds / TestRunsTimeSeriesQueryService.TARGET_BUCKETS;
+    // Snap up: the coarsest rung is the cap for a very long run.
+    return ladder.find((step) => step >= wanted) ?? ladder[ladder.length - 1]!;
+  }
+
+  /**
    * Aggregation seconds must be >= 5 and a multiple of 5 — the CAGG floor is
    * the 5 s `bucket` column on `requests_raw_5s` / `transactions_5s`.
    */
@@ -102,6 +149,13 @@ export class TestRunsTimeSeriesQueryService {
    *   - 'sampler'          → group by 5 s bucket + sampler_name, read from requests_raw_5s
    *   - 'sampler-single'   → group by 5 s bucket only, filter sampler_name = $3,
    *                          read from requests_raw_5s
+   *
+   * The single-series kinds pad against a generate_series grid so an idle bucket
+   * plots as a real zero on the throughput trace. The 'sampler' kind deliberately
+   * does NOT: it is a Plotly stacked area (stackgroup, stackgaps 'infer zero'),
+   * which fills the gaps client-side. Padding it costs buckets × samplers rows —
+   * a 3 h run with 19 samplers returned 41 420 rows of which 560 held data, an
+   * 11.8 MB response instead of 173 KB. Do not "restore" the LEFT JOIN here.
    *
    * Parameters expected by the returned SQL:
    *   $1 = test_run_id
@@ -152,28 +206,12 @@ export class TestRunsTimeSeriesQueryService {
         FROM run
       ),
       time_series AS (
-        SELECT ${isSamplerGroup ? 'sl.sampler_name,' : ''}
-               generate_series(
+        SELECT generate_series(
                  time_bucket('${aggSec} seconds'::interval, b.start_time),
                  time_bucket('${aggSec} seconds'::interval, b.end_time),
                  interval '${aggSec} seconds'
                ) AS time_bucket
         FROM bounds b
-        ${
-          isSamplerGroup
-            ? `CROSS JOIN (
-                 SELECT DISTINCT sampler_name
-                 FROM requests_raw_5s c
-                 JOIN run r
-                   ON c.system_under_test = r.sut
-                  AND c.test_environment  = r.env
-                 WHERE c.transaction_name = $2
-                   AND c.scenario_name IN (SELECT scenario_name FROM scenarios)
-                   AND c.bucket >= (SELECT start_time FROM bounds)
-                   AND c.bucket <  (SELECT end_time   FROM bounds) + interval '5 seconds'
-               ) sl`
-            : ''
-        }
       ),
       agg AS (
         SELECT
@@ -202,18 +240,26 @@ export class TestRunsTimeSeriesQueryService {
                OR c.bucket >= time_bucket('5 seconds', ${cutoffParam}::timestamptz))
         GROUP BY time_bucket('${aggSec} seconds'::interval, c.bucket)${samplerGroupKey}
       )
-      SELECT ${isSamplerGroup ? 'ts.sampler_name,' : ''}
-             ts.time_bucket,
-             a.avg_response_time, a.median_response_time,
-             a.min_response_time, a.max_response_time,
-             a.p90_response_time, a.p95_response_time, a.p99_response_time,
-             COALESCE(a.total_count, 0)  AS total_count,
-             COALESCE(a.passed_count, 0) AS passed_count,
-             COALESCE(a.failed_count, 0) AS failed_count
-      FROM time_series ts
-      LEFT JOIN agg a ON a.time_bucket = ts.time_bucket
-        ${isSamplerGroup ? 'AND a.sampler_name = ts.sampler_name' : ''}
-      ORDER BY ${isSamplerGroup ? 'ts.sampler_name, ' : ''}ts.time_bucket ASC
+      ${
+        isSamplerGroup
+          ? `SELECT sampler_name, time_bucket,
+                    avg_response_time, median_response_time,
+                    min_response_time, max_response_time,
+                    p90_response_time, p95_response_time, p99_response_time,
+                    total_count, passed_count, failed_count
+             FROM agg
+             ORDER BY sampler_name, time_bucket ASC`
+          : `SELECT ts.time_bucket,
+                    a.avg_response_time, a.median_response_time,
+                    a.min_response_time, a.max_response_time,
+                    a.p90_response_time, a.p95_response_time, a.p99_response_time,
+                    COALESCE(a.total_count, 0)  AS total_count,
+                    COALESCE(a.passed_count, 0) AS passed_count,
+                    COALESCE(a.failed_count, 0) AS failed_count
+             FROM time_series ts
+             LEFT JOIN agg a ON a.time_bucket = ts.time_bucket
+             ORDER BY ts.time_bucket ASC`
+      }
     `;
   }
 
@@ -243,7 +289,9 @@ export class TestRunsTimeSeriesQueryService {
    * @param transactionName - The transaction name to filter by
    * @param userId - User ID for authorization checks
    * @param roles - User roles for authorization checks
-   * @param aggregationSeconds - Aggregation bucket size in seconds
+   * @param aggregationSeconds - Aggregation bucket size in seconds. Omit to let
+   *   the server pick one from the run duration; the choice is echoed back as
+   *   `aggregation_seconds`.
    * @param excludeRampUp - Whether to exclude ramp-up period from results
    */
   async getTransactionTimeSeries(
@@ -251,15 +299,19 @@ export class TestRunsTimeSeriesQueryService {
     transactionName: string,
     userId: string,
     roles: string[],
-    aggregationSeconds: number = 5,
+    aggregationSeconds?: number,
     excludeRampUp: boolean = false,
   ): Promise<TransactionTimeSeriesData> {
     try {
-      this.validateAggregationSeconds(aggregationSeconds);
+      if (aggregationSeconds !== undefined) this.validateAggregationSeconds(aggregationSeconds);
       await this.validateOrganizationAccess(testRunId, userId, roles);
 
+      // Resolve after the access check — an unauthorized caller must not be
+      // able to probe run durations.
+      const aggSec = aggregationSeconds ?? (await this.resolveAggregationSeconds(testRunId));
+
       this.logger.log(
-        `Getting time-series data for transaction: ${transactionName} with ${aggregationSeconds}s aggregation (excludeRampUp: ${excludeRampUp})`,
+        `Getting time-series data for transaction: ${transactionName} with ${aggSec}s aggregation (${aggregationSeconds === undefined ? 'server-picked from run duration' : 'caller-supplied'}, excludeRampUp: ${excludeRampUp})`,
       );
 
       const cutoffTime = await this.getRampUpCutoffTime(testRunId, excludeRampUp);
@@ -267,7 +319,7 @@ export class TestRunsTimeSeriesQueryService {
 
       const transactionQuery = this.buildTimeSeriesQuery({
         kind: 'transaction',
-        aggSec: aggregationSeconds,
+        aggSec,
       });
       const transactionResult = await withRequestEm(this.testRunRepo).query(
         transactionQuery,
@@ -276,7 +328,7 @@ export class TestRunsTimeSeriesQueryService {
 
       const samplerQuery = this.buildTimeSeriesQuery({
         kind: 'sampler',
-        aggSec: aggregationSeconds,
+        aggSec,
       });
       const samplerResult = await withRequestEm(this.testRunRepo).query(
         samplerQuery,
@@ -301,6 +353,7 @@ export class TestRunsTimeSeriesQueryService {
           this.parseTimeSeriesRow(row),
         ),
         sampler_data: samplerData,
+        aggregation_seconds: aggSec,
       };
     } catch (error) {
       if (error instanceof HttpException) throw error;
