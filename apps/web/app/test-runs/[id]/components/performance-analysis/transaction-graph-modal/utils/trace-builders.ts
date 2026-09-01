@@ -85,13 +85,37 @@ export function buildSamplerTraces(
   const traces: unknown[] = [];
   let colorIndex = 0;
 
+  // Re-grid the sampler series onto the full bucket grid before plotting.
+  //
+  // The API sends only the buckets a sampler actually has data in — padding
+  // every sampler across the whole grid server-side made a 3 h / 19-sampler
+  // response 11.8 MB for 560 rows of data. But the padding is not decorative
+  // here: Plotly's `stackgaps: 'infer zero'` only fills a bucket that some
+  // OTHER trace in the stackgroup has. A bucket where EVERY sampler was silent
+  // is absent from the group's x-union entirely, so the filled band
+  // interpolates straight across an idle window instead of dropping to zero —
+  // a real outage would render as a solid coloured band. `transaction_data` is
+  // still sent padded, so it is the grid, and rebuilding here costs nothing on
+  // the wire.
+  const grid = data.transaction_data.map(d => d.time_bucket);
+  const gridX = grid.map(t => new Date(t));
+
   Object.entries(data.sampler_data).forEach(([samplerName, samplerData]) => {
     const colors = SAMPLER_COLORS[colorIndex % SAMPLER_COLORS.length];
     colorIndex++;
 
+    // Defensive: with no grid (a run with no usable end_time returns both
+    // arrays empty) fall back to the sampler's own buckets.
+    const byBucket = new Map(samplerData.map(d => [d.time_bucket, d[selectedMetric]]));
+    const x = grid.length > 0 ? gridX : samplerData.map(d => new Date(d.time_bucket));
+    const y =
+      grid.length > 0
+        ? grid.map(t => (byBucket.has(t) ? byBucket.get(t)! : null))
+        : samplerData.map(d => d[selectedMetric]);
+
     traces.push({
-      x: samplerData.map(d => new Date(d.time_bucket)),
-      y: samplerData.map(d => d[selectedMetric]),
+      x,
+      y,
       name: samplerName,
       type: 'scatter',
       mode: 'lines',

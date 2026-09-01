@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { SelectChangeEvent } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
 import type { TimeSeriesResponse, MetricType } from '../types';
@@ -31,8 +31,15 @@ export function useTransactionGraphData({
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [aggregationSeconds, setAggregationSeconds] = useState(5);
+  // null = let the server pick from the run duration. A 3 h run at the 5 s floor
+  // is 2160 points per series, well past what the chart can show.
+  const [aggregationSeconds, setAggregationSeconds] = useState<number | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('avg_response_time');
+  // Guards against an out-of-order response. The bucket choices now span 5s..300s,
+  // so a 300s response (tiny) routinely lands before a 5s one (60x larger) issued
+  // first — last-write-wins on ARRIVAL would pair the 5s data with a 300s divisor
+  // and render throughput 60x too low, permanently.
+  const requestSeq = useRef(0);
 
   // Keyboard shortcut for Escape key
   useEffect(() => {
@@ -47,27 +54,36 @@ export function useTransactionGraphData({
   }, [open, onClose]);
 
   const fetchTimeSeriesData = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
 
     try {
-      const url = `/test-runs/${testRunId}/transactions/${encodeURIComponent(transactionName)}/timeseries?aggregationSeconds=${aggregationSeconds}`;
+      const url =
+        `/test-runs/${testRunId}/transactions/${encodeURIComponent(transactionName)}/timeseries` +
+        (aggregationSeconds === null ? '' : `?aggregationSeconds=${aggregationSeconds}`);
       const response = await authenticatedFetch(url);
 
       if (!response.ok) {
         throw new Error('Failed to fetch time-series data');
       }
 
-      const result = await response.json();
+      const result: TimeSeriesResponse = await response.json();
+      if (seq !== requestSeq.current) return;
       setData(result);
+      // Deliberately NOT stored in `aggregationSeconds`: that state drives the
+      // fetch, so adopting into it would trigger a second full round trip for
+      // the same chart. The effective value is derived from `data` below.
+
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       const errorMessage =
         err && typeof err === 'object' && 'message' in err
           ? (err as Error).message
           : 'Failed to load time-series data';
       setError(errorMessage);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [testRunId, transactionName, aggregationSeconds]);
 
@@ -89,7 +105,10 @@ export function useTransactionGraphData({
     loading,
     data,
     error,
-    aggregationSeconds,
+    // The user's explicit pick wins; otherwise show what the server chose.
+    // Before the first response there is nothing to divide by yet, and the
+    // chart is not rendered in that state.
+    aggregationSeconds: aggregationSeconds ?? data?.aggregation_seconds ?? 5,
     selectedMetric,
     handleAggregationChange,
     handleMetricChange,

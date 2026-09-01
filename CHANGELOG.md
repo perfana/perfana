@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.93.0] - 2026-09-01
+
+### Fixed
+- **The transaction time-series graph opens quickly again on a long test run.** Opening "View Time-Series Graph" from the performance analysis card on a three-hour test took about twenty seconds. The wait was not the query — that took 40 ms — it was the size of the answer. The graph draws each request within a transaction as a stacked band, and the server was filling in every five-second slot for every request, including the slots where that request did not run. On a three-hour run with nineteen requests that is 41,420 rows of which 560 carried any data; the rest were empty padding, and the response came to 11.8 MB. The chart already fills those gaps itself, so the padding is gone and the response is now 734 KB. The graph looks exactly the same.
+
+### Changed
+- **The transaction graph now picks a sensible time resolution for the length of the test.** It always used five-second buckets, which on a three-hour run is 2,160 points per line — more detail than the chart can show, and it had to be sent and drawn regardless. The graph now starts at a resolution matched to the run: five seconds for a short test, one minute for a three-hour one, aiming for a readable number of points either way. The Aggregation menu shows what was chosen and still lets you change it, and it has gained 15 seconds, 20 seconds, 2, 3 and 5 minutes alongside the existing choices — enough steps that a test lasting a second longer never costs you a large chunk of the chart's detail. Together with the fix above, opening the graph on a three-hour run now transfers 188 KB instead of 11.8 MB.
+
 ## [0.2.92.0] - 2026-09-01
 
 ### Added

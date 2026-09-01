@@ -6,10 +6,18 @@ import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
 import type { Theme } from '@mui/material';
 import type { MetricType, MetricOption, AggregationOption, SamplerColor } from '../types';
 
+// Must list every value the API's server-side ladder can return, or the Select
+// renders blank when the server picks one the user never chose.
 export const AGGREGATION_OPTIONS: AggregationOption[] = [
   { value: 5, label: '5 seconds' },
   { value: 10, label: '10 seconds' },
+  { value: 15, label: '15 seconds' },
+  { value: 20, label: '20 seconds' },
   { value: 30, label: '30 seconds' },
+  { value: 60, label: '1 minute' },
+  { value: 120, label: '2 minutes' },
+  { value: 180, label: '3 minutes' },
+  { value: 300, label: '5 minutes' },
 ];
 
 export const METRIC_OPTIONS: MetricOption[] = [

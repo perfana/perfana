@@ -276,6 +276,12 @@ export interface TimeSeriesDataPoint {
 export interface TransactionTimeSeriesData {
   transaction_data: TimeSeriesDataPoint[];
   sampler_data: Record<string, TimeSeriesDataPoint[]>;
+  /**
+   * The bucket size actually used. Echoed because the caller may omit
+   * aggregationSeconds and let the server pick one from the run duration —
+   * clients divide counts by it to get throughput, so they must not assume 5.
+   */
+  aggregation_seconds: number;
 }
 
 /**

@@ -70,6 +70,98 @@ describe('TestRunsTimeSeriesQueryService', () => {
     );
   });
 
+  describe('resolveAggregationSeconds', () => {
+    const resolve = (durationSeconds: number | null) => {
+      repo.query.mockReset();
+      repo.query.mockResolvedValue([{ seconds: durationSeconds }]);
+      return (service as unknown as {
+        resolveAggregationSeconds: (id: string) => Promise<number>;
+      }).resolveAggregationSeconds('run-1');
+    };
+
+    // Target is ~360 points/series; ladder [5,10,15,20,30,60,120,180,300].
+    it.each([
+      [360, 5],      // 6 min  -> 72 pts
+      [1800, 5],     // 30 min -> 360 pts
+      [1801, 10],    // just over -> next rung up
+      [3600, 10],    // 1 h    -> 360 pts
+      [3601, 15],    // just past 1 h -> 15, not a 3x drop to 30
+      [10800, 30],   // 3 h    -> 360 pts, the reported case
+      [21601, 120],  // just past 6 h -> 120, not a 5x drop to 300
+      [43200, 120],  // 12 h   -> 360 pts
+      [64800, 180],  // 18 h   -> 360 pts
+    ])('picks %ss duration -> %ss buckets', async (duration, expected) => {
+      await expect(resolve(duration)).resolves.toBe(expected);
+    });
+
+    it('caps at the coarsest rung rather than returning undefined', async () => {
+      await expect(resolve(60 * 60 * 24 * 30)).resolves.toBe(300);
+    });
+
+    it.each([[null], [0], [-1]])(
+      'falls back to the 5s floor when duration is unusable (%s)',
+      async (duration) => {
+        await expect(resolve(duration)).resolves.toBe(5);
+      },
+    );
+
+    it('only returns values validateAggregationSeconds accepts', async () => {
+      const validate = (n: number) =>
+        (service as unknown as { validateAggregationSeconds: (x: number) => void })
+          .validateAggregationSeconds(n);
+      for (const duration of [60, 600, 3600, 10800, 86400]) {
+        const picked = await resolve(duration);
+        expect(() => validate(picked)).not.toThrow();
+      }
+    });
+
+    it('reaches the 60s rung for a 6 h run', async () => {
+      await expect(resolve(6 * 3600)).resolves.toBe(60);
+      await expect(resolve(10801)).resolves.toBe(60); // just past the 30s rung
+      await expect(resolve(21600)).resolves.toBe(60); // exactly 360 x 60
+    });
+
+    it('never drops resolution by more than 2x between adjacent rungs', async () => {
+      // Regression: the ladder was [5,10,30,60,300], so a run one second past
+      // 6 h fell from 360 points to 72 — one extra second cost 80% of the
+      // chart's detail. Every step must stay within 2x.
+      const ladder = (
+        service.constructor as unknown as { AGGREGATION_LADDER: number[] }
+      ).AGGREGATION_LADDER;
+      for (let i = 1; i < ladder.length; i++) {
+        expect(ladder[i]! / ladder[i - 1]!).toBeLessThanOrEqual(2);
+      }
+    });
+
+    it('falls back to the floor when the run row is missing', async () => {
+      // `result?.[0]?.seconds` on an empty set: a deleted or unknown run must
+      // not blow up mid-chart.
+      repo.query.mockReset();
+      repo.query.mockResolvedValue([]);
+      await expect(
+        (
+          service as unknown as {
+            resolveAggregationSeconds: (id: string) => Promise<number>;
+          }
+        ).resolveAggregationSeconds('run-1'),
+      ).resolves.toBe(5);
+    });
+
+    it('handles the numeric-as-string EXTRACT result the pg driver returns', async () => {
+      // node-postgres hands back `numeric` as a string, not a number — the real
+      // shape of this query's result, which the numeric cases above do not have.
+      repo.query.mockReset();
+      repo.query.mockResolvedValue([{ seconds: '10800.000000' }]);
+      await expect(
+        (
+          service as unknown as {
+            resolveAggregationSeconds: (id: string) => Promise<number>;
+          }
+        ).resolveAggregationSeconds('run-1'),
+      ).resolves.toBe(30);
+    });
+  });
+
   describe('buildTimeSeriesQuery', () => {
     const build = (kind: 'transaction' | 'sampler' | 'sampler-single', aggSec: number) =>
       (service as unknown as {
@@ -117,6 +209,12 @@ describe('TestRunsTimeSeriesQueryService', () => {
         expect(build('transaction', 30)).toContain("time_bucket('30 seconds'::interval, c.bucket)");
         expect(build('transaction', 30)).toContain("interval '30 seconds'");
       });
+
+      it('still pads against the generate_series grid', () => {
+        // Single series: an idle bucket must plot as a real zero on throughput.
+        expect(sql()).toContain('FROM time_series ts');
+        expect(sql()).toContain('LEFT JOIN agg a ON a.time_bucket = ts.time_bucket');
+      });
     });
 
     describe('sampler kind', () => {
@@ -136,6 +234,16 @@ describe('TestRunsTimeSeriesQueryService', () => {
         expect(sql()).toContain(
           "GROUP BY time_bucket('10 seconds'::interval, c.bucket), c.sampler_name",
         );
+      });
+
+      it('does not pad against the generate_series grid', () => {
+        // Regression: padding buckets x samplers turned a 3 h / 19-sampler run
+        // into 41 420 rows (560 with data) and an 11.8 MB response. The stacked
+        // area fills its own gaps client-side, so the grid must stay out of here.
+        const q = sql();
+        expect(q).toContain('FROM agg');
+        expect(q).not.toContain('FROM time_series ts');
+        expect(q).not.toContain('LEFT JOIN agg');
       });
     });
 
@@ -268,6 +376,68 @@ describe('TestRunsTimeSeriesQueryService', () => {
       await expect(
         service.getTransactionTimeSeries(TEST_RUN_ID, TX_NAME, USER, ROLES, 10, false),
       ).rejects.toThrow(ResourceNotFoundException);
+    });
+
+    it('resolves the bucket from the run duration when aggregationSeconds is omitted', async () => {
+      primeOrgAccessAndRamp(repo);
+      // duration lookup: 3 h -> 30 s buckets
+      repo.query.mockResolvedValueOnce([{ seconds: 10800 }]);
+      repo.query.mockResolvedValueOnce([]); // transaction CAGG
+      repo.query.mockResolvedValueOnce([]); // sampler CAGG
+
+      const result = await service.getTransactionTimeSeries(
+        TEST_RUN_ID,
+        TX_NAME,
+        USER,
+        ROLES,
+        undefined,
+        false,
+      );
+
+      // 4 calls now: org access, duration lookup, transaction CAGG, sampler CAGG.
+      expect(repo.query).toHaveBeenCalledTimes(4);
+      expect(repo.query.mock.calls[1]![0]).toContain(
+        'EXTRACT(EPOCH FROM (end_time - start_time))',
+      );
+      // The resolved bucket reaches both CAGG queries, not the 5 s floor.
+      expect(repo.query.mock.calls[2]![0]).toContain("time_bucket('30 seconds'::interval");
+      expect(repo.query.mock.calls[3]![0]).toContain("time_bucket('30 seconds'::interval");
+      // Echoed back: the client divides counts by it for throughput.
+      expect(result.aggregation_seconds).toBe(30);
+    });
+
+    it('does not probe the run duration when the caller supplied a bucket', async () => {
+      primeOrgAccessAndRamp(repo);
+      repo.query.mockResolvedValueOnce([]); // transaction CAGG
+      repo.query.mockResolvedValueOnce([]); // sampler CAGG
+
+      const result = await service.getTransactionTimeSeries(
+        TEST_RUN_ID,
+        TX_NAME,
+        USER,
+        ROLES,
+        10,
+        false,
+      );
+
+      expect(repo.query).toHaveBeenCalledTimes(3);
+      expect(
+        repo.query.mock.calls.some((c) => String(c[0]).includes('EXTRACT(EPOCH FROM')),
+      ).toBe(false);
+      expect(result.aggregation_seconds).toBe(10);
+    });
+
+    it('refuses before probing the duration of a run the caller cannot see', async () => {
+      // The resolve query must run after validateOrganizationAccess, or an
+      // unauthorized caller can time/probe run durations.
+      repo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: 'other-user' }]);
+      (authzService.canAccessResource as jest.Mock).mockResolvedValueOnce({ allowed: false });
+
+      await expect(
+        service.getTransactionTimeSeries(TEST_RUN_ID, TX_NAME, USER, ROLES, undefined, false),
+      ).rejects.toThrow(ResourceNotFoundException);
+
+      expect(repo.query).toHaveBeenCalledTimes(1);
     });
   });
 

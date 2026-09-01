@@ -264,7 +264,7 @@ export class TestRunsService {
     return this.queryService.getTransactionErrors(testRunId, userId, roles, transactionName, samplerName, excludeRampUp);
   }
 
-  async getTransactionTimeSeries(testRunId: string, transactionName: string, userId: string, roles: string[], aggregationSeconds: number = 5, excludeRampUp: boolean = false) {
+  async getTransactionTimeSeries(testRunId: string, transactionName: string, userId: string, roles: string[], aggregationSeconds?: number, excludeRampUp: boolean = false) {
     return this.queryService.getTransactionTimeSeries(testRunId, transactionName, userId, roles, aggregationSeconds, excludeRampUp);
   }
 
