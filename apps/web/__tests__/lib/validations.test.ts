@@ -527,17 +527,102 @@ describe('Validation Schemas', () => {
       });
     });
 
+    // clientUrl is the browser-facing base URL for deep links; the server may
+    // reach Dynatrace at an address the browser cannot. It is optional, '' means
+    // "cleared", and it is handed straight to window.open — so unlike `host` it
+    // carries an http(s)-only refine.
+    describe('Client URL Validation', () => {
+      const base = {
+        label: 'Test Dynatrace',
+        host: 'https://dynatrace.example.com',
+        apiToken: 'valid-token-123',
+      };
+
+      it('should accept a config with no clientUrl at all', () => {
+        const result = createDynatraceConfigSchema.safeParse(base);
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.clientUrl).toBeUndefined();
+        }
+      });
+
+      it('should accept a valid https clientUrl', () => {
+        const result = createDynatraceConfigSchema.safeParse({
+          ...base,
+          clientUrl: 'https://dt-proxy.internal.example.com',
+        });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.clientUrl).toBe('https://dt-proxy.internal.example.com');
+        }
+      });
+
+      // '' is not "no value" — it is the edit dialog clearing a client URL that
+      // was previously set, and handleUpdate sends it as-is.
+      it('should accept an empty clientUrl, which is how the user clears it', () => {
+        const result = createDynatraceConfigSchema.safeParse({ ...base, clientUrl: '' });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.clientUrl).toBe('');
+        }
+      });
+
+      it('should reject a clientUrl that is not a URL', () => {
+        const result = createDynatraceConfigSchema.safeParse({
+          ...base,
+          clientUrl: 'not-a-url',
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues.some((issue) => issue.path[0] === 'clientUrl')).toBe(true);
+        }
+      });
+
+      // new URL() happily parses these, so the httpsOnly refine is the only thing
+      // between a stored config and window.open('javascript:...').
+      it('should reject javascript: and data: URLs via the httpsOnly refine', () => {
+        const hostileUrls = ['javascript:alert(1)', 'data:text/html,x'];
+
+        hostileUrls.forEach((clientUrl) => {
+          const result = createDynatraceConfigSchema.safeParse({ ...base, clientUrl });
+
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            expect(result.error.issues.some((issue) => issue.path[0] === 'clientUrl')).toBe(true);
+          }
+        });
+      });
+    });
+
     describe('API Token Validation', () => {
-      it('should reject empty API token', () => {
+      // The schema deliberately ACCEPTS a blank token: the edit dialog sends it
+      // blank to mean "keep the existing one", and requiring it there made every
+      // edit un-submittable. handleCreate and handleTestConnection re-impose it
+      // on the paths where there is nothing to keep.
+      it('should accept an empty API token — blank means "keep existing" on edit', () => {
         const result = createDynatraceConfigSchema.safeParse({
           label: 'Test Dynatrace',
           host: 'https://dynatrace.example.com',
           apiToken: '',
         });
 
+        expect(result.success).toBe(true);
+      });
+
+      it('should still reject a too-short API token', () => {
+        const result = createDynatraceConfigSchema.safeParse({
+          label: 'Test Dynatrace',
+          host: 'https://dynatrace.example.com',
+          apiToken: 'short',
+        });
+
         expect(result.success).toBe(false);
         if (!result.success) {
-          expect(result.error.issues[0].message).toContain('API token is required');
+          expect(result.error.issues[0].message).toContain('at least 10 characters');
         }
       });
 

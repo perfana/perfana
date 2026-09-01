@@ -22,6 +22,7 @@ Perfana collects metrics from performance tests and compares them against histor
 - [[Architecture Overview]] — System architecture and design principles
 - [[Tech Stack]] — Technologies, frameworks, and libraries
 - [[Data Flow]] — How data moves through the system
+- [[Capabilities and RBAC]] — Capability model, role mapping, and where RLS does and does not backstop it
 
 ### Applications
 - [[API Overview]] — NestJS backend API (port 3001)

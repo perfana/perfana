@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.92.0] - 2026-09-01
+
+### Added
+- **A Dynatrace configuration can now carry a separate client URL for deep links.** Until now Perfana opened Dynatrace at the same address its own server uses to call the Dynatrace API. On a deployment where those differ — a reverse proxy in front of Dynatrace, or split DNS where the internal name does not resolve from a laptop — every link out of Perfana landed on an address the browser could not reach. The Dynatrace integration dialog now has an optional **Client URL** beside the server URL, set up the same way as the Grafana pair. When it is filled in, every link that leaves Perfana for Dynatrace uses it: the service deep links, service flow, multidimensional analysis, the run comparison, and the host details view. Leave it empty and nothing changes — the server URL is used, as before.
+- **The Dynatrace host details view now shows which host you are looking at.** Drilling into a host from the hosts list showed a "Back to hosts" button and three unlabelled cards, with the host's name nowhere on the page. The name from the hosts list is now shown beside the back button.
+
+### Changed
+- **The Dynatrace server URL is no longer editable after creation.** It never was — the field accepted typing but the change was discarded on save. It is now read-only in the edit dialog and says why.
+
+### Fixed
+- **Renaming a Dynatrace configuration now works.** The label was editable in the edit dialog but was never sent, so a rename appeared to save and then reverted the moment the page reloaded.
+- **The Dynatrace edit dialog can be saved without retyping the API token.** The dialog says "leave blank to keep the existing token", but a blank token failed validation and the Save button silently did nothing — so changing a label, a request attribute or the new client URL was impossible without pasting the token in again.
+- **Dynatrace configurations can no longer be created in an organization you do not belong to.** Creating a configuration accepted whatever organization was named in the request and did not check membership, so a configuration — including the address its links point at — could be planted in another organization's view. Creating one now requires membership, and a request that names no organization uses your own.
+
 ## [0.2.91.0] - 2026-08-31
 
 ### Changed

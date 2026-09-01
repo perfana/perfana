@@ -67,6 +67,35 @@ Neither replaces the other.
 | Reject a request before it touches the DB | `@RequiresCapability(...)` decorator (controller) |
 | Reject a request after loading the resource | `canAccessResource` / `canModifyResource` (service) |
 | Decide "should I add a `WHERE organization_id IN (...)` clause" | `withOrgFilter` or `getAccessibleOrgIds` (service) |
+| Authorize a **create** whose target org comes from the request body | `@RequiresCapability(..., { orgIdFromBody: 'organizationId' })`, or `getCapabilities(userId, roles, organizationId)` in the service |
+
+### Create is the case RLS does not cover
+
+Row-Level Security backstops read and update paths, but not create. `can_access_resource`
+(`packages/shared/src/database/migrations/schema-sql.ts`) is a chain of ORs whose **last** branch
+is `resource_created_by = current_user_id()` — a fallback, not a short-circuit. On an INSERT the
+organization check runs first and fails, because the caller is not a member of the organization
+the body named; the team check fails too; and the creator branch then returns TRUE anyway, since a
+row the caller is inserting is self-created by definition. So `WITH CHECK
+(can_access_resource(...))` admits the row no matter which organization it carries.
+
+So a create endpoint that reads `organizationId` out of the request body **must check membership
+in application code**. The pattern, from `DynatraceService.create`:
+
+```typescript
+// Body may name a target org; default to the caller's own.
+const organizationId =
+  dto.organizationId ?? (await this.authzService.getAccessibleOrganizations(userId))[0];
+if (!organizationId) throw new ForbiddenException('User has no accessible organization');
+
+// getCapabilities is scoped to that org and already grants global admins the
+// full set, so this is the whole check.
+const caps = await this.authzService.getCapabilities(userId, roles, organizationId);
+if (!caps.includes(Capability.IntegrationDynatraceCreate)) throw new ForbiddenException(...);
+```
+
+That service was missing the check until v0.2.92.0, and `rls_dynatrace_configs_insert` did not
+catch it for exactly the reason above.
 
 ## Role decision matrix
 

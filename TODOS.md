@@ -251,6 +251,29 @@ saying the pipeline did not finish.
 
 ---
 
+## Dynatrace
+
+### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster
+
+**Priority:** P3
+**Origin:** Adversarial and API-contract review during /ship on
+`feat/dynatrace-client-url` (2026-09-01).
+**Why:** `HostPropertiesSection.handleOpenInDynatrace` builds
+`${base}/ui/apps/dynatrace.classic.hosts/ui/entity/${hostId}` for every config. That
+`/ui/apps/...` path is a Dynatrace **platform** route; a Managed cluster does not serve
+it. Before v0.2.92.0 the base was also mangled — `createPlatformUrl` grafted
+`.apps.dynatrace.com` onto the managed host, so the link failed at DNS. That release
+added the `dynatraceType === 'saas'` branch the other builders already had, so the link
+now reaches the real managed host and 404s there instead. Closer, still wrong.
+**Why it is P3:** it only affects Managed deployments, only the host-details button (the
+service deep links in `buildDeepLinkUrl` branch correctly), and it has been broken since
+the button was added — nobody has reported it.
+**What to do:** supply the correct Managed host-entity route (the classic
+`#newhosts/hostdetails;id=HOST-…` hash form is the likely shape, but it needs confirming
+against a real Managed cluster rather than guessing), then move this link into
+`dynatrace-formatters.ts` so it shares the `isSaaS` branch and the test suite instead of
+carrying its own copy.
+
 ## Test run detail tables
 
 ### Redo the long-table virtualisation that was reverted in v0.2.86.0

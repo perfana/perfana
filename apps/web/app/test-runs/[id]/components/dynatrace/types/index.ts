@@ -7,6 +7,8 @@ import { TestRun } from '@/types/test-runs';
 export interface DynatraceConfig {
   id: string;
   host: string;
+  /** Browser-facing URL for deep links; falls back to `host` when unset. */
+  clientUrl?: string;
   apiToken: string;
   dynatraceType: 'saas' | 'managed';
   label: string;

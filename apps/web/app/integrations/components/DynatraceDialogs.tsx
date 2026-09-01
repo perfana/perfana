@@ -84,15 +84,33 @@ export function DynatraceFormDialog({
               helperText={form.formState.errors.label?.message || "A friendly name for this Dynatrace configuration"}
             />
             <TextField
-              label="Dynatrace Server URL"
+              label="Server URL"
               placeholder="https://your-tenant.dynatrace.com"
               fullWidth
               variant="outlined"
               autoComplete="off"
               sx={{ mb: 2 }}
+              // readOnly, not disabled: the value stays legible and focusable,
+              // and the helper text explaining the lock stays readable too.
+              InputProps={{ readOnly: isEdit }}
               {...form.register('host')}
               error={!!form.formState.errors.host}
-              helperText={form.formState.errors.host?.message || "Your Dynatrace tenant URL"}
+              helperText={form.formState.errors.host?.message || (isEdit
+                ? 'The server URL cannot be changed after creation'
+                : 'URL used by server-side components to reach Dynatrace')}
+            />
+            <TextField
+              label="Client URL (Optional)"
+              placeholder="https://dynatrace.corp.example.com"
+              fullWidth
+              variant="outlined"
+              autoComplete="off"
+              sx={{ mb: 2 }}
+              {...form.register('clientUrl')}
+              error={!!form.formState.errors.clientUrl}
+              helperText={form.formState.errors.clientUrl?.message || (form.watch('dynatraceType') === 'managed'
+                ? 'URL used by browser clients for deep links, environment path included (…/e/<env-id>)'
+                : 'URL used by browser clients for deep links (if different from server URL)')}
             />
             <TextField
               label="API Token"

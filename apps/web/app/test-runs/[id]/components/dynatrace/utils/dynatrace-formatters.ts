@@ -17,14 +17,26 @@ export function createTimeFilter(testRun: TestRun): string {
 }
 
 /**
- * Convert classic Dynatrace URL to modern platform URL
+ * Base URL for links opened in the user's browser. `clientUrl` wins when set —
+ * the server may reach Dynatrace at an address the browser cannot (proxy, split DNS).
+ */
+export function deepLinkBaseUrl(config: Pick<DynatraceConfig, 'host' | 'clientUrl'>): string {
+  return (config.clientUrl || config.host || '').replace(/\/+$/, '');
+}
+
+/**
+ * Convert a Dynatrace SaaS tenant URL to its modern platform (apps) URL.
+ *
+ * Only a real `<tenant>.live.dynatrace.com` / `<tenant>.dynatrace.com` address has a
+ * platform twin. Anything else is returned unchanged: a proxy or split-DNS client URL
+ * is already the address the browser should use, and a URL that already names the
+ * platform host must not be rewritten to `<tenant>.apps.apps.dynatrace.com`.
  */
 export function createPlatformUrl(baseUrl: string): string {
-  const hostname = baseUrl
-    .replace('https://', '')
-    .replace('.live.dynatrace.com', '')
-    .replace('.dynatrace.com', '');
-  return `https://${hostname}.apps.dynatrace.com`;
+  // `[^./]+` on purpose: the tenant is a single label, so `<tenant>.apps.dynatrace.com`
+  // and any deeper name simply fail to match and come back untouched.
+  const tenant = /^https?:\/\/([^./]+)(?:\.live)?\.dynatrace\.com$/.exec(baseUrl)?.[1];
+  return tenant ? `https://${tenant}.apps.dynatrace.com` : baseUrl;
 }
 
 // Dynatrace's sentinel for an open-ended max duration (microseconds).
@@ -97,7 +109,7 @@ export function buildDeepLinkUrl(
   testRun: TestRun,
   serviceFilterParam: string
 ): string {
-  const baseUrl = config.host.replace(/\/$/, '');
+  const baseUrl = deepLinkBaseUrl(config);
   const platformBaseUrl = createPlatformUrl(baseUrl);
   const entityId = entity.entityId;
   const isSaaS = config.dynatraceType === 'saas';
@@ -146,7 +158,7 @@ export function buildMDAUrl(
   const metric = METRIC_TYPE_MAP[analysisType];
   if (!metric) return '';
 
-  const baseUrl = config.host.replace(/\/$/, '');
+  const baseUrl = deepLinkBaseUrl(config);
   const platformBaseUrl = createPlatformUrl(baseUrl);
   const entityId = entity.entityId;
   const isSaaS = config.dynatraceType === 'saas';
@@ -176,7 +188,7 @@ export function buildComparisonUrl(
   minDuration: string,
   maxDuration: string
 ): string {
-  const baseUrl = config.host?.replace(/\/$/, '');
+  const baseUrl = deepLinkBaseUrl(config);
   if (!baseUrl || !testRun.start_time || !testRun.end_time) return '';
 
   const currentStartMs = new Date(testRun.start_time).getTime();

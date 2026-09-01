@@ -3,6 +3,8 @@ import { authenticatedFetch } from './api'
 export interface DynatraceConfig {
   id: string
   host: string
+  /** Browser-facing URL for deep links; falls back to `host` when unset. */
+  clientUrl?: string
   apiToken: string
   dynatraceType: 'saas' | 'managed'
   label: string
@@ -17,6 +19,7 @@ export interface DynatraceConfig {
 export interface CreateDynatraceConfigDto {
   label: string
   host: string
+  clientUrl?: string
   apiToken: string
   platformApiToken?: string
   dynatraceType?: 'saas' | 'managed'
@@ -86,6 +89,8 @@ export async function testDynatraceConnection(
 }
 
 export interface UpdateDynatraceConfigDto {
+  label?: string
+  clientUrl?: string
   perfanaTestRunIdAttribute?: string
   perfanaRequestNameAttribute?: string
   apiToken?: string

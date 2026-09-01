@@ -46,6 +46,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
     defaultValues: {
       label: '',
       host: '',
+      clientUrl: '',
       apiToken: '',
       platformApiToken: '',
       dynatraceType: 'saas' as const,
@@ -59,6 +60,7 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
       form.reset({
         label: selectedConfig.label || '',
         host: selectedConfig.host,
+        clientUrl: selectedConfig.clientUrl || '',
         apiToken: '', // Don't pre-fill secrets — blank means "keep existing"
         platformApiToken: '',
         dynatraceType: selectedConfig.dynatraceType,
@@ -92,10 +94,17 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
   };
 
   const handleCreate = async (data: CreateDynatraceConfigFormData) => {
+    // The schema leaves apiToken optional so the EDIT dialog can submit it blank
+    // ("keep the existing token"). On create there is nothing to keep.
+    if (!data.apiToken) {
+      form.setError('apiToken', { message: 'API token is required' });
+      return;
+    }
     try {
       const createData: CreateDynatraceConfigDto = {
         label: data.label!,
         host: data.host!,
+        ...(data.clientUrl && { clientUrl: data.clientUrl }),
         apiToken: data.apiToken!,
         dynatraceType: data.dynatraceType!,
         ...(data.platformApiToken && { platformApiToken: data.platformApiToken }),
@@ -131,6 +140,11 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
 
     try {
       const updateData: UpdateDynatraceConfigDto = {
+        // label was editable in the dialog but never sent, so a rename silently
+        // did nothing; the API has accepted it all along.
+        label: data.label,
+        // Always sent, '' included: that is how the user clears it.
+        clientUrl: data.clientUrl ?? '',
         perfanaTestRunIdAttribute: selectedTestRunIdAttribute || undefined,
         perfanaRequestNameAttribute: selectedRequestNameAttribute || undefined,
         useProxy: data.useProxy,
@@ -186,6 +200,12 @@ export function useDynatraceIntegration({ onSnackbar, organizationId }: UseDynat
   };
 
   const handleTestConnection = async (data: CreateDynatraceConfigFormData) => {
+    // Same reason as handleCreate: the schema allows a blank token for the edit
+    // dialog, and there is nothing to test a connection with without one.
+    if (!data.apiToken) {
+      form.setError('apiToken', { message: 'API token is required' });
+      return;
+    }
     try {
       setTestingConnection(true);
       const result = await testDynatraceConnection({

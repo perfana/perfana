@@ -38,6 +38,16 @@ export const createGrafanaInstanceSchema = z.object({
   message: 'Either API key or username/password should be provided',
 })
 
+// A URL the browser will open must be http(s); new URL() alone accepts
+// javascript: and data:, which reach window.open via the deep links.
+const httpsOnly = (val: string) => {
+  try {
+    return /^https?:$/.test(new URL(val).protocol);
+  } catch {
+    return false;
+  }
+};
+
 // Dynatrace Configuration schemas
 export const createDynatraceConfigSchema = z.object({
   label: z.string().min(1, 'Label is required').max(255, 'Label must be less than 255 characters'),
@@ -54,9 +64,21 @@ export const createDynatraceConfigSchema = z.object({
       },
       { message: 'Invalid URL format' }
     ),
+  // Deliberately NOT given the httpsOnly refine: host is read-only in the edit
+    // dialog, and a SUT-imported row (which bypasses DTO validation) with a
+    // scheme-less host would make the whole form unsubmittable on a field the
+    // user cannot fix. The server validates host via validateExternalUrl.
+  // Only http(s): the client URL is handed straight to window.open, so a
+  // javascript:/data: value would be an XSS vector. The API's @IsUrl rejects
+  // these too — this is the matching client-side guard.
+  clientUrl: z.string().url('Invalid URL format')
+    .refine(httpsOnly, { message: 'URL must start with http:// or https://' })
+    .optional().or(z.literal('')),
+  // Optional at the schema level because the edit dialog sends it blank to mean
+  // "keep the existing token"; handleCreate enforces it on the create path.
   apiToken: z.string()
-    .min(1, 'API token is required')
-    .min(10, 'API token must be at least 10 characters'),
+    .min(10, 'API token must be at least 10 characters')
+    .optional().or(z.literal('')),
   platformApiToken: z.string().optional(),
   dynatraceType: z.enum(['saas', 'managed']).optional().default('saas'),
   useProxy: z.boolean().optional(),

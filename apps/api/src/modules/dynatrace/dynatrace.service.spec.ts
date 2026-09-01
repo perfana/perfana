@@ -128,6 +128,11 @@ describe('DynatraceService', () => {
     repository = module.get(DynatraceRepository);
     auditService = module.get(AuditService);
     authzService = module.get(AuthorizationService);
+
+    // create() resolves the target organization from the caller when the body
+    // omits one; the shared mock defaults this to [], which every create test
+    // would otherwise trip over. Tests that care override it.
+    authzService.getAccessibleOrganizations.mockResolvedValue(['org-123']);
   });
 
   afterEach(() => {
@@ -200,6 +205,7 @@ describe('DynatraceService', () => {
         expect(repository.findByHost).toHaveBeenCalledWith('https://example.live.dynatrace.com');
         expect(repository.create).toHaveBeenCalledWith({
           host: 'https://example.live.dynatrace.com',
+          client_url: undefined,
           api_token: createDto.apiToken,
           dynatrace_type: createDto.dynatraceType,
           label: createDto.label,
@@ -207,7 +213,9 @@ describe('DynatraceService', () => {
           use_proxy: false,
           created_by: mockUserId,
           updated_by: mockUserId,
-          organization_id: undefined,
+          // Resolved from the caller, not left undefined: organization_id is
+          // NOT NULL, so the old expectation described a row that cannot exist.
+          organization_id: 'org-123',
         });
       });
 
@@ -263,6 +271,69 @@ describe('DynatraceService', () => {
           })
         );
       });
+
+      // RLS cannot backstop these: rls_dynatrace_configs_insert's
+      // can_access_resource creator branch passes for any row the caller created,
+      // whatever organization_id it carries. The service is the only gate.
+      describe('organization scoping', () => {
+        beforeEach(() => {
+          repository.findByHost.mockResolvedValue(null);
+          repository.create.mockResolvedValue(mockDynatraceConfig);
+          mockedAxios.get.mockResolvedValue({ data: { totalCount: 100 } });
+        });
+
+        it('refuses an organization the caller has no create capability in', async () => {
+          authzService.getCapabilities.mockResolvedValue([]);
+
+          await expect(
+            service.create({ ...createDto, organizationId: 'someone-elses-org' }, mockUserId, mockRoles),
+          ).rejects.toThrow(ForbiddenException);
+          expect(repository.create).not.toHaveBeenCalled();
+        });
+
+        it('scopes the capability lookup to the organization named in the body', async () => {
+          authzService.getCapabilities.mockResolvedValue([Capability.IntegrationDynatraceCreate]);
+
+          await service.create({ ...createDto, organizationId: 'my-org' }, mockUserId, mockRoles);
+
+          expect(authzService.getCapabilities).toHaveBeenCalledWith(mockUserId, mockRoles, 'my-org');
+          expect(repository.create).toHaveBeenCalledWith(
+            expect.objectContaining({ organization_id: 'my-org' }),
+          );
+        });
+
+        it('defaults to the first accessible organization when the body omits one', async () => {
+          authzService.getCapabilities.mockResolvedValue([Capability.IntegrationDynatraceCreate]);
+          authzService.getAccessibleOrganizations.mockResolvedValue(['first-org', 'second-org']);
+
+          await service.create(createDto, mockUserId, mockRoles);
+
+          expect(repository.create).toHaveBeenCalledWith(
+            expect.objectContaining({ organization_id: 'first-org' }),
+          );
+        });
+
+        it('refuses when the caller has no accessible organization', async () => {
+          authzService.getAccessibleOrganizations.mockResolvedValue([]);
+
+          await expect(service.create(createDto, mockUserId, mockRoles)).rejects.toThrow(
+            ForbiddenException,
+          );
+          expect(repository.create).not.toHaveBeenCalled();
+        });
+
+        // getCapabilities returns the full set for a global admin, so no separate
+        // admin bypass is needed here — this pins that the path is not special-cased.
+        it('lets a global admin name any organization', async () => {
+          authzService.getCapabilities.mockResolvedValue(GLOBAL_ADMIN_CAPABILITIES);
+
+          await service.create({ ...createDto, organizationId: 'any-org' }, mockUserId, ['super-admin']);
+
+          expect(repository.create).toHaveBeenCalledWith(
+            expect.objectContaining({ organization_id: 'any-org' }),
+          );
+        });
+      });
     });
 
     describe('update', () => {
@@ -297,6 +368,88 @@ describe('DynatraceService', () => {
         await expect(service.update('nonexistent', updateDto, mockUserId, mockRoles)).rejects.toThrow(NotFoundException);
         await expect(service.update('nonexistent', updateDto, mockUserId, mockRoles)).rejects.toThrow(
           'Dynatrace configuration with ID nonexistent not found'
+        );
+      });
+    });
+
+    /**
+     * `clientUrl` is the browser-facing deep-link URL. It is deliberately NOT run
+     * through `normalizeUrl` — that is an SSRF guard for URLs the *server* dials,
+     * and this one is only ever opened in the user's browser. What the service does
+     * do is strip trailing slashes, and distinguish "absent" from "cleared".
+     */
+    describe('clientUrl handling', () => {
+      const createDtoWithClientUrl: CreateDynatraceConfigDto = {
+        host: 'https://example.live.dynatrace.com',
+        apiToken: 'dt0c01.test.token',
+        dynatraceType: 'saas',
+        label: 'Test Dynatrace',
+      };
+
+      beforeEach(() => {
+        repository.findByHost.mockResolvedValue(null);
+        repository.create.mockResolvedValue(mockDynatraceConfig);
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.update.mockResolvedValue(mockDynatraceConfig);
+        mockedAxios.get.mockResolvedValue({ data: { totalCount: 100 } });
+      });
+
+      it('create forwards clientUrl with trailing slashes stripped', async () => {
+        await service.create(
+          { ...createDtoWithClientUrl, clientUrl: 'https://dynatrace.example.com///' },
+          mockUserId,
+          mockRoles,
+        );
+
+        expect(repository.create).toHaveBeenCalledWith(
+          expect.objectContaining({ client_url: 'https://dynatrace.example.com' }),
+        );
+      });
+
+      it('create sends undefined when clientUrl is absent or collapses to empty', async () => {
+        await service.create(createDtoWithClientUrl, mockUserId, mockRoles);
+        expect(repository.create).toHaveBeenCalledWith(
+          expect.objectContaining({ client_url: undefined }),
+        );
+
+        // A lone slash strips to '' and must not be stored as an empty client URL
+        await service.create(
+          { ...createDtoWithClientUrl, clientUrl: '/' },
+          mockUserId,
+          mockRoles,
+        );
+        expect(repository.create).toHaveBeenLastCalledWith(
+          expect.objectContaining({ client_url: undefined }),
+        );
+      });
+
+      it('update forwards an empty string verbatim — that is the clear path', async () => {
+        await service.update('config-123', { clientUrl: '' }, mockUserId, mockRoles);
+
+        // '' must reach the repository, where the `!== undefined` guard writes it.
+        // Collapsing it to undefined here would silently ignore "clear this field".
+        expect(repository.update).toHaveBeenCalledWith(
+          'config-123',
+          expect.objectContaining({ client_url: '' }),
+        );
+      });
+
+      it('update leaves clientUrl untouched when the key is absent, and strips slashes when present', async () => {
+        await service.update('config-123', { label: 'Renamed' }, mockUserId, mockRoles);
+        expect(repository.update).toHaveBeenCalledWith(
+          'config-123',
+          expect.objectContaining({ client_url: undefined }),
+        );
+
+        await service.update(
+          'config-123',
+          { clientUrl: 'https://dynatrace.example.com/' },
+          mockUserId,
+          mockRoles,
+        );
+        expect(repository.update).toHaveBeenLastCalledWith(
+          'config-123',
+          expect.objectContaining({ client_url: 'https://dynatrace.example.com' }),
         );
       });
     });

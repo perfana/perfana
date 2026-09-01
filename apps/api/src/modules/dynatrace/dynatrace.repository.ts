@@ -123,6 +123,7 @@ export class DynatraceRepository {
 
   async create(dto: {
     host: string;
+    client_url?: string;
     api_token: string;
     dynatrace_type?: 'saas' | 'managed';
     label: string;
@@ -136,6 +137,7 @@ export class DynatraceRepository {
   }) {
     const config = this.configRepo.create({
       host: dto.host,
+      clientUrl: dto.client_url,
       apiToken: dto.api_token,
       dynatraceType: dto.dynatrace_type || 'saas',
       label: dto.label,
@@ -153,6 +155,7 @@ export class DynatraceRepository {
   async update(
     id: string,
     dto: {
+      client_url?: string;
       perfana_test_run_id_attribute?: string;
       perfana_request_name_attribute?: string;
       label?: string;
@@ -164,6 +167,12 @@ export class DynatraceRepository {
   ) {
     const updateData: Partial<DynatraceConfig> = {};
 
+    if (dto.client_url !== undefined) {
+      // '' is the wire signal for "clear it", stored as NULL so the column has a
+      // single unset representation. TypeORM's update() skips undefined but does
+      // write null, hence the cast past the non-nullable property type.
+      updateData.clientUrl = dto.client_url === '' ? (null as unknown as undefined) : dto.client_url;
+    }
     if (dto.perfana_test_run_id_attribute !== undefined) {
       updateData.perfanaTestRunIdAttribute = dto.perfana_test_run_id_attribute;
     }

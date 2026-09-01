@@ -16,12 +16,22 @@ export function DynatraceExpandedContent({ config }: DynatraceExpandedContentPro
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         <Box>
           <Typography variant="caption" color="text.secondary">
-            Host URL
+            Server URL
           </Typography>
           <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
             {config.host}
           </Typography>
         </Box>
+        {config.clientUrl && (
+          <Box>
+            <Typography variant="caption" color="text.secondary">
+              Client URL
+            </Typography>
+            <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+              {config.clientUrl}
+            </Typography>
+          </Box>
+        )}
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
           <Chip
             label={config.dynatraceType.toUpperCase()}
