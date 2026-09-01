@@ -200,7 +200,8 @@ export class TestRunsMetricsTransactionController {
   async getTransactionTimeSeries(
     @Param('testRunId') testRunId: string,
     @Param('transactionName') transactionName: string,
-    @Query('aggregationSeconds', new DefaultValuePipe(5), ParseIntPipe) aggregationSeconds: number,
+    // No DefaultValuePipe: an omitted param means "server picks from run duration".
+    @Query('aggregationSeconds', new ParseIntPipe({ optional: true })) aggregationSeconds: number | undefined,
     @Query('excludeRampUp', new DefaultValuePipe(false), ParseBoolPipe) excludeRampUp: boolean,
     @UserCtx() ctx: UserContext,
   ) {
