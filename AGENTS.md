@@ -212,7 +212,7 @@ An API-key principal (`api-key:{uuid}`) gets its organization from the `api_keys
 
 ### RLS does not backstop a caller-named `organization_id` on create
 
-An INSERT policy written as `WITH CHECK (can_access_resource(...))` passes on the **creator branch** (`created_by = app.current_user_id`) before it looks at the row's `organization_id`. Every inserted row is self-created, so the policy is satisfied whatever organization the body named. `rls_dynatrace_configs_insert` is the worked example; the shape is shared by every owned-resource insert policy.
+`can_access_resource` is a chain of ORs whose **last** branch is `created_by = current_user_id()` — a fallback, not a short-circuit. On an INSERT the org check fails first (the caller is not a member of the org the body named), the team check fails, and the creator check then returns TRUE anyway because an inserted row is self-created by definition. So `WITH CHECK (can_access_resource(...))` admits the row whatever organization it carries. `rls_dynatrace_configs_insert` is the worked example; the shape is shared by every owned-resource insert policy.
 
 So **a create endpoint that reads `organizationId` from the request body must check membership itself** — `@RequiresCapability(Capability.X, { orgIdFromBody: 'organizationId' })` on the controller, or `getCapabilities(userId, roles, organizationId)` in the service before the write, defaulting to `getAccessibleOrganizations(userId)[0]` when the body names none. `DynatraceService.create` was missing this until v0.2.92.0: any authenticated user could plant a Dynatrace configuration — including the browser-facing `client_url` org members then follow out of Perfana — into an organization they did not belong to.
 

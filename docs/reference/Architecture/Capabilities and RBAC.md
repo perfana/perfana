@@ -71,10 +71,13 @@ Neither replaces the other.
 
 ### Create is the case RLS does not cover
 
-Row-Level Security backstops read and update paths, but not create. An INSERT policy written as
-`WITH CHECK (can_access_resource(...))` passes on the **creator branch** — `created_by =
-app.current_user_id` — before it ever looks at the row's `organization_id`. Every row the caller
-inserts is self-created, so the policy is satisfied no matter which organization the body named.
+Row-Level Security backstops read and update paths, but not create. `can_access_resource`
+(`packages/shared/src/database/migrations/schema-sql.ts`) is a chain of ORs whose **last** branch
+is `resource_created_by = current_user_id()` — a fallback, not a short-circuit. On an INSERT the
+organization check runs first and fails, because the caller is not a member of the organization
+the body named; the team check fails too; and the creator branch then returns TRUE anyway, since a
+row the caller is inserting is self-created by definition. So `WITH CHECK
+(can_access_resource(...))` admits the row no matter which organization it carries.
 
 So a create endpoint that reads `organizationId` out of the request body **must check membership
 in application code**. The pattern, from `DynatraceService.create`:
