@@ -67,6 +67,32 @@ Neither replaces the other.
 | Reject a request before it touches the DB | `@RequiresCapability(...)` decorator (controller) |
 | Reject a request after loading the resource | `canAccessResource` / `canModifyResource` (service) |
 | Decide "should I add a `WHERE organization_id IN (...)` clause" | `withOrgFilter` or `getAccessibleOrgIds` (service) |
+| Authorize a **create** whose target org comes from the request body | `@RequiresCapability(..., { orgIdFromBody: 'organizationId' })`, or `getCapabilities(userId, roles, organizationId)` in the service |
+
+### Create is the case RLS does not cover
+
+Row-Level Security backstops read and update paths, but not create. An INSERT policy written as
+`WITH CHECK (can_access_resource(...))` passes on the **creator branch** — `created_by =
+app.current_user_id` — before it ever looks at the row's `organization_id`. Every row the caller
+inserts is self-created, so the policy is satisfied no matter which organization the body named.
+
+So a create endpoint that reads `organizationId` out of the request body **must check membership
+in application code**. The pattern, from `DynatraceService.create`:
+
+```typescript
+// Body may name a target org; default to the caller's own.
+const organizationId =
+  dto.organizationId ?? (await this.authzService.getAccessibleOrganizations(userId))[0];
+if (!organizationId) throw new ForbiddenException('User has no accessible organization');
+
+// getCapabilities is scoped to that org and already grants global admins the
+// full set, so this is the whole check.
+const caps = await this.authzService.getCapabilities(userId, roles, organizationId);
+if (!caps.includes(Capability.IntegrationDynatraceCreate)) throw new ForbiddenException(...);
+```
+
+That service was missing the check until v0.2.92.0, and `rls_dynatrace_configs_insert` did not
+catch it for exactly the reason above.
 
 ## Role decision matrix
 

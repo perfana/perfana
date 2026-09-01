@@ -210,6 +210,12 @@ An API-key principal (`api-key:{uuid}`) gets its organization from the `api_keys
 
 `api_keys` rows are treated as immutable and delete-only; the `api-key:<id>` membership cache is invalidated in `ApiKeysService.deleteApiKey`. A revoke flag or org-move endpoint would need that invalidation to grow.
 
+### RLS does not backstop a caller-named `organization_id` on create
+
+An INSERT policy written as `WITH CHECK (can_access_resource(...))` passes on the **creator branch** (`created_by = app.current_user_id`) before it looks at the row's `organization_id`. Every inserted row is self-created, so the policy is satisfied whatever organization the body named. `rls_dynatrace_configs_insert` is the worked example; the shape is shared by every owned-resource insert policy.
+
+So **a create endpoint that reads `organizationId` from the request body must check membership itself** — `@RequiresCapability(Capability.X, { orgIdFromBody: 'organizationId' })` on the controller, or `getCapabilities(userId, roles, organizationId)` in the service before the write, defaulting to `getAccessibleOrganizations(userId)[0]` when the body names none. `DynatraceService.create` was missing this until v0.2.92.0: any authenticated user could plant a Dynatrace configuration — including the browser-facing `client_url` org members then follow out of Perfana — into an organization they did not belong to.
+
 ### Per-resource authorization in test-runs
 
 `TestRunsCrudQueryService` splits two patterns that look alike:
@@ -285,6 +291,21 @@ Not every row is a real Grafana dashboard. `ensureArtificialDashboardExists()` i
 - That predicate also misses artificial application dashboards from a SUT import — those have `metrics_source_id` NULL. Where a filter must hold (grafana-sync restore), `grafana_json` is the reliable signal.
 - A dashboard `uid` is unique only within a Grafana instance, so every lookup by uid must also scope by `grafana_instance_id`. Both the grafana-sync restore sweep and the uid arm of `GrafanaDashboardsService.remove`'s pre-check do — the latter shipped unscoped in v0.2.89.0 and caused a false 409, fixed in v0.2.89.1.
 - `DELETE /api/grafana/dashboards/:id` returns **409** when application dashboards still reference the dashboard. It does not cascade: Grafana dashboards are shared and a SUT delete leaves them behind on purpose. Remove the references via `/api/grafana/application-dashboards` first.
+
+### Client URL vs server URL: Grafana and Dynatrace have opposite polarity
+
+Both integrations can point the browser at a different address than the API calls (reverse proxy, split DNS). Which column is required is **inverted** between them, deliberately — do not "align" them.
+
+| | Server-side URL | Browser-facing URL |
+|---|---|---|
+| `grafana_instances` | `server_url` — optional | `client_url` — **required** |
+| `dynatrace_configs` | `host` — **required** | `client_url` — optional (v0.2.92.0) |
+
+Grafana's required column is the client one because Perfana renders Grafana panels in the browser; Dynatrace's is the server one because every Dynatrace API call is server-side. The optional column falls back to the required one when unset.
+
+For Dynatrace: read the base through `deepLinkBaseUrl(config)` in `apps/web/app/test-runs/[id]/components/dynatrace/utils/dynatrace-formatters.ts` (returns `clientUrl || host`), never `config.host` — a new link reading `host` reintroduces the bug. The column has exactly **one unset representation** (NULL): create collapses `''` to `undefined`, update treats `null` and `''` alike as "clear it", and only an absent key leaves the stored value alone. It is never fetched server-side, so it skips `normalizeUrl` (an SSRF guard) and is guarded by a pinned scheme instead — `@IsUrl({ protocols: ['http','https'], require_protocol: true })`; drop `require_protocol` and validator.js never consults the protocol list, so `javascript:alert(1)` passes.
+
+`createPlatformUrl` rewrites **only** a single-label SaaS tenant URL (`https://<tenant>[.live].dynatrace.com`) to `<tenant>.apps.dynatrace.com`. A Managed host, a proxy address, or a URL already naming the platform host comes back untouched.
 
 ### ADAPT's baseline depends on the `pct_agg` sketch
 

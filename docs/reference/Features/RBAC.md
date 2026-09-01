@@ -101,6 +101,20 @@ The `AuthorizationService` exposes four checks:
 
 Read-time list filtering uses query helpers — `withOrgFilter`, `withTeamFilter`, and an inline `restrict_to_team_members` join — that mirror the same rules at SQL level.
 
+> [!warning] Step 2 makes RLS useless as a backstop on INSERT
+> The creator branch (`created_by == userId`) is evaluated **before** the row's `organization_id`.
+> An INSERT policy written as `WITH CHECK (can_access_resource(...))` therefore passes for every
+> row the caller inserts, whatever organization the request body named — a row is self-created by
+> definition. `rls_dynatrace_configs_insert` is the worked example; the shape is shared by every
+> owned-resource insert policy.
+>
+> **A create endpoint that takes `organizationId` from the request body must check membership
+> itself.** Either `@RequiresCapability(Capability.X, { orgIdFromBody: 'organizationId' })` on the
+> controller, or a `getCapabilities(userId, roles, organizationId)` check in the service before
+> the write. `DynatraceService.create` was missing this until v0.2.92.0: any authenticated user
+> could plant a Dynatrace configuration — including the browser-facing `client_url` that org
+> members then follow out of Perfana — into an organization they did not belong to.
+
 ---
 
 ## 4. Ownership model — `OwnedResource`

@@ -212,6 +212,28 @@ This is not an oversight, and it must not be "fixed" back:
 
 `api_keys` rows are treated as immutable and delete-only. The membership cache is keyed on `api-key:<id>` and invalidated in `ApiKeysService.deleteApiKey`. Add a revoke flag or an org-move endpoint and that invalidation has to grow to match.
 
+### RLS does not backstop a caller-named `organization_id` on create
+
+An INSERT policy written as `WITH CHECK (can_access_resource(...))` passes on the **creator branch** — `created_by = app.current_user_id` — before it ever looks at the row's `organization_id`. Every row a caller inserts is self-created by definition, so the policy is satisfied no matter which organization the body named. `rls_dynatrace_configs_insert` is the worked example, and the shape is shared by every owned-resource insert policy.
+
+The consequence: **a create endpoint that reads `organizationId` out of the request body must check membership itself.** RLS will not catch it. Before v0.2.92.0 `DynatraceService.create` passed `dto.organizationId` straight through, so any authenticated user could plant a Dynatrace configuration — including the browser-facing `client_url` that org members then follow out of Perfana — into an organization they do not belong to.
+
+The fix is the standard two-line pair, and it is what a new create path should copy:
+
+```typescript
+// Body may name a target org; default to the caller's own.
+const organizationId =
+  dto.organizationId ?? (await this.authzService.getAccessibleOrganizations(userId))[0];
+if (!organizationId) throw new ForbiddenException('User has no accessible organization');
+
+// getCapabilities is scoped to that org and already grants global admins the full
+// set, so this is the whole check.
+const caps = await this.authzService.getCapabilities(userId, roles, organizationId);
+if (!caps.includes(Capability.IntegrationDynatraceCreate)) throw new ForbiddenException(...);
+```
+
+A controller-level `@RequiresCapability(Capability.X, { orgIdFromBody: 'organizationId' })` is the equivalent declarative gate and is preferred where the create path has no other org-resolution work to do.
+
 ### Per-resource authorization in test-runs
 
 `TestRunsCrudQueryService` splits two patterns that look similar and are not:
@@ -333,6 +355,25 @@ Anything that reads this table has to decide whether it means "real dashboards" 
 4. **Deleting one is not free.** `application_dashboards.grafana_dashboard_id` is `ON DELETE NO ACTION`, and app dashboards can also reference by `dashboard_uid` with a NULL foreign key. `DELETE /api/grafana/dashboards/:id` refuses with **409** rather than cascading, because Grafana dashboards are shared and a SUT delete deliberately leaves them behind. Remove the referencing rows first via `/api/grafana/application-dashboards`.
 
 v0.2.89.0 fixed three symptoms of this: the grafana-sync restore sweep re-pushing artificial rows every 30s forever, one rejected dashboard aborting the whole sweep, and the API delete returning an opaque 500. See `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md` and `apps/api/src/modules/grafana/README.md`.
+
+### Client URL vs server URL: Grafana and Dynatrace have opposite polarity
+
+Both integrations can point the browser at a different address than the API calls, for deploys behind a reverse proxy or split DNS. **Which column is the required one is inverted between them, and that is deliberate — do not "align" them.**
+
+| | Server-side URL (what api/worker call) | Browser-facing URL (deep links) |
+|---|---|---|
+| `grafana_instances` | `server_url` — **optional** override | `client_url` — **required** |
+| `dynatrace_configs` | `host` — **required** | `client_url` — **optional** (v0.2.92.0) |
+
+Grafana's required column is the client one because Perfana renders Grafana panels in the user's browser; Dynatrace's required column is the server one because every Dynatrace API call is made server-side. In both cases the optional column falls back to the required one when unset.
+
+Three rules for the Dynatrace side:
+
+1. **Read it through `deepLinkBaseUrl(config)`** (`apps/web/app/test-runs/[id]/components/dynatrace/utils/dynatrace-formatters.ts`), never `config.host`. It returns `clientUrl || host`, trailing slashes stripped. Every deep-link builder — service links, service flow, MDA, the run comparison, host details — goes through it. A new link that reads `host` directly reintroduces the bug.
+2. **One unset representation.** The column is NULL when unset. Create collapses `''` to `undefined`; update treats `null` and `''` alike as "clear it", and only an **absent key** leaves the stored value alone. That is what lets a client GET a config and POST/PATCH it back without special-casing a cleared field.
+3. **It is never fetched server-side, so it is not normalised like `host`.** `normalizeUrl` is an SSRF guard for URLs the API calls; `client_url` only ever reaches `window.open`. Its guard is a pinned scheme instead — `@IsUrl({ protocols: ['http','https'], require_protocol: true })` on both DTOs, mirrored by a `httpsOnly` refine in `apps/web/lib/validations.ts`. Drop `require_protocol` and validator.js stops consulting the protocol list entirely, so `javascript:alert(1)` passes. `require_tld` stays off on purpose for internal hostnames.
+
+Related: `createPlatformUrl` rewrites **only** a single-label SaaS tenant URL (`https://<tenant>[.live].dynatrace.com`) to its `<tenant>.apps.dynatrace.com` twin. Anything else — a Managed host, a proxy address, a URL already naming the platform host — comes back untouched. Before v0.2.92.0 it string-replaced blindly and produced `<tenant>.apps.apps.dynatrace.com` or grafted `.apps.dynatrace.com` onto a Managed hostname.
 
 ### ADAPT's baseline depends on the `pct_agg` sketch
 
