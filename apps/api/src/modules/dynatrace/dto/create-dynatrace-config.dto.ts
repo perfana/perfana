@@ -10,6 +10,14 @@ export class CreateDynatraceConfigDto {
   @IsNotEmpty()
   host!: string;
 
+  @ApiPropertyOptional({
+    description: 'Browser-facing Dynatrace URL for deep links, when it differs from the server URL',
+    example: 'https://dynatrace.example.com',
+  })
+  @IsOptional()
+  @IsUrl({ require_tld: false }, { message: 'Client URL must be a valid URL' })
+  clientUrl?: string;
+
   @ApiProperty({
     description: 'Dynatrace API token',
     example: 'dt0c01.XXXXXXXXXXXX.YYYYYYYYYYYY',

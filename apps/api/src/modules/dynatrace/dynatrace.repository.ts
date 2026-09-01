@@ -123,6 +123,7 @@ export class DynatraceRepository {
 
   async create(dto: {
     host: string;
+    client_url?: string;
     api_token: string;
     dynatrace_type?: 'saas' | 'managed';
     label: string;
@@ -136,6 +137,7 @@ export class DynatraceRepository {
   }) {
     const config = this.configRepo.create({
       host: dto.host,
+      clientUrl: dto.client_url,
       apiToken: dto.api_token,
       dynatraceType: dto.dynatrace_type || 'saas',
       label: dto.label,
@@ -153,6 +155,7 @@ export class DynatraceRepository {
   async update(
     id: string,
     dto: {
+      client_url?: string;
       perfana_test_run_id_attribute?: string;
       perfana_request_name_attribute?: string;
       label?: string;
@@ -164,6 +167,12 @@ export class DynatraceRepository {
   ) {
     const updateData: Partial<DynatraceConfig> = {};
 
+    if (dto.client_url !== undefined) {
+      // Stored verbatim: '' clears it in practice, since every read site is
+      // `clientUrl || host`. TypeORM's update() skips undefined, so we cannot
+      // write a NULL here without casting.
+      updateData.clientUrl = dto.client_url;
+    }
     if (dto.perfana_test_run_id_attribute !== undefined) {
       updateData.perfanaTestRunIdAttribute = dto.perfana_test_run_id_attribute;
     }

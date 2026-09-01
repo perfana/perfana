@@ -295,6 +295,9 @@ export class DynatraceService {
     // Save configuration with API token and deployment type (with normalized URL)
     const config = await this.repository.create({
       host: normalizedHost,
+      // Not run through normalizeUrl: that is an SSRF guard for URLs the server
+      // calls, and the client URL is only ever opened in the user's browser.
+      client_url: dto.clientUrl?.replace(/\/+$/, '') || undefined,
       api_token: dto.apiToken,
       dynatrace_type: dto.dynatraceType || 'saas',
       label: dto.label,
@@ -353,6 +356,7 @@ export class DynatraceService {
 
     // Update the configuration with the provided attributes
     const updated = await this.repository.update(id, {
+      client_url: dto.clientUrl?.replace(/\/+$/, ''),
       perfana_test_run_id_attribute: dto.perfanaTestRunIdAttribute,
       perfana_request_name_attribute: dto.perfanaRequestNameAttribute,
       label: dto.label,

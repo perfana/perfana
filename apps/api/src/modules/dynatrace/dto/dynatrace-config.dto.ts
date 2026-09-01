@@ -8,6 +8,9 @@ export class DynatraceConfigDto {
   @ApiProperty()
   host!: string;
 
+  @ApiPropertyOptional({ description: 'Browser-facing URL used for deep links; falls back to host' })
+  clientUrl?: string;
+
   @ApiProperty()
   apiToken!: string;
 
