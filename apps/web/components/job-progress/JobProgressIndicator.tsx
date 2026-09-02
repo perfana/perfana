@@ -84,6 +84,23 @@ function getProgressColor(progress: JobProgress): 'primary' | 'success' | 'error
 }
 
 /**
+ * "run 3/7: SONAR-…-00004" for the stages that walk a batch one run at a time.
+ *
+ * Returns null for a stage that processes the whole batch at once — the fields are
+ * absent there on purpose, and `progress.testRunId` must NOT be used as a stand-in:
+ * it is the batch anchor (testRunIds[0]) and naming it would claim the batch is on
+ * the first run when it is on the fifth.
+ */
+function formatCurrentTestRun(progress: JobProgress): string | null {
+  if (!progress.currentTestRunId) return null;
+  const position =
+    progress.currentTestRunIndex && progress.totalTestRuns
+      ? `run ${progress.currentTestRunIndex}/${progress.totalTestRuns}: `
+      : '';
+  return `${position}${progress.currentTestRunId}`;
+}
+
+/**
  * Compact variant - minimal progress bar with tooltip
  */
 function CompactProgressIndicator({ progress }: { progress: JobProgress }): JSX.Element {
@@ -106,6 +123,14 @@ function CompactProgressIndicator({ progress }: { progress: JobProgress }): JSX.
       <Typography variant="body2" sx={{ color: 'white', fontSize: '0.75rem', mb: 0.5 }}>
         Stage {progress.stageIndex}/{progress.totalStages}: {progress.stageName}
       </Typography>
+      {formatCurrentTestRun(progress) && (
+        <Typography
+          variant="body2"
+          sx={{ color: 'white', fontSize: '0.75rem', mb: 0.5, wordBreak: 'break-all' }}
+        >
+          {formatCurrentTestRun(progress)}
+        </Typography>
+      )}
       <Typography variant="body2" sx={{ color: 'white', fontSize: '0.75rem', mb: 0.5 }}>
         Overall: {progress.overallProgress}%
       </Typography>
@@ -217,6 +242,15 @@ function DetailedProgressIndicator({ progress }: { progress: JobProgress }): JSX
           <Typography variant="body2" color="text.secondary" gutterBottom>
             Stage {progress.stageIndex} of {progress.totalStages}: {progress.stageName}
           </Typography>
+          {formatCurrentTestRun(progress) && (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ fontFamily: 'monospace', fontSize: '0.75rem', wordBreak: 'break-all' }}
+            >
+              {formatCurrentTestRun(progress)}
+            </Typography>
+          )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1 }}>
             <LinearProgress
               variant="determinate"
@@ -586,6 +620,7 @@ function BlockedJobIndicator({
  *
  * Main component that wraps useJobProgress hook and renders appropriate variant.
  */
+
 export function JobProgressIndicator({
   testRunId,
   systemUnderTestId,

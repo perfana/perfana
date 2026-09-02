@@ -192,6 +192,68 @@ describe('JobProgressIndicator', () => {
   // Compact variant
   // -------------------------------------------------------------------------
 
+  describe('Current test run in a batch', () => {
+    it('names the run a batch stage is actually on, not the batch anchor', () => {
+      // The reporter is built from testRunIds[0] and kept for the whole batch, so
+      // progress.testRunId says -00001 for all seven runs. The stage is on -00004.
+      setHookState({
+        progress: makeProgress({
+          testRunId: 'SONAR-acceptatie-loadtest_perfana-00001',
+          stageName: 'Force refetch',
+          currentTestRunId: 'SONAR-acceptatie-loadtest_perfana-00004',
+          currentTestRunIndex: 4,
+          totalTestRuns: 7,
+        }),
+        isRunning: true,
+      });
+
+      render(<JobProgressIndicator testRunId="test-run-001" variant="detailed" />);
+
+      expect(
+        screen.getByText('run 4/7: SONAR-acceptatie-loadtest_perfana-00004')
+      ).toBeInTheDocument();
+    });
+
+    it('shows nothing when the stage processes the whole batch at once', () => {
+      // ADAPT and the control-group stages take every run in one job. Falling back
+      // to progress.testRunId here would claim the batch is on the first run.
+      setHookState({
+        progress: makeProgress({
+          testRunId: 'SONAR-acceptatie-loadtest_perfana-00001',
+          stageName: 'ADAPT analysis',
+          currentTestRunId: undefined,
+          currentTestRunIndex: undefined,
+          totalTestRuns: undefined,
+        }),
+        isRunning: true,
+      });
+
+      render(<JobProgressIndicator testRunId="test-run-001" variant="detailed" />);
+
+      expect(screen.queryByText(/^run \d+\//)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/SONAR-acceptatie-loadtest_perfana-00001$/)
+      ).not.toBeInTheDocument();
+    });
+
+    it('falls back to the bare id when the batch position is missing', () => {
+      setHookState({
+        progress: makeProgress({
+          currentTestRunId: 'SONAR-acceptatie-loadtest_perfana-00004',
+          currentTestRunIndex: undefined,
+          totalTestRuns: undefined,
+        }),
+        isRunning: true,
+      });
+
+      render(<JobProgressIndicator testRunId="test-run-001" variant="detailed" />);
+
+      expect(
+        screen.getByText('SONAR-acceptatie-loadtest_perfana-00004')
+      ).toBeInTheDocument();
+    });
+  });
+
   describe('Compact variant', () => {
     const activeProgress = makeProgress({ overallProgress: 45 });
 
