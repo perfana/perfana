@@ -497,7 +497,10 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             logger.error(`  ❌ Force re-fetch failed for ${testRunId}: ${err}`);
           }
 
-          await progressReporter?.updateStageProgress(Math.round(((i + 1) / testRunIds.length) * 100));
+          await progressReporter?.updateStageProgress(
+            Math.round(((i + 1) / testRunIds.length) * 100),
+            { testRunId, index: i + 1, total: testRunIds.length }
+          );
         }
 
         const forceRefetchDuration = Date.now() - forceRefetchStart;
@@ -561,7 +564,10 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             logger.warn(`  ${testRunId}: gap detection failed: ${err}`);
             testRunGaps.set(testRunId, { gaps: [], coverageBefore: 0 });
           }
-          await progressReporter?.updateStageProgress(Math.round(((i + 1) / testRunIds.length) * 100));
+          await progressReporter?.updateStageProgress(
+            Math.round(((i + 1) / testRunIds.length) * 100),
+            { testRunId, index: i + 1, total: testRunIds.length }
+          );
         }
 
         const gapAnalysisDuration = Date.now() - gapAnalysisStart;
@@ -672,7 +678,12 @@ export function simpleOrchestrateReevaluateBatchWorker() {
               }
 
               processedGaps++;
-              await progressReporter?.updateStageProgress(Math.round((processedGaps / totalGaps) * 100));
+              await progressReporter?.updateStageProgress(
+                Math.round((processedGaps / totalGaps) * 100),
+                // Gap-based percentage, run-based label: a run can hold several gaps,
+                // so the two do not advance together.
+                { testRunId, index: testRunIds.indexOf(testRunId) + 1, total: testRunIds.length }
+              );
             }
 
             if (testRunReceivedData) { testRunsWithNewData++; }
@@ -846,7 +857,15 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
       // Stage: Data Sanity Check
       await progressReporter?.startStage('data-sanity-check');
-      for (const testRunId of testRunIds) {
+      for (let i = 0; i < testRunIds.length; i++) {
+        const testRunId = testRunIds[i]!;
+        // Reported nothing per run before, and it is the slowest per-run stage in
+        // the batch — 42s for one run in the 13:09 log — so the UI sat on "80%,
+        // data sanity check" with no sign of which run or how many were left.
+        await progressReporter?.updateStageProgress(
+          Math.round((i / testRunIds.length) * 100),
+          { testRunId, index: i + 1, total: testRunIds.length }
+        );
         const sanityPipeline = new DataSanityCheckPipeline(logger);
         await sanityPipeline.execute({ testRunId });
       }

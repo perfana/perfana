@@ -67,6 +67,25 @@ export interface JobProgress {
 
   /** Current job status */
   status: JobStatus;
+
+  /**
+   * The test run this stage is working on right now.
+   *
+   * `testRunId` above is the batch's anchor — the orchestrator builds one
+   * ProgressReporter from `testRunIds[0]` and keeps it for the whole batch — so on
+   * its own it names the wrong run for six sevenths of a seven-run re-evaluate.
+   * These three are set only by the stages that actually iterate the batch
+   * (force-refetch, gap analysis, gap filling, data sanity check) and are cleared
+   * when a stage starts, so a batch-wide stage never inherits the previous
+   * stage's run. Absent means "this stage works on the whole batch at once".
+   */
+  currentTestRunId?: string;
+
+  /** 1-based position of `currentTestRunId` in the batch. */
+  currentTestRunIndex?: number;
+
+  /** How many test runs the batch covers. */
+  totalTestRuns?: number;
 }
 
 /**
