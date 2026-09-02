@@ -54,7 +54,10 @@ describe('ControlGroupStatisticsPipeline sketch backfill (#552)', () => {
         get(target: Record<string, unknown>, prop: string) {
           if (prop === 'query') {
             return (...args: unknown[]) => {
-              if (typeof args[0] === 'string' && args[0].includes('SET LOCAL')) {
+              if (
+                typeof args[0] === 'string' &&
+                (args[0].includes('SET LOCAL') || args[0].includes('set_config'))
+              ) {
                 return Promise.resolve(undefined);
               }
               return (target.query as (...a: unknown[]) => unknown)(...args);
