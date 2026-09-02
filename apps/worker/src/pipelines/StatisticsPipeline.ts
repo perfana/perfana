@@ -120,30 +120,31 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       // written" does not make it free. See findRunsWithStaleRampUpFlags.
       const staleRuns = await this.findRunsWithStaleRampUpFlags(testRunIds);
 
-      if (staleRuns.length > 0) {
-        // Same shape, and the same fix, as the force-refetch guard in
-        // simple-orchestrate-reevaluate-batch.ts: decompress the affected chunks
-        // up front, outside the transaction, so the UPDATE never has to do it as
-        // DML. The compression policy recompresses them on its next pass.
-        // Number.isFinite guard: an unparseable bound would become NaN here and
-        // reach decompressChunksForRange as an Invalid Date, which Postgres would
-        // reject mid-flight. The SQL above already requires both to be NOT NULL,
-        // so this only ever drops a genuinely malformed row.
-        const bounds = staleRuns
-          .flatMap((r) => [new Date(r.from).getTime(), new Date(r.to).getTime()])
-          .filter((t) => Number.isFinite(t));
-        if (bounds.length > 0) {
-          await this.db.decompressChunksForRange(
-            'ds_metrics',
-            new Date(Math.min(...bounds)),
-            new Date(Math.max(...bounds))
-          );
-        }
+      // Same shape, and the same fix, as the force-refetch guard in
+      // simple-orchestrate-reevaluate-batch.ts: decompress up front, outside the
+      // transaction, so the UPDATE never has to do it as DML. The compression
+      // policy recompresses on its next pass.
+      //
+      // Per run, over the span of the DISAGREEING rows — not the run's full
+      // window, and not one global min/max across every stale run. decompress_chunk
+      // works at chunk granularity and a chunk holds every run in its time range,
+      // so widening the range is not free: it converts other runs' data to row
+      // store too, and every later query over that window scans row store until the
+      // compression policy catches up. A stale trailing flag spans minutes; the old
+      // run-wide bounds decompressed hours, and a batch of stale runs weeks.
+      for (const run of staleRuns) {
+        await this.db.decompressChunksForRange('ds_metrics', run.from, run.to);
       }
 
       const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
+        // First statement in the transaction, not next to the INSERT: SET LOCAL is
+        // transaction-scoped, and refreshRampUpFlags below rewrites a compressed run
+        // — it is the statement most likely to blow the 120s analytics cap, and it
+        // runs before the aggregation the cap was raised for.
+        await this.setAggregationBudget(manager);
+
         if (staleRuns.length > 0) {
-          await this.refreshRampUpFlags(manager, staleRuns.map((r) => r.testRunId));
+          await this.refreshRampUpFlags(manager, staleRuns);
         } else {
           this.logger.info(
             `🕒 ramp_up flags already match the current analysis offsets for ${testRunIds.length} run(s) — no update needed`
@@ -197,7 +198,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
    */
   /**
    * Which of these runs actually have a ramp_up flag that disagrees with the
-   * run's current analysis offsets — and over what time range.
+   * run's current analysis offsets — and over what time range those rows lie.
    *
    * This is a SELECT on purpose. `ramp_up` is neither `compress_segmentby`
    * (test_run_id) nor `compress_orderby` (time), so the UPDATE's guard predicate
@@ -217,57 +218,83 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
   ): Promise<Array<{ testRunId: string; from: Date; to: Date }>> {
     const placeholders = testRunIds.map((_, i) => `$${i + 1}`).join(', ');
 
-    // EXISTS short-circuits on the first disagreeing row, so a run that DOES
-    // need the update is cheap to detect; a run that does not costs one scan.
+    // MIN/MAX over the disagreeing rows, not the run's own start/end. Those bounds
+    // are what the decompression and the UPDATE below are scoped to, and a stale
+    // trailing flag typically spans minutes out of a multi-hour run.
+    //
+    // This costs one full read of the run where the old EXISTS short-circuited on
+    // the first disagreeing row. That trade is worth making: a read decompresses
+    // transiently and rewrites nothing, while the run-wide bounds it replaces put
+    // every chunk of the run into row store for good. The 939ms in CLAUDE.md is the
+    // 2.6M-row figure and scales roughly linearly — budget ~8s on a 20M-row run.
     const sql = `
-      SELECT tr.test_run_id, tr.start_time, tr.end_time
+      SELECT tr.test_run_id, MIN(m.time) AS from_time, MAX(m.time) AS to_time
       FROM test_runs tr
+      JOIN ds_metrics m ON m.test_run_id = tr.test_run_id
       WHERE tr.test_run_id IN (${placeholders})
         AND tr.start_time IS NOT NULL
         AND tr.end_time IS NOT NULL
-        AND EXISTS (
-          SELECT 1
-          FROM ds_metrics m
-          WHERE m.test_run_id = tr.test_run_id
-            AND m.ramp_up IS DISTINCT FROM ${RAMP_UP_EXPR}
-        )
+        AND m.ramp_up IS DISTINCT FROM ${RAMP_UP_EXPR}
+      GROUP BY tr.test_run_id
     `;
 
-    const rows: Array<{ test_run_id: string; start_time: Date; end_time: Date }> =
+    const rows: Array<{ test_run_id: string; from_time: Date; to_time: Date }> =
       await this.db.query(sql, testRunIds);
 
-    return (rows ?? []).map((r) => ({
-      testRunId: r.test_run_id,
-      from: r.start_time,
-      to: r.end_time,
-    }));
+    // A run with nothing to fix produces no group, so it never reaches the UPDATE.
+    //
+    // The isFinite filter belongs HERE rather than at the decompression loop: both
+    // the decompression and the UPDATE bind these bounds, so skipping only the
+    // former would still hand Postgres an Invalid Date as $2/$3 — and with the
+    // chunks left compressed. MIN/MAX carry no NOT NULL guarantee of their own
+    // (the run's start_time/end_time do, but these are ds_metrics.time), so a
+    // malformed row drops the whole run rather than half-processing it.
+    return (rows ?? [])
+      .map((r) => ({ testRunId: r.test_run_id, from: r.from_time, to: r.to_time }))
+      .filter(
+        (r) =>
+          Number.isFinite(new Date(r.from).getTime()) && Number.isFinite(new Date(r.to).getTime())
+      );
   }
 
   private async refreshRampUpFlags(
     manager: EntityManager,
-    testRunIds: string[]
+    staleRuns: Array<{ testRunId: string; from: Date; to: Date }>
   ): Promise<void> {
-    const placeholders = testRunIds.map((_, i) => `$${i + 1}`).join(', ');
-
+    // One statement per run, bounded by the disagreeing rows' time span. Both
+    // predicates earn their place in the compressed layout: test_run_id is
+    // compress_segmentby and time is compress_orderby, so TimescaleDB can skip
+    // whole batches by their min/max time metadata instead of decompressing the
+    // run's entire segment to evaluate the ramp_up guard.
+    //
+    // Splitting per run narrows the tuples each statement touches; it does NOT give
+    // each run its own decompression budget —
+    // max_tuples_decompressed_per_dml_transaction (100k) is charged per TRANSACTION
+    // and all N statements share one. What keeps the loop under it is the up-front
+    // decompressChunksForRange; if that silently no-ops the limit is still reachable.
     const sql = `
       UPDATE ds_metrics m
       SET ramp_up = ${RAMP_UP_EXPR}
       FROM test_runs tr
       WHERE m.test_run_id = tr.test_run_id
-        AND m.test_run_id IN (${placeholders})
+        AND m.test_run_id = $1
+        AND m.time >= $2
+        AND m.time <= $3
         AND tr.start_time IS NOT NULL
         AND tr.end_time IS NOT NULL
         AND m.ramp_up IS DISTINCT FROM ${RAMP_UP_EXPR}
     `;
 
-    const result = await manager.query(sql, testRunIds);
-    // pg returns [rows, rowCount] for UPDATE via node-postgres; TypeORM's raw
-    // query surfaces an array whose affected count we log best-effort.
-    const affected = Array.isArray(result) ? (result[1] ?? undefined) : undefined;
+    let affected = 0;
+    for (const run of staleRuns) {
+      const result = await manager.query(sql, [run.testRunId, run.from, run.to]);
+      // pg returns [rows, rowCount] for UPDATE via node-postgres; TypeORM's raw
+      // query surfaces an array whose affected count we log best-effort.
+      affected += (Array.isArray(result) ? (result[1] ?? 0) : 0) as number;
+    }
+
     this.logger.info(
-      `🕒 Refreshed ramp_up flags against current analysis offsets for ${testRunIds.length} run(s)${
-        affected !== undefined ? ` (${affected} rows changed)` : ''
-      }`
+      `🕒 Refreshed ramp_up flags against current analysis offsets for ${staleRuns.length} run(s) (${affected} rows changed)`
     );
   }
 
@@ -281,21 +308,22 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     // Build parameterized query placeholders
     const placeholders = testRunIds.map((_, i) => `$${i + 1}`).join(', ');
 
-    // First, check if there are any metrics to aggregate
-    const metricsCountQuery = `
-      SELECT COUNT(*) as count
-      FROM ds_metrics
-      WHERE test_run_id IN (${placeholders})
-        AND ramp_up = false
-        AND value IS NOT NULL
-    `;
+    // Is there anything to aggregate? EXISTS, not COUNT(*): this only guards the
+    // DELETE below (a run whose ds_metrics have aged out must keep its statistics
+    // rather than have them wiped and replaced with nothing). COUNT(*) answered the
+    // same yes/no by scanning every row — 16s over 20.6M rows on a compressed
+    // hypertable, to produce a log line the INSERT's own row count already gives.
+    const metricsProbe = await manager.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM ds_metrics
+         WHERE test_run_id IN (${placeholders})
+           AND ramp_up = false
+           AND value IS NOT NULL
+       ) AS has_metrics`,
+      testRunIds
+    );
 
-    const metricsCount = await manager.query(metricsCountQuery, testRunIds);
-    const totalMetrics = parseInt(metricsCount[0]?.count || '0', 10);
-
-    this.logger.info(`🔍 Found ${totalMetrics} metrics to aggregate (ramp_up=false, value IS NOT NULL)`);
-
-    if (totalMetrics === 0) {
+    if (!metricsProbe[0]?.has_metrics) {
       this.logger.warn(`⚠️ No metrics found for test runs: ${testRunIds.join(', ')}`);
       this.logger.warn('💡 This could mean:');
       this.logger.warn('   1. MetricsPipeline hasn\'t run yet for these test runs');
@@ -627,27 +655,6 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     // Step 2: INSERT new statistics (no ON CONFLICT needed since we deleted existing records)
     this.logger.info(`🚀 Executing statistics aggregation INSERT...`);
 
-    // First, count how many unique metrics we'll aggregate
-    const uniqueMetricsQuery = `
-      SELECT COUNT(*)::integer as expected_rows
-      FROM (
-        SELECT DISTINCT test_run_id, application_dashboard_id, panel_id, metric_name
-        FROM ds_metrics
-        WHERE test_run_id IN (${placeholders})
-          AND ramp_up = false
-          AND value IS NOT NULL
-      ) d
-    `;
-    // Same number, reached without a sort. COUNT(DISTINCT (composite)) cannot be
-    // parallelised and spills an external sort of anonymous ROW() values — 4.7s
-    // and ~370MB of temp I/O on a 1.58M-row run, against 1.6s for this form —
-    // and it exists only to produce the log line and the mismatch warning below.
-
-    const expectedCount = await manager.query(uniqueMetricsQuery, testRunIds);
-    const expectedRows = expectedCount[0]?.expected_rows || 0;
-
-    this.logger.info(`📊 Aggregation will process ${expectedRows} unique metrics`);
-
     await manager.query(aggregationSQL, testRunIds);
 
     // For CTE-based INSERT...SELECT, TypeORM doesn't return rowCount reliably
@@ -660,18 +667,15 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     const actualCountResult = await manager.query(actualCountQuery, testRunIds);
     const actualCount = actualCountResult[0]?.count || 0;
 
-    this.logger.info(`✅ Statistics aggregation completed`);
-    this.logger.info(`   🧹 Deleted: ${deletedRows ?? 'an unknown number of'} existing records (allowing re-analysis)`);
-    this.logger.info(`   📝 Expected: ${expectedRows} unique metrics`);
-    this.logger.info(`   📝 Actual: ${actualCount} statistic records in database`);
-    this.logger.info(`   📊 Source: ${totalMetrics} total data points`);
+    this.logger.info(
+      `✅ Statistics aggregation completed: deleted ${deletedRows ?? 'an unknown number of'}, wrote ${actualCount} statistic records`
+    );
 
-    if (actualCount === 0 && expectedRows > 0) {
-      this.logger.warn(`⚠️  Expected ${expectedRows} statistics but found 0 in database - possible data issue`);
-    } else if (actualCount !== expectedRows) {
-      this.logger.warn(`⚠️  Count mismatch: expected ${expectedRows}, found ${actualCount} in database`);
-    } else {
-      this.logger.info(`✅ Successfully processed all ${actualCount} statistics`);
+    if (actualCount === 0) {
+      // The EXISTS probe above said there was data, so an empty result is a real
+      // problem (org-scoping dropped every dashboard, most likely) — not "nothing
+      // to do", which returned earlier.
+      this.logger.warn('⚠️  Metrics exist for these test runs but no statistics were written - possible data issue');
     }
 
     return { success: true, rowCount: actualCount };
