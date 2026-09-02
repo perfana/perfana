@@ -251,6 +251,31 @@ saying the pipeline did not finish.
 
 ---
 
+### The worker has no RLS context and relies on its DB role holding BYPASSRLS
+
+**Priority:** P3
+**Origin:** the v0.2.93.1 investigation into a `control-group-statistics` statement timeout
+(2026-09-02). The Postgres error context was
+`where: 'PL/pgSQL function can_access_resource(uuid,uuid,text) line 4 at RETURN'` — proof that
+RLS policies were being evaluated on a worker connection.
+**Why:** unlike the API, the worker never runs `SET LOCAL ROLE perfana_app` and never sets the
+four `app.current_*` GUCs — it has no `RlsTransactionInterceptor` equivalent. Its queries touch
+`test_runs`, `application_dashboards` and `dynatrace_queries`, all of which are
+`FORCE ROW LEVEL SECURITY`, so being the table owner is not enough: only a superuser or a role
+with `BYPASSRLS` escapes them. Locally `DB_USERNAME=perfana` is `rolsuper=t rolbypassrls=t`, so
+nothing surfaces. Deploy the worker under a least-privilege role — the normal shape on managed
+Postgres, where the application user owns the tables but is not superuser — and
+`can_access_resource` returns FALSE for every row, because with no GUCs set
+`is_global_admin()` is false and `current_user_organizations()` is empty.
+**Symptom if it happens:** not an error. `ds_control_group_statistics` comes out empty and ADAPT
+reports INSUFFICIENT_DATA against a baseline that is fine — the same misleading message the
+missing-`pct_agg` cause produces, so it will be misdiagnosed. Metrics collection would degrade
+the same silent way.
+**What to do:** either assert at worker boot that the connection can read a known
+`application_dashboards` row (fail loud, the way `assertEntityColumns` does), or give the worker
+a real RLS context under `perfana_system`. This is the worker-side twin of the API-key
+deployment constraint already documented in CLAUDE.md; nothing enforces either yet.
+
 ## Dynatrace
 
 ### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster
