@@ -26,7 +26,8 @@ export interface StatisticsInput {
  *   statistics_aggregated     GROUP BY (test_run, dashboard, panel, metric):
  *        │                      - Classical: COUNT, AVG (mean), MIN, MAX, STDDEV_POP
  *        │                      - TimescaleDB: percentile_agg(value) — single-pass t-digest sketch
- *        │                      - Auxiliary: n_missing, n_non_zero, is_constant
+ *        │                      - Auxiliary: n_missing, n_non_zero
+ *        │                      - last_value: value at the greatest time, via last()
  *        ▼
  *   final_statistics          Derives remaining columns from the aggregates:
  *        │                      - Percentiles via approx_percentile(p, pct_agg):
@@ -36,7 +37,6 @@ export interface StatisticsInput {
  *        │                      - is_constant: true when all values are identical (min = max)
  *        │                      - all_missing: true when every observation is NULL
  *        │                      - pct_missing: percentage of NULL observations
- *        │                      - last_value: value at the latest timestamp (via last())
  *        ▼
  *   INSERT INTO ds_metric_statistics  (delete-then-insert for idempotent re-runs)
  *
@@ -68,6 +68,22 @@ export interface StatisticsInput {
  *                 The metric exists in the dashboard definition but produced no
  *                 usable data — ADAPT labels these "incomparable".
  */
+/**
+ * Whether a metric sample falls in a run's ramp-up or ramp-down window.
+ *
+ * Module-level so the read-only pre-check, the UPDATE's SET and the UPDATE's
+ * change-guard all interpolate one definition and cannot drift apart. Uses the
+ * `m` (ds_metrics) and `tr` (test_runs) aliases every consumer supplies.
+ */
+const RAMP_UP_EXPR = `(
+      EXTRACT(EPOCH FROM (m.time - tr.start_time)) < COALESCE(tr.ramp_up, 0)
+      OR (
+        COALESCE(tr.ramp_down, 0) > 0
+        AND EXTRACT(EPOCH FROM (m.time - tr.start_time))
+            > EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) - COALESCE(tr.ramp_down, 0)
+      )
+    )`;
+
 export class StatisticsPipeline extends BasePipelineTypeORM {
 
   validateInput(input: unknown): boolean {
@@ -93,14 +109,46 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['ds_metric_statistics']);
 
+      // Refresh the ds_metrics.ramp_up flag from each run's CURRENT analysis
+      // offsets before aggregating. The flag is otherwise baked once at
+      // ingestion (MetricsPipeline), so editing the analysis time range on a
+      // completed run — which skips metric-collection on re-analysis — would
+      // leave ADAPT reading the OLD window (#421-followup / analysis-time-range).
+      //
+      // Ask with a read before writing: on a compressed chunk the UPDATE's own
+      // guard is what triggers the decompression, so "only rows that change are
+      // written" does not make it free. See findRunsWithStaleRampUpFlags.
+      const staleRuns = await this.findRunsWithStaleRampUpFlags(testRunIds);
+
+      if (staleRuns.length > 0) {
+        // Same shape, and the same fix, as the force-refetch guard in
+        // simple-orchestrate-reevaluate-batch.ts: decompress the affected chunks
+        // up front, outside the transaction, so the UPDATE never has to do it as
+        // DML. The compression policy recompresses them on its next pass.
+        // Number.isFinite guard: an unparseable bound would become NaN here and
+        // reach decompressChunksForRange as an Invalid Date, which Postgres would
+        // reject mid-flight. The SQL above already requires both to be NOT NULL,
+        // so this only ever drops a genuinely malformed row.
+        const bounds = staleRuns
+          .flatMap((r) => [new Date(r.from).getTime(), new Date(r.to).getTime()])
+          .filter((t) => Number.isFinite(t));
+        if (bounds.length > 0) {
+          await this.db.decompressChunksForRange(
+            'ds_metrics',
+            new Date(Math.min(...bounds)),
+            new Date(Math.max(...bounds))
+          );
+        }
+      }
+
       const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
-        // Refresh the ds_metrics.ramp_up flag from each run's CURRENT analysis
-        // offsets before aggregating. The flag is otherwise baked once at
-        // ingestion (MetricsPipeline), so editing the analysis time range on a
-        // completed run — which skips metric-collection on re-analysis — would
-        // leave ADAPT reading the OLD window (#421-followup / analysis-time-range).
-        // Idempotent: only rows whose flag actually changes are written.
-        await this.refreshRampUpFlags(manager, testRunIds);
+        if (staleRuns.length > 0) {
+          await this.refreshRampUpFlags(manager, staleRuns.map((r) => r.testRunId));
+        } else {
+          this.logger.info(
+            `🕒 ramp_up flags already match the current analysis offsets for ${testRunIds.length} run(s) — no update needed`
+          );
+        }
         return await this.aggregateMetricStatistics(manager, testRunIds);
       });
 
@@ -147,32 +195,69 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
    * Runs with a NULL start_time or end_time are skipped (window undefined) — the
    * flag stays as ingested, matching MetricsPipeline's `Infinity` duration branch.
    */
+  /**
+   * Which of these runs actually have a ramp_up flag that disagrees with the
+   * run's current analysis offsets — and over what time range.
+   *
+   * This is a SELECT on purpose. `ramp_up` is neither `compress_segmentby`
+   * (test_run_id) nor `compress_orderby` (time), so the UPDATE's guard predicate
+   * cannot be pushed into a compressed batch: TimescaleDB decompresses the run's
+   * whole segment as DML just to discover nothing needs writing. Measured on a
+   * 2.6M-row run whose flags were already correct: 53s, 2,620,348 tuples
+   * decompressed, then `tuple decompression limit exceeded by operation`
+   * (max_tuples_decompressed_per_dml_transaction defaults to 100k). A read pays
+   * none of that — the executor decompresses transiently and rewrites nothing.
+   *
+   * Every run the ADAPT sketch backfill repairs is older than the 7-day
+   * compression policy by construction, so this is the normal path there, not
+   * an edge case.
+   */
+  private async findRunsWithStaleRampUpFlags(
+    testRunIds: string[]
+  ): Promise<Array<{ testRunId: string; from: Date; to: Date }>> {
+    const placeholders = testRunIds.map((_, i) => `$${i + 1}`).join(', ');
+
+    // EXISTS short-circuits on the first disagreeing row, so a run that DOES
+    // need the update is cheap to detect; a run that does not costs one scan.
+    const sql = `
+      SELECT tr.test_run_id, tr.start_time, tr.end_time
+      FROM test_runs tr
+      WHERE tr.test_run_id IN (${placeholders})
+        AND tr.start_time IS NOT NULL
+        AND tr.end_time IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM ds_metrics m
+          WHERE m.test_run_id = tr.test_run_id
+            AND m.ramp_up IS DISTINCT FROM ${RAMP_UP_EXPR}
+        )
+    `;
+
+    const rows: Array<{ test_run_id: string; start_time: Date; end_time: Date }> =
+      await this.db.query(sql, testRunIds);
+
+    return (rows ?? []).map((r) => ({
+      testRunId: r.test_run_id,
+      from: r.start_time,
+      to: r.end_time,
+    }));
+  }
+
   private async refreshRampUpFlags(
     manager: EntityManager,
     testRunIds: string[]
   ): Promise<void> {
     const placeholders = testRunIds.map((_, i) => `$${i + 1}`).join(', ');
 
-    // Defined once, interpolated into both SET and the change-guard so the two
-    // can never drift. Uses `m`/`tr` aliases from the UPDATE ... FROM below.
-    const rampUpExpr = `(
-      EXTRACT(EPOCH FROM (m.time - tr.start_time)) < COALESCE(tr.ramp_up, 0)
-      OR (
-        COALESCE(tr.ramp_down, 0) > 0
-        AND EXTRACT(EPOCH FROM (m.time - tr.start_time))
-            > EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) - COALESCE(tr.ramp_down, 0)
-      )
-    )`;
-
     const sql = `
       UPDATE ds_metrics m
-      SET ramp_up = ${rampUpExpr}
+      SET ramp_up = ${RAMP_UP_EXPR}
       FROM test_runs tr
       WHERE m.test_run_id = tr.test_run_id
         AND m.test_run_id IN (${placeholders})
         AND tr.start_time IS NOT NULL
         AND tr.end_time IS NOT NULL
-        AND m.ramp_up IS DISTINCT FROM ${rampUpExpr}
+        AND m.ramp_up IS DISTINCT FROM ${RAMP_UP_EXPR}
     `;
 
     const result = await manager.query(sql, testRunIds);
@@ -302,21 +387,28 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
 
               -- TimescaleDB last(): value at the greatest time, in the pass that is
               -- already running. This used to be a LEFT JOIN LATERAL on ds_metrics in
-              -- final_statistics. ds_metrics is compressed with segmentby=test_run_id,
-              -- so a compressed chunk cannot push down application_dashboard_id/panel_id/
-              -- metric_name — every group decompressed the whole run's segment, once per
-              -- group. Fine on a fresh run, a statement timeout on any run older than the
-              -- 7-day compression policy (which is every run the sketch backfill visits).
-              last(value, time) as last_value,
+              -- final_statistics, one probe per output group. ds_metrics is compressed
+              -- with segmentby=test_run_id, so a compressed chunk cannot narrow a probe
+              -- by application_dashboard_id/panel_id/metric_name. TimescaleDB does push
+              -- ORDER BY time DESC LIMIT 1 into the columnar scan, so a metric still
+              -- reporting at the end of the run was found in the first batch (~0.04ms);
+              -- the cost is metrics that STOP reporting early, which force a deep
+              -- backward walk (~0.97ms, 24x worse). Enough of those and the aggregation
+              -- exceeds ANALYTICS_STATEMENT_TIMEOUT_MS: 60.1s measured over 12,370
+              -- groups, against 1.19s for the aggregate below.
+              --
+              -- The FILTER is not decoration: every other aggregate here skips NULLs by
+              -- definition, but last() returns the value AT the greatest time even when
+              -- that value is NULL. The lateral carried its own "value IS NOT NULL", so
+              -- this keeps the predicate local instead of leaning on metrics_filtered
+              -- forty lines above.
+              last(value, time) FILTER (WHERE value IS NOT NULL) as last_value,
 
               -- n_missing: always 0 here because WHERE filters out NULLs, but kept
               -- for schema compatibility. Downstream code may re-count from raw data.
               COUNT(CASE WHEN value IS NULL THEN 1 END) as n_missing,
               COUNT(CASE WHEN value > 0 THEN 1 END) as n_non_zero,
 
-              -- Constant ⇔ min = max, since NULLs are filtered out above. Both are
-              -- already aggregated; COUNT(DISTINCT value) needed its own per-group sort.
-              (MIN(value) = MAX(value)) as is_constant,
               -- These columns are identical within each group; MIN() is just a
               -- deterministic way to pick one value without a window function.
               MIN(unit) as unit,
@@ -394,8 +486,12 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               -- useful for understanding tail behavior in response time metrics.
               (approx_percentile(0.90, sa.pct_agg) - approx_percentile(0.10, sa.pct_agg)) as idr,
 
-              sa.is_constant,
-              sa.is_constant as constant_value,  -- alias kept for backward compat
+              -- Constant ⇔ min = max. Derived here from the aggregates already
+              -- projected above rather than as a fourth aggregate expression, which
+              -- is what COUNT(DISTINCT value) used to be — that needed its own
+              -- per-group sort; this needs nothing.
+              (sa.min_value = sa.max_value) as is_constant,
+              (sa.min_value = sa.max_value) as constant_value,  -- alias kept for backward compat
               (sa.count = sa.n_missing) as all_missing,
 
               CASE
@@ -533,12 +629,19 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
 
     // First, count how many unique metrics we'll aggregate
     const uniqueMetricsQuery = `
-      SELECT COUNT(DISTINCT (test_run_id, application_dashboard_id, panel_id, metric_name))::integer as expected_rows
-      FROM ds_metrics
-      WHERE test_run_id IN (${placeholders})
-        AND ramp_up = false
-        AND value IS NOT NULL
+      SELECT COUNT(*)::integer as expected_rows
+      FROM (
+        SELECT DISTINCT test_run_id, application_dashboard_id, panel_id, metric_name
+        FROM ds_metrics
+        WHERE test_run_id IN (${placeholders})
+          AND ramp_up = false
+          AND value IS NOT NULL
+      ) d
     `;
+    // Same number, reached without a sort. COUNT(DISTINCT (composite)) cannot be
+    // parallelised and spills an external sort of anonymous ROW() values — 4.7s
+    // and ~370MB of temp I/O on a 1.58M-row run, against 1.6s for this form —
+    // and it exists only to produce the log line and the mismatch warning below.
 
     const expectedCount = await manager.query(uniqueMetricsQuery, testRunIds);
     const expectedRows = expectedCount[0]?.expected_rows || 0;
