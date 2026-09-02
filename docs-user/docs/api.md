@@ -141,7 +141,7 @@ Upload JMeter `.jtl` results directly, as an alternative to streaming during the
 | `systemUnderTest` | string | yes | |
 | `testEnvironment` | string | yes | |
 | `workload` | string | yes | |
-| `analysisStartOffset` | string (sec) | no | Default `0` |
+| `analysisStartOffset` | string (sec) | no | Default `0`. Trims a warm-up period off the front of the analysis window. If the start and end offsets together are longer than the run, Perfana analyses the whole run rather than discarding it. |
 | `configs` | string | no | JSON array `[{key, value}]` |
 | `includeSubTransactions` | `"true"`/`"false"` | no | Default `false` |
 
