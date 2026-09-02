@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.93.2] - 2026-09-02
+
+### Fixed
+- **Repairing a baseline no longer times out on older test runs.** The previous release fixed one statement timeout in the "control group statistics" stage; the repair step that runs just before it hit a second one, so analysing a run still ended in `canceling statement due to statement timeout` and ADAPT still reported that it could not build a baseline. Recalculating a run's statistics finishes by recording each metric's last measured value, and it looked that value up with a separate query per metric — around twelve thousand of them on a large run. Perfana compresses measurement data older than seven days, and a compressed lookup cannot narrow down to one metric: each of those twelve thousand queries unpacked the whole run. Baseline runs are older runs by definition, so the repair walked into this every time. The last value is now read in the same pass that already computes the averages and percentiles. On a run of 2.6 million measurements the step went from 60.1 seconds to 1.2 seconds, and the figures it writes are unchanged — checked metric by metric across 13,047 of them.
+
 ## [0.2.93.1] - 2026-09-02
 
 ### Fixed
