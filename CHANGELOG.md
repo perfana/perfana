@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.0] - 2026-09-02
+
+### Changed
+- **The progress bar for a batch re-evaluate now says which test run it is on.** Re-evaluating several runs at once showed a stage and a percentage, and named a single test run for the entire batch — always the first one, because that is the run the progress tracker was created from. So a batch of seven sat on "Force refetch, 43%" against run 1 while it was actually working on run 4, and there was no way to tell from the screen how far through the batch it had got or which run was slow.
+
+  The stages that walk the batch one run at a time — re-fetching data, finding gaps, filling them, and the final sanity check — now report the run they are on, shown as "run 4/7" alongside its name. The stages that take the whole batch in one go, such as the ADAPT analysis, deliberately show nothing there rather than repeat a run they are not working on. The sanity check reported no progress at all before, which is why a batch could appear frozen at 80% for minutes; it now advances per run.
+
 ## [0.2.93.3] - 2026-09-02
 
 ### Fixed
