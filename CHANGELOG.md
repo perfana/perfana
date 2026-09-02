@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.93.1] - 2026-09-02
+
+### Fixed
+- **ADAPT stops timing out while building a baseline.** Analysing a run could spend nine minutes on the "control group statistics" stage and then fail with `canceling statement due to statement timeout`, leaving the baseline empty and ADAPT reporting that it had nothing to compare against. The stage picks which dashboards belong to the test's organisation, and it was asking that question once per measurement instead of once per test run. On a baseline of 2.9 million measurements across 163 dashboards that is roughly 473 million repeated lookups. It now resolves the organisation's dashboards a single time up front. The same baseline that took 17.8 seconds locally now takes 3.2 seconds, and the aggregation produces byte-identical results — 12,370 baseline metrics, same values. Deployments whose database user does not bypass row-level security were hit hardest, because every one of those repeated lookups also ran a permission check; the giveaway in the error was `PL/pgSQL function can_access_resource`.
+
 ## [0.2.93.0] - 2026-09-01
 
 ### Fixed

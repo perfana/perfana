@@ -830,5 +830,41 @@ describe('ControlGroupStatisticsPipeline', () => {
       expect(statisticsQueryCall[0]).toContain('STDDEV_POP(m.value) as std_dev');
       expect(statisticsQueryCall[0]).not.toContain('per_run_pooled');
     });
+
+    // Regression: the org scope must stay UNCORRELATED. When it was written as
+    // `IN (SELECT ... WHERE ad.organization_id = tr.organization_id)` over a
+    // `test_runs` join, Postgres could not pull it up into a semi-join and emitted
+    // `Join Filter: ((SubPlan 1) OR (SubPlan 2))` — a seq scan of
+    // application_dashboards plus a sort+unique of dynatrace_queries re-run for
+    // EVERY ds_metrics row. That is what blew past ANALYTICS_STATEMENT_TIMEOUT_MS.
+    test.each([
+      ['fast path', 0],
+      ['legacy path', 7],
+    ])('should scope dashboards by org without correlating on test_runs (%s)', async (_label, missingSketches) => {
+      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([
+        {
+          control_group_id: 'control-group-1',
+          system_under_test_id: 'system-1',
+          workload: 'load-test',
+          test_environment: 'production',
+          test_runs: ['test-run-1', 'test-run-2'],
+          n_test_runs: 2
+        }
+      ]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ count: '100' }]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: missingSketches }]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 50 }]);
+      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
+
+      await pipeline.execute({ controlGroupIds: ['control-group-1'] });
+
+      const sql: string = (mockEntityManager.query as any).mock.calls[4][0];
+      expect(sql).toContain('scoped_dashboards AS (');
+      expect(sql).toContain('IN (SELECT application_dashboard_id FROM scoped_dashboards)');
+      // No per-row correlation with the joined test_runs row.
+      expect(sql).not.toContain('organization_id = tr.organization_id');
+      expect(sql).not.toMatch(/INNER JOIN test_runs tr/);
+    });
   });
 });

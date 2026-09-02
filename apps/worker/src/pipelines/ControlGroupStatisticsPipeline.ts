@@ -65,6 +65,11 @@ export interface ControlGroupStatisticsInput {
  * SQL CTE Chain Overview (fast path)
  * ──────────────────────────────────────────────────────────────────────────────
  *
+ *   scope / scoped_dashboards  The control group's organization, and the set of
+ *        │                     application_dashboard_ids that org may aggregate.
+ *        │                     Materialised ONCE — see orgScopeCtes for why this
+ *        │                     must not go back to correlating on a test_runs join.
+ *        │
  *   per_run_pooled             SUM(sum_value), SUM(sum_sq_value), SUM(count),
  *        │                     MIN(min_value), MAX(max_value),
  *        │                     rollup(pct_agg) over the per-run rows.
@@ -343,12 +348,48 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       this.logger.warn(`🐢 Legacy path: ${missingSketches} ds_metric_statistics rows missing pct_agg — the automatic backfill (#552) did not repair them; this raw scan may exceed ANALYTICS_STATEMENT_TIMEOUT_MS`);
     }
 
+    // Org scope for the whole aggregation, resolved ONCE.
+    //
+    // This used to be two `IN (SELECT ... WHERE organization_id = tr.organization_id)`
+    // subqueries correlated on a `test_runs` join. Correlated subqueries cannot be
+    // pulled up into a semi-join, so the planner emitted
+    // `Join Filter: ((SubPlan 1) OR (SubPlan 2))` and re-ran both — a seq scan of
+    // `application_dashboards` plus a sort+unique over `dynatrace_queries` — for
+    // EVERY row of the `ds_metrics` scan. On a 2.9M-row control group that is ~473M
+    // subplan row evaluations: 16.6s here, and past ANALYTICS_STATEMENT_TIMEOUT_MS on
+    // a deploy whose DB role lacks BYPASSRLS, where each of those rows also invokes
+    // the PL/pgSQL `can_access_resource` RLS policy. Decorrelated: 1.1s, same 12,370 rows.
+    //
+    // Both `organization_id` columns are NOT NULL, so the old `OR ... IS NULL` arms
+    // were dead. `ds_control_groups.organization_id` is nullable in the DDL, hence
+    // the COALESCE back to the control runs' own org.
+    const orgScopeCtes = `
+      scope AS (
+        SELECT COALESCE(
+          $3::uuid,
+          (SELECT tr.organization_id FROM test_runs tr WHERE tr.test_run_id = ANY($2::varchar[]) LIMIT 1)
+        ) AS organization_id
+      ),
+
+      scoped_dashboards AS (
+        SELECT id AS application_dashboard_id
+        FROM application_dashboards
+        WHERE organization_id = (SELECT organization_id FROM scope)
+        UNION
+        SELECT application_dashboard_id
+        FROM dynatrace_queries
+        WHERE organization_id = (SELECT organization_id FROM scope)
+          AND application_dashboard_id IS NOT NULL
+      ),
+    `;
+
     // Fast path — pool persisted per-run sketches with `rollup(pct_agg)` and
     // recombine population mean / std_dev exactly from sum / sum_sq / count.
     // ~10 control runs × ~795 metric rows ≈ 8 K rows scanned, vs. ~10 × ~70 K
     // raw `ds_metrics` rows × ~50 metrics on the legacy path.
     const fastPathLeadingCtes = `
-      WITH per_run_pooled AS (
+      WITH ${orgScopeCtes}
+      per_run_pooled AS (
         SELECT
           ms.application_dashboard_id,
           ms.panel_id,
@@ -360,19 +401,9 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           MAX(ms.max_value)                        AS pooled_max,
           rollup(ms.pct_agg)                       AS pct_agg
         FROM ds_metric_statistics ms
-        INNER JOIN test_runs tr ON ms.test_run_id = tr.test_run_id
         WHERE ms.test_run_id = ANY($2::varchar[])
           AND ms.pct_agg IS NOT NULL
-          AND (
-            ms.application_dashboard_id IN (
-              SELECT id FROM application_dashboards ad
-              WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
-            )
-            OR ms.application_dashboard_id IN (
-              SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
-              WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
-            )
-          )
+          AND ms.application_dashboard_id IN (SELECT application_dashboard_id FROM scoped_dashboards)
         GROUP BY ms.application_dashboard_id, ms.panel_id, ms.metric_name
       ),
 
@@ -409,7 +440,8 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
     // Legacy path — kept verbatim for backfill correctness when any control
     // run is missing the persisted per-run sketch.
     const legacyLeadingCtes = `
-      WITH raw_metrics_aggregated AS (
+      WITH ${orgScopeCtes}
+      raw_metrics_aggregated AS (
         -- Pool ALL raw data points from ALL control runs into a single
         -- distribution per metric. This is fundamentally different from
         -- averaging per-run statistics — it preserves the true shape of
@@ -426,23 +458,13 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           (STDDEV_POP(m.value) < 0.0001) as is_constant,  -- Near-zero variance → constant metric
           (COUNT(m.value) = 0) as all_missing
         FROM ds_metrics m
-        INNER JOIN test_runs tr ON m.test_run_id = tr.test_run_id
         WHERE m.test_run_id = ANY($2::varchar[])
           AND m.value IS NOT NULL
           AND m.ramp_up = false   -- respect the analysis window; the fast path
                                   -- pools per-run sketches already ramp_up-filtered
                                   -- by StatisticsPipeline, so the legacy raw-scan
                                   -- fallback must exclude ramp-up/ramp-down too.
-          AND (
-            m.application_dashboard_id IN (
-              SELECT id FROM application_dashboards ad
-              WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
-            )
-            OR m.application_dashboard_id IN (
-              SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
-              WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
-            )
-          )
+          AND m.application_dashboard_id IN (SELECT application_dashboard_id FROM scoped_dashboards)
         GROUP BY m.application_dashboard_id, m.panel_id, m.metric_name
       )
     `;
@@ -463,18 +485,8 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           ms.benchmark_id,
           ms.metrics_source_id
         FROM ds_metric_statistics ms
-        INNER JOIN test_runs tr ON ms.test_run_id = tr.test_run_id
         WHERE ms.test_run_id = ANY($2::varchar[])
-          AND (
-            ms.application_dashboard_id IN (
-              SELECT id FROM application_dashboards ad
-              WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
-            )
-            OR ms.application_dashboard_id IN (
-              SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
-              WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
-            )
-          )
+          AND ms.application_dashboard_id IN (SELECT application_dashboard_id FROM scoped_dashboards)
         ORDER BY ms.application_dashboard_id, ms.panel_id, ms.metric_name, ms.dashboard_uid NULLS LAST, ms.metrics_source_id NULLS LAST
       ),
 
@@ -493,18 +505,8 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
           AVG(ms.n_missing::float / NULLIF(ms.count, 0) * 100) as pct_missing,
           array_agg(DISTINCT ms.benchmark_id) FILTER (WHERE ms.benchmark_id IS NOT NULL) as benchmark_ids
         FROM ds_metric_statistics ms
-        INNER JOIN test_runs tr ON ms.test_run_id = tr.test_run_id
         WHERE ms.test_run_id = ANY($2::varchar[])
-          AND (
-            ms.application_dashboard_id IN (
-              SELECT id FROM application_dashboards ad
-              WHERE ad.organization_id = tr.organization_id OR ad.organization_id IS NULL
-            )
-            OR ms.application_dashboard_id IN (
-              SELECT DISTINCT application_dashboard_id FROM dynatrace_queries dq
-              WHERE dq.organization_id = tr.organization_id OR dq.organization_id IS NULL
-            )
-          )
+          AND ms.application_dashboard_id IN (SELECT application_dashboard_id FROM scoped_dashboards)
         GROUP BY ms.application_dashboard_id, ms.panel_id, ms.metric_name
       ),
 
