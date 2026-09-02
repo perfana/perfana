@@ -980,8 +980,10 @@ describe('StatisticsPipeline', () => {
       // TimescaleDB to decompress the run's whole segment as DML — 53s and
       // "tuple decompression limit exceeded" on a 2.6M-row run that needed no write.
       expect(preCheck).toBeDefined();
-      expect(preCheck).toMatch(/^\s*SELECT/);
-      expect(preCheck).not.toMatch(/UPDATE/i);
+      // Strip comments first: the shared RAMP_UP_EXPR explains itself by referring
+      // to "the UPDATE below", which is prose, not a statement.
+      expect(stripSqlComments(preCheck!)).toMatch(/^\s*SELECT/);
+      expect(stripSqlComments(preCheck!)).not.toMatch(/UPDATE/i);
 
       // Nothing stale => no write, and nothing decompressed.
       expect(interceptedQueries.some((q) => q.includes('UPDATE ds_metrics'))).toBe(false);

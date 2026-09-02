@@ -75,6 +75,11 @@ All configuration is managed through environment variables, loaded from `.env.lo
 | Variable | Default | Description |
 |---|---|---|
 | `AUDIT_RETENTION_MONTHS` | `24` | How long `audit_logs` rows are kept. `AuditRetentionManager` deletes older rows in 10k batches on boot and daily at 03:00 UTC, and logs the row count it removed. A value that is not a positive integer is rejected with a warning and falls back to 24 — `0` would mean `timestamp < now()`, which erases the whole audit trail. |
+| `ANALYTICS_STATEMENT_TIMEOUT_MS` | `120000` | Cap on analytics reads, so a runaway query cannot hold a connection indefinitely. Meant to be lowerable. Since v0.2.93.3 it does **not** apply to the two heavy aggregations below — lowering it will not shorten them. |
+| `AGGREGATION_STATEMENT_TIMEOUT_MS` | `540000` | Budget for the heavy aggregation transactions (`StatisticsPipeline`, `ControlGroupStatisticsPipeline`), applied by `BasePipelineTypeORM.setAggregationBudget()` as the first statement of the transaction so the whole unit of work gets it. Keep it strictly **below** the analytics pool's client-side `query_timeout` of `600000`: at equal deadlines node-postgres destroys the connection instead of letting Postgres cancel the statement, and the clean rollback and diagnosable error are both lost. |
+| `AGGREGATION_WORK_MEM` | `128MB` | `work_mem` for those same two transactions. It keeps roughly 20k `percentile_agg` sketches in a HashAggregate; spilling turns the aggregation into a GroupAggregate that sorts every input row to disk. Postgres charges `work_mem` per hash/sort node **and** per parallel worker, then again per concurrent job, so the deploy-wide peak is roughly this value x (1 + `max_parallel_workers_per_gather`) x (`WORKER_ANALYZE_CONCURRENCY` + `WORKER_BATCH_CONCURRENCY`). Size it against available RAM, not against one query. |
+| `WORKER_ANALYZE_CONCURRENCY` | `2` | Concurrent jobs on the analyze queue. Multiplies the `AGGREGATION_WORK_MEM` peak above. |
+| `WORKER_BATCH_CONCURRENCY` | `2` | Concurrent jobs on the batch queue. Multiplies the `AGGREGATION_WORK_MEM` peak above. |
 
 ## External Integrations
 

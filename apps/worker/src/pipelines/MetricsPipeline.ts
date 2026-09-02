@@ -341,8 +341,16 @@ export class MetricsPipeline extends BasePipelineTypeORM {
           const durationSeconds = testRun.end_time
             ? (testRun.end_time.getTime() - testRun.start_time.getTime()) / 1000
             : Infinity;
-          isRampUp = elapsedSeconds < startOffset
-            || (endOffset > 0 && elapsedSeconds > durationSeconds - endOffset);
+          // The offsets have to fit inside the run. A run shorter than
+          // startOffset + endOffset would otherwise have every sample flagged —
+          // the two windows overlap — leaving an empty analysis window, empty
+          // statistics and an ADAPT INSUFFICIENT_DATA on a run that has data.
+          // Analyse the whole run instead; same guard as RAMP_UP_EXPR in
+          // StatisticsPipeline, which recomputes this flag later.
+          const offsetsFit = durationSeconds > startOffset + endOffset;
+          isRampUp = offsetsFit
+            && (elapsedSeconds < startOffset
+              || (endOffset > 0 && elapsedSeconds > durationSeconds - endOffset));
         }
 
         flattened.push({

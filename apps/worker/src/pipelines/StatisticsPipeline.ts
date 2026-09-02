@@ -76,11 +76,27 @@ export interface StatisticsInput {
  * `m` (ds_metrics) and `tr` (test_runs) aliases every consumer supplies.
  */
 const RAMP_UP_EXPR = `(
-      EXTRACT(EPOCH FROM (m.time - tr.start_time)) < COALESCE(tr.ramp_up, 0)
-      OR (
-        COALESCE(tr.ramp_down, 0) > 0
-        AND EXTRACT(EPOCH FROM (m.time - tr.start_time))
-            > EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) - COALESCE(tr.ramp_down, 0)
+      -- The offsets have to FIT inside the run. When they do not — a run shorter
+      -- than analysisStartOffset + analysisEndOffset — the leading and trailing
+      -- windows overlap and every sample matches one of them, so the whole run
+      -- is flagged outside the analysis window. Nothing downstream survives that:
+      -- ds_metric_statistics comes out empty, the Apdex rollup misses on every
+      -- transaction, and ADAPT reports INSUFFICIENT_DATA against a run that has
+      -- data. It is also the worst case for the UPDATE below, which then rewrites
+      -- every row of a compressed run instead of a boundary band.
+      --
+      -- Analysing the whole run is the honest fallback: the offsets are a request
+      -- to trim, not a request to discard. Mirrored in MetricsPipeline so a newly
+      -- ingested run is baked the same way.
+      EXTRACT(EPOCH FROM (tr.end_time - tr.start_time))
+        > COALESCE(tr.ramp_up, 0) + COALESCE(tr.ramp_down, 0)
+      AND (
+        EXTRACT(EPOCH FROM (m.time - tr.start_time)) < COALESCE(tr.ramp_up, 0)
+        OR (
+          COALESCE(tr.ramp_down, 0) > 0
+          AND EXTRACT(EPOCH FROM (m.time - tr.start_time))
+              > EXTRACT(EPOCH FROM (tr.end_time - tr.start_time)) - COALESCE(tr.ramp_down, 0)
+        )
       )
     )`;
 

@@ -142,6 +142,8 @@ Stage 11: Data Sanity Check (runs outside the orchestrator)
 | Statistics | 3-6 | 256-384MB each |
 | Checks | 3-6 | 256-384MB each |
 
+These are **worker process** budgets. The heavy aggregation transactions in `StatisticsPipeline` and `ControlGroupStatisticsPipeline` also carry a **database-side** budget, set per transaction by `BasePipelineTypeORM.setAggregationBudget()`: `AGGREGATION_STATEMENT_TIMEOUT_MS` (default 540s) and `AGGREGATION_WORK_MEM` (default 128MB). Both are separate from `ANALYTICS_STATEMENT_TIMEOUT_MS`, which stays a lowerable 120s cap on ordinary analytics reads and no longer applies to these two jobs. The `work_mem` value is charged per hash/sort node, per parallel worker, and per concurrent job — size it against the database host's RAM rather than the worker container's. See [[Environment Variables]].
+
 ## Queue Configuration
 
 ```

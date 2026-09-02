@@ -1055,4 +1055,52 @@ describe('MetricsPipeline', () => {
       );
     });
   });
+
+  describe('ramp_up flag vs the analysis window', () => {
+    const start = new Date('2026-01-01T10:00:00Z');
+    // 10-minute run.
+    const end = new Date('2026-01-01T10:10:00Z');
+    const at = (seconds: number) => new Date(start.getTime() + seconds * 1000);
+
+    const flatten = (rampUp: number, rampDown: number, times: number[]) =>
+      (pipeline as any).flattenSingleDocument(
+        {
+          test_run_id: 'test-run-001',
+          application_dashboard_id: 'ad-1',
+          dashboard_uid: 'uid',
+          panel_id: 1,
+          panel_title: 'p',
+          dashboard_label: 'd',
+          benchmark_ids: [],
+          updated_at: start,
+          data: times.map((t, i) => ({
+            metric_name: `m${i}`,
+            time: at(t),
+            timestep: i,
+            value: 1,
+            unit: 'ms',
+          })),
+        },
+        { start_time: start, end_time: end, ramp_up: rampUp, ramp_down: rampDown }
+      ) as Array<{ ramp_up: boolean }>;
+
+    test('trims the leading and trailing windows when the offsets fit', () => {
+      // 60s + 60s of a 600s run: the middle is kept, the edges are not.
+      const rows = flatten(60, 60, [30, 300, 570]);
+      expect(rows.map((r) => r.ramp_up)).toEqual([true, false, true]);
+    });
+
+    test('keeps the whole run when the offsets do not fit inside it', () => {
+      // 400s + 300s of a 600s run: the two windows overlap, so without the guard
+      // every sample matches one of them and the run is emptied — no statistics,
+      // no Apdex rollup, and ADAPT reporting INSUFFICIENT_DATA on a run with data.
+      const rows = flatten(400, 300, [30, 300, 570]);
+      expect(rows.map((r) => r.ramp_up)).toEqual([false, false, false]);
+    });
+
+    test('keeps the whole run when the offsets exactly consume it', () => {
+      const rows = flatten(300, 300, [30, 300, 570]);
+      expect(rows.map((r) => r.ramp_up)).toEqual([false, false, false]);
+    });
+  });
 });
