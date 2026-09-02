@@ -52,7 +52,14 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
         });
         return fn(proxy);
       }),
-      query: vi.fn().mockResolvedValue([undefined, 0]),
+      // The read-only ramp_up pre-check runs before the transaction; return no
+      // stale runs so this file stays focused on the DELETE row count.
+      query: vi.fn((sql: string) =>
+        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
+          ? Promise.resolve([])
+          : Promise.resolve([undefined, 0])
+      ),
+      decompressChunksForRange: vi.fn().mockResolvedValue(undefined),
     };
 
     vi.mocked(databaseAccessor.getDatabaseService).mockReturnValue(mockDb as never);

@@ -22,13 +22,19 @@ import { EntityManager } from 'typeorm';
 vi.mock('../../../lib/utils/logger.js');
 vi.mock('../../../common/database-accessor.js');
 
+const stripSqlComments = (sql: string) => sql.replace(/--[^\n]*/g, '');
+
 describe('StatisticsPipeline', () => {
   let pipeline: StatisticsPipeline;
   let mockLogger: any;
   let mockDb: any;
   let mockEntityManager: any;
+  // In-transaction queries the proxy swallows (SET LOCAL, the ramp_up UPDATE) so
+  // they don't shift mockEntityManager.query.mock.calls indices.
+  let interceptedQueries: string[];
 
   beforeEach(() => {
+    interceptedQueries = [];
     // Reset all mocks
     vi.clearAllMocks();
 
@@ -62,6 +68,7 @@ describe('StatisticsPipeline', () => {
                   typeof args[0] === 'string' &&
                   (args[0].includes('SET LOCAL') || args[0].includes('UPDATE ds_metrics'))
                 ) {
+                  interceptedQueries.push(args[0]);
                   return Promise.resolve(undefined);
                 }
                 return target.query(...args);
@@ -72,7 +79,15 @@ describe('StatisticsPipeline', () => {
         });
         return fn(proxy);
       }),
-      query: vi.fn().mockResolvedValue([undefined, 0]) // Mock cleanup query
+      // Pooled (non-transaction) queries: the cleanup query and the read-only
+      // ramp_up pre-check. Default the pre-check to "nothing stale" so the
+      // aggregation mock chains below stay the only thing under test.
+      query: vi.fn((sql: string) =>
+        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
+          ? Promise.resolve([])
+          : Promise.resolve([undefined, 0])
+      ),
+      decompressChunksForRange: vi.fn().mockResolvedValue(undefined)
     };
 
     vi.mocked(databaseAccessor.getDatabaseService).mockReturnValue(mockDb as any);
@@ -554,10 +569,47 @@ describe('StatisticsPipeline', () => {
 
       await pipeline.execute({ testRunIds });
 
-      const aggregationCall = mockEntityManager.query.mock.calls[3];
-      const sqlQuery = aggregationCall[0];
+      // Strip comments once, for BOTH directions: the query's own comment block
+      // explains the LATERAL it replaced and names last(), so prose must not be
+      // able to satisfy the positive assertion either.
+      const sqlQuery = stripSqlComments(mockEntityManager.query.mock.calls[3][0]);
 
-      expect(sqlQuery).toContain('lv.value as last_value');
+      // last() runs inside the aggregate pass that is already scanning these rows,
+      // and keeps the deleted lateral's own value IS NOT NULL — last() returns the
+      // value AT the greatest time even when that value is NULL.
+      expect(sqlQuery).toContain('last(value, time) FILTER (WHERE value IS NOT NULL) as last_value');
+      expect(sqlQuery).toContain('sa.last_value'); // produced AND projected downstream
+
+      // The defect class is "ds_metrics is visited more than once", not one
+      // spelling of it: a correlated scalar subquery reintroduces the same
+      // per-group decompression at the same cost and contains no JOIN LATERAL.
+      // Pin the visit count instead of the syntax.
+      expect(sqlQuery.match(/\bds_metrics\b/g) ?? []).toHaveLength(1);
+      expect(sqlQuery).not.toMatch(/JOIN\s+LATERAL/i);
+    });
+
+    test('derives is_constant from the projected min/max, not a per-group sort', async () => {
+      const testRunIds = ['test-run-001'];
+
+      mockEntityManager.query
+        .mockResolvedValueOnce([{ count: '100' }])
+        .mockResolvedValueOnce({ rowCount: 0 })
+        .mockResolvedValueOnce([{ expected_rows: 5 }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ count: 5 }]);
+
+      await pipeline.execute({ testRunIds });
+
+      const sqlQuery = stripSqlComments(mockEntityManager.query.mock.calls[3][0]);
+
+      expect(sqlQuery).toContain('(sa.min_value = sa.max_value) as is_constant');
+      // constant_value is a backward-compat alias and must track is_constant.
+      expect(sqlQuery).toContain('(sa.min_value = sa.max_value) as constant_value');
+      // Both COUNT(DISTINCT) forms cost a sort the aggregates above already paid for:
+      // per-group on value, and whole-relation on the composite group key.
+      expect(sqlQuery).not.toMatch(/COUNT\s*\(\s*DISTINCT/i);
+      // A leftover sa.distinct_count would only fail against real Postgres.
+      expect(sqlQuery).not.toContain('distinct_count');
     });
 
     test('should join with test_runs to get start_time', async () => {
@@ -977,4 +1029,61 @@ describe('StatisticsPipeline', () => {
       expect(sqlQuery).toContain('ELSE 0.0');
     });
   });
+
+  describe('ramp_up refresh (compressed-chunk guard)', () => {
+    const aggregationMocks = () =>
+      mockEntityManager.query
+        .mockResolvedValueOnce([{ count: '100' }])
+        .mockResolvedValueOnce({ rowCount: 0 })
+        .mockResolvedValueOnce([{ expected_rows: 5 }])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ count: 5 }]);
+
+    test('asks with a read, and issues no UPDATE when every flag already matches', async () => {
+      aggregationMocks();
+      // mockDb.query returns [] for the pre-check by default: nothing is stale.
+
+      await pipeline.execute({ testRunIds: ['test-run-001'] });
+
+      const preCheck = mockDb.query.mock.calls
+        .map((c: any[]) => c[0])
+        .find((sql: any) => typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM'));
+
+      // The pre-check must be a SELECT. ramp_up is neither compress_segmentby
+      // (test_run_id) nor compress_orderby (time), so as an UPDATE guard it forces
+      // TimescaleDB to decompress the run's whole segment as DML — 53s and
+      // "tuple decompression limit exceeded" on a 2.6M-row run that needed no write.
+      expect(preCheck).toBeDefined();
+      expect(preCheck).toMatch(/^\s*SELECT/);
+      expect(preCheck).not.toMatch(/UPDATE/i);
+
+      // Nothing stale => no write, and nothing decompressed.
+      expect(interceptedQueries.some((q) => q.includes('UPDATE ds_metrics'))).toBe(false);
+      expect(mockDb.decompressChunksForRange).not.toHaveBeenCalled();
+    });
+
+    test('decompresses the run range before the UPDATE when a flag is stale', async () => {
+      const from = new Date('2026-01-01T10:00:00Z');
+      const to = new Date('2026-01-01T11:00:00Z');
+      mockDb.query.mockImplementation((sql: string) =>
+        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
+          ? Promise.resolve([{ test_run_id: 'test-run-001', start_time: from, end_time: to }])
+          : Promise.resolve([undefined, 0])
+      );
+      aggregationMocks();
+
+      await pipeline.execute({ testRunIds: ['test-run-001'] });
+
+      // Decompress up front, outside the transaction — same guard the force-refetch
+      // path uses at simple-orchestrate-reevaluate-batch.ts, so the UPDATE never
+      // has to decompress as DML.
+      expect(mockDb.decompressChunksForRange).toHaveBeenCalledWith('ds_metrics', from, to);
+      expect(interceptedQueries.some((q) => q.includes('UPDATE ds_metrics'))).toBe(true);
+
+      const decompressOrder = mockDb.decompressChunksForRange.mock.invocationCallOrder[0];
+      const transactionOrder = mockDb.transaction.mock.invocationCallOrder[0];
+      expect(decompressOrder).toBeLessThan(transactionOrder);
+    });
+  });
+
 });

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.93.2] - 2026-09-02
+
+### Fixed
+- **Repairing a baseline no longer fails on older test runs.** The previous release fixed one statement timeout while ADAPT builds a baseline; the repair step that runs just before it hit two more, so analysing a run still ended with ADAPT reporting that it could not build a baseline. Both come from the same place. Perfana compresses measurement data older than seven days, and a compressed run is stored as a single block per test run that cannot be opened part-way — and every baseline run is older than seven days by definition, so the repair met this every time.
+
+  The first problem was reading. Recalculating a run's statistics finishes by recording each metric's last measured value, and it looked that value up with a separate query per metric — around twelve thousand of them on a large run. For a metric that was still reporting when the test ended that lookup is quick, but one that went quiet early forces a search back through the whole run, and enough of those exhaust the time limit. On a run of 2.6 million measurements that step took 60.1 seconds; it now takes 1.2 seconds, because the last value is read in the same pass that already computes the averages and percentiles.
+
+  The second was writing, and it was the larger of the two. Before aggregating, Perfana refreshes each measurement's ramp-up marker so that editing a test's analysis window is reflected in the results. That update was written to touch only rows whose marker actually changes, which reads as safe and is not: deciding which rows those are is itself enough to make the database unpack the entire run. On the same 2.6 million measurement run — where not one marker needed changing — it spent 53.7 seconds unpacking 2.6 million rows and then gave up. Perfana now asks the question with a read first, which leaves the data compressed and takes 0.9 seconds, and only does the work when something genuinely needs updating.
+
+  The figures written out are unchanged, checked metric by metric across 13,047 of them.
+
 ## [0.2.93.1] - 2026-09-02
 
 ### Fixed
