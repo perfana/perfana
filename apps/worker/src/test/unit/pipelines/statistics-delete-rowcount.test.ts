@@ -40,7 +40,9 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
               return (...args: unknown[]) => {
                 if (
                   typeof args[0] === 'string' &&
-                  (args[0].includes('SET LOCAL') || args[0].includes('UPDATE ds_metrics'))
+                  (args[0].includes('SET LOCAL') ||
+                    args[0].includes('set_config') ||
+                    args[0].includes('UPDATE ds_metrics'))
                 ) {
                   return Promise.resolve(undefined);
                 }
@@ -73,9 +75,8 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
   /** Queue the aggregation call sequence, with `deleteResult` for the DELETE. */
   const runWithDeleteResult = async (deleteResult: unknown) => {
     mockEntityManager.query
-      .mockResolvedValueOnce([{ count: '100' }]) // metrics count
+      .mockResolvedValueOnce([{ has_metrics: true }]) // metrics-exist probe
       .mockResolvedValueOnce(deleteResult) // DELETE existing
-      .mockResolvedValueOnce([{ expected_rows: 10 }]) // expected rows
       .mockResolvedValueOnce(undefined) // INSERT
       .mockResolvedValueOnce([{ count: 10 }]); // actual count
 
@@ -106,9 +107,8 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
 
   test('names the affected test runs alongside the count', async () => {
     mockEntityManager.query
-      .mockResolvedValueOnce([{ count: '100' }])
+      .mockResolvedValueOnce([{ has_metrics: true }])
       .mockResolvedValueOnce([[], 12])
-      .mockResolvedValueOnce([{ expected_rows: 10 }])
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce([{ count: 10 }]);
 

@@ -97,7 +97,9 @@ The third case is the one that used to be reported as the first, which sent peop
 
 ### The `pct_agg` fast path
 
-`ControlGroupStatisticsPipeline` pools the per-run t-digest stored in `ds_metric_statistics.pct_agg` with `rollup(pct_agg)`. Rows written before that column existed — or restored from a backup or a SUT transfer — have `pct_agg = NULL`, and the pipeline falls back to scanning `ds_metrics` raw. On a baseline holding millions of data points that scan exceeds `ANALYTICS_STATEMENT_TIMEOUT_MS` (default 120s), so `ds_control_group_statistics` is never written and ADAPT sees no baseline.
+`ControlGroupStatisticsPipeline` pools the per-run t-digest stored in `ds_metric_statistics.pct_agg` with `rollup(pct_agg)`. Rows written before that column existed — or restored from a backup or a SUT transfer — have `pct_agg = NULL`, and the pipeline falls back to scanning `ds_metrics` raw. On a baseline holding millions of data points that scan runs out of time, so `ds_control_group_statistics` is never written and ADAPT sees no baseline.
+
+Since v0.2.93.3 the aggregation has its own time budget, `AGGREGATION_STATEMENT_TIMEOUT_MS` (default 540s), rather than sharing `ANALYTICS_STATEMENT_TIMEOUT_MS` (default 120s) with the rest of the analytics workload. That cap exists to stop a runaway read from crowding everything else out and has to stay lowerable; the aggregation is the job's own work and a 20-million-row run needs longer. The budget is raised for the whole transaction, not just the final insert, because the step before it — refreshing each measurement's ramp-up marker — was the one most likely to exceed the old limit. 540s rather than 600s is deliberate: at 600s the database connection's own client-side timeout fires first and the connection is dropped, which loses the clean rollback and the error message that says what happened.
 
 Since v0.2.90.0 the pipeline repairs this itself: before aggregating, it reruns `StatisticsPipeline` on any control run missing `pct_agg`, which rebuilds the sketches from `ds_metrics` already in the database. It is best-effort — if the rebuild fails, the legacy scan still runs and says so in the log.
 

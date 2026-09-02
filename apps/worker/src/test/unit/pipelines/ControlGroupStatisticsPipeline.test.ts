@@ -48,10 +48,23 @@ const mockLogger: Logger = {
 } as any;
 
 describe('ControlGroupStatisticsPipeline', () => {
+
+  // Find the aggregation INSERT by its SQL rather than by position — positional
+  // indices broke every time a diagnostic query was added or removed.
+  const aggregationCall = (): any[] =>
+    (mockEntityManager.query as any).mock.calls.find((c: any[]) =>
+      String(c[0]).includes('INSERT INTO ds_control_group_statistics')
+    );
+  const aggregationSql = (): string => aggregationCall()[0];
   let pipeline: ControlGroupStatisticsPipeline;
   let mockEntityManager: Partial<EntityManager>;
+  // In-transaction statements the proxy swallows so they don't shift mock.calls
+  // indices. Recorded, not discarded: dropping them made the aggregation budget
+  // untestable — deleting it from the pipeline left all 30 tests green.
+  let interceptedCalls: Array<[string, unknown[]?]>;
 
   beforeEach(() => {
+    interceptedCalls = [];
     // Reset all mocks
     vi.clearAllMocks();
 
@@ -68,7 +81,11 @@ describe('ControlGroupStatisticsPipeline', () => {
         get(target: any, prop: string) {
           if (prop === 'query') {
             return (...args: any[]) => {
-              if (typeof args[0] === 'string' && args[0].includes('SET LOCAL')) {
+              if (
+                typeof args[0] === 'string' &&
+                (args[0].includes('SET LOCAL') || args[0].includes('set_config'))
+              ) {
+                interceptedCalls.push([args[0], args[1] as unknown[] | undefined]);
                 return Promise.resolve(undefined);
               }
               return target.query(...args);
@@ -171,9 +188,6 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query (fast-path eligible — no missing pct_agg)
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
-      // Mock expected rows count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 50 }]);
-
       // Mock insert query with rowCount
       (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
 
@@ -210,7 +224,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         }])
         .mockResolvedValueOnce([{ count: '50' }])
         .mockResolvedValueOnce([{ missing_sketches: 0 }])
-        .mockResolvedValueOnce([{ expected_rows: 25 }])
         .mockResolvedValueOnce({ rowCount: 25 })
         .mockResolvedValueOnce([{
           control_group_id: 'test-run-2',
@@ -222,7 +235,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         }])
         .mockResolvedValueOnce([{ count: '75' }])
         .mockResolvedValueOnce([{ missing_sketches: 0 }])
-        .mockResolvedValueOnce([{ expected_rows: 30 }])
         .mockResolvedValueOnce({ rowCount: 30 });
 
       const result = await pipeline.execute(input);
@@ -259,9 +271,6 @@ describe('ControlGroupStatisticsPipeline', () => {
 
       // Mock sketch availability query (fast-path eligible)
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
-
-      // Mock expected rows count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 5 }]);
 
       // Mock insert query
       (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 5 });
@@ -404,7 +413,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       );
     });
 
-    test('should handle zero statistics inserted due to ON CONFLICT', async () => {
+    test('warns when the aggregation writes nothing', async () => {
       const input: ControlGroupStatisticsInput = {
         controlGroupIds: ['control-group-1']
       };
@@ -430,10 +439,6 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query (fast-path eligible)
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
-      // Mock expected rows count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 50 }]);
-
-      // Mock insert query with 0 rows inserted (all conflicts)
       (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 0 });
 
       const result = await pipeline.execute(input);
@@ -444,9 +449,9 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroups: 1
       });
 
-      // Verify info message about conflicts
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('statistics already exist')
+      // Verify the empty result is flagged
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('No metrics were available to aggregate')
       );
     });
 
@@ -476,9 +481,6 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query (fast-path eligible)
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
-      // Mock expected rows count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 100 }]);
-
       // Mock insert query with partial inserts (60 new, 40 updated)
       (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 60 });
 
@@ -490,9 +492,9 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroups: 1
       });
 
-      // Verify info message about partial inserts
+      // Verify the summary reports what the INSERT actually wrote
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Inserted 60 new records, updated 40 existing records')
+        expect.stringContaining('60 row(s) inserted or updated')
       );
     });
   });
@@ -577,9 +579,6 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query (fast-path eligible)
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
-      // Mock expected rows count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 50 }]);
-
       // Mock insert query failure
       (mockEntityManager.query as any).mockRejectedValueOnce(
         new Error('Aggregation query timeout')
@@ -639,9 +638,6 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query (fast-path eligible)
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
-      // Mock expected rows count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 5 }]);
-
       // Mock insert query
       (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 5 });
 
@@ -651,6 +647,42 @@ describe('ControlGroupStatisticsPipeline', () => {
       expect(mockDatabaseService.query).toHaveBeenCalledWith(
         expect.stringContaining('DELETE FROM ds_control_group_statistics')
       );
+    });
+  });
+
+  describe('Aggregation budget', () => {
+    test('raises the budget once for the whole batch, under the pool query_timeout', async () => {
+      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
+      for (const i of [1, 2]) {
+        (mockEntityManager.query as any)
+          .mockResolvedValueOnce([{
+            control_group_id: `control-group-${i}`,
+            system_under_test_id: 'system-1',
+            workload: 'load-test',
+            test_environment: 'production',
+            test_runs: [`test-run-${i}`],
+            n_test_runs: 1,
+          }])
+          .mockResolvedValueOnce([{ count: '100' }])
+          .mockResolvedValueOnce([{ missing_sketches: 0 }])
+          .mockResolvedValueOnce({ rowCount: 50 });
+      }
+
+      await pipeline.execute({ controlGroupIds: ['control-group-1', 'control-group-2'] });
+
+      const settings = interceptedCalls.filter(([sql]) => sql.includes('set_config'));
+      const byName = new Map(settings.map(([, params]) => [String(params?.[0]), String(params?.[1])]));
+
+      expect(Number(byName.get('statement_timeout'))).toBeGreaterThan(120000);
+      // Strictly under the analytics pool's client-side query_timeout (600000):
+      // at equal deadlines node-postgres tears the connection down instead of
+      // letting Postgres cancel, losing the rollback and the diagnosable error.
+      expect(Number(byName.get('statement_timeout'))).toBeLessThan(600000);
+      expect(byName.get('work_mem')).toBeTruthy();
+
+      // Once for the transaction, not once per group — SET LOCAL is
+      // transaction-scoped, so a per-group call would be misleading, not stricter.
+      expect(settings).toHaveLength(2);
     });
   });
 
@@ -676,7 +708,6 @@ describe('ControlGroupStatisticsPipeline', () => {
           }])
           .mockResolvedValueOnce([{ count: `${i * 10}` }])
           .mockResolvedValueOnce([{ missing_sketches: 0 }])
-          .mockResolvedValueOnce([{ expected_rows: i * 5 }])
           .mockResolvedValueOnce({ rowCount: i * 5 });
       }
 
@@ -689,7 +720,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       });
 
       // Verify all control groups were processed
-      expect(mockEntityManager.query).toHaveBeenCalledTimes(15); // 5 queries per control group (incl. sketch availability)
+      expect(mockEntityManager.query).toHaveBeenCalledTimes(12); // 4 per control group: fetch, stats count, sketch availability, INSERT
     });
 
     test('should continue processing after encountering missing control group', async () => {
@@ -712,7 +743,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         }])
         .mockResolvedValueOnce([{ count: '10' }])
         .mockResolvedValueOnce([{ missing_sketches: 0 }])
-        .mockResolvedValueOnce([{ expected_rows: 5 }])
         .mockResolvedValueOnce({ rowCount: 5 })
         // Mock missing-group (empty result)
         .mockResolvedValueOnce([])
@@ -727,7 +757,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         }])
         .mockResolvedValueOnce([{ count: '15' }])
         .mockResolvedValueOnce([{ missing_sketches: 0 }])
-        .mockResolvedValueOnce([{ expected_rows: 7 }])
         .mockResolvedValueOnce({ rowCount: 7 });
 
       const result = await pipeline.execute(input);
@@ -767,18 +796,12 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query — every per-run row has pct_agg → fast path
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
-      // Mock expected rows count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 50 }]);
-
       // Mock insert query
       (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
 
       await pipeline.execute(input);
 
-      // The INSERT/aggregation query is mock.calls[4]:
-      // [0] control group, [1] metric count, [2] sketch availability,
-      // [3] expected rows, [4] aggregation INSERT.
-      const statisticsQueryCall = (mockEntityManager.query as any).mock.calls[4];
+      const statisticsQueryCall = aggregationCall();
       expect(statisticsQueryCall[0]).toContain('INSERT INTO ds_control_group_statistics');
       expect(statisticsQueryCall[0]).toContain('per_run_pooled');
       expect(statisticsQueryCall[0]).toContain('rollup(ms.pct_agg)');
@@ -815,15 +838,12 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query — pre-#289 rows present → legacy path
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 7 }]);
 
-      // Mock expected rows count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 50 }]);
-
       // Mock insert query
       (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
 
       await pipeline.execute(input);
 
-      const statisticsQueryCall = (mockEntityManager.query as any).mock.calls[4];
+      const statisticsQueryCall = aggregationCall();
       expect(statisticsQueryCall[0]).toContain('INSERT INTO ds_control_group_statistics');
       expect(statisticsQueryCall[0]).toContain('FROM ds_metrics m');
       expect(statisticsQueryCall[0]).toContain('AVG(m.value) as mean');
@@ -854,12 +874,11 @@ describe('ControlGroupStatisticsPipeline', () => {
       ]);
       (mockEntityManager.query as any).mockResolvedValueOnce([{ count: '100' }]);
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: missingSketches }]);
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ expected_rows: 50 }]);
       (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
 
       await pipeline.execute({ controlGroupIds: ['control-group-1'] });
 
-      const sql: string = (mockEntityManager.query as any).mock.calls[4][0];
+      const sql: string = aggregationSql();
       expect(sql).toContain('scoped_dashboards AS (');
       expect(sql).toContain('IN (SELECT application_dashboard_id FROM scoped_dashboards)');
       // No per-row correlation with the joined test_runs row.

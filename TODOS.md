@@ -293,6 +293,31 @@ dead branch.
 the INSERT along with their docs, or missing-data really should be counted, in which case the
 count has to happen before the NULL filter rather than after it.
 
+### The stale-`ramp_up` pre-check scans every `ds_metrics` chunk ever created
+
+**Priority:** P3
+**Origin:** performance specialist during /ship on `perf/statistics-aggregation-timeouts` (2026-09-02).
+**Why:** `findRunsWithStaleRampUpFlags` joins `ds_metrics` with no predicate on `time`, so the
+planner gets no chunk exclusion and considers every chunk of the hypertable for the run. On a
+deploy with years of retention that is thousands of chunk-planning steps before a row is read, and
+v0.2.93.3 made it worse by replacing the early-exit `EXISTS` with an unconditional `MIN/MAX`
+aggregate that runs on every statistics job.
+**What to do:** bound it with `AND m.time >= tr.start_time - <margin> AND m.time <= tr.end_time +
+<margin>`. Confirm first that no collected sample legitimately lands outside the run window — a
+trailing scrape excluded by the bound would keep its stale flag forever — and take the margin from
+the collector's step, not zero.
+
+### `StatisticsPipeline.test.ts` repeats the same four-line mock chain 35 times
+
+**Priority:** P4
+**Origin:** maintainability specialist during /ship on `perf/statistics-aggregation-timeouts` (2026-09-02).
+**Why:** every test builds the aggregation mock chain inline, so adding or removing one query in
+the pipeline is a 35-site hand edit — paid twice already in v0.2.93.3 (dropping the expected-rows
+count, then adding `set_config`). The file already has the right abstraction: `aggregationMocks()`,
+used by only the handful of tests in the `ramp_up refresh` describe block.
+**What to do:** hoist `aggregationMocks()` to the top-level describe, parameterised on the deleted
+and actual counts, and replace the inline copies. Pure test refactor, no behaviour change.
+
 ## Dynatrace
 
 ### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster

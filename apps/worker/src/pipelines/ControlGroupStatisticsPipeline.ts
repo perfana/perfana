@@ -142,6 +142,12 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       await this.backfillMissingSketches(groupIds);
 
       const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
+        // Once for the whole batch, not per group. SET LOCAL is transaction-scoped,
+        // so setting it inside calculateStatisticsForControlGroup would silently
+        // widen the budget for every LATER group anyway — stating it here makes the
+        // scope match what actually happens.
+        await this.setAggregationBudget(manager);
+
         // Process statistics for each control group
         let totalStatisticsCreated = 0;
 
@@ -673,58 +679,23 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
 
     this.logger.info(`🚀 Executing control group statistics aggregation INSERT...`);
 
-    // First, count how many rows the aggregation would produce
-    const countQuery = `
-      WITH control_metrics_metadata AS (
-        SELECT
-          ms.application_dashboard_id,
-          ms.panel_id,
-          ms.metric_name
-        FROM ds_metric_statistics ms
-        WHERE ms.test_run_id = ANY($1::varchar[])
-      ),
-      raw_metrics AS (
-        SELECT
-          application_dashboard_id,
-          panel_id,
-          metric_name
-        FROM ds_metrics
-        WHERE test_run_id = ANY($1::varchar[])
-          AND value IS NOT NULL
-      )
-      SELECT COUNT(DISTINCT (m.application_dashboard_id, m.panel_id, m.metric_name))::integer as expected_rows
-      FROM control_metrics_metadata m
-      WHERE EXISTS (
-        SELECT 1 FROM raw_metrics r
-        WHERE r.application_dashboard_id = m.application_dashboard_id
-        AND r.panel_id = m.panel_id
-        AND r.metric_name = m.metric_name
-      )
-    `;
-
-    const expectedCount = await manager.query(countQuery, [controlGroup.test_runs]);
-    const expectedRows = expectedCount[0]?.expected_rows || 0;
-
-    this.logger.info(`📊 Aggregation will process ${expectedRows} unique metrics`);
-
+    // There used to be a COUNT(DISTINCT (dashboard, panel, metric)) here, joining
+    // ds_metric_statistics against a raw ds_metrics scan of every control run, to
+    // log "will process N unique metrics" and compare it with the row count below.
+    // It ran on BOTH paths — so the #289 fast path still paid the full raw scan it
+    // exists to avoid, and on a 20M-row control run that scan alone can outlast the
+    // statement timeout. The INSERT's own rowCount says everything the log needs.
     const result = await manager.query(statisticsQuery, [controlGroupId, controlGroup.test_runs, controlGroup.organization_id || null, controlGroup.team_id || null]);
 
     // For INSERT with ON CONFLICT, TypeORM returns the pg driver result with rowCount
     const rowCount = (result).rowCount || 0;
 
-    this.logger.info(`✅ Control group statistics aggregation completed`);
-    this.logger.info(`   📝 Processed: ${expectedRows} unique metrics`);
-    this.logger.info(`   📝 Inserted: ${rowCount} new statistic records`);
-    this.logger.info(`   📊 Source: ${totalMetricStats} metric statistics from ${controlGroup.n_test_runs} control runs`);
+    this.logger.info(
+      `✅ Control group statistics aggregation completed: ${rowCount} row(s) inserted or updated, from ${totalMetricStats} metric statistics across ${controlGroup.n_test_runs} control runs`
+    );
 
-    if (rowCount === 0 && expectedRows > 0) {
-      this.logger.info(`ℹ️  All ${expectedRows} statistics already exist (ON CONFLICT updated existing records)`);
-    } else if (rowCount === 0 && expectedRows === 0) {
+    if (rowCount === 0) {
       this.logger.warn(`⚠️ No metrics were available to aggregate`);
-    } else if (rowCount < expectedRows) {
-      this.logger.info(`ℹ️  Inserted ${rowCount} new records, updated ${expectedRows - rowCount} existing records`);
-    } else {
-      this.logger.info(`✅ All ${rowCount} records are new`);
     }
 
     return rowCount;

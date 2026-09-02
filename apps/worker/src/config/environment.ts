@@ -56,6 +56,23 @@ const envSchema = z.object({
   // Prevents queries from holding connections indefinitely under load.
   ANALYTICS_STATEMENT_TIMEOUT_MS: z.coerce.number().default(120000),
 
+  // Budget for the heavy aggregation transactions (StatisticsPipeline,
+  // ControlGroupStatisticsPipeline). Separate from ANALYTICS_STATEMENT_TIMEOUT_MS
+  // on purpose: that one is a CAP on runaway reads and must stay lowerable, while
+  // these two are the job's own work and a 20M-row run needs more than 120s.
+  // Same shape as ROLLUP_STATEMENT_TIMEOUT_MS in TransactionStatsRollupPipeline.
+  //
+  // Keep the timeout strictly BELOW the analytics pool's client-side query_timeout
+  // (600000, config/typeorm.config.ts). At equal deadlines node-postgres destroys
+  // the connection instead of letting Postgres cancel the statement, which loses
+  // both the clean rollback and the diagnosable error.
+  //
+  // work_mem is charged per hash/sort node AND per parallel worker, then again per
+  // concurrent job (WORKER_ANALYZE_CONCURRENCY + WORKER_BATCH_CONCURRENCY, 2 each),
+  // so the deploy-wide peak is roughly this value x (1 + max_parallel_workers_per_gather) x 4.
+  AGGREGATION_STATEMENT_TIMEOUT_MS: z.coerce.number().default(540000),
+  AGGREGATION_WORK_MEM: z.string().default('128MB'),
+
   // Performance Tuning
   DB_POOL_SIZE: z.coerce.number().default(30), // Pool for 2 concurrent analyze jobs + headroom (reduced from 100 after write starvation post-mortem)
   METRICS_BATCH_SIZE: z.coerce.number().default(200),
