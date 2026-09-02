@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.93.3] - 2026-09-02
+
+### Fixed
+- **Re-evaluating several test runs at once no longer stalls and then gives up.** The previous two releases each removed one reason the baseline step ran out of time; this one removes the rest, found by reading the logs from a batch that still failed after upgrading.
+
+  Most of the time was being spent answering questions nobody asked. Before aggregating a run, Perfana counted its measurements twice — once for a total and once for a distinct count — purely to write two numbers into the log. On a run of 20.6 million measurements those two counts took 16 and 32 seconds, and both had to read through compressed data to do it. The first is now a yes/no check that stops at the first row it finds, and only exists to protect statistics belonging to a run whose measurements have since aged out; the second is gone entirely, because the number it produced is one the aggregation already reports. A third count of the same kind, in the control-group step, was reading raw measurements for every baseline run — and it did so on the fast path as well, which is the one path built specifically to avoid that read.
+
+  The time limit was also wrong for the work. Heavy background aggregation was sharing a limit meant to stop a runaway query from crowding out everything else, and that limit is two minutes. It now has its own, nine minutes, which can be tuned per deployment and is deliberately kept below the point at which the connection itself would be dropped — losing a clean error is worse than waiting. The limit is now raised for the whole unit of work rather than just the final step, because the step before it, which refreshes each measurement's ramp-up marker, was the one most likely to exceed it.
+
+  Finally, that refresh was doing far more work than it needed to. Perfana stores measurements older than seven days compressed, in blocks covering a span of time rather than a single test run, and updating a marker requires unpacking a block first. The refresh was unpacking every block the run touched — several hours' worth, containing every other run in the same period — and a batch of runs spanning months unpacked the months between them. It now unpacks only the span in which markers actually disagree, run by run, which for the usual case of a stale trailing marker is minutes rather than hours. Everything left unpacked stays fast to read; everything unpacked unnecessarily was slowing down every later query over that period until the compression schedule caught up.
+
 ## [0.2.93.2] - 2026-09-02
 
 ### Fixed
