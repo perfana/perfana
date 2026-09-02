@@ -34,6 +34,11 @@ export class ProgressReporter {
   private startedAt: string;
   private lastProgressAt: string;
   private status: JobStatus = 'active';
+  /**
+   * The run the current stage is working on. Cleared by startStage so a
+   * batch-wide stage never inherits the previous stage's run.
+   */
+  private currentTestRun: { testRunId: string; index: number; total: number } | null = null;
   private debounceTimer: NodeJS.Timeout | null = null;
   private pendingUpdate: boolean = false;
 
@@ -75,6 +80,7 @@ export class ProgressReporter {
     this.currentStage = stageName;
     this.currentStageIndex = stageIndex + 1; // 1-based for display
     this.currentStageProgress = 0;
+    this.currentTestRun = null;
 
     logger.info(`🔷 Stage started: ${stageName} (${this.currentStageIndex}/${this.stages.length})`, {
       jobId: this.job.id,
@@ -85,10 +91,20 @@ export class ProgressReporter {
   }
 
   /**
-   * Update progress within the current stage (0-100)
+   * Update progress within the current stage (0-100).
+   *
+   * `currentTestRun` is for the stages that walk the batch one run at a time. The
+   * percentage alone tells a user how far along the stage is but not which run is
+   * being worked on, and the reporter's own testRunId is the batch anchor
+   * (testRunIds[0]) for every stage — so without this the UI names one run for the
+   * whole batch. Omit it for a stage that processes the batch in one go.
    */
-  async updateStageProgress(percent: number): Promise<void> {
+  async updateStageProgress(
+    percent: number,
+    currentTestRun?: { testRunId: string; index: number; total: number }
+  ): Promise<void> {
     this.currentStageProgress = Math.min(100, Math.max(0, percent));
+    if (currentTestRun) {this.currentTestRun = currentTestRun;}
     await this.debouncedPublish();
   }
 
@@ -262,6 +278,9 @@ export class ProgressReporter {
       startedAt: this.startedAt,
       lastProgressAt: this.lastProgressAt,
       status: this.status,
+      currentTestRunId: this.currentTestRun?.testRunId,
+      currentTestRunIndex: this.currentTestRun?.index,
+      totalTestRuns: this.currentTestRun?.total,
     };
   }
 
