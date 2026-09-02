@@ -26,17 +26,17 @@ export interface StatisticsInput {
  *   statistics_aggregated     GROUP BY (test_run, dashboard, panel, metric):
  *        │                      - Classical: COUNT, AVG (mean), MIN, MAX, STDDEV_POP
  *        │                      - TimescaleDB: percentile_agg(value) — single-pass t-digest sketch
- *        │                      - Auxiliary: n_missing, n_non_zero, distinct_count
+ *        │                      - Auxiliary: n_missing, n_non_zero, is_constant
  *        ▼
  *   final_statistics          Derives remaining columns from the aggregates:
  *        │                      - Percentiles via approx_percentile(p, pct_agg):
  *        │                          median (p50), q10, q25, q75, q90, q95, q99
  *        │                      - IQR = q75 - q25  (interquartile range — robust spread)
  *        │                      - IDR = q90 - q10  (interdecile range — wider robust spread)
- *        │                      - is_constant: true when all values are identical (distinct_count=1)
+ *        │                      - is_constant: true when all values are identical (min = max)
  *        │                      - all_missing: true when every observation is NULL
  *        │                      - pct_missing: percentage of NULL observations
- *        │                      - last_value: value at the latest timestamp (via LATERAL subquery)
+ *        │                      - last_value: value at the latest timestamp (via last())
  *        ▼
  *   INSERT INTO ds_metric_statistics  (delete-then-insert for idempotent re-runs)
  *
@@ -61,7 +61,7 @@ export interface StatisticsInput {
  * ──────────────────────────────────────────────────────────────────────────────
  * Quality Flags
  * ──────────────────────────────────────────────────────────────────────────────
- * - is_constant:  All observed values are identical (distinct_count = 1).
+ * - is_constant:  All observed values are identical (min = max).
  *                 Downstream ADAPT treats these specially since std_dev = 0
  *                 makes ratio-based thresholds meaningless.
  * - all_missing:  Every observation in the group is NULL (count = n_missing).
@@ -300,17 +300,23 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               -- instead of re-scanning ds_metrics for every re-evaluate.
               percentile_agg(value) as pct_agg,
 
-              -- Track max timestamp so the LATERAL join in final_statistics can
-              -- efficiently fetch last_value without ARRAY_AGG + sort.
-              MAX(time) as max_time,
+              -- TimescaleDB last(): value at the greatest time, in the pass that is
+              -- already running. This used to be a LEFT JOIN LATERAL on ds_metrics in
+              -- final_statistics. ds_metrics is compressed with segmentby=test_run_id,
+              -- so a compressed chunk cannot push down application_dashboard_id/panel_id/
+              -- metric_name — every group decompressed the whole run's segment, once per
+              -- group. Fine on a fresh run, a statement timeout on any run older than the
+              -- 7-day compression policy (which is every run the sketch backfill visits).
+              last(value, time) as last_value,
 
               -- n_missing: always 0 here because WHERE filters out NULLs, but kept
               -- for schema compatibility. Downstream code may re-count from raw data.
               COUNT(CASE WHEN value IS NULL THEN 1 END) as n_missing,
               COUNT(CASE WHEN value > 0 THEN 1 END) as n_non_zero,
 
-              -- distinct_count = 1 → metric is constant (used for is_constant flag)
-              COUNT(DISTINCT value) as distinct_count,
+              -- Constant ⇔ min = max, since NULLs are filtered out above. Both are
+              -- already aggregated; COUNT(DISTINCT value) needed its own per-group sort.
+              (MIN(value) = MAX(value)) as is_constant,
               -- These columns are identical within each group; MIN() is just a
               -- deterministic way to pick one value without a window function.
               MIN(unit) as unit,
@@ -358,8 +364,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               sa.min_value,
               sa.max_value,
               sa.std_dev,
-              -- last_value via LATERAL subquery (avoids ARRAY_AGG of entire column)
-              lv.value as last_value,
+              sa.last_value,
 
               sa.n_missing,
               sa.n_non_zero,
@@ -389,8 +394,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               -- useful for understanding tail behavior in response time metrics.
               (approx_percentile(0.90, sa.pct_agg) - approx_percentile(0.10, sa.pct_agg)) as idr,
 
-              (sa.distinct_count = 1) as is_constant,
-              (sa.distinct_count = 1) as constant_value,  -- alias kept for backward compat
+              sa.is_constant,
+              sa.is_constant as constant_value,  -- alias kept for backward compat
               (sa.count = sa.n_missing) as all_missing,
 
               CASE
@@ -413,18 +418,6 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
 
           FROM statistics_aggregated sa
           LEFT JOIN run_orgs tr ON tr.test_run_id = sa.test_run_id
-          LEFT JOIN LATERAL (
-              SELECT mf2.value
-              FROM ds_metrics mf2
-              WHERE mf2.test_run_id = sa.test_run_id
-                AND mf2.application_dashboard_id = sa.application_dashboard_id
-                AND mf2.panel_id = sa.panel_id
-                AND mf2.metric_name = sa.metric_name
-                AND mf2.ramp_up = false
-                AND mf2.value IS NOT NULL
-              ORDER BY mf2.time DESC
-              LIMIT 1
-          ) lv ON true
       )
 
       INSERT INTO ds_metric_statistics (

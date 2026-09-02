@@ -557,7 +557,14 @@ describe('StatisticsPipeline', () => {
       const aggregationCall = mockEntityManager.query.mock.calls[3];
       const sqlQuery = aggregationCall[0];
 
-      expect(sqlQuery).toContain('lv.value as last_value');
+      // last() runs inside the aggregate pass that is already scanning these rows.
+      // The LATERAL it replaced re-scanned ds_metrics once per output group; on a
+      // compressed chunk (segmentby=test_run_id) that decompressed the whole run's
+      // segment every time, so the guard below is the regression that matters.
+      expect(sqlQuery).toContain('last(value, time) as last_value');
+      // Strip SQL comments first — the query's own comment explains the LATERAL
+      // it replaced, and that prose must not satisfy the guard.
+      expect(sqlQuery.replace(/--[^\n]*/g, '')).not.toMatch(/JOIN\s+LATERAL/);
     });
 
     test('should join with test_runs to get start_time', async () => {
