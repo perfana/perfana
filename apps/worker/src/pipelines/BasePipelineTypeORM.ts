@@ -16,6 +16,21 @@ import { EntityManager } from 'typeorm';
  * - Error handling
  * - Input validation
  */
+/**
+ * Budget for a heavy background aggregation, mirrored in config/environment.ts
+ * (AGGREGATION_STATEMENT_TIMEOUT_MS / AGGREGATION_WORK_MEM) so a bad value is
+ * rejected at boot. Read from process.env rather than getConfig() because the
+ * full schema requires secrets a unit test has no reason to provide — the same
+ * reason TransactionStatsRollupPipeline reads ROLLUP_STATEMENT_TIMEOUT_MS directly.
+ *
+ * 540s, not 600s: the analytics pool sets a client-side query_timeout of 600000
+ * (config/typeorm.config.ts). At equal deadlines node-postgres tears the connection
+ * down instead of letting Postgres cancel the statement, so you lose the clean
+ * rollback and get a torn socket instead of `canceling statement due to ...`.
+ */
+const AGGREGATION_STATEMENT_TIMEOUT_DEFAULT_MS = 540000;
+const AGGREGATION_WORK_MEM_DEFAULT = '128MB';
+
 export abstract class BasePipelineTypeORM implements Pipeline {
   protected timer: PerformanceTimer;
   protected db: WorkerDatabaseService;
@@ -76,6 +91,30 @@ export abstract class BasePipelineTypeORM implements Pipeline {
       await manager.query(`SET LOCAL statement_timeout = '${timeoutMs}'`);
       return operation(manager);
     });
+  }
+
+  /**
+   * Widen this transaction's budget for a heavy aggregation.
+   *
+   * Call it ONCE at the top of the withAnalyticsTransaction callback, never beside
+   * the INSERT. `SET LOCAL` is transaction-scoped, so placing it next to the
+   * aggregation leaves every earlier statement on the 120s cap — including
+   * StatisticsPipeline's ramp_up refresh, which rewrites a compressed run and is
+   * the statement most likely to exceed it.
+   *
+   * `set_config(name, value, true)` rather than an interpolated `SET LOCAL`: it
+   * binds the value, so an operator-supplied env string never reaches the parser,
+   * and a non-numeric timeout cannot abort the transaction as `'NaN'`.
+   */
+  protected async setAggregationBudget(manager: EntityManager): Promise<void> {
+    const parsed = Number.parseInt(process.env.AGGREGATION_STATEMENT_TIMEOUT_MS ?? '', 10);
+    const timeoutMs = Number.isFinite(parsed) ? parsed : AGGREGATION_STATEMENT_TIMEOUT_DEFAULT_MS;
+    const workMem = process.env.AGGREGATION_WORK_MEM || AGGREGATION_WORK_MEM_DEFAULT;
+
+    await manager.query('SELECT set_config($1, $2, true)', ['statement_timeout', String(timeoutMs)]);
+    // Keeps ~20k percentile_agg sketches in a HashAggregate; spilling turns the
+    // aggregation into a GroupAggregate that sorts every input row to disk.
+    await manager.query('SELECT set_config($1, $2, true)', ['work_mem', workMem]);
   }
 
   /**

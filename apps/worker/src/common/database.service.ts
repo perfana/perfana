@@ -872,8 +872,13 @@ export class WorkerDatabaseService implements OnModuleInit {
       }
     } catch (err) {
       // Compression not enabled, timescaledb missing, or table not a hypertable → nothing to do.
+      //
+      // warn, not debug: callers rely on this having decompressed before they run a
+      // DML guard on a non-segmentby column. When it silently no-ops (chunk owned by
+      // another role, recompressed in between, TimescaleDB error) the caller hits
+      // `tuple decompression limit exceeded` with nothing in the log explaining why.
       const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'unknown error';
-      this.logger.debug(`decompressChunksForRange(${hypertable}) skipped: ${msg}`);
+      this.logger.warn(`decompressChunksForRange(${hypertable}) skipped: ${msg}`);
     }
   }
 
