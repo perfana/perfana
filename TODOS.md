@@ -276,6 +276,23 @@ the same silent way.
 a real RLS context under `perfana_system`. This is the worker-side twin of the API-key
 deployment constraint already documented in CLAUDE.md; nothing enforces either yet.
 
+### `all_missing` / `pct_missing` are structurally unreachable
+
+**Priority:** P4
+**Origin:** adversarial review during /ship on `fix/statistics-lateral-last-value` (2026-09-02).
+**Why:** in `StatisticsPipeline`, `metrics_filtered` already applies `AND m.value IS NOT NULL`, so
+`n_missing` (`COUNT(CASE WHEN value IS NULL THEN 1 END)`) is always 0. Everything derived from it
+is therefore constant: `all_missing` (`sa.count = sa.n_missing`) is always false, and
+`pct_missing` / `missing_percentage` are always 0.0. Confirmed across all 58,319 rows currently in
+`ds_metric_statistics`.
+**Why it matters:** CLAUDE.md and the pipeline's own docblock describe `all_missing` as "every
+observation in the group is NULL … ADAPT labels these incomparable", which is behaviour that
+cannot occur. Anyone reasoning about missing-data handling from those docs is reasoning about a
+dead branch.
+**What to do:** decide which is true — either the columns are vestigial and should be dropped from
+the INSERT along with their docs, or missing-data really should be counted, in which case the
+count has to happen before the NULL filter rather than after it.
+
 ## Dynatrace
 
 ### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster
@@ -522,6 +539,29 @@ escaper go back to being broad without printing artifacts.
 
 
 ## Quality gates
+
+### The worker integration suite is dead code, not dormant coverage
+
+**Priority:** P3
+**Origin:** the v0.2.93.2 testing-specialist review (2026-09-02). The specialist flagged
+`apps/worker/src/test/integration/` as excluded from the default run; running it showed it is
+worse than that.
+**Why:** `apps/worker/vitest.config.ts` excludes `src/test/integration/**` and `src/test/e2e/**`,
+so neither `npm run test` nor `npm run preflight` touches them, and no CI workflow calls
+`test:integration`. Nothing has noticed that the suite stopped working. `clearTestData`
+(`apps/worker/src/test/helpers/database.ts:265`) issues `DELETE FROM ds_panel_metrics` and
+`DELETE FROM ds_panels` — tables that no longer exist in the schema — so every one of the 33
+tests in `statistics-pipeline.integration.test.ts` errors in `beforeEach` before reaching an
+assertion. Verified against a freshly created `perfana_test` with timescaledb + toolkit
+installed: `error: relation "ds_panel_metrics" does not exist`, 33 failed.
+**What it costs:** this is where the only *behavioural* coverage of `StatisticsPipeline` lives —
+`last_value` (line 611), `is_constant` / `constant_value` (lines 869, 899), benchmark id
+extraction, dashboard metadata. The unit suite only asserts on the SQL *string* against a mocked
+EntityManager, so it can prove the query says what we meant and never that Postgres agrees. The
+v0.2.93.2 `last()` / `MIN=MAX` change had to be verified by hand against a live database instead.
+**What to do:** repair `clearTestData` against the current schema, run the suite once to find the
+rest of the rot, then wire it into a gated job so it fails instead of silently never running.
+Until then do not count it as coverage.
 
 ### Three gates report success for code they never examine
 
