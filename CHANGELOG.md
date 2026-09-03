@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.1] - 2026-09-03
+
+### Fixed
+- **Analysing a test run no longer reads the whole run's measurement data twice over to write a warning.** The data sanity check that runs at the end of every analysis looks for metrics with very few data points, so it can warn that a dashboard is probably misconfigured. To find them it grouped every measurement in the run by name — a question the stored data is not arranged to answer, so the database had to read all of it. Measured across a re-evaluate of four large runs, that single query read 103 GB to return about six thousand rows, and accounted for 92% of all the reading the database did in that window. The counts it needs were already calculated and stored earlier in the same analysis, so it now reads those instead. A second query in the same check counted every measurement in the run only to ask whether there were any at all; it now stops at the first one it finds.
+
+  The visible symptom of this was a deployment that felt slow for reasons no single slow query explained. Because the work was reading rather than computing, it pushed everything else's data out of the database's memory cache on its way past, so unrelated pages and queries got slower while it ran.
+
+  One consequence worth knowing about before you upgrade: the sparse-metric warning now counts only the measurements that actually fall inside the analysis window, where before it counted everything including the warm-up period. A metric with a thousand measurements of which nearly all are warm-up used to pass silently and will now be flagged. If a workload is configured with a long warm-up, expect new warnings on runs that were previously quiet. They are not new problems; they were always there and were being hidden by measurements the analysis discards anyway.
+
+- **The ADAPT comparison step no longer re-checks the same short list of dashboards for every metric it looks at.** Two queries asked whether a metric's dashboard still exists by testing it against one list or another. Written that way, the database cannot resolve the two lists once and reuse them, so it rebuilt the answer for each candidate row. It is now a single combined list, resolved once. The result is identical; the same shape was corrected elsewhere in 0.2.93.1 and this closes the two remaining places it survived.
+
 ## [0.2.94.0] - 2026-09-02
 
 ### Changed
