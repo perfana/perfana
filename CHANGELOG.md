@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.2] - 2026-09-03
+
+### Fixed
+- **Expanding a transaction in Performance Analysis is fast again on runs whose per-request summary was never written.** Opening a transaction row shows the requests inside it. Those figures are normally pre-calculated once when a test run finishes, and reading them takes about a millisecond. When the pre-calculation is missing, Perfana silently falls back to working the numbers out from scratch on every click — on a run of 1.4 million requests that was measured at 95 ms when the data was warm in memory and 737 ms when it was not, against 0.95 ms for the pre-calculated read. Nothing failed and nothing was logged; expanding a row just felt slow, forever.
+
+  The pre-calculation is written in two halves that read from different places: the per-transaction half from the transaction records, the per-request half from the raw request records. It runs within a second of the run being marked finished, and raw request data can still be arriving at that moment — measured on affected runs at up to 36 seconds later. When that happens the first half succeeds, the second half summarises an empty table, and the result is stored looking perfectly healthy. Nothing retried it, because every readiness check looks at the half that did get written. Six of the ten most recent runs on the deployment this was found on were in that state, including the two most recent.
+
+  Perfana now notices the mismatch the first time someone expands a row on such a run and asks for the summary to be recalculated in the background. That request is served from the slower path as before, and every expand after it is fast. The recalculation is only requested when the run's underlying records are all still present, because rebuilding a summary replaces it wholesale — asking for one on a run whose source data has since been cleaned up would have thrown away the working half along with the missing one. Runs that cannot be repaired, including those that never recorded per-request data, are left alone rather than re-checked on every click.
+
+- **The stats backfill script no longer skips the runs that need it most.** The maintenance script that rebuilds missing run summaries decided what to work on by looking only at the per-transaction half, so a run with that half present and the per-request half missing — exactly the runs above — was passed over every time. It now checks both halves. On the deployment this was found on, that changed the number of affected runs it offers to repair from none to six.
+
 ## [0.2.94.1] - 2026-09-03
 
 ### Fixed

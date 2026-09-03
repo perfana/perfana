@@ -32,6 +32,23 @@ Background job processing service using **BullMQ** with Redis for queue manageme
 `ds_metric_statistics` can be rebuilt from `ds_metrics` already in the database. It fetches nothing
 from Grafana or Dynatrace, so it is safe on a run whose dashboard window has expired.
 
+`transaction-stats-rollup` is likewise enqueued from outside an analysis run, by the API's read
+path. The stage writes `test_run_transaction_stats` (from `transactions`) and
+`test_run_sampler_stats` (from `requests_raw`) in one transaction, but it runs ~0.2s after the run
+is marked completed, and `requests_raw` ingestion can still be in flight — observed up to 36s past
+`end_time`. The transaction half then succeeds, the sampler half aggregates an empty table, and the
+job commits looking healthy; nothing retries it, because every readiness check reads the half that
+was written. `repairEmptySamplerRollup` in the API detects the mismatch on the first row expand and
+re-enqueues this job. Two consequences for anyone changing the pipeline: its first act is an
+**unconditional delete** of all three rollup tables for the run, so the API's probe has to prove
+both halves can be rebuilt before asking for a re-run — a re-run that cannot would let a read
+destroy the working half; and if the job exhausts its retries it stays in BullMQ's failed set under
+the same jobId, where a later `add` is a silent no-op and the repair goes quiet until that job is
+cleared. `scripts/backfill-test-run-stats-rollup.ts` is the operator-side fix: it selects runs
+missing **either** half (a transaction-only predicate skipped exactly the affected runs) and stops
+when a poll returns no ids it has not already served this invocation, since an unrepairable run
+stays a candidate forever.
+
 ### The control-group fast path needs `pct_agg`
 
 `ControlGroupStatisticsPipeline` pools per-run t-digests with `rollup(pct_agg)` (#289). A control
