@@ -66,7 +66,7 @@ function createMockTestRun(overrides: Record<string, unknown> = {}) {
  */
 function setupQueryMock(responses: {
   panels?: { panels: string; dashboards_with_panels: string };
-  metrics?: { count: string };
+  metrics?: { has_metrics: string };
   sparse?: any[];
   sparseExclusions?: any[];
   statistics?: { total: string; all_missing: string };
@@ -80,10 +80,12 @@ function setupQueryMock(responses: {
     if (sql.includes('ds_panels') && sql.includes('application_dashboards')) {
       return Promise.resolve([responses.panels ?? { panels: '10', dashboards_with_panels: '2' }]);
     }
-    if (sql.includes('ds_metrics') && sql.includes('COUNT(*)') && !sql.includes('GROUP BY') && !sql.includes('ramp_up')) {
-      return Promise.resolve([responses.metrics ?? { count: '100' }]);
+    if (sql.includes('ds_metrics') && sql.includes('EXISTS')) {
+      return Promise.resolve([responses.metrics ?? { has_metrics: 'true' }]);
     }
-    if (sql.includes('ds_metrics') && sql.includes('GROUP BY')) {
+    // Sparse-metric check: reads pre-aggregated counts from ds_metric_statistics, so it
+    // must be matched before the statistics-completeness branch below.
+    if (sql.includes('ds_metric_statistics') && sql.includes('GROUP BY')) {
       return Promise.resolve(responses.sparse ?? []);
     }
     if (sql.includes('sparse_metric_exclusions')) {
@@ -242,7 +244,7 @@ describe('DataSanityCheckPipeline', () => {
     it('should flag no metrics data', async () => {
       const testRun = createMockTestRun();
       mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
-      setupQueryMock({ metrics: { count: '0' } });
+      setupQueryMock({ metrics: { has_metrics: 'false' } });
 
       const result = await pipeline.execute({ testRunId: 'test-run-001' });
 
@@ -320,6 +322,39 @@ describe('DataSanityCheckPipeline', () => {
       expect(result.success).toBe(true);
       const warnings: string[] = result.data.warnings ?? [];
       expect(warnings.some((w: string) => w.includes('Analysis window is zero or negative'))).toBe(true);
+    });
+
+    it('should warn on sparse metrics without ever scanning ds_metrics', async () => {
+      const testRun = createMockTestRun();  // 360s run
+      mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
+      setupQueryMock({
+        sparse: [
+          { metric_name: 'cpu', dashboard_label: 'Host', panel_title: 'CPU', data_points: '3' },
+        ],
+      });
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      const warnings: string[] = result.data.warnings ?? [];
+      expect(warnings.some(w => w.includes('Host / cpu: 3 points across a 360s run'))).toBe(true);
+
+      // The whole point of the rewrite: this check reads pre-aggregated counts, it must
+      // never group raw data points again. That query read ~103 GB across four runs.
+      const groupedRawScans = mockDb.query.mock.calls.filter(
+        (call: unknown[]) =>
+          typeof call[0] === 'string' &&
+          call[0].includes('ds_metrics') &&
+          call[0].includes('GROUP BY')
+      );
+      expect(groupedRawScans).toHaveLength(0);
+
+      // The replacement must be well formed, not merely absent: the old assertion above
+      // passes just as happily if the sparse check stopped querying anything at all.
+      const sparseQuery = mockDb.query.mock.calls
+        .map((call: unknown[]) => call[0])
+        .find((sql: unknown) => typeof sql === 'string' && sql.includes('SUM(count)')) as string;
+      expect(sparseQuery).toContain('ds_metric_statistics');
+      expect(sparseQuery).toContain('HAVING SUM(count) <');
     });
 
     it('should NOT add zero-window warning when both offsets are 0', async () => {

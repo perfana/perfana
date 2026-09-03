@@ -277,9 +277,13 @@ export class AdaptValidator {
           cgs.metric_name = ms.metric_name
       )
       WHERE ms.test_run_id IN (${placeholders})
-        AND (
-          ms.application_dashboard_id IN (SELECT id FROM application_dashboards)
-          OR ms.application_dashboard_id IN (SELECT DISTINCT application_dashboard_id FROM dynatrace_queries)
+        -- One IN over a UNION rather than an OR of two INs: an OR of subqueries blocks
+        -- semi-join pullup and is re-evaluated per row. See buildValidDashboardFilterSQL.
+        AND ms.application_dashboard_id IN (
+          SELECT id FROM application_dashboards
+          UNION
+          SELECT application_dashboard_id FROM dynatrace_queries
+          WHERE application_dashboard_id IS NOT NULL
         )
       GROUP BY ms.test_run_id
       HAVING count(cgs.control_group_id) = 0

@@ -154,10 +154,17 @@ export class ControlGroupProcessor {
    * @returns SQL fragment for WHERE clause filtering
    */
   buildValidDashboardFilterSQL(): string {
+    // One IN over a UNION, not an OR of two INs. An OR between two subqueries cannot be
+    // pulled up into a semi-join, so the planner emits `(SubPlan 1) OR (SubPlan 2)` and
+    // re-evaluates both per candidate row — the same shape fixed in the control-group
+    // aggregation in v0.2.93.1. A single IN (subquery) hashes once. Same output: UNION
+    // dedupes, and the IS NOT NULL arm only drops rows that could never match anyway.
     return `
-      AND (
-          ms.application_dashboard_id IN (SELECT id FROM application_dashboards)
-          OR ms.application_dashboard_id IN (SELECT DISTINCT application_dashboard_id FROM dynatrace_queries)
+      AND ms.application_dashboard_id IN (
+          SELECT id FROM application_dashboards
+          UNION
+          SELECT application_dashboard_id FROM dynatrace_queries
+          WHERE application_dashboard_id IS NOT NULL
       )
     `;
   }
