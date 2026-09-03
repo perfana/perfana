@@ -58,42 +58,57 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
         reasons.push(`No dashboard panels found (${dashboardsWithPanels} dashboards with panels configured)`);
       }
 
-      // 3. Metrics data check
-      const metricsResult = await this.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM ds_metrics WHERE test_run_id = $1`,
+      // 3. Metrics data check.
+      // Only "are there any" is ever asked, so probe instead of counting: COUNT(*) here
+      // read the run's entire ds_metrics (11s / 66k blocks on a large run) to produce a
+      // number nothing uses. EXISTS stops at the first row.
+      // ::text and a string compare, matching every other query in this file. The check
+      // fails closed, so a driver that handed back 't' instead of true would mark every
+      // run 'No metrics data collected' — and a mocked-driver unit test could never see it.
+      const metricsProbe = await this.query<{ has_metrics: string }>(
+        `SELECT EXISTS (SELECT 1 FROM ds_metrics WHERE test_run_id = $1)::text AS has_metrics`,
         [testRunId]
       );
-      const metricsCount = parseInt(metricsResult[0]?.count ?? '0', 10);
-      if (metricsCount === 0) {
+      const hasMetrics = metricsProbe[0]?.has_metrics === 'true';
+      if (!hasMetrics) {
         reasons.push('No metrics data collected');
       }
 
       // 3b. Sparse data check — flag metrics with very few data points
-      if (metricsCount > 0 && testRun.startTime && testRun.endTime) {
+      if (hasMetrics && testRun.startTime && testRun.endTime) {
         const durationSec = (new Date(testRun.endTime).getTime() - new Date(testRun.startTime).getTime()) / 1000;
         const minDataPoints = parseInt(process.env.SANITY_CHECK_MIN_DATA_POINTS ?? '5', 10);
 
         if (durationSec > 60) {
+          // Read the per-metric counts StatisticsPipeline already wrote rather than
+          // re-deriving them from raw data points. Grouping ds_metrics by
+          // (metric_name, dashboard_label, panel_title) is not a key ds_metrics is
+          // organised by, so it scanned every row of the run to return a handful:
+          // measured at 12.6M blocks (~103 GB) and 70s across four runs, 16.5 MB read
+          // per row returned, and the single largest read on the whole deployment.
+          // ds_metric_statistics holds one pre-aggregated row per (dashboard, panel, metric).
+          // It is NOT written by the immediately preceding stage: analyze.ts runs
+          // statistics-calculation four stages earlier, and the reevaluate batch worker only
+          // runs statistics-recalculation for refreshMode missing-data/force with new data.
+          // The read is still sound — a plain reevaluate reads the rows the prior analyze
+          // wrote, which are the same rows ADAPT is about to compare against. If the table
+          // is empty for this run the sparse check simply finds nothing, and the
+          // totalStats === 0 branch below reports that as its own reason.
           const sparseResult = await this.query<{
             metric_name: string;
             dashboard_label: string;
             panel_title: string;
             data_points: string;
-            avg_timestep_sec: string;
           }>(
             `SELECT
               metric_name,
               dashboard_label,
               panel_title,
-              COUNT(*)::text AS data_points,
-              CASE WHEN COUNT(*) > 1
-                THEN ROUND(EXTRACT(EPOCH FROM MAX(time) - MIN(time))::numeric / (COUNT(*) - 1), 0)::text
-                ELSE NULL
-              END AS avg_timestep_sec
-             FROM ds_metrics
+              SUM(count)::text AS data_points
+             FROM ds_metric_statistics
              WHERE test_run_id = $1
              GROUP BY metric_name, dashboard_label, panel_title
-             HAVING COUNT(*) < $2`,
+             HAVING SUM(count) < $2`,
             [testRunId, minDataPoints]
           );
 
@@ -136,10 +151,15 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
             }
 
             if (sparseMetrics.length > 0) {
-              const examples = sparseMetrics.slice(0, 3).map(r => {
-                const ts = r.avg_timestep_sec ? ` (${r.avg_timestep_sec}s timestep)` : '';
-                return `${r.dashboard_label} / ${r.metric_name}: ${r.data_points} points${ts}`;
-              });
+              // ponytail: report the count and the run length, not a timestep. The old
+              // message measured a real timestep from MIN/MAX(time) over the metric's own
+              // points, which needed the raw scan this query exists to avoid. Deriving one
+              // from the run duration would put the word "timestep" on a number that is not
+              // one: 3 points clustered in the first 90s of a 3600s run are spaced 45s apart
+              // and would be reported as 1800s. These two numbers say as much and don't lie.
+              const examples = sparseMetrics.slice(0, 3).map(
+                r => `${r.dashboard_label} / ${r.metric_name}: ${r.data_points} points across a ${Math.round(durationSec)}s run`
+              );
               const suffix = sparseMetrics.length > 3
                 ? ` and ${sparseMetrics.length - 3} more`
                 : '';
@@ -166,7 +186,7 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
       }
 
       // 4. Statistics completeness (only if metrics exist)
-      if (metricsCount > 0) {
+      if (hasMetrics) {
         const statsResult = await this.query<{ total: string; all_missing: string }>(
           `SELECT
             COUNT(*)::text AS total,
