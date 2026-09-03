@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { withRequestEm } from '../../../common/db/request-em';
+import { withRequestEm, getRequestEm, runAfterRequestCommit } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { TestRunsMapperService } from './test-runs-mapper.service';
 import { JobProgressService } from '../../data-science/services/job-progress.service';
+import { BullMQClientService } from '../../data-science/services/bullmq-client.service';
 import { RollupPendingResult } from './test-runs-performance-query.types';
 import {
   TransactionStats,
@@ -105,6 +106,7 @@ export class TestRunsPerformanceQueryService {
     private readonly testRunRepo: Repository<TestRunEntity>,
     private readonly mapper: TestRunsMapperService,
     private readonly jobProgressService: JobProgressService,
+    private readonly bullmqClientService: BullMQClientService,
   ) {}
 
   /**
@@ -305,6 +307,144 @@ export class TestRunsPerformanceQueryService {
       [testRunId],
     );
     return result.length > 0;
+  }
+
+  /**
+   * Ask for a rollup re-run when a completed run has transaction rollup rows
+   * but NO sampler rollup rows at all.
+   *
+   * The two halves of `transaction-stats-rollup` read different tables in one
+   * transaction: the transaction half reads `transactions`, the sampler half
+   * reads `requests_raw`. The stage runs at position 4 of the analyze pipeline,
+   * ~0.2s after the run is marked completed, and `requests_raw` ingestion can
+   * still be in flight then — observed up to 36s past `end_time`. The
+   * transaction half then succeeds while the sampler half aggregates an empty
+   * table, and the whole thing commits looking healthy. Nothing retries:
+   * `getRollupStatus` reads `test_run_transaction_stats`, so it answers 'ready'
+   * forever after. Every row expand falls to the CAGG path instead — measured
+   * 95ms warm / 737ms cold against 0.95ms for the rollup read, on a
+   * 1.4M-request run.
+   *
+   * The single probe below is deliberately strict, because the rollup job's
+   * first act is an UNCONDITIONAL delete of all three rollup tables for the run
+   * before it re-inserts. Asking for a re-run we cannot be sure will rebuild
+   * both halves would let a row expand DESTROY a working transaction rollup —
+   * a read triggering silent data loss. So every precondition the job needs is
+   * checked first, in one round trip:
+   *
+   *  - `completed` + `end_time IS NOT NULL` — the pipeline's own early returns.
+   *    It reports success while writing nothing when either is missing, so
+   *    without this the repair re-fires on every expand forever.
+   *  - `transactions` has rows — the transaction half must be able to rebuild
+   *    what the delete removes.
+   *  - `requests_raw` has rows with `transaction_name IS NOT NULL` — mirrors
+   *    `SAMPLER_ROLLUP_SQL`'s own predicate exactly. A guard that passes where
+   *    the rollup declines to write is the same permanent loop.
+   *  - zero sampler rows for the WHOLE run — distinguishes this from the
+   *    legitimate per-transaction miss (an unsampled high-cardinality sampler,
+   *    fall-through case 1 at the call site).
+   *  - the org filter — the call site runs before `loadCaggApdexScope`, so this
+   *    is the only thing stopping a non-member from causing background work on
+   *    a run they cannot read.
+   *
+   * The probe is NOT time-bounded: the rollup has no `time` predicate either,
+   * so a row arriving outside the recorded window (the 36s-late case above) is
+   * one the rollup would aggregate but a bounded probe would miss, stranding
+   * the run on the slow path. Unbounded is cheap here — `test_run_id` LEADS
+   * `idx_requests_raw_test_run_id_time` and is the `compress_segmentby` key, so
+   * a miss is an index-only descent (measured 1.9ms, `Heap Fetches: 0`), not
+   * the every-chunk scan the "LIMIT bounds rows matched, not scanned" pitfall
+   * describes — that one applies to a filter with no leading index.
+   *
+   * Best-effort: this request is still served from the CAGG (or the raw-scan
+   * safety net). One caveat on "the next expand gets the rollup": if the job
+   * exhausts its retries it stays in BullMQ's failed set under the same jobId,
+   * where a later `add` is a silent no-op — the repair then goes quiet for that
+   * run until the failed job is cleared.
+   */
+  private async repairEmptySamplerRollup(
+    testRunId: string,
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<void> {
+    const em = withRequestEm(this.testRunRepo);
+    // Only meaningful — and only legal — inside a transaction. The read below
+    // runs on the caller's open RLS transaction, so an error here (statement
+    // timeout, cancel, lock) would put it in 25P02 and every later statement,
+    // including the CAGG read this method exists to let proceed, would fail
+    // with "current transaction is aborted". Swallowing the error without a
+    // SAVEPOINT would turn a slow read into a 500 with a misleading cause.
+    const guarded = getRequestEm() !== null;
+    let repairable: unknown[];
+
+    try {
+      if (guarded) await em.query('SAVEPOINT sampler_rollup_repair');
+      repairable = await em.query(
+        `SELECT 1
+           FROM test_runs tr
+           JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+          WHERE tr.test_run_id = $1
+            AND tr.completed = true
+            AND tr.end_time IS NOT NULL
+            ${!isAdmin ? 'AND sut.organization_id = ANY($2::uuid[])' : ''}
+            AND NOT EXISTS (
+              SELECT 1 FROM test_run_sampler_stats s WHERE s.test_run_id = tr.test_run_id
+            )
+            AND EXISTS (
+              SELECT 1 FROM transactions t WHERE t.test_run_id = tr.test_run_id
+            )
+            AND EXISTS (
+              SELECT 1 FROM requests_raw r
+               WHERE r.test_run_id = tr.test_run_id
+                 AND r.transaction_name IS NOT NULL
+            )
+          LIMIT 1`,
+        !isAdmin ? [testRunId, organizationIds] : [testRunId],
+      );
+      if (guarded) await em.query('RELEASE SAVEPOINT sampler_rollup_repair');
+    } catch (err) {
+      if (guarded) {
+        // Undo only this method's failed statement so the caller's transaction
+        // stays usable. If even the rollback fails there is nothing left to
+        // salvage and the caller's own error handling takes over.
+        await em.query('ROLLBACK TO SAVEPOINT sampler_rollup_repair').catch(() => undefined);
+      }
+      const msg =
+        err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
+      this.logger.error(`Sampler rollup repair probe failed for ${this.forLog(testRunId)}: ${msg}`);
+      return;
+    }
+
+    if (repairable.length === 0) return;
+
+    this.logger.warn(
+      `Sampler rollup is empty for ${this.forLog(testRunId)} while its source rows are intact — ` +
+        `the rollup ran before request ingestion finished. Requesting a ` +
+        `transaction-stats-rollup re-run; serving this request from the CAGG.`,
+    );
+    // Deferred, not awaited: this is a Redis round trip and we are inside the
+    // request's open RLS transaction. Awaiting it holds a pooled Postgres
+    // connection idle-in-transaction for the length of a Redis stall, which
+    // `commandTimeout: 5000` bounds per command but not per `Queue.add` (script
+    // load + reconnect churn). At pool max 50 that is a real way to starve
+    // unrelated endpoints from a cheap GET. `runAfterRequestCommit` is the
+    // repo's existing helper for exactly this.
+    runAfterRequestCommit(async () => {
+      try {
+        await this.bullmqClientService.enqueueTransactionStatsRollup(testRunId);
+      } catch (err) {
+        const msg =
+          err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
+        this.logger.error(
+          `Sampler rollup re-enqueue failed for ${this.forLog(testRunId)}: ${msg}`,
+        );
+      }
+    });
+  }
+
+  /** Strip CR/LF from a caller-supplied id before it reaches a log line. */
+  private forLog(value: string): string {
+    return value.replace(/[\r\n]/g, '');
   }
 
   /**
@@ -1426,6 +1566,10 @@ export class TestRunsPerformanceQueryService {
       //      CAGG empty falls through to the raw-scan safety net
       let pendingRollup: RollupPendingResult | null = null;
       let needsLivePath = clampedSinceMinutes != null;
+      // Set when the run has transaction rollup rows but no sampler row for
+      // this transaction — the only fall-through that can mean a half-written
+      // rollup. See repairEmptySamplerRollup.
+      let samplerRollupMissed = false;
       if (clampedSinceMinutes == null) {
         const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
         if (rollupStatus.status === 'ready') {
@@ -1445,6 +1589,7 @@ export class TestRunsPerformanceQueryService {
           }
           // status='ready' but no per-transaction sampler row → fall through
           needsLivePath = true;
+          samplerRollupMissed = true;
         } else if (rollupStatus.status === 'rollup-pending') {
           // Hold the pending result; CAGG may still serve a live 200.
           pendingRollup = rollupStatus;
@@ -1467,6 +1612,14 @@ export class TestRunsPerformanceQueryService {
       //       statement_timeout 10s; CAGG reads typically <500 ms even for
       //       10M-row runs).
       if (needsLivePath) {
+        if (samplerRollupMissed) {
+          // Not conditional on the CAGG below: when there is no CAGG either,
+          // this request falls through to the raw scan, which is slower still —
+          // so that is the case that most needs the rollup repaired. It carries
+          // its own org filter precisely because it runs before the CAGG scope
+          // lookup that would otherwise be doing that scoping.
+          await this.repairEmptySamplerRollup(resolvedTestRunId, isAdmin, organizationIds);
+        }
         const caggScope = await this.loadCaggApdexScope(
           resolvedTestRunId,
           excludeRampUp,

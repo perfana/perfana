@@ -27,6 +27,7 @@ import { TestRunsMapperService } from './test-runs-mapper.service';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { JobProgressService } from '../../data-science/services/job-progress.service';
+import { BullMQClientService } from '../../data-science/services/bullmq-client.service';
 import { isRollupPending } from './test-runs-performance-query.types';
 
 // ---------------------------------------------------------------------------
@@ -166,11 +167,15 @@ describe('TestRunsPerformanceQueryService', () => {
   let testRunRepo: MockRepo;
   let mapper: TestRunsMapperService;
   let mockJobProgressService: { getActiveJobForScope: jest.Mock };
+  let mockBullmqClientService: { enqueueTransactionStatsRollup: jest.Mock };
 
   beforeEach(async () => {
     testRunRepo = createMockRepo();
     mockJobProgressService = {
       getActiveJobForScope: jest.fn(),
+    };
+    mockBullmqClientService = {
+      enqueueTransactionStatsRollup: jest.fn().mockResolvedValue('rollup-job-1'),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -184,6 +189,10 @@ describe('TestRunsPerformanceQueryService', () => {
         {
           provide: JobProgressService,
           useValue: mockJobProgressService,
+        },
+        {
+          provide: BullMQClientService,
+          useValue: mockBullmqClientService,
         },
       ],
     }).compile();
@@ -1070,6 +1079,167 @@ describe('TestRunsPerformanceQueryService', () => {
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, NOT_ADMIN, ORG_IDS);
 
         expect(result).toHaveLength(1);
+      });
+    });
+
+    /**
+     * Guards the half-written-rollup repair. `transaction-stats-rollup` writes
+     * both halves in one transaction but from different source tables, so a run
+     * whose `requests_raw` had not finished ingesting when the stage ran commits
+     * with transaction rows and zero sampler rows — and nothing retries, because
+     * every readiness probe looks at `test_run_transaction_stats`.
+     */
+    describe('empty sampler rollup repair', () => {
+      /** The single repair probe, told apart from the two existence checks. */
+      // Keyed on the NOT EXISTS clause, which is unique to the repair probe —
+      // `FROM test_runs tr JOIN systems_under_test` also matches the CAGG scope
+      // loader, and matching that too made the mock answer the wrong query.
+      const isRepairProbe = (sql: unknown): boolean =>
+        typeof sql === 'string' &&
+        /NOT EXISTS\s*\(\s*SELECT 1 FROM test_run_sampler_stats/i.test(sql);
+
+      /** runAfterRequestCommit has no request EM in tests, so it fires on a microtask. */
+      const flushAfterCommit = () => new Promise((resolve) => setImmediate(resolve));
+
+      const CAGG_SCOPE_ROW = {
+        sut: 'shop',
+        system_under_test_id: 'sut-uuid',
+        env: 'acc',
+        workload: 'loadTest',
+        start_time: '2024-01-01T10:00:00Z',
+        end_time: '2024-01-01T11:00:00Z',
+        cutoff_time: null,
+        end_cutoff_time: null,
+        has_transactions_cagg: true,
+        has_requests_raw_cagg: true,
+      };
+
+      /**
+       * Transaction rollup present, no sampler row for this transaction, and the
+       * repair probe answering `repairable`: the half-written shape the fix targets.
+       */
+      function mockHalfWrittenRollup(opts: { repairable: boolean; cagg?: boolean }) {
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (isRepairProbe(sql)) return opts.repairable ? [{ '?column?': 1 }] : [];
+          if (typeof sql === 'string' && /FROM\s+test_run_transaction_stats/i.test(sql)) {
+            return [{ '?column?': 1 }];
+          }
+          if (typeof sql === 'string' && /FROM\s+test_run_sampler_stats/i.test(sql)) return [];
+          if (isRollupScopeLookup(sql)) return [];
+          if (isCaggScopeLookup(sql)) return opts.cagg === false ? [] : [CAGG_SCOPE_ROW];
+          return [];
+        });
+      }
+
+      const probeSql = () =>
+        (testRunRepo.query as jest.Mock).mock.calls.map(([sql]) => sql).find(isRepairProbe) as string;
+
+      it('re-enqueues the rollup when the run is repairable', async () => {
+        mockHalfWrittenRollup({ repairable: true });
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+        await flushAfterCommit();
+
+        expect(mockBullmqClientService.enqueueTransactionStatsRollup).toHaveBeenCalledWith(
+          TEST_RUN_ID,
+        );
+      });
+
+      it('does not re-enqueue when the probe finds the run unrepairable', async () => {
+        mockHalfWrittenRollup({ repairable: false });
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+        await flushAfterCommit();
+
+        expect(mockBullmqClientService.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
+      });
+
+      it('still repairs when no CAGG scope could be loaded', async () => {
+        // No CAGG means this request falls through to the raw scan — slower than
+        // the CAGG path, so it is the case that most needs the rollup back.
+        mockHalfWrittenRollup({ repairable: true, cagg: false });
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+        await flushAfterCommit();
+
+        expect(mockBullmqClientService.enqueueTransactionStatsRollup).toHaveBeenCalledWith(
+          TEST_RUN_ID,
+        );
+      });
+
+      it('probes every precondition the rollup job needs before asking for a re-run', async () => {
+        // The job DELETEs all three rollup tables before re-inserting, so a probe
+        // that passes where the job writes nothing would destroy a working
+        // transaction rollup. Each clause below guards one of the job's own
+        // early returns or source tables.
+        mockHalfWrittenRollup({ repairable: true });
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const sql = probeSql();
+        expect(sql).toBeDefined();
+        expect(sql).toMatch(/completed\s*=\s*true/i);
+        expect(sql).toMatch(/end_time IS NOT NULL/i);
+        expect(sql).toMatch(/EXISTS \(\s*SELECT 1 FROM transactions/i);
+        expect(sql).toMatch(/transaction_name IS NOT NULL/i);
+        expect(sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM test_run_sampler_stats/i);
+        // Not time-bounded: the rollup has no time predicate either, so bounding
+        // the probe would strand runs whose rows arrived late.
+        expect(sql).not.toMatch(/\btime\s*>=/i);
+      });
+
+      it('scopes the probe to the caller organizations for a non-admin', async () => {
+        // The repair runs before loadCaggApdexScope, so this filter is the only
+        // thing stopping a non-member causing background work on a foreign run.
+        mockHalfWrittenRollup({ repairable: true });
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, NOT_ADMIN, ORG_IDS);
+
+        expect(probeSql()).toMatch(/sut\.organization_id = ANY\(\$2::uuid\[\]\)/i);
+        const call = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]) => isRepairProbe(sql));
+        expect(call?.[1]).toEqual([TEST_RUN_ID, ORG_IDS]);
+      });
+
+      it('omits the org filter for an admin caller', async () => {
+        mockHalfWrittenRollup({ repairable: true });
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        expect(probeSql()).not.toMatch(/organization_id = ANY/i);
+      });
+
+      it('still returns samples when the probe throws', async () => {
+        // A swallowed probe error must not leave the caller's transaction aborted
+        // or turn a slow read into a failed one.
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+          if (isSetLocalWorkMem(sql)) return [];
+          if (isRepairProbe(sql)) throw new Error('statement timeout');
+          if (typeof sql === 'string' && /FROM\s+test_run_transaction_stats/i.test(sql)) {
+            return [{ '?column?': 1 }];
+          }
+          if (typeof sql === 'string' && /FROM\s+test_run_sampler_stats/i.test(sql)) return [];
+          if (isRollupScopeLookup(sql)) return [];
+          if (isCaggScopeLookup(sql)) return [CAGG_SCOPE_ROW];
+          return [];
+        });
+
+        await expect(
+          service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []),
+        ).resolves.toBeDefined();
+        expect(mockBullmqClientService.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
+      });
+
+      it('still returns samples when the deferred enqueue rejects', async () => {
+        mockHalfWrittenRollup({ repairable: true });
+        mockBullmqClientService.enqueueTransactionStatsRollup.mockRejectedValueOnce(
+          new Error('redis down'),
+        );
+
+        await expect(
+          service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []),
+        ).resolves.toBeDefined();
+        await flushAfterCommit();
       });
     });
 
