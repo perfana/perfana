@@ -332,9 +332,11 @@ export class TestRunsPerformanceQueryService {
    * a read triggering silent data loss. So every precondition the job needs is
    * checked first, in one round trip:
    *
-   *  - `completed` + `end_time IS NOT NULL` — the pipeline's own early returns.
-   *    It reports success while writing nothing when either is missing, so
-   *    without this the repair re-fires on every expand forever.
+   *  - `completed` + `start_time IS NOT NULL` + `end_time IS NOT NULL` — all
+   *    three of the pipeline's own early returns. It reports success while
+   *    writing nothing when any is missing, so a gap here is a repair that
+   *    re-fires on every expand forever. Both timestamps are nullable in the
+   *    entity and the DDL, so neither is implied by `completed`.
    *  - `transactions` has rows — the transaction half must be able to rebuild
    *    what the delete removes.
    *  - `requests_raw` has rows with `transaction_name IS NOT NULL` — mirrors
@@ -385,6 +387,7 @@ export class TestRunsPerformanceQueryService {
            JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           WHERE tr.test_run_id = $1
             AND tr.completed = true
+            AND tr.start_time IS NOT NULL
             AND tr.end_time IS NOT NULL
             ${!isAdmin ? 'AND sut.organization_id = ANY($2::uuid[])' : ''}
             AND NOT EXISTS (

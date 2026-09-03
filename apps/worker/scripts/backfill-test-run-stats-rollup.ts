@@ -126,6 +126,12 @@ async function main() {
     // The `queue.getJob` dedupe below does not save it either — that record only
     // survives while `removeOnComplete: 50` retains it on the shared queue, so
     // unrelated job volume eventually evicts it and the same 50 get re-enqueued.
+    //
+    // Ceiling, accepted: `seen` is re-sent in full on every poll and grows to
+    // the number of runs served, so a backfill over tens of thousands of runs
+    // degrades roughly quadratically toward the end. Fine for a manual operator
+    // tool run occasionally; if it ever needs to scale, replace the exclusion
+    // array with a keyset cursor on (end_time, created_at).
     const seen = new Set<string>();
 
     while (true) {

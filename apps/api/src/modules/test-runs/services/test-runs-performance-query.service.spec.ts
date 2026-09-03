@@ -1180,6 +1180,7 @@ describe('TestRunsPerformanceQueryService', () => {
         const sql = probeSql();
         expect(sql).toBeDefined();
         expect(sql).toMatch(/completed\s*=\s*true/i);
+        expect(sql).toMatch(/start_time IS NOT NULL/i);
         expect(sql).toMatch(/end_time IS NOT NULL/i);
         expect(sql).toMatch(/EXISTS \(\s*SELECT 1 FROM transactions/i);
         expect(sql).toMatch(/transaction_name IS NOT NULL/i);
