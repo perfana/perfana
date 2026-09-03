@@ -2,7 +2,13 @@
  * Backfill per-test-run transaction/sampler stats rollup (#150, #151).
  *
  * Enqueues `transaction-stats-rollup` jobs for every completed test run that
- * does NOT already have rollup rows in `test_run_transaction_stats`. Each
+ * is missing rollup rows in `test_run_transaction_stats` OR in
+ * `test_run_sampler_stats`. Both halves are checked because they read
+ * different source tables (`transactions` vs `requests_raw`) and can disagree:
+ * when the stage runs before request ingestion has finished, the transaction
+ * half writes rows and the sampler half writes none. A transaction-only
+ * predicate skips exactly those runs — and they are the ones that need it, as
+ * every transaction row-expand then falls to the much slower CAGG path. Each
  * job is processed by the worker's standard pipeline path, so behavior is
  * identical to the in-line stage that runs at test-run finalization.
  *
@@ -14,6 +20,14 @@
  * Safety:
  *   - Resumable: re-running the script picks up where it left off (it skips
  *     test_run_ids that already have rows).
+ *   - Terminating: the loop exits when a poll returns no ids it has not already
+ *     served this invocation, NOT when a poll returns nothing. A run with no
+ *     usable `requests_raw` rows can never gain sampler rows, so it stays a
+ *     candidate forever; without the per-invocation exclusion set such runs
+ *     would pin the head of `ORDER BY end_time DESC LIMIT $1` and the script
+ *     would spin on the same page indefinitely. Re-running the script later
+ *     will offer those runs once more, which is the intended behaviour — one
+ *     wasted no-op job per invocation, not an endless stream.
  *   - Rate-limited: only enqueues `batchSize` jobs per poll, waits for the
  *     queue to drain below a threshold before enqueuing more.
  *   - Idempotent: the pipeline's ON CONFLICT DO UPDATE makes re-running a
@@ -81,6 +95,10 @@ async function main() {
           AND NOT EXISTS (
             SELECT 1 FROM test_run_transaction_stats trs
              WHERE trs.test_run_id = tr.test_run_id
+               AND EXISTS (
+                 SELECT 1 FROM test_run_sampler_stats trss
+                  WHERE trss.test_run_id = tr.test_run_id
+               )
           )`,
     );
     const totalCount = parseInt(total, 10);
@@ -96,6 +114,19 @@ async function main() {
 
     let enqueued = 0;
     let skippedAlreadyQueued = 0;
+    // Every id this invocation has already served, excluded from later batches.
+    //
+    // The loop's exit is "a poll returned no NEW ids", not "a poll returned no
+    // ids", and it has to be: a run whose `requests_raw` holds nothing the
+    // rollup will aggregate never gains `test_run_sampler_stats` rows, so it
+    // stays in the candidate set permanently. With an unfiltered
+    // `ORDER BY end_time DESC LIMIT 50`, as few as BATCH_SIZE such runs pin the
+    // head of the ordering: the loop would re-serve the same page every
+    // POLL_INTERVAL_MS forever, never reaching older runs and never exiting.
+    // The `queue.getJob` dedupe below does not save it either — that record only
+    // survives while `removeOnComplete: 50` retains it on the shared queue, so
+    // unrelated job volume eventually evicts it and the same 50 get re-enqueued.
+    const seen = new Set<string>();
 
     while (true) {
       const inflight = await countPending(queue);
@@ -115,10 +146,15 @@ async function main() {
             AND NOT EXISTS (
               SELECT 1 FROM test_run_transaction_stats trs
                WHERE trs.test_run_id = tr.test_run_id
+                 AND EXISTS (
+                   SELECT 1 FROM test_run_sampler_stats trss
+                    WHERE trss.test_run_id = tr.test_run_id
+                 )
             )
+            AND tr.test_run_id <> ALL($2::text[])
           ORDER BY tr.end_time DESC NULLS LAST, tr.created_at DESC
           LIMIT $1`,
-        [BATCH_SIZE],
+        [BATCH_SIZE, Array.from(seen)],
       );
 
       if (batch.length === 0) {
@@ -127,6 +163,7 @@ async function main() {
       }
 
       for (const { test_run_id } of batch) {
+        seen.add(test_run_id);
         const jobId = `rollup-backfill-${test_run_id}`;
 
         if (DRY_RUN) {
