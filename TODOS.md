@@ -318,6 +318,23 @@ used by only the handful of tests in the `ramp_up refresh` describe block.
 **What to do:** hoist `aggregationMocks()` to the top-level describe, parameterised on the deleted
 and actual counts, and replace the inline copies. Pure test refactor, no behaviour change.
 
+### A rollup job stuck in BullMQ's failed set silences the read-path repair
+
+**Priority:** P3
+**Origin:** /ship review on `fix/sampler-rollup-empty-repair` (v0.2.94.2, 2026-09-03).
+**Why:** `repairEmptySamplerRollup` re-enqueues `transaction-stats-rollup` under a fixed jobId so
+repeated row expands coalesce into one job. If that job exhausts its retries it stays in the failed
+set under the same id, and every later `add` is a silent no-op — the run keeps serving row expands
+from the CAGG path (95 ms warm / 737 ms cold against 0.95 ms) with nothing in the log saying the
+repair stopped firing. The `statistics-calculation` escape hatch has the same shape and solved it by
+not retaining the job record after it settles.
+**What to do:** either drop the failed job record when the repair re-enqueues (matching
+`enqueueStatisticsCalculation`), or log at warn when the probe says repairable and `queue.getJob`
+finds an existing failed job, so the state is visible instead of silent.
+**Where:** `apps/api/src/modules/test-runs/services/test-runs-performance-query.service.ts`
+(`repairEmptySamplerRollup`) and `apps/api/src/modules/data-science/services/bullmq-client.service.ts`
+(`enqueueTransactionStatsRollup`).
+
 ## Dynatrace
 
 ### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster
