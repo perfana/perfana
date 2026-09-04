@@ -483,6 +483,52 @@ server-side export failure arrive as an unexplained connection error before v0.2
 Cancelling still leaves a 0-byte file at the chosen location: the picker creates the entry
 before the first byte arrives, and `abort()` discards the swap file, not the entry.
 
+### `ds_metrics` chunks carry a statistics object, created by a scheduled job
+
+`StatisticsPipeline` groups `ds_metrics` by `(test_run_id, application_dashboard_id, panel_id,
+metric_name)`. Postgres has no combined `n_distinct` for that tuple, so it multiplies the
+per-column values out — measured 10 x 59 x 26 x 3547 into an estimate of **8,404,581 groups against
+20,598 actual**. Two things follow from that one number, and both are expensive:
+
+- At an implied 3.4 GB hash table the planner rejects HashAggregate and sorts instead — measured
+  `external merge Disk: 5205304kB`. **Raising `AGGREGATION_WORK_MEM` does not help**: the decision
+  is made on the *estimate*, which exceeds 128 MB just as it exceeds the 32 MB default.
+- It also suppresses parallelism, because gathering 5.4M estimated rows looks expensive.
+
+`1801000000000-AddDsMetricsChunkStatistics` fixes the estimate with `CREATE STATISTICS (ndistinct)`
+on that group key. Measured standalone: **48.0 s -> 24.9 s** with near-identical I/O (4,164,567 vs
+4,164,471 blocks read, so a real plan change, not a warm cache).
+
+Three things about it that are not obvious:
+
+1. **It has to be per chunk, so it is a scheduled job, not a one-off statement.** The estimate that
+   matters is the per-chunk `Partial HashAggregate`, so the object must exist ON THE CHUNK.
+   TimescaleDB propagates indexes and constraints to new chunks but **not** statistics objects, and
+   chunks are created continuously. `job_ds_metrics_chunk_statistics` runs hourly and only touches
+   chunks that lack the object — once it exists, ordinary autoanalyze maintains it.
+2. **It is a TimescaleDB job specifically because `CREATE STATISTICS` is DDL.** The worker's
+   `perfana_system` role has no `CREATE` on schema `public`, so a worker implementation would fail
+   silently — the same trap that left `audit_logs` without partitions. `add_job` runs the procedure
+   as its owner.
+3. **Compressed chunks are skipped deliberately.** They are read via `ColumnarScan` keyed on
+   `test_run_id` (the `compress_segmentby` column) and cost ~2 buffers for this query — there is no
+   misestimate to fix, and the run's rows are already grouped.
+
+The same migration drops `chunk_time_interval` from 7 days to **1 day**. The active chunk was 79 GB
+/ 82.5M rows against `shared_buffers` of 4 GB, so the scan ran almost entirely off disk (a 4.4%
+buffer hit ratio). A run's rows are ~25% of such a chunk and scattered — `correlation` on
+`test_run_id` measured **-0.027**, because concurrent runs interleave — so no index helps and a seq
+scan is the correct plan. Smaller chunks are the only lever. **New chunks only**: a run already
+ingested keeps its 79 GB chunk until compression reaches it.
+
+`compress_after` is deliberately left at 7 days. Compressing sooner would remove the scan entirely,
+but recent runs are exactly the ones force-refetch touches, and that path calls
+`decompressChunksForRange` against `max_tuples_decompressed_per_dml_transaction`, charged per
+transaction. Cheaper reads for more frequent decompression is a trade, not a win.
+
+**A dev database cannot reproduce any of this.** Local chunks are a few million rows and already
+plan to a parallel HashAggregate with no sort.
+
 ### ADAPT runs with JIT off, on purpose
 
 `AdaptPipeline` sets `jit = off` for its own transaction (`set_config('jit','off',true)`, first
@@ -531,6 +577,8 @@ TODOS.md, which is un-`ANALYZE`d and joined four times.
 8. **Transaction time-series graph draws a solid band across an idle window, or throughput reads far too low** → the sampler series is sent unpadded on purpose. Either the client-side re-grid in `buildSamplerTraces` was removed, or a caller is dividing counts by an assumed 5 instead of the response's `aggregation_seconds`. See "The transaction time-series route pads one series and deliberately not the other" above.
 9. **A re-evaluate is slow, the buffer cache hit ratio has collapsed, and no single query looks slow enough to blame** → order `pg_stat_statements` by `shared_blks_read`, not by `total_exec_time`, and look for a diagnostic grouping raw `ds_metrics`. A query can read 103 GB to return 6,234 rows while ranking unremarkably by wall clock, and it evicts everything else's pages on the way. See item 7 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 10. **Expanding a transaction row in Performance Analysis is slow on a finished run, with nothing in the log** → the run's `test_run_sampler_stats` is empty while `test_run_transaction_stats` is populated, so every expand falls to the CAGG path. Fixed in v0.2.94.2 (the read path re-enqueues the rollup on first expand); on an older deploy, or if the job is stuck in BullMQ's failed set, run `apps/worker/scripts/backfill-test-run-stats-rollup.ts`. See "The transaction rollup is written in two halves, and one can be silently empty" above.
+
+13. **A `force` or `missing-data` re-evaluate is far slower than a plain one, with huge temp file usage** → `StatisticsPipeline`, not ADAPT. Look for `Sort Method: external merge Disk:` in the aggregation plan — it means the group-count estimate is wrong and the planner chose a sort over a hash. Check the chunk has its statistics object (`SELECT * FROM pg_statistic_ext WHERE stxname LIKE '%_groupkey'`) and that `job_ds_metrics_chunk_statistics` is scheduled and succeeding. Note a plain re-evaluate never runs this pipeline at all — it is gated on `refreshMode` and `testRunsWithNewData > 0`. See "`ds_metrics` chunks carry a statistics object" above.
 
 12. **A batch re-evaluate's ADAPT stage is slow or hits the 120 s statement timeout** → check whether Postgres is JIT-compiling the `ds_adapt_results` upsert. `EXPLAIN (ANALYZE, BUFFERS)` the statement and read the `JIT:` footer — 64 s of `Optimization`/`Emission` on a statement that runs in 13 s is the signature. Fixed in v0.2.94.5 (`AdaptPipeline` sets `jit = off` for its own transaction). Do not "fix" it by putting that in `withAnalyticsTransaction`: `StatisticsPipeline` is ~18 s *faster* with JIT on. See "ADAPT runs with JIT off, on purpose" above.
 

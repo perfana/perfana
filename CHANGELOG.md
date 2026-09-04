@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.6] - 2026-09-04
+
+### Fixed
+- **Recalculating a run's statistics is faster, and stops writing gigabytes of temporary files.** This step runs when a re-evaluate is asked to re-fetch data (the "force" and "missing data" modes); a plain re-evaluate does not run it. On a large run it was measured at 157 seconds, reading about 34 GB and writing 5.2 GB of temporary files to disk.
+
+  Most of that was one bad guess. Before running a query PostgreSQL estimates how many distinct groups it will produce, and it had no way to know how the four grouping columns combine, so it multiplied their individual counts together: it predicted 8.4 million groups where there were 20,598. Believing the result would be far too large to hold in memory, it sorted the data on disk instead of grouping it in memory, and it declined to use more than one CPU. Perfana now records the real combined figure so the estimate is close to correct. On its own that change took the query from 48.0 to 24.9 seconds while reading exactly as much data, the gain coming entirely from a better plan.
+
+  These figures are recorded per storage block, and new blocks are created continuously, so a scheduled hourly database job keeps them up to date and a one-off pass covers the blocks that already exist.
+
+  Storage blocks for measurement data are also now created one day at a time rather than one week. The most recent block had grown to 79 GB against 4 GB of database cache, so reading a run's measurements meant reading almost entirely from disk. Roughly seven times less data now has to be read to find one run. This applies to newly written data only — a run already recorded keeps its existing block until that block is compressed on the normal schedule.
+
+  Deliberately not changed: how soon measurement data is compressed. Compressing sooner would remove the remaining disk reads, but recent runs are exactly the ones people re-fetch, and re-fetching a compressed run has its own cost. That is a trade rather than an improvement, so it was left alone.
+
 ## [0.2.94.5] - 2026-09-04
 
 ### Fixed
