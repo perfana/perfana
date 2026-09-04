@@ -269,7 +269,7 @@ All five denial causes return an indistinguishable refusal to the caller (404, o
 - `KEYCLOAK_CLIENT_SECRET` - Keycloak client secret
 - `LOG_VIEWER_ENABLED` - Enable admin log viewer (default: `false`). Requires a read-only Docker socket mount on the api service (`/var/run/docker.sock:/var/run/docker.sock:ro`). The distroless api runs non-root, so also grant it the socket's group (`group_add: ["0"]` in compose) or it gets EACCES and the container list is empty.
 - `LOG_VIEWER_COMPOSE_PROJECT` - Docker Compose project name for container filtering (default: `perfana`). Must match your deploy's compose project (often the directory name) or the list is empty.
-- `SUT_TRANSFER_ENABLED` - Enable admin-only SUT export/import feature (default: `false`). Exports production data — including grafana/dynatrace connection rows — to a downloadable file and imports bundles into this environment; keep off in production unless deliberately debugging. Admin (perfana-admin) only.
+- `SUT_TRANSFER_ENABLED` - Enable admin-only SUT export/import feature (default: `false`). Exports production data — including grafana/dynatrace connection rows — to a downloadable file and imports bundles into this environment; keep off in production unless deliberately debugging. Admin (perfana-admin) only. The export streams with no `Content-Length` and can run to multiple GB on a large test run — see "The SUT export is large by default, and only Chrome and Edge can stream it to disk" below before debugging a failed one.
 - `SCHEMA_DRIFT_CHECK` - How the boot-time entity/schema comparison behaves: `warn` (default) logs any column the database is missing at ERROR and keeps serving, `strict` refuses to start, `off` skips it. A column that reaches only `ConsolidatedSchema.ts` exists on new installs and nowhere else, and the symptom is a read that fails and a list that looks empty rather than an error — see `apps/api/src/common/db/assert-entity-columns.ts`. The matching pre-ship gate is `npm run check:entity-migrations`, wired into `npm run preflight`.
 - `API_BODY_LIMIT` - Maximum JSON/urlencoded request body (default: `2mb`). Express defaults to 100 kB, which a report section's configuration can exceed on its own — selecting every series across two dashboards is a few thousand entries and the whole section is posted to render a preview. Raise it only if a legitimate payload is rejected with `request entity too large`.
 - `AUDIT_RETENTION_MONTHS` - How long `audit_logs` rows are kept, in months (default: `24`). Read by the **worker**: `AuditRetentionManager` deletes older rows on boot and daily at 03:00 UTC and logs the count. Retention is a `DELETE`, not a partition `DROP` — the worker's `perfana_system` role owns no tables.
@@ -443,6 +443,46 @@ Two things it does not fix. If the job exhausts its BullMQ retries it stays in t
 
 The matching operator tool is `apps/worker/scripts/backfill-test-run-stats-rollup.ts`, which now selects runs missing **either** half — its old transaction-only predicate skipped exactly these runs — and terminates on "a poll returned no ids it has not already served this invocation" rather than on an empty poll, since an unrepairable run stays a candidate forever and would otherwise pin the head of `ORDER BY end_time DESC LIMIT 50`.
 
+### The SUT export is large by default, and only Chrome and Edge can stream it to disk
+
+`SUT_TRANSFER_ENABLED` gates an admin-only export that streams a gzipped NDJSON bundle with no
+`Content-Length`. Three things about it are not obvious, and all three present as the same
+useless symptom: a bare **"Network error"** in the export dialog.
+
+1. **`ds_metrics` is a `core` resource, so it ships on every export.** The "Include raw sample
+   data" checkbox covers the `raw` group — `requests_raw`, `requests_error`, `transactions`,
+   `virtual_users` — and nothing else. Unchecking it does **not** make a large run's export
+   small; the measurement data is the bulk of it and leaves regardless. The groups are declared
+   in `SUT_RESOURCES` (`apps/api/src/modules/sut-transfer/sut-resource-graph.ts`), which is the
+   only place to check what a given export will actually contain.
+
+2. **The browser is the size ceiling unless it can write to disk.** The dialog asks for a file
+   via `showSaveFilePicker()` and streams each chunk straight through, retaining nothing. That
+   API exists only in Chrome and Edge (and needs a secure context, so not in a cross-origin
+   iframe). Everywhere else — Firefox, Safari — it falls back to buffering the whole bundle in
+   the tab as a chunk array and then copying it into a `Blob`, roughly 2x the bundle in memory.
+   A large run kills the tab, and `fetch` reports that as `network error`, indistinguishable
+   from a real one. The dialog says which path it took while the export runs; believe it before
+   blaming the network. `pickDiskSink` and `readWithProgress` in `ExportSystemDialog.tsx` are
+   exported and unit-tested precisely because this branch is invisible from the UI.
+
+3. **A proxy can hold the whole thing back.** The export service sync-flushes the gzip every 2 s
+   (`GZIP_FLUSH_INTERVAL_MS`) so the socket is never idle, but nginx buffers a proxied response
+   by default and swallows exactly that signal. The route sends `X-Accel-Buffering: no` to
+   suppress it. A load balancer with a **total** request cap (as opposed to an idle timeout) is
+   not covered by any of this — nothing client-side helps, so export fewer runs per bundle.
+
+Two rules if you touch this path. **Aborting the sink is not enough — abort the fetch too.**
+With no `read()` outstanding the response stream stops draining the socket instead of closing
+it, so the server never sees `res.on('close')` and keeps its Postgres cursor and one of 50
+pooled connections open until the tab dies. And **do not add `res.flushHeaders()`** to the
+route; see "A streamed response cannot report its own failure once the body is in flight" in
+[CONVENTIONS.md](CONVENTIONS.md) for why, and for the `res.destroy()` trap that made every
+server-side export failure arrive as an unexplained connection error before v0.2.94.3.
+
+Cancelling still leaves a 0-byte file at the chosen location: the picker creates the entry
+before the first byte arrives, and `abort()` discards the swap file, not the entry.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls
@@ -455,6 +495,8 @@ The matching operator tool is `apps/worker/scripts/backfill-test-run-stats-rollu
 8. **Transaction time-series graph draws a solid band across an idle window, or throughput reads far too low** → the sampler series is sent unpadded on purpose. Either the client-side re-grid in `buildSamplerTraces` was removed, or a caller is dividing counts by an assumed 5 instead of the response's `aggregation_seconds`. See "The transaction time-series route pads one series and deliberately not the other" above.
 9. **A re-evaluate is slow, the buffer cache hit ratio has collapsed, and no single query looks slow enough to blame** → order `pg_stat_statements` by `shared_blks_read`, not by `total_exec_time`, and look for a diagnostic grouping raw `ds_metrics`. A query can read 103 GB to return 6,234 rows while ranking unremarkably by wall clock, and it evicts everything else's pages on the way. See item 7 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 10. **Expanding a transaction row in Performance Analysis is slow on a finished run, with nothing in the log** → the run's `test_run_sampler_stats` is empty while `test_run_transaction_stats` is populated, so every expand falls to the CAGG path. Fixed in v0.2.94.2 (the read path re-enqueues the rollup on first expand); on an older deploy, or if the job is stuck in BullMQ's failed set, run `apps/worker/scripts/backfill-test-run-stats-rollup.ts`. See "The transaction rollup is written in two halves, and one can be silently empty" above.
+
+11. **"Network error" exporting a SUT with a large test run** → almost never the network. Either the browser ran the tab out of memory buffering the bundle (Firefox/Safari, which have no save-to-disk picker), or a reverse proxy buffered the stream until a load balancer cut it, or the export failed server-side and the error could not be delivered. Fixed in v0.2.94.3; the API log line `SUT export failed for <id>` distinguishes the third case. See "The SUT export is large by default, and only Chrome and Edge can stream it to disk" above.
 
 ## How-To Tutorials
 

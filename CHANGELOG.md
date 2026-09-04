@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.4] - 2026-09-04
+
+### Changed
+- **Documented why a SUT export is big and which browsers can stream it.** The export always includes a system's measurement data — the "include raw sample data" checkbox does not cover it — and only Chrome and Edge can write the bundle straight to disk. CLAUDE.md now carries both, plus how to tell the three causes of an export "Network error" apart, and CONVENTIONS.md records why a streamed response cannot report its own failure once the body is in flight. No behaviour changed.
+
 ## [0.2.94.3] - 2026-09-04
 
 ### Fixed
