@@ -7,15 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.2.94.6] - 2026-09-04
 
 ### Fixed
-- **Recalculating a run's statistics is faster, and stops writing gigabytes of temporary files.** This step runs when a re-evaluate is asked to re-fetch data (the "force" and "missing data" modes); a plain re-evaluate does not run it. On a large run it was measured at 157 seconds, reading about 34 GB and writing 5.2 GB of temporary files to disk.
+- **Recalculating a run's statistics no longer writes gigabytes of temporary files to disk.** This step runs when a re-evaluate is asked to re-fetch data (the "force" and "missing data" modes); a plain re-evaluate does not run it. On a large run it was measured at 157 seconds, reading about 34 GB and writing 5.2 GB of temporary files.
 
-  Most of that was one bad guess. Before running a query PostgreSQL estimates how many distinct groups it will produce, and it had no way to know how the four grouping columns combine, so it multiplied their individual counts together: it predicted 8.4 million groups where there were 20,598. Believing the result would be far too large to hold in memory, it sorted the data on disk instead of grouping it in memory, and it declined to use more than one CPU. Perfana now records the real combined figure so the estimate is close to correct. On its own that change took the query from 48.0 to 24.9 seconds while reading exactly as much data, the gain coming entirely from a better plan.
+  Most of that traced to one bad guess. Before running a query PostgreSQL estimates how many distinct groups it will produce, and it had no way to know how the four grouping columns combine, so it predicted 8.4 million groups where there were 20,598. Believing the result far too large to hold in memory, it sorted on disk instead of grouping in memory, and declined to use more than one CPU. Raising the memory limit could not help, because the decision is made on the prediction rather than on what the work actually needs.
 
-  These figures are recorded per storage block, and new blocks are created continuously, so a scheduled hourly database job keeps them up to date and a one-off pass covers the blocks that already exist.
+  Perfana now records the real combined figure. Measured on the actual query, the prediction went from 741,991 to 21,372 against 17,882 real groups. A daily database job keeps the figure current, because the database's own automatic maintenance never updates this particular kind of statistic.
 
-  Storage blocks for measurement data are also now created one day at a time rather than one week. The most recent block had grown to 79 GB against 4 GB of database cache, so reading a run's measurements meant reading almost entirely from disk. Roughly seven times less data now has to be read to find one run. This applies to newly written data only — a run already recorded keeps its existing block until that block is compressed on the normal schedule.
-
-  Deliberately not changed: how soon measurement data is compressed. Compressing sooner would remove the remaining disk reads, but recent runs are exactly the ones people re-fetch, and re-fetching a compressed run has its own cost. That is a trade rather than an improvement, so it was left alone.
+  Not changed: how measurement data is divided into storage blocks. An earlier draft of this change also made those blocks smaller, which would reduce how much has to be read. That has its own consequences — many more blocks, no limit on how many accumulate, and more load on a part of the database that is already short of capacity on this deployment — so it was separated out to be decided on its own.
 
 ## [0.2.94.5] - 2026-09-04
 
