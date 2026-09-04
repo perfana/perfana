@@ -151,6 +151,54 @@ describe('AdaptPipeline', () => {
       vi.spyOn((adaptPipeline as any).resultsProcessor, 'publishRealtimeUpdates').mockResolvedValue(undefined);
     });
 
+    // Guards the JIT-off statement in AdaptPipeline.execute. Postgres decides
+    // whether to JIT at plan time, per statement, so this has to be the FIRST
+    // query in the transaction or the statements planned before it still compile.
+    // Asserting the call exists is not enough — the ordering is the load-bearing
+    // half, and without this test deleting the line leaves the whole file green.
+    // Same shape as ControlGroupStatisticsPipeline.test.ts's set_config assertions.
+    it('should disable JIT as the first statement in the transaction', async () => {
+      // Arrange
+      const calls: Array<[string, unknown[]?]> = [];
+      const recordingManager = {
+        query: vi.fn((sql: string, params?: unknown[]) => {
+          calls.push([sql, params]);
+          return Promise.resolve([]);
+        }),
+      } as unknown as EntityManager;
+
+      mockDatabaseService.transaction.mockImplementation(async (callback) => {
+        return callback(recordingManager);
+      });
+
+      // The happy-path beforeEach stubs updateEvaluationStatus, so nothing would
+      // reach recordingManager before the JIT call and the ordering assertion
+      // below would pass even if the line were moved down. Let the real status
+      // UPDATE through so there IS real SQL to be wrongly ordered against.
+      (((adaptPipeline as any).validator).updateEvaluationStatus as any).mockRestore?.();
+
+      // Act
+      await adaptPipeline.execute({ testRunIds: ['test-run-1'] });
+
+      // Assert — present, and ahead of any statement that plans real work.
+      // Not "call 0": withAnalyticsTransaction issues SET LOCAL statement_timeout
+      // before the callback runs (BasePipelineTypeORM). Asserting "no real SQL
+      // before it" rather than a fixed index keeps this green if another session
+      // setting is added later, while still failing if the line moves down.
+      const jitIndex = calls.findIndex(
+        ([sql, params]) =>
+          sql.includes('set_config') &&
+          Array.isArray(params) &&
+          params[0] === 'jit' &&
+          params[1] === 'off'
+      );
+      expect(jitIndex).toBeGreaterThanOrEqual(0);
+
+      const isSessionSetting = (sql: string) =>
+        sql.includes('set_config') || /^\s*SET\s+LOCAL\b/i.test(sql);
+      expect(calls.slice(0, jitIndex).map(([sql]) => sql).filter(s => !isSessionSetting(s))).toEqual([]);
+    });
+
     it('should execute successfully with valid input', async () => {
       // Arrange
       const input = {
