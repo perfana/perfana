@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.3] - 2026-09-04
+
+### Fixed
+- **Exporting a system with a large test run no longer fails with "Network error".** The export bundle is streamed as a compressed file, and the browser used to hold all of it in the tab's memory before the download could start — first as a list of pieces, then copied again into a single file, so roughly twice the size of the bundle. A system's measurement data is always included in an export (it is not covered by the "include raw sample data" checkbox), so a large test run produces a bundle big enough to run the tab out of memory. The browser reports that as a bare "Network error", which looks identical to a genuine connection failure and gave no hint about the real cause.
+
+  Perfana now asks where to save the file before starting, then writes each piece straight to disk and keeps nothing, so the size of the export is no longer limited by the tab's memory. This uses a browser feature available in Chrome and Edge; Firefox and Safari have no equivalent, so they still buffer in memory, and the dialog now says so while the export runs instead of letting it fail unexplained. The progress counter also reads in GB rather than four-digit MB, and is now announced to screen readers.
+
+  Three related fixes. Cancelling or failing an export now closes the connection as well as the file. Previously only the file was released, so the server carried on producing an export nobody was reading, holding a database connection and an open query open until the browser tab was closed. The server now tells a reverse proxy in front of Perfana not to buffer the export, so the periodic keep-alive the export already sends actually reaches the browser — without it a proxy can hold the whole response back, leaving the browser with nothing to show for minutes and a load balancer free to cut the connection. And an export that fails before it has sent anything now reports the failure properly instead of dropping the connection: the previous code set a 500 and then tore the connection down in the same breath, which discards the status, so every server-side export failure reached the browser as an unexplained connection error no matter what went wrong.
+
 ## [0.2.94.2] - 2026-09-03
 
 ### Fixed
