@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.6] - 2026-09-04
+
+### Fixed
+- **Recalculating a run's statistics no longer writes gigabytes of temporary files to disk.** This step runs when a re-evaluate is asked to re-fetch data (the "force" and "missing data" modes); a plain re-evaluate does not run it. On a large run it was measured at 157 seconds, reading about 34 GB and writing 5.2 GB of temporary files.
+
+  Most of that traced to one bad guess. Before running a query PostgreSQL estimates how many distinct groups it will produce, and it had no way to know how the four grouping columns combine, so it predicted 8.4 million groups where there were 20,598. Believing the result far too large to hold in memory, it sorted on disk instead of grouping in memory, and declined to use more than one CPU. Raising the memory limit could not help, because the decision is made on the prediction rather than on what the work actually needs.
+
+  Perfana now records the real combined figure. Measured on the actual query, the prediction went from 741,991 to 21,372 against 17,882 real groups. A daily database job keeps the figure current, because the database's own automatic maintenance never updates this particular kind of statistic.
+
+  Not changed: how measurement data is divided into storage blocks. An earlier draft of this change also made those blocks smaller, which would reduce how much has to be read. That has its own consequences — many more blocks, no limit on how many accumulate, and more load on a part of the database that is already short of capacity on this deployment — so it was separated out to be decided on its own.
+
 ## [0.2.94.5] - 2026-09-04
 
 ### Fixed

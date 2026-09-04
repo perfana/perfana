@@ -318,6 +318,72 @@ used by only the handful of tests in the `ramp_up refresh` describe block.
 **What to do:** hoist `aggregationMocks()` to the top-level describe, parameterised on the deleted
 and actual counts, and replace the inline copies. Pure test refactor, no behaviour change.
 
+### `StatisticsPipeline` reads 34 GB per run — estimate half done, scan half open
+
+**Priority:** P3 (was P2 — the estimate half shipped in v0.2.94.6)
+**Origin:** performance investigation following /ship on `perf/adapt-disable-jit` (2026-09-04).
+**Why:** recalculating statistics for one 20,598-metric run measured 157 s, reading 4,171,222 blocks
+(~34 GB) and spilling 5.2 GB of temp. Two independent causes:
+
+1. **A 408x group-count misestimate forces a disk sort.** 8,404,581 estimated groups against 20,598
+   actual. The planner sizes the hash table off that, picks a sort, and spills. `work_mem` cannot
+   fix it — the choice is made on the estimate.
+2. **A 33 GB seq scan of the uncompressed chunk.** `_hyper_1_113_chunk` held 82.5 M rows over 7 days;
+   the run's 20.65 M are 25% of it and scattered (`correlation` on `test_run_id` -0.027, because
+   concurrent runs interleave). At that selectivity a seq scan is correct and no index helps.
+
+**DONE in v0.2.94.6** for cause 1 (`1801000000000-AddDsMetricsGroupKeyStatistics`): one
+`CREATE STATISTICS (ndistinct)` on the `ds_metrics` **parent** plus a daily `ANALYZE` job. Measured
+on the real join-bearing query: estimate 741,991 -> 21,372 against 17,882 actual. An earlier draft
+put the objects on chunks and was provably inert on that query — the joins block chunkwise
+aggregation, so the estimate is made at the parent. See CLAUDE.md.
+
+**Still to verify on production:** that the `external merge Disk:` sort actually disappears. The
+estimate is fixed and measured, but the resulting plan switch was only ever inferred, and a dev
+database reproduces the estimate and not the spill.
+
+**Still open — the 33 GB scan (cause 2).** No code fix; it self-heals when the chunk compresses
+(`compress_after` 7 days). Only runs 0-14 days old are affected, since `chunk_time_interval` is also
+7 days so two chunks are uncompressed at any time.
+
+**Explicitly ruled out:** adding a time bound (`m.time BETWEEN tr.start_time AND tr.end_time`).
+Measured — identical `Rows Removed by Filter` (61,890,539) and 9 s *slower*. `test_run_id = X`
+already selects exactly the run's rows. NOTE: that measurement was taken under 7-day chunks, where
+the run sits inside one chunk and exclusion buys nothing. If the chunk interval is ever reduced,
+re-measure — the conclusion does not carry over.
+
+**Scope:** the pipeline runs only in `force` / `missing-data` refresh modes, gated on
+`testRunsWithNewData > 0` (`simple-orchestrate-reevaluate-batch.ts:516,719`). A plain re-evaluate
+never pays it.
+
+### Decide whether to reduce `ds_metrics` chunk_time_interval from 7 days
+
+**Priority:** P3
+**Origin:** split out of the v0.2.94.6 work after adversarial review (2026-09-04).
+**Why:** the active chunk was 79 GB / 82.5 M rows against `shared_buffers` of 4 GB, giving a 4.4%
+buffer hit ratio (194,290 hits vs 4,171,222 reads) on the aggregation scan. Smaller chunks are the
+only lever that reduces how much has to be read, since the run's rows are scattered and no index
+helps. 1 day would give ~11 GB chunks at the measured ~11.3 GB/day, a ~7x smaller scan.
+
+**Why it was NOT shipped with the statistics fix:**
+- **Unbounded growth.** There is no retention policy on `ds_metrics` (the only `add_retention_policy`
+  calls are 90 days on the 15 CAGGs). 7 days -> 1 day takes ~52 chunks/year to ~365, each with its
+  indexes and compressed counterpart. `max_locks_per_transaction` is at the default 64.
+- **No query can exclude chunks.** The hot `ds_metrics` paths all filter on `test_run_id` with no
+  time predicate (`StatisticsPipeline`, `metrics.service.ts` panel render,
+  `DataSanityCheckPipeline`, `PerformanceTestMetricsPipeline` DELETE, the reevaluate orchestrator,
+  the SUT delete handler), so every one plans and locks every chunk. Planning cost was never
+  measured.
+- **Background workers are already starved.** ~36 TimescaleDB jobs against a default
+  `timescaledb.max_background_workers` of 16, and the compression policy already logs 21
+  `failed to start job`. 1-day chunks multiply compression-policy invocations 7x.
+- **It is a one-way ratchet.** A revert restores the setting, not the chunks it created.
+
+**What to do:** measure planning time on the panel-render path across a few hundred chunks before
+changing anything, and pair any reduction with a retention policy and a `max_background_workers`
+raise. The genuine win on the other side: `decompressChunksForRange` and the per-run bounded ramp-up
+`UPDATE` both get *better* with narrower chunks (less collateral decompression).
+
 ### The 2.5M ADAPT plan cost that triggers JIT may be an ANALYZE artifact
 
 **Priority:** P3

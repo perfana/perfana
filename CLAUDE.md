@@ -483,6 +483,51 @@ server-side export failure arrive as an unexplained connection error before v0.2
 Cancelling still leaves a 0-byte file at the chosen location: the picker creates the entry
 before the first byte arrives, and `abort()` discards the swap file, not the entry.
 
+### `ds_metrics` carries one group-key statistics object, on the PARENT
+
+`StatisticsPipeline` groups `ds_metrics` by `(test_run_id, application_dashboard_id, panel_id,
+metric_name)`. Postgres has no combined `n_distinct` for that tuple and derives one that lands far
+too high — measured on production, **8,404,581 estimated groups against 20,598 actual (408x)**. That
+one number costs twice:
+
+- The planner sizes the hash table off it, decides a sort is cheaper, and spills:
+  `external merge Disk: 5205304kB` on 20.6M rows. **Raising `AGGREGATION_WORK_MEM` does not help** —
+  the choice is made on the estimate, not on what the aggregation needs.
+- It suppresses parallelism, because gathering millions of estimated rows looks expensive.
+
+`1801000000000-AddDsMetricsGroupKeyStatistics` fixes it with **one** `CREATE STATISTICS (ndistinct)`
+on `public.ds_metrics` plus a daily `ANALYZE` of the parent.
+
+**The parent is the whole point, and putting it on chunks instead makes the migration silently
+inert.** The real aggregation joins `ds_metrics` to the `run_orgs` MATERIALIZED CTE and semi-joins
+`allowed_dashboards`. Those joins block TimescaleDB's chunkwise-aggregation pushdown, so the plan
+carries a single `GroupAggregate` **above** the joins rather than a `Partial HashAggregate` per
+chunk, and `estimate_num_groups` resolves the grouping Vars to the parent relation. Measured on the
+real query with the same data, only the object moved:
+
+| Statistics object | Estimate | Actual | Error |
+|---|---|---|---|
+| per chunk | 741,991 | 17,882 | 41x |
+| **on the parent** | **21,372** | 17,882 | **1.2x** |
+
+A join-free query (`SELECT dashboard, panel, metric, count(*) FROM ds_metrics WHERE test_run_id = …`)
+*does* get the per-chunk pushdown and *does* read per-chunk objects. That is what makes this an easy
+mistake: it benchmarks beautifully and then does nothing for the query you care about. Always confirm
+a `Partial HashAggregate` exists in the **real** plan before reasoning about per-chunk statistics.
+
+Two operational notes:
+
+- **The daily `ANALYZE` job is not optional.** Autovacuum analyzes chunks, never an inheritance
+  parent, so without `job_analyze_ds_metrics` the statistics object exists and holds nothing. If the
+  estimate looks wrong again, check `stxdinherit` is `true` and the job is succeeding:
+  `SELECT s.stxname, d.stxdinherit, d.stxdndistinct FROM pg_statistic_ext s JOIN pg_statistic_ext_data d ON d.stxoid = s.oid WHERE s.stxname = 'ds_metrics_groupkey';`
+- Needs **PG15+** for `pg_statistic_ext_data.stxdinherit` (extended statistics across an inheritance
+  tree). The image is `timescaledb-ha:pg15`. On an older server the CREATE succeeds and ANALYZE
+  collects nothing, so it degrades to a no-op rather than breaking.
+
+**A dev database reproduces the estimate but not the timing.** The bad plan shape and the 41x error
+show up on a few million rows; the 5.2 GB spill needs production scale.
+
 ### ADAPT runs with JIT off, on purpose
 
 `AdaptPipeline` sets `jit = off` for its own transaction (`set_config('jit','off',true)`, first
@@ -532,9 +577,11 @@ TODOS.md, which is un-`ANALYZE`d and joined four times.
 9. **A re-evaluate is slow, the buffer cache hit ratio has collapsed, and no single query looks slow enough to blame** → order `pg_stat_statements` by `shared_blks_read`, not by `total_exec_time`, and look for a diagnostic grouping raw `ds_metrics`. A query can read 103 GB to return 6,234 rows while ranking unremarkably by wall clock, and it evicts everything else's pages on the way. See item 7 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 10. **Expanding a transaction row in Performance Analysis is slow on a finished run, with nothing in the log** → the run's `test_run_sampler_stats` is empty while `test_run_transaction_stats` is populated, so every expand falls to the CAGG path. Fixed in v0.2.94.2 (the read path re-enqueues the rollup on first expand); on an older deploy, or if the job is stuck in BullMQ's failed set, run `apps/worker/scripts/backfill-test-run-stats-rollup.ts`. See "The transaction rollup is written in two halves, and one can be silently empty" above.
 
+11. **"Network error" exporting a SUT with a large test run** → almost never the network. Either the browser ran the tab out of memory buffering the bundle (Firefox/Safari, which have no save-to-disk picker), or a reverse proxy buffered the stream until a load balancer cut it, or the export failed server-side and the error could not be delivered. Fixed in v0.2.94.3; the API log line `SUT export failed for <id>` distinguishes the third case. See "The SUT export is large by default, and only Chrome and Edge can stream it to disk" above.
+
 12. **A batch re-evaluate's ADAPT stage is slow or hits the 120 s statement timeout** → check whether Postgres is JIT-compiling the `ds_adapt_results` upsert. `EXPLAIN (ANALYZE, BUFFERS)` the statement and read the `JIT:` footer — 64 s of `Optimization`/`Emission` on a statement that runs in 13 s is the signature. Fixed in v0.2.94.5 (`AdaptPipeline` sets `jit = off` for its own transaction). Do not "fix" it by putting that in `withAnalyticsTransaction`: `StatisticsPipeline` is ~18 s *faster* with JIT on. See "ADAPT runs with JIT off, on purpose" above.
 
-11. **"Network error" exporting a SUT with a large test run** → almost never the network. Either the browser ran the tab out of memory buffering the bundle (Firefox/Safari, which have no save-to-disk picker), or a reverse proxy buffered the stream until a load balancer cut it, or the export failed server-side and the error could not be delivered. Fixed in v0.2.94.3; the API log line `SUT export failed for <id>` distinguishes the third case. See "The SUT export is large by default, and only Chrome and Edge can stream it to disk" above.
+13. **A `force` or `missing-data` re-evaluate is far slower than a plain one, with huge temp file usage** → `StatisticsPipeline`, not ADAPT. Look for `Sort Method: external merge Disk:` in the aggregation plan: the group-count estimate is wrong and the planner chose a sort over a hash. Check the statistics object is populated — `SELECT stxdinherit, stxdndistinct FROM pg_statistic_ext s JOIN pg_statistic_ext_data d ON d.stxoid = s.oid WHERE s.stxname = 'ds_metrics_groupkey'` — and that `job_analyze_ds_metrics` is scheduled and succeeding; without that daily ANALYZE the object is empty. Note a plain re-evaluate never runs this pipeline at all (gated on `refreshMode` and `testRunsWithNewData > 0`). See "`ds_metrics` carries one group-key statistics object" above.
 
 ## How-To Tutorials
 
