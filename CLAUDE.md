@@ -483,6 +483,42 @@ server-side export failure arrive as an unexplained connection error before v0.2
 Cancelling still leaves a 0-byte file at the chosen location: the picker creates the entry
 before the first byte arrives, and `abort()` discards the swap file, not the entry.
 
+### ADAPT runs with JIT off, on purpose
+
+`AdaptPipeline` sets `jit = off` for its own transaction (`set_config('jit','off',true)`, first
+statement inside `withAnalyticsTransaction`). It is **not** in the shared helper, and moving it
+there would be a regression.
+
+Postgres decides whether to JIT from the estimated **plan cost**, which is driven by row count.
+JIT's compile cost is driven by how large and deeply nested the compiled expressions are. The
+`ds_adapt_results` upsert is where those two diverge: a generated jsonb target list
+(`buildStatisticsColumns` + `buildConclusionLogic` + the three threshold CTEs) over a moderate row
+count, estimated at 2,561,177 — clearing `jit_above_cost` and the 500k inline/optimize thresholds,
+so LLVM runs -O3 over it. Measured on a 20,598-metric run: **64,215 ms in the JIT footer** on an
+87.3 s statement that takes 13.3 s with JIT off. Read the JIT footer figure, not the totals — the
+two arms ran in sequence so the second had a warmer cache, and ~9.8 s of the gap is unexplained.
+
+Do not generalise it to "many functions compile slowly": `StatisticsPipeline` compiles **102**
+functions in 2,155 ms against this one's **73** in 64,215 ms, and both clear the same thresholds.
+
+The other two `withAnalyticsTransaction` callers were measured and deliberately left alone:
+
+| Pipeline | JIT on | JIT off | Verdict |
+|---|---|---|---|
+| `AdaptPipeline` upsert | 87,308 ms | 13,255 ms | off — the 64.2 s is compile |
+| `StatisticsPipeline` | 157,032 ms | 174,672 ms | **keep on** — pays across millions of rows |
+| `ControlGroupStatisticsPipeline` | cost 93,338 | — | never JITs (under `jit_above_cost`) |
+
+Two things follow. `AdaptPipeline` never calls `setAggregationBudget`, so it runs on the **120 s**
+`ANALYTICS_STATEMENT_TIMEOUT_MS` cap, not 540 s — at 87.3 s a single run was at 73% of budget and
+the 2-run batch that surfaced this was at 109 s (91%), so this was a cancellation waiting to
+happen, not just slowness. And the hardcode cannot backfire on a large batch: rows scale with
+batch size while the compile cost stays fixed, so JIT would only pay past ~5 runs, but at ~13 s/run
+a 9-run batch already exceeds the 120 s cap.
+
+The estimate itself may be an artifact worth removing — see the `temp_config_cache` item in
+TODOS.md, which is un-`ANALYZE`d and joined four times.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls
@@ -495,6 +531,8 @@ before the first byte arrives, and `abort()` discards the swap file, not the ent
 8. **Transaction time-series graph draws a solid band across an idle window, or throughput reads far too low** → the sampler series is sent unpadded on purpose. Either the client-side re-grid in `buildSamplerTraces` was removed, or a caller is dividing counts by an assumed 5 instead of the response's `aggregation_seconds`. See "The transaction time-series route pads one series and deliberately not the other" above.
 9. **A re-evaluate is slow, the buffer cache hit ratio has collapsed, and no single query looks slow enough to blame** → order `pg_stat_statements` by `shared_blks_read`, not by `total_exec_time`, and look for a diagnostic grouping raw `ds_metrics`. A query can read 103 GB to return 6,234 rows while ranking unremarkably by wall clock, and it evicts everything else's pages on the way. See item 7 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 10. **Expanding a transaction row in Performance Analysis is slow on a finished run, with nothing in the log** → the run's `test_run_sampler_stats` is empty while `test_run_transaction_stats` is populated, so every expand falls to the CAGG path. Fixed in v0.2.94.2 (the read path re-enqueues the rollup on first expand); on an older deploy, or if the job is stuck in BullMQ's failed set, run `apps/worker/scripts/backfill-test-run-stats-rollup.ts`. See "The transaction rollup is written in two halves, and one can be silently empty" above.
+
+12. **A batch re-evaluate's ADAPT stage is slow or hits the 120 s statement timeout** → check whether Postgres is JIT-compiling the `ds_adapt_results` upsert. `EXPLAIN (ANALYZE, BUFFERS)` the statement and read the `JIT:` footer — 64 s of `Optimization`/`Emission` on a statement that runs in 13 s is the signature. Fixed in v0.2.94.5 (`AdaptPipeline` sets `jit = off` for its own transaction). Do not "fix" it by putting that in `withAnalyticsTransaction`: `StatisticsPipeline` is ~18 s *faster* with JIT on. See "ADAPT runs with JIT off, on purpose" above.
 
 11. **"Network error" exporting a SUT with a large test run** → almost never the network. Either the browser ran the tab out of memory buffering the bundle (Firefox/Safari, which have no save-to-disk picker), or a reverse proxy buffered the stream until a load balancer cut it, or the export failed server-side and the error could not be delivered. Fixed in v0.2.94.3; the API log line `SUT export failed for <id>` distinguishes the third case. See "The SUT export is large by default, and only Chrome and Edge can stream it to disk" above.
 
