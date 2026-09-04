@@ -318,6 +318,56 @@ used by only the handful of tests in the `ramp_up refresh` describe block.
 **What to do:** hoist `aggregationMocks()` to the top-level describe, parameterised on the deleted
 and actual counts, and replace the inline copies. Pure test refactor, no behaviour change.
 
+### The 2.5M ADAPT plan cost that triggers JIT may be an ANALYZE artifact
+
+**Priority:** P3
+**Origin:** adversarial review during /ship on `perf/adapt-disable-jit` (2026-09-04).
+**Why:** `jit=off` in `AdaptPipeline` treats the symptom. The reason JIT fired at all is the
+estimated plan cost of 2,561,177, and that estimate may be manufactured: `createTempConfigCache`
+(`apps/worker/src/pipelines/helpers/adapt/compare-config-cache.ts`) creates and populates
+`temp_config_cache` with no index and no `ANALYZE`, and `buildAdaptResultsSQL`
+(`helpers/adapt/results/sql-builder.ts`) LEFT JOINs it four times. A table with no statistics
+joined four ways is a standard way to inflate a cost estimate.
+**What to do:** add `ANALYZE temp_config_cache` after the populate and re-`EXPLAIN`. If the cost
+drops below `jit_above_cost` (100,000 on the deploy measured), the `jit=off` line becomes a
+no-op belt-and-braces rather than the fix. Note what is ALREADY known: indexing + ANALYZE does
+*not* speed up the join itself — measured 150 ms vs 176 ms on a standalone repro, the planner
+hash-joins it fine either way. The open question is only whether it changes the COST ESTIMATE,
+which was never tested. Three of the four joins are also dead on current data (metric-level and
+dashboard-level configs are 0 rows, and `cfg_global` can never match because
+`createTempConfigCache` skips the `global` and `default` keys) — worth deleting regardless.
+
+### The ADAPT upsert rewrites every result row even when nothing changed
+
+**Priority:** P3
+**Origin:** performance investigation during /ship on `perf/adapt-disable-jit` (2026-09-04).
+**Why:** with JIT disabled the `ds_adapt_results` upsert is still ~8s of the ~13s ADAPT statement.
+`EXPLAIN (ANALYZE, BUFFERS)` on a 20,598-metric run reports `Tuples Inserted: 0`,
+`Conflicting Tuples: 20598`, `width=4080` — every re-evaluate rewrites the whole result set as
+UPDATEs, ~84 MB of wide jsonb, at ~94 buffers per row. `ds_adapt_results` is 975 MB for 161,661
+rows (6.3 KB/row), so the jsonb columns are TOASTed and each row update touches several pages plus
+three index updates. Re-evaluating a run whose inputs are unchanged does the same work as the first
+evaluation.
+**What to do:** measure first — how many rows actually change value on a typical re-evaluate. If it
+is a small fraction, add a `WHERE` clause to the `DO UPDATE` (`ds_adapt_results.conclusion IS
+DISTINCT FROM EXCLUDED.conclusion OR ...`) so unchanged rows are skipped. Note that `checks`,
+`thresholds` and `conditions` are regenerated jsonb and may not compare equal even when
+semantically identical; compare the fields that matter, not the whole row. Also worth pricing:
+several of the stored jsonb columns are derivable and may not need storing at all.
+
+### The ADAPT trigger fires twice per upserted row
+
+**Priority:** P4
+**Origin:** performance investigation during /ship on `perf/adapt-disable-jit` (2026-09-04).
+**Why:** `auto_mark_fresh_on_analysis` is `BEFORE INSERT OR UPDATE ... FOR EACH ROW` on
+`ds_adapt_results`. `ON CONFLICT DO UPDATE` runs the BEFORE INSERT trigger, then the BEFORE UPDATE
+trigger, so a 20,598-row upsert fires it 41,196 times — measured at 676 ms with JIT off (3,245 ms
+with JIT on, since its expressions were being compiled too). Small next to the upsert itself, but
+it scales with the same row count and is pure overhead on the insert half, whose `NEW.is_stale =
+false` assignment the update half immediately redoes.
+**What to do:** low value on its own; fold into the upsert work above, since skipping unchanged
+rows removes most of these calls for free.
+
 ### A rollup job stuck in BullMQ's failed set silences the read-path repair
 
 **Priority:** P3

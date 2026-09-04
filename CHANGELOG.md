@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.5] - 2026-09-04
+
+### Fixed
+- **Re-evaluating a large test run is roughly six times faster.** The step that compares a run's metrics against its baseline was spending most of its time not comparing anything. PostgreSQL can compile a query to machine code before running it, and decides whether to bother based on how expensive it estimates the query to be. That estimate is a poor guide for this particular query: it is driven by how many rows are involved, while the compilation cost is driven by how large and deeply nested the individual calculations are. This query builds unusually large nested values for each row while touching only a moderate number of rows, so it gets compiled at the highest optimisation level for no return. The result was 64 seconds of compilation on a step that takes 13 seconds to run without it.
+
+  Measured on a production-sized run of 20,598 metrics, PostgreSQL reported 64.2 seconds of compilation on a step whose total was 87.3 seconds; with compilation switched off the same step took 13.3 seconds. The 64.2 seconds is read directly from the database's own compilation timer and is the reliable figure. The two totals were measured one after the other, so the second benefited from a warmer cache and the difference between them should be read as "several times faster", not as an exact saving.
+
+  This also removes a failure that was close to happening rather than only slowness. This step runs under a two-minute limit. At 87.3 seconds a single run was already using 73% of that budget before doing any real work, and the two-run batch that prompted the investigation was at 109 seconds — 91%. A slightly larger run would have been cancelled outright, rolling back the whole baseline comparison.
+
+  Compilation is switched off only for this one step. The two neighbouring steps that share the same database session setup were measured as well and deliberately left alone: the statistics calculation is genuinely faster with compilation on (157 seconds against 175, because there it pays off across millions of rows), and the baseline aggregation never triggers compilation at all. Turning it off across all three would have cost about 18 seconds on every statistics run to save 64 seconds here.
+
 ## [0.2.94.4] - 2026-09-04
 
 ### Changed
