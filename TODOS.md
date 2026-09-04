@@ -318,6 +318,54 @@ used by only the handful of tests in the `ramp_up refresh` describe block.
 **What to do:** hoist `aggregationMocks()` to the top-level describe, parameterised on the deleted
 and actual counts, and replace the inline copies. Pure test refactor, no behaviour change.
 
+### `StatisticsPipeline` reads 34 GB per run — statistics half done, scan half open
+
+**Priority:** P3 (was P2 — the actionable half shipped in v0.2.94.6)
+**Origin:** performance investigation following /ship on `perf/adapt-disable-jit` (2026-09-04).
+**Why:** recalculating statistics for one 20,598-metric run measured 157 s, reading 4,171,222 blocks
+(~34 GB) and spilling 5.2 GB of temp. Two independent causes, both measured on prod:
+
+1. **A 300x group-count misestimate forces a disk sort.** `pg_stats` on the chunk has per-column
+   `n_distinct` of 10 / 59 / 26 / 3547 for the group key `(test_run_id, application_dashboard_id,
+   panel_id, metric_name)`; with no multi-column stats the planner multiplies these to 8,404,581
+   groups against **20,598** actual. At an estimated 3.4 GB hash table it rejects HashAggregate at
+   any `work_mem` (128 MB included, so `AGGREGATION_WORK_MEM` does not help) and sorts 20.6 M rows
+   to disk instead.
+2. **A 33 GB seq scan of the uncompressed chunk.** `_hyper_1_113_chunk` holds 82.5 M rows across a
+   7-day window; the run's 20.65 M are 25% of it, scattered (`correlation` on `test_run_id` is
+   -0.027, because concurrent runs interleave). At 25% selectivity a seq scan is correct and no
+   index helps. Compressed chunks answer the same query in **2 buffers** because `test_run_id` is
+   the `compress_segmentby` key.
+
+**DONE in v0.2.94.6** (`1801000000000-AddDsMetricsChunkStatistics`): a TimescaleDB job creates
+`CREATE STATISTICS (ndistinct)` on the group key for every uncompressed `ds_metrics` chunk, hourly,
+plus a backfill on migrate; and `chunk_time_interval` drops 7 days -> 1 day for new chunks. Measured
+standalone before implementing: 48.0 s -> 24.9 s with identical I/O (4,164,567 vs 4,164,471 blocks),
+the gain being a parallel plan unlocked by the accurate estimate.
+
+**Still to verify on production** (local chunks are 6.2M rows and already plan fine, so none of this
+is reproducible on a dev database): that the 5.2 GB `external merge` sort actually disappears from
+the real pipeline query. The mechanism is sound — 20,598 groups x 400 bytes is ~8 MB against the
+3.4 GB the bad estimate implied — but it was never measured end to end. Re-run the aggregation on a
+large run after the migration and check for `Sort Method: external merge` in the plan.
+
+**Still open — the 33 GB scan itself.** `chunk_time_interval` only affects NEW chunks, so runs
+already ingested keep their 79 GB chunk until it compresses. Nothing more to do here; it self-heals.
+
+**Explicitly ruled out:** adding a time bound (`m.time BETWEEN tr.start_time AND tr.end_time`).
+Measured — it changes nothing: identical `Rows Removed by Filter` (61,890,539) and 9 s *slower*.
+`test_run_id = X` already selects exactly the run's rows, so a time predicate removes no additional
+rows and cannot make them cheaper to find.
+
+**Scope, so this is not over-prioritised:** the pipeline runs only in `force` / `missing-data`
+refresh modes, gated on `testRunsWithNewData > 0` (`simple-orchestrate-reevaluate-batch.ts:516,719`)
+— a plain re-evaluate never pays it. The scan half also self-heals: `compress_after` is 7 days and
+`chunk_time_interval` is 7 days, so there are always up to two uncompressed chunks (currently 79 GB
++ 36 GB against 2.5 GB for a compressed week, ~31x). Only runs 0-14 days old are expensive. Lowering
+`compress_after` would shrink that window but pulls against `decompressChunksForRange` on the
+force-refetch path, where `max_tuples_decompressed_per_dml_transaction` is charged per transaction —
+cheaper reads for more frequent decompression. Lowering `chunk_time_interval` is the safer half.
+
 ### The 2.5M ADAPT plan cost that triggers JIT may be an ANALYZE artifact
 
 **Priority:** P3
