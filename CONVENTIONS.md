@@ -69,6 +69,38 @@ Two rules the helper exists to enforce:
 `ParseUUIDPipe` / `@IsUUID()` on a `test_run_id` is the same bug in DTO form: it rejects the only
 id a pipeline has before the service, which resolves either form, ever sees it.
 
+### A streamed response cannot report its own failure once the body is in flight
+
+Routes that `@Res()` a stream (`sut-transfer` export, the admin log viewer) leave the
+Controller → Service → Repository shape: the handler returns before the work finishes, so a
+failure surfaces on the stream, not as a thrown exception the exception filter can turn into a
+response. Two rules, both learned the hard way in v0.2.94.3:
+
+- **`res.status(500)` followed by `res.destroy(err)` sends no 500.** `res.destroy()` tears the
+  socket down without flushing a status line, so the client gets a transport error
+  (`UND_ERR_SOCKET`, or a bare "network error" in the browser) no matter what you set first.
+  Verified with a live `http.createServer` probe. Branch on `res.headersSent`: reply properly
+  while it is false, and only destroy once the body is in flight, where an abrupt close is the
+  only signal a truncated payload can carry.
+
+  ```typescript
+  stream.on('error', (err) => {
+    this.logger.error(`Export stream failed: ${err.message}`);
+    if (res.headersSent) res.destroy(err);
+    else res.status(500).json({ message: 'Export failed' });
+  });
+  ```
+
+- **`res.flushHeaders()` is for SSE, not for downloads.** It commits the status line up front,
+  which closes the window the branch above depends on. `logs.controller.ts` needs it because an
+  SSE stream is not established until the headers land; a file download does not. If a proxy
+  needs to know not to buffer, the `X-Accel-Buffering: no` header carries that on its own —
+  nginx reads it whenever the headers arrive.
+
+Also give any long stream a periodic flush. nginx buffers a proxied response by default and a
+load balancer will cut an apparently idle connection, so a slow producer that emits nothing for
+minutes looks dead to everything between it and the browser.
+
 ## Worker Patterns
 
 Every job follows: **Job Handler → Pipeline Registry → Pipeline**

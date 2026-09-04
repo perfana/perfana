@@ -709,6 +709,39 @@ sized database before committing to either.
 
 ---
 
+## SUT transfer
+
+### The SUT export has no completion signal, and leaves an empty file behind on cancel
+
+**Priority:** P4
+**Origin:** /ship on `fix/sut-export-stream-to-disk` (v0.2.94.3, 2026-09-04). Three gaps the
+review surfaced and the fix deliberately left out of scope.
+**Why:** the fix made a large export possible; these are the rough edges around it. None of them
+lose data, which is why they were deferred rather than fixed.
+
+1. **No completion confirmation on the disk-stream path.** Chrome shows no download UI for a
+   File System Access write, so a multi-minute export ends with the dialog simply closing. The
+   buffered fallback gets the browser's own download shelf for free, so the two paths give
+   different feedback for the same action. Blocked on there being no toast/snackbar system in
+   `apps/web` — a terminal "Export complete, <size>" state in the dialog is the cheaper fix.
+
+2. **Cancelling leaves a 0-byte file at the chosen location.** `showSaveFilePicker()` creates
+   the entry before the first byte arrives, and `FileSystemWritableFileStream.abort()` discards
+   the swap file, not the entry. Reads as a successful-but-empty export. `handle.remove()` would
+   clear it, but that means holding the handle rather than only the writable.
+
+3. **`Content-Disposition` and the filename the client writes have never agreed.** The server
+   sends `sut-<SUT uuid>-<date>.ndjson.gz`; the dialog writes `sut-<system name>-<date>.ndjson.gz`
+   for both `a.download` and the picker's `suggestedName`. A scripted client honouring the header
+   and a browser client get different names for the same bundle, and each computes its own date,
+   so a request straddling UTC midnight disagrees with itself. Fixing it properly means the
+   client reading the header, which needs `Access-Control-Expose-Headers`.
+
+**What:** (1) is the only one a user would notice. Do it first, or decide the dialog state is
+enough. (2) and (3) are correctness tidiness, not bugs.
+
+---
+
 ## Dead code detection
 
 ### knip treats every file under `apps/web/app/**` as an entry point, so nothing there is ever unused
