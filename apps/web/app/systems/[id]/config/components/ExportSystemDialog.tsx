@@ -11,13 +11,68 @@ import { FileDownload as FileDownloadIcon } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 
+/** The slice of the writable we use. Narrow on purpose: the full stream is awkward to fake in a test. */
+type DiskSink = Pick<FileSystemWritableFileStream, 'write' | 'close' | 'abort'>;
+
+/**
+ * A cancel — the user dismissing the save dialog, or aborting the fetch — not a failure.
+ * Read `name` off the value rather than gating on `instanceof Error`: jsdom's DOMException
+ * does not inherit from Error, so the instanceof form makes the cancel paths untestable.
+ */
+function isAbortError(err: unknown): boolean {
+  return (err as { name?: string } | undefined)?.name === 'AbortError';
+}
+
+/** The picker rejects a suggestedName carrying path separators, and a SUT name is free text. */
+function safeFilePart(name: string): string {
+  return name.replace(/[^a-z0-9._-]/gi, '-');
+}
+
+/**
+ * Ask the browser for a file to stream the bundle into, so a multi-GB export never lands in the
+ * tab's heap. Chrome/Edge only; anywhere else (and in a non-secure context or a cross-origin
+ * iframe) this returns null and the caller falls back to buffering a Blob.
+ *
+ * Must be called straight out of the click handler — the picker needs transient user activation.
+ */
+export async function pickDiskSink(suggestedName: string): Promise<DiskSink | null> {
+  const picker = (window as unknown as {
+    showSaveFilePicker?: (o: unknown) => Promise<{ createWritable(): Promise<DiskSink> }>;
+  }).showSaveFilePicker;
+  if (!picker) return null;
+  const handle = await picker({
+    suggestedName,
+    types: [{ description: 'Gzipped NDJSON', accept: { 'application/gzip': ['.gz'] } }],
+  });
+  return handle.createWritable();
+}
+
 /**
  * The export is a piped gzip stream with no Content-Length, so there is no percentage to show —
  * only how much has arrived. Reading it chunk by chunk (instead of response.blob()) is what turns
  * a dialog that looks hung into one that visibly counts up.
+ *
+ * With a `sink` the chunks go straight to disk and nothing is retained: buffering them all and
+ * then copying them into a Blob costs ~2x the bundle in tab memory, and a large run's ds_metrics
+ * (always exported — it is a `core` resource, not covered by the raw-data checkbox) is enough to
+ * kill the tab. fetch reports that as a bare "network error", indistinguishable from a real one.
  */
-export async function readWithProgress(response: Response, onBytes: (bytes: number) => void): Promise<Blob> {
-  if (!response.body) return response.blob(); // no streams (old browser / jsdom) — fall back
+export async function readWithProgress(
+  response: Response,
+  onBytes: (bytes: number) => void,
+  sink?: DiskSink | null,
+): Promise<Blob | null> {
+  if (!response.body) {
+    // No streams (old browser / jsdom). With a sink already open this is not a success: the
+    // picker truncated the target file at createWritable(), so returning null here would close
+    // the dialog over a 0-byte file and leave the writable holding its swap file. Give the file
+    // back and fail loudly instead.
+    if (sink) {
+      await sink.abort().catch(() => undefined);
+      throw new Error('This browser cannot stream the export. Try Chrome or Edge.');
+    }
+    return response.blob();
+  }
   const reader = response.body.getReader();
   const chunks: BlobPart[] = [];
   let total = 0;
@@ -25,7 +80,8 @@ export async function readWithProgress(response: Response, onBytes: (bytes: numb
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    chunks.push(value as BlobPart);
+    if (sink) await sink.write(value);
+    else chunks.push(value as BlobPart);
     total += value.byteLength;
     // ponytail: 256 kB step keeps a 1 GB export at ~4k renders instead of ~16k chunk renders.
     if (total - reported >= 256 * 1024) {
@@ -34,12 +90,15 @@ export async function readWithProgress(response: Response, onBytes: (bytes: numb
     }
   }
   onBytes(total);
-  return new Blob(chunks);
+  if (!sink) return new Blob(chunks);
+  await sink.close();
+  return null;
 }
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} kB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 ** 3) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
 interface TestRunRow {
@@ -65,6 +124,7 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportedBytes, setExportedBytes] = useState(0);
+  const [buffering, setBuffering] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchRuns = useCallback(async () => {
@@ -107,6 +167,7 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
       setSelected(new Set());
       setExportError(null);
       setExportedBytes(0);
+      setBuffering(false);
       setIncludeOptional(true);
       setIncludeRaw(false);
       fetchRuns();
@@ -130,11 +191,28 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
   };
 
   const handleExport = async () => {
+    // Clear stale state BEFORE the picker: dismissing the save dialog returns early, and a
+    // previous attempt's error banner would otherwise sit there describing the action just taken.
+    setExportError(null);
+    setExportedBytes(0);
+
+    const filename = `sut-${safeFilePart(systemName)}-${new Date().toISOString().slice(0, 10)}.ndjson.gz`;
+    // Before any await, while the click still counts as user activation.
+    let sink: DiskSink | null = null;
+    try {
+      sink = await pickDiskSink(filename);
+    } catch (err) {
+      // Dismissing the save dialog is a cancel, not a failure.
+      if (isAbortError(err)) return;
+      // Anything else (insecure origin, cross-origin iframe, a rejected suggestedName) falls back
+      // to buffering. Log it: otherwise a picker regression is indistinguishable from a tab OOM.
+      console.warn('Save picker unavailable — buffering the export in memory instead', err);
+      sink = null;
+    }
+    setBuffering(sink === null);
     const controller = new AbortController();
     abortRef.current = controller;
     setExporting(true);
-    setExportError(null);
-    setExportedBytes(0);
     try {
       const response = await authenticatedFetch(`/systems-under-test/${systemId}/export`, {
         method: 'POST',
@@ -150,21 +228,29 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
         const body = await response.json().catch(() => null);
         throw new Error(body?.message || `Export failed: ${response.statusText}`);
       }
-      const blob = await readWithProgress(response, setExportedBytes);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sut-${systemName}-${new Date().toISOString().slice(0, 10)}.ndjson.gz`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const blob = await readWithProgress(response, setExportedBytes, sink);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
       onClose();
     } catch (err) {
-      // A cancel is a choice, not a failure — abort surfaces here as an AbortError. Read `name`
-      // off the value rather than gating on `instanceof Error`: jsdom's DOMException does not
-      // inherit from Error, so the instanceof form makes the cancel path untestable.
-      if ((err as { name?: string } | undefined)?.name !== 'AbortError') {
+      // Close the socket, not just the file. Without this the server keeps streaming into a
+      // reader that has stopped draining: no read() is outstanding, so the connection never
+      // closes, res.on('close') never fires, and the export's Postgres cursor and pooled
+      // connection stay held until the tab dies. A disk-full mid-write is enough to trigger it.
+      controller.abort();
+      // Discards the swap file. It does NOT remove the entry the picker already created, so a
+      // cancelled export can still leave a 0-byte file at the chosen location.
+      await sink?.abort().catch(() => undefined);
+      // A cancel is a choice, not a failure — abort surfaces here as an AbortError.
+      if (!isAbortError(err)) {
         setExportError(
           err && typeof err === 'object' && 'message' in err
             ? (err as Error).message
@@ -206,12 +292,27 @@ export default function ExportSystemDialog({ open, onClose, systemId, systemName
         {exporting && (
           <Box sx={{ mb: 2 }}>
             <LinearProgress />
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            {/* The only signal that a multi-minute export is moving rather than hung — announce it. */}
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              role="status"
+              aria-live="polite"
+              sx={{ display: 'block', mt: 0.5 }}
+            >
               {exportedBytes === 0
                 ? 'Collecting data on the server… this can take a while for large test runs.'
                 : `Downloading bundle… ${formatBytes(exportedBytes)} received.`}
               {' '}You can cancel at any time.
             </Typography>
+            {/* Without a save picker the whole bundle is held in the tab, which is what kills a
+                large export. Say so, rather than letting it fail as a bare "network error". */}
+            {buffering && (
+              <Alert severity="info" sx={{ mt: 1 }}>
+                This browser has no save-to-disk picker, so the bundle is held in memory. For a very
+                large export use Chrome or Edge, or select fewer test runs.
+              </Alert>
+            )}
           </Box>
         )}
 
