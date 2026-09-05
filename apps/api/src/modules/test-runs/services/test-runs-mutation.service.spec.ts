@@ -494,10 +494,50 @@ describe('TestRunsMutationService', () => {
   });
 
   describe('updateAnalysisTimeRange', () => {
-    const handlerResult = (testRun: Record<string, unknown>, affectedTestRunIds: string[]) => ({
-      testRun,
-      affectedTestRunIds,
-    });
+    /**
+     * The handler's contract is `{ testRun, affectedTestRunIds, completedTestRunIds, skipped }`.
+     * `completedTestRunIds` defaults to the affected list so the common "everything the
+     * write touched was already finished" case stays short.
+     */
+    const handlerResult = (
+      testRun: Record<string, unknown>,
+      affectedTestRunIds: string[],
+      completedTestRunIds: string[] = affectedTestRunIds,
+      skipped: Array<Record<string, unknown>> = [],
+    ) => ({ testRun, affectedTestRunIds, completedTestRunIds, skipped });
+
+    /**
+     * The queue work now runs in `enqueueAnalysisTimeRangeFollowUp`, dispatched through
+     * `runAfterRequestCommit`. Outside a request context that is
+     * `void Promise.resolve().then(fn)`, so the hook is still pending when
+     * `updateAnalysisTimeRange` resolves. A bare `await Promise.resolve()` only advances
+     * one microtask; the hook awaits several. Drain to the end of the microtask queue.
+     */
+    const flushDeferred = async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    };
+
+    const installMocks = (
+      result: Record<string, unknown>,
+      affected: string[],
+      completed: string[] = affected,
+      skipped: Array<Record<string, unknown>> = [],
+      bullmqOverrides: Record<string, jest.Mock> = {},
+    ) => {
+      const mockHandler = {
+        execute: jest.fn().mockResolvedValue(handlerResult(result, affected, completed, skipped)),
+      };
+      const mockBullmq = {
+        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
+        analyzeTest: jest.fn().mockResolvedValue(undefined),
+        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
+        ...bullmqOverrides,
+      };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+      return { mockHandler, mockBullmq };
+    };
 
     it('calls handler and enqueues rollup when test run is completed', async () => {
       const mockResult = {
@@ -507,49 +547,32 @@ describe('TestRunsMutationService', () => {
         analysis_start_offset: 30,
         analysis_end_offset: 60,
       };
-      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001'])) };
-      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
-      (service as any).bullmqClientService = {
-        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
-        analyzeTest: jest.fn().mockResolvedValue(undefined),
-        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
-      };
+      const { mockHandler, mockBullmq } = installMocks(mockResult, ['run-001']);
 
       const result = await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', []);
+      await flushDeferred();
 
       expect(mockHandler.execute).toHaveBeenCalledWith({ id: 'uuid-1', analysisStartOffset: 30, analysisEndOffset: 60, applyToAll: false });
-      expect((service as any).bullmqClientService.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-001');
+      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-001');
       expect(result).toBe(mockResult);
     });
 
     it('does not enqueue rollup when test run is not completed', async () => {
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: false };
-      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001'])) };
-      const mockBullmq = {
-        enqueueTransactionStatsRollup: jest.fn(),
-        analyzeTest: jest.fn().mockResolvedValue(undefined),
-        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
-      };
-      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
-      (service as any).bullmqClientService = mockBullmq;
+      const { mockBullmq } = installMocks(mockResult, ['run-001'], []);
 
       await service.updateAnalysisTimeRange('uuid-1', 0, 0, 'user-1', []);
+      await flushDeferred();
 
       expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
     });
 
     it('re-analyses only the edited run when applyToAll is not set', async () => {
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
-      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001'])) };
-      const mockBullmq = {
-        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
-        analyzeTest: jest.fn().mockResolvedValue(undefined),
-        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
-      };
-      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
-      (service as any).bullmqClientService = mockBullmq;
+      const { mockBullmq } = installMocks(mockResult, ['run-001']);
 
       await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', []);
+      await flushDeferred();
 
       expect(mockBullmq.analyzeTest).toHaveBeenCalledWith('run-001', { adapt: true, benchmarksOnly: false });
       expect(mockBullmq.reevaluateBatch).not.toHaveBeenCalled();
@@ -558,16 +581,10 @@ describe('TestRunsMutationService', () => {
     it('re-evaluates the whole workload with recalculateStatistics when applyToAll is set', async () => {
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
       const affected = ['run-001', 'run-002', 'run-003'];
-      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, affected)) };
-      const mockBullmq = {
-        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
-        analyzeTest: jest.fn().mockResolvedValue(undefined),
-        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
-      };
-      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
-      (service as any).bullmqClientService = mockBullmq;
+      const { mockHandler, mockBullmq } = installMocks(mockResult, affected);
 
       await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+      await flushDeferred();
 
       expect(mockHandler.execute).toHaveBeenCalledWith({ id: 'uuid-1', analysisStartOffset: 30, analysisEndOffset: 60, applyToAll: true });
       // analyze-test would re-hit Grafana once per run; the batch path skips collection
@@ -580,66 +597,177 @@ describe('TestRunsMutationService', () => {
       expect(mockBullmq.analyzeTest).not.toHaveBeenCalled();
     });
 
-    it('falls back to analyzeTest when applyToAll matched only the edited run', async () => {
-      // The workload has a single run. reevaluateBatch on a one-run batch would skip
-      // data collection for a run that may never have been collected; analyze-test is
-      // the correct path once there are no siblings to spare.
+    // ---- Finding 6: branch on applyToAll ALONE -------------------------------------
+    //
+    // The pulled release gated the batch arm on `affectedTestRunIds.length > 1`, so a
+    // workload holding a single run fell through to analyzeTest. analyze-test runs
+    // metrics collection and re-hits Grafana — the exact cost this path exists to avoid,
+    // and on an old run whose Grafana window has expired it can also collect nothing and
+    // overwrite good data. The user asked for "apply to all"; one run is still all of them.
+    it('uses reevaluateBatch for a single-run workload when applyToAll is set', async () => {
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
-      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001'])) };
-      const mockBullmq = {
-        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
-        analyzeTest: jest.fn().mockResolvedValue(undefined),
-        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
-      };
-      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
-      (service as any).bullmqClientService = mockBullmq;
+      const { mockBullmq } = installMocks(mockResult, ['run-001']);
 
       await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+      await flushDeferred();
 
-      expect(mockBullmq.reevaluateBatch).not.toHaveBeenCalled();
-      expect(mockBullmq.analyzeTest).toHaveBeenCalledWith('run-001', { adapt: true, benchmarksOnly: false });
+      expect(mockBullmq.reevaluateBatch).toHaveBeenCalledWith(['run-001'], {
+        checks: true,
+        adapt: true,
+        recalculateStatistics: true,
+      });
+      expect(mockBullmq.analyzeTest).not.toHaveBeenCalled();
     });
 
+    // The other half of the same gate: the old code's else-arm was `target.completed`, so
+    // an applyToAll edit on a RUNNING target enqueued nothing at all while the UI still
+    // reported that re-analysis had started.
     it('re-evaluates the workload even when the edited run is not completed', async () => {
-      // Only the single-run arm is gated on `completed`. The siblings are historical
-      // runs whose windows moved, and they still need rebuilding.
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: false };
       const affected = ['run-001', 'run-002'];
-      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, affected)) };
-      const mockBullmq = {
-        enqueueTransactionStatsRollup: jest.fn(),
-        analyzeTest: jest.fn().mockResolvedValue(undefined),
-        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
-      };
-      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
-      (service as any).bullmqClientService = mockBullmq;
+      const { mockBullmq } = installMocks(mockResult, affected, ['run-002']);
 
       await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+      await flushDeferred();
 
       expect(mockBullmq.reevaluateBatch).toHaveBeenCalledWith(affected, {
         checks: true,
         adapt: true,
         recalculateStatistics: true,
       });
-      // Not completed, so no rollup.
-      expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
+      expect(mockBullmq.analyzeTest).not.toHaveBeenCalled();
     });
 
-    it('returns the updated run even when the re-evaluation enqueue fails', async () => {
-      // The offsets are already committed at this point. Throwing here would show the
-      // user an error for a write that succeeded, and they would edit again.
+    it('still uses analyzeTest for a completed run when applyToAll is not set', async () => {
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
-      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001', 'run-002'])) };
-      const mockBullmq = {
-        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
-        analyzeTest: jest.fn().mockResolvedValue(undefined),
-        reevaluateBatch: jest.fn().mockRejectedValue(new Error('redis down')),
-      };
-      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
-      (service as any).bullmqClientService = mockBullmq;
+      const { mockBullmq } = installMocks(mockResult, ['run-001']);
 
-      await expect(service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true))
-        .resolves.toBe(mockResult);
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', []);
+      await flushDeferred();
+
+      expect(mockBullmq.analyzeTest).toHaveBeenCalledWith('run-001', { adapt: true, benchmarksOnly: false });
+      expect(mockBullmq.reevaluateBatch).not.toHaveBeenCalled();
+    });
+
+    it('enqueues nothing when applyToAll wrote no runs at all', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const { mockBullmq } = installMocks(mockResult, [], []);
+
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+      await flushDeferred();
+
+      expect(mockBullmq.reevaluateBatch).not.toHaveBeenCalled();
+      expect(mockBullmq.analyzeTest).not.toHaveBeenCalled();
+    });
+
+    // ---- Finding 7: the rollup follows completedTestRunIds, not just the target -----
+    //
+    // The rollup recomputes ramp_up_excluded from the offsets. getRollupStatus reads a
+    // populated table and answers `ready` forever, so a sibling that is never re-enqueued
+    // serves previous-window numbers in Performance Analysis indefinitely with nothing
+    // logged. Rolling up only the target is therefore silent, permanent staleness.
+    it('enqueues a stats rollup for every completed run that was written', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const affected = ['run-001', 'run-002', 'run-003'];
+      const completed = ['run-001', 'run-003'];
+      const { mockBullmq } = installMocks(mockResult, affected, completed);
+
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+      await flushDeferred();
+
+      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledTimes(2);
+      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-001');
+      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-003');
+      // run-002 was still running, so it has no rollup to refresh.
+      expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalledWith('run-002');
+    });
+
+    it('rolls up a completed sibling even when the edited run itself is still running', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: false };
+      const { mockBullmq } = installMocks(mockResult, ['run-001', 'run-002'], ['run-002']);
+
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+      await flushDeferred();
+
+      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledTimes(1);
+      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-002');
+    });
+
+    it('still enqueues the re-evaluation when one sibling rollup fails', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const rollup = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('redis blip'))
+        .mockResolvedValue(undefined);
+      const { mockBullmq } = installMocks(
+        mockResult,
+        ['run-001', 'run-002'],
+        ['run-001', 'run-002'],
+        [],
+        { enqueueTransactionStatsRollup: rollup },
+      );
+
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+      await flushDeferred();
+
+      expect(rollup).toHaveBeenCalledTimes(2);
+      expect(mockBullmq.reevaluateBatch).toHaveBeenCalled();
+    });
+
+    // ---- Finding 8: the deferred hook must never reject -----------------------------
+    //
+    // runAfterRequestCommit dispatches as `void Promise.resolve().then(fn)` when there is
+    // no request EM, so an escaping rejection is an unhandled rejection — which terminates
+    // the process on this Node version. The response is already sent by then; nothing in
+    // the follow-up is worth taking the API down for.
+    it('returns the updated run even when the re-evaluation enqueue fails', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      installMocks(mockResult, ['run-001', 'run-002'], ['run-001', 'run-002'], [], {
+        reevaluateBatch: jest.fn().mockRejectedValue(new Error('redis down')),
+      });
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        const result = await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+        expect(result).toEqual({ ...mockResult, affectedCount: 2, skipped: [] });
+        await flushDeferred();
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+
+      expect(unhandled).toEqual([]);
+    });
+
+    it('does not reject when analyzeTest fails on the single-run path', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      installMocks(mockResult, ['run-001'], ['run-001'], [], {
+        analyzeTest: jest.fn().mockRejectedValue(new Error('redis down')),
+      });
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        await expect(service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [])).resolves.toBe(mockResult);
+        await flushDeferred();
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+
+      expect(unhandled).toEqual([]);
+    });
+
+    it('surfaces the blast radius to the caller on an applyToAll edit', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const skipped = [{ testRunId: 'run-009', completed: false, skipped: 'running' }];
+      installMocks(mockResult, ['run-001', 'run-002'], ['run-001', 'run-002'], skipped);
+
+      const result = await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+      await flushDeferred();
+
+      expect(result).toEqual({ ...mockResult, affectedCount: 2, skipped });
     });
   });
 

@@ -20,6 +20,7 @@ import { CreateDsCompareConfigDto, UpdateDsCompareConfigDto, DsCompareConfigDto 
 import { DeleteAnomalyDto } from './dto/delete-anomaly.dto';
 import { SetApdexThresholdDto, WorkloadApdexThresholdDto, WorkloadTransactionApdexThresholdDto } from './dto/apdex-threshold.dto';
 import { PaginationQueryDto, PaginatedResponseDto } from '../../common/dto';
+import type { AnalysisTimeRangeScopeEntry } from './handlers/update-analysis-time-range.handler';
 import {
   TestRunStatus,
   ConsolidatedResult,
@@ -361,7 +362,11 @@ export class TestRunsService {
     return this.mutationService.updateAnalysisStartOffset(id, analysisStartOffset, userId, roles);
   }
 
-  async updateAnalysisTimeRange(id: string, analysisStartOffset: number, analysisEndOffset: number, userId: string, roles: string[], applyToAll = false): Promise<TestRun> {
+  async previewAnalysisTimeRangeScope(id: string, analysisStartOffset: number, analysisEndOffset: number, userId: string, roles: string[]) {
+    return this.mutationService.previewAnalysisTimeRangeScope(id, analysisStartOffset, analysisEndOffset, userId, roles);
+  }
+
+  async updateAnalysisTimeRange(id: string, analysisStartOffset: number, analysisEndOffset: number, userId: string, roles: string[], applyToAll = false): Promise<TestRun & { affectedCount?: number; skipped?: AnalysisTimeRangeScopeEntry[] }> {
     return this.mutationService.updateAnalysisTimeRange(id, analysisStartOffset, analysisEndOffset, userId, roles, applyToAll);
   }
 

@@ -17,7 +17,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
-import { withRequestEm } from '../../../common/db/request-em';
+import { withRequestEm, runAfterRequestCommit } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { UpdateRunningTestDto } from '../dto/update-running-test.dto';
 import { InitTestDto, InitTestResponse } from '../dto/init-test.dto';
@@ -33,7 +33,11 @@ import { UpdateTagsHandler } from '../handlers/update-tags.handler';
 import { UpdateApplicationReleaseHandler } from '../handlers/update-application-release.handler';
 import { UpdateAnnotationsHandler } from '../handlers/update-annotations.handler';
 import { UpdateAnalysisStartOffsetHandler } from '../handlers/update-analysis-start-offset.handler';
-import { UpdateAnalysisTimeRangeHandler } from '../handlers/update-analysis-time-range.handler';
+import {
+  UpdateAnalysisTimeRangeHandler,
+  partitionAnalysisTimeRangeScope,
+  type AnalysisTimeRangeScopeEntry,
+} from '../handlers/update-analysis-time-range.handler';
 import { UpdateAdaptConfigHandler } from '../handlers/update-adapt-config.handler';
 import { InitTestHandler } from '../handlers/init-test.handler';
 import { TestRunLookupService } from './test-run-lookup.service';
@@ -503,6 +507,47 @@ export class TestRunsMutationService {
     return result;
   }
 
+  /**
+   * What would "apply to all test runs" actually change?
+   *
+   * Read-only twin of updateAnalysisTimeRange, so the dialog can state the blast radius
+   * before the user commits instead of after. Shares
+   * `partitionAnalysisTimeRangeScope` with the write path — two implementations would
+   * drift and the drift would be invisible, since the dialog would promise a count the
+   * write does not honour.
+   */
+  async previewAnalysisTimeRangeScope(
+    id: string,
+    analysisStartOffset: number,
+    analysisEndOffset: number,
+    userId: string,
+    roles: string[],
+  ): Promise<{ total: number; applicable: number; skipped: AnalysisTimeRangeScopeEntry[] }> {
+    await this.assertCanModify({ id }, id, userId, roles);
+
+    const target = await withRequestEm(this.testRunRepo).findOne({ where: { id } });
+    if (!target) {
+      throw new NotFoundException(`Test run not found: ${id}`);
+    }
+
+    const candidates = await withRequestEm(this.testRunRepo).find({
+      where: {
+        systemUnderTestId: target.systemUnderTestId,
+        testEnvironment: target.testEnvironment,
+        workload: target.workload,
+      },
+    });
+
+    const { applicable, skipped } = partitionAnalysisTimeRangeScope(
+      candidates,
+      target,
+      analysisStartOffset,
+      analysisEndOffset,
+    );
+
+    return { total: candidates.length, applicable: applicable.length, skipped };
+  }
+
   async updateAnalysisTimeRange(
     id: string,
     analysisStartOffset: number,
@@ -510,61 +555,114 @@ export class TestRunsMutationService {
     userId: string,
     roles: string[],
     applyToAll = false,
-  ): Promise<TestRun> {
+  ): Promise<TestRun & { affectedCount?: number; skipped?: AnalysisTimeRangeScopeEntry[] }> {
     this.logger.debug(
       `updateAnalysisTimeRange: id=${id}, startOffset=${analysisStartOffset}, endOffset=${analysisEndOffset}, applyToAll=${applyToAll}, userId=${userId}`,
     );
 
     await this.assertCanModify({ id }, id, userId, roles);
 
-    const { testRun: result, affectedTestRunIds } = await this.updateAnalysisTimeRangeHandler.execute({
-      id,
-      analysisStartOffset,
-      analysisEndOffset,
-      applyToAll,
-    });
+    const { testRun: result, affectedTestRunIds, completedTestRunIds, skipped } =
+      await this.updateAnalysisTimeRangeHandler.execute({
+        id,
+        analysisStartOffset,
+        analysisEndOffset,
+        applyToAll,
+      });
 
-    if (result?.completed && result?.test_run_id) {
+    // Deferred out of the request's RLS transaction on purpose. Awaiting a Redis round
+    // trip inside it holds a pooled Postgres connection idle-in-transaction for the
+    // length of a Redis stall, and at pool max 50 that starves unrelated endpoints from
+    // a cheap GET. Same reason repairEmptySamplerRollup defers its enqueue.
+    runAfterRequestCommit(() =>
+      this.enqueueAnalysisTimeRangeFollowUp({
+        targetId: id,
+        target: result,
+        applyToAll,
+        affectedTestRunIds,
+        completedTestRunIds,
+      }),
+    );
+
+    // The caller cannot see the blast radius otherwise: the response body is the single
+    // target run, so without these the UI has no way to say what it just changed.
+    return applyToAll
+      ? { ...result, affectedCount: affectedTestRunIds.length, skipped }
+      : result;
+  }
+
+  /**
+   * Queue the work an analysis-window edit implies, after the response has been sent.
+   *
+   * Never rejects. `runAfterRequestCommit` dispatches its hook as
+   * `void Promise.resolve().then(fn)` when there is no request entity manager, so an
+   * escaping rejection is an unhandled rejection — which terminates the process on this
+   * Node version. The response is already sent by the time this runs; nothing in here is
+   * worth taking the API down for, so every failure is logged and swallowed.
+   */
+  private async enqueueAnalysisTimeRangeFollowUp(args: {
+    targetId: string;
+    target: TestRun;
+    applyToAll: boolean;
+    affectedTestRunIds: string[];
+    completedTestRunIds: string[];
+  }): Promise<void> {
+    const { targetId, target, applyToAll, affectedTestRunIds, completedTestRunIds } = args;
+    try {
+      // The rollup recomputes the ramp_up_excluded rows from the offsets. Every COMPLETED
+      // run that was written needs it, not just the target: getRollupStatus reads a
+      // populated table and answers `ready` forever, so a sibling that is never
+      // re-enqueued serves previous-window numbers in Performance Analysis indefinitely,
+      // with nothing logged anywhere.
+      for (const testRunId of completedTestRunIds) {
+        try {
+          await this.bullmqClientService.enqueueTransactionStatsRollup(testRunId);
+        } catch (err) {
+          this.logger.error(`Failed to re-enqueue stats rollup after time range edit for ${testRunId}:`, err);
+        }
+      }
+
+      // The offsets on their own change nothing anyone can see: they take effect only once
+      // StatisticsPipeline rebakes ds_metrics.ramp_up and rewrites ds_metric_statistics,
+      // and ADAPT recomputes off that.
       try {
-        await this.bullmqClientService.enqueueTransactionStatsRollup(result.test_run_id);
+        if (applyToAll) {
+          // Branch on applyToAll ALONE. Gating on `affectedTestRunIds.length > 1` meant a
+          // single-run workload fell through to analyzeTest — which includes
+          // metrics-collection and re-hits Grafana, the exact thing this path exists to
+          // avoid — or, when the run was not completed, enqueued nothing at all while the
+          // UI still reported that re-analysis had started.
+          //
+          // reevaluateBatch, not analyzeTest per run: analyze-test collects data. The batch
+          // path skips collection, and recalculateStatistics is what makes it still rebuild
+          // the statistics the new window implies. It must stay ONE job: the orchestrator's
+          // scope lock is keyed on sut:env:workload, so a second job for the same workload
+          // is refused rather than queued — the chunking happens inside that one job.
+          if (affectedTestRunIds.length === 0) {
+            this.logger.warn(`No writable runs to re-evaluate after time range edit for ${targetId}`);
+            return;
+          }
+          await this.bullmqClientService.reevaluateBatch(affectedTestRunIds, {
+            checks: true,
+            adapt: true,
+            recalculateStatistics: true,
+          });
+          this.logger.log(
+            `Re-evaluation enqueued for ${affectedTestRunIds.length} test run(s) after time range update (applyToAll)`,
+          );
+        } else if (target?.completed && target?.test_run_id) {
+          await this.bullmqClientService.analyzeTest(target.test_run_id, { adapt: true, benchmarksOnly: false });
+          this.logger.log(`Re-analysis enqueued for test run ${target.test_run_id} after time range update`);
+        }
       } catch (err) {
         this.logger.error(
-          `Failed to re-enqueue stats rollup after time range edit for ${result.test_run_id}:`,
+          `Failed to enqueue re-analysis after time range edit for ${target?.test_run_id ?? targetId}:`,
           err,
         );
       }
-    }
-
-    // The offsets on their own change nothing that anyone can see: they take effect
-    // only once StatisticsPipeline rebakes ds_metrics.ramp_up and rewrites
-    // ds_metric_statistics, and ADAPT then recomputes off that.
-    try {
-      if (applyToAll && affectedTestRunIds.length > 1) {
-        // reevaluateBatch, not analyzeTest per run: analyze-test includes
-        // metrics-collection, so fanning it out over a workload's whole history would
-        // re-hit Grafana once per run to fetch data that has not changed. The batch
-        // path skips collection, and recalculateStatistics is what makes it still
-        // rebuild the statistics the new window implies.
-        await this.bullmqClientService.reevaluateBatch(affectedTestRunIds, {
-          checks: true,
-          adapt: true,
-          recalculateStatistics: true,
-        });
-        this.logger.log(
-          `Re-evaluation enqueued for ${affectedTestRunIds.length} test runs after time range update (applyToAll)`,
-        );
-      } else if (result?.completed && result?.test_run_id) {
-        await this.bullmqClientService.analyzeTest(result.test_run_id, { adapt: true, benchmarksOnly: false });
-        this.logger.log(`Re-analysis enqueued for test run ${result.test_run_id} after time range update`);
-      }
     } catch (err) {
-      this.logger.error(
-        `Failed to enqueue re-analysis after time range edit for ${result?.test_run_id ?? id}:`,
-        err,
-      );
+      this.logger.error(`Post-commit work failed after time range edit for ${targetId}:`, err);
     }
-
-    return result;
   }
 
   /**

@@ -36,6 +36,14 @@ export interface UpdateAnalysisTimeRangeData {
   applyToAll?: boolean;
 }
 
+/** A run considered for the bulk apply, and what happened to it. */
+export interface AnalysisTimeRangeScopeEntry {
+  testRunId: string;
+  completed: boolean;
+  /** Reason it was left alone; absent when the run was written. */
+  skipped?: 'running' | 'too-short' | 'not-writable';
+}
+
 export interface UpdateAnalysisTimeRangeResult {
   testRun: TestRun;
   /**
@@ -44,6 +52,90 @@ export interface UpdateAnalysisTimeRangeResult {
    * ds_metrics.ramp_up and rewrites ds_metric_statistics from them.
    */
   affectedTestRunIds: string[];
+  /**
+   * The runs that were written and are `completed`. Only these get a
+   * transaction-stats rollup: the rollup recomputes the `ramp_up_excluded` rows from
+   * the offsets, and `getRollupStatus` reads a populated table and answers `ready`
+   * forever, so a sibling that never gets re-enqueued shows previous-window numbers
+   * in Performance Analysis indefinitely with nothing logged.
+   */
+  completedTestRunIds: string[];
+  /** Runs deliberately left alone, with the reason. Surfaced to the caller, never silent. */
+  skipped: AnalysisTimeRangeScopeEntry[];
+}
+
+/**
+ * Can this run take these offsets?
+ *
+ * The analysis window is [start + startOffset, end - endOffset]. When the two
+ * exclusions overlap, every sample is outside the window. Two different failures
+ * follow, and neither is reported as a misconfiguration:
+ *
+ *  - `AdaptValidator.checkTooShortTestRuns` tests `ramp_up >= duration` ONLY — it never
+ *    looks at ramp_down — and force-writes NO_BASELINES_FOUND on a match.
+ *  - When only the SUM overruns, that check passes and the run instead falls through to
+ *    the v0.2.93.3 "analyse the whole run" fallback, silently ignoring the trim.
+ *
+ * So the guard has to be the sum, matching RAMP_UP_EXPR and MetricsPipeline. A run with
+ * no recorded duration is treated as applicable: refusing on missing data would exclude
+ * runs that are probably fine, and the pipeline's own fallback still covers it.
+ */
+export function offsetsFitRun(
+  duration: number | null | undefined,
+  analysisStartOffset: number,
+  analysisEndOffset: number,
+): boolean {
+  if (duration === null || duration === undefined) return true;
+  return duration > analysisStartOffset + analysisEndOffset;
+}
+
+/**
+ * Decide which of a workload's runs may take a new analysis window, and why the rest
+ * may not.
+ *
+ * Exported and pure so the preview endpoint and the write path share ONE definition of
+ * the scope. Two implementations would drift, and the drift is invisible: the dialog
+ * would promise a count the write does not honour.
+ *
+ * The target is always applicable — the user edited that run, and refusing it would make
+ * the single-run and bulk paths disagree about the same click.
+ */
+export function partitionAnalysisTimeRangeScope(
+  candidates: TestRunEntity[],
+  target: TestRunEntity,
+  analysisStartOffset: number,
+  analysisEndOffset: number,
+): { applicable: TestRunEntity[]; skipped: AnalysisTimeRangeScopeEntry[] } {
+  const applicable: TestRunEntity[] = [];
+  const skipped: AnalysisTimeRangeScopeEntry[] = [];
+
+  for (const run of candidates) {
+    if (run.id === target.id) {
+      applicable.push(run);
+      continue;
+    }
+    const entry: AnalysisTimeRangeScopeEntry = {
+      testRunId: run.testRunId,
+      completed: run.completed === true,
+    };
+    if (run.organizationId !== target.organizationId || run.teamId !== target.teamId) {
+      // team_id is per-row and nullable, not derived from the system under test, so a
+      // workload can span teams. The caller proved write permission on the target's
+      // (org, team) pair only.
+      skipped.push({ ...entry, skipped: 'not-writable' });
+    } else if (run.completed !== true) {
+      // MetricsPipeline bakes ds_metrics.ramp_up at INGESTION, so moving the offsets
+      // mid-run leaves the run carrying rows flagged under two different settings —
+      // one of the ways a run ends up with partial statistics.
+      skipped.push({ ...entry, skipped: 'running' });
+    } else if (!offsetsFitRun(run.duration, analysisStartOffset, analysisEndOffset)) {
+      skipped.push({ ...entry, skipped: 'too-short' });
+    } else {
+      applicable.push(run);
+    }
+  }
+
+  return { applicable, skipped };
 }
 
 @Injectable()
@@ -73,7 +165,14 @@ export class UpdateAnalysisTimeRangeHandler {
 
       // Siblings are resolved BEFORE the write so the audit diff below has a genuine
       // "before" for each of them.
-      const siblings = applyToAll
+      //
+      // Scoped to the target's organization AND team, not just the workload triple.
+      // `test_runs.team_id` is a per-row nullable column, NOT derived from the system
+      // under test, so a workload can hold runs on different teams; the caller proved
+      // write permission on the target's (org, team) pair only, and RLS is a coarse
+      // backstop that grants modify to any org member. Anything outside that pair is
+      // reported as `not-writable` rather than quietly written.
+      const candidates = applyToAll
         ? await withRequestEm(this.testRunRepo).find({
             where: {
               systemUnderTestId: testRunEntity.systemUnderTestId,
@@ -82,6 +181,13 @@ export class UpdateAnalysisTimeRangeHandler {
             },
           })
         : [testRunEntity];
+
+      const { applicable: siblings, skipped } = partitionAnalysisTimeRangeScope(
+        candidates,
+        testRunEntity,
+        analysisStartOffset,
+        analysisEndOffset,
+      );
 
       // Through the request's RLS transaction, not the pooled connection: the API's login
       // role bypasses row-level security, so a raw dataSource write would update a row the
@@ -141,15 +247,25 @@ export class UpdateAnalysisTimeRangeHandler {
         `Updated analysis time range to start=${analysisStartOffset}s, end=${analysisEndOffset}s ` +
           `for ${siblings.length} test run(s)${applyToAll ? ` (system=${testRunEntity.systemUnderTestId}, environment=${testRunEntity.testEnvironment}, workload=${testRunEntity.workload})` : ` (${id})`}`,
       );
+      if (skipped.length > 0) {
+        const bucket = (reason: string) => skipped.filter((e) => e.skipped === reason).length;
+        this.logger.log(
+          `Left ${skipped.length} run(s) of the workload unchanged: ` +
+            `${bucket('running')} still running, ${bucket('too-short')} shorter than the offsets, ` +
+            `${bucket('not-writable')} on another team or organization`,
+        );
+      }
       const testRun = mapEntityToTestRun(updatedEntity);
 
       this.emitUpdateEvent(testRun, updatedEntity.systemUnderTest?.team_id);
 
+      const affectedTestRunIds = siblings.map((run) => run.testRunId);
+
       return {
         testRun,
-        affectedTestRunIds: siblings
-          .map((run) => run.testRunId)
-          .filter((testRunId): testRunId is string => Boolean(testRunId)),
+        affectedTestRunIds,
+        completedTestRunIds: siblings.filter((run) => run.completed === true).map((run) => run.testRunId),
+        skipped,
       };
     } catch (error) {
       this.logger.error(`Failed to update analysis time range for test run ${id}:`, error);

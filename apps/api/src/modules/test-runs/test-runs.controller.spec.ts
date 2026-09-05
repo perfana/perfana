@@ -83,6 +83,7 @@ const mockServiceFactory = () => ({
   getSummaryTimeseries: jest.fn(),
   getFilterOptions: jest.fn(),
   updateAnalysisStartOffset: jest.fn(),
+  previewAnalysisTimeRangeScope: jest.fn(),
 });
 
 // =============================================================================
@@ -706,6 +707,87 @@ describe('TestRunsController', () => {
       // Must not reach the service: a truthy non-boolean would otherwise be coerced
       // by `=== true` to false silently, or by a looser guard to a workload-wide write.
       expect(service.updateAnalysisTimeRange).not.toHaveBeenCalled();
+    });
+  });
+
+  // G4b: GET :id/analysis-time-range/scope
+  //
+  // Finding 9. Read-only preview behind the "apply to all" checkbox. Its two offsets
+  // arrive as QUERY STRINGS, where the coercion traps are not the same as on the PUT
+  // body: Number('') is 0, so an omitted parameter would silently preview the
+  // "no trim at all" scope and report a count for a window the user never asked for,
+  // and Number('abc') is NaN, which compares false against every bound and would sail
+  // past a naive `start < 0` guard into the partition.
+  describe('GET :id/analysis-time-range/scope', () => {
+    const preview = { total: 7, applicable: 4, skipped: [{ testRunId: 'run-9', completed: false, skipped: 'running' as const }] };
+
+    it('forwards parsed offsets to the service and returns its preview', async () => {
+      const id = mockTestRun.id;
+      service.previewAnalysisTimeRangeScope.mockResolvedValue(preview);
+
+      const result = await controller.previewAnalysisTimeRangeScope(id, '30', '60', mockUserContext);
+
+      expect(result).toEqual(preview);
+      expect(service.previewAnalysisTimeRangeScope).toHaveBeenCalledWith(
+        id,
+        30,
+        60,
+        mockUserContext.userId,
+        mockUserContext.roles,
+      );
+    });
+
+    it('accepts zero for both offsets', async () => {
+      const id = mockTestRun.id;
+      service.previewAnalysisTimeRangeScope.mockResolvedValue(preview);
+
+      await controller.previewAnalysisTimeRangeScope(id, '0', '0', mockUserContext);
+
+      expect(service.previewAnalysisTimeRangeScope).toHaveBeenCalledWith(
+        id,
+        0,
+        0,
+        mockUserContext.userId,
+        mockUserContext.roles,
+      );
+    });
+
+    it.each([
+      ['a non-numeric start offset', 'abc', '30'],
+      ['a non-numeric end offset', '30', 'abc'],
+      ['a negative start offset', '-1', '30'],
+      ['a negative end offset', '30', '-1'],
+      ['both offsets missing', undefined as unknown as string, undefined as unknown as string],
+    ])('rejects %s without reaching the service', async (_label, start, end) => {
+      const id = mockTestRun.id;
+
+      await expect(
+        controller.previewAnalysisTimeRangeScope(id, start, end, mockUserContext),
+      ).rejects.toThrow(ValidationException);
+
+      expect(service.previewAnalysisTimeRangeScope).not.toHaveBeenCalled();
+    });
+
+    // KNOWN GAP — reported, not fixed here (tests-only change).
+    //
+    // `?analysisStartOffset=` (present but empty) reaches the handler as `''`, and
+    // `Number('')` is 0, which is finite and non-negative — so the guard admits it and
+    // the endpoint previews the "no trim at all" scope. The handler's own comment says
+    // "Number('') is 0 ... so both the empty and the garbage case have to be rejected
+    // explicitly", but `!Number.isFinite(start) || start < 0` does not reject it.
+    // Number('') is 0, not NaN, so an explicitly empty offset used to pass the finite /
+    // non-negative guard and preview the NO-TRIM scope — the wrong count in the very
+    // dialog the user is about to confirm. An omitted param is undefined -> NaN and was
+    // always caught; only the empty string slipped through.
+    it.each([
+      ['start', '', '30'],
+      ['end', '30', ''],
+      ['both', '', ''],
+      ['whitespace-only start', '   ', '30'],
+    ])('rejects an explicitly empty %s offset', async (_label, startOffset, endOffset) => {
+      await expect(
+        controller.previewAnalysisTimeRangeScope(mockTestRun.id, startOffset, endOffset, mockUserContext),
+      ).rejects.toThrow(ValidationException);
     });
   });
 

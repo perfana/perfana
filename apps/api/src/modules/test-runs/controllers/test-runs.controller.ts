@@ -282,6 +282,41 @@ export class TestRunsController {
     return this.testRunsService.updateAnalysisStartOffset(id, body.analysisStartOffset, ctx.userId, ctx.roles);
   }
 
+  @Get(':id/analysis-time-range/scope')
+  @ApiOperation({
+    summary: 'Preview which runs an "apply to all" analysis time range change would affect',
+    description:
+      'Read-only. Returns how many runs of this run\'s system/environment/workload would take the ' +
+      'given offsets, and which would be left alone and why (still running, shorter than the ' +
+      'offsets, or on another team). Lets a client state the blast radius before committing.',
+  })
+  @ApiResponse({ status: 200, description: 'Scope preview' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  async previewAnalysisTimeRangeScope(
+    @Param('id', UuidValidationPipe) id: string,
+    @Query('analysisStartOffset') analysisStartOffset: string,
+    @Query('analysisEndOffset') analysisEndOffset: string,
+    @UserCtx() ctx: UserContext,
+  ) {
+    // Query params arrive as strings, and Number() is too permissive to use alone here:
+    // Number('') is 0, not NaN, so `?analysisStartOffset=` would pass a finite,
+    // non-negative 0 and preview the NO-TRIM scope — a wrong count in the confirmation
+    // dialog the user is about to act on. An OMITTED param is undefined -> NaN and is
+    // caught, so only the explicitly-empty case needs the extra arm.
+    const parse = (raw: string | undefined): number =>
+      raw === undefined || raw.trim() === '' ? Number.NaN : Number(raw);
+
+    const start = parse(analysisStartOffset);
+    const end = parse(analysisEndOffset);
+    if (!Number.isFinite(start) || start < 0 || !Number.isFinite(end) || end < 0) {
+      throw new ValidationException(
+        'analysisStartOffset and analysisEndOffset must be non-negative numbers (seconds)',
+      );
+    }
+    return this.testRunsService.previewAnalysisTimeRangeScope(id, start, end, ctx.userId, ctx.roles);
+  }
+
   @Put(':id/analysis-time-range')
   @ApiOperation({ summary: 'Update analysis time range (start and end offsets) for a test run' })
   @ApiResponse({ status: 200, description: 'Analysis time range updated successfully' })
