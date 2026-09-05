@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Slider, Typography, Box, CircularProgress, Alert, useTheme,
@@ -24,6 +24,18 @@ interface SummaryTimeseriesResponse {
   duration: number;
   bucketSizeSeconds: number;
   buckets: SummaryBucket[];
+}
+
+interface ScopeSkip {
+  testRunId: string;
+  completed: boolean;
+  skipped?: 'running' | 'too-short' | 'not-writable';
+}
+
+interface ScopePreview {
+  total: number;
+  applicable: number;
+  skipped: ScopeSkip[];
 }
 
 interface Props {
@@ -50,6 +62,9 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState<string | null>(null);
   const [applyToAll, setApplyToAll] = useState(false);
+  const [scope, setScope]           = useState<ScopePreview | null>(null);
+  const [scopeLoading, setScopeLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   // Slider value: [startOffset, duration - endOffset]
   const sliderValue: [number, number] = [localStart, duration - localEnd];
@@ -62,7 +77,45 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
 
   const effectiveDuration = Math.max(0, duration - localStart - localEnd);
 
+  // Ask the server what this would actually change, rather than asserting "every run of
+  // the workload" in prose. The server is the only place that knows which runs are still
+  // running, too short for these offsets, or on a team the user cannot write — and the
+  // preview shares its partition function with the write path, so the number shown is
+  // the number that will be honoured.
+  //
+  // Re-fetched when the offsets move because "too short for these offsets" depends on them.
+  useEffect(() => {
+    if (!open || !applyToAll) {
+      setScope(null);
+      return;
+    }
+    let cancelled = false;
+    setScopeLoading(true);
+    authenticatedFetch(
+      `/test-runs/${testRun.id}/analysis-time-range/scope?analysisStartOffset=${localStart}&analysisEndOffset=${localEnd}`,
+    )
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data: ScopePreview) => { if (!cancelled) setScope(data); })
+      .catch(() => { if (!cancelled) setScope(null); })
+      .finally(() => { if (!cancelled) setScopeLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, applyToAll, testRun.id, localStart, localEnd]);
+
+  // Un-ticking, or moving the sliders after confirming, invalidates the confirmation:
+  // the user agreed to a specific blast radius, not to whatever it becomes next.
+  useEffect(() => { setConfirming(false); }, [applyToAll, localStart, localEnd]);
+
+  const skipCount = (reason: ScopeSkip['skipped']) =>
+    scope?.skipped.filter((e) => e.skipped === reason).length ?? 0;
+
   const handleSave = async () => {
+    // A workload-wide rewrite goes through a second click. The first Save arms the
+    // warning showing the real count; only the second one sends. Single-run saves are
+    // unaffected — this is not a confirmation for the common case.
+    if (applyToAll && !confirming) {
+      setConfirming(true);
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     try {
@@ -189,17 +242,72 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
             </Typography>
           }
         />
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mt: -0.5 }}>
-          {applyToAll
-            ? `Every run of ${testRun.test_environment} / ${testRun.workload} gets these offsets and is re-evaluated. ADAPT compares a run against a baseline of other runs, so they only stay comparable while they share the same analysis window.`
-            : 'Only this run changes. Its baseline runs keep their current analysis window, so the comparison spans two different windows.'}
-        </Typography>
+        <Box sx={{ ml: 4, mt: -0.5 }}>
+          {!applyToAll && (
+            <Typography variant="caption" color="text.secondary" display="block">
+              Only this run changes. Its baseline runs keep their current analysis window, so the
+              comparison spans two different windows.
+            </Typography>
+          )}
+
+          {applyToAll && scopeLoading && (
+            <Typography variant="caption" color="text.secondary" display="block">
+              Checking which runs this would change…
+            </Typography>
+          )}
+
+          {applyToAll && !scopeLoading && scope && (
+            <>
+              <Typography variant="caption" color="text.secondary" display="block">
+                <strong>{scope.applicable}</strong> of {scope.total} run
+                {scope.total === 1 ? '' : 's'} in {testRun.test_environment} / {testRun.workload} will
+                get these offsets and be re-evaluated. ADAPT compares a run against a baseline of
+                other runs, so they only stay comparable while they share the same analysis window.
+              </Typography>
+              {scope.skipped.length > 0 && (
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                  Leaving {scope.skipped.length} unchanged:
+                  {skipCount('running') > 0 && ` ${skipCount('running')} still running,`}
+                  {skipCount('too-short') > 0 && ` ${skipCount('too-short')} shorter than these offsets,`}
+                  {skipCount('not-writable') > 0 && ` ${skipCount('not-writable')} on another team,`}
+                  {' '}so their analysis is untouched.
+                </Typography>
+              )}
+            </>
+          )}
+
+          {applyToAll && !scopeLoading && !scope && (
+            <Typography variant="caption" color="warning.main" display="block">
+              Could not determine how many runs this affects. Saving will still apply it to every
+              eligible run of this workload.
+            </Typography>
+          )}
+        </Box>
       </Box>
+
+      {confirming && (
+        <Box sx={{ px: 3, pb: 1 }}>
+          <Alert severity="warning">
+            This rewrites the analysis window on{' '}
+            <strong>{scope ? scope.applicable : 'every eligible'}</strong> run
+            {scope && scope.applicable === 1 ? '' : 's'} and re-evaluates {scope && scope.applicable === 1 ? 'it' : 'them'}.
+            Previous ADAPT verdicts for those runs are recomputed. Press Save again to confirm.
+          </Alert>
+        </Box>
+      )}
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} disabled={saving}>Cancel</Button>
-        <Button onClick={handleSave} variant="contained" disabled={saving} startIcon={saving ? <CircularProgress size={16} /> : undefined}>
-          Save &amp; Re-analyse
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          color={applyToAll && confirming ? 'warning' : 'primary'}
+          disabled={saving || (applyToAll && scopeLoading)}
+          startIcon={saving ? <CircularProgress size={16} /> : undefined}
+        >
+          {applyToAll && confirming
+            ? `Confirm — change ${scope ? scope.applicable : 'all'} run${scope && scope.applicable === 1 ? '' : 's'}`
+            : 'Save & Re-analyse'}
         </Button>
       </DialogActions>
     </Dialog>
