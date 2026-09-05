@@ -30,6 +30,90 @@ const logger = getLogger('simple-orchestrate-reevaluate-batch');
 const JOB_WAIT_TIMEOUT_MS = 600_000;
 
 /**
+ * How many test runs may share one ADAPT / statistics job.
+ *
+ * Both downstream pipelines do their work in a SINGLE transaction over every id they
+ * are handed, and both have a per-transaction ceiling that scales with the batch:
+ *
+ *  - `AdaptPipeline` never calls `setAggregationBudget`, so it runs on the 120 s
+ *    `ANALYTICS_STATEMENT_TIMEOUT_MS` cap. CLAUDE.md's measurement is ~13 s/run with
+ *    JIT off, and says outright that "a 9-run batch already exceeds the 120s cap".
+ *    v0.2.94.7 then added the orphan-results DELETE to that same transaction, so the
+ *    per-run figure is now a floor rather than an estimate.
+ *  - `StatisticsPipeline.refreshRampUpFlags` issues one UPDATE per run but they all
+ *    share ONE transaction's `max_tuples_decompressed_per_dml_transaction` (100k).
+ *    An analysis-window edit makes every run's ramp_up flags stale at once, which is
+ *    the documented recipe for `tuple decompression limit exceeded`.
+ *
+ * 5 leaves roughly half the ADAPT budget as headroom for the added DELETE and for
+ * runs larger than the one that was measured. Chunking here rather than by issuing
+ * several batch jobs is deliberate: the scope lock below is keyed on
+ * `sut:env:workload`, so a second job for the same workload would be refused, not
+ * queued.
+ */
+const REEVALUATE_CHUNK_SIZE = Math.max(
+  1,
+  Number(process.env.REEVALUATE_CHUNK_SIZE) || 5
+);
+
+/**
+ * Enqueue StatisticsPipeline for `testRunIds`, chunked and sequential, waiting on each.
+ *
+ * Chunked for a different ceiling than ADAPT: `refreshRampUpFlags` issues one UPDATE per
+ * run but they all share a single transaction's
+ * `max_tuples_decompressed_per_dml_transaction` budget, and an analysis-window edit
+ * invalidates every run's ramp_up flags at once — the documented recipe for
+ * `tuple decompression limit exceeded`.
+ *
+ * Shared by all three call sites (force refetch, gap fill, analysis-window recalculation)
+ * so the chunking cannot drift between them.
+ */
+async function runStatisticsChunks(
+  analyzeQueue: Queue,
+  analyzeEvents: QueueEvents,
+  testRunIds: string[],
+  progressReporter: ProgressReporter | null,
+): Promise<void> {
+  const chunks = chunkTestRunIds(testRunIds);
+  if (chunks.length > 1) {
+    logger.info(
+      `Statistics recalculation split into ${chunks.length} chunks of up to ` +
+        `${REEVALUATE_CHUNK_SIZE} run(s) to stay inside one transaction's decompression budget`
+    );
+  }
+
+  let done = 0;
+  for (let c = 0; c < chunks.length; c++) {
+    const chunk = chunks[c]!;
+    const statsJob = await analyzeQueue.add(
+      JOB_NAMES.STATISTICS_PIPELINE,
+      { testRunIds: chunk },
+      getJobOptions(JOB_NAMES.STATISTICS_PIPELINE)
+    );
+
+    logger.info(`Waiting for statistics job ${statsJob.id} (chunk ${c + 1}/${chunks.length})...`);
+    await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+    // Report RUNS done, not chunks: the UI renders this as "run X of N", and the chunk
+    // size is an internal budget detail nobody watching a progress bar cares about.
+    done += chunk.length;
+    await progressReporter?.updateStageProgress(
+      Math.round((done / testRunIds.length) * 100),
+      { testRunId: chunk[chunk.length - 1]!, index: done, total: testRunIds.length }
+    );
+  }
+}
+
+/** Split ids into chunks of at most `size`, preserving order. */
+function chunkTestRunIds(ids: string[], size: number = REEVALUATE_CHUNK_SIZE): string[][] {
+  if (ids.length <= size) { return [ids]; }
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) {
+    chunks.push(ids.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
  * Throw when a soft-failing child pipeline reported failure (#552).
  *
  * Pipelines registered with `softFail` return `{ status: 'failed' }` instead of
@@ -205,7 +289,11 @@ export function simpleOrchestrateReevaluateBatchWorker() {
       const { testRunIds, batchId, checks, adapt, refreshMode, sources, recalculateStatistics, applicationDashboardId, panelId, metricName } = validatedData;
 
       logger.info(`Processing batch ${batchId} with ${testRunIds.length} test runs`);
-      logger.info(`Config: checks=${checks}, adapt=${adapt}, refreshMode=${refreshMode || 'reevaluate'}`);
+      logger.info(`Config: checks=${checks}, adapt=${adapt}, refreshMode=${refreshMode || 'reevaluate'}, recalculateStatistics=${recalculateStatistics ?? false}`);
+      // Zod strips unknown keys, so a worker predating this field drops it silently and the
+      // user's analysis-window edit has no effect with nothing logged. Printing it means a
+      // rolling-deploy skew shows up as `recalculateStatistics=false` on a job the API sent
+      // with true, instead of as an unexplained no-op.
       if (sources) {
         logger.info(`Source filter: grafana=${sources.grafana ?? true}, dynatrace=${sources.dynatrace ?? true}, performanceMetrics=${sources.performanceMetrics ?? true}`);
       }
@@ -515,15 +603,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         logger.info('🔷 STAGE: Statistics recalculation');
         await progressReporter?.startStage('statistics-recalculation');
 
-        if (testRunsWithNewData > 0) {
-          const statsJob = await analyzeQueue.add(
-            JOB_NAMES.STATISTICS_PIPELINE,
-            { testRunIds },
-            getJobOptions(JOB_NAMES.STATISTICS_PIPELINE)
-          );
-
-          logger.info(`Waiting for statistics job ${statsJob.id}...`);
-          await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        // `|| recalculateStatistics`: the caller may be asking for a recalculation
+        // because the ANALYSIS WINDOW moved, which no fetch can detect. Without this
+        // arm, refreshMode + recalculateStatistics ran no statistics at all while the
+        // stage list still advertised the stage and the progress reporter marked it
+        // complete — a silent no-op on the one input the user actually changed.
+        if (testRunsWithNewData > 0 || recalculateStatistics) {
+          await runStatisticsChunks(analyzeQueue, analyzeEvents, testRunIds, progressReporter);
           logger.info(`✅ Statistics recalculation completed`);
         } else {
           logger.info('⏭️  Skipping statistics recalculation (no new data collected)');
@@ -718,15 +804,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         logger.info('🔷 STAGE 1c: Statistics recalculation');
         await progressReporter?.startStage('statistics-recalculation');
 
-        if (testRunsWithNewData > 0) {
-          const statsJob = await analyzeQueue.add(
-            JOB_NAMES.STATISTICS_PIPELINE,
-            { testRunIds },
-            getJobOptions(JOB_NAMES.STATISTICS_PIPELINE)
-          );
-
-          logger.info(`Waiting for statistics job ${statsJob.id}...`);
-          await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        // `|| recalculateStatistics`: the caller may be asking for a recalculation
+        // because the ANALYSIS WINDOW moved, which no fetch can detect. Without this
+        // arm, refreshMode + recalculateStatistics ran no statistics at all while the
+        // stage list still advertised the stage and the progress reporter marked it
+        // complete — a silent no-op on the one input the user actually changed.
+        if (testRunsWithNewData > 0 || recalculateStatistics) {
+          await runStatisticsChunks(analyzeQueue, analyzeEvents, testRunIds, progressReporter);
           logger.info(`✅ Statistics recalculation completed`);
         } else {
           logger.info('⏭️  Skipping statistics recalculation (no new data collected)');
@@ -754,14 +838,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         logger.info('🔷 STAGE: Statistics recalculation (analysis window changed, no data collection)');
         await progressReporter?.startStage('statistics-recalculation');
 
-        const statsJob = await analyzeQueue.add(
-          JOB_NAMES.STATISTICS_PIPELINE,
-          { testRunIds },
-          getJobOptions(JOB_NAMES.STATISTICS_PIPELINE)
-        );
-
-        logger.info(`Waiting for statistics job ${statsJob.id}...`);
-        await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        await runStatisticsChunks(analyzeQueue, analyzeEvents, testRunIds, progressReporter);
         logger.info('✅ Statistics recalculation completed');
 
         stageTiming.push({ stage: 'statistics-recalculation', duration: Date.now() - statsStart });
@@ -856,21 +933,49 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         // Substage 3c: ADAPT difference detection
         await progressReporter?.startStage('adapt-analysis');
         const adaptStart = Date.now();
-        const adaptJob = await analyzeQueue.add(
-          JOB_NAMES.ADAPT_PIPELINE,
-          {
-            testRunIds,
-            updateControlGroup: false,
-            updateControlStatistics: false,
-            applicationDashboardId,
-            panelId,
-            metricName
-          },
-          getJobOptions(JOB_NAMES.ADAPT_PIPELINE)
-        );
+        // Chunked and SEQUENTIAL. AdaptPipeline puts every id it is handed into one
+        // transaction on the 120 s cap, so a workload-wide list is a guaranteed
+        // cancellation that rolls back ADAPT for the whole batch — including the run
+        // the user actually edited. Sequential rather than parallel because the
+        // chunks contend for the same analytics pool and the same compressed chunks.
+        //
+        // Chunk N's storeTrackedResults reads the ds_adapt_results of runs in other
+        // chunks, so an earlier chunk sees its later siblings' pre-refresh rows. That
+        // is the same staleness a two-batch re-evaluate has always had, and it is
+        // strictly better than the timeout it replaces.
+        const adaptChunks = chunkTestRunIds(testRunIds);
+        if (adaptChunks.length > 1) {
+          logger.info(
+            `ADAPT split into ${adaptChunks.length} chunks of up to ${REEVALUATE_CHUNK_SIZE} run(s) ` +
+              `to stay inside the 120s ANALYTICS_STATEMENT_TIMEOUT_MS cap`
+          );
+        }
 
-        logger.info(`Waiting for ADAPT job ${adaptJob.id}...`);
-        await waitForJobs(analyzeEvents, [adaptJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        let adaptDone = 0;
+        for (let c = 0; c < adaptChunks.length; c++) {
+          const chunk = adaptChunks[c]!;
+          const adaptJob = await analyzeQueue.add(
+            JOB_NAMES.ADAPT_PIPELINE,
+            {
+              testRunIds: chunk,
+              updateControlGroup: false,
+              updateControlStatistics: false,
+              applicationDashboardId,
+              panelId,
+              metricName
+            },
+            getJobOptions(JOB_NAMES.ADAPT_PIPELINE)
+          );
+
+          logger.info(`Waiting for ADAPT job ${adaptJob.id} (chunk ${c + 1}/${adaptChunks.length})...`);
+          await waitForJobs(analyzeEvents, [adaptJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+          adaptDone += chunk.length;
+          await progressReporter?.updateStageProgress(
+            Math.round((adaptDone / testRunIds.length) * 100),
+            { testRunId: chunk[chunk.length - 1]!, index: adaptDone, total: testRunIds.length }
+          );
+        }
+
         const adaptDuration = Date.now() - adaptStart;
         logger.info(`✅ ADAPT analysis completed`);
         stageTiming.push({ stage: 'adapt-difference-detection', duration: adaptDuration });
