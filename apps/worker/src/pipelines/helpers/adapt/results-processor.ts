@@ -161,6 +161,104 @@ export class ResultsProcessor {
   }
 
   /**
+   * Delete ADAPT results that the upsert no longer produces.
+   *
+   * `processAdaptResults` is a pure `INSERT ... ON CONFLICT DO UPDATE` whose row
+   * source is `ds_metric_statistics` for the run. A metric that stops appearing
+   * there — the normal outcome when a user narrows the analysis time range past
+   * its samples, since `StatisticsPipeline` deletes and rewrites that table from
+   * the current `ramp_up`/`ramp_down` offsets — leaves its previous row behind,
+   * still carrying the label it had under the OLD window.
+   *
+   * That row is not merely cosmetic: `buildConclusionSQL` aggregates every row in
+   * `ds_adapt_results` for the run with no freshness predicate, so a single orphan
+   * `regression` pins the whole test run at REGRESSION forever, on a transaction
+   * that no longer has a single sample inside the analysis window. The API read
+   * path (`TestRunsAnomalyService.getAnomalyDetectionResults`) returns them too.
+   *
+   * `is_stale` does not cover this. Only the `mark_results_stale_on_config_change`
+   * trigger sets it, and neither the conclusion SQL nor the read path consults it.
+   *
+   * Scoped to `metricFilter` on purpose: a single-metric re-analysis must not
+   * delete every other metric's results.
+   *
+   * @param manager - TypeORM entity manager for transactional operations
+   * @param testRunIds - Test run IDs that were just processed
+   * @param metricFilter - The same filter the upsert ran under, if any
+   * @returns Number of orphaned rows deleted
+   */
+  async deleteOrphanedResults(
+    manager: EntityManager,
+    testRunIds: string[],
+    metricFilter?: MetricFilter
+  ): Promise<number> {
+    const params: unknown[] = [...testRunIds];
+    const placeholders = testRunIds.map((_: unknown, i: number) => `$${i + 1}`).join(', ');
+
+    // Written against the `ar` alias rather than reusing buildMetricFilterSQL, which
+    // emits `ms.`-qualified conditions for the statistics side of the upsert.
+    const filterConditions: string[] = [];
+    if (metricFilter?.applicationDashboardId) {
+      params.push(metricFilter.applicationDashboardId);
+      filterConditions.push(`AND ar.application_dashboard_id = $${params.length}`);
+    }
+    if (metricFilter?.panelId) {
+      params.push(metricFilter.panelId);
+      filterConditions.push(`AND ar.panel_id = $${params.length}`);
+    }
+    if (metricFilter?.metricName) {
+      params.push(metricFilter.metricName);
+      filterConditions.push(`AND ar.metric_name = $${params.length}`);
+    }
+
+    const result = await manager.query(
+      `
+      DELETE FROM ds_adapt_results ar
+      WHERE ar.test_run_id IN (${placeholders})
+        ${filterConditions.join('\n        ')}
+        -- Refuse to act on a run with NO statistics at all. "Every metric is orphaned"
+        -- is never a real state; it means the statistics computation produced nothing,
+        -- and deleting on that reading destroys history that cannot be rebuilt once
+        -- ds_metrics has aged out. StatisticsPipeline reaches exactly that state while
+        -- returning success: it warns "Metrics exist ... but no statistics were written"
+        -- when org-scoping drops every dashboard, and its batch-wide EXISTS probe lets
+        -- one live run authorise deleting statistics for every aged-out run beside it.
+        -- AdaptValidator cannot screen those out either: checkEmptyControlGroups selects
+        -- FROM ds_metric_statistics and GROUP BY test_run_id, so a run with no rows forms
+        -- no group and is never reported as empty.
+        -- Same rule, same reason as repairEmptySamplerRollup: the probe stays strict
+        -- because the statement deletes.
+        AND EXISTS (
+          SELECT 1
+          FROM ds_metric_statistics ms_any
+          WHERE ms_any.test_run_id = ar.test_run_id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ds_metric_statistics ms
+          WHERE ms.test_run_id = ar.test_run_id
+            AND ms.application_dashboard_id = ar.application_dashboard_id
+            AND ms.panel_id = ar.panel_id
+            AND ms.metric_name = ar.metric_name
+        )
+      `,
+      params
+    );
+
+    // node-postgres returns [rows, rowCount] for DELETE.
+    const deleted: number = Array.isArray(result) ? (result[1] as number) || 0 : 0;
+
+    if (deleted > 0) {
+      this.logger.info(
+        `🧹 Removed ${deleted} ADAPT result(s) whose metric no longer has statistics ` +
+          `(usually the analysis time range was narrowed past their samples)`
+      );
+    }
+
+    return deleted;
+  }
+
+  /**
    * Generate conclusions for test runs based on ADAPT results
    *
    * This method:

@@ -174,6 +174,14 @@ export class AdaptPipeline extends BasePipelineTypeORM {
           const adaptRows = await this.resultsProcessor.processAdaptResults(manager, processable, metricFilter);
           processedRows += adaptRows;
           subStages.push({ stage: 'process-adapt-results', duration: Date.now() - resultsStart, rows: adaptRows });
+
+          // The upsert above adds and updates, but never removes. Drop the results
+          // whose metric no longer has a ds_metric_statistics row — otherwise a
+          // narrowed analysis time range leaves the old window's verdicts standing
+          // and generateConclusions below still counts them as regressions.
+          const orphanStart = Date.now();
+          const orphanRows = await this.resultsProcessor.deleteOrphanedResults(manager, processable, metricFilter);
+          subStages.push({ stage: 'delete-orphaned-results', duration: Date.now() - orphanStart, rows: orphanRows });
         }
 
         // Store tracked results
