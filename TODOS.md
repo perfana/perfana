@@ -221,68 +221,6 @@ not a P2 — and also what makes it easy to break without noticing.
 
 ---
 
-## Analysis time range
-
-### "Apply analysis time range to all test runs" — blast-radius work before the toggle ships
-
-**Priority:** P1
-**Origin:** pre-landing + adversarial review during /ship on
-`fix/adapt-orphaned-results-analysis-window` (2026-09-05). The feature was split out of
-v0.2.94.7 rather than shipped; the implementation is parked complete-but-unsafe on branch
-`feature/apply-analysis-window-to-workload`, which is where this work continues.
-**Why:** a single checkbox rewrites `ramp_up`/`ramp_down` on every run of a
-(system, environment, workload) and re-evaluates all of them. Seven defects were found, and
-two of them can destroy data that cannot be rebuilt once `ds_metrics` has aged out.
-**What:** all seven must land before the checkbox is exposed.
-
-1. **Cap and chunk the batch.** `update-analysis-time-range.handler.ts` `find()` has no `take`,
-   and the whole id list reaches `reevaluateBatch` as one job. `AdaptPipeline` runs the batch in
-   a single `withAnalyticsTransaction` on the 120 s `ANALYTICS_STATEMENT_TIMEOUT_MS` cap and
-   never calls `setAggregationBudget`; at the ~13 s/run measured in CLAUDE.md a 9-run batch
-   already exceeds it, so a 40-run workload times out and rolls ADAPT back for every run
-   including the one the user edited. Chunk to ~9. `data-science.controller.ts:401` and `:555`
-   are the existing `.slice(0, 100)` precedent.
-2. **Do not let one batch mix live and aged-out runs.** `StatisticsPipeline`'s `EXISTS` probe
-   (`:332-345`) is evaluated across the whole batch while its `DELETE FROM ds_metric_statistics`
-   (`:656-659`) is also batch-wide and the re-`INSERT` only refills runs that still have raw
-   metrics. One live run therefore authorises deleting statistics for every aged-out run beside
-   it. Pre-existing, but only reachable at workload scale through this feature. Fix the probe to
-   be per-run, or chunk so a batch is homogeneous.
-3. **Authorize every sibling, not just the target.** `test-runs-mutation.service.ts` calls
-   `assertCanModify` on the target only. `test_runs.team_id` is a per-row nullable column, not
-   derived from the SUT, so a caller with write on the target's team and viewer-only on a
-   sibling's team still mutates the sibling. RLS is not the gate — the module's own header
-   says so.
-4. **Re-enqueue `transaction-stats-rollup` for every affected completed run.** Only the target
-   gets it today. `TransactionStatsRollupPipeline` documents that changing the offsets on a
-   completed run must retrigger it to recompute the `ramp_up_excluded` rows, and
-   `getRollupStatus` reads the populated table and answers `ready` forever, so nothing ever
-   retriggers it. Siblings show previous-window numbers in Performance Analysis with nothing
-   logged.
-5. **Filter siblings to `completed = true`, and surface a blocked batch.** An in-flight run gets
-   its offsets changed mid-ingest, and `MetricsPipeline` bakes `ds_metrics.ramp_up` at
-   ingestion, so it ends carrying rows flagged under two different offset settings. Separately,
-   the orchestrator's lock is keyed on `sut:env:workload`: if any run of that workload is
-   processing, the bulk job returns `blocked: true`, the API enqueue swallows it, the offsets
-   commit and the UI still says re-analysis was queued.
-6. **Branch on `applyToAll` alone, not `applyToAll && length > 1`.** On a single-run workload the
-   current condition falls through to `analyzeTest`, which includes metrics collection and
-   re-hits Grafana — the exact thing the branch exists to avoid — or, if the run is not
-   completed, enqueues nothing at all while the toast claims otherwise.
-7. **Validate the offsets against the siblings.** The controller checks only `>= 0`, so offsets
-   tuned for a 3 h soak are written onto 5 min smoke runs in the same workload and
-   `AdaptValidator.checkTooShortTestRuns` flips them to NO_BASELINES_FOUND. Reject when the
-   offsets exceed the shortest sibling's duration, or report which runs could not take them.
-   Related: item 8 of the ADAPT section in CLAUDE.md.
-8. **Quantify the blast radius in the dialog.** `AnalysisTimeRangeDialog.tsx` describes the scope
-   in prose but never says how many runs will change, and the Save button reads the same whether
-   the box is ticked. Return the affected count from the handler (it is computed and currently
-   discarded) and require a confirmation.
-
-Also noted, lower priority: `OrchestrateReevaluateBatchJobSchema` is not `.strict()`, so during a
-rolling deploy an old worker silently strips `recalculateStatistics` and the user's edit has no
-effect with nothing logged.
-
 ## Worker pipeline
 
 ### Four reevaluate stages render as raw ids in the progress UI
@@ -947,6 +885,34 @@ captured in a baseline/ignore list, then burn the list down by directory so each
 reviewable.
 
 ## Completed
+
+### "Apply analysis time range to all test runs" — blast-radius work
+
+**Completed:** v0.2.95.0 (2026-09-05)
+**Origin:** pre-landing + adversarial review during /ship on
+`fix/adapt-orphaned-results-analysis-window` (2026-09-05); the feature was split out of
+v0.2.94.7 rather than shipped, and all eight items landed together in v0.2.95.0.
+
+1. Cap and chunk the batch — `REEVALUATE_CHUNK_SIZE` (default 5) chunks ADAPT and
+   statistics inside the orchestrator, sequentially. Chunking there rather than by
+   issuing several batch jobs, because the scope lock is keyed on `sut:env:workload`.
+2. Do not let one batch mix live and aged-out runs — `StatisticsPipeline`'s metrics
+   probe is now per run and the DELETE/INSERT bind to the probed subset.
+3. Authorize every sibling — `partitionAnalysisTimeRangeScope` skips runs outside the
+   target's `(organizationId, teamId)` as `not-writable`.
+4. Re-enqueue `transaction-stats-rollup` for every affected completed run.
+5. Filter siblings to `completed = true`; running runs are skipped and reported.
+6. Branch on `applyToAll` alone, not `applyToAll && length > 1`.
+7. Validate the offsets against each run's duration, using the SUM of both offsets
+   (`AdaptValidator.checkTooShortTestRuns` only ever tested `ramp_up`).
+8. Quantify the blast radius — new `GET :id/analysis-time-range/scope` preview plus a
+   two-step confirmation naming the count.
+
+Also closed: `recalculateStatistics` combined with a `refreshMode` was silently ignored,
+and the flag is now printed in the orchestrator's config line so a rolling-deploy skew
+(an older worker strips the unknown field) shows up in the log instead of as an
+unexplained no-op.
+
 
 ### Job locks are renewed for as long as the job runs
 
