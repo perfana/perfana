@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.94.7] - 2026-09-05
+
+### Fixed
+- **A test run no longer reports regressions on transactions that fall outside its analysis time range.** Narrowing a run's analysis window is supposed to drop the excluded transactions from the comparison. The statistics were recalculated correctly and those transactions did disappear from them, but their earlier verdicts were left behind: the step that writes the comparison results only added and updated rows, and never removed one it had stopped producing. The overall verdict counts every row it finds, with no check on whether the row is still current, so a single leftover "regression" held the whole run at REGRESSION indefinitely — on a transaction with no measurements inside the window at all. The results are now cleaned up in the same step that writes them.
+
+  The cleanup refuses to act on a run that has no statistics whatsoever. "Every transaction is out of range" is never a real result; it means the statistics calculation produced nothing, which happens for reasons that have nothing to do with the analysis window. Treating that as a reason to delete would throw away comparison history that cannot be rebuilt once the underlying measurements have aged out. Where a re-analysis is limited to one dashboard, panel or metric, the cleanup is limited to the same scope, so re-analysing a single metric cannot disturb the others.
+
+  This does not cover a second, separate cause of the same symptom: a transaction that keeps its statistics but loses its baseline row also keeps a stale verdict. That is the known baseline-timeout case and is unchanged here.
+
 ## [0.2.94.6] - 2026-09-04
 
 ### Fixed
