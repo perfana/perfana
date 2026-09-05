@@ -57,8 +57,9 @@ AdaptPipeline
   ├── Load control group statistics
   ├── Compare each metric against baseline
   ├── Classify changes (regression/improvement/no-change)
-  ├── Generate conclusions
-  └── Store in ds_adapt_results
+  ├── Store in ds_adapt_results (upsert)
+  ├── Delete results whose metric no longer has statistics
+  └── Generate conclusions
 ```
 
 > [!info] Resource Usage
@@ -82,6 +83,47 @@ AdaptPipeline
 ```
 
 This ensures one result row per unique combination of these five identifiers.
+
+## Results are upserted, so stale ones have to be deleted
+
+`ResultsProcessor.processAdaptResults` is an `INSERT … ON CONFLICT DO UPDATE` whose row source is
+`ds_metric_statistics` for the run. It adds and updates, and before v0.2.94.7 nothing removed a row
+it had stopped producing.
+
+That matters because the statistics table is not append-only either. Narrowing a run's analysis time
+range makes `StatisticsPipeline` delete and rewrite `ds_metric_statistics` from the new
+ramp-up/ramp-down offsets, so the newly excluded metrics disappear from it. Their old results rows
+stayed behind, still carrying the verdict from the **previous** window. The overall conclusion
+(`buildConclusionSQL`) counts every row it finds for the run with no freshness check, so a single
+leftover `regression` held the run at REGRESSION indefinitely — on a metric with no samples inside
+the window at all. The API read path (`TestRunsAnomalyService.getAnomalyDetectionResults`) served
+them as well.
+
+`is_stale` is not the mechanism for this. It is set only by the `mark_results_stale_on_config_change`
+trigger, and neither the conclusion SQL nor the read path consults it.
+
+Since v0.2.94.7, `ResultsProcessor.deleteOrphanedResults()` runs from `AdaptPipeline` immediately
+after the upsert, as its own `delete-orphaned-results` substage. It deletes the results for the run
+whose `(application_dashboard_id, panel_id, metric_name)` has no `ds_metric_statistics` row, scoped
+to the same metric filter the upsert ran under — so re-analysing one dashboard, panel or metric
+cannot disturb any other.
+
+> [!warning] The `EXISTS` guard is load-bearing
+> The delete refuses to act on a run that has **no** `ds_metric_statistics` rows at all. "Every
+> metric is orphaned" is never a real state: it means the statistics computation produced nothing,
+> and deleting on that reading throws away comparison history that cannot be rebuilt once
+> `ds_metrics` has aged out. `StatisticsPipeline` reaches exactly that state while reporting
+> success — it warns `Metrics exist … but no statistics were written` when org-scoping drops every
+> dashboard — and its own metrics probe is evaluated across the whole batch while its `DELETE` is
+> too, so one live run can authorise wiping the statistics of an aged-out run beside it.
+> `AdaptValidator.checkEmptyControlGroups` cannot screen those out either: it selects `FROM
+> ds_metric_statistics` and groups by `test_run_id`, so a run with no rows forms no group and is
+> never reported as empty.
+
+This covers **one** class of stale result. The unique constraint above includes `control_group_id`,
+and the delete deliberately ignores it — it matches on the metric's identity, not on which baseline
+produced the verdict. A metric that keeps its statistics but loses its control-group row therefore
+keeps its stale verdict. That is the baseline case described next, and it is unchanged.
 
 ## When ADAPT cannot build a baseline
 

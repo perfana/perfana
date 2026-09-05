@@ -76,7 +76,8 @@ Stage 9: Control Group Statistics
 
 Stage 10: ADAPT Analysis (optional — skipped when adapt=false)
   └── Automated regression detection
-  └── Stores in ds_adapt_results
+  └── Upserts into ds_adapt_results, then deletes the results whose metric no longer
+      has a ds_metric_statistics row (`delete-orphaned-results`), then concludes
 
 Stage 11: Data Sanity Check (runs outside the orchestrator)
   └── Collects invalidating reasons: no start/end time, no dashboard panels, no metrics

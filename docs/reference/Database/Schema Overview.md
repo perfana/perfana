@@ -143,7 +143,7 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 
 ## Key Constraints
 
-- `ds_adapt_results`: Unique on `(test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name)`
+- `ds_adapt_results`: Unique on `(test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name)`. The table is written by an upsert, so `AdaptPipeline` deletes separately — on metric identity, ignoring `control_group_id`. See [[ADAPT Algorithm]].
 - Row-Level Security policies on all multi-tenant tables
 
 ## Related

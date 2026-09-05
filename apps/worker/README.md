@@ -49,6 +49,36 @@ missing **either** half (a transaction-only predicate skipped exactly the affect
 when a poll returns no ids it has not already served this invocation, since an unrepairable run
 stays a candidate forever.
 
+### `ds_adapt_results` is upserted, so `AdaptPipeline` also has to delete
+
+`ResultsProcessor.processAdaptResults` is a pure `INSERT … ON CONFLICT DO UPDATE` sourced from
+`ds_metric_statistics`. Narrowing a run's analysis time range makes `StatisticsPipeline` delete and
+rewrite that table from the new offsets, so the excluded metrics vanish from it — and until
+v0.2.94.7 their `ds_adapt_results` rows survived, still labelled from the old window.
+`buildConclusionSQL` counts every row for the run with no freshness predicate, so one orphan pinned
+the run at REGRESSION forever. `is_stale` does not help: only the
+`mark_results_stale_on_config_change` trigger sets it, and neither the conclusion SQL nor the API
+read path reads it.
+
+`ResultsProcessor.deleteOrphanedResults()` now runs right after the upsert as the
+`delete-orphaned-results` substage, scoped to the same `metricFilter` so a single-metric
+re-analysis cannot delete anything else. Two rules if you touch it:
+
+- **Keep the `EXISTS` guard.** It refuses to run against a test run with zero
+  `ds_metric_statistics` rows. "Every metric is orphaned" is never real — it means the statistics
+  computation produced nothing, and deleting on that reading destroys history that cannot be
+  rebuilt once `ds_metrics` has aged out. `StatisticsPipeline` reaches that state while returning
+  `{ success: true }` (it warns `Metrics exist … but no statistics were written` when org-scoping
+  drops every dashboard), its own `EXISTS` probe at `StatisticsPipeline.ts:332-345` is evaluated
+  batch-wide while its `DELETE` is too, and `AdaptValidator.checkEmptyControlGroups` selects `FROM
+  ds_metric_statistics` and groups by `test_run_id`, so a run with no rows forms no group and is
+  never reported as empty. Same reasoning as `repairEmptySamplerRollup` in the API: the probe stays
+  strict because the statement deletes.
+- **It fixes one orphan class only.** The unique key carries `control_group_id`; the `DELETE`
+  ignores it on purpose and matches on metric identity. A metric that keeps its statistics but
+  loses its control-group row keeps its stale verdict — that is the `pct_agg` baseline case below,
+  and it is unchanged.
+
 ### The control-group fast path needs `pct_agg`
 
 `ControlGroupStatisticsPipeline` pools per-run t-digests with `rollup(pct_agg)` (#289). A control
