@@ -544,6 +544,47 @@ describe('AdaptPipeline', () => {
       );
     });
 
+    it('should delete orphaned results after the upsert, under the same filter', async () => {
+      // The upsert only adds and updates. Without this delete, a metric that drops out
+      // of ds_metric_statistics (analysis time range narrowed past its samples) keeps
+      // its old row, and generateConclusions still counts it as a regression.
+      const input = {
+        testRunIds: ['test-run-1'],
+        applicationDashboardId: 'app-dash-uuid',
+        metricName: 'checkout.duration',
+        updateResults: true,
+      };
+
+      const processSpy = vi.spyOn((adaptPipeline as any).resultsProcessor, 'processAdaptResults')
+        .mockResolvedValue(3);
+      const orphanSpy = vi.spyOn((adaptPipeline as any).resultsProcessor, 'deleteOrphanedResults')
+        .mockResolvedValue(2);
+
+      await adaptPipeline.execute(input);
+
+      expect(orphanSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        ['test-run-1'],
+        expect.objectContaining({
+          applicationDashboardId: 'app-dash-uuid',
+          metricName: 'checkout.duration',
+        })
+      );
+      // After, never before: the freshly upserted rows must already exist or the
+      // delete would remove results the same run is about to write.
+      expect(processSpy.mock.invocationCallOrder[0]!)
+        .toBeLessThan(orphanSpy.mock.invocationCallOrder[0]!);
+    });
+
+    it('should not delete orphaned results when updateResults is false', async () => {
+      const orphanSpy = vi.spyOn((adaptPipeline as any).resultsProcessor, 'deleteOrphanedResults')
+        .mockResolvedValue(0);
+
+      await adaptPipeline.execute({ testRunIds: ['test-run-1'], updateResults: false });
+
+      expect(orphanSpy).not.toHaveBeenCalled();
+    });
+
     it('should process ADAPT results with panelId filter', async () => {
       // Arrange
       const input = {

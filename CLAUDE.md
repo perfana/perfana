@@ -564,6 +564,40 @@ a 9-run batch already exceeds the 120 s cap.
 The estimate itself may be an artifact worth removing — see the `temp_config_cache` item in
 TODOS.md, which is un-`ANALYZE`d and joined four times.
 
+### `ds_adapt_results` is written by an upsert, so it also needs a delete
+
+`ResultsProcessor.processAdaptResults` is a pure `INSERT … ON CONFLICT DO UPDATE` sourced from
+`ds_metric_statistics`. It adds and updates; until v0.2.94.7 nothing removed a row it had stopped
+producing. Narrowing a run's analysis time range makes `StatisticsPipeline` delete and rewrite
+`ds_metric_statistics` from the new `ramp_up`/`ramp_down` offsets, so the excluded metrics vanish
+from it — and their old `ds_adapt_results` rows survived, still carrying the verdict they had under
+the **previous** window. `buildConclusionSQL` aggregates every row for the run with no freshness
+predicate, so one leftover `regression` pinned the run at REGRESSION forever, on a metric with no
+samples inside the window at all. `TestRunsAnomalyService.getAnomalyDetectionResults` returned them
+too. **`is_stale` does not cover this**: only the `mark_results_stale_on_config_change` trigger sets
+it, and neither the conclusion SQL nor the read path consults it.
+
+`ResultsProcessor.deleteOrphanedResults()` runs from `AdaptPipeline` immediately after the upsert,
+as its own `delete-orphaned-results` substage, scoped to the same `metricFilter` (a single-metric
+re-analysis must not delete every other metric's results). Two things about it are load-bearing:
+
+1. **The `EXISTS` guard is not defensive padding — remove it and a read-shaped edge case destroys
+   unrebuildable history.** It refuses to act on a run with **zero** `ds_metric_statistics` rows,
+   because "every metric is orphaned" is never a real state; it means the statistics computation
+   produced nothing. `StatisticsPipeline` reaches exactly that while returning `{ success: true }`
+   — it warns `Metrics exist … but no statistics were written` when org-scoping drops every
+   dashboard — and its own `EXISTS` probe (`StatisticsPipeline.ts:332-345`) is evaluated
+   **batch-wide** while its `DELETE` is too, so one live run can authorise wiping the statistics of
+   an aged-out run beside it. `AdaptValidator.checkEmptyControlGroups` cannot screen those out
+   either: it selects `FROM ds_metric_statistics` and `GROUP BY test_run_id`, so a run with no rows
+   forms no group and is never reported as empty. Same rule, same reason as
+   `repairEmptySamplerRollup`: the probe stays strict because the statement deletes.
+2. **It covers one orphan class only.** The unique key is
+   `(test_run_id, control_group_id, application_dashboard_id, panel_id, metric_name)` and the
+   `DELETE` deliberately ignores `control_group_id` — it matches on the metric identity, not the
+   baseline. A metric that keeps its statistics but loses its control-group row therefore keeps its
+   stale verdict. That is the known baseline-timeout case above, unchanged.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls
@@ -582,6 +616,8 @@ TODOS.md, which is un-`ANALYZE`d and joined four times.
 12. **A batch re-evaluate's ADAPT stage is slow or hits the 120 s statement timeout** → check whether Postgres is JIT-compiling the `ds_adapt_results` upsert. `EXPLAIN (ANALYZE, BUFFERS)` the statement and read the `JIT:` footer — 64 s of `Optimization`/`Emission` on a statement that runs in 13 s is the signature. Fixed in v0.2.94.5 (`AdaptPipeline` sets `jit = off` for its own transaction). Do not "fix" it by putting that in `withAnalyticsTransaction`: `StatisticsPipeline` is ~18 s *faster* with JIT on. See "ADAPT runs with JIT off, on purpose" above.
 
 13. **A `force` or `missing-data` re-evaluate is far slower than a plain one, with huge temp file usage** → `StatisticsPipeline`, not ADAPT. Look for `Sort Method: external merge Disk:` in the aggregation plan: the group-count estimate is wrong and the planner chose a sort over a hash. Check the statistics object is populated — `SELECT stxdinherit, stxdndistinct FROM pg_statistic_ext s JOIN pg_statistic_ext_data d ON d.stxoid = s.oid WHERE s.stxname = 'ds_metrics_groupkey'` — and that `job_analyze_ds_metrics` is scheduled and succeeding; without that daily ANALYZE the object is empty. Note a plain re-evaluate never runs this pipeline at all (gated on `refreshMode` and `testRunsWithNewData > 0`). See "`ds_metrics` carries one group-key statistics object" above.
+
+14. **A run stays at REGRESSION after its analysis time range was narrowed, blamed on a metric with no samples in the window** → orphaned `ds_adapt_results` rows the upsert stopped producing but never deleted. `buildConclusionSQL` counts them with no freshness predicate, and `is_stale` is not consulted by either the conclusion SQL or the read path. Fixed in v0.2.94.7 (`deleteOrphanedResults` runs as a substage of `adapt-analysis`); on an older deploy, re-analyse after deleting the rows whose `(application_dashboard_id, panel_id, metric_name)` has no `ds_metric_statistics` row for the run. If the metric *does* still have statistics, this is not your bug — see #6. See "`ds_adapt_results` is written by an upsert, so it also needs a delete" above.
 
 ## How-To Tutorials
 

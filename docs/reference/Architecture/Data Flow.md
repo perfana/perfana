@@ -92,7 +92,8 @@ Stage 9: Control Group Statistics
 
 Stage 10: ADAPT Analysis
   └── Automated regression detection algorithm
-  └── Stores results in ds_adapt_results
+  └── Upserts results into ds_adapt_results, then deletes the ones whose metric no
+      longer has statistics (a narrowed analysis time range leaves them behind)
 
 Stage 11: Data Sanity Check (run by analyzeTestWorker, not the orchestrator)
   └── Marks the run invalid on any of: no start/end time, no dashboard panels, no metrics
