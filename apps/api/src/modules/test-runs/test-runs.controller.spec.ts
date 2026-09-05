@@ -603,6 +603,7 @@ describe('TestRunsController', () => {
         120,
         mockUserContext.userId,
         mockUserContext.roles,
+        false,
       );
     });
 
@@ -617,7 +618,7 @@ describe('TestRunsController', () => {
       );
 
       expect(result).toEqual(mockTestRun);
-      expect(service.updateAnalysisTimeRange).toHaveBeenCalledWith(id, 0, 0, mockUserContext.userId, mockUserContext.roles);
+      expect(service.updateAnalysisTimeRange).toHaveBeenCalledWith(id, 0, 0, mockUserContext.userId, mockUserContext.roles, false);
     });
 
     it('should throw ValidationException when analysisStartOffset is negative', async () => {
@@ -645,6 +646,65 @@ describe('TestRunsController', () => {
         ),
       ).rejects.toThrow(ValidationException);
 
+      expect(service.updateAnalysisTimeRange).not.toHaveBeenCalled();
+    });
+
+    // applyToAll fans the write out over every run of the workload. The body is typed
+    // but not class-validated on this route, so the controller's own guard is the only
+    // thing between a caller and a truthy string mutating a whole workload's history.
+    it('should forward applyToAll when the body sets it to true', async () => {
+      const id = mockTestRun.id;
+      service.updateAnalysisTimeRange.mockResolvedValue(mockTestRun);
+
+      await controller.updateAnalysisTimeRange(
+        id,
+        { analysisStartOffset: 60, analysisEndOffset: 120, applyToAll: true },
+        mockUserContext,
+      );
+
+      expect(service.updateAnalysisTimeRange).toHaveBeenCalledWith(
+        id,
+        60,
+        120,
+        mockUserContext.userId,
+        mockUserContext.roles,
+        true,
+      );
+    });
+
+    it('should forward false when the body sets applyToAll to false', async () => {
+      const id = mockTestRun.id;
+      service.updateAnalysisTimeRange.mockResolvedValue(mockTestRun);
+
+      await controller.updateAnalysisTimeRange(
+        id,
+        { analysisStartOffset: 60, analysisEndOffset: 120, applyToAll: false },
+        mockUserContext,
+      );
+
+      expect(service.updateAnalysisTimeRange).toHaveBeenCalledWith(
+        id,
+        60,
+        120,
+        mockUserContext.userId,
+        mockUserContext.roles,
+        false,
+      );
+    });
+
+    it('should throw ValidationException when applyToAll is not a boolean', async () => {
+      const id = mockTestRun.id;
+
+      await expect(
+        controller.updateAnalysisTimeRange(
+          id,
+          { analysisStartOffset: 60, analysisEndOffset: 120, applyToAll: 'yes' as unknown as boolean },
+          mockUserContext,
+        ),
+      ).rejects.toThrow(ValidationException);
+
+      // Must not reach the service: a truthy non-boolean would otherwise be coerced
+      // by `=== true` to false silently, or by a looser guard to a workload-wide write.
       expect(service.updateAnalysisTimeRange).not.toHaveBeenCalled();
     });
   });

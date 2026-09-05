@@ -321,32 +321,65 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
 
     this.logger.info(`📊 Aggregating statistics for ${testRunIds.length} test run(s): ${testRunIds.join(', ')}`);
 
-    // Build parameterized query placeholders
-    const placeholders = testRunIds.map((_, i) => `$${i + 1}`).join(', ');
-
     // Is there anything to aggregate? EXISTS, not COUNT(*): this only guards the
     // DELETE below (a run whose ds_metrics have aged out must keep its statistics
     // rather than have them wiped and replaced with nothing). COUNT(*) answered the
     // same yes/no by scanning every row — 16s over 20.6M rows on a compressed
     // hypertable, to produce a log line the INSERT's own row count already gives.
-    const metricsProbe = await manager.query(
-      `SELECT EXISTS (
-         SELECT 1 FROM ds_metrics
-         WHERE test_run_id IN (${placeholders})
-           AND ramp_up = false
-           AND value IS NOT NULL
-       ) AS has_metrics`,
-      testRunIds
-    );
+    //
+    // PER RUN, not once for the batch. The probe guards a DELETE that is itself
+    // scoped by `test_run_id IN (...)`, so a single batch-wide answer let ONE run
+    // with live metrics authorise deleting the statistics of every other run in the
+    // same job — and the re-INSERT below only rewrites the runs that still have raw
+    // metrics, so the aged-out ones were left with nothing. That is unrecoverable:
+    // ds_metrics is gone, so the statistics cannot be rebuilt, and ADAPT then has no
+    // baseline for those runs.
+    //
+    // Harmless while batches were hand-picked and small; a workload-wide re-evaluate
+    // (an "apply analysis window to all test runs" edit) mixes live and aged-out runs
+    // in one job by construction, which is what makes this reachable.
+    //
+    // N probes instead of 1 is the right trade: test_run_id is the ds_metrics
+    // `compress_segmentby` key and leads the index, so each probe is an index descent
+    // that stops at the first row — the batch-wide form was not measurably cheaper.
+    const runsWithMetrics: string[] = [];
+    for (const testRunId of testRunIds) {
+      const probe = await manager.query(
+        `SELECT EXISTS (
+           SELECT 1 FROM ds_metrics
+           WHERE test_run_id = $1
+             AND ramp_up = false
+             AND value IS NOT NULL
+         ) AS has_metrics`,
+        [testRunId]
+      );
+      if (probe[0]?.has_metrics) {
+        runsWithMetrics.push(testRunId);
+      }
+    }
 
-    if (!metricsProbe[0]?.has_metrics) {
-      this.logger.warn(`⚠️ No metrics found for test runs: ${testRunIds.join(', ')}`);
+    const runsWithoutMetrics = testRunIds.filter((id) => !runsWithMetrics.includes(id));
+    if (runsWithoutMetrics.length > 0) {
+      this.logger.warn(`⚠️ No metrics found for test runs: ${runsWithoutMetrics.join(', ')}`);
       this.logger.warn('💡 This could mean:');
       this.logger.warn('   1. MetricsPipeline hasn\'t run yet for these test runs');
       this.logger.warn('   2. All metrics have ramp_up=true (no steady-state data)');
       this.logger.warn('   3. All metric values are NULL');
+      this.logger.warn('   Their existing statistics are left untouched.');
+    }
+
+    if (runsWithMetrics.length === 0) {
       return { success: true, rowCount: 0 };
     }
+
+    // Everything below operates on the runs that passed the probe, never the caller's
+    // full list — that binding is the whole point of the change above. Shadowing the
+    // parameter deliberately: a later edit that reaches for `testRunIds` inside the
+    // aggregation would otherwise silently reintroduce the batch-wide DELETE.
+    const targetRunIds = runsWithMetrics;
+
+    // Build parameterized query placeholders
+    const placeholders = targetRunIds.map((_, i) => `$${i + 1}`).join(', ');
 
     const aggregationSQL = `
       -- The runs being aggregated, read once. Everything below joins this
@@ -659,19 +692,19 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       WHERE test_run_id IN (${placeholders})
     `;
 
-    const deleteResult = await manager.query(deleteSQL, testRunIds);
+    const deleteResult = await manager.query(deleteSQL, targetRunIds);
     // TypeORM surfaces a DELETE as [rows, rowCount]; `.rowCount` on that array is
     // always undefined, so the old log claimed 0 even when rows were removed.
     const deletedRows = Array.isArray(deleteResult) ? (deleteResult[1] ?? undefined) : undefined;
 
     this.logger.info(
-      `✅ Deleted ${deletedRows ?? 'an unknown number of'} existing statistic records for test runs: ${testRunIds.join(', ')}`
+      `✅ Deleted ${deletedRows ?? 'an unknown number of'} existing statistic records for test runs: ${targetRunIds.join(', ')}`
     );
 
     // Step 2: INSERT new statistics (no ON CONFLICT needed since we deleted existing records)
     this.logger.info(`🚀 Executing statistics aggregation INSERT...`);
 
-    await manager.query(aggregationSQL, testRunIds);
+    await manager.query(aggregationSQL, targetRunIds);
 
     // For CTE-based INSERT...SELECT, TypeORM doesn't return rowCount reliably
     // Verify the actual count from the database
@@ -680,7 +713,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       FROM ds_metric_statistics
       WHERE test_run_id IN (${placeholders})
     `;
-    const actualCountResult = await manager.query(actualCountQuery, testRunIds);
+    const actualCountResult = await manager.query(actualCountQuery, targetRunIds);
     const actualCount = actualCountResult[0]?.count || 0;
 
     this.logger.info(

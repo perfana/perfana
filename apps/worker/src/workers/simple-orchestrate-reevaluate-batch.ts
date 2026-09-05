@@ -202,7 +202,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
       logger.info(`🚀 Orchestrate-reevaluate-batch job started (ID: ${job.id})`);
 
       const validatedData = OrchestrateReevaluateBatchJobSchema.parse(job.data);
-      const { testRunIds, batchId, checks, adapt, refreshMode, sources, applicationDashboardId, panelId, metricName } = validatedData;
+      const { testRunIds, batchId, checks, adapt, refreshMode, sources, recalculateStatistics, applicationDashboardId, panelId, metricName } = validatedData;
 
       logger.info(`Processing batch ${batchId} with ${testRunIds.length} test runs`);
       logger.info(`Config: checks=${checks}, adapt=${adapt}, refreshMode=${refreshMode || 'reevaluate'}`);
@@ -290,6 +290,8 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         stages.push('statistics-recalculation');
       } else if (refreshMode === 'force') {
         stages.push('force-refetch');
+        stages.push('statistics-recalculation');
+      } else if (recalculateStatistics) {
         stages.push('statistics-recalculation');
       }
       if (checks) {
@@ -740,6 +742,30 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           testRunsWithNewData,
           details: gapAnalysisDetails,
         };
+      } else if (recalculateStatistics) {
+        // No data collection, but the analysis window moved: rebake ds_metrics.ramp_up
+        // from each run's current offsets and rewrite ds_metric_statistics. Without
+        // this, checks and ADAPT below run against the PREVIOUS window's statistics
+        // and the edit the user made in the UI has no visible effect.
+        //
+        // Deliberately not gated on testRunsWithNewData the way the two refreshMode
+        // branches are — nothing was fetched here, and there is still work to do.
+        const statsStart = Date.now();
+        logger.info('🔷 STAGE: Statistics recalculation (analysis window changed, no data collection)');
+        await progressReporter?.startStage('statistics-recalculation');
+
+        const statsJob = await analyzeQueue.add(
+          JOB_NAMES.STATISTICS_PIPELINE,
+          { testRunIds },
+          getJobOptions(JOB_NAMES.STATISTICS_PIPELINE)
+        );
+
+        logger.info(`Waiting for statistics job ${statsJob.id}...`);
+        await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        logger.info('✅ Statistics recalculation completed');
+
+        stageTiming.push({ stage: 'statistics-recalculation', duration: Date.now() - statsStart });
+        await progressReporter?.completeStage();
       } else {
         logger.info('⏭️  Skipping data collection (reevaluate mode)');
       }

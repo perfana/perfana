@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Slider, Typography, Box, CircularProgress, Alert, useTheme,
+  Checkbox, FormControlLabel,
 } from '@mui/material';
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -48,6 +49,7 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
   const [localEnd, setLocalEnd]     = useState(testRun.analysis_end_offset ?? 0);
   const [saving, setSaving]         = useState(false);
   const [saveError, setSaveError]   = useState<string | null>(null);
+  const [applyToAll, setApplyToAll] = useState(false);
 
   // Slider value: [startOffset, duration - endOffset]
   const sliderValue: [number, number] = [localStart, duration - localEnd];
@@ -67,7 +69,7 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
       const res = await authenticatedFetch(`/test-runs/${testRun.id}/analysis-time-range`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analysisStartOffset: localStart, analysisEndOffset: localEnd }),
+        body: JSON.stringify({ analysisStartOffset: localStart, analysisEndOffset: localEnd, applyToAll }),
       });
       if (!res.ok) throw new Error(`Failed to save analysis time range (HTTP ${res.status})`);
       const updated: TestRun = await res.json();
@@ -170,6 +172,29 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
           <Alert severity="error" onClose={() => setSaveError(null)}>{saveError}</Alert>
         </Box>
       )}
+
+      <Box sx={{ px: 3, pb: 0.5 }}>
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              checked={applyToAll}
+              onChange={(e) => setApplyToAll(e.target.checked)}
+              disabled={saving}
+            />
+          }
+          label={
+            <Typography variant="body2">
+              Apply to all test runs of this workload
+            </Typography>
+          }
+        />
+        <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mt: -0.5 }}>
+          {applyToAll
+            ? `Every run of ${testRun.test_environment} / ${testRun.workload} gets these offsets and is re-evaluated. ADAPT compares a run against a baseline of other runs, so they only stay comparable while they share the same analysis window.`
+            : 'Only this run changes. Its baseline runs keep their current analysis window, so the comparison spans two different windows.'}
+        </Typography>
+      </Box>
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} disabled={saving}>Cancel</Button>

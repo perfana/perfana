@@ -75,7 +75,7 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
   /** Queue the aggregation call sequence, with `deleteResult` for the DELETE. */
   const runWithDeleteResult = async (deleteResult: unknown) => {
     mockEntityManager.query
-      .mockResolvedValueOnce([{ has_metrics: true }]) // metrics-exist probe
+      .mockResolvedValueOnce([{ has_metrics: true }]) // metrics-exist probe (one per run)
       .mockResolvedValueOnce(deleteResult) // DELETE existing
       .mockResolvedValueOnce(undefined) // INSERT
       .mockResolvedValueOnce([{ count: 10 }]); // actual count
@@ -107,6 +107,10 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
 
   test('names the affected test runs alongside the count', async () => {
     mockEntityManager.query
+      // ONE probe per run, not one for the batch: the probe guards a DELETE, so a
+      // batch-wide answer let a run with live metrics authorise deleting the statistics
+      // of an aged-out run beside it.
+      .mockResolvedValueOnce([{ has_metrics: true }])
       .mockResolvedValueOnce([{ has_metrics: true }])
       .mockResolvedValueOnce([[], 12])
       .mockResolvedValueOnce(undefined)

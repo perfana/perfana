@@ -71,7 +71,7 @@ describe.each(cases)('$name — RLS write routing', ({ Handler, column, payload 
   it('writes through the request entity manager, never the pooled connection', async () => {
     const pooledQuery = jest.fn().mockResolvedValue(undefined);
     const managerQuery = jest.fn().mockResolvedValue(undefined);
-    const repo = { findOne: jest.fn().mockResolvedValue(run()) };
+    const repo = { findOne: jest.fn().mockResolvedValue(run()), find: jest.fn().mockResolvedValue([run()]) };
 
     const module = await Test.createTestingModule({
       providers: [

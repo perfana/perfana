@@ -53,6 +53,13 @@ export interface BatchOptions {
 export interface ReevaluationOptions {
   checks?: boolean;
   adapt?: boolean;
+  /**
+   * Recalculate ds_metric_statistics before evaluating, without collecting any data.
+   * Set this when the analysis WINDOW changed but the data did not — the worker's two
+   * refreshMode branches run statistics only after a fetch returned new rows, so
+   * neither covers an edit to test_runs.ramp_up / ramp_down.
+   */
+  recalculateStatistics?: boolean;
   // Optional fields for specific metric re-analysis
   applicationDashboardId?: string;
   metricsSourceId?: string;
@@ -295,6 +302,10 @@ export class BullMQClientService implements OnModuleDestroy {
         checks: includeChecks,
         adapt: includeAdapt,
       };
+
+      if (options.recalculateStatistics) {
+        jobData.recalculateStatistics = true;
+      }
 
       // Add specific metric targeting if provided
       if (options.applicationDashboardId) {

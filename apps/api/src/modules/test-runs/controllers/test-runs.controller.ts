@@ -289,7 +289,7 @@ export class TestRunsController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   async updateAnalysisTimeRange(
     @Param('id', UuidValidationPipe) id: string,
-    @Body() body: { analysisStartOffset: number; analysisEndOffset: number },
+    @Body() body: { analysisStartOffset: number; analysisEndOffset: number; applyToAll?: boolean },
     @UserCtx() ctx: UserContext,
   ) {
     if (
@@ -300,12 +300,16 @@ export class TestRunsController {
         'analysisStartOffset and analysisEndOffset must be non-negative numbers (seconds)',
       );
     }
+    if (body.applyToAll !== undefined && typeof body.applyToAll !== 'boolean') {
+      throw new ValidationException('applyToAll must be a boolean');
+    }
     return this.testRunsService.updateAnalysisTimeRange(
       id,
       body.analysisStartOffset,
       body.analysisEndOffset,
       ctx.userId,
       ctx.roles,
+      body.applyToAll === true,
     );
   }
 

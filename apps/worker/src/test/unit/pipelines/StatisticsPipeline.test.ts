@@ -41,6 +41,19 @@ describe('StatisticsPipeline', () => {
   const callWith = (needle: string): any[] =>
     mockEntityManager.query.mock.calls.find((c: any[]) => String(c[0]).includes(needle));
 
+  /**
+   * The metrics-exist probe runs ONCE PER RUN. It guards a DELETE, so a single
+   * batch-wide answer let one run with live ds_metrics authorise deleting the
+   * statistics of every aged-out run beside it — and the re-INSERT, reading the same
+   * vanished metrics, refilled only the live ones. Queue one `true` per id ahead of
+   * the DELETE / INSERT / count triple.
+   */
+  const queueProbes = (n: number) => {
+    for (let i = 0; i < n; i++) {
+      mockEntityManager.query.mockResolvedValueOnce([{ has_metrics: true }]);
+    }
+  };
+
   beforeEach(() => {
     interceptedQueries = [];
     interceptedCalls = [];
@@ -193,8 +206,8 @@ describe('StatisticsPipeline', () => {
     test('should execute successfully with multiple test runs', async () => {
       const testRunIds = ['test-run-001', 'test-run-002', 'test-run-003'];
 
+      queueProbes(testRunIds.length);
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 50 }]);          // Actual count verification
@@ -228,8 +241,8 @@ describe('StatisticsPipeline', () => {
     test('should execute aggregation query with parameterized test run IDs', async () => {
       const testRunIds = ['test-run-001', 'test-run-002'];
 
+      queueProbes(testRunIds.length);
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 20 }]);          // Actual count verification
@@ -492,7 +505,8 @@ describe('StatisticsPipeline', () => {
       await pipeline.execute({ testRunIds });
 
       const metricsCountCall = callWith('has_metrics');
-      expect(metricsCountCall[0]).toContain('WHERE test_run_id IN');
+      // `= $1`, not `IN (...)`: the probe asks about one run at a time.
+      expect(metricsCountCall[0]).toContain('WHERE test_run_id = $1');
       expect(metricsCountCall[0]).toContain('AND ramp_up = false');
       expect(metricsCountCall[0]).toContain('AND value IS NOT NULL');
     });
@@ -832,8 +846,8 @@ describe('StatisticsPipeline', () => {
     test('should handle multiple test runs correctly', async () => {
       const testRunIds = ['test-run-001', 'test-run-002', 'test-run-003', 'test-run-004'];
 
+      queueProbes(testRunIds.length);
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 40 }]);          // Actual count verification
@@ -851,26 +865,30 @@ describe('StatisticsPipeline', () => {
     test('should generate correct placeholders for multiple test runs', async () => {
       const testRunIds = ['test-1', 'test-2', 'test-3'];
 
+      queueProbes(testRunIds.length);
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 30 }]);          // Actual count verification
 
       await pipeline.execute({ testRunIds });
 
-      const metricsCountCall = callWith('has_metrics');
-      const sqlQuery = metricsCountCall[0];
+      // The probe carries ONE placeholder now — it asks about one run at a time, which
+      // is what stops a live run authorising the deletion of an aged-out run's statistics.
+      const probeCall = callWith('has_metrics');
+      expect(probeCall[0]).toContain('test_run_id = $1');
+      expect(probeCall[1]).toEqual(['test-1']);
 
-      // Should have $1, $2, $3 placeholders
-      expect(sqlQuery).toContain('$1, $2, $3');
+      // The batch placeholders belong to the statements bound to the probed subset.
+      expect(callWith('DELETE FROM ds_metric_statistics')[0]).toContain('$1, $2, $3');
+      expect(callWith('INSERT INTO ds_metric_statistics')[1]).toEqual(testRunIds);
     });
 
     test('should handle large number of test runs', async () => {
       const testRunIds = Array.from({ length: 50 }, (_, i) => `test-run-${i.toString().padStart(3, '0')}`);
 
+      queueProbes(testRunIds.length);
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 500 }]);          // Actual count verification

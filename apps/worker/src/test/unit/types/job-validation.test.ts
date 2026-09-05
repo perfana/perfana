@@ -683,6 +683,66 @@ describe('Job Schema Validation', () => {
       // Act & Assert
       expect(() => OrchestrateReevaluateBatchJobSchema.parse(invalidData)).toThrow();
     });
+
+    // recalculateStatistics is the ONLY route to the third data-collection branch:
+    // no fetch, but ds_metric_statistics has to be rebuilt because the analysis
+    // window moved. The worker destructures it straight off the parse result, so a
+    // schema that dropped it would silently disable the whole "apply to all" flow.
+    it('should carry recalculateStatistics through the parse', () => {
+      // Arrange
+      const validData = {
+        testRunIds: ['test-1', 'test-2'],
+        batchId: 'orchestrate-recalc-1',
+        checks: true,
+        adapt: true,
+        recalculateStatistics: true,
+      };
+
+      // Act
+      const result = OrchestrateReevaluateBatchJobSchema.parse(validData);
+
+      // Assert
+      expect(result.recalculateStatistics).toBe(true);
+      // No refreshMode: data collection is skipped, statistics are not.
+      expect(result.refreshMode).toBeUndefined();
+    });
+
+    it('should leave recalculateStatistics undefined when absent, not default it to true', () => {
+      // Arrange
+      const minimalData = {
+        testRunIds: ['test-1'],
+        batchId: 'orchestrate-recalc-2',
+      };
+
+      // Act
+      const result = OrchestrateReevaluateBatchJobSchema.parse(minimalData);
+
+      // Assert
+      expect(result.recalculateStatistics).toBeUndefined();
+    });
+
+    it('should preserve an explicit false', () => {
+      // Act
+      const result = OrchestrateReevaluateBatchJobSchema.parse({
+        testRunIds: ['test-1'],
+        batchId: 'orchestrate-recalc-3',
+        recalculateStatistics: false,
+      });
+
+      // Assert
+      expect(result.recalculateStatistics).toBe(false);
+    });
+
+    it('should reject a non-boolean recalculateStatistics', () => {
+      // Act & Assert
+      expect(() =>
+        OrchestrateReevaluateBatchJobSchema.parse({
+          testRunIds: ['test-1'],
+          batchId: 'orchestrate-recalc-4',
+          recalculateStatistics: 'yes',
+        })
+      ).toThrow();
+    });
   });
 
   describe('Edge Cases and Boundary Values', () => {

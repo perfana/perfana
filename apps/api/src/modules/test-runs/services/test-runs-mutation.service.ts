@@ -509,17 +509,19 @@ export class TestRunsMutationService {
     analysisEndOffset: number,
     userId: string,
     roles: string[],
+    applyToAll = false,
   ): Promise<TestRun> {
     this.logger.debug(
-      `updateAnalysisTimeRange: id=${id}, startOffset=${analysisStartOffset}, endOffset=${analysisEndOffset}, userId=${userId}`,
+      `updateAnalysisTimeRange: id=${id}, startOffset=${analysisStartOffset}, endOffset=${analysisEndOffset}, applyToAll=${applyToAll}, userId=${userId}`,
     );
 
     await this.assertCanModify({ id }, id, userId, roles);
 
-    const result = await this.updateAnalysisTimeRangeHandler.execute({
+    const { testRun: result, affectedTestRunIds } = await this.updateAnalysisTimeRangeHandler.execute({
       id,
       analysisStartOffset,
       analysisEndOffset,
+      applyToAll,
     });
 
     if (result?.completed && result?.test_run_id) {
@@ -531,15 +533,35 @@ export class TestRunsMutationService {
           err,
         );
       }
-      try {
+    }
+
+    // The offsets on their own change nothing that anyone can see: they take effect
+    // only once StatisticsPipeline rebakes ds_metrics.ramp_up and rewrites
+    // ds_metric_statistics, and ADAPT then recomputes off that.
+    try {
+      if (applyToAll && affectedTestRunIds.length > 1) {
+        // reevaluateBatch, not analyzeTest per run: analyze-test includes
+        // metrics-collection, so fanning it out over a workload's whole history would
+        // re-hit Grafana once per run to fetch data that has not changed. The batch
+        // path skips collection, and recalculateStatistics is what makes it still
+        // rebuild the statistics the new window implies.
+        await this.bullmqClientService.reevaluateBatch(affectedTestRunIds, {
+          checks: true,
+          adapt: true,
+          recalculateStatistics: true,
+        });
+        this.logger.log(
+          `Re-evaluation enqueued for ${affectedTestRunIds.length} test runs after time range update (applyToAll)`,
+        );
+      } else if (result?.completed && result?.test_run_id) {
         await this.bullmqClientService.analyzeTest(result.test_run_id, { adapt: true, benchmarksOnly: false });
         this.logger.log(`Re-analysis enqueued for test run ${result.test_run_id} after time range update`);
-      } catch (err) {
-        this.logger.error(
-          `Failed to enqueue re-analysis after time range edit for ${result.test_run_id}:`,
-          err,
-        );
       }
+    } catch (err) {
+      this.logger.error(
+        `Failed to enqueue re-analysis after time range edit for ${result?.test_run_id ?? id}:`,
+        err,
+      );
     }
 
     return result;

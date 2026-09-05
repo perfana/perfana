@@ -120,3 +120,92 @@ describe('BullMQClientService.enqueueStatisticsCalculation (#552)', () => {
     });
   });
 });
+
+/**
+ * `recalculateStatistics` pass-through on the re-evaluate batch path.
+ *
+ * "Apply to all test runs of this workload" edits every sibling run's ramp_up /
+ * ramp_down and then has to make the new window take effect. The two worker
+ * refreshMode branches run StatisticsPipeline only after a fetch returned new rows,
+ * so neither covers "the data is unchanged but the analysis window moved" — this
+ * flag is the only thing that reaches the worker's third branch. If it is dropped
+ * here the batch runs checks and ADAPT against the PREVIOUS window's statistics and
+ * the user's edit silently does nothing.
+ */
+function makeReevaluateService(overrides?: {
+  batchAdd?: jest.Mock;
+  testRunRows?: unknown[];
+}): { service: BullMQClientService; batchAdd: jest.Mock } {
+  const batchAdd = overrides?.batchAdd ?? jest.fn().mockResolvedValue({ id: 'batch-job-1' });
+
+  const service = Object.create(BullMQClientService.prototype) as BullMQClientService;
+  const internals = service as unknown as Record<string, unknown>;
+
+  internals.isRedisAvailable = true;
+  internals.analysisQueue = { add: jest.fn(), name: 'perfana-analyze' };
+  internals.batchQueue = { add: batchAdd, name: 'perfana-batch' };
+  internals.reevalQueue = { add: jest.fn(), name: 'perfana-reevaluate' };
+  internals.flowProducer = { add: jest.fn() };
+  // determineConfigurationScope reads test_runs; an empty result short-circuits it
+  // to metric scope without touching ds_compare_config.
+  internals.dataSource = { query: jest.fn().mockResolvedValue(overrides?.testRunRows ?? []) };
+  internals.logger = {
+    log: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  } as unknown as Logger;
+
+  return { service, batchAdd };
+}
+
+const jobDataOf = (batchAdd: jest.Mock): Record<string, unknown> =>
+  batchAdd.mock.calls.at(0)?.[1] as Record<string, unknown>;
+
+describe('BullMQClientService.reevaluateBatch — recalculateStatistics', () => {
+  it('forwards recalculateStatistics onto the orchestrate job data', async () => {
+    const { service, batchAdd } = makeReevaluateService();
+
+    await service.reevaluateBatch(['run-001', 'run-002'], {
+      checks: true,
+      adapt: true,
+      recalculateStatistics: true,
+    });
+
+    expect(batchAdd).toHaveBeenCalledTimes(1);
+    expect(batchAdd.mock.calls.at(0)?.[0]).toBe('orchestrate-reevaluate-batch');
+
+    const jobData = jobDataOf(batchAdd);
+    expect(jobData.recalculateStatistics).toBe(true);
+    expect(jobData.testRunIds).toEqual(['run-001', 'run-002']);
+    expect(jobData.checks).toBe(true);
+    expect(jobData.adapt).toBe(true);
+    // No refreshMode: the worker must skip data collection and still recalculate.
+    expect(jobData.refreshMode).toBeUndefined();
+  });
+
+  it('omits the key entirely when the caller does not ask for it', async () => {
+    const { service, batchAdd } = makeReevaluateService();
+
+    await service.reevaluateBatch(['run-001'], { checks: true, adapt: true });
+
+    expect(jobDataOf(batchAdd)).not.toHaveProperty('recalculateStatistics');
+  });
+
+  it('omits the key when it is explicitly false, so the worker keeps its default branch', async () => {
+    const { service, batchAdd } = makeReevaluateService();
+
+    await service.reevaluateBatch(['run-001'], { recalculateStatistics: false });
+
+    expect(jobDataOf(batchAdd)).not.toHaveProperty('recalculateStatistics');
+  });
+
+  it('rethrows without enqueuing when Redis is unavailable', async () => {
+    const { service, batchAdd } = makeReevaluateService();
+    (service as unknown as Record<string, unknown>).isRedisAvailable = false;
+
+    await expect(
+      service.reevaluateBatch(['run-001'], { recalculateStatistics: true }),
+    ).rejects.toThrow(/Redis\/BullMQ is not available/);
+    expect(batchAdd).not.toHaveBeenCalled();
+  });
+});

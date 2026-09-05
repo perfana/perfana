@@ -494,6 +494,11 @@ describe('TestRunsMutationService', () => {
   });
 
   describe('updateAnalysisTimeRange', () => {
+    const handlerResult = (testRun: Record<string, unknown>, affectedTestRunIds: string[]) => ({
+      testRun,
+      affectedTestRunIds,
+    });
+
     it('calls handler and enqueues rollup when test run is completed', async () => {
       const mockResult = {
         id: 'uuid-1',
@@ -502,27 +507,139 @@ describe('TestRunsMutationService', () => {
         analysis_start_offset: 30,
         analysis_end_offset: 60,
       };
-      const mockHandler = { execute: jest.fn().mockResolvedValue(mockResult) };
+      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001'])) };
       (service as any).updateAnalysisTimeRangeHandler = mockHandler;
-      (service as any).bullmqClientService = { enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined) };
+      (service as any).bullmqClientService = {
+        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
+        analyzeTest: jest.fn().mockResolvedValue(undefined),
+        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
+      };
 
       const result = await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', []);
 
-      expect(mockHandler.execute).toHaveBeenCalledWith({ id: 'uuid-1', analysisStartOffset: 30, analysisEndOffset: 60 });
+      expect(mockHandler.execute).toHaveBeenCalledWith({ id: 'uuid-1', analysisStartOffset: 30, analysisEndOffset: 60, applyToAll: false });
       expect((service as any).bullmqClientService.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-001');
       expect(result).toBe(mockResult);
     });
 
     it('does not enqueue rollup when test run is not completed', async () => {
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: false };
-      const mockHandler = { execute: jest.fn().mockResolvedValue(mockResult) };
-      const mockBullmq = { enqueueTransactionStatsRollup: jest.fn() };
+      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001'])) };
+      const mockBullmq = {
+        enqueueTransactionStatsRollup: jest.fn(),
+        analyzeTest: jest.fn().mockResolvedValue(undefined),
+        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
+      };
       (service as any).updateAnalysisTimeRangeHandler = mockHandler;
       (service as any).bullmqClientService = mockBullmq;
 
       await service.updateAnalysisTimeRange('uuid-1', 0, 0, 'user-1', []);
 
       expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
+    });
+
+    it('re-analyses only the edited run when applyToAll is not set', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001'])) };
+      const mockBullmq = {
+        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
+        analyzeTest: jest.fn().mockResolvedValue(undefined),
+        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
+      };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', []);
+
+      expect(mockBullmq.analyzeTest).toHaveBeenCalledWith('run-001', { adapt: true, benchmarksOnly: false });
+      expect(mockBullmq.reevaluateBatch).not.toHaveBeenCalled();
+    });
+
+    it('re-evaluates the whole workload with recalculateStatistics when applyToAll is set', async () => {
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const affected = ['run-001', 'run-002', 'run-003'];
+      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, affected)) };
+      const mockBullmq = {
+        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
+        analyzeTest: jest.fn().mockResolvedValue(undefined),
+        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
+      };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+
+      expect(mockHandler.execute).toHaveBeenCalledWith({ id: 'uuid-1', analysisStartOffset: 30, analysisEndOffset: 60, applyToAll: true });
+      // analyze-test would re-hit Grafana once per run; the batch path skips collection
+      // but still has to rebuild statistics for the new window.
+      expect(mockBullmq.reevaluateBatch).toHaveBeenCalledWith(affected, {
+        checks: true,
+        adapt: true,
+        recalculateStatistics: true,
+      });
+      expect(mockBullmq.analyzeTest).not.toHaveBeenCalled();
+    });
+
+    it('falls back to analyzeTest when applyToAll matched only the edited run', async () => {
+      // The workload has a single run. reevaluateBatch on a one-run batch would skip
+      // data collection for a run that may never have been collected; analyze-test is
+      // the correct path once there are no siblings to spare.
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001'])) };
+      const mockBullmq = {
+        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
+        analyzeTest: jest.fn().mockResolvedValue(undefined),
+        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
+      };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+
+      expect(mockBullmq.reevaluateBatch).not.toHaveBeenCalled();
+      expect(mockBullmq.analyzeTest).toHaveBeenCalledWith('run-001', { adapt: true, benchmarksOnly: false });
+    });
+
+    it('re-evaluates the workload even when the edited run is not completed', async () => {
+      // Only the single-run arm is gated on `completed`. The siblings are historical
+      // runs whose windows moved, and they still need rebuilding.
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: false };
+      const affected = ['run-001', 'run-002'];
+      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, affected)) };
+      const mockBullmq = {
+        enqueueTransactionStatsRollup: jest.fn(),
+        analyzeTest: jest.fn().mockResolvedValue(undefined),
+        reevaluateBatch: jest.fn().mockResolvedValue(undefined),
+      };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+
+      await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
+
+      expect(mockBullmq.reevaluateBatch).toHaveBeenCalledWith(affected, {
+        checks: true,
+        adapt: true,
+        recalculateStatistics: true,
+      });
+      // Not completed, so no rollup.
+      expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
+    });
+
+    it('returns the updated run even when the re-evaluation enqueue fails', async () => {
+      // The offsets are already committed at this point. Throwing here would show the
+      // user an error for a write that succeeded, and they would edit again.
+      const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
+      const mockHandler = { execute: jest.fn().mockResolvedValue(handlerResult(mockResult, ['run-001', 'run-002'])) };
+      const mockBullmq = {
+        enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
+        analyzeTest: jest.fn().mockResolvedValue(undefined),
+        reevaluateBatch: jest.fn().mockRejectedValue(new Error('redis down')),
+      };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+      (service as any).bullmqClientService = mockBullmq;
+
+      await expect(service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true))
+        .resolves.toBe(mockResult);
     });
   });
 
