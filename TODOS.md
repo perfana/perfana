@@ -221,6 +221,58 @@ not a P2 — and also what makes it easy to break without noticing.
 
 ---
 
+## Analysis time range
+
+### Two re-evaluate stages are still unchunked against the 100-run bulk cap
+
+**Priority:** P2
+**Origin:** third-round review of `feat/apply-analysis-window-to-workload-v2` (2026-09-06),
+finding M4. Deliberately not fixed in v0.2.95.0.
+**Why:** v0.2.95.0 chunks `statistics-recalculation`, `control-group-statistics` and
+`adapt-analysis` at `REEVALUATE_CHUNK_SIZE` (5), but `checks-evaluation`
+(`simple-orchestrate-reevaluate-batch.ts`) and `control-groups-creation` still get the
+whole id list in one job. `ControlGroupsPipeline` wraps its loop over every run in a
+single `withTransaction`, so it holds one pooled connection for the batch; both must
+finish inside the orchestrator's 600 s `JOB_WAIT_TIMEOUT_MS`. At the new cap of 100 runs
+those two are the tightest remaining constraint in the chain, and the cap was chosen for
+symmetry with `data-science.controller`'s existing `.slice(0, 100)` rather than measured
+against them.
+**What:** measure both at 100 runs, then either chunk them on the same constant or lower
+`MAX_BULK_ANALYSIS_TIME_RANGE_RUNS` to what they actually sustain. Not urgent: a timeout
+now removes the orphaned child job and fails the orchestration visibly rather than
+silently half-applying.
+
+### The scope preview returns an unbounded `skipped` array
+
+**Priority:** P3
+**Origin:** third-round review (2026-09-06), finding L2.
+**Why:** `MAX_BULK_ANALYSIS_TIME_RANGE_RUNS` bounds the *applicable* set, not the skipped
+one. A workload with three years of nightly runs can return several thousand
+`{testRunId, completed, skipped}` objects in the preview body — on every debounced slider
+settle — and again in the PUT response. The dialog only ever reads counts
+(`skipped.length` and `skipCount(reason)`).
+**What:** return counts by reason instead of the array, or cap it and send a total.
+
+### A bulk re-evaluate that fails or is refused never reaches the user
+
+**Priority:** P2
+**Origin:** adversarial review during /ship on `feat/apply-analysis-window-to-workload-v2`
+(2026-09-05), finding A1. Partially addressed in v0.2.95.0.
+**Why:** `TestRunsMutationService.enqueueAnalysisTimeRangeFollowUp` enqueues
+`reevaluateBatch` and logs on failure; the response has already been decided. v0.2.95.0
+made the orchestrator throw on a scope-lock refusal and on a mid-run error, so the job
+now fails and retries (`attempts: 2`) instead of being recorded as completed — but if it
+exhausts its retries the offsets stay written with `ds_metric_statistics` never
+recalculated, and the dialog said the re-analysis had started. `analyze.ts` takes the
+same `sut:env:workload` lock after every run of the workload finishes, so a refusal is
+routine rather than exotic.
+**What:** report the batch outcome. The job id is already returned by `reevaluateBatch`;
+either have the dialog poll `/api/data-science/jobs/{id}/status` after a bulk apply, or
+emit a realtime event from the orchestrator's failure path through the existing test-runs
+gateway. Also consider recording, per run, whether its statistics have been recalculated
+since its offsets last changed — that is the invariant this whole feature depends on and
+nothing currently asserts it.
+
 ## Worker pipeline
 
 ### Four reevaluate stages render as raw ids in the progress UI
@@ -901,7 +953,12 @@ v0.2.94.7 rather than shipped, and all eight items landed together in v0.2.95.0.
 3. Authorize every sibling — `partitionAnalysisTimeRangeScope` skips runs outside the
    target's `(organizationId, teamId)` as `not-writable`.
 4. Re-enqueue `transaction-stats-rollup` for every affected completed run.
-5. Filter siblings to `completed = true`; running runs are skipped and reported.
+5. Filter siblings to `completed = true`; running runs are skipped and reported. The
+   second half of this item — a blocked batch reaching the user — landed only in part:
+   the orchestrator now THROWS on a lock refusal instead of returning a `failed` result
+   that BullMQ recorded as completed, so the job genuinely fails and retries. The API
+   enqueue is still fire-and-forget and the UI still reports success optimistically. See
+   the open item below.
 6. Branch on `applyToAll` alone, not `applyToAll && length > 1`.
 7. Validate the offsets against each run's duration, using the SUM of both offsets
    (`AdaptValidator.checkTooShortTestRuns` only ever tested `ramp_up`).
