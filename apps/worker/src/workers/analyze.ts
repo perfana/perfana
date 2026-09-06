@@ -87,15 +87,23 @@ export function analyzeTestWorker() {
           blockingJobId: lockResult.blockingInfo?.existingJobId,
         });
 
-        return {
-          status: 'failed',
-          message: `Job blocked: ${lockResult.blockingInfo?.reason || 'Another job is processing this scope'}`,
-          data: {
-            blocked: true,
-            blockingJobId: lockResult.blockingInfo?.existingJobId,
-            blockingJobProgress: lockResult.blockingInfo?.existingJobProgress,
-          },
-        };
+        // THROW, do not return. simple-workers.ts does `return await processor(job)`, so a
+        // returned {status:'failed'} RESOLVES the promise and BullMQ records the job as
+        // COMPLETED — no retry, no failed-set entry, and this run is never analysed:
+        // no benchmarks, no ADAPT, no transaction-stats rollup. The run simply looks
+        // analysed and is not.
+        //
+        // This was survivable while every holder of the sut:env:workload lock finished in
+        // seconds. It is not now: a workload-wide analysis-window apply holds that lock
+        // across all of its statistics, control-group and ADAPT chunks, which on a large
+        // workload is a long window — and every run that FINISHES during it takes this
+        // branch. Throwing lets BullMQ retry instead of silently dropping the analysis.
+        const blockedError = new Error(
+          `Job blocked: ${lockResult.blockingInfo?.reason || 'Another job is processing this scope'}` +
+            ` (blocking job ${lockResult.blockingInfo?.existingJobId ?? 'unknown'})`
+        );
+        (blockedError as Error & { blocked?: boolean }).blocked = true;
+        throw blockedError;
       }
 
       lockAcquired = true;

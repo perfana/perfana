@@ -258,7 +258,7 @@ describe('orchestrate-reevaluate-batch — recalculateStatistics branch', () => 
     expect(declaredStages.filter((stage) => stage === 'statistics-recalculation')).toHaveLength(1);
   });
 
-  it('fails the job when the statistics job fails, rather than evaluating the old window', async () => {
+  it('rejects when the statistics job fails, rather than evaluating the old window', async () => {
     vi.mocked(Queue).mockImplementation(
       () =>
         ({
@@ -274,17 +274,52 @@ describe('orchestrate-reevaluate-batch — recalculateStatistics branch', () => 
         }) as never
     );
 
-    const result = await run({
-      testRunIds: ['run-001'],
-      batchId: 'reeval-6',
-      checks: false,
-      adapt: false,
-      recalculateStatistics: true,
-    });
+    // REJECT, not resolve with {status:'failed'}. simple-workers.ts does
+    // `return await processor(job)`, so a returned failure RESOLVES the promise and
+    // BullMQ records the job as COMPLETED — `attempts` never fires, nothing lands in the
+    // failed set, and an operator has nothing to find. With chunking that is worse still:
+    // a mid-chunk failure leaves the earlier chunks' statistics on the new window and the
+    // rest on the old one, i.e. a half-applied batch reported as a success.
+    await expect(
+      run({
+        testRunIds: ['run-001'],
+        batchId: 'reeval-6',
+        checks: false,
+        adapt: false,
+        recalculateStatistics: true,
+      })
+    ).rejects.toThrow(/jobs failed/);
 
-    expect(result.status).toBe('failed');
     // The data sanity check must not have run past a failed statistics stage.
     expect(sanityExecute).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the scope lock is refused, rather than resolving as a success', async () => {
+    // `analyze.ts` takes this same sut:env:workload lock after every run of the workload
+    // finishes, so a bulk analysis-window edit landing in that window is refused
+    // routinely — this is not a rare path. Resolving here left test_runs.ramp_up written
+    // while ds_metric_statistics was never recalculated and ADAPT never re-ran:
+    // permanently, with a green job and a UI reporting success. Throwing lets BullMQ
+    // retry (attempts: 2, 10s fixed backoff), which is usually enough for the blocking
+    // job to finish.
+    acquireLock.mockResolvedValue({
+      acquired: false,
+      blockingInfo: { existingJobId: 'analyze-77', reason: 'Another job is processing this scope' },
+    });
+
+    await expect(
+      run({
+        testRunIds: ['run-001'],
+        batchId: 'reeval-7',
+        checks: false,
+        adapt: false,
+        recalculateStatistics: true,
+      })
+    ).rejects.toThrow(/Job blocked/);
+
+    // Refused before any work was scheduled: nothing may reach the analyze queue, or the
+    // retry would double-run whatever slipped through.
+    expect(enqueued).toEqual([]);
   });
 });
 

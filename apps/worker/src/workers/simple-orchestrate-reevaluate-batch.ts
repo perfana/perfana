@@ -23,38 +23,12 @@ import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
 import { PanelsPipeline } from '../pipelines/PanelsPipeline.js';
 import { DataSanityCheckPipeline } from '../pipelines/DataSanityCheckPipeline.js';
 import { JobType } from '@perfana/shared/types';
+import { chunkTestRunIds, REEVALUATE_CHUNK_SIZE } from '../lib/utils/chunking.js';
 
 const logger = getLogger('simple-orchestrate-reevaluate-batch');
 
 /** Maximum time (ms) to wait for a child job to complete before timing out (10 minutes) */
 const JOB_WAIT_TIMEOUT_MS = 600_000;
-
-/**
- * How many test runs may share one ADAPT / statistics job.
- *
- * Both downstream pipelines do their work in a SINGLE transaction over every id they
- * are handed, and both have a per-transaction ceiling that scales with the batch:
- *
- *  - `AdaptPipeline` never calls `setAggregationBudget`, so it runs on the 120 s
- *    `ANALYTICS_STATEMENT_TIMEOUT_MS` cap. CLAUDE.md's measurement is ~13 s/run with
- *    JIT off, and says outright that "a 9-run batch already exceeds the 120s cap".
- *    v0.2.94.7 then added the orphan-results DELETE to that same transaction, so the
- *    per-run figure is now a floor rather than an estimate.
- *  - `StatisticsPipeline.refreshRampUpFlags` issues one UPDATE per run but they all
- *    share ONE transaction's `max_tuples_decompressed_per_dml_transaction` (100k).
- *    An analysis-window edit makes every run's ramp_up flags stale at once, which is
- *    the documented recipe for `tuple decompression limit exceeded`.
- *
- * 5 leaves roughly half the ADAPT budget as headroom for the added DELETE and for
- * runs larger than the one that was measured. Chunking here rather than by issuing
- * several batch jobs is deliberate: the scope lock below is keyed on
- * `sut:env:workload`, so a second job for the same workload would be refused, not
- * queued.
- */
-const REEVALUATE_CHUNK_SIZE = Math.max(
-  1,
-  Number(process.env.REEVALUATE_CHUNK_SIZE) || 5
-);
 
 /**
  * Enqueue StatisticsPipeline for `testRunIds`, chunked and sequential, waiting on each.
@@ -103,15 +77,6 @@ async function runStatisticsChunks(
   }
 }
 
-/** Split ids into chunks of at most `size`, preserving order. */
-function chunkTestRunIds(ids: string[], size: number = REEVALUATE_CHUNK_SIZE): string[][] {
-  if (ids.length <= size) { return [ids]; }
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += size) {
-    chunks.push(ids.slice(i, i + size));
-  }
-  return chunks;
-}
 
 /**
  * Throw when a soft-failing child pipeline reported failure (#552).
@@ -209,7 +174,29 @@ async function waitForJobs(
         resolved = true;
         queueEvents.off('completed', onCompleted);
         queueEvents.off('failed', onFailed);
-        reject(new Error(`Timeout waiting for jobs after ${timeoutMs}ms. Completed: ${completedJobs.size}, Failed: ${failedJobs.size}, Total: ${jobIds.length}`));
+
+        // Give up waiting AND stop the work. Timing out only abandoned the wait, leaving
+        // the child job running unobserved — which was survivable while the orchestrator
+        // returned a failure BullMQ recorded as completed and never retried. Now that it
+        // throws, BullMQ retries and re-enqueues the SAME stage for the same ids while the
+        // orphan is still running. For the unchunked stages (checks-evaluation,
+        // control-groups-creation) that overlap is total, and ChecksPipeline writes per run
+        // in its own transactions, so two concurrent passes can interleave or deadlock.
+        //
+        // Best-effort: a job that already moved on cannot be removed, and that is fine —
+        // the point is not to leave a duplicate running.
+        const pending = jobIds.filter((id) => !completedJobs.has(id) && !failedJobs.has(id));
+        void Promise.all(
+          pending.map(async (id) => {
+            try {
+              await (await queue?.getJob(id))?.remove();
+            } catch (removeError) {
+              logger.warn(`Could not remove orphaned job ${id} after timeout:`, removeError);
+            }
+          })
+        ).finally(() => {
+          reject(new Error(`Timeout waiting for jobs after ${timeoutMs}ms. Completed: ${completedJobs.size}, Failed: ${failedJobs.size}, Total: ${jobIds.length}`));
+        });
       }
     }, timeoutMs);
 
@@ -280,6 +267,10 @@ export function simpleOrchestrateReevaluateBatchWorker() {
     let progressReporter: ProgressReporter | null = null;
     let lockAcquired = false;
     let stopLockRenewal: (() => void) | null = null;
+    // Hoisted so the finally can close them: each constructs its own IORedis, and they
+    // were previously closed only where the happy path happened to reach.
+    let analyzeQueueRef: Queue | null = null;
+    let analyzeEventsRef: QueueEvents | null = null;
     let testRunInfo: { testRunId: string; systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
 
     try {
@@ -342,15 +333,25 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           blockingJobId: lockResult.blockingInfo?.existingJobId,
         });
 
-        return {
-          status: 'failed',
-          message: `Job blocked: ${lockResult.blockingInfo?.reason || 'Another job is processing this scope'}`,
-          data: {
-            blocked: true,
-            blockingJobId: lockResult.blockingInfo?.existingJobId,
-            blockingJobProgress: lockResult.blockingInfo?.existingJobProgress,
-          },
-        };
+        // THROW, do not return. simple-workers.ts does `return await processor(job)`, so a
+        // returned {status:'failed'} RESOLVES the promise and BullMQ records the job as
+        // completed — `attempts` never fires and nothing surfaces the refusal.
+        //
+        // That is not a rare path. `analyze.ts` takes this same sut:env:workload lock after
+        // every run of the workload finishes, so a bulk analysis-window edit landing in that
+        // window is refused routinely. Resolving here left test_runs.ramp_up written while
+        // ds_metric_statistics was never recalculated and ADAPT never re-ran — permanently,
+        // with a green job and a UI reporting success. Throwing lets BullMQ retry (attempts:
+        // it), which is usually enough for the blocking job to finish. Note the retry policy
+        // that applies is the one reevaluateBatch sets when it enqueues
+        // (bullmq-client.service.ts: attempts 2, fixed 10s), NOT the queue-level default in
+        // simple-queues.ts — a reader chasing this will find the wrong one first.
+        const blockedError = new Error(
+          `Job blocked: ${lockResult.blockingInfo?.reason || 'Another job is processing this scope'}` +
+            ` (blocking job ${lockResult.blockingInfo?.existingJobId ?? 'unknown'})`
+        );
+        (blockedError as Error & { blocked?: boolean }).blocked = true;
+        throw blockedError;
       }
 
       lockAcquired = true;
@@ -409,6 +410,8 @@ export function simpleOrchestrateReevaluateBatchWorker() {
       // Create queues (all jobs go to perfana-analyze queue)
       const analyzeQueue = createSimpleQueue(SIMPLE_QUEUES.ANALYZE);
       const analyzeEvents = createQueueEvents(SIMPLE_QUEUES.ANALYZE);
+      analyzeQueueRef = analyzeQueue;
+      analyzeEventsRef = analyzeEvents;
 
       // Stage 1: Data collection (when refreshMode === 'missing-data' or 'force')
       if (refreshMode === 'force') {
@@ -905,22 +908,39 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           // Substage 3b: Control group statistics
           await progressReporter?.startStage('control-group-statistics');
           const controlStatsStart = Date.now();
-          const controlStatsJob = await analyzeQueue.add(
-            JOB_NAMES.CONTROL_GROUP_STATISTICS,
-            { testRunIds },
-            getJobOptions(JOB_NAMES.CONTROL_GROUP_STATISTICS)
-          );
+          // Chunked for the same reason as ADAPT and statistics: this pipeline also does
+          // its work for every id in one withAnalyticsTransaction, and the orchestrator
+          // waits JOB_WAIT_TIMEOUT_MS (600s) for the whole job against a 540s aggregation
+          // budget — only 60s of headroom for a workload-sized list. It additionally
+          // re-enters StatisticsPipeline via backfillMissingSketches, so an unchunked list
+          // here reintroduces the very decompression-budget problem runStatisticsChunks
+          // exists to respect.
+          const controlStatsChunks = chunkTestRunIds(testRunIds);
+          let controlStatsDone = 0;
+          for (const chunk of controlStatsChunks) {
+            const controlStatsJob = await analyzeQueue.add(
+              JOB_NAMES.CONTROL_GROUP_STATISTICS,
+              { testRunIds: chunk },
+              getJobOptions(JOB_NAMES.CONTROL_GROUP_STATISTICS)
+            );
 
-          logger.info(`Waiting for control group statistics job ${controlStatsJob.id}...`);
-          await waitForJobs(analyzeEvents, [controlStatsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+            logger.info(`Waiting for control group statistics job ${controlStatsJob.id}...`);
+            await waitForJobs(analyzeEvents, [controlStatsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
 
-          // control-group-statistics is registered with softFail, so a failed
-          // aggregation still completes the BullMQ job. Read the return value or we
-          // walk into ADAPT with an empty baseline and blame the baseline (#552).
-          assertStageSucceeded(
-            'Control group statistics',
-            (await analyzeQueue.getJob(controlStatsJob.id!))?.returnvalue
-          );
+            // control-group-statistics is registered with softFail, so a failed
+            // aggregation still completes the BullMQ job. Read the return value or we
+            // walk into ADAPT with an empty baseline and blame the baseline (#552).
+            assertStageSucceeded(
+              'Control group statistics',
+              (await analyzeQueue.getJob(controlStatsJob.id!))?.returnvalue
+            );
+
+            controlStatsDone += chunk.length;
+            await progressReporter?.updateStageProgress(
+              Math.round((controlStatsDone / testRunIds.length) * 100),
+              { testRunId: chunk[chunk.length - 1]!, index: controlStatsDone, total: testRunIds.length }
+            );
+          }
 
           const controlStatsDuration = Date.now() - controlStatsStart;
           logger.info('✅ Control group statistics completed');
@@ -1002,9 +1022,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
       }
       await progressReporter?.completeStage();
 
-      // Cleanup queues
-      await analyzeEvents.close();
-      await analyzeQueue.close();
+      // Queues are closed in the finally, on every path.
 
       // Signal completion
       await progressReporter?.complete();
@@ -1057,18 +1075,29 @@ ${breakdown}
         await progressReporter.fail(errorMessage);
       }
 
-      return {
-        status: 'failed',
-        message: errorMessage,
-        errors: [{
-          message: errorMessage,
-          code: 'ORCHESTRATION_ERROR',
-        }],
-      };
+      // Rethrow rather than returning a 'failed' result: the worker resolves whatever this
+      // returns, so returning marked a failed orchestration as a COMPLETED BullMQ job —
+      // no retry, no failed-set entry, nothing for an operator to find. With chunking, a
+      // mid-chunk failure leaves the earlier chunks' statistics rewritten and the rest on
+      // the old window, so a silent success here is a half-applied batch nobody learns about.
+      throw error;
     } finally {
       // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
       // of a lock we just handed back.
       stopLockRenewal?.();
+
+      // createSimpleQueue / createQueueEvents each construct their own IORedis. They were
+      // closed only on the success path, so every failed orchestration leaked two
+      // connections — and failures are both more visible and longer-running now that this
+      // throws and chunks.
+      for (const closeable of [analyzeQueueRef, analyzeEventsRef]) {
+        if (!closeable) { continue; }
+        try {
+          await closeable.close();
+        } catch (closeError) {
+          logger.error(`Failed to close queue resource for job ${job.id}:`, closeError);
+        }
+      }
 
       // Always release lock and Redis connection in finally block
       if (lockAcquired && lockService && testRunInfo) {
