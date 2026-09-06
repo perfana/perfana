@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Box, Button, Typography } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { TestRun } from '@/types/test-runs';
@@ -28,39 +28,61 @@ interface HostsTabContentProps {
   configs: DynatraceConfig[];
 }
 
+// One request per host, this many in flight. Same ceiling the worker's Dynatrace
+// client uses (DEFAULT_MAX_CONCURRENT), so a 100-host run cannot rate-limit the
+// tenant. Each request costs 3 Dynatrace calls server-side.
+const HOST_OVERVIEW_CONCURRENCY = 5;
+
 export default function HostsTabContent({ hostEntities, testRun, configs }: HostsTabContentProps) {
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [rows, setRows] = useState<HostOverviewRow[]>([]);
   const [loading, setLoading] = useState(false);
 
   const first = hostEntities[0];
+  const systemUnderTestId = first?.systemUnderTestId;
+  const testEnvironment = first?.testEnvironment ?? '';
+  const workload = first?.workload ?? '';
+  // Identity-stable dep: hostEntities is re-filtered on every parent render.
+  const hostIdsKey = hostEntities.map((h) => h.entityId).join(',');
+  const { start_time: startTime, end_time: endTime } = testRun;
 
-  const loadOverview = useCallback(async () => {
-    if (!first || !testRun.start_time || !testRun.end_time) {
-      setRows([]);
-      return;
-    }
-    try {
-      setLoading(true);
-      const data = await fetchHostsOverview(
-        first.systemUnderTestId,
-        first.testEnvironment ?? '',
-        first.workload ?? '',
-        testRun.start_time,
-        testRun.end_time,
-      );
-      setRows(data);
-    } catch (error) {
-      console.error('Failed to fetch host overview:', error);
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [first, testRun.start_time, testRun.end_time]);
-
+  // Fan out per host so the table fills in as answers arrive, rather than
+  // blocking on one selector covering every host.
   useEffect(() => {
-    loadOverview();
-  }, [loadOverview]);
+    setRows([]);
+    if (!systemUnderTestId || !startTime || !endTime || !hostIdsKey) return;
+
+    let cancelled = false;
+    const queue = hostIdsKey.split(',');
+    setLoading(true);
+
+    const worker = async () => {
+      for (let hostId = queue.shift(); hostId && !cancelled; hostId = queue.shift()) {
+        try {
+          const data = await fetchHostsOverview(
+            systemUnderTestId,
+            testEnvironment,
+            workload,
+            startTime,
+            endTime,
+            hostId,
+          );
+          if (!cancelled) setRows((prev) => [...prev, ...data]);
+        } catch (error) {
+          // Soft-fail per host: the row keeps its "no data" dashes.
+          console.error(`Failed to fetch host overview for ${hostId}:`, error);
+        }
+      }
+    };
+
+    Promise.all(Array.from({ length: HOST_OVERVIEW_CONCURRENCY }, worker)).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hostIdsKey, systemUnderTestId, testEnvironment, workload, startTime, endTime]);
 
   const selectedHost = hostEntities.find((h) => h.entityId === selectedHostId) ?? null;
 

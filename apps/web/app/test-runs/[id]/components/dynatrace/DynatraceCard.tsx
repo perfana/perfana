@@ -246,8 +246,12 @@ export default function DynatraceCard({
               onEntered: Plotly charts inside (host performance graphs) measure their
               geometry mid-animation and useResizeHandler only listens to window
               resize — dispatch one once the Collapse settles so they relayout at the
-              final width (same fix as TrendsCard / AnomalyExpandedContent). */}
-          <Collapse in={expanded} onEntered={() => window.dispatchEvent(new Event('resize'))}>
+              final width (same fix as TrendsCard / AnomalyExpandedContent).
+
+              unmountOnExit: Collapse keeps its children mounted by default, so the
+              Hosts tab mounted — and hit Dynatrace once per config — while the card
+              was still collapsed. The collapsed card must cost DB reads only. */}
+          <Collapse in={expanded} unmountOnExit onEntered={() => window.dispatchEvent(new Event('resize'))}>
             <Divider sx={{ my: 2 }} />
 
             {dynatraceData.loading ? (

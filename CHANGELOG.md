@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.1] - 2026-09-06
+
+### Fixed
+- **The collapsed Dynatrace card no longer calls Dynatrace.** It shows a count of services and hosts, which comes from Perfana's own database, but the expanded content behind it was already mounted and had started fetching CPU, memory and problem data for every host — so on a system with many hosts the collapsed card sat on a spinner waiting for Dynatrace. The expanded content is now built only when the card is actually opened.
+
+- **The Dynatrace hosts list appears immediately instead of after every host has been measured.** The list itself comes from the database and was being held back until one request covering all hosts returned. Hosts are now listed straight away and each row's CPU, memory and problem figures fill in as they arrive, queried per host with at most five requests in flight so a large system cannot rate-limit the Dynatrace tenant. Rows keep their position while the figures stream in, and a host Dynatrace does not answer for leaves its own row blank rather than the whole table.
+
 ## [0.2.95.0] - 2026-09-05
 
 ### Added

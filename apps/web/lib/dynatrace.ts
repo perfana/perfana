@@ -548,8 +548,10 @@ export async function fetchHostsOverview(
   workload: string,
   startTime: string,
   endTime: string,
+  hostId?: string,
 ): Promise<HostOverviewRow[]> {
   const params = new URLSearchParams({ systemId, environment, workload, startTime, endTime });
+  if (hostId) params.set('hostId', hostId);
   const response = await authenticatedFetch(`/dynatrace/hosts/overview?${params.toString()}`, {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
