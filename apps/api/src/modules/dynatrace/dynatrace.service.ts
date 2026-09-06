@@ -1616,6 +1616,10 @@ export class DynatraceService {
    * and a count of problems overlapping the window. Hosts are grouped by their own
    * Dynatrace instance config; each config costs 2 Dynatrace calls. Fails soft per
    * config so one bad instance never blanks the whole table.
+   *
+   * `hostId` narrows the answer to a single host so the Hosts tab can fan out one
+   * request per host and fill the table as replies arrive, instead of waiting for
+   * one selector covering every host.
    */
   async fetchHostsOverview(
     systemId: string,
@@ -1625,9 +1629,13 @@ export class DynatraceService {
     endTime: Date,
     userId: string,
     roles: string[],
+    hostId?: string,
   ): Promise<HostOverviewRow[]> {
     const mappings = await this.getEntityMappings(userId, roles, systemId, environment, workload);
-    const hosts = (mappings ?? []).filter((m: { entityType: string }) => m.entityType === 'HOST') as Array<{
+    const hosts = (mappings ?? []).filter(
+      (m: { entityType: string; entityId: string }) =>
+        m.entityType === 'HOST' && (!hostId || m.entityId === hostId),
+    ) as Array<{
       entityId: string;
       entityDisplayName: string;
       dynatraceConfigId: string;

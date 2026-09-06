@@ -87,6 +87,9 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
         case 'problems':
           return sign * ((ra?.problemCount ?? 0) - (rb?.problemCount ?? 0));
         default: {
+          // Rows stream in one host at a time; re-sorting on every arrival makes
+          // them jump under the cursor. Hold the mapping order until all are in.
+          if (loading) return 0;
           const pa = (ra?.problemCount ?? 0) > 0 ? 1 : 0;
           const pb = (rb?.problemCount ?? 0) > 0 ? 1 : 0;
           if (pa !== pb) return pb - pa;
@@ -94,7 +97,7 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
         }
       }
     });
-  }, [hosts, byId, filter, sortKey, sortDir]);
+  }, [hosts, byId, filter, sortKey, sortDir, loading]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {

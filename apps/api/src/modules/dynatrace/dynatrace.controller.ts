@@ -117,6 +117,7 @@ export class DynatraceController {
     @Query('startTime') startTime: string,
     @Query('endTime') endTime: string,
     @UserCtx() ctx: UserContext,
+    @Query('hostId') hostId?: string,
   ): Promise<HostOverviewRow[]> {
     if (!systemId || !environment || !workload) {
       throw new BadRequestException('systemId, environment and workload query parameters are required');
@@ -129,7 +130,7 @@ export class DynatraceController {
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       throw new BadRequestException('Invalid date format for startTime or endTime');
     }
-    return this.dynatraceService.fetchHostsOverview(systemId, environment, workload, start, end, ctx.userId, ctx.roles);
+    return this.dynatraceService.fetchHostsOverview(systemId, environment, workload, start, end, ctx.userId, ctx.roles, hostId);
   }
 
   // Host Endpoints - Place before parameterized routes to avoid conflicts
