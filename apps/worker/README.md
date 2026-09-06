@@ -69,11 +69,12 @@ re-analysis cannot delete anything else. Two rules if you touch it:
   computation produced nothing, and deleting on that reading destroys history that cannot be
   rebuilt once `ds_metrics` has aged out. `StatisticsPipeline` reaches that state while returning
   `{ success: true }` (it warns `Metrics exist … but no statistics were written` when org-scoping
-  drops every dashboard), its own `EXISTS` probe at `StatisticsPipeline.ts:332-345` is evaluated
-  batch-wide while its `DELETE` is too, and `AdaptValidator.checkEmptyControlGroups` selects `FROM
+  drops every dashboard), and `AdaptValidator.checkEmptyControlGroups` selects `FROM
   ds_metric_statistics` and groups by `test_run_id`, so a run with no rows forms no group and is
   never reported as empty. Same reasoning as `repairEmptySamplerRollup` in the API: the probe stays
-  strict because the statement deletes.
+  strict because the statement deletes. (Until v0.2.95.0 `StatisticsPipeline`'s own metrics probe
+  was evaluated batch-wide while its `DELETE` was too, so one live run could authorise wiping an
+  aged-out run's statistics — see "The metrics probe is per run" below.)
 - **It fixes one orphan class only.** The unique key carries `control_group_id`; the `DELETE`
   ignores it on purpose and matches on metric identity. A metric that keeps its statistics but
   loses its control-group row keeps its stale verdict — that is the `pct_agg` baseline case below,
@@ -92,6 +93,36 @@ on those control runs so the fast path applies (#552). It is **best-effort**: an
 and the legacy scan still runs. `StatisticsPipeline` can also succeed while writing nothing (no
 `ds_metrics` rows left), so check `processedRecords`, not `success`, before calling the sketches
 repaired.
+
+It **chunks itself**, on the same `REEVALUATE_CHUNK_SIZE` the orchestrator uses (v0.2.95.0).
+Chunking the caller does not bound it: the orchestrator chunks *control groups*, and this expands
+each group to its member test runs, so a 5-group chunk routinely becomes 50+ runs. Those all land
+in one `StatisticsPipeline` invocation sharing a single transaction's
+`max_tuples_decompressed_per_dml_transaction` budget — which reintroduces `tuple decompression
+limit exceeded` through the back door, where the catch above swallows it into the legacy raw scan
+that then blows the 540s aggregation budget. The constant is imported from `lib/utils/chunking.ts`
+rather than redeclared, so the two cannot drift while bounding the same budget.
+
+### The metrics probe is per run
+
+`StatisticsPipeline.filterRunsWithMetrics` probes each run individually for any `ds_metrics` rows,
+and the decompression, the `ramp_up` refresh and the aggregation all run on exactly that filtered
+set. Two rules:
+
+- **Per run, not per batch.** A batch-wide answer let one run with live metrics authorise deleting
+  the statistics of every aged-out run beside it, while the re-`INSERT` only refilled the runs that
+  still had raw data. For an older run that is unrecoverable. Harmless while batches were small and
+  hand-picked; an analysis-window apply across a workload mixes recent and aged-out runs by
+  construction, which is what made it reachable. Each probe is an index descent stopping at the
+  first row (`test_run_id` leads the index and is the `compress_segmentby` key), so N probes cost
+  effectively nothing.
+- **It asks only whether rows EXIST, never whether any are in-window.** A `ramp_up = false` probe
+  would answer against the very flags `refreshRampUpFlags` is about to rewrite, and its answer
+  decides whether the run gets new flags at all. "The new window excludes every sample" is also a
+  correct outcome that should produce empty statistics, not a skipped run stranded with new flags
+  and the previous window's statistics. The cost is that a zero-row result after a positive probe
+  now has two causes — org-scoping dropped every dashboard, or the window legitimately excludes
+  everything — so it warns rather than asserts.
 
 ### Heavy aggregations get their own budget (v0.2.93.3)
 
@@ -185,6 +216,7 @@ Worker-specific tuning (full schema and defaults in `src/config/environment.ts`)
 | `ANALYTICS_STATEMENT_TIMEOUT_MS` | `120000` | Cap on analytics reads, to stop a runaway query holding a connection. Lowerable. Does **not** apply to the two heavy aggregations below. |
 | `AGGREGATION_STATEMENT_TIMEOUT_MS` | `540000` | Budget for `StatisticsPipeline` / `ControlGroupStatisticsPipeline`. Must stay strictly under the analytics pool's client-side `query_timeout` (600000). |
 | `AGGREGATION_WORK_MEM` | `128MB` | `work_mem` for those two. Keeps ~20k `percentile_agg` sketches in a HashAggregate; spilling turns the aggregation into a GroupAggregate that sorts every input row to disk. Charged per hash/sort node, per parallel worker, and per concurrent job — deploy-wide peak is roughly this x (1 + `max_parallel_workers_per_gather`) x 4. |
+| `REEVALUATE_CHUNK_SIZE` | `5` | Runs per `statistics-calculation` / `control-group-statistics` / `adapt-analysis` job inside the re-evaluate orchestrator, and per `StatisticsPipeline` invocation inside `backfillMissingSketches`. Read in `lib/utils/chunking.ts`, not `environment.ts`, so a pipeline can import it without pulling in BullMQ. |
 | `WORKER_ANALYZE_CONCURRENCY` / `WORKER_BATCH_CONCURRENCY` | `2` / `2` | Concurrent jobs per queue. Both multiply the `work_mem` peak above. |
 | `AUDIT_RETENTION_MONTHS` | `24` | `AuditRetentionManager` deletes `audit_logs` rows older than this on boot and daily at 03:00 UTC. |
 
@@ -226,6 +258,58 @@ whether the work succeeded. Read the job's `returnvalue` — `simple-orchestrate
 exports `assertStageSucceeded(stage, returnValue)` for exactly this — or the orchestrator logs a
 green tick and the next stage runs on empty data. That is how a failed `control-group-statistics`
 used to reach ADAPT with no baseline and get the baseline blamed (#552).
+
+### Reporting failure by returning marks the job COMPLETED
+
+`simple-workers.ts` wraps every processor as `return await processor(job)`. Returning any value —
+`{ status: 'failed', errors: [...] }` included — resolves that promise, so BullMQ records the job
+as **completed**: `attempts` never fires, nothing lands in the failed set, and no operator can find
+it. Throwing is the only way a job fails.
+
+`softFail` above is the one place the return *is* the contract, because a named caller reads
+`returnvalue`. Everywhere else, grep `status: 'failed'` under `src/workers/` before adding another:
+
+| Site | Behaviour |
+|---|---|
+| `simple-orchestrate-reevaluate-batch.ts` | **Throws** since v0.2.95.0, on a scope-lock refusal and from its catch-all. Returning left `test_runs.ramp_up` written with `ds_metric_statistics` never recalculated, behind a green job; with chunking it also leaves earlier chunks rewritten and the rest on the old window. Retries come from the enqueue (`bullmq-client.service.ts`: `attempts: 2`, fixed 10s), **not** the queue default in `simple-queues.ts`. |
+| `analyze.ts` | **Throws on the scope-lock refusal only** (v0.2.95.0). Its catch-all still returns — a remaining instance, not a fixed one. The lock branch mattered because a workload-wide analysis-window apply holds `sut:env:workload` across all its chunks, and every run finishing in that window was recorded as analysed without benchmarks, ADAPT or rollup. |
+| `incremental-metrics.ts` | Returns **deliberately** — a scheduler re-drives it next cycle, so a BullMQ failure would double the retry. |
+
+### The re-evaluate orchestrator chunks its heavy stages
+
+`simpleOrchestrateReevaluateBatchWorker` splits `statistics-recalculation`,
+`control-group-statistics` and `adapt-analysis` into sequential jobs of at most
+`REEVALUATE_CHUNK_SIZE` runs (default 5, `lib/utils/chunking.ts`). Each of those pipelines does its
+work in one transaction over every id it is handed, against a ceiling that scales with the batch —
+ADAPT's 120s `ANALYTICS_STATEMENT_TIMEOUT_MS` (it never calls `setAggregationBudget`), the
+decompression budget shared by `refreshRampUpFlags`' per-run UPDATEs, and the 540s aggregation
+budget inside a 600s `JOB_WAIT_TIMEOUT_MS` wait.
+
+Three things to keep in mind:
+
+- **Chunk inside the one job, never by issuing several batch jobs.** The scope lock is keyed on
+  `sut:env:workload`, so a second job for the same workload is refused, not queued.
+- **Sequential, not parallel.** The chunks contend for the same analytics pool and the same
+  compressed chunks. A chunk's `storeTrackedResults` also reads other chunks' `ds_adapt_results`,
+  so an earlier chunk sees its later siblings' pre-refresh rows — the same staleness a two-batch
+  re-evaluate has always had, and better than the timeout it replaces.
+- **`checks-evaluation` and `control-groups-creation` are still unchunked.** `ControlGroupsPipeline`
+  wraps its loop over every run in a single `withTransaction`; both must finish inside
+  `JOB_WAIT_TIMEOUT_MS`. At the API's 100-run bulk cap those are the tightest remaining constraint
+  in the chain and have not been measured — see TODOS.md.
+
+`waitForJobs` now removes the orphaned child job on timeout. Abandoning only the wait was
+survivable while the orchestrator returned a failure BullMQ recorded as completed; now that it
+throws and retries, the retry would re-enqueue the same stage for the same ids while the orphan is
+still running.
+
+`recalculateStatistics` (a boolean on `OrchestrateReevaluateBatchJobSchema`) runs
+`statistics-recalculation` with no data collection, for the case where the analysis *window* moved
+but the data did not. The two `refreshMode` branches gate that stage on a fetch having returned new
+rows, which no window edit can satisfy — so without this flag the stage was advertised, marked
+complete, and did nothing. The orchestrator prints the flag in its config line on purpose: Zod
+strips unknown keys, so during a rolling deploy an older worker drops the field silently and the
+user's edit becomes an unexplained no-op.
 
 ### The analyze-test job result
 

@@ -13,6 +13,9 @@ Domain module for the full lifecycle of a performance test run — from init thr
 | GET | `/test-runs/:testRunId` | Crud | Single run; accepts `system+environment+workload` query params |
 | PUT | `/test-runs/:id/annotations` | Crud | Update annotation tags |
 | PUT | `/test-runs/:id/tags` | Crud | Update free-form tags |
+| PUT | `/test-runs/:id/analysis-start-offset` | Crud | Set the ramp-up offset only |
+| PUT | `/test-runs/:id/analysis-time-range` | Crud | Set both offsets. `applyToAll: true` writes them across the run's whole (system, environment, workload) and re-evaluates it — capped at 100 runs, 400 past that. Rejects offsets whose SUM leaves no analysis window |
+| GET | `/test-runs/:id/analysis-time-range/scope` | Crud | Read-only preview of that apply: applicable count, total, per-run skip reasons (`running` / `too-short` / `not-writable`), and `exceedsCap` |
 | DELETE | `/test-runs/:id` | Crud | Hard-delete a run |
 | POST | `/test/init` | Crud | Reserve a `testRunId` before a test starts |
 | POST | `/test` | Crud | Event-reporting endpoint (throttled 200 req/min) |

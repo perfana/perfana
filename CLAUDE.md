@@ -274,7 +274,7 @@ All five denial causes return an indistinguishable refusal to the caller (404, o
 - `API_BODY_LIMIT` - Maximum JSON/urlencoded request body (default: `2mb`). Express defaults to 100 kB, which a report section's configuration can exceed on its own — selecting every series across two dashboards is a few thousand entries and the whole section is posted to render a preview. Raise it only if a legitimate payload is rejected with `request entity too large`.
 - `AUDIT_RETENTION_MONTHS` - How long `audit_logs` rows are kept, in months (default: `24`). Read by the **worker**: `AuditRetentionManager` deletes older rows on boot and daily at 03:00 UTC and logs the count. Retention is a `DELETE`, not a partition `DROP` — the worker's `perfana_system` role owns no tables.
 - `AGGREGATION_STATEMENT_TIMEOUT_MS` - Budget in milliseconds for the **worker's** heavy aggregation transactions — `StatisticsPipeline` and `ControlGroupStatisticsPipeline` (default: `540000`, v0.2.93.3). Deliberately **separate from `ANALYTICS_STATEMENT_TIMEOUT_MS`, not a replacement for it**: that one is a cap on runaway reads and has to stay lowerable, while these two are the job's own work and a 20 M-row run needs more than 120 s. `BasePipelineTypeORM.setAggregationBudget()` applies it with `set_config(..., true)` as the **first** statement inside `withAnalyticsTransaction`, so the whole transaction gets it — including `StatisticsPipeline`'s `ramp_up` refresh, which runs before the aggregation and is the statement most likely to blow the 120 s cap. Keep the value strictly **below** the analytics pool's client-side `query_timeout` (600000, `apps/worker/src/config/typeorm.config.ts`): at equal deadlines node-postgres destroys the connection instead of letting Postgres cancel the statement, and you lose both the clean rollback and the diagnosable `canceling statement due to statement timeout`. 540000 is that headroom.
-- `REEVALUATE_CHUNK_SIZE` - How many test runs may share one ADAPT or statistics job inside the re-evaluate orchestrator (default: `5`). Both downstream pipelines do their work in a **single transaction over every id they are handed**, and both have a per-transaction ceiling that scales with the batch: `AdaptPipeline` never calls `setAggregationBudget` so it runs on the 120 s `ANALYTICS_STATEMENT_TIMEOUT_MS` cap (~13 s/run measured, so a 9-run batch already exceeds it — and v0.2.94.7 added the orphan-results DELETE to that same transaction), and `StatisticsPipeline.refreshRampUpFlags` issues one UPDATE per run but they all share one transaction's `max_tuples_decompressed_per_dml_transaction` (100 000). Chunking happens **inside** the orchestrator, not by issuing several batch jobs: the scope lock is keyed on `sut:env:workload`, so a second job for the same workload is refused rather than queued. Raising it trades headroom against fewer round trips. Lowering it is not free either: each chunk is a separate job with its own 600 s `JOB_WAIT_TIMEOUT_MS` window, and the orchestrator holds the `sut:env:workload` scope lock across all of them — during which every other re-evaluate for that workload is refused, not queued.
+- `REEVALUATE_CHUNK_SIZE` - How many test runs may share one `statistics-calculation`, `control-group-statistics` or `adapt-analysis` job inside the re-evaluate orchestrator (default: `5`, v0.2.95.0). All three pipelines do their work in a **single transaction over every id they are handed**, and each has a per-transaction ceiling that scales with the batch: `AdaptPipeline` never calls `setAggregationBudget` so it runs on the 120 s `ANALYTICS_STATEMENT_TIMEOUT_MS` cap (~13 s/run measured, so a 9-run batch already exceeds it — and v0.2.94.7 added the orphan-results DELETE to that same transaction); `StatisticsPipeline.refreshRampUpFlags` issues one UPDATE per run but they all share one transaction's `max_tuples_decompressed_per_dml_transaction` (100 000); `ControlGroupStatisticsPipeline` runs against the 540 s `AGGREGATION_STATEMENT_TIMEOUT_MS` inside a 600 s `JOB_WAIT_TIMEOUT_MS` wait, and re-enters `StatisticsPipeline` through `backfillMissingSketches` so it inherits the decompression ceiling too. Chunking happens **inside** the orchestrator, not by issuing several batch jobs: the scope lock is keyed on `sut:env:workload`, so a second job for the same workload is refused rather than queued. Raising it trades headroom against fewer round trips. Lowering it is not free either: each chunk is a separate job with its own 600 s `JOB_WAIT_TIMEOUT_MS` window, and the orchestrator holds the `sut:env:workload` scope lock across all of them — during which every other re-evaluate for that workload is refused, not queued. `checks-evaluation` and `control-groups-creation` are **not** chunked and still receive the whole list; see TODOS.md for the measurement that is owed against the 100-run bulk cap.
 - `AGGREGATION_WORK_MEM` - `work_mem` for those same two transactions (default: `128MB`, v0.2.93.3). It keeps ~20k `percentile_agg` sketches in a HashAggregate; spilling turns the aggregation into a GroupAggregate that sorts every input row to disk. Postgres charges `work_mem` per hash/sort node **and** per parallel worker, then again per concurrent job (`WORKER_ANALYZE_CONCURRENCY` + `WORKER_BATCH_CONCURRENCY`, 2 each), so the deploy-wide peak is roughly this value x (1 + `max_parallel_workers_per_gather`) x 4. Raise it only against that budget.
 
 **Frontend:**
@@ -408,7 +408,11 @@ Four things to know before touching this path:
 
    The rule is not confined to those two pipelines — `DataSanityCheckPipeline` was never covered by it and paid the most. Its sparse-metric check grouped raw `ds_metrics` by `(metric_name, dashboard_label, panel_title)` with `HAVING COUNT(*) < $2`; none of those three columns is `compress_segmentby`, so every run was read in full to surface a handful of thin metrics. Profiled with `pg_stat_statements` across a re-evaluate of 4 large runs it was **92% of all block reads on the deployment**: 4 calls, 12,613,099 shared blocks read (~103 GB) against 1,154,636 hits, 70,062 ms, 6,234 rows returned — 16.5 MB read per row returned. It now sums the per-metric `count` that `StatisticsPipeline` writes into `ds_metric_statistics` in the stage immediately before (`SUM(count) … GROUP BY metric_name, dashboard_label, panel_title HAVING SUM(count) < $2`). That changes what the threshold means, deliberately: `ds_metric_statistics` counts only non-null values inside the analysis window (`ramp_up = false`) and only org-scoped dashboards, where the old count included ramp-up rows and NULLs — so it now measures points that actually reach analysis. Two consequences, both deliberate. It fires **more** often: a metric with 1000 raw points of which 998 are in a long ramp-up used to count 1000 and stay silent, and now counts 2 and warns — expect new warnings on existing runs with a large `analysisStartOffset`. And it fires **less** on one case: a metric whose points are *entirely* in ramp-up (or that sits on a dashboard outside the org scope) gets no `ds_metric_statistics` row at all, so it is not a group and cannot be flagged. That gap is **not** covered by the "No steady-state data" reason — that branch only runs when the whole run has zero statistics, so a handful of all-ramp-up metrics inside an otherwise healthy run now go unreported. Two smaller reads in the same pipeline went the same way: `SELECT COUNT(*) FROM ds_metrics WHERE test_run_id = $1`, whose result was only ever compared against zero, is an `EXISTS` probe (it was 11.1 s and 66k blocks), and the `avg_timestep_sec` in the warning text — the only remaining reason to pull `MIN(time)`/`MAX(time)` off that scan — is gone, replaced by the run duration the message already had in scope. Do not "restore" it by dividing the duration by the point count: 3 points clustered in the first 90 s of a 3600 s run are 45 s apart and that arithmetic would call them 1800 s.
 
-8. **The analysis offsets must FIT inside the run, and the check lives in two mirrored places (v0.2.93.3).** The analysis window is `[start + analysisStartOffset, end - analysisEndOffset]`. When a short run meets offsets configured for a long one, the leading and trailing exclusions overlap, every sample matches one of them, and the entire run is flagged outside the window. Nothing downstream reports that as a misconfiguration: `ds_metric_statistics` comes out empty, the Apdex rollup misses on every transaction and falls back to the slow path, and ADAPT writes INSUFFICIENT_DATA against a run that plainly has data. It is also the worst case for `refreshRampUpFlags`, which then rewrites every row of a compressed run instead of the boundary band the per-run bounds exist to narrow it to. The fallback is to analyse the **whole** run — the offsets are a request to trim, not to discard — guarded by `duration > ramp_up + ramp_down`. That guard exists **twice**: `MetricsPipeline` bakes the flag at ingestion, `RAMP_UP_EXPR` in `StatisticsPipeline` recomputes it on recalculation. Change one and you must change the other, or a run's flags flip depending on which path last touched it.
+8. **The analysis offsets must FIT inside the run, and the check lives in three mirrored places (v0.2.93.3, extended v0.2.95.0).** The analysis window is `[start + analysisStartOffset, end - analysisEndOffset]`. When a short run meets offsets configured for a long one, the leading and trailing exclusions overlap, every sample matches one of them, and the entire run is flagged outside the window. Nothing downstream reports that as a misconfiguration: `ds_metric_statistics` comes out empty, the Apdex rollup misses on every transaction and falls back to the slow path, and ADAPT writes INSUFFICIENT_DATA against a run that plainly has data. It is also the worst case for `refreshRampUpFlags`, which then rewrites every row of a compressed run instead of the boundary band the per-run bounds exist to narrow it to. The fallback is to analyse the **whole** run — the offsets are a request to trim, not to discard — guarded by `EXTRACT(EPOCH FROM (end_time - start_time)) > ramp_up + ramp_down`.
+
+   **Measure the run from its timestamps, never from `test_runs.duration`.** `duration` is client-supplied (an updating test posts it, see `update-test-run.handler.ts`), so it can be seeded from a planned duration or left behind by an aborted run and disagree with the timestamps arbitrarily. `RAMP_UP_EXPR` uses the timestamps, so anything that measures a run differently lets the API and the pipeline disagree about the same run — accepting offsets the pipeline then silently ignores, while the user is told the trim was applied.
+
+   The guard now exists in **three** places, and changing one means changing all three or a run's flags flip depending on which path last touched it: `MetricsPipeline` bakes the flag at ingestion; `RAMP_UP_EXPR` in `StatisticsPipeline` recomputes it on recalculation; and `offsetsFitRun` in `apps/api/src/modules/test-runs/handlers/update-analysis-time-range.handler.ts` (v0.2.95.0) refuses the write up front, so a bad combination is a 400 rather than a silent fallback. The API check is the SUM of both offsets on purpose: `AdaptValidator.checkTooShortTestRuns` only ever tested `ramp_up >= duration` and never looked at `ramp_down`, so a pair that overruns only in total passed it and landed on the whole-run fallback instead.
 
 Related: `control-group-statistics` is registered with `softFail`, so a failed aggregation still completes its BullMQ job. The reevaluate orchestrator reads the job's return value through the exported `assertStageSucceeded()` (`apps/worker/src/workers/simple-orchestrate-reevaluate-batch.ts`) instead of logging a green tick and running ADAPT on an empty baseline. Any new stage waiting on a `softFail` pipeline has to do the same.
 
@@ -587,9 +591,10 @@ re-analysis must not delete every other metric's results). Two things about it a
    because "every metric is orphaned" is never a real state; it means the statistics computation
    produced nothing. `StatisticsPipeline` reaches exactly that while returning `{ success: true }`
    — it warns `Metrics exist … but no statistics were written` when org-scoping drops every
-   dashboard — and its own `EXISTS` probe (`StatisticsPipeline.ts:332-345`) is evaluated
-   **batch-wide** while its `DELETE` is too, so one live run can authorise wiping the statistics of
-   an aged-out run beside it. `AdaptValidator.checkEmptyControlGroups` cannot screen those out
+   dashboard. Until v0.2.95.0 its own `EXISTS` probe was evaluated **batch-wide** while its
+   `DELETE` was too, so one live run could authorise wiping the statistics of an aged-out run
+   beside it; the probe is now per run (`filterRunsWithMetrics`) and the DELETE binds to the runs
+   that passed it. `AdaptValidator.checkEmptyControlGroups` cannot screen those out
    either: it selects `FROM ds_metric_statistics` and `GROUP BY test_run_id`, so a run with no rows
    forms no group and is never reported as empty. Same rule, same reason as
    `repairEmptySamplerRollup`: the probe stays strict because the statement deletes.
@@ -598,6 +603,89 @@ re-analysis must not delete every other metric's results). Two things about it a
    `DELETE` deliberately ignores `control_group_id` — it matches on the metric identity, not the
    baseline. A metric that keeps its statistics but loses its control-group row therefore keeps its
    stale verdict. That is the known baseline-timeout case above, unchanged.
+
+### A worker that reports failure by RETURNING is silently succeeding
+
+`simple-workers.ts` wraps every registered processor as `return await processor(job)`. Returning a
+value — any value, including `{ status: 'failed', errors: [...] }` — **resolves** that promise, and
+BullMQ records the job as **completed**. No retry (`attempts` never fires), no entry in the failed
+set, nothing for an operator to find. The only way a job fails is to throw.
+
+This is not a style preference, and it is repo-wide: grep `status: 'failed'` under
+`apps/worker/src/workers/` before adding another one. Two sites were fixed in v0.2.95.0 and the
+remaining ones are deliberate, so know which kind you are writing:
+
+- **`simple-orchestrate-reevaluate-batch.ts` now throws** on a scope-lock refusal and rethrows from
+  its catch-all. Returning left `test_runs.ramp_up` written while `ds_metric_statistics` was never
+  recalculated and ADAPT never re-ran — permanently, behind a green job and a UI reporting success.
+  With chunking, a mid-chunk failure additionally leaves the earlier chunks rewritten and the rest
+  on the old window, so a silent success is a half-applied batch nobody learns about. The retry
+  policy that applies is the one `reevaluateBatch` sets at enqueue time (`bullmq-client.service.ts`:
+  `attempts: 2`, fixed 10 s), **not** the queue-level default in `simple-queues.ts` — a reader
+  chasing this finds the wrong one first.
+- **`analyze.ts` now throws on the scope-lock refusal only.** Its catch-all still returns
+  `{ status: 'failed' }` (`analyze.ts:243`) — a remaining instance of this trap, not a fixed one.
+  The lock branch mattered because a bulk analysis-window apply holds `sut:env:workload` across all
+  of its chunks, and every run that finishes during that window used to take the returning branch
+  and be recorded as analysed without ever being analysed: no benchmarks, no ADAPT, no rollup.
+- **`incremental-metrics.ts` returns on purpose.** A scheduler re-drives it on the next cycle, so a
+  BullMQ failure would double up the retry. Leave it.
+
+Distinct from, and easily confused with, `softFail` (below): that one is a *deliberate* return of
+`{ status: 'failed' }` by a pipeline whose caller reads `returnvalue` via `assertStageSucceeded()`.
+A worker with no such reader gets no such contract.
+
+### An analysis window belongs to a workload, not to a run
+
+Trimming one run's analysis window in isolation quietly breaks the comparison it feeds. ADAPT
+measures a run against a baseline of earlier runs, and `ds_control_group_statistics` pools those
+runs' `ds_metric_statistics`, each computed under whatever offsets its own run happens to carry —
+so a narrowed run is compared against untrimmed history. `PUT /test-runs/:id/analysis-time-range`
+therefore takes `applyToAll`, which writes the same offsets across every run of the target's
+`(system_under_test, environment, workload)` and re-evaluates them all (v0.2.95.0).
+
+Four things about that path are not obvious:
+
+1. **The write is a preview and a write, and they must not drift.** `GET
+   :id/analysis-time-range/scope` answers the same question read-only so the dialog can name the
+   blast radius before the user commits. Both call the same
+   `partitionAnalysisTimeRangeScope`; two implementations would drift, and the drift would be
+   invisible — a dialog promising a count the write does not honour. The preview's projection
+   (`ANALYSIS_TIME_RANGE_SCOPE_COLUMNS`) has to carry every column the partition reads: drop
+   `startTime`/`endTime` and the preview answers the fit question from the client-supplied
+   `duration` while the write answers it from the timestamps.
+2. **`MAX_BULK_ANALYSIS_TIME_RANGE_RUNS = 100` refuses, it does not truncate.** The scope is every
+   run a workload ever produced, which on a nightly workload is thousands. The number matches
+   `data-science.controller.ts`'s existing `.slice(0, 100)` on a caller-supplied run set, but
+   truncating here would leave the remainder as untrimmed baseline — exactly the apples-to-oranges
+   comparison the feature exists to prevent. The preview reports `exceedsCap` so the refusal is not
+   a surprise at submit time.
+3. **Three reasons a sibling is skipped, and all three are reported rather than silent.**
+   `not-writable` (outside the target's `(organizationId, teamId)` — `test_runs.team_id` is a
+   per-row nullable column, *not* derived from the system under test, so a workload can span teams
+   and the caller proved write permission on one pair only); `running` (`MetricsPipeline` bakes
+   `ds_metrics.ramp_up` at ingestion, so moving the offsets mid-run leaves rows flagged under two
+   settings); `too-short` (the offsets do not fit — item 8 above). The target itself is checked too
+   and rejected outright, because writing impossible offsets onto the run the user is looking at
+   while skipping a sibling for the same reason is the inconsistency the check exists to prevent.
+4. **Every completed run that was written needs its `transaction-stats-rollup` re-enqueued, not
+   just the target.** The rollup recomputes the `ramp_up_excluded` rows from the offsets, and
+   `getRollupStatus` reads a populated table and answers `ready` forever — so a sibling that is
+   never re-enqueued serves previous-window numbers in Performance Analysis indefinitely with
+   nothing logged. `repairEmptySamplerRollup` does **not** cover this: it fires only when the table
+   is *empty*, and here it is populated with the old window's numbers. That is also why
+   `ROLLUP_JOB_OPTIONS` sets `removeOnComplete: true`: BullMQ refuses an `add` whose jobId still
+   exists in any state, so a retained `rollup-<id>` record makes every later enqueue for that run a
+   silent no-op, and the obvious user loop (apply → look → adjust → apply again) rebuilds nothing.
+
+The follow-up work is queued from `runAfterRequestCommit`, which keeps the Redis round trips out of
+the request's open RLS transaction — but note the caller still waits for them:
+`RlsTransactionInterceptor` awaits every after-commit hook before Nest builds the response. What
+deferring buys is the Postgres connection, not the latency. Because the caller is waiting, the
+enqueues are batched (`enqueueTransactionStatsRollupBulk`) rather than looped; and because
+`runAfterRequestCommit` dispatches as `void Promise.resolve().then(fn)` when there is no request
+entity manager, an escaping rejection is an unhandled rejection that terminates the process — so
+everything in that hook logs and swallows.
 
 ### Common Issues
 
@@ -619,6 +707,10 @@ re-analysis must not delete every other metric's results). Two things about it a
 13. **A `force` or `missing-data` re-evaluate is far slower than a plain one, with huge temp file usage** → `StatisticsPipeline`, not ADAPT. Look for `Sort Method: external merge Disk:` in the aggregation plan: the group-count estimate is wrong and the planner chose a sort over a hash. Check the statistics object is populated — `SELECT stxdinherit, stxdndistinct FROM pg_statistic_ext s JOIN pg_statistic_ext_data d ON d.stxoid = s.oid WHERE s.stxname = 'ds_metrics_groupkey'` — and that `job_analyze_ds_metrics` is scheduled and succeeding; without that daily ANALYZE the object is empty. Note a plain re-evaluate never runs this pipeline at all (gated on `refreshMode` and `testRunsWithNewData > 0`). See "`ds_metrics` carries one group-key statistics object" above.
 
 14. **A run stays at REGRESSION after its analysis time range was narrowed, blamed on a metric with no samples in the window** → orphaned `ds_adapt_results` rows the upsert stopped producing but never deleted. `buildConclusionSQL` counts them with no freshness predicate, and `is_stale` is not consulted by either the conclusion SQL or the read path. Fixed in v0.2.94.7 (`deleteOrphanedResults` runs as a substage of `adapt-analysis`); on an older deploy, re-analyse after deleting the rows whose `(application_dashboard_id, panel_id, metric_name)` has no `ds_metric_statistics` row for the run. If the metric *does* still have statistics, this is not your bug — see #6. See "`ds_adapt_results` is written by an upsert, so it also needs a delete" above.
+
+15. **A bulk analysis-window apply reports success but nothing changed for some runs** → three different causes, told apart in the API log. Either the runs were *skipped* and the dialog said so (`not-writable` / `running` / `too-short` — the handler logs the counts per reason), or the whole apply exceeded `MAX_BULK_ANALYSIS_TIME_RANGE_RUNS` (100) and was refused with a 400 naming the count, or the re-evaluate job was refused by the `sut:env:workload` scope lock and exhausted its 2 attempts. Only the third leaves `test_runs.ramp_up` written with `ds_metric_statistics` never recalculated; since v0.2.95.0 that job genuinely fails rather than being recorded completed, so look in BullMQ's failed set. Re-analysis is still fire-and-forget from the API — the open TODOS.md item. See "An analysis window belongs to a workload, not to a run" above.
+
+16. **A worker job shows as completed in BullMQ but its work plainly did not happen** → the processor reported failure by *returning* `{ status: 'failed' }` instead of throwing. `simple-workers.ts` does `return await processor(job)`, so that resolves and BullMQ marks it completed: no retry, no failed-set entry, nothing logged as an error. Grep `status: 'failed'` under `apps/worker/src/workers/`. Note `analyze.ts:243` still does this on its catch-all path by design-debt, and `incremental-metrics.ts` does it deliberately because a scheduler re-drives it. Do not confuse either with `softFail`, where the return value *is* the contract and the caller reads it via `assertStageSucceeded()`. See "A worker that reports failure by RETURNING is silently succeeding" above.
 
 ## How-To Tutorials
 

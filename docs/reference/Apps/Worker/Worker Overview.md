@@ -33,7 +33,7 @@ The Worker service is the core processing engine for performance analysis. It ru
 | `transaction-stats-rollup` | perfana-analyze | Per-test-run transaction/sampler tdigest rollup |
 | `reevaluate-checks` | perfana-analyze | Re-run checks with updated benchmarks |
 | `collect-metrics-incremental` | perfana-analyze | Real-time collection for running tests |
-| `orchestrate-reevaluate-batch` | perfana-batch | Complex batch operations |
+| `orchestrate-reevaluate-batch` | perfana-batch | Batch re-evaluation — see [[#Re-evaluation batches are chunked]] |
 
 ## Analysis Pipeline (11 Stages)
 
@@ -144,6 +144,31 @@ Stage 11: Data Sanity Check (runs outside the orchestrator)
 | Checks | 3-6 | 256-384MB each |
 
 These are **worker process** budgets. The heavy aggregation transactions in `StatisticsPipeline` and `ControlGroupStatisticsPipeline` also carry a **database-side** budget, set per transaction by `BasePipelineTypeORM.setAggregationBudget()`: `AGGREGATION_STATEMENT_TIMEOUT_MS` (default 540s) and `AGGREGATION_WORK_MEM` (default 128MB). Both are separate from `ANALYTICS_STATEMENT_TIMEOUT_MS`, which stays a lowerable 120s cap on ordinary analytics reads and no longer applies to these two jobs. The `work_mem` value is charged per hash/sort node, per parallel worker, and per concurrent job — size it against the database host's RAM rather than the worker container's. See [[Environment Variables]].
+
+## Re-evaluation batches are chunked
+
+`simpleOrchestrateReevaluateBatchWorker` re-runs analysis for a set of test runs without collecting
+new data. Since v0.2.95.0 it splits its three heaviest stages — `statistics-recalculation`,
+`control-group-statistics` and `adapt-analysis` — into sequential child jobs of at most
+`REEVALUATE_CHUNK_SIZE` runs (default 5). Each of those pipelines does its work in one transaction
+over every id it is handed, against a ceiling that scales with the batch: ADAPT's 120s statement
+timeout, the per-transaction decompression budget shared by the `ramp_up` updates, and the 540s
+aggregation budget inside a 600s wait for the child job.
+
+The chunking has to happen **inside** the one job rather than by enqueuing several batch jobs,
+because `JobLockService` keys its lock on `{systemUnderTestId}:{testEnvironment}:{workload}` — a
+second job for the same workload is refused, not queued. `checks-evaluation` and
+`control-groups-creation` still receive the whole list.
+
+Two consequences for anyone reading its logs:
+
+- A refused lock or a mid-run error now **throws**. Returning `{ status: 'failed' }` resolved the
+  processor promise, so BullMQ recorded the job as completed and nothing retried it — see
+  `apps/worker/README.md` for the repo-wide shape of that trap and which sites still do it.
+- `recalculateStatistics` in the job payload runs the statistics stage with no data collection, for
+  an analysis-window change that no data fetch can detect. It is printed in the config line so a
+  rolling deploy where an older worker strips the unknown field shows up in the log rather than as
+  a silent no-op.
 
 ## Queue Configuration
 
