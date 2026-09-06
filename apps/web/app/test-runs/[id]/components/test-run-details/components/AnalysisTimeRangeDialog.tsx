@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Slider, Typography, Box, CircularProgress, Alert, useTheme,
@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { TestRun } from '@/types/test-runs';
 import { authenticatedFetch } from '@/lib/api';
+import { useDebounce } from '@/lib/hooks/use-debounce';
 
 interface SummaryBucket {
   timeSeconds: number;
@@ -36,7 +37,19 @@ interface ScopePreview {
   total: number;
   applicable: number;
   skipped: ScopeSkip[];
+  /** The write will refuse this apply — more runs than the server's bulk limit. */
+  exceedsCap: boolean;
 }
+
+/**
+ * The PUT answers with the target run plus, on the applyToAll path only, the number of
+ * runs actually written and the ones it declined to touch. See
+ * `TestRunsMutationService.updateAnalysisTimeRange`.
+ */
+type AnalysisTimeRangeSaveResponse = TestRun & {
+  affectedCount?: number;
+  skipped?: ScopeSkip[];
+};
 
 interface Props {
   open: boolean;
@@ -45,6 +58,25 @@ interface Props {
   onClose: () => void;
   onSaved: (updated: TestRun) => void;
 }
+
+/**
+ * The scope preview is a workload-wide query behind an authorization check, and the MUI
+ * Slider reports every intermediate value of a drag (`onChange`, not `onChangeCommitted`).
+ * Firing the preview off the raw offsets turns one drag into hundreds of overlapping
+ * server-side scans. The slider, the chart and the offset labels stay on the raw values —
+ * only the fetch waits for the drag to settle.
+ */
+const SCOPE_PREVIEW_DEBOUNCE_MS = 350;
+
+/**
+ * How long the dialog holds itself open to state what the bulk write actually changed.
+ * `onSaved` closes it (TimingInformationSection), so the count has to be on screen before
+ * that call, not after it.
+ */
+const BULK_SAVE_RESULT_DISPLAY_MS = 1200;
+
+/** Referenced by the checkbox's aria-describedby — the count IS the safety mechanism. */
+const SCOPE_DESCRIPTION_ID = 'analysis-time-range-scope-description';
 
 function formatSeconds(s: number): string {
   if (s < 60) return `${s}s`;
@@ -65,17 +97,40 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
   const [scope, setScope]           = useState<ScopePreview | null>(null);
   const [scopeLoading, setScopeLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ affectedCount: number; confirmedCount: number | null } | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }, []);
 
   // Slider value: [startOffset, duration - endOffset]
   const sliderValue: [number, number] = [localStart, duration - localEnd];
 
+  // The server measures the run as end_time - start_time and treats `duration` as
+  // untrusted, because it is client-supplied — but the slider is scaled to `duration`.
+  // Where the two disagree (a run seeded from a planned duration, or aborted early) the
+  // slider would otherwise offer a whole band of offsets the API refuses with a 400.
+  // Bound the window by whichever is smaller so the control cannot produce a rejection.
+  const timestampLength =
+    testRun.start_time && testRun.end_time
+      ? (new Date(testRun.end_time).getTime() - new Date(testRun.start_time).getTime()) / 1000
+      : null;
+  const serverRunLength = timestampLength ?? duration;
+  // Strictly less than: at exactly start+end the window is empty, which the server rejects.
+  const maxTotalOffsets = Math.max(0, Math.floor(Math.min(duration, serverRunLength)) - 1);
+
   const handleSliderChange = useCallback((_: Event, value: number | number[]) => {
     const [left, right] = value as [number, number];
-    setLocalStart(Math.max(0, left));
-    setLocalEnd(Math.max(0, duration - right));
-  }, [duration]);
+    const nextStart = Math.max(0, left);
+    const nextEnd = Math.max(0, duration - right);
+    // Never let the two exclusions consume the run: that is an EMPTY analysis window, and
+    // the server rejects it rather than silently analysing everything.
+    if (nextStart + nextEnd > maxTotalOffsets) { return; }
+    setLocalStart(nextStart);
+    setLocalEnd(nextEnd);
+  }, [duration, maxTotalOffsets]);
 
   const effectiveDuration = Math.max(0, duration - localStart - localEnd);
+
 
   // Ask the server what this would actually change, rather than asserting "every run of
   // the workload" in prose. The server is the only place that knows which runs are still
@@ -83,23 +138,42 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
   // preview shares its partition function with the write path, so the number shown is
   // the number that will be honoured.
   //
-  // Re-fetched when the offsets move because "too short for these offsets" depends on them.
+  // Re-fetched when the offsets move because "too short for these offsets" depends on them —
+  // but off the DEBOUNCED offsets, so a slider drag issues one query rather than one per tick.
+  const debouncedStart = useDebounce(localStart, SCOPE_PREVIEW_DEBOUNCE_MS);
+  const debouncedEnd   = useDebounce(localEnd, SCOPE_PREVIEW_DEBOUNCE_MS);
+
+  // True while the sliders have moved on but the preview has not been asked yet. The
+  // displayed scope describes the previous window during this gap, so it counts as pending:
+  // otherwise Save is briefly enabled against a count that no longer applies.
+  const offsetsSettling = debouncedStart !== localStart || debouncedEnd !== localEnd;
+  const scopePending = scopeLoading || offsetsSettling;
+
   useEffect(() => {
     if (!open || !applyToAll) {
       setScope(null);
       return;
     }
     let cancelled = false;
+    // `cancelled` only suppresses the setState. Aborting is what stops the server from
+    // running a superseded workload-wide scan to completion.
+    const controller = new AbortController();
     setScopeLoading(true);
     authenticatedFetch(
-      `/test-runs/${testRun.id}/analysis-time-range/scope?analysisStartOffset=${localStart}&analysisEndOffset=${localEnd}`,
+      `/test-runs/${testRun.id}/analysis-time-range/scope?analysisStartOffset=${debouncedStart}&analysisEndOffset=${debouncedEnd}`,
+      { signal: controller.signal },
     )
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data: ScopePreview) => { if (!cancelled) setScope(data); })
-      .catch(() => { if (!cancelled) setScope(null); })
+      .catch((err: unknown) => {
+        // A superseded request is not a failed one — surfacing it as "could not determine"
+        // would make every slider move look like a broken preview.
+        if (cancelled || (err instanceof Error && err.name === 'AbortError')) return;
+        setScope(null);
+      })
       .finally(() => { if (!cancelled) setScopeLoading(false); });
-    return () => { cancelled = true; };
-  }, [open, applyToAll, testRun.id, localStart, localEnd]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [open, applyToAll, testRun.id, debouncedStart, debouncedEnd]);
 
   // Un-ticking, or moving the sliders after confirming, invalidates the confirmation:
   // the user agreed to a specific blast radius, not to whatever it becomes next.
@@ -124,8 +198,31 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ analysisStartOffset: localStart, analysisEndOffset: localEnd, applyToAll }),
       });
-      if (!res.ok) throw new Error(`Failed to save analysis time range (HTTP ${res.status})`);
-      const updated: TestRun = await res.json();
+      if (!res.ok) {
+        // The server explains WHY (which runs, which limit, how long the run actually is).
+        // Throwing a bare status code discarded the only useful part of the response.
+        // try/catch around the whole extraction, not just the promise: a body that is not
+        // JSON at all (an HTML error page from a proxy) throws rather than rejecting.
+        let detail: string | undefined;
+        try {
+          const body = (await res.json()) as { message?: string | string[] } | undefined;
+          detail = Array.isArray(body?.message) ? body.message.join('; ') : body?.message;
+        } catch {
+          detail = undefined;
+        }
+        throw new Error(detail || `Failed to save analysis time range (HTTP ${res.status})`);
+      }
+      const updated: AnalysisTimeRangeSaveResponse = await res.json();
+
+      // A run can finish, or be created, between the preview and the PUT — so the number
+      // written is not necessarily the number the user confirmed. The server reports the
+      // real one on the applyToAll path; report that rather than the count we guessed.
+      if (applyToAll && typeof updated.affectedCount === 'number') {
+        setBulkResult({ affectedCount: updated.affectedCount, confirmedCount: scope?.applicable ?? null });
+        // onSaved closes the dialog, so it has to wait for the count to be readable.
+        closeTimerRef.current = setTimeout(() => onSaved(updated), BULK_SAVE_RESULT_DISPLAY_MS);
+        return;
+      }
       onSaved(updated);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save — please try again');
@@ -133,6 +230,10 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
       setSaving(false);
     }
   };
+
+  // The write has landed and the dialog is only still open to report it — nothing here is
+  // re-submittable any more.
+  const busy = saving || bulkResult !== null;
 
   const chartData = useMemo(() => timeseriesData.buckets.map(b => ({
     ...b,
@@ -233,7 +334,13 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
               size="small"
               checked={applyToAll}
               onChange={(e) => setApplyToAll(e.target.checked)}
-              disabled={saving}
+              disabled={busy}
+              // Without this a screen reader announces only "Apply to all test runs of this
+              // workload, checkbox" — the applicable-of-total count below is the whole
+              // reason the confirmation means anything. It has to go through inputProps:
+              // MUI spreads unrecognised props onto the root span, and the description has
+              // to sit on the input that actually carries the checkbox role.
+              inputProps={{ 'aria-describedby': SCOPE_DESCRIPTION_ID }}
             />
           }
           label={
@@ -242,7 +349,7 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
             </Typography>
           }
         />
-        <Box sx={{ ml: 4, mt: -0.5 }}>
+        <Box id={SCOPE_DESCRIPTION_ID} sx={{ ml: 4, mt: -0.5 }}>
           {!applyToAll && (
             <Typography variant="caption" color="text.secondary" display="block">
               Only this run changes. Its baseline runs keep their current analysis window, so the
@@ -250,13 +357,21 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
             </Typography>
           )}
 
-          {applyToAll && scopeLoading && (
+          {applyToAll && scopePending && (
             <Typography variant="caption" color="text.secondary" display="block">
               Checking which runs this would change…
             </Typography>
           )}
 
-          {applyToAll && !scopeLoading && scope && (
+          {applyToAll && !scopePending && scope?.exceedsCap && (
+            <Typography variant="caption" color="error.main" display="block">
+              <strong>{scope.applicable}</strong> runs is more than can be applied at once.
+              The server refuses a bulk apply above its limit, so narrow the scope or change
+              these runs in smaller groups.
+            </Typography>
+          )}
+
+          {applyToAll && !scopePending && scope && !scope.exceedsCap && (
             <>
               <Typography variant="caption" color="text.secondary" display="block">
                 <strong>{scope.applicable}</strong> of {scope.total} run
@@ -276,7 +391,7 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
             </>
           )}
 
-          {applyToAll && !scopeLoading && !scope && (
+          {applyToAll && !scopePending && !scope && (
             <Typography variant="caption" color="warning.main" display="block">
               Could not determine how many runs this affects. Saving will still apply it to every
               eligible run of this workload.
@@ -285,7 +400,19 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
         </Box>
       </Box>
 
-      {confirming && (
+      {bulkResult && (
+        <Box sx={{ px: 3, pb: 1 }}>
+          <Alert severity="success">
+            Applied to <strong>{bulkResult.affectedCount}</strong> run
+            {bulkResult.affectedCount === 1 ? '' : 's'} — re-analysis enqueued.
+            {bulkResult.confirmedCount !== null && bulkResult.confirmedCount !== bulkResult.affectedCount && (
+              <> The preview showed {bulkResult.confirmedCount}; the workload changed in between.</>
+            )}
+          </Alert>
+        </Box>
+      )}
+
+      {confirming && !bulkResult && (
         <Box sx={{ px: 3, pb: 1 }}>
           <Alert severity="warning">
             This rewrites the analysis window on{' '}
@@ -297,12 +424,12 @@ export function AnalysisTimeRangeDialog({ open, testRun, timeseriesData, onClose
       )}
 
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button onClick={onClose} disabled={busy}>Cancel</Button>
         <Button
           onClick={handleSave}
           variant="contained"
           color={applyToAll && confirming ? 'warning' : 'primary'}
-          disabled={saving || (applyToAll && scopeLoading)}
+          disabled={busy || (applyToAll && (scopePending || scope?.exceedsCap === true))}
           startIcon={saving ? <CircularProgress size={16} /> : undefined}
         >
           {applyToAll && confirming

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { AnalysisTimeRangeDialog } from './AnalysisTimeRangeDialog';
 import { authenticatedFetch } from '@/lib/api';
 import type { TestRun } from '@/types/test-runs';
@@ -283,6 +283,150 @@ it('still lets the user proceed when the scope preview fails', async () => {
   fireEvent.click(saveButton());
   await waitFor(() => expect(putCalls()).toHaveLength(1));
   expect(bodyOfLastPut()).toMatchObject({ applyToAll: true });
+});
+
+/**
+ * The preview is a workload-wide query behind an authorization check, and the MUI Slider
+ * fires `onChange` on every intermediate value of a drag. Undebounced, one drag is dozens
+ * to hundreds of those.
+ */
+it('issues one scope query for a drag, not one per slider tick', async () => {
+  renderDialog();
+
+  fireEvent.click(checkbox());
+  await waitFor(() => expect(scopeCalls()).toHaveLength(1));
+
+  // A drag: three values in quick succession, only the last of which the user meant.
+  fireEvent.change(sliders()[0]!, { target: { value: '60' } });
+  fireEvent.change(sliders()[0]!, { target: { value: '90' } });
+  fireEvent.change(sliders()[0]!, { target: { value: '120' } });
+
+  await waitFor(() =>
+    expect(scopeCalls().some(([url]) => String(url).includes('analysisStartOffset=120'))).toBe(true),
+  );
+
+  // The intermediate positions must never have reached the server.
+  expect(scopeCalls()).toHaveLength(2);
+  expect(scopeCalls().some(([url]) => String(url).includes('analysisStartOffset=60'))).toBe(false);
+  expect(scopeCalls().some(([url]) => String(url).includes('analysisStartOffset=90'))).toBe(false);
+});
+
+it('aborts a superseded scope request rather than just ignoring its response', async () => {
+  renderDialog();
+
+  fireEvent.click(checkbox());
+  await waitFor(() => expect(scopeCalls()).toHaveLength(1));
+
+  fireEvent.change(sliders()[0]!, { target: { value: '120' } });
+  await waitFor(() => expect(scopeCalls()).toHaveLength(2));
+
+  // Ignoring the response still lets the server finish a workload-wide scan for a window
+  // nobody is looking at any more.
+  const firstInit = scopeCalls()[0]![1] as { signal?: AbortSignal } | undefined;
+  expect(firstInit?.signal).toBeInstanceOf(AbortSignal);
+  expect(firstInit?.signal?.aborted).toBe(true);
+
+  const secondInit = scopeCalls()[1]![1] as { signal?: AbortSignal } | undefined;
+  expect(secondInit?.signal?.aborted).toBe(false);
+
+  // An aborted request is not a failed one.
+  await waitForScopeSettled();
+  expect(screen.queryByText(/could not determine how many runs this affects/i)).not.toBeInTheDocument();
+});
+
+/**
+ * The closure guard is the only thing pairing a response with the offsets that produced it.
+ * Every other test in this file resolves fetches in call order, which never exercises it.
+ */
+it('renders the latest offsets’ count when the scope responses arrive out of order', async () => {
+  const pending: Array<(payload: unknown) => void> = [];
+  (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
+    if (!String(url).includes('/analysis-time-range/scope')) return Promise.resolve(saveResponse);
+    return new Promise((resolve) => {
+      pending.push((payload) => resolve({ ok: true, json: () => Promise.resolve(payload) }));
+    });
+  });
+
+  renderDialog();
+
+  fireEvent.click(checkbox());
+  await waitFor(() => expect(pending).toHaveLength(1));
+
+  fireEvent.change(sliders()[0]!, { target: { value: '120' } });
+  await waitFor(() => expect(pending).toHaveLength(2));
+
+  // The request for the CURRENT window (120) answers first...
+  await act(async () => { pending[1]!({ total: 7, applicable: 3, skipped: [] }); });
+  // ...and the stale one for the old window (30) answers after it.
+  await act(async () => { pending[0]!({ total: 7, applicable: 5, skipped: [] }); });
+
+  const line = await screen.findByText(/of 7 runs in acc \/ loadTest/i);
+  // 5 is the count for a window the user has moved off. Confirming against it would show
+  // the wrong blast radius on the warning and on the Confirm button.
+  expect(line.textContent?.replace(/\s+/g, ' ')).toContain('3 of 7 runs');
+  expect(screen.queryByText(/could not determine how many runs this affects/i)).not.toBeInTheDocument();
+});
+
+/**
+ * "Apply to all test runs of this workload, checkbox" says nothing about how many runs
+ * that is. The count below it is the entire safety mechanism, so it has to be the
+ * checkbox's accessible description.
+ */
+it('associates the applicable-of-total count with the checkbox for screen readers', async () => {
+  renderDialog();
+
+  fireEvent.click(checkbox());
+
+  const describedBy = checkbox().getAttribute('aria-describedby');
+  expect(describedBy).toBe('analysis-time-range-scope-description');
+
+  await screen.findByText(/of 7 runs in acc \/ loadTest/i);
+  const description = document.getElementById(describedBy!);
+  expect(description).not.toBeNull();
+  expect(description!.textContent?.replace(/\s+/g, ' ')).toContain('5 of 7 runs');
+});
+
+/**
+ * The count the user confirmed came from a preview taken before the PUT. A run can finish
+ * or be created in between, so `affectedCount` off the write is the only number that
+ * describes what actually happened.
+ */
+it('reports the count the server actually wrote, not the count that was previewed', async () => {
+  const { onSaved } = renderDialog();
+  saveResponse = {
+    ok: true,
+    json: () => Promise.resolve({ ...testRun, affectedCount: 4, skipped: [] }),
+  };
+
+  fireEvent.click(checkbox());
+  await waitForScopeSettled();
+  fireEvent.click(saveButton());
+  await screen.findByText(/press save again to confirm/i);
+  fireEvent.click(saveButton());
+
+  const alert = await screen.findByText(/re-analysis enqueued/i);
+  const text = alert.textContent?.replace(/\s+/g, ' ') ?? '';
+  expect(text).toContain('Applied to 4 runs');
+  // The preview said 5. Silently reporting 5 would misstate what was written.
+  expect(text).toContain('The preview showed 5');
+
+  // The dialog holds itself open long enough for that to be read — the parent closes it
+  // from onSaved, so calling it immediately would flash the count away.
+  expect(onSaved).not.toHaveBeenCalled();
+  await waitFor(
+    () => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ affectedCount: 4 })),
+    { timeout: 3000 },
+  );
+});
+
+it('leaves the single-run save path unchanged — no count, no delay', async () => {
+  const { onSaved } = renderDialog();
+
+  fireEvent.click(saveButton());
+
+  // No applyToAll means no affectedCount, so the dialog closes on the spot as before.
+  await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  expect(screen.queryByText(/re-analysis enqueued/i)).not.toBeInTheDocument();
 });
 
 it('names the environment and workload it is about to change, so the blast radius is visible', async () => {
