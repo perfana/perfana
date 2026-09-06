@@ -9,6 +9,29 @@ import { UserCtx, UserContext } from '../../../common/decorators/user-context.de
 import { BulkDeleteTestRunsDto } from '../dto/bulk-delete-test-runs.dto';
 import { TestRunDeletionProcessor } from '../processors/test-run-deletion.processor';
 
+/** postgres `integer` upper bound — `test_runs.ramp_up` / `ramp_down` are int4. */
+const INT4_MAX = 2147483647;
+
+/**
+ * Can `test_runs.ramp_up` / `ramp_down` actually store this value?
+ *
+ * `typeof x === 'number' && x >= 0` is not enough, and the gap is not theoretical:
+ * `JSON.parse` yields `Infinity` for the literal `1e999`, floats pass unchanged, and
+ * `999999999999` is a perfectly ordinary number. All three reach
+ * `UPDATE test_runs SET ramp_up = $1` against an INTEGER column and die inside the
+ * driver, so a malformed request is served as a 500 instead of the 400 it is.
+ *
+ * Shared by the PUT (body, already a number) and the scope preview (query string,
+ * parsed to a number first) so the two routes cannot disagree about what is storable —
+ * a preview that accepts what the write rejects is worse than no preview.
+ */
+function isStorableOffset(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= INT4_MAX;
+}
+
+const OFFSET_RANGE_MESSAGE =
+  `must be non-negative whole numbers of seconds, no greater than ${INT4_MAX}`;
+
 /**
  * Core CRUD operations for test runs.
  *
@@ -275,11 +298,64 @@ export class TestRunsController {
     @Body() body: { analysisStartOffset: number },
     @UserCtx() ctx: UserContext,
   ) {
-    if (body.analysisStartOffset === undefined || body.analysisStartOffset === null || typeof body.analysisStartOffset !== 'number' || body.analysisStartOffset < 0) {
-      throw new ValidationException('analysisStartOffset must be a non-negative number (seconds)');
+    // Same int4 ceiling as the time-range PUT below — this route writes the same column.
+    if (!isStorableOffset(body.analysisStartOffset)) {
+      throw new ValidationException(`analysisStartOffset ${OFFSET_RANGE_MESSAGE}`);
     }
 
     return this.testRunsService.updateAnalysisStartOffset(id, body.analysisStartOffset, ctx.userId, ctx.roles);
+  }
+
+  @Get(':id/analysis-time-range/scope')
+  @ApiOperation({
+    summary: 'Preview which runs an "apply to all" analysis time range change would affect',
+    description:
+      'Read-only. Returns how many runs of this run\'s system/environment/workload would take the ' +
+      'given offsets, and which would be left alone and why (still running, shorter than the ' +
+      'offsets, or on another team). Lets a client state the blast radius before committing.',
+  })
+  @ApiResponse({ status: 200, description: 'Scope preview' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  // The swagger CLI plugin is not enabled in nest-cli.json, so @Query() params are never
+  // inferred — every query parameter in this controller has to be declared by hand or it
+  // is simply absent from /api/docs.
+  @ApiQuery({ name: 'analysisStartOffset', required: true, type: Number, description: 'Proposed analysis start offset (ramp-up) in seconds' })
+  @ApiQuery({ name: 'analysisEndOffset', required: true, type: Number, description: 'Proposed analysis end offset (ramp-down) in seconds' })
+  async previewAnalysisTimeRangeScope(
+    @Param('id', UuidValidationPipe) id: string,
+    @Query('analysisStartOffset') analysisStartOffset: string,
+    @Query('analysisEndOffset') analysisEndOffset: string,
+    @UserCtx() ctx: UserContext,
+  ) {
+    // Query params arrive as strings, and Number() is too permissive to use alone here:
+    // Number('') is 0, not NaN, so `?analysisStartOffset=` would pass a finite,
+    // non-negative 0 and preview the NO-TRIM scope — a wrong count in the confirmation
+    // dialog the user is about to act on. An OMITTED param is undefined -> NaN and is
+    // caught, so only the explicitly-empty case needs the extra arm.
+    //
+    // The declared `string` type is a lie the framework does not enforce: HTTP parameter
+    // pollution (`?analysisStartOffset=1&analysisStartOffset=2`) hands this a string[],
+    // and `?analysisStartOffset[a]=b` an object (qs extended parser). `raw.trim()` on
+    // either is a TypeError, which surfaces as a 500 and bypasses the very validation
+    // this function exists to perform. Take the first element of an array — matching
+    // `getFilterOptions` above — and treat anything that is still not a string as NaN so
+    // it lands on the existing 400.
+    const parse = (raw: unknown): number => {
+      const first = Array.isArray(raw) ? raw[0] : raw;
+      if (typeof first !== 'string') return Number.NaN;
+      const trimmed = first.trim();
+      return trimmed === '' ? Number.NaN : Number(trimmed);
+    };
+
+    const start = parse(analysisStartOffset);
+    const end = parse(analysisEndOffset);
+    if (!isStorableOffset(start) || !isStorableOffset(end)) {
+      throw new ValidationException(
+        `analysisStartOffset and analysisEndOffset ${OFFSET_RANGE_MESSAGE}`,
+      );
+    }
+    return this.testRunsService.previewAnalysisTimeRangeScope(id, start, end, ctx.userId, ctx.roles);
   }
 
   @Put(':id/analysis-time-range')
@@ -289,16 +365,16 @@ export class TestRunsController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   async updateAnalysisTimeRange(
     @Param('id', UuidValidationPipe) id: string,
-    @Body() body: { analysisStartOffset: number; analysisEndOffset: number },
+    @Body() body: { analysisStartOffset: number; analysisEndOffset: number; applyToAll?: boolean },
     @UserCtx() ctx: UserContext,
   ) {
-    if (
-      typeof body.analysisStartOffset !== 'number' || body.analysisStartOffset < 0 ||
-      typeof body.analysisEndOffset !== 'number' || body.analysisEndOffset < 0
-    ) {
+    if (!isStorableOffset(body.analysisStartOffset) || !isStorableOffset(body.analysisEndOffset)) {
       throw new ValidationException(
-        'analysisStartOffset and analysisEndOffset must be non-negative numbers (seconds)',
+        `analysisStartOffset and analysisEndOffset ${OFFSET_RANGE_MESSAGE}`,
       );
+    }
+    if (body.applyToAll !== undefined && typeof body.applyToAll !== 'boolean') {
+      throw new ValidationException('applyToAll must be a boolean');
     }
     return this.testRunsService.updateAnalysisTimeRange(
       id,
@@ -306,6 +382,7 @@ export class TestRunsController {
       body.analysisEndOffset,
       ctx.userId,
       ctx.roles,
+      body.applyToAll === true,
     );
   }
 

@@ -41,9 +41,30 @@ describe('StatisticsPipeline', () => {
   const callWith = (needle: string): any[] =>
     mockEntityManager.query.mock.calls.find((c: any[]) => String(c[0]).includes(needle));
 
+  /**
+   * Which runs the fake database still holds raw `ds_metrics` for. `null` — the
+   * default — means "every run has metrics", so a test that does not care about the
+   * probe does not have to enumerate its ids.
+   *
+   * The probe runs ONCE PER RUN on the POOLED connection (`this.db.query`), before the
+   * transaction is opened, so it is answered here rather than on mockEntityManager:
+   * its answer decides which runs reach the decompression, the ramp_up UPDATE and the
+   * aggregation, and all four must cover the same set.
+   */
+  let runsWithMetrics: Set<string> | null;
+  /** Ids the probe asked about, in order. */
+  let probed: string[];
+  /** Rows the read-only stale-flag pre-check returns, keyed by nothing but the SQL. */
+  let staleRows: Array<{ test_run_id: string; from_time: unknown; to_time: unknown }>;
+
+  const hasMetrics = (id: string) => runsWithMetrics === null || runsWithMetrics.has(id);
+
   beforeEach(() => {
     interceptedQueries = [];
     interceptedCalls = [];
+    runsWithMetrics = null;
+    probed = [];
+    staleRows = [];
     // Reset all mocks
     vi.clearAllMocks();
 
@@ -91,14 +112,28 @@ describe('StatisticsPipeline', () => {
         });
         return fn(proxy);
       }),
-      // Pooled (non-transaction) queries: the cleanup query and the read-only
-      // ramp_up pre-check. Default the pre-check to "nothing stale" so the
-      // aggregation mock chains below stay the only thing under test.
-      query: vi.fn((sql: string) =>
-        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
-          ? Promise.resolve([])
-          : Promise.resolve([undefined, 0])
-      ),
+      // Pooled (non-transaction) queries: the cleanup query, the per-run metrics probe
+      // and the read-only ramp_up pre-check. Routed by SQL text, not by call order —
+      // the probe is N calls rather than 1, so an ordered mock would encode the very
+      // thing under test.
+      //
+      // The pre-check answers only about ids it was actually ASKED about. A mock that
+      // returned rows for a run the pipeline never named would hide the bug this
+      // restructure fixes: a run filtered out for having no ds_metrics must not reach
+      // the decompression or the UPDATE either.
+      query: vi.fn((sql: string, params?: unknown[]) => {
+        const text = String(sql);
+        if (text.includes('has_metrics')) {
+          const id = String((params ?? [])[0]);
+          probed.push(id);
+          return Promise.resolve([{ has_metrics: hasMetrics(id) }]);
+        }
+        if (text.includes('m.ramp_up IS DISTINCT FROM')) {
+          const asked = new Set((params ?? []).map(String));
+          return Promise.resolve(staleRows.filter((r) => asked.has(r.test_run_id)));
+        }
+        return Promise.resolve([undefined, 0]);
+      }),
       decompressChunksForRange: vi.fn().mockResolvedValue(undefined)
     };
 
@@ -176,7 +211,6 @@ describe('StatisticsPipeline', () => {
 
       // Mock query sequence: metrics count, DELETE, expected rows, INSERT, actual count
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 10 }]);          // Actual count verification
@@ -194,7 +228,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001', 'test-run-002', 'test-run-003'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 50 }]);          // Actual count verification
@@ -211,9 +244,10 @@ describe('StatisticsPipeline', () => {
     test('should call cleanup for stale application dashboards', async () => {
       const testRunIds = ['test-run-001'];
 
-      mockDb.query.mockResolvedValue([undefined, 0]); // No stale data
+      // No blanket mockDb.query override here: the routed default already answers the
+      // cleanup query, and overriding it would swallow the per-run metrics probe, which
+      // shares that connection.
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 10 }]);          // Actual count verification
@@ -229,7 +263,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001', 'test-run-002'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 20 }]);          // Actual count verification
@@ -246,7 +279,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 10 }]);          // Actual count verification
@@ -267,25 +299,23 @@ describe('StatisticsPipeline', () => {
 
   describe('Pipeline Execution - Edge Cases', () => {
     test('treats an empty probe result as no metrics and touches nothing', async () => {
-      // `!metricsProbe[0]?.has_metrics` reads index 0; an empty result short-circuits
-      // to the early return, which is a different outcome from the old
-      // parseInt(count[0]?.count || '0') path that the removed test covered.
-      mockEntityManager.query.mockResolvedValueOnce([]);
+      // `probe[0]?.has_metrics` reads index 0; an empty result is falsy, so the run is
+      // filtered out exactly as an explicit `false` would be.
+      mockDb.query.mockImplementation((sql: string) =>
+        String(sql).includes('has_metrics') ? Promise.resolve([]) : Promise.resolve([undefined, 0])
+      );
 
       const result = await pipeline.execute({ testRunIds: ['test-run-001'] });
 
       expect(result.success).toBe(true);
-      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('No metrics found'));
-      const sqls = mockEntityManager.query.mock.calls.map((c: any[]) => String(c[0]));
-      expect(sqls.some((q: string) => q.includes('DELETE FROM ds_metric_statistics'))).toBe(false);
-      expect(sqls.some((q: string) => q.includes('INSERT INTO ds_metric_statistics'))).toBe(false);
+      expect(mockDb.transaction).not.toHaveBeenCalled();
+      expect(mockEntityManager.query).not.toHaveBeenCalled();
     });
 
     test('should handle no metrics found for test runs', async () => {
       const testRunIds = ['test-run-001'];
 
-      // Mock zero metrics
-      mockEntityManager.query.mockResolvedValueOnce([{ has_metrics: false }]);
+      runsWithMetrics = new Set();
 
       const result = await pipeline.execute({ testRunIds });
 
@@ -295,24 +325,30 @@ describe('StatisticsPipeline', () => {
         testRunIds: 1
       });
 
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('No metrics found for test runs')
-      );
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('MetricsPipeline hasn\'t run yet')
-      );
+      const warnings = mockLogger.warn.mock.calls.map((c: any[]) => String(c[0])).join('\n');
+      expect(warnings).toContain('No ds_metrics rows for test run(s): test-run-001');
+      expect(warnings).toContain('MetricsPipeline may not have run');
     });
 
-    test('should handle metrics with ramp_up=true only', async () => {
-      const testRunIds = ['test-run-001'];
+    test('probes only for the existence of rows, never for the flag it is about to rewrite', async () => {
+      await pipeline.execute({ testRunIds: ['test-run-001'] });
 
-      mockEntityManager.query.mockResolvedValueOnce([{ has_metrics: false }]);
+      const probeSql: string = mockDb.query.mock.calls
+        .map((c: any[]) => String(c[0]))
+        .find((q: string) => q.includes('has_metrics'));
 
-      await pipeline.execute({ testRunIds });
-
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('All metrics have ramp_up=true')
-      );
+      expect(probeSql).toBeDefined();
+      // The probe decides whether a run gets new ramp_up flags AT ALL, and
+      // refreshRampUpFlags rewrites that column moments later in the same execute().
+      // A `ramp_up = false` predicate here answers against flags that are one statement
+      // from being stale — and "the new window excludes every sample" is a correct
+      // outcome that must produce empty statistics, not a skipped run left with new
+      // flags and the previous window's statistics.
+      expect(stripSqlComments(probeSql)).not.toMatch(/ramp_up/i);
+      expect(stripSqlComments(probeSql)).not.toMatch(/value\s+IS\s+NOT\s+NULL/i);
+      // Existence only, so the index descent stops at the first row.
+      expect(probeSql).toContain('SELECT EXISTS');
+      expect(probeSql).toContain('FROM ds_metrics');
     });
 
     test('should handle invalid input and return error result', async () => {
@@ -334,7 +370,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 10 })          // DELETE existing (10 deleted)
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 10 }]);          // Actual count verification
@@ -349,7 +384,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 7 })           // DELETE existing (7 deleted)
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 10 }]);          // Actual count verification
@@ -364,7 +398,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing (nothing to delete)
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 10 }]);          // Actual count verification
@@ -381,7 +414,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -404,7 +436,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -425,7 +456,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -447,7 +477,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -465,7 +494,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -484,24 +512,23 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
 
       await pipeline.execute({ testRunIds });
 
-      const metricsCountCall = callWith('has_metrics');
-      expect(metricsCountCall[0]).toContain('WHERE test_run_id IN');
-      expect(metricsCountCall[0]).toContain('AND ramp_up = false');
-      expect(metricsCountCall[0]).toContain('AND value IS NOT NULL');
+      // The AGGREGATION is what applies the analysis window; the probe upstream of it
+      // deliberately does not (see 'probes only for the existence of rows' above).
+      const sqlQuery = stripSqlComments(callWith('INSERT INTO ds_metric_statistics')[0]);
+      expect(sqlQuery).toContain('m.ramp_up = false');
+      expect(sqlQuery).toContain('m.value IS NOT NULL');
     });
 
     test('should filter by valid application_dashboard_id', async () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -526,7 +553,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -547,7 +573,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -571,7 +596,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -601,7 +625,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])
         .mockResolvedValueOnce({ rowCount: 0 })
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce([{ count: 5 }]);
@@ -624,7 +647,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -645,7 +667,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -659,7 +680,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])
         .mockRejectedValueOnce(new Error('Aggregation failed'));
 
       const result = await pipeline.execute({ testRunIds });
@@ -682,9 +702,7 @@ describe('StatisticsPipeline', () => {
     test('should clean up stale data before processing', async () => {
       const testRunIds = ['test-run-001'];
 
-      mockDb.query.mockResolvedValue([undefined, 3]); // 3 rows deleted
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -751,7 +769,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])
         .mockResolvedValueOnce({}); // No rowCount property
 
       const result = await pipeline.execute({ testRunIds });
@@ -760,15 +777,19 @@ describe('StatisticsPipeline', () => {
       expect(result.data?.processedRecords).toBe(0);
     });
 
-    test('should handle invalid count response', async () => {
+    test('warns when the probe found metrics but the INSERT wrote nothing', async () => {
       const testRunIds = ['test-run-001'];
 
-      mockEntityManager.query.mockResolvedValueOnce([]); // Empty result
-
+      // Every in-transaction statement falls through to the default `[]`, so the
+      // verification count reads 0. The probe already said this run HAS ds_metrics, so
+      // an empty result is a real problem (org-scoping dropped every dashboard, most
+      // likely) rather than "nothing to do", which returns before the transaction.
       const result = await pipeline.execute({ testRunIds });
 
       expect(result.success).toBe(true);
-      expect(mockLogger.warn).toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('no statistics were written')
+      );
     });
 
   });
@@ -778,7 +799,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001', 'test-run-002'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 20 }]);          // Actual count verification
@@ -797,7 +817,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -814,7 +833,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 10 }]);          // Actual count verification
@@ -833,7 +851,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001', 'test-run-002', 'test-run-003', 'test-run-004'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 40 }]);          // Actual count verification
@@ -852,25 +869,30 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-1', 'test-2', 'test-3'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 30 }]);          // Actual count verification
 
       await pipeline.execute({ testRunIds });
 
-      const metricsCountCall = callWith('has_metrics');
-      const sqlQuery = metricsCountCall[0];
+      // The probe carries ONE placeholder — it asks about one run at a time, which is
+      // what stops a live run authorising the deletion of an aged-out run's statistics.
+      const probeCall = mockDb.query.mock.calls.find((c: any[]) =>
+        String(c[0]).includes('has_metrics'),
+      );
+      expect(probeCall[0]).toContain('test_run_id = $1');
+      expect(probeCall[1]).toEqual(['test-1']);
+      expect(probed).toEqual(testRunIds);
 
-      // Should have $1, $2, $3 placeholders
-      expect(sqlQuery).toContain('$1, $2, $3');
+      // The batch placeholders belong to the statements bound to the probed subset.
+      expect(callWith('DELETE FROM ds_metric_statistics')[0]).toContain('$1, $2, $3');
+      expect(callWith('INSERT INTO ds_metric_statistics')[1]).toEqual(testRunIds);
     });
 
     test('should handle large number of test runs', async () => {
       const testRunIds = Array.from({ length: 50 }, (_, i) => `test-run-${i.toString().padStart(3, '0')}`);
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 500 }]);          // Actual count verification
@@ -887,7 +909,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -905,7 +926,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -924,7 +944,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -942,7 +961,6 @@ describe('StatisticsPipeline', () => {
       const testRunIds = ['test-run-001'];
 
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])        // metrics-exist probe
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
         .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
@@ -960,7 +978,6 @@ describe('StatisticsPipeline', () => {
   describe('ramp_up refresh (compressed-chunk guard)', () => {
     const aggregationMocks = () =>
       mockEntityManager.query
-        .mockResolvedValueOnce([{ has_metrics: true }])
         .mockResolvedValueOnce({ rowCount: 0 })
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce([{ count: 5 }]);
@@ -994,11 +1011,7 @@ describe('StatisticsPipeline', () => {
       // The stale flags sit in the last two minutes of a one-hour run.
       const from = new Date('2026-01-01T10:58:00Z');
       const to = new Date('2026-01-01T11:00:00Z');
-      mockDb.query.mockImplementation((sql: string) =>
-        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
-          ? Promise.resolve([{ test_run_id: 'test-run-001', from_time: from, to_time: to }])
-          : Promise.resolve([undefined, 0])
-      );
+      staleRows = [{ test_run_id: 'test-run-001', from_time: from, to_time: to }];
       aggregationMocks();
 
       await pipeline.execute({ testRunIds: ['test-run-001'] });
@@ -1029,11 +1042,7 @@ describe('StatisticsPipeline', () => {
         { test_run_id: 'run-jan', from_time: new Date('2026-01-01T10:00:00Z'), to_time: new Date('2026-01-01T10:05:00Z') },
         { test_run_id: 'run-mar', from_time: new Date('2026-03-01T10:00:00Z'), to_time: new Date('2026-03-01T10:05:00Z') },
       ];
-      mockDb.query.mockImplementation((sql: string) =>
-        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
-          ? Promise.resolve(runs)
-          : Promise.resolve([undefined, 0])
-      );
+      staleRows = runs;
       aggregationMocks();
 
       await pipeline.execute({ testRunIds: ['run-jan', 'run-mar'] });
@@ -1067,11 +1076,7 @@ describe('StatisticsPipeline', () => {
         { test_run_id: 'run-jan', from_time: new Date('2026-01-01T10:00:00Z'), to_time: new Date('2026-01-01T10:05:00Z') },
         { test_run_id: 'run-mar', from_time: new Date('2026-03-01T10:00:00Z'), to_time: new Date('2026-03-01T10:05:00Z') },
       ];
-      mockDb.query.mockImplementation((sql: string) =>
-        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
-          ? Promise.resolve(runs)
-          : Promise.resolve([undefined, 0])
-      );
+      staleRows = runs;
       aggregationMocks();
 
       await pipeline.execute({ testRunIds: ['run-jan', 'run-mar'] });
@@ -1087,11 +1092,7 @@ describe('StatisticsPipeline', () => {
 
     test('drops a stale run with an unparseable bound instead of binding an Invalid Date', async () => {
       const good = { test_run_id: 'run-ok', from_time: new Date('2026-01-01T10:00:00Z'), to_time: new Date('2026-01-01T10:05:00Z') };
-      mockDb.query.mockImplementation((sql: string) =>
-        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
-          ? Promise.resolve([{ test_run_id: 'run-bad', from_time: 'not-a-date', to_time: 'nope' }, good])
-          : Promise.resolve([undefined, 0])
-      );
+      staleRows = [{ test_run_id: 'run-bad', from_time: 'not-a-date', to_time: 'nope' }, good];
       aggregationMocks();
 
       await pipeline.execute({ testRunIds: ['run-bad', 'run-ok'] });

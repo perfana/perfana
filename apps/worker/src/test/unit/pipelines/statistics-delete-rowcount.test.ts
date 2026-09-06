@@ -54,12 +54,17 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
         });
         return fn(proxy);
       }),
-      // The read-only ramp_up pre-check runs before the transaction; return no
-      // stale runs so this file stays focused on the DELETE row count.
+      // Pooled queries. The per-run metrics probe and the read-only ramp_up pre-check
+      // both run before the transaction, on this connection. Every run has metrics and
+      // nothing is stale, so this file stays focused on the DELETE row count.
       query: vi.fn((sql: string) =>
-        typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
-          ? Promise.resolve([])
-          : Promise.resolve([undefined, 0])
+        typeof sql === 'string' && sql.includes('has_metrics')
+          ? Promise.resolve([{ has_metrics: true }])
+          : Promise.resolve(
+              typeof sql === 'string' && sql.includes('m.ramp_up IS DISTINCT FROM')
+                ? []
+                : [undefined, 0]
+            )
       ),
       decompressChunksForRange: vi.fn().mockResolvedValue(undefined),
     };
@@ -75,7 +80,6 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
   /** Queue the aggregation call sequence, with `deleteResult` for the DELETE. */
   const runWithDeleteResult = async (deleteResult: unknown) => {
     mockEntityManager.query
-      .mockResolvedValueOnce([{ has_metrics: true }]) // metrics-exist probe
       .mockResolvedValueOnce(deleteResult) // DELETE existing
       .mockResolvedValueOnce(undefined) // INSERT
       .mockResolvedValueOnce([{ count: 10 }]); // actual count
@@ -106,8 +110,9 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
   });
 
   test('names the affected test runs alongside the count', async () => {
+    // The probe is answered on the pooled connection, one call per run — see the
+    // mockDb.query router above. Only the aggregation triple runs in the transaction.
     mockEntityManager.query
-      .mockResolvedValueOnce([{ has_metrics: true }])
       .mockResolvedValueOnce([[], 12])
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce([{ count: 10 }]);

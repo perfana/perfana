@@ -104,6 +104,13 @@ export const OrchestrateReevaluateBatchJobSchema = z.object({
     dynatrace: z.boolean().optional(),
     performanceMetrics: z.boolean().optional(),
   }).optional(),
+  // Recalculate ds_metric_statistics before evaluating, without collecting any data.
+  // The two refreshMode branches run statistics only when a fetch actually returned
+  // new rows, so neither covers the case where the DATA is unchanged but the
+  // ANALYSIS WINDOW moved (test_runs.ramp_up / ramp_down edited in the UI).
+  // StatisticsPipeline rebakes ds_metrics.ramp_up from the run's current offsets and
+  // rewrites ds_metric_statistics, which is what makes the new window take effect.
+  recalculateStatistics: z.boolean().optional(),
   // Optional: Filter to specific metric for re-evaluation
   applicationDashboardId: z.string().uuid().optional(),
   panelId: z.number().int().positive().optional(),

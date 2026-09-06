@@ -23,11 +23,60 @@ import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
 import { PanelsPipeline } from '../pipelines/PanelsPipeline.js';
 import { DataSanityCheckPipeline } from '../pipelines/DataSanityCheckPipeline.js';
 import { JobType } from '@perfana/shared/types';
+import { chunkTestRunIds, REEVALUATE_CHUNK_SIZE } from '../lib/utils/chunking.js';
 
 const logger = getLogger('simple-orchestrate-reevaluate-batch');
 
 /** Maximum time (ms) to wait for a child job to complete before timing out (10 minutes) */
 const JOB_WAIT_TIMEOUT_MS = 600_000;
+
+/**
+ * Enqueue StatisticsPipeline for `testRunIds`, chunked and sequential, waiting on each.
+ *
+ * Chunked for a different ceiling than ADAPT: `refreshRampUpFlags` issues one UPDATE per
+ * run but they all share a single transaction's
+ * `max_tuples_decompressed_per_dml_transaction` budget, and an analysis-window edit
+ * invalidates every run's ramp_up flags at once — the documented recipe for
+ * `tuple decompression limit exceeded`.
+ *
+ * Shared by all three call sites (force refetch, gap fill, analysis-window recalculation)
+ * so the chunking cannot drift between them.
+ */
+async function runStatisticsChunks(
+  analyzeQueue: Queue,
+  analyzeEvents: QueueEvents,
+  testRunIds: string[],
+  progressReporter: ProgressReporter | null,
+): Promise<void> {
+  const chunks = chunkTestRunIds(testRunIds);
+  if (chunks.length > 1) {
+    logger.info(
+      `Statistics recalculation split into ${chunks.length} chunks of up to ` +
+        `${REEVALUATE_CHUNK_SIZE} run(s) to stay inside one transaction's decompression budget`
+    );
+  }
+
+  let done = 0;
+  for (let c = 0; c < chunks.length; c++) {
+    const chunk = chunks[c]!;
+    const statsJob = await analyzeQueue.add(
+      JOB_NAMES.STATISTICS_PIPELINE,
+      { testRunIds: chunk },
+      getJobOptions(JOB_NAMES.STATISTICS_PIPELINE)
+    );
+
+    logger.info(`Waiting for statistics job ${statsJob.id} (chunk ${c + 1}/${chunks.length})...`);
+    await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+    // Report RUNS done, not chunks: the UI renders this as "run X of N", and the chunk
+    // size is an internal budget detail nobody watching a progress bar cares about.
+    done += chunk.length;
+    await progressReporter?.updateStageProgress(
+      Math.round((done / testRunIds.length) * 100),
+      { testRunId: chunk[chunk.length - 1]!, index: done, total: testRunIds.length }
+    );
+  }
+}
+
 
 /**
  * Throw when a soft-failing child pipeline reported failure (#552).
@@ -125,7 +174,29 @@ async function waitForJobs(
         resolved = true;
         queueEvents.off('completed', onCompleted);
         queueEvents.off('failed', onFailed);
-        reject(new Error(`Timeout waiting for jobs after ${timeoutMs}ms. Completed: ${completedJobs.size}, Failed: ${failedJobs.size}, Total: ${jobIds.length}`));
+
+        // Give up waiting AND stop the work. Timing out only abandoned the wait, leaving
+        // the child job running unobserved — which was survivable while the orchestrator
+        // returned a failure BullMQ recorded as completed and never retried. Now that it
+        // throws, BullMQ retries and re-enqueues the SAME stage for the same ids while the
+        // orphan is still running. For the unchunked stages (checks-evaluation,
+        // control-groups-creation) that overlap is total, and ChecksPipeline writes per run
+        // in its own transactions, so two concurrent passes can interleave or deadlock.
+        //
+        // Best-effort: a job that already moved on cannot be removed, and that is fine —
+        // the point is not to leave a duplicate running.
+        const pending = jobIds.filter((id) => !completedJobs.has(id) && !failedJobs.has(id));
+        void Promise.all(
+          pending.map(async (id) => {
+            try {
+              await (await queue?.getJob(id))?.remove();
+            } catch (removeError) {
+              logger.warn(`Could not remove orphaned job ${id} after timeout:`, removeError);
+            }
+          })
+        ).finally(() => {
+          reject(new Error(`Timeout waiting for jobs after ${timeoutMs}ms. Completed: ${completedJobs.size}, Failed: ${failedJobs.size}, Total: ${jobIds.length}`));
+        });
       }
     }, timeoutMs);
 
@@ -196,16 +267,24 @@ export function simpleOrchestrateReevaluateBatchWorker() {
     let progressReporter: ProgressReporter | null = null;
     let lockAcquired = false;
     let stopLockRenewal: (() => void) | null = null;
+    // Hoisted so the finally can close them: each constructs its own IORedis, and they
+    // were previously closed only where the happy path happened to reach.
+    let analyzeQueueRef: Queue | null = null;
+    let analyzeEventsRef: QueueEvents | null = null;
     let testRunInfo: { testRunId: string; systemUnderTestId: string; testEnvironment: string; workload: string } | null = null;
 
     try {
       logger.info(`🚀 Orchestrate-reevaluate-batch job started (ID: ${job.id})`);
 
       const validatedData = OrchestrateReevaluateBatchJobSchema.parse(job.data);
-      const { testRunIds, batchId, checks, adapt, refreshMode, sources, applicationDashboardId, panelId, metricName } = validatedData;
+      const { testRunIds, batchId, checks, adapt, refreshMode, sources, recalculateStatistics, applicationDashboardId, panelId, metricName } = validatedData;
 
       logger.info(`Processing batch ${batchId} with ${testRunIds.length} test runs`);
-      logger.info(`Config: checks=${checks}, adapt=${adapt}, refreshMode=${refreshMode || 'reevaluate'}`);
+      logger.info(`Config: checks=${checks}, adapt=${adapt}, refreshMode=${refreshMode || 'reevaluate'}, recalculateStatistics=${recalculateStatistics ?? false}`);
+      // Zod strips unknown keys, so a worker predating this field drops it silently and the
+      // user's analysis-window edit has no effect with nothing logged. Printing it means a
+      // rolling-deploy skew shows up as `recalculateStatistics=false` on a job the API sent
+      // with true, instead of as an unexplained no-op.
       if (sources) {
         logger.info(`Source filter: grafana=${sources.grafana ?? true}, dynatrace=${sources.dynatrace ?? true}, performanceMetrics=${sources.performanceMetrics ?? true}`);
       }
@@ -254,15 +333,25 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           blockingJobId: lockResult.blockingInfo?.existingJobId,
         });
 
-        return {
-          status: 'failed',
-          message: `Job blocked: ${lockResult.blockingInfo?.reason || 'Another job is processing this scope'}`,
-          data: {
-            blocked: true,
-            blockingJobId: lockResult.blockingInfo?.existingJobId,
-            blockingJobProgress: lockResult.blockingInfo?.existingJobProgress,
-          },
-        };
+        // THROW, do not return. simple-workers.ts does `return await processor(job)`, so a
+        // returned {status:'failed'} RESOLVES the promise and BullMQ records the job as
+        // completed — `attempts` never fires and nothing surfaces the refusal.
+        //
+        // That is not a rare path. `analyze.ts` takes this same sut:env:workload lock after
+        // every run of the workload finishes, so a bulk analysis-window edit landing in that
+        // window is refused routinely. Resolving here left test_runs.ramp_up written while
+        // ds_metric_statistics was never recalculated and ADAPT never re-ran — permanently,
+        // with a green job and a UI reporting success. Throwing lets BullMQ retry (attempts:
+        // it), which is usually enough for the blocking job to finish. Note the retry policy
+        // that applies is the one reevaluateBatch sets when it enqueues
+        // (bullmq-client.service.ts: attempts 2, fixed 10s), NOT the queue-level default in
+        // simple-queues.ts — a reader chasing this will find the wrong one first.
+        const blockedError = new Error(
+          `Job blocked: ${lockResult.blockingInfo?.reason || 'Another job is processing this scope'}` +
+            ` (blocking job ${lockResult.blockingInfo?.existingJobId ?? 'unknown'})`
+        );
+        (blockedError as Error & { blocked?: boolean }).blocked = true;
+        throw blockedError;
       }
 
       lockAcquired = true;
@@ -290,6 +379,8 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         stages.push('statistics-recalculation');
       } else if (refreshMode === 'force') {
         stages.push('force-refetch');
+        stages.push('statistics-recalculation');
+      } else if (recalculateStatistics) {
         stages.push('statistics-recalculation');
       }
       if (checks) {
@@ -319,6 +410,8 @@ export function simpleOrchestrateReevaluateBatchWorker() {
       // Create queues (all jobs go to perfana-analyze queue)
       const analyzeQueue = createSimpleQueue(SIMPLE_QUEUES.ANALYZE);
       const analyzeEvents = createQueueEvents(SIMPLE_QUEUES.ANALYZE);
+      analyzeQueueRef = analyzeQueue;
+      analyzeEventsRef = analyzeEvents;
 
       // Stage 1: Data collection (when refreshMode === 'missing-data' or 'force')
       if (refreshMode === 'force') {
@@ -513,15 +606,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         logger.info('🔷 STAGE: Statistics recalculation');
         await progressReporter?.startStage('statistics-recalculation');
 
-        if (testRunsWithNewData > 0) {
-          const statsJob = await analyzeQueue.add(
-            JOB_NAMES.STATISTICS_PIPELINE,
-            { testRunIds },
-            getJobOptions(JOB_NAMES.STATISTICS_PIPELINE)
-          );
-
-          logger.info(`Waiting for statistics job ${statsJob.id}...`);
-          await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        // `|| recalculateStatistics`: the caller may be asking for a recalculation
+        // because the ANALYSIS WINDOW moved, which no fetch can detect. Without this
+        // arm, refreshMode + recalculateStatistics ran no statistics at all while the
+        // stage list still advertised the stage and the progress reporter marked it
+        // complete — a silent no-op on the one input the user actually changed.
+        if (testRunsWithNewData > 0 || recalculateStatistics) {
+          await runStatisticsChunks(analyzeQueue, analyzeEvents, testRunIds, progressReporter);
           logger.info(`✅ Statistics recalculation completed`);
         } else {
           logger.info('⏭️  Skipping statistics recalculation (no new data collected)');
@@ -716,15 +807,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         logger.info('🔷 STAGE 1c: Statistics recalculation');
         await progressReporter?.startStage('statistics-recalculation');
 
-        if (testRunsWithNewData > 0) {
-          const statsJob = await analyzeQueue.add(
-            JOB_NAMES.STATISTICS_PIPELINE,
-            { testRunIds },
-            getJobOptions(JOB_NAMES.STATISTICS_PIPELINE)
-          );
-
-          logger.info(`Waiting for statistics job ${statsJob.id}...`);
-          await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        // `|| recalculateStatistics`: the caller may be asking for a recalculation
+        // because the ANALYSIS WINDOW moved, which no fetch can detect. Without this
+        // arm, refreshMode + recalculateStatistics ran no statistics at all while the
+        // stage list still advertised the stage and the progress reporter marked it
+        // complete — a silent no-op on the one input the user actually changed.
+        if (testRunsWithNewData > 0 || recalculateStatistics) {
+          await runStatisticsChunks(analyzeQueue, analyzeEvents, testRunIds, progressReporter);
           logger.info(`✅ Statistics recalculation completed`);
         } else {
           logger.info('⏭️  Skipping statistics recalculation (no new data collected)');
@@ -740,6 +829,23 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           testRunsWithNewData,
           details: gapAnalysisDetails,
         };
+      } else if (recalculateStatistics) {
+        // No data collection, but the analysis window moved: rebake ds_metrics.ramp_up
+        // from each run's current offsets and rewrite ds_metric_statistics. Without
+        // this, checks and ADAPT below run against the PREVIOUS window's statistics
+        // and the edit the user made in the UI has no visible effect.
+        //
+        // Deliberately not gated on testRunsWithNewData the way the two refreshMode
+        // branches are — nothing was fetched here, and there is still work to do.
+        const statsStart = Date.now();
+        logger.info('🔷 STAGE: Statistics recalculation (analysis window changed, no data collection)');
+        await progressReporter?.startStage('statistics-recalculation');
+
+        await runStatisticsChunks(analyzeQueue, analyzeEvents, testRunIds, progressReporter);
+        logger.info('✅ Statistics recalculation completed');
+
+        stageTiming.push({ stage: 'statistics-recalculation', duration: Date.now() - statsStart });
+        await progressReporter?.completeStage();
       } else {
         logger.info('⏭️  Skipping data collection (reevaluate mode)');
       }
@@ -802,22 +908,39 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           // Substage 3b: Control group statistics
           await progressReporter?.startStage('control-group-statistics');
           const controlStatsStart = Date.now();
-          const controlStatsJob = await analyzeQueue.add(
-            JOB_NAMES.CONTROL_GROUP_STATISTICS,
-            { testRunIds },
-            getJobOptions(JOB_NAMES.CONTROL_GROUP_STATISTICS)
-          );
+          // Chunked for the same reason as ADAPT and statistics: this pipeline also does
+          // its work for every id in one withAnalyticsTransaction, and the orchestrator
+          // waits JOB_WAIT_TIMEOUT_MS (600s) for the whole job against a 540s aggregation
+          // budget — only 60s of headroom for a workload-sized list. It additionally
+          // re-enters StatisticsPipeline via backfillMissingSketches, so an unchunked list
+          // here reintroduces the very decompression-budget problem runStatisticsChunks
+          // exists to respect.
+          const controlStatsChunks = chunkTestRunIds(testRunIds);
+          let controlStatsDone = 0;
+          for (const chunk of controlStatsChunks) {
+            const controlStatsJob = await analyzeQueue.add(
+              JOB_NAMES.CONTROL_GROUP_STATISTICS,
+              { testRunIds: chunk },
+              getJobOptions(JOB_NAMES.CONTROL_GROUP_STATISTICS)
+            );
 
-          logger.info(`Waiting for control group statistics job ${controlStatsJob.id}...`);
-          await waitForJobs(analyzeEvents, [controlStatsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+            logger.info(`Waiting for control group statistics job ${controlStatsJob.id}...`);
+            await waitForJobs(analyzeEvents, [controlStatsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
 
-          // control-group-statistics is registered with softFail, so a failed
-          // aggregation still completes the BullMQ job. Read the return value or we
-          // walk into ADAPT with an empty baseline and blame the baseline (#552).
-          assertStageSucceeded(
-            'Control group statistics',
-            (await analyzeQueue.getJob(controlStatsJob.id!))?.returnvalue
-          );
+            // control-group-statistics is registered with softFail, so a failed
+            // aggregation still completes the BullMQ job. Read the return value or we
+            // walk into ADAPT with an empty baseline and blame the baseline (#552).
+            assertStageSucceeded(
+              'Control group statistics',
+              (await analyzeQueue.getJob(controlStatsJob.id!))?.returnvalue
+            );
+
+            controlStatsDone += chunk.length;
+            await progressReporter?.updateStageProgress(
+              Math.round((controlStatsDone / testRunIds.length) * 100),
+              { testRunId: chunk[chunk.length - 1]!, index: controlStatsDone, total: testRunIds.length }
+            );
+          }
 
           const controlStatsDuration = Date.now() - controlStatsStart;
           logger.info('✅ Control group statistics completed');
@@ -830,21 +953,49 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         // Substage 3c: ADAPT difference detection
         await progressReporter?.startStage('adapt-analysis');
         const adaptStart = Date.now();
-        const adaptJob = await analyzeQueue.add(
-          JOB_NAMES.ADAPT_PIPELINE,
-          {
-            testRunIds,
-            updateControlGroup: false,
-            updateControlStatistics: false,
-            applicationDashboardId,
-            panelId,
-            metricName
-          },
-          getJobOptions(JOB_NAMES.ADAPT_PIPELINE)
-        );
+        // Chunked and SEQUENTIAL. AdaptPipeline puts every id it is handed into one
+        // transaction on the 120 s cap, so a workload-wide list is a guaranteed
+        // cancellation that rolls back ADAPT for the whole batch — including the run
+        // the user actually edited. Sequential rather than parallel because the
+        // chunks contend for the same analytics pool and the same compressed chunks.
+        //
+        // Chunk N's storeTrackedResults reads the ds_adapt_results of runs in other
+        // chunks, so an earlier chunk sees its later siblings' pre-refresh rows. That
+        // is the same staleness a two-batch re-evaluate has always had, and it is
+        // strictly better than the timeout it replaces.
+        const adaptChunks = chunkTestRunIds(testRunIds);
+        if (adaptChunks.length > 1) {
+          logger.info(
+            `ADAPT split into ${adaptChunks.length} chunks of up to ${REEVALUATE_CHUNK_SIZE} run(s) ` +
+              `to stay inside the 120s ANALYTICS_STATEMENT_TIMEOUT_MS cap`
+          );
+        }
 
-        logger.info(`Waiting for ADAPT job ${adaptJob.id}...`);
-        await waitForJobs(analyzeEvents, [adaptJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        let adaptDone = 0;
+        for (let c = 0; c < adaptChunks.length; c++) {
+          const chunk = adaptChunks[c]!;
+          const adaptJob = await analyzeQueue.add(
+            JOB_NAMES.ADAPT_PIPELINE,
+            {
+              testRunIds: chunk,
+              updateControlGroup: false,
+              updateControlStatistics: false,
+              applicationDashboardId,
+              panelId,
+              metricName
+            },
+            getJobOptions(JOB_NAMES.ADAPT_PIPELINE)
+          );
+
+          logger.info(`Waiting for ADAPT job ${adaptJob.id} (chunk ${c + 1}/${adaptChunks.length})...`);
+          await waitForJobs(analyzeEvents, [adaptJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+          adaptDone += chunk.length;
+          await progressReporter?.updateStageProgress(
+            Math.round((adaptDone / testRunIds.length) * 100),
+            { testRunId: chunk[chunk.length - 1]!, index: adaptDone, total: testRunIds.length }
+          );
+        }
+
         const adaptDuration = Date.now() - adaptStart;
         logger.info(`✅ ADAPT analysis completed`);
         stageTiming.push({ stage: 'adapt-difference-detection', duration: adaptDuration });
@@ -871,9 +1022,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
       }
       await progressReporter?.completeStage();
 
-      // Cleanup queues
-      await analyzeEvents.close();
-      await analyzeQueue.close();
+      // Queues are closed in the finally, on every path.
 
       // Signal completion
       await progressReporter?.complete();
@@ -926,18 +1075,29 @@ ${breakdown}
         await progressReporter.fail(errorMessage);
       }
 
-      return {
-        status: 'failed',
-        message: errorMessage,
-        errors: [{
-          message: errorMessage,
-          code: 'ORCHESTRATION_ERROR',
-        }],
-      };
+      // Rethrow rather than returning a 'failed' result: the worker resolves whatever this
+      // returns, so returning marked a failed orchestration as a COMPLETED BullMQ job —
+      // no retry, no failed-set entry, nothing for an operator to find. With chunking, a
+      // mid-chunk failure leaves the earlier chunks' statistics rewritten and the rest on
+      // the old window, so a silent success here is a half-applied batch nobody learns about.
+      throw error;
     } finally {
       // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
       // of a lock we just handed back.
       stopLockRenewal?.();
+
+      // createSimpleQueue / createQueueEvents each construct their own IORedis. They were
+      // closed only on the success path, so every failed orchestration leaked two
+      // connections — and failures are both more visible and longer-running now that this
+      // throws and chunks.
+      for (const closeable of [analyzeQueueRef, analyzeEventsRef]) {
+        if (!closeable) { continue; }
+        try {
+          await closeable.close();
+        } catch (closeError) {
+          logger.error(`Failed to close queue resource for job ${job.id}:`, closeError);
+        }
+      }
 
       // Always release lock and Redis connection in finally block
       if (lockAcquired && lockService && testRunInfo) {

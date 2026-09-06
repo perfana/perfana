@@ -1,5 +1,6 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { StatisticsPipeline } from './StatisticsPipeline.js';
+import { chunkTestRunIds, REEVALUATE_CHUNK_SIZE } from '../lib/utils/chunking.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
 
@@ -103,6 +104,13 @@ export interface ControlGroupStatisticsInput {
  * This deterministically picks the metadata row that has the most complete
  * information (non-null dashboard_uid and metrics_source_id preferred).
  */
+/**
+ * Runs per StatisticsPipeline invocation inside the sketch backfill. Pinned to the
+ * orchestrator's chunk size: both bound the same per-transaction decompression budget,
+ * and two independent numbers would drift.
+ */
+const BACKFILL_CHUNK_SIZE = REEVALUATE_CHUNK_SIZE;
+
 export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
   validateInput(input: unknown): boolean {
     if (!input || typeof input !== 'object') {return false;}
@@ -224,19 +232,32 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
         `🔧 ${testRunIds.length} control run(s) missing pct_agg — recomputing statistics before aggregation (#552): ${testRunIds.join(', ')}`
       );
 
-      const result = await new StatisticsPipeline(this.logger).execute({ testRunIds });
-      if (!result.success) {
-        this.logger.error(
-          `❌ Sketch backfill failed for ${testRunIds.join(', ')} — falling back to the legacy raw-scan path, which may time out`
-        );
-        return;
+      // CHUNKED. The caller's chunking does not bound this: it chunks CONTROL GROUPS,
+      // and this expands each group to its member test runs, so a 5-group chunk routinely
+      // becomes 50+ runs. StatisticsPipeline puts one `UPDATE ds_metrics` per run into a
+      // single transaction, and they share that transaction's
+      // max_tuples_decompressed_per_dml_transaction budget (100k) — so an unchunked
+      // expansion here reintroduces `tuple decompression limit exceeded` through the back
+      // door, and the catch below swallows it into the legacy raw scan that then blows the
+      // 540s aggregation budget.
+      //
+      // Same constant as the orchestrator so the two cannot drift.
+      let repaired = 0;
+      for (const chunk of chunkTestRunIds(testRunIds, BACKFILL_CHUNK_SIZE)) {
+        const result = await new StatisticsPipeline(this.logger).execute({ testRunIds: chunk });
+        if (!result.success) {
+          this.logger.error(
+            `❌ Sketch backfill failed for ${chunk.join(', ')} — falling back to the legacy raw-scan path, which may time out`
+          );
+          return;
+        }
+        // A run with no `ds_metrics` rows left (retention, a partial delete) makes
+        // StatisticsPipeline succeed while writing nothing, so success alone does not mean
+        // the sketches now exist. Summed across chunks so the log below reports what was
+        // actually rewritten, not how many runs were attempted.
+        repaired += (result.data as { processedRecords?: number } | undefined)?.processedRecords ?? 0;
       }
 
-      // A run with no `ds_metrics` rows left (retention, a partial delete) makes
-      // StatisticsPipeline succeed while writing nothing, so success alone does not
-      // mean the sketches now exist. Say which happened rather than logging a false
-      // green — the legacy path still runs below and the next evaluation retries this.
-      const repaired = (result.data as { processedRecords?: number } | undefined)?.processedRecords ?? 0;
       if (repaired > 0) {
         this.logger.info(
           `✅ Sketch backfill completed: ${repaired} statistic record(s) rewritten across ${testRunIds.length} control run(s)`

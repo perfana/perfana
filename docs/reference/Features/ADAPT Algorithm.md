@@ -114,8 +114,9 @@ cannot disturb any other.
 > and deleting on that reading throws away comparison history that cannot be rebuilt once
 > `ds_metrics` has aged out. `StatisticsPipeline` reaches exactly that state while reporting
 > success — it warns `Metrics exist … but no statistics were written` when org-scoping drops every
-> dashboard — and its own metrics probe is evaluated across the whole batch while its `DELETE` is
-> too, so one live run can authorise wiping the statistics of an aged-out run beside it.
+> dashboard. Until v0.2.95.0 its own metrics probe was evaluated across the whole batch while its
+> `DELETE` was too, so one live run could authorise wiping the statistics of an aged-out run beside
+> it; the probe is now per run and the delete covers only the runs that passed it.
 > `AdaptValidator.checkEmptyControlGroups` cannot screen those out either: it selects `FROM
 > ds_metric_statistics` and groups by `test_run_id`, so a run with no rows forms no group and is
 > never reported as empty.
@@ -124,6 +125,39 @@ This covers **one** class of stale result. The unique constraint above includes 
 and the delete deliberately ignores it — it matches on the metric's identity, not on which baseline
 produced the verdict. A metric that keeps its statistics but loses its control-group row therefore
 keeps its stale verdict. That is the baseline case described next, and it is unchanged.
+
+## The analysis window has to match across the control group
+
+ADAPT compares a run against a baseline of earlier runs, and `ds_control_group_statistics` pools
+those runs' `ds_metric_statistics` — each computed under whatever ramp-up/ramp-down offsets its own
+run happens to carry. Narrowing one run's analysis window in isolation therefore compares a trimmed
+run against untrimmed history, and nothing reports the mismatch.
+
+Since v0.2.95.0 the analysis time range can be applied across a whole workload in one action:
+`PUT /api/test-runs/:id/analysis-time-range` accepts `applyToAll`, which writes the same offsets to
+every run of the target's system / environment / workload and re-evaluates them.
+`GET /api/test-runs/:id/analysis-time-range/scope` answers the same question read-only, so the
+dialog can state the blast radius before anything is written.
+
+Three kinds of run are deliberately left out, and each is reported rather than skipped silently:
+
+| Reason | Why |
+|---|---|
+| `running` | `MetricsPipeline` bakes `ds_metrics.ramp_up` at ingestion, so moving the offsets mid-run leaves the run carrying rows flagged under two different settings |
+| `too-short` | the two offsets together leave no analysis window in that run — see the note on offsets fitting the run in [[Worker Overview]] and CLAUDE.md |
+| `not-writable` | `test_runs.team_id` is a per-row nullable column, not derived from the system under test, so a workload can span teams; the caller proved write permission on the target's organization and team only |
+
+A bulk apply is capped at 100 runs and **refuses** past that rather than truncating: applying the
+window to the first 100 runs of a workload would leave the remainder as an untrimmed baseline,
+which is the comparison this feature exists to prevent. The preview reports `exceedsCap` in advance.
+
+Two mechanics worth knowing when a bulk apply looks like it did nothing. The offsets alone change
+nothing visible — they take effect only once `StatisticsPipeline` rebakes `ds_metrics.ramp_up` and
+rewrites `ds_metric_statistics`, which is what the re-evaluate's `recalculateStatistics` flag runs.
+And every *completed* run that was written also needs its `transaction-stats-rollup` re-enqueued,
+because the rollup recomputes its ramp-up-excluded rows from the offsets and its readiness check
+answers `ready` forever once the table is populated — a run that is missed serves previous-window
+numbers in Performance Analysis indefinitely.
 
 ## When ADAPT cannot build a baseline
 

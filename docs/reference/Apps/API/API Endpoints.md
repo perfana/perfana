@@ -74,6 +74,8 @@ tags:
 | `POST` | `/api/test-runs/:id/delete-anomaly` | Remove anomaly |
 | `GET` | `/api/test-runs/adapt-results` | ADAPT analysis results |
 | `POST` | `/api/test-runs/:id/adapt-config` | Update ADAPT configuration |
+| `GET` | `/api/test-runs/:id/analysis-time-range/scope` | Read-only preview of an `applyToAll` change: how many runs of this run's system/environment/workload would take the offsets, and which are skipped and why (`?analysisStartOffset=&analysisEndOffset=`) |
+| `PUT` | `/api/test-runs/:id/analysis-time-range` | Set the ramp-up/ramp-down offsets. `applyToAll: true` writes them across the whole workload and re-evaluates it — capped at 100 runs, refused (400) past that. See [[ADAPT Algorithm]] for why the window has to match across a control group |
 
 ### Metrics
 

@@ -125,6 +125,25 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['ds_metric_statistics']);
 
+      // Establish ONE set of runs for everything below. The flag refresh, the
+      // decompression it needs, and the aggregation must all cover the same runs: a run
+      // that gets new ds_metrics.ramp_up flags but keeps the previous window's
+      // ds_metric_statistics is silently incoherent, and ADAPT pools it into a control
+      // group as if it were current. A bulk analysis-window edit is exactly what
+      // produces that combination, so this is not a theoretical ordering concern.
+      const runIds = await this.filterRunsWithMetrics(testRunIds);
+      const agedOut = testRunIds.filter((id) => !runIds.includes(id));
+      if (agedOut.length > 0) {
+        this.logger.warn(
+          `⚠️ No ds_metrics rows for test run(s): ${agedOut.join(', ')} — leaving their ` +
+            `existing statistics and ramp_up flags untouched (nothing could rebuild them)`
+        );
+      }
+      if (runIds.length === 0) {
+        this.logger.warn('💡 Nothing to aggregate: MetricsPipeline may not have run for these test runs');
+        return this.createSuccessResult({ processedRecords: 0, testRunIds: testRunIds.length }, Date.now() - startTime);
+      }
+
       // Refresh the ds_metrics.ramp_up flag from each run's CURRENT analysis
       // offsets before aggregating. The flag is otherwise baked once at
       // ingestion (MetricsPipeline), so editing the analysis time range on a
@@ -134,7 +153,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       // Ask with a read before writing: on a compressed chunk the UPDATE's own
       // guard is what triggers the decompression, so "only rows that change are
       // written" does not make it free. See findRunsWithStaleRampUpFlags.
-      const staleRuns = await this.findRunsWithStaleRampUpFlags(testRunIds);
+      const staleRuns = await this.findRunsWithStaleRampUpFlags(runIds);
 
       // Same shape, and the same fix, as the force-refetch guard in
       // simple-orchestrate-reevaluate-batch.ts: decompress up front, outside the
@@ -163,10 +182,10 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           await this.refreshRampUpFlags(manager, staleRuns);
         } else {
           this.logger.info(
-            `🕒 ramp_up flags already match the current analysis offsets for ${testRunIds.length} run(s) — no update needed`
+            `🕒 ramp_up flags already match the current analysis offsets for ${runIds.length} run(s) — no update needed`
           );
         }
-        return await this.aggregateMetricStatistics(manager, testRunIds);
+        return await this.aggregateMetricStatistics(manager, runIds);
       });
 
       const duration = Date.now() - startTime;
@@ -229,6 +248,43 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
    * compression policy by construction, so this is the normal path there, not
    * an edge case.
    */
+  /**
+   * Which of these runs still have raw `ds_metrics` at all?
+   *
+   * This is the guard on the DELETE in `aggregateMetricStatistics`: a run whose
+   * metrics have aged out must KEEP its statistics rather than have them wiped and
+   * replaced with nothing, because nothing can rebuild them.
+   *
+   * It deliberately asks only "do any rows exist", NOT "are any rows steady-state"
+   * (`ramp_up = false AND value IS NOT NULL`), for two reasons:
+   *
+   *  1. `ramp_up` is precisely what `refreshRampUpFlags` is about to rewrite, so a
+   *     steady-state probe answers against flags that are one statement from being
+   *     stale — and its answer decides whether the run gets new flags at all.
+   *  2. "the new window excludes every sample" is a real, correct outcome that should
+   *     produce empty statistics, not a reason to skip the run and strand it with new
+   *     flags and the previous window's statistics.
+   *
+   * Everything downstream — the decompression, the flag refresh and the aggregation —
+   * runs on exactly this set, which is what keeps the three consistent.
+   *
+   * Per run rather than once for the batch: a batch-wide answer let one run with live
+   * metrics authorise deleting the statistics of every aged-out run beside it. Each
+   * probe is an index descent that stops at the first row (`test_run_id` is the
+   * `compress_segmentby` key and leads the index), so N probes cost effectively nothing.
+   */
+  private async filterRunsWithMetrics(testRunIds: string[]): Promise<string[]> {
+    const withMetrics: string[] = [];
+    for (const testRunId of testRunIds) {
+      const probe = await this.db.query(
+        'SELECT EXISTS (SELECT 1 FROM ds_metrics WHERE test_run_id = $1) AS has_metrics',
+        [testRunId]
+      );
+      if (probe[0]?.has_metrics) { withMetrics.push(testRunId); }
+    }
+    return withMetrics;
+  }
+
   private async findRunsWithStaleRampUpFlags(
     testRunIds: string[]
   ): Promise<Array<{ testRunId: string; from: Date; to: Date }>> {
@@ -321,32 +377,16 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
 
     this.logger.info(`📊 Aggregating statistics for ${testRunIds.length} test run(s): ${testRunIds.join(', ')}`);
 
+    // The caller has already filtered to runs that HAVE ds_metrics (filterRunsWithMetrics,
+    // called once in execute). That filter, the decompression, the ramp_up refresh and this
+    // aggregation must all cover the SAME set: a run that gets new flags but keeps the
+    // previous window's statistics is silently incoherent, and ADAPT pools it into a
+    // control group as current. This method therefore does no filtering of its own —
+    // `testRunIds` here is already the filtered set, not the original request.
+    const targetRunIds = testRunIds;
+
     // Build parameterized query placeholders
-    const placeholders = testRunIds.map((_, i) => `$${i + 1}`).join(', ');
-
-    // Is there anything to aggregate? EXISTS, not COUNT(*): this only guards the
-    // DELETE below (a run whose ds_metrics have aged out must keep its statistics
-    // rather than have them wiped and replaced with nothing). COUNT(*) answered the
-    // same yes/no by scanning every row — 16s over 20.6M rows on a compressed
-    // hypertable, to produce a log line the INSERT's own row count already gives.
-    const metricsProbe = await manager.query(
-      `SELECT EXISTS (
-         SELECT 1 FROM ds_metrics
-         WHERE test_run_id IN (${placeholders})
-           AND ramp_up = false
-           AND value IS NOT NULL
-       ) AS has_metrics`,
-      testRunIds
-    );
-
-    if (!metricsProbe[0]?.has_metrics) {
-      this.logger.warn(`⚠️ No metrics found for test runs: ${testRunIds.join(', ')}`);
-      this.logger.warn('💡 This could mean:');
-      this.logger.warn('   1. MetricsPipeline hasn\'t run yet for these test runs');
-      this.logger.warn('   2. All metrics have ramp_up=true (no steady-state data)');
-      this.logger.warn('   3. All metric values are NULL');
-      return { success: true, rowCount: 0 };
-    }
+    const placeholders = targetRunIds.map((_, i) => `$${i + 1}`).join(', ');
 
     const aggregationSQL = `
       -- The runs being aggregated, read once. Everything below joins this
@@ -659,19 +699,19 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       WHERE test_run_id IN (${placeholders})
     `;
 
-    const deleteResult = await manager.query(deleteSQL, testRunIds);
+    const deleteResult = await manager.query(deleteSQL, targetRunIds);
     // TypeORM surfaces a DELETE as [rows, rowCount]; `.rowCount` on that array is
     // always undefined, so the old log claimed 0 even when rows were removed.
     const deletedRows = Array.isArray(deleteResult) ? (deleteResult[1] ?? undefined) : undefined;
 
     this.logger.info(
-      `✅ Deleted ${deletedRows ?? 'an unknown number of'} existing statistic records for test runs: ${testRunIds.join(', ')}`
+      `✅ Deleted ${deletedRows ?? 'an unknown number of'} existing statistic records for test runs: ${targetRunIds.join(', ')}`
     );
 
     // Step 2: INSERT new statistics (no ON CONFLICT needed since we deleted existing records)
     this.logger.info(`🚀 Executing statistics aggregation INSERT...`);
 
-    await manager.query(aggregationSQL, testRunIds);
+    await manager.query(aggregationSQL, targetRunIds);
 
     // For CTE-based INSERT...SELECT, TypeORM doesn't return rowCount reliably
     // Verify the actual count from the database
@@ -680,7 +720,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       FROM ds_metric_statistics
       WHERE test_run_id IN (${placeholders})
     `;
-    const actualCountResult = await manager.query(actualCountQuery, testRunIds);
+    const actualCountResult = await manager.query(actualCountQuery, targetRunIds);
     const actualCount = actualCountResult[0]?.count || 0;
 
     this.logger.info(
@@ -688,9 +728,12 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     );
 
     if (actualCount === 0) {
-      // The EXISTS probe above said there was data, so an empty result is a real
-      // problem (org-scoping dropped every dashboard, most likely) — not "nothing
-      // to do", which returned earlier.
+      // The probe only established that the run HAS ds_metrics rows — it deliberately no
+      // longer asks whether any are in-window, because that depends on the ramp_up flags
+      // this pipeline rewrites. So zero has two causes now, and they are not
+      // distinguishable here: org-scoping dropped every dashboard (a real problem), or the
+      // new analysis window legitimately excludes every sample (correct, and the reason
+      // the caller edited the offsets). Warn rather than assert.
       this.logger.warn('⚠️  Metrics exist for these test runs but no statistics were written - possible data issue');
     }
 

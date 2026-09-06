@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.0] - 2026-09-05
+
+### Added
+- **An analysis time range can now be applied to every test run of a workload at once.** Changing one run's analysis window in isolation quietly breaks the comparison it feeds: ADAPT measures a run against a baseline of earlier runs, and those runs keep whatever window they were analysed under, so a trimmed run ends up compared against untrimmed history. The dialog now offers to apply the same offsets across the workload and re-evaluate everything affected.
+
+  Before anything is written, Perfana says exactly what will change — how many runs of that environment and workload will take the offsets, and how many will be left alone and why. Three reasons a run is left alone: it is still running (its measurement data is flagged as it arrives, so moving the window mid-run would leave it flagged two different ways), it is shorter than the offsets being applied, or it belongs to a team the user cannot write to. A workload-wide change then takes a second, explicit confirmation that names the count.
+
+- **A bulk apply is limited to 100 test runs.** Applying an analysis window across a workload is real work for every run it touches — statistics recalculated, baselines rebuilt, comparisons re-run — and it holds that workload's processing slot for the duration, refusing other re-evaluations meanwhile. Beyond 100 runs the request is refused with the count and the limit, rather than accepted and left to run for hours. The preview says in advance whether the limit would be exceeded.
+
+- **Offsets that leave no analysis window are now rejected instead of quietly ignored.** The existing check only compared the leading offset against the run length and never looked at the trailing one, so a combination that overlapped either forced the run to report that no baseline could be found, or silently fell back to analysing the whole run — neither reported as a misconfiguration. The check now uses both offsets together, which is what actually defines the window, and measures the run the same way the analysis itself does (from its start and end timestamps) rather than trusting the duration a test reports for itself. It applies to the run being edited, which is rejected outright, and to every other run in a bulk apply, which is listed as skipped.
+
+### Fixed
+- **Recalculating statistics for several runs at once could delete the statistics of the ones whose measurement data had aged out.** The check for "is there anything to recalculate" was answered once for the whole batch while the deletion it guarded was applied to every run in that batch. One run with data present therefore authorised deleting the statistics of every other run alongside it, and only the runs that still had raw data were rebuilt. For an older run this is not recoverable: the measurements it would be rebuilt from are gone, and its baseline comparison goes with them. The check is now made per run, and the deletion only ever covers the runs that passed it.
+
+  Harmless while batches were small and hand-picked. Applying a change across a whole workload mixes recent and old runs in one batch by construction, which is what made it reachable.
+
+- **A large re-evaluation no longer runs into the database's statement time limit.** Both the baseline comparison and the statistics recalculation do their work for every run they are given in a single database transaction, and each has a ceiling that grows with the number of runs — a time limit for one, a limit on how much compressed data may be rewritten for the other. A workload-wide request exceeded both. Work is now split into batches of five (configurable), processed one after another inside the same job. It has to stay a single job: a second job for the same workload is refused rather than queued, because only one may work on a workload at a time.
+
+- **Asking to recalculate statistics while also refreshing data no longer does nothing.** The recalculation was tied to whether the refresh actually returned new data, so a request to recalculate because the *analysis window* moved — which no data fetch can detect — was skipped, while the progress display still showed the step running and completing.
+
+- **Every run changed in a bulk edit is recorded in the audit trail with what actually changed**, and each one that is complete has its transaction statistics rebuilt. Previously only the run the user had open was rebuilt, and because that data is only ever built once, the rest would have served figures from the previous analysis window indefinitely with nothing reported.
+
 ## [0.2.94.7] - 2026-09-05
 
 ### Fixed
