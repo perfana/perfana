@@ -708,6 +708,48 @@ describe('TestRunsController', () => {
       // by `=== true` to false silently, or by a looser guard to a workload-wide write.
       expect(service.updateAnalysisTimeRange).not.toHaveBeenCalled();
     });
+
+    // `ramp_up` / `ramp_down` are postgres INTEGER. A `typeof === 'number' && >= 0`
+    // guard admits three values the column cannot hold, and each one reached the driver
+    // as an unhandled error — a 500 for what is a malformed request.
+    it.each([
+      // JSON.parse('{"analysisStartOffset": 1e999}') is Infinity, not a parse error.
+      ['Infinity from the 1e999 literal', Number.POSITIVE_INFINITY, 0],
+      ['a fractional offset', 1.5, 0],
+      ['a value past int4 max', 999999999999, 0],
+      ['NaN', Number.NaN, 0],
+      ['an out-of-range end offset', 0, 999999999999],
+      ['a fractional end offset', 0, 1.5],
+    ])('should throw ValidationException for %s', async (_label, start, end) => {
+      await expect(
+        controller.updateAnalysisTimeRange(
+          mockTestRun.id,
+          { analysisStartOffset: start, analysisEndOffset: end },
+          mockUserContext,
+        ),
+      ).rejects.toThrow(ValidationException);
+
+      expect(service.updateAnalysisTimeRange).not.toHaveBeenCalled();
+    });
+
+    it('should accept the int4 boundary value 2147483647', async () => {
+      service.updateAnalysisTimeRange.mockResolvedValue(mockTestRun);
+
+      await controller.updateAnalysisTimeRange(
+        mockTestRun.id,
+        { analysisStartOffset: 2147483647, analysisEndOffset: 2147483647 },
+        mockUserContext,
+      );
+
+      expect(service.updateAnalysisTimeRange).toHaveBeenCalledWith(
+        mockTestRun.id,
+        2147483647,
+        2147483647,
+        mockUserContext.userId,
+        mockUserContext.roles,
+        false,
+      );
+    });
   });
 
   // G4b: GET :id/analysis-time-range/scope
@@ -719,7 +761,14 @@ describe('TestRunsController', () => {
   // and Number('abc') is NaN, which compares false against every bound and would sail
   // past a naive `start < 0` guard into the partition.
   describe('GET :id/analysis-time-range/scope', () => {
-    const preview = { total: 7, applicable: 4, skipped: [{ testRunId: 'run-9', completed: false, skipped: 'running' as const }] };
+    const preview = {
+      total: 7,
+      applicable: 4,
+      skipped: [{ testRunId: 'run-9', completed: false, skipped: 'running' as const }],
+      // The service reports the cap condition itself so the dialog can say the write
+      // would be refused, rather than discovering it from the PUT's 400.
+      exceedsCap: false,
+    };
 
     it('forwards parsed offsets to the service and returns its preview', async () => {
       const id = mockTestRun.id;
@@ -768,17 +817,11 @@ describe('TestRunsController', () => {
       expect(service.previewAnalysisTimeRangeScope).not.toHaveBeenCalled();
     });
 
-    // KNOWN GAP — reported, not fixed here (tests-only change).
-    //
-    // `?analysisStartOffset=` (present but empty) reaches the handler as `''`, and
-    // `Number('')` is 0, which is finite and non-negative — so the guard admits it and
-    // the endpoint previews the "no trim at all" scope. The handler's own comment says
-    // "Number('') is 0 ... so both the empty and the garbage case have to be rejected
-    // explicitly", but `!Number.isFinite(start) || start < 0` does not reject it.
     // Number('') is 0, not NaN, so an explicitly empty offset used to pass the finite /
     // non-negative guard and preview the NO-TRIM scope — the wrong count in the very
     // dialog the user is about to confirm. An omitted param is undefined -> NaN and was
-    // always caught; only the empty string slipped through.
+    // always caught; only the empty string slipped through. Closed by the `trim() === ''`
+    // arm in the controller's parse().
     it.each([
       ['start', '', '30'],
       ['end', '30', ''],
@@ -788,6 +831,76 @@ describe('TestRunsController', () => {
       await expect(
         controller.previewAnalysisTimeRangeScope(mockTestRun.id, startOffset, endOffset, mockUserContext),
       ).rejects.toThrow(ValidationException);
+    });
+
+    // HTTP parameter pollution. The `string` parameter type is not enforced at runtime:
+    // qs turns a repeated param into an array and a bracketed one into an object, and
+    // `raw.trim()` on either threw a TypeError that surfaced as a 500 — bypassing the
+    // validation this handler exists to do.
+    it('should coerce polluted array params (?analysisStartOffset=1&analysisStartOffset=2) to their first value', async () => {
+      service.previewAnalysisTimeRangeScope.mockResolvedValue(preview);
+
+      await controller.previewAnalysisTimeRangeScope(
+        mockTestRun.id,
+        ['30', '900'] as unknown as string,
+        '60',
+        mockUserContext,
+      );
+
+      expect(service.previewAnalysisTimeRangeScope).toHaveBeenCalledWith(
+        mockTestRun.id,
+        30,
+        60,
+        mockUserContext.userId,
+        mockUserContext.roles,
+      );
+    });
+
+    it.each([
+      ['an object-shaped start param (?analysisStartOffset[a]=b)', { a: 'b' } as unknown as string, '60'],
+      ['an object-shaped end param', '30', { a: 'b' } as unknown as string],
+      ['an empty array param', [] as unknown as string, '60'],
+      ['an array of non-strings', [30] as unknown as string, '60'],
+    ])('rejects %s with a 400 rather than a 500', async (_label, start, end) => {
+      await expect(
+        controller.previewAnalysisTimeRangeScope(mockTestRun.id, start, end, mockUserContext),
+      ).rejects.toThrow(ValidationException);
+
+      expect(service.previewAnalysisTimeRangeScope).not.toHaveBeenCalled();
+    });
+
+    // The preview must refuse exactly what the write refuses: a preview that reports a
+    // blast radius for a window the PUT will reject is worse than no preview.
+    it.each([
+      ['a fractional offset', '1.5', '60'],
+      ['a value past int4 max', '999999999999', '60'],
+      ['Infinity', 'Infinity', '60'],
+      ['a fractional end offset', '30', '1.5'],
+    ])('rejects %s, matching the PUT', async (_label, start, end) => {
+      await expect(
+        controller.previewAnalysisTimeRangeScope(mockTestRun.id, start, end, mockUserContext),
+      ).rejects.toThrow(ValidationException);
+
+      expect(service.previewAnalysisTimeRangeScope).not.toHaveBeenCalled();
+    });
+
+    it('accepts the int4 boundary value 2147483647', async () => {
+      service.previewAnalysisTimeRangeScope.mockResolvedValue(preview);
+
+      await controller.previewAnalysisTimeRangeScope(
+        mockTestRun.id,
+        '2147483647',
+        '2147483647',
+        mockUserContext,
+      );
+
+      expect(service.previewAnalysisTimeRangeScope).toHaveBeenCalledWith(
+        mockTestRun.id,
+        2147483647,
+        2147483647,
+        mockUserContext.userId,
+        mockUserContext.roles,
+      );
     });
   });
 

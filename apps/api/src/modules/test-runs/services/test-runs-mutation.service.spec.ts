@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TestRunsMutationService } from './test-runs-mutation.service';
+import { TestRunsMutationService, MAX_BULK_ANALYSIS_TIME_RANGE_RUNS } from './test-runs-mutation.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { UpdateRunningTestDto } from '../dto/update-running-test.dto';
@@ -116,6 +116,8 @@ describe('TestRunsMutationService', () => {
     const mockBullmqClientService = {
       analyzeTest: jest.fn(),
       enqueueTransactionStatsRollup: jest.fn(),
+      enqueueTransactionStatsRollupBulk: jest.fn().mockResolvedValue([]),
+      reevaluateBatch: jest.fn(),
     };
     const mockCreateHandler = { execute: jest.fn() };
     const mockUpdateHandler = { execute: jest.fn() };
@@ -530,6 +532,7 @@ describe('TestRunsMutationService', () => {
       };
       const mockBullmq = {
         enqueueTransactionStatsRollup: jest.fn().mockResolvedValue(undefined),
+        enqueueTransactionStatsRollupBulk: jest.fn().mockResolvedValue([]),
         analyzeTest: jest.fn().mockResolvedValue(undefined),
         reevaluateBatch: jest.fn().mockResolvedValue(undefined),
         ...bullmqOverrides,
@@ -553,7 +556,10 @@ describe('TestRunsMutationService', () => {
       await flushDeferred();
 
       expect(mockHandler.execute).toHaveBeenCalledWith({ id: 'uuid-1', analysisStartOffset: 30, analysisEndOffset: 60, applyToAll: false });
-      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-001');
+      // ONE round trip, not one per run: the RLS interceptor awaits after-commit hooks
+      // before the response is emitted, so these sit on the request's critical path.
+      expect(mockBullmq.enqueueTransactionStatsRollupBulk).toHaveBeenCalledWith(['run-001']);
+      expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
       expect(result).toBe(mockResult);
     });
 
@@ -564,7 +570,7 @@ describe('TestRunsMutationService', () => {
       await service.updateAnalysisTimeRange('uuid-1', 0, 0, 'user-1', []);
       await flushDeferred();
 
-      expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalled();
+      expect(mockBullmq.enqueueTransactionStatsRollupBulk).not.toHaveBeenCalled();
     });
 
     it('re-analyses only the edited run when applyToAll is not set', async () => {
@@ -675,11 +681,10 @@ describe('TestRunsMutationService', () => {
       await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
       await flushDeferred();
 
-      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledTimes(2);
-      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-001');
-      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-003');
-      // run-002 was still running, so it has no rollup to refresh.
-      expect(mockBullmq.enqueueTransactionStatsRollup).not.toHaveBeenCalledWith('run-002');
+      // One bulk call carrying exactly the completed runs. run-002 was still running,
+      // so it has no rollup to refresh.
+      expect(mockBullmq.enqueueTransactionStatsRollupBulk).toHaveBeenCalledTimes(1);
+      expect(mockBullmq.enqueueTransactionStatsRollupBulk).toHaveBeenCalledWith(['run-001', 'run-003']);
     });
 
     it('rolls up a completed sibling even when the edited run itself is still running', async () => {
@@ -689,28 +694,27 @@ describe('TestRunsMutationService', () => {
       await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
       await flushDeferred();
 
-      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledTimes(1);
-      expect(mockBullmq.enqueueTransactionStatsRollup).toHaveBeenCalledWith('run-002');
+      expect(mockBullmq.enqueueTransactionStatsRollupBulk).toHaveBeenCalledTimes(1);
+      expect(mockBullmq.enqueueTransactionStatsRollupBulk).toHaveBeenCalledWith(['run-002']);
     });
 
     it('still enqueues the re-evaluation when one sibling rollup fails', async () => {
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
-      const rollup = jest
-        .fn()
-        .mockRejectedValueOnce(new Error('redis blip'))
-        .mockResolvedValue(undefined);
+      // addBulk is not atomic, so a rejection can leave some jobs queued. The
+      // re-evaluation must still be enqueued — losing it is the visible failure.
+      const rollup = jest.fn().mockRejectedValue(new Error('redis blip'));
       const { mockBullmq } = installMocks(
         mockResult,
         ['run-001', 'run-002'],
         ['run-001', 'run-002'],
         [],
-        { enqueueTransactionStatsRollup: rollup },
+        { enqueueTransactionStatsRollupBulk: rollup },
       );
 
       await service.updateAnalysisTimeRange('uuid-1', 30, 60, 'user-1', [], true);
       await flushDeferred();
 
-      expect(rollup).toHaveBeenCalledTimes(2);
+      expect(rollup).toHaveBeenCalledTimes(1);
       expect(mockBullmq.reevaluateBatch).toHaveBeenCalled();
     });
 
@@ -718,8 +722,10 @@ describe('TestRunsMutationService', () => {
     //
     // runAfterRequestCommit dispatches as `void Promise.resolve().then(fn)` when there is
     // no request EM, so an escaping rejection is an unhandled rejection — which terminates
-    // the process on this Node version. The response is already sent by then; nothing in
-    // the follow-up is worth taking the API down for.
+    // the process on this Node version. (The response is NOT already sent: under
+    // DB_ENABLE_RLS_ROLE=true the interceptor awaits every hook before re-emitting. What
+    // deferring buys is releasing the pooled Postgres connection first.) Nothing in the
+    // follow-up is worth taking the API down for.
     it('returns the updated run even when the re-evaluation enqueue fails', async () => {
       const mockResult = { id: 'uuid-1', test_run_id: 'run-001', completed: true };
       installMocks(mockResult, ['run-001', 'run-002'], ['run-001', 'run-002'], [], {
@@ -768,6 +774,176 @@ describe('TestRunsMutationService', () => {
       await flushDeferred();
 
       expect(result).toEqual({ ...mockResult, affectedCount: 2, skipped });
+    });
+  });
+
+  /**
+   * `previewAnalysisTimeRangeScope` — the read-only twin of the bulk write.
+   *
+   * It had no service-level test at all, so nothing asserted that the authorization gate
+   * runs, that a missing run 404s, or that the shape the dialog renders is what the
+   * method returns. All three are load-bearing: this preview is what the user confirms
+   * before a workload-wide rewrite.
+   */
+  describe('previewAnalysisTimeRangeScope', () => {
+    const scopeRun = (overrides?: Partial<TestRunEntity>): TestRunEntity =>
+      createMockTestRunEntity({
+        organizationId: mockOrganizationId,
+        teamId: 'team-uuid-123',
+        ...overrides,
+      });
+
+    beforeEach(() => {
+      // The shared fixture has no organizationId / teamId, and the partition compares
+      // both against the target — give every run in this block the same pair so the
+      // scope questions under test are the only ones being answered.
+      testRunRepo.findOne.mockResolvedValue(scopeRun());
+      testRunRepo.find.mockResolvedValue([]);
+    });
+
+    it('refuses a caller holding test-run:read but not test-run:update', async () => {
+      authzService.getCapabilities.mockResolvedValue([Capability.TestRunRead]);
+
+      await expect(
+        service.previewAnalysisTimeRangeScope('test-run-uuid-123', 30, 60, mockUserId, mockRoles),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      // The gate must run BEFORE the workload is read, or the preview leaks the size and
+      // composition of a workload the caller cannot touch.
+      expect(testRunRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when the run does not exist', async () => {
+      testRunRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.previewAnalysisTimeRangeScope('missing-uuid', 30, 60, mockUserId, mockRoles),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('returns { total, applicable, skipped, exceedsCap } for the workload', async () => {
+      const target = scopeRun({ id: 'uuid-target', testRunId: 'run-target' });
+      const running = scopeRun({ id: 'uuid-2', testRunId: 'run-002', completed: false });
+      // 100s long, so a 60 + 60 trim leaves no analysis window at all.
+      const tooShort = scopeRun({
+        id: 'uuid-3',
+        testRunId: 'run-003',
+        startTime: new Date('2024-01-15T10:00:00Z'),
+        endTime: new Date('2024-01-15T10:01:40Z'),
+        duration: 100,
+      });
+      const otherTeam = scopeRun({ id: 'uuid-4', testRunId: 'run-004', teamId: 'team-other' });
+      testRunRepo.findOne.mockResolvedValue(target);
+      testRunRepo.find.mockResolvedValue([target, running, tooShort, otherTeam]);
+
+      const result = await service.previewAnalysisTimeRangeScope(
+        'uuid-target', 60, 60, mockUserId, mockRoles,
+      );
+
+      expect(result).toEqual({
+        total: 4,
+        applicable: 1,
+        skipped: [
+          { testRunId: 'run-002', completed: false, skipped: 'running' },
+          { testRunId: 'run-003', completed: true, skipped: 'too-short' },
+          { testRunId: 'run-004', completed: true, skipped: 'not-writable' },
+        ],
+        exceedsCap: false,
+      });
+    });
+
+    it('projects the read instead of hydrating every column of every run', async () => {
+      await service.previewAnalysisTimeRangeScope('uuid-target', 30, 60, mockUserId, mockRoles);
+
+      const findArgs = testRunRepo.find.mock.calls.at(0)?.[0] as Record<string, unknown> | undefined;
+      // startTime/endTime are what offsetsFitRun measures; dropping them would make the
+      // preview answer the fit question from client-supplied `duration` while the write
+      // answers it from the timestamps.
+      expect(findArgs?.select).toEqual(
+        expect.objectContaining({
+          id: true,
+          testRunId: true,
+          completed: true,
+          startTime: true,
+          endTime: true,
+          duration: true,
+          organizationId: true,
+          teamId: true,
+        }),
+      );
+    });
+
+    const workloadOf = (size: number) => {
+      const target = scopeRun({ id: 'uuid-0', testRunId: 'run-000' });
+      return [
+        target,
+        ...Array.from({ length: size - 1 }, (_, i) =>
+          scopeRun({ id: `uuid-${i + 1}`, testRunId: `run-${i + 1}` }),
+        ),
+      ];
+    };
+
+    it('reports exceedsCap when the applicable set is over the limit', async () => {
+      const runs = workloadOf(MAX_BULK_ANALYSIS_TIME_RANGE_RUNS + 1);
+      testRunRepo.findOne.mockResolvedValue(runs[0]!);
+      testRunRepo.find.mockResolvedValue(runs);
+
+      const result = await service.previewAnalysisTimeRangeScope(
+        'uuid-0', 30, 60, mockUserId, mockRoles,
+      );
+
+      expect(result.applicable).toBe(MAX_BULK_ANALYSIS_TIME_RANGE_RUNS + 1);
+      expect(result.exceedsCap).toBe(true);
+    });
+
+    it('does not report exceedsCap exactly at the limit', async () => {
+      const runs = workloadOf(MAX_BULK_ANALYSIS_TIME_RANGE_RUNS);
+      testRunRepo.findOne.mockResolvedValue(runs[0]!);
+      testRunRepo.find.mockResolvedValue(runs);
+
+      const result = await service.previewAnalysisTimeRangeScope(
+        'uuid-0', 30, 60, mockUserId, mockRoles,
+      );
+
+      expect(result.applicable).toBe(MAX_BULK_ANALYSIS_TIME_RANGE_RUNS);
+      expect(result.exceedsCap).toBe(false);
+    });
+
+    // The write has to refuse exactly what the preview flags, or the dialog promises a
+    // blast radius the PUT then rejects.
+    it('the write path refuses an over-cap apply before the handler runs', async () => {
+      const runs = workloadOf(MAX_BULK_ANALYSIS_TIME_RANGE_RUNS + 1);
+      testRunRepo.findOne.mockResolvedValue(runs[0]!);
+      testRunRepo.find.mockResolvedValue(runs);
+      const mockHandler = { execute: jest.fn() };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+
+      await expect(
+        service.updateAnalysisTimeRange('uuid-0', 30, 60, mockUserId, mockRoles, true),
+      ).rejects.toThrow(
+        new RegExp(
+          `${MAX_BULK_ANALYSIS_TIME_RANGE_RUNS + 1} test runs.*limit of ${MAX_BULK_ANALYSIS_TIME_RANGE_RUNS}`,
+        ),
+      );
+
+      expect(mockHandler.execute).not.toHaveBeenCalled();
+    });
+
+    it('does not read the workload at all on a single-run edit', async () => {
+      const mockHandler = {
+        execute: jest.fn().mockResolvedValue({
+          testRun: { id: 'uuid-0', test_run_id: 'run-000', completed: false },
+          affectedTestRunIds: ['run-000'],
+          completedTestRunIds: [],
+          skipped: [],
+        }),
+      };
+      (service as any).updateAnalysisTimeRangeHandler = mockHandler;
+
+      await service.updateAnalysisTimeRange('uuid-0', 30, 60, mockUserId, mockRoles, false);
+
+      expect(testRunRepo.find).not.toHaveBeenCalled();
+      expect(mockHandler.execute).toHaveBeenCalled();
     });
   });
 

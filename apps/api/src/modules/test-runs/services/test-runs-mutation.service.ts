@@ -16,7 +16,7 @@
 
 import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsSelect, FindOptionsWhere, Repository } from 'typeorm';
 import { withRequestEm, runAfterRequestCommit } from '../../../common/db/request-em';
 import { TestRun as TestRunEntity, OwnedResource } from '../../../entities';
 import { UpdateRunningTestDto } from '../dto/update-running-test.dto';
@@ -52,6 +52,49 @@ import { TestRunEventType } from '../types/realtime-events.types';
 
 // Re-export types for backward compatibility
 export { TestRun, SystemUnderTest, TestEnvironment, Workload };
+
+/**
+ * Ceiling on how many runs one "apply to all" may rewrite.
+ *
+ * The bulk apply has no natural bound — it is every run a system/environment/workload
+ * has ever produced, which on a long-lived nightly workload is thousands. Each one costs
+ * an audit row, a rollup job and a slot in the re-evaluate batch, all inside a single
+ * request. 100 matches the existing in-repo bound on a caller-supplied run set
+ * (`data-science.controller.ts` truncates `dto.testRunIds` with `.slice(0, 100)`), but
+ * this one REFUSES rather than truncates: silently applying the window to the first 100
+ * runs of a workload would leave the rest as an untrimmed baseline, which is the exact
+ * apples-to-oranges comparison the feature exists to prevent.
+ */
+export const MAX_BULK_ANALYSIS_TIME_RANGE_RUNS = 100;
+
+/**
+ * Columns the scope decision reads, and nothing else.
+ *
+ * `partitionAnalysisTimeRangeScope` needs id / testRunId / completed / duration /
+ * organizationId / teamId; the workload triple is what the candidate query is keyed on.
+ * Without a projection this hydrates every column of every run of the workload —
+ * `variables` and `deep_links` are jsonb and `status` / `consolidated_result` are
+ * unbounded — to compute six booleans per row.
+ */
+const ANALYSIS_TIME_RANGE_SCOPE_COLUMNS: FindOptionsSelect<TestRunEntity> = {
+  id: true,
+  testRunId: true,
+  completed: true,
+  // startTime/endTime are what offsetsFitRun actually measures — `duration` is only its
+  // fallback, because it is client-supplied and can disagree with the timestamps. Drop
+  // either of these and the PREVIEW silently answers the fit question from `duration`
+  // while the WRITE answers it from the timestamps, so the count the user confirms stops
+  // matching the rows that get written. Keep this list in step with everything
+  // partitionAnalysisTimeRangeScope reads.
+  startTime: true,
+  endTime: true,
+  duration: true,
+  organizationId: true,
+  teamId: true,
+  systemUnderTestId: true,
+  testEnvironment: true,
+  workload: true,
+};
 
 @Injectable()
 export class TestRunsMutationService {
@@ -522,10 +565,57 @@ export class TestRunsMutationService {
     analysisEndOffset: number,
     userId: string,
     roles: string[],
-  ): Promise<{ total: number; applicable: number; skipped: AnalysisTimeRangeScopeEntry[] }> {
+  ): Promise<{
+    total: number;
+    applicable: number;
+    skipped: AnalysisTimeRangeScopeEntry[];
+    /**
+     * The write would refuse this apply: more than MAX_BULK_ANALYSIS_TIME_RANGE_RUNS runs
+     * are applicable. Reported here rather than left to the 400, so the dialog can say so
+     * before the user commits instead of previewing a scope the PUT will reject.
+     */
+    exceedsCap: boolean;
+  }> {
     await this.assertCanModify({ id }, id, userId, roles);
 
-    const target = await withRequestEm(this.testRunRepo).findOne({ where: { id } });
+    const { total, applicable, skipped } = await this.resolveAnalysisTimeRangeScope(
+      id,
+      analysisStartOffset,
+      analysisEndOffset,
+    );
+
+    return {
+      total,
+      applicable: applicable.length,
+      skipped,
+      exceedsCap: applicable.length > MAX_BULK_ANALYSIS_TIME_RANGE_RUNS,
+    };
+  }
+
+  /**
+   * Resolve the target's workload and partition its runs against the proposed offsets.
+   *
+   * Shared by the preview and by the write path's cap check so the two cannot disagree
+   * about how many runs an apply would touch — a dialog that promises a count the write
+   * refuses is worse than no dialog.
+   *
+   * Projected (`ANALYSIS_TIME_RANGE_SCOPE_COLUMNS`) because this reads EVERY run of the
+   * workload; without it, a long-lived nightly workload hydrates thousands of fully
+   * populated entities to compute a handful of booleans per row.
+   */
+  private async resolveAnalysisTimeRangeScope(
+    id: string,
+    analysisStartOffset: number,
+    analysisEndOffset: number,
+  ): Promise<{
+    total: number;
+    applicable: TestRunEntity[];
+    skipped: AnalysisTimeRangeScopeEntry[];
+  }> {
+    const target = await withRequestEm(this.testRunRepo).findOne({
+      where: { id },
+      select: ANALYSIS_TIME_RANGE_SCOPE_COLUMNS,
+    });
     if (!target) {
       throw new NotFoundException(`Test run not found: ${id}`);
     }
@@ -536,6 +626,7 @@ export class TestRunsMutationService {
         testEnvironment: target.testEnvironment,
         workload: target.workload,
       },
+      select: ANALYSIS_TIME_RANGE_SCOPE_COLUMNS,
     });
 
     const { applicable, skipped } = partitionAnalysisTimeRangeScope(
@@ -545,7 +636,7 @@ export class TestRunsMutationService {
       analysisEndOffset,
     );
 
-    return { total: candidates.length, applicable: applicable.length, skipped };
+    return { total: candidates.length, applicable, skipped };
   }
 
   async updateAnalysisTimeRange(
@@ -561,6 +652,31 @@ export class TestRunsMutationService {
     );
 
     await this.assertCanModify({ id }, id, userId, roles);
+
+    if (applyToAll) {
+      // Refuse before the handler writes anything. The bulk apply is unbounded on its
+      // own — it is every run the system/environment/workload has ever produced — and
+      // each one costs an audit row, a rollup job and a slot in the re-evaluate batch,
+      // all inside one request.
+      //
+      // This repeats the scope read the handler does for itself. It is deliberate and
+      // it is the cheaper of the two: the handler needs FULL entities for the audit
+      // "before" diff, while this one is projected to the nine columns the decision
+      // reads. There is no way to hand the handler a verdict without changing it, and
+      // checking AFTER it returns would mean the rows are already written.
+      const { applicable } = await this.resolveAnalysisTimeRangeScope(
+        id,
+        analysisStartOffset,
+        analysisEndOffset,
+      );
+      if (applicable.length > MAX_BULK_ANALYSIS_TIME_RANGE_RUNS) {
+        throw new BadRequestException(
+          `Applying this analysis time range would rewrite ${applicable.length} test runs, ` +
+            `more than the limit of ${MAX_BULK_ANALYSIS_TIME_RANGE_RUNS}. Narrow the scope, ` +
+            `or apply it to this run only.`,
+        );
+      }
+    }
 
     const { testRun: result, affectedTestRunIds, completedTestRunIds, skipped } =
       await this.updateAnalysisTimeRangeHandler.execute({
@@ -592,12 +708,25 @@ export class TestRunsMutationService {
   }
 
   /**
-   * Queue the work an analysis-window edit implies, after the response has been sent.
+   * Queue the work an analysis-window edit implies, once the request's transaction has
+   * committed.
+   *
+   * NOT after the response is sent. When `DB_ENABLE_RLS_ROLE=true`,
+   * `RlsTransactionInterceptor` awaits every after-commit hook inside its `.then()`
+   * BEFORE re-emitting the value Nest turns into the response, so the caller waits for
+   * everything in here. What deferring actually buys is the Postgres connection: the
+   * interceptor nulls `REQ_EM` and the transaction is committed and its query runner
+   * released before the hooks run, so a Redis stall no longer holds a pooled connection
+   * idle-in-transaction — at pool max 50 that is what starves unrelated endpoints. It
+   * also guarantees the worker can see the rows this request wrote.
+   *
+   * Because the caller is waiting, the Redis round trips here are on the critical path
+   * and have to be batched rather than looped — hence `enqueueTransactionStatsRollupBulk`.
    *
    * Never rejects. `runAfterRequestCommit` dispatches its hook as
-   * `void Promise.resolve().then(fn)` when there is no request entity manager, so an
-   * escaping rejection is an unhandled rejection — which terminates the process on this
-   * Node version. The response is already sent by the time this runs; nothing in here is
+   * `void Promise.resolve().then(fn)` when there is no request entity manager (RLS off,
+   * `@SkipRls`, or outside an HTTP request), so an escaping rejection is an unhandled
+   * rejection — which terminates the process on this Node version. Nothing in here is
    * worth taking the API down for, so every failure is logged and swallowed.
    */
   private async enqueueAnalysisTimeRangeFollowUp(args: {
@@ -614,11 +743,41 @@ export class TestRunsMutationService {
       // populated table and answers `ready` forever, so a sibling that is never
       // re-enqueued serves previous-window numbers in Performance Analysis indefinitely,
       // with nothing logged anywhere.
-      for (const testRunId of completedTestRunIds) {
+      //
+      // One `addBulk` round trip, not one `add` per run: see the note above about the
+      // caller waiting on this hook. A 100-run workload was 100 sequential Redis round
+      // trips wired straight into the PUT's latency.
+      if (completedTestRunIds.length > 0) {
         try {
-          await this.bullmqClientService.enqueueTransactionStatsRollup(testRunId);
+          await this.bullmqClientService.enqueueTransactionStatsRollupBulk(completedTestRunIds);
         } catch (err) {
-          this.logger.error(`Failed to re-enqueue stats rollup after time range edit for ${testRunId}:`, err);
+          // `addBulk` is not atomic. Idempotency covers DUPLICATION, which is not the risk
+          // here — the risk is OMISSION: the runs after the failure point get no rollup at
+          // all, and nothing retries them. `repairEmptySamplerRollup` does not cover it
+          // either, because it only fires when test_run_sampler_stats is EMPTY, whereas
+          // these tables are populated with the PREVIOUS window's numbers, so
+          // getRollupStatus answers `ready` forever. That is exactly the silent staleness
+          // this whole completedTestRunIds path exists to prevent.
+          //
+          // So retry per run. The deterministic jobId makes anything already queued a
+          // no-op, and a run that fails again is named individually in the log for the
+          // backfill script to pick up.
+          this.logger.error(
+            `Bulk stats-rollup enqueue failed for ${completedTestRunIds.length} test run(s), ` +
+              `falling back to one enqueue per run:`,
+            err,
+          );
+          for (const testRunId of completedTestRunIds) {
+            try {
+              await this.bullmqClientService.enqueueTransactionStatsRollup(testRunId);
+            } catch (perRunErr) {
+              this.logger.error(
+                `Stats rollup could not be enqueued for ${testRunId} — its Performance Analysis ` +
+                  `will show previous-window numbers until apps/worker/scripts/backfill-test-run-stats-rollup.ts runs:`,
+                perRunErr,
+              );
+            }
+          }
         }
       }
 

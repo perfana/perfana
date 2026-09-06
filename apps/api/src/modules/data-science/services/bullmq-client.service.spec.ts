@@ -11,16 +11,22 @@ import { BullMQClientService } from './bullmq-client.service';
  */
 function makeService(overrides?: {
   add?: jest.Mock;
+  addBulk?: jest.Mock;
   redisAvailable?: boolean;
-}): { service: BullMQClientService; add: jest.Mock; errors: string[] } {
+}): { service: BullMQClientService; add: jest.Mock; addBulk: jest.Mock; errors: string[] } {
   const add = overrides?.add ?? jest.fn().mockResolvedValue({ id: 'statistics-run-001' });
+  const addBulk =
+    overrides?.addBulk ??
+    jest.fn().mockImplementation((jobs: { opts: { jobId: string } }[]) =>
+      Promise.resolve(jobs.map((job) => ({ id: job.opts.jobId }))),
+    );
   const errors: string[] = [];
 
   const service = Object.create(BullMQClientService.prototype) as BullMQClientService;
   const internals = service as unknown as Record<string, unknown>;
 
   internals.isRedisAvailable = overrides?.redisAvailable ?? true;
-  internals.analysisQueue = { add, name: 'perfana-analyze' };
+  internals.analysisQueue = { add, addBulk, name: 'perfana-analyze' };
   internals.batchQueue = { add: jest.fn(), name: 'perfana-batch' };
   internals.reevalQueue = { add: jest.fn(), name: 'perfana-reevaluate' };
   internals.flowProducer = { add: jest.fn() };
@@ -32,7 +38,7 @@ function makeService(overrides?: {
     }),
   } as unknown as Logger;
 
-  return { service, add, errors };
+  return { service, add, addBulk, errors };
 }
 
 describe('BullMQClientService.enqueueStatisticsCalculation (#552)', () => {
@@ -118,6 +124,97 @@ describe('BullMQClientService.enqueueStatisticsCalculation (#552)', () => {
       await expect(service.enqueueStatisticsCalculation('run-001')).rejects.toBe('boom');
       expect(errors.some((message) => message.includes('Unknown error'))).toBe(true);
     });
+  });
+});
+
+/**
+ * Retention on the transaction-stats-rollup enqueue.
+ *
+ * The jobId is deterministic (`rollup-<id>`) so repeated edits coalesce. BullMQ refuses
+ * an `add` whose jobId still exists in ANY state, so retaining the settled record turns
+ * every later enqueue for that run into a silent no-op — and `getRollupStatus` reads the
+ * table the first pass populated and answers `ready` forever, so nothing surfaces it.
+ * A 30-run "apply to all" leaves 30 such records behind under a numeric retention.
+ */
+describe('BullMQClientService.enqueueTransactionStatsRollup — retention', () => {
+  it('must not retain the job record after it settles', async () => {
+    const add = jest.fn().mockResolvedValue({ id: 'rollup-run-001' });
+    const { service } = makeService({ add });
+
+    const jobId = await service.enqueueTransactionStatsRollup('run-001');
+
+    expect(jobId).toBe('rollup-run-001');
+    const [jobName, payload, options] = add.mock.calls.at(0) as [
+      string,
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
+    expect(jobName).toBe('transaction-stats-rollup');
+    expect(payload).toMatchObject({ testRunId: 'run-001', initiatedBy: 'api' });
+    expect(options.jobId).toBe('rollup-run-001');
+    // A numeric retention (the old `removeOnComplete: 50`) keeps the record and blocks
+    // the next enqueue for this run.
+    expect(options.removeOnComplete).toBe(true);
+    expect(options.removeOnFail).toBe(true);
+    expect(options.attempts).toBe(3);
+    expect(options.backoff).toEqual({ type: 'exponential', delay: 5000 });
+  });
+});
+
+describe('BullMQClientService.enqueueTransactionStatsRollupBulk', () => {
+  it('enqueues every run in one round trip with the single-run job options', async () => {
+    const { service, addBulk, add } = makeService();
+
+    const ids = await service.enqueueTransactionStatsRollupBulk(['run-001', 'run-002']);
+
+    expect(ids).toEqual(['rollup-run-001', 'rollup-run-002']);
+    expect(addBulk).toHaveBeenCalledTimes(1);
+    // One round trip, not N: these run on the request's critical path, because the RLS
+    // interceptor awaits after-commit hooks before the response is emitted.
+    expect(add).not.toHaveBeenCalled();
+
+    const jobs = addBulk.mock.calls.at(0)?.[0] as {
+      name: string;
+      data: Record<string, unknown>;
+      opts: Record<string, unknown>;
+    }[];
+    expect(jobs).toHaveLength(2);
+    for (const [index, job] of jobs.entries()) {
+      expect(job.name).toBe('transaction-stats-rollup');
+      expect(job.data).toMatchObject({ testRunId: `run-00${index + 1}`, initiatedBy: 'api' });
+      expect(job.opts).toMatchObject({
+        jobId: `rollup-run-00${index + 1}`,
+        attempts: 3,
+        removeOnComplete: true,
+        removeOnFail: true,
+      });
+    }
+  });
+
+  it('is a no-op on an empty list, without touching Redis', async () => {
+    const { service, addBulk } = makeService({ redisAvailable: false });
+
+    await expect(service.enqueueTransactionStatsRollupBulk([])).resolves.toEqual([]);
+    expect(addBulk).not.toHaveBeenCalled();
+  });
+
+  it('rethrows without enqueuing when Redis is unavailable', async () => {
+    const { service, addBulk } = makeService({ redisAvailable: false });
+
+    await expect(service.enqueueTransactionStatsRollupBulk(['run-001'])).rejects.toThrow(
+      /Redis\/BullMQ is not available/,
+    );
+    expect(addBulk).not.toHaveBeenCalled();
+  });
+
+  it('logs and rethrows when the queue rejects the batch', async () => {
+    const addBulk = jest.fn().mockRejectedValue(new Error('connection reset'));
+    const { service, errors } = makeService({ addBulk });
+
+    await expect(
+      service.enqueueTransactionStatsRollupBulk(['run-001', 'run-002']),
+    ).rejects.toThrow('connection reset');
+    expect(errors.some((message) => message.includes('connection reset'))).toBe(true);
   });
 });
 

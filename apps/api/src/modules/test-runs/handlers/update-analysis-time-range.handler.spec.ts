@@ -1,14 +1,24 @@
 import { Test } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
   UpdateAnalysisTimeRangeHandler,
   offsetsFitRun,
+  runLengthSeconds,
   partitionAnalysisTimeRangeScope,
 } from './update-analysis-time-range.handler';
 import { TestRun as TestRunEntity, getAuditableFields } from '../../../entities';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { AuditService } from '../../audit/audit.service';
+
+// startTime/endTime are set deliberately: offsetsFitRun measures end_time - start_time
+// and falls back to `duration` only when a timestamp is missing. A fixture without them
+// sends every handler-level test down the FALLBACK branch — the one the implementation
+// explicitly demotes as untrustworthy — so the primary path would go uncovered.
+// One hour, which comfortably fits the offsets these tests use.
+const RUN_START = new Date('2026-09-05T10:00:00Z');
+const RUN_END = new Date('2026-09-05T11:00:00Z');
 
 const mockTestRun = (overrides = {}) => ({
   id: 'uuid-1',
@@ -17,6 +27,9 @@ const mockTestRun = (overrides = {}) => ({
   analysisEndOffset: 0,
   completed: true,
   organizationId: 'org-1',
+  startTime: RUN_START,
+  endTime: RUN_END,
+  duration: 3600,
   systemUnderTest: { team_id: null },
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -95,6 +108,37 @@ describe('UpdateAnalysisTimeRangeHandler', () => {
     await handler.execute({ id: 'uuid-1', analysisStartOffset: 0, analysisEndOffset: 0 });
 
     expect(mockGateway.emitTestRunUpdated).toHaveBeenCalled();
+  });
+
+  it('rejects offsets that leave the target run no analysis window', async () => {
+    // The target used to be exempt from the fit check while siblings were skipped for it,
+    // so the run the user is actually looking at could be written with an inverted window:
+    // ds_metric_statistics comes out empty, the Apdex rollup misses every transaction, and
+    // ADAPT reports INSUFFICIENT_DATA against a run that plainly has data.
+    const entity = mockTestRun(); // 3600s run
+    mockRepo.findOne.mockResolvedValue(entity);
+
+    await expect(
+      handler.execute({ id: 'uuid-1', analysisStartOffset: 1800, analysisEndOffset: 1800 }),
+    ).rejects.toThrow(BadRequestException);
+
+    // Nothing is written when the offsets are refused.
+    expect(mockDataSource.query).not.toHaveBeenCalled();
+  });
+
+  it('judges the target by its timestamps, not by a duration that disagrees', async () => {
+    // A 60s run whose client-supplied duration claims an hour. The pipeline measures
+    // end_time - start_time, so trusting `duration` here would accept offsets the
+    // pipeline then refuses, and the user would be told the trim was applied.
+    const entity = mockTestRun({
+      endTime: new Date(RUN_START.getTime() + 60_000),
+      duration: 3600,
+    });
+    mockRepo.findOne.mockResolvedValue(entity);
+
+    await expect(
+      handler.execute({ id: 'uuid-1', analysisStartOffset: 30, analysisEndOffset: 60 }),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('writes only the target run when applyToAll is not set', async () => {
@@ -188,7 +232,15 @@ describe('UpdateAnalysisTimeRangeHandler', () => {
         sibling({ id: 'uuid-2', testRunId: 'run-002' }),
         sibling({ id: 'uuid-3', testRunId: 'run-003', completed: false }),
         sibling({ id: 'uuid-4', testRunId: 'run-004', organizationId: 'org-2' }),
-        sibling({ id: 'uuid-5', testRunId: 'run-005', duration: 60 }),
+        // Genuinely short: a 60s SPAN, not merely a duration column claiming 60. The fit
+        // check reads end_time - start_time, so setting only `duration` would leave this
+        // run 3600s long and silently stop exercising the too-short branch at all.
+        sibling({
+          id: 'uuid-5',
+          testRunId: 'run-005',
+          endTime: new Date(RUN_START.getTime() + 60_000),
+          duration: 60,
+        }),
       ];
       mockRepo.findOne.mockResolvedValue(target);
       mockRepo.find.mockResolvedValue(candidates);
@@ -296,9 +348,45 @@ describe('UpdateAnalysisTimeRangeHandler', () => {
 // dialog would promise a count the write does not honour.
 // ---------------------------------------------------------------------------------
 
+describe('runLengthSeconds', () => {
+  // The timestamps are the primary source, and MUST be, because they are what
+  // RAMP_UP_EXPR in StatisticsPipeline measures. `duration` is client-supplied (an
+  // updating test posts it), so it can be seeded from a planned duration or stranded by
+  // an aborted run — trusting it would let the API accept offsets the pipeline rejects.
+  it('measures end_time - start_time, ignoring a disagreeing duration', () => {
+    expect(
+      runLengthSeconds({
+        startTime: new Date('2026-09-05T10:00:00Z'),
+        endTime: new Date('2026-09-05T10:05:00Z'),
+        duration: 3600, // the client's claim, deliberately wrong
+      }),
+    ).toBe(300);
+  });
+
+  it('falls back to duration only when a timestamp is missing', () => {
+    expect(runLengthSeconds({ startTime: new Date('2026-09-05T10:00:00Z'), duration: 42 })).toBe(42);
+    expect(runLengthSeconds({ endTime: new Date('2026-09-05T10:05:00Z'), duration: 42 })).toBe(42);
+    expect(runLengthSeconds({ duration: 42 })).toBe(42);
+  });
+
+  it('returns null when the length cannot be determined at all', () => {
+    expect(runLengthSeconds({})).toBeNull();
+    expect(runLengthSeconds({ duration: null })).toBeNull();
+  });
+});
+
 describe('offsetsFitRun', () => {
+  // Every case names the run length through the PRIMARY path (timestamps). Passing a
+  // bare number here would be silently vacuous: a number has no `startTime` and no
+  // `duration`, so runLengthSeconds returns null and offsetsFitRun answers `true` for
+  // any offsets at all — a test that passes whatever the implementation does.
+  const runOf = (seconds: number) => ({
+    startTime: new Date('2026-09-05T10:00:00Z'),
+    endTime: new Date(new Date('2026-09-05T10:00:00Z').getTime() + seconds * 1000),
+  });
+
   it('fits when the run is longer than the two exclusions combined', () => {
-    expect(offsetsFitRun(3600, 300, 300)).toBe(true);
+    expect(offsetsFitRun(runOf(3600), 300, 300)).toBe(true);
   });
 
   it('does NOT fit when the two exclusions exactly consume the run', () => {
@@ -306,26 +394,42 @@ describe('offsetsFitRun', () => {
     // window, not a degenerate-but-usable one: every sample is excluded, statistics come
     // out empty, and ADAPT reports INSUFFICIENT_DATA against a run that plainly has data.
     // `>` not `>=`.
-    expect(offsetsFitRun(90, 30, 60)).toBe(false);
+    expect(offsetsFitRun(runOf(90), 30, 60)).toBe(false);
   });
 
   it('does not fit when the exclusions overrun the run', () => {
-    expect(offsetsFitRun(60, 30, 60)).toBe(false);
+    expect(offsetsFitRun(runOf(60), 30, 60)).toBe(false);
   });
 
   it('fits by one second past the boundary', () => {
-    expect(offsetsFitRun(91, 30, 60)).toBe(true);
+    expect(offsetsFitRun(runOf(91), 30, 60)).toBe(true);
   });
 
   it('fits when no offsets are requested', () => {
-    expect(offsetsFitRun(3600, 0, 0)).toBe(true);
+    expect(offsetsFitRun(runOf(3600), 0, 0)).toBe(true);
   });
 
-  it('treats a run with no recorded duration as applicable', () => {
+  it('judges by the timestamps, not by a duration that disagrees with them', () => {
+    // The regression this guards: reading `duration` here while the pipeline reads the
+    // timestamps means the API accepts offsets the pipeline then refuses, and the user is
+    // told the trim was applied to runs where it silently was not.
+    const shortRunClaimingToBeLong = { ...runOf(60), duration: 3600 };
+    expect(offsetsFitRun(shortRunClaimingToBeLong, 30, 60)).toBe(false);
+
+    const longRunClaimingToBeShort = { ...runOf(3600), duration: 10 };
+    expect(offsetsFitRun(longRunClaimingToBeShort, 300, 300)).toBe(true);
+  });
+
+  it('uses duration when the run has no timestamps', () => {
+    expect(offsetsFitRun({ duration: 90 }, 30, 60)).toBe(false);
+    expect(offsetsFitRun({ duration: 91 }, 30, 60)).toBe(true);
+  });
+
+  it('treats a run whose length is unknown as applicable', () => {
     // Refusing on missing data would exclude runs that are probably fine, and the
     // pipeline's own "analyse the whole run" fallback still covers it.
-    expect(offsetsFitRun(null, 300, 300)).toBe(true);
-    expect(offsetsFitRun(undefined, 300, 300)).toBe(true);
+    expect(offsetsFitRun({ duration: null }, 300, 300)).toBe(true);
+    expect(offsetsFitRun({}, 300, 300)).toBe(true);
   });
 });
 

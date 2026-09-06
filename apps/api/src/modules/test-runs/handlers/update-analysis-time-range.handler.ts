@@ -7,7 +7,7 @@
  * both ends to exclude ramp-up and ramp-down periods from statistical analysis.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { withRequestEm, withRequestQuery } from '../../../common/db/request-em';
@@ -65,41 +65,57 @@ export interface UpdateAnalysisTimeRangeResult {
 }
 
 /**
+ * How long did this run actually last, in seconds?
+ *
+ * `end_time - start_time`, matching `RAMP_UP_EXPR` in StatisticsPipeline and its twin in
+ * MetricsPipeline — those are what actually decide whether a sample falls inside the
+ * analysis window, so anything else here would let the API and the pipeline disagree
+ * about the same run.
+ *
+ * `test_runs.duration` is only a fallback. It is CLIENT-SUPPLIED (an updating test posts
+ * it, see update-test-run.handler.ts), so it can be seeded from a planned duration or
+ * left behind by an aborted run and differ from the timestamps arbitrarily. Trusting it
+ * would let the API accept offsets the pipeline then rejects — the user is told the trim
+ * was applied, and on those runs it silently was not.
+ */
+export function runLengthSeconds(run: {
+  startTime?: Date | null;
+  endTime?: Date | null;
+  duration?: number | null;
+}): number | null {
+  if (run.startTime && run.endTime) {
+    return (new Date(run.endTime).getTime() - new Date(run.startTime).getTime()) / 1000;
+  }
+  return run.duration ?? null;
+}
+
+/**
  * Can this run take these offsets?
  *
- * The analysis window is [start + startOffset, end - endOffset]. When the two
- * exclusions overlap, every sample is outside the window. Two different failures
- * follow, and neither is reported as a misconfiguration:
+ * The analysis window is [start + startOffset, end - endOffset]. When the two exclusions
+ * overlap, every sample is outside the window. Two different failures follow, and neither
+ * is reported as a misconfiguration:
  *
  *  - `AdaptValidator.checkTooShortTestRuns` tests `ramp_up >= duration` ONLY — it never
  *    looks at ramp_down — and force-writes NO_BASELINES_FOUND on a match.
  *  - When only the SUM overruns, that check passes and the run instead falls through to
  *    the v0.2.93.3 "analyse the whole run" fallback, silently ignoring the trim.
  *
- * So the guard has to be the sum, matching RAMP_UP_EXPR and MetricsPipeline. A run with
- * no recorded duration is treated as applicable: refusing on missing data would exclude
- * runs that are probably fine, and the pipeline's own fallback still covers it.
+ * So the guard is the sum, against the same run length the pipeline uses. A run whose
+ * length cannot be determined at all is treated as applicable: refusing on missing data
+ * would exclude runs that are probably fine, and the pipeline's own fallback still covers
+ * it. Strict inequality — at exactly `start + end` the window is empty, not minimal.
  */
 export function offsetsFitRun(
-  duration: number | null | undefined,
+  run: { startTime?: Date | null; endTime?: Date | null; duration?: number | null },
   analysisStartOffset: number,
   analysisEndOffset: number,
 ): boolean {
-  if (duration === null || duration === undefined) return true;
-  return duration > analysisStartOffset + analysisEndOffset;
+  const length = runLengthSeconds(run);
+  if (length === null) { return true; }
+  return length > analysisStartOffset + analysisEndOffset;
 }
 
-/**
- * Decide which of a workload's runs may take a new analysis window, and why the rest
- * may not.
- *
- * Exported and pure so the preview endpoint and the write path share ONE definition of
- * the scope. Two implementations would drift, and the drift is invisible: the dialog
- * would promise a count the write does not honour.
- *
- * The target is always applicable — the user edited that run, and refusing it would make
- * the single-run and bulk paths disagree about the same click.
- */
 export function partitionAnalysisTimeRangeScope(
   candidates: TestRunEntity[],
   target: TestRunEntity,
@@ -128,7 +144,7 @@ export function partitionAnalysisTimeRangeScope(
       // mid-run leaves the run carrying rows flagged under two different settings —
       // one of the ways a run ends up with partial statistics.
       skipped.push({ ...entry, skipped: 'running' });
-    } else if (!offsetsFitRun(run.duration, analysisStartOffset, analysisEndOffset)) {
+    } else if (!offsetsFitRun(run, analysisStartOffset, analysisEndOffset)) {
       skipped.push({ ...entry, skipped: 'too-short' });
     } else {
       applicable.push(run);
@@ -161,6 +177,25 @@ export class UpdateAnalysisTimeRangeHandler {
 
       if (!testRunEntity) {
         throw new ResourceNotFoundException('TestRun', id);
+      }
+
+      // The TARGET is checked too, not just the siblings. Skipping a sibling as
+      // `too-short` while writing the same impossible offsets onto the run the user is
+      // looking at is the inconsistency the sibling check exists to prevent — and it is
+      // the run most likely to get them, since the dialog's slider is bounded by the
+      // summary timeseries duration rather than by end_time - start_time.
+      //
+      // Rejecting rather than silently falling back: an inverted window empties
+      // ds_metric_statistics, makes the Apdex rollup miss every transaction and leaves
+      // ADAPT reporting INSUFFICIENT_DATA on a run that plainly has data. The pipeline's
+      // whole-run fallback keeps that from being destructive, but it is still not what
+      // the user asked for, and nothing tells them.
+      if (!offsetsFitRun(testRunEntity, analysisStartOffset, analysisEndOffset)) {
+        const length = runLengthSeconds(testRunEntity);
+        throw new BadRequestException(
+          `Analysis offsets do not fit this test run: ${analysisStartOffset}s + ${analysisEndOffset}s ` +
+            `leaves no analysis window in a run of ${length === null ? 'unknown' : Math.round(length)}s`,
+        );
       }
 
       // Siblings are resolved BEFORE the write so the audit diff below has a genuine

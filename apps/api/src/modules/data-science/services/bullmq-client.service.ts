@@ -67,6 +67,34 @@ export interface ReevaluationOptions {
   metricName?: string;
 }
 
+/**
+ * Job options for a transaction-stats-rollup enqueue. One definition, so the single-run
+ * and bulk paths cannot drift apart on the two things that matter here.
+ *
+ * The jobId is deterministic so rapid successive edits to the same run coalesce into one
+ * pending job instead of stacking up; the pipeline re-reads the offsets from the DB at
+ * execute time, so whichever enqueue wins the race still computes against the latest
+ * values.
+ *
+ * The job record must NOT be retained after it settles. BullMQ refuses an `add` whose
+ * jobId still exists in ANY state — including `completed` — so a retained record makes
+ * every later enqueue for that run a silent no-op. That is not a corner case for this
+ * job: an "apply to all" over a 30-run workload leaves 30 `rollup-*` records behind, and
+ * the obvious user loop (apply → look → adjust → apply again) then rebuilds nothing for
+ * any of them. Worse, it is invisible — `getRollupStatus` reads the rollup table written
+ * by the FIRST pass, finds rows, and answers `ready` forever, so Performance Analysis
+ * serves previous-window numbers with nothing logged anywhere.
+ *
+ * `enqueueStatisticsCalculation` below carries the same trap and the same fix.
+ */
+const ROLLUP_JOB_OPTIONS = (testRunId: string) => ({
+  jobId: `rollup-${testRunId}`,
+  attempts: 3,
+  backoff: { type: 'exponential' as const, delay: 5000 },
+  removeOnComplete: true,
+  removeOnFail: true,
+});
+
 @Injectable()
 export class BullMQClientService implements OnModuleDestroy {
   private readonly logger = new Logger(BullMQClientService.name);
@@ -338,8 +366,14 @@ export class BullMQClientService implements OnModuleDestroy {
         }
       }
 
-      // Log the actual job data being put on the queue
-      this.logger.log(`Re-evaluation job data:`, JSON.stringify(jobData, null, 2));
+      // Summary only. Pretty-printing the payload wrote one line per test run id — a
+      // bulk apply over a whole workload dumped hundreds of lines into the log on every
+      // click, burying everything else. The ids are recoverable from the batch id.
+      this.logger.log(
+        `Re-evaluation job queued: batch=${reevalBatchId}, runs=${testRunIds.length}, ` +
+          `first=[${testRunIds.slice(0, 3).join(', ')}${testRunIds.length > 3 ? ', …' : ''}], ` +
+          `checks=${includeChecks}, adapt=${includeAdapt}, recalculateStatistics=${jobData.recalculateStatistics === true}`,
+      );
 
       const job = await this.batchQueue!.add('orchestrate-reevaluate-batch', jobData, {
         attempts: 2,
@@ -561,20 +595,10 @@ export class BullMQClientService implements OnModuleDestroy {
       this.checkRedisAvailability();
       this.logger.log(`Enqueuing transaction-stats-rollup for test run: ${testRunId}`);
 
-      // Deterministic jobId so rapid successive edits coalesce into one
-      // pending job instead of stacking up. The pipeline re-reads
-      // `analysisStartOffset` from the DB at execute time, so whichever
-      // enqueue "wins" the race will still compute against the latest value.
       const job = await this.analysisQueue!.add(
         'transaction-stats-rollup',
         { testRunId, initiatedBy: 'api', timestamp: new Date().toISOString() },
-        {
-          jobId: `rollup-${testRunId}`,
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
-          removeOnComplete: 50,
-          removeOnFail: 15,
-        },
+        ROLLUP_JOB_OPTIONS(testRunId),
       );
 
       this.logger.log(`Rollup job created with ID: ${job.id}`);
@@ -583,6 +607,48 @@ export class BullMQClientService implements OnModuleDestroy {
       const errorMessage = error && typeof error === 'object' && 'message' in error
         ? (error as Error).message : 'Unknown error';
       this.logger.error(`Failed to enqueue rollup for ${testRunId}: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Enqueue transaction-stats-rollup for many runs in ONE Redis round trip.
+   *
+   * An "apply to all" over a workload has to re-roll every completed run it wrote. The
+   * per-run loop that did this ran N sequential round trips, and — contrary to the
+   * comment that used to sit on the caller — those are NOT off the request's critical
+   * path: `RlsTransactionInterceptor` awaits every after-commit hook before re-emitting
+   * the value Nest turns into the response, so the user waits for all N.
+   *
+   * Same jobId and retention semantics as the single-run method (`ROLLUP_JOB_OPTIONS`),
+   * so a run already pending is still coalesced rather than duplicated.
+   *
+   * Returns the ids BullMQ assigned. `addBulk` is not atomic — a partial failure throws
+   * after some jobs are already queued — so callers treat a rejection as "some may have
+   * been enqueued", which is safe here because the job is idempotent.
+   */
+  async enqueueTransactionStatsRollupBulk(testRunIds: string[]): Promise<string[]> {
+    if (testRunIds.length === 0) return [];
+    try {
+      this.checkRedisAvailability();
+      this.logger.log(`Enqueuing transaction-stats-rollup for ${testRunIds.length} test run(s)`);
+
+      const timestamp = new Date().toISOString();
+      const jobs = await this.analysisQueue!.addBulk(
+        testRunIds.map((testRunId) => ({
+          name: 'transaction-stats-rollup',
+          data: { testRunId, initiatedBy: 'api', timestamp },
+          opts: ROLLUP_JOB_OPTIONS(testRunId),
+        })),
+      );
+
+      return jobs.map((job) => job.id!).filter((id): id is string => id !== undefined);
+    } catch (error) {
+      const errorMessage = error && typeof error === 'object' && 'message' in error
+        ? (error as Error).message : 'Unknown error';
+      this.logger.error(
+        `Failed to enqueue rollups for ${testRunIds.length} test run(s): ${errorMessage}`,
+      );
       throw error;
     }
   }
