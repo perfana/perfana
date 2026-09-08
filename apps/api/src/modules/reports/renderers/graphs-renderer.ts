@@ -30,11 +30,14 @@ const QUALITY_SIZES: Record<string, { width: number; height: number }> = {
   high: { width: 1400, height: 460 },
 };
 
-/** The slice of the run to chart, as epoch milliseconds. */
+/** The run's analysis time range, as epoch milliseconds. `null` = that end is not trimmed. */
 interface ChartWindow {
-  from: number;
-  to: number;
+  from: number | null;
+  to: number | null;
 }
+
+/** Matches the amber dashed boundary the Graphs card draws. */
+const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
 
 /**
  * Renderer for Graphs section
@@ -78,7 +81,10 @@ export class GraphsRenderer {
     const config = section.config || {};
     const title = section.title || 'Custom Graphs';
     const text = getSectionText(section);
-    const excludeRampUp = config.excludeRampUp !== false;
+    // The whole run is charted and the analysis time range is shaded on top of
+    // it, the way the Graphs card does it. Trimming the data here would leave
+    // nothing to shade.
+    const excludeRampUp = false;
     // Quality picks the chart's rendered size — the only dimension an inline SVG
     // has to trade. An explicit chartWidth/chartHeight still wins, so a template
     // that set them keeps its size.
@@ -91,7 +97,7 @@ export class GraphsRenderer {
       return this.renderNoDataSection(title, text, 'No test run data available for graph rendering.');
     }
 
-    const window = this.chartWindow(config, testRun);
+    const window = this.analysisWindow(testRun);
 
     // Determine ds_metrics panels to render
     const includeAggregated = config.includeAggregated === true;
@@ -140,8 +146,6 @@ export class GraphsRenderer {
       ];
     }
 
-    timeSeriesData = this.clipToWindow(timeSeriesData, window);
-
     if (timeSeriesData.length === 0) {
       if (includeAggregated) {
         return this.renderNoDataSection(title, text, 'No aggregated performance-test data found for this test run.');
@@ -153,7 +157,7 @@ export class GraphsRenderer {
     }
 
     const charts = timeSeriesData
-      .map((panel, idx) => this.renderPanelChart(panel, idx, chartWidth, chartHeight, showLegend))
+      .map((panel, idx) => this.renderPanelChart(panel, idx, chartWidth, chartHeight, window, showLegend))
       .join('\n');
 
     return `
@@ -247,15 +251,12 @@ export class GraphsRenderer {
       // ds_metrics rows and is computed from the raw tables instead.
       const stored = preset.panels.filter((p) => !p.aggregate);
       const aggregated = preset.panels.filter((p) => p.aggregate);
-      const series = this.clipToWindow(
-        [
-          ...(stored.length > 0
-            ? await this.dataFetcher.getMetricsTimeSeries(testRun.testRunId, stored, excludeRampUp, userId, roles)
-            : []),
-          ...(await this.buildPresetAggregatedPanels(testRun.testRunId, aggregated, excludeRampUp, userId, roles)),
-        ],
-        window,
-      );
+      const series = [
+        ...(stored.length > 0
+          ? await this.dataFetcher.getMetricsTimeSeries(testRun.testRunId, stored, excludeRampUp, userId, roles)
+          : []),
+        ...(await this.buildPresetAggregatedPanels(testRun.testRunId, aggregated, excludeRampUp, userId, roles)),
+      ];
       if (series.length === 0) {
         charts.push(`
           <div style="margin: 16px 0;">
@@ -266,7 +267,7 @@ export class GraphsRenderer {
         continue;
       }
       seriesCount += series.length;
-      charts.push(this.renderChart(preset.name, series, idx, width, height, showLegend));
+      charts.push(this.renderChart(preset.name, series, idx, width, height, window, showLegend));
     }
 
     if (seriesCount === 0) {
@@ -289,53 +290,30 @@ export class GraphsRenderer {
     panelIdx: number,
     width: number,
     height: number,
+    window: ChartWindow,
     showLegend: boolean = true,
   ): string {
     const chartTitle = panel.dashboardLabel
       ? `${panel.dashboardLabel} — ${panel.panelTitle}`
       : panel.panelTitle;
-    return this.renderChart(chartTitle, [panel], panelIdx, width, height, showLegend);
+    return this.renderChart(chartTitle, [panel], panelIdx, width, height, window, showLegend);
   }
 
   /**
-   * The slice of the run the section asked to chart.
+   * The run's analysis time range, in epoch milliseconds.
    *
-   * Offsets trim from each END of the run, the same convention the analysis
-   * time range uses (effective duration = duration − start − end) — a reader who
-   * has set one there should not have to learn a second meaning here.
+   * The offsets belong to the test run, not to the section: they are the same
+   * `analysisStartOffset` / `analysisEndOffset` (seconds) the Graphs card reads,
+   * so the report and the card mark the same band. Without a clock to anchor
+   * them to, neither end is marked.
    */
-  private chartWindow(config: Record<string, unknown>, testRun: TestRun): ChartWindow {
-    const range = (config.timeRange ?? {}) as { startOffset?: unknown; endOffset?: unknown };
-    const minutes = (value: unknown) => {
-      const n = typeof value === 'number' ? value : Number(value);
-      return Number.isFinite(n) && n > 0 ? n * 60_000 : 0;
-    };
-    const startTrim = minutes(range.startOffset);
-    const endTrim = minutes(range.endOffset);
-    if (startTrim === 0 && endTrim === 0) return { from: -Infinity, to: Infinity };
-
-    // Trimming needs the run's own clock. Without it the offsets have no anchor,
-    // so the window is left open rather than guessed at from the data.
+  private analysisWindow(testRun: TestRun): ChartWindow {
     const start = testRun.startTime ? new Date(testRun.startTime).getTime() : null;
     const end = testRun.endTime ? new Date(testRun.endTime).getTime() : null;
     return {
-      from: start !== null && startTrim > 0 ? start + startTrim : -Infinity,
-      to: end !== null && endTrim > 0 ? end - endTrim : Infinity,
+      from: start !== null && testRun.analysisStartOffset ? start + testRun.analysisStartOffset * 1000 : null,
+      to: end !== null && testRun.analysisEndOffset ? end - testRun.analysisEndOffset * 1000 : null,
     };
-  }
-
-  /** Drop the points outside the window, and any series left with nothing. */
-  private clipToWindow(series: MetricsTimeSeriesPanel[], window: ChartWindow): MetricsTimeSeriesPanel[] {
-    if (window.from === -Infinity && window.to === Infinity) return series;
-    return series
-      .map((s) => ({
-        ...s,
-        dataPoints: s.dataPoints.filter((dp) => {
-          const t = dp.time.getTime();
-          return t >= window.from && t <= window.to;
-        }),
-      }))
-      .filter((s) => s.dataPoints.length > 0);
   }
 
   /**
@@ -357,6 +335,7 @@ export class GraphsRenderer {
     colorOffset: number,
     width: number,
     height: number,
+    window: ChartWindow,
     showLegend: boolean = true,
   ): string {
     const drawn = series
@@ -447,6 +426,23 @@ export class GraphsRenderer {
       return { series: s, color, path, axis };
     });
 
+    // Analysis time range: dim what it excludes and mark each boundary with an
+    // amber dashed line — the same overlay the Graphs card draws.
+    const analysisShapes: string[] = [];
+    const clampX = (t: number) => Math.min(Math.max(scaleX(t), padding.left), padding.left + chartWidth);
+    const dimBand = (x0: number, x1: number) =>
+      `<rect x="${x0}" y="${padding.top}" width="${Math.max(0, x1 - x0)}" height="${chartHeight}" fill="#9e9e9e" opacity="0.18"/>`;
+    const boundary = (x: number) =>
+      `<line x1="${x}" y1="${padding.top}" x2="${x}" y2="${padding.top + chartHeight}" stroke="${ANALYSIS_BOUNDARY_COLOR}" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+    if (window.from !== null && window.from > tMin) {
+      const x = clampX(window.from);
+      analysisShapes.push(dimBand(padding.left, x), boundary(x));
+    }
+    if (window.to !== null && window.to < tMax) {
+      const x = clampX(window.to);
+      analysisShapes.push(dimBand(x, padding.left + chartWidth), boundary(x));
+    }
+
     // Grid lines (5 horizontal). The lines are shared; every axis labels those
     // same positions with its own values, which is what makes two scales
     // readable off one plot area.
@@ -509,12 +505,13 @@ export class GraphsRenderer {
     }
 
     const unitLabel = unit ? ` (${this.utils.escapeHtml(unit)})` : '';
-    // One series names itself in the subtitle, as it always has. Several get a
-    // legend instead — a subtitle listing five metric names is unreadable.
+    // One series names itself in the subtitle; several are counted there and
+    // named in the legend — a subtitle listing five metric names is unreadable.
+    // The legend follows the toggle, single series included.
     const subtitle = drawn.length === 1
       ? `${this.utils.escapeHtml(drawn[0]!.metricName)}${unitLabel} &middot; ${formatInt(allPoints.length)} data points`
       : `${formatInt(drawn.length)} series${unitLabel} &middot; ${formatInt(allPoints.length)} data points`;
-    const legend = drawn.length === 1 || !showLegend ? '' : `
+    const legend = !showLegend ? '' : `
       <div style="display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 12px;">
         ${lines.map(({ series: s, color }) => `
           <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 9pt; color: ${REPORT_COLORS.mutedInk};">
@@ -536,6 +533,9 @@ export class GraphsRenderer {
             <!-- Chart border -->
             <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}"
                   fill="none" stroke="#999" stroke-width="1"/>
+
+            <!-- Analysis time range: excluded bands and their boundaries -->
+            ${analysisShapes.join('')}
 
             <!-- Grid lines and axis labels -->
             ${gridLines.join('')}

@@ -1121,10 +1121,6 @@ export interface GraphsConfig {
   graphPresetIds?: string[];
   panels?: string[];
   quality?: 'low' | 'standard' | 'high';
-  timeRange?: {
-    startOffset?: number;
-    endOffset?: number;
-  };
   showLegends?: boolean;
   /**
    * No longer offered by the form. Kept on the type so a template saved before
@@ -1235,30 +1231,11 @@ export function GraphsConfigForm({ config, onChange, text, onTextChange, testRun
         }
         label="Show Legends"
       />
-      <Box sx={{ display: 'flex', gap: 2 }}>
-        <TextField
-          label="Start Offset (min)"
-          type="number"
-          value={config.timeRange?.startOffset || 0}
-          onChange={(e) => onChange({
-            ...config,
-            timeRange: { ...config.timeRange, startOffset: Number(e.target.value) },
-          })}
-          size="small"
-          sx={{ flex: 1 }}
-        />
-        <TextField
-          label="End Offset (min)"
-          type="number"
-          value={config.timeRange?.endOffset || 0}
-          onChange={(e) => onChange({
-            ...config,
-            timeRange: { ...config.timeRange, endOffset: Number(e.target.value) },
-          })}
-          size="small"
-          sx={{ flex: 1 }}
-        />
-      </Box>
+      {/* No offsets here: the chart shades the run's own analysis time range,
+          the way the Graphs card does. */}
+      <Typography variant="caption" color="text.secondary">
+        Charts cover the whole run; the analysis time range is marked on each chart.
+      </Typography>
     </SectionConfigShell>
   );
 }

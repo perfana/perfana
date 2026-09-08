@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.6] - 2026-09-08
+
+### Changed
+- **A report's Custom Graphs section now marks the analysis time range the way the Graphs card does.** Each chart covers the whole run, with the leading and trailing bands the analysis excludes dimmed and their boundaries drawn as amber dashed lines — the same overlay the Graphs card and the comparison charts use, so a chart in a report and the same chart on screen read alike.
+
+  The section's own "Start Offset" and "End Offset" fields are gone with it. They trimmed the chart by a number of minutes that had nothing to do with the run's analysis window, so a report could silently disagree with the run it described. The window now comes from the test run itself, and changing it on the run changes what the next report draws.
+
+- **The legend follows the "Show Legends" toggle for single-series charts too.** With the toggle on, a chart with one series showed no legend at all — the toggle only ever reached charts combining several series.
+
 ## [0.2.95.5] - 2026-09-08
 
 ### Fixed
