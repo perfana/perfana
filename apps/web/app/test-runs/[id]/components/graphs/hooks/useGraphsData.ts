@@ -15,6 +15,7 @@ import { extractYAxisFormat, generateChartName, PERFORMANCE_METRICS_PANEL_UNITS 
 import { getFilteredDashboards, computeAvailableSources, determineSource } from '../utils';
 import {
   ALL_AGGREGATED_OPTION,
+  isAllAggregatedDashboard,
   getAggregateSpec,
   buildAggregatedMetricName,
 } from '@/lib/aggregated-perf-series';
@@ -389,7 +390,8 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
    * Fetch metric data for a series from the backend
    */
   const fetchSeriesData = useCallback(async (series: SeriesConfig): Promise<MetricDataPoint[]> => {
-    if (series.metricName.startsWith(ALL_AGGREGATED_OPTION)) {
+    if (series.metricName.startsWith(ALL_AGGREGATED_OPTION)
+        && !isAllAggregatedDashboard(series.dashboardLabel)) {
       return fetchAggregatedSeriesData(testRun?.test_run_id || testRunId, series);
     }
     try {
@@ -441,7 +443,8 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     const source = determineSource(selectedPanel.type, selectedDashboard.dashboard_uid);
 
     const newSeriesList: SeriesConfig[] = selectedMetrics.map(metricName => {
-      const isAggregated = metricName === ALL_AGGREGATED_OPTION;
+      const isAggregated = metricName === ALL_AGGREGATED_OPTION
+        && !isAllAggregatedDashboard(selectedDashboard.dashboard_label);
       const spec = isAggregated ? getAggregateSpec(selectedPanel.id) : null;
       return {
         id: `${applicationDashboardId}-${selectedPanel.id}-${isAggregated ? 'aggregated' : metricName}-${Date.now()}-${Math.random()}`,

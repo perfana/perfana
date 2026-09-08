@@ -36,7 +36,7 @@ export function offerAggregatedOption(
   panelId: number,
   metricNames: string[],
 ): string[] {
-  return shouldOfferAllAggregated(source, panelId)
+  return shouldOfferAllAggregated(source, panelId, metricNames)
     ? [ALL_AGGREGATED_OPTION, ...metricNames]
     : metricNames;
 }
