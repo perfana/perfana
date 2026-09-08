@@ -786,6 +786,71 @@ escaper go back to being broad without printing artifacts.
 ---
 
 
+## Metrics dropdowns
+
+### `GET /metrics/ds-metrics/distinct-names` has no authorization, and neither ds_metrics table has RLS
+
+**Priority:** P0
+**Origin:** security + adversarial review during /ship on `perf/metric-dropdown-statistics-source`
+(2026-09-08). Pre-existing; the branch neither introduced nor widened it.
+**Why:** `MetricsService.getDistinctMetricNames` takes no `userId`/`roles`, calls no
+`validateTestRunAccess`, and applies no org filter — the controller binds the principal as
+`@UserCtx() _ctx` and discards it. There is no database backstop either: the consolidated schema
+has 120 `CREATE POLICY` statements and **none** names `ds_metrics` or `ds_metric_statistics`, and
+neither entity is in `OWNED_RESOURCE_ENTITIES`, so the service layer is the only control and it is
+absent. Any authenticated principal — including an API key from any organization — can enumerate
+another tenant's metric names by supplying arbitrary UUIDs. On panel 201 those names are
+`transaction_name.sampler_name`, i.e. the customer's business flow names.
+**What:** Give the method `(userId, roles)` like its sibling `getAvailableDashboards`: when
+`testRunId` is present call `validateTestRunAccess` and return `[]` on failure; otherwise resolve
+the dashboard's organization and check it against `getAccessibleOrganizations`. Rename `_ctx` to
+`ctx` in the controller and thread it through. Separately decide whether these two tables should be
+brought under Phase 5b RLS now that a UI dropdown reads one directly — they are policy-free by
+omission, not by a documented decision like the `api_keys` carve-out.
+**Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getDistinctMetricNames`),
+`apps/api/src/modules/metrics/metrics.controller.ts:277`.
+
+---
+
+### An unmatched dashboard/panel pair is an unindexed scan of the whole ds_metrics hypertable
+
+**Priority:** P1
+**Origin:** adversarial review during /ship on `perf/metric-dropdown-statistics-source` (2026-09-08).
+**Why:** Called without `testRunId` — the report-template path, where `MetricSelectionCascade`
+makes it conditional and fans one request out per selected panel — `getDistinctMetricNames` filters
+on `panel_id` + `application_dashboard_id` only. Neither `uniq_ds_metrics_upsert` nor
+`idx_ds_metrics_panel_lookup` leads with those, so there is no usable index prefix and no chunk
+exclusion. There is no `statement_timeout` on this path either (only
+`test-runs-performance-query.service.ts` sets one). Combined with the missing authorization above,
+an authenticated caller can aim it deliberately. Note the *scoped* call is fine and needs nothing:
+TimescaleDB applies a native `Custom Scan (SkipScan)` there — measured 3.9 ms, `Heap Fetches: 0`.
+**What:** A covering index for the unscoped shape (`application_dashboard_id, panel_id,
+metric_name`), a `SET LOCAL statement_timeout` on the path, or require `testRunId`. Measure before
+choosing — check whether the unscoped call is actually hot in production first.
+**Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getDistinctMetricNames`).
+
+---
+
+### The panel list is still ~0.9s, and the client refetches the whole run's aggregate per dashboard
+
+**Priority:** P2
+**Origin:** performance review during /ship on `perf/metric-dropdown-statistics-source` (2026-09-08),
+after the DISTINCT-first rewrite took it from 2035 ms to 927 ms.
+**Why:** 927 ms is an index-only scan over `idx_ds_metrics_panel_lookup` of every distinct
+(panel, metric) tuple in the run — better than walking every data point, but still linear in the
+run. The client makes it worse: `useGraphsData.fetchPerformanceTestPanels` and
+`useTrendsData.fetchPerformanceTestPanels` fetch the entire `/ds-metrics/available/:testRunId`
+aggregate and filter by `dashboard_label` in JavaScript, so selecting each dashboard re-runs the
+whole-run query. The response is also unbounded — one run here carries 381 panel rows and 4,631
+metric names in a single payload.
+**What:** Accept a `dashboardLabel` (or `applicationDashboardId`) query parameter so the client
+stops pulling the whole run to render one dashboard's panels. `ds_metric_statistics` is NOT the
+answer — see the comment in `getAvailableDashboards` for why it is both faster and wrong.
+**Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getAvailableDashboards`),
+`apps/web/app/test-runs/[id]/components/{graphs,trends}/hooks/`.
+
+---
+
 ## Quality gates
 
 ### The worker integration suite is dead code, not dormant coverage

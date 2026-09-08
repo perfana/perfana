@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.3] - 2026-09-08
+
+### Changed
+- **The panel dropdown opens faster on runs with many transactions.** Picking a performance metrics dashboard in the trends, compare and graphs cards built the panel list by counting and collecting metric names across every measurement point the run recorded, which on a large run is millions of rows to describe a few hundred panels. The list is now assembled from the distinct panel/metric combinations instead, which is the same answer from the same data: measured 2.0 seconds down to 0.9 on a 12.8 million row run, returning an identical list. The metric dropdown was measured too and left alone — it was already fast.
+
 ## [0.2.95.2] - 2026-09-08
 
 ### Fixed
