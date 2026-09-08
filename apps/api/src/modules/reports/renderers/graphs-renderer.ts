@@ -149,7 +149,7 @@ export class GraphsRenderer {
       if (panels.length === 0) {
         return this.renderNoDataSection(title, text, 'No metric panels configured or discovered for this test run.');
       }
-      return this.renderNoDataSection(title, text, 'No ds_metrics data found for the selected panels.');
+      return this.renderNoDataSection(title, text, 'No metrics data found for the selected panels.');
     }
 
     const charts = timeSeriesData
@@ -190,6 +190,33 @@ export class GraphsRenderer {
     return out;
   }
 
+  /** The preset's synthetic run-wide aggregates, each computed from the raw tables. */
+  private async buildPresetAggregatedPanels(
+    testRunId: string,
+    selectors: MetricsPanelSelector[],
+    excludeRampUp: boolean,
+    userId: string,
+    roles: string[],
+  ): Promise<MetricsTimeSeriesPanel[]> {
+    const out: MetricsTimeSeriesPanel[] = [];
+    for (const sel of selectors) {
+      const spec = sel.aggregate;
+      if (!spec) continue;
+      const series = await this.dataFetcher.getAggregatedSeries(
+        testRunId, spec.metric, spec.stat, excludeRampUp, userId, roles,
+      );
+      if (series.length === 0) continue;
+      out.push({
+        panelTitle: sel.panelTitle || '',
+        dashboardLabel: sel.dashboardLabel || '',
+        metricName: sel.metricName || '',
+        unit: spec.unit,
+        dataPoints: series.map((p) => ({ time: p.time, value: p.value })),
+      });
+    }
+    return out;
+  }
+
   /**
    * One chart per preset, drawing every series the preset combines.
    *
@@ -216,17 +243,24 @@ export class GraphsRenderer {
     let seriesCount = 0;
 
     for (const [idx, preset] of presets.entries()) {
+      // A preset may mix stored metrics with the synthetic run-wide aggregate, which has no
+      // ds_metrics rows and is computed from the raw tables instead.
+      const stored = preset.panels.filter((p) => !p.aggregate);
+      const aggregated = preset.panels.filter((p) => p.aggregate);
       const series = this.clipToWindow(
-        preset.panels.length > 0
-          ? await this.dataFetcher.getMetricsTimeSeries(testRun.testRunId, preset.panels, excludeRampUp, userId, roles)
-          : [],
+        [
+          ...(stored.length > 0
+            ? await this.dataFetcher.getMetricsTimeSeries(testRun.testRunId, stored, excludeRampUp, userId, roles)
+            : []),
+          ...(await this.buildPresetAggregatedPanels(testRun.testRunId, aggregated, excludeRampUp, userId, roles)),
+        ],
         window,
       );
       if (series.length === 0) {
         charts.push(`
           <div style="margin: 16px 0;">
             ${groupHeader(preset.name)}
-            ${emptyState('No ds_metrics data found for this preset in this test run.')}
+            ${emptyState('No metrics data found for this preset in this test run.')}
           </div>
         `);
         continue;
@@ -236,7 +270,7 @@ export class GraphsRenderer {
     }
 
     if (seriesCount === 0) {
-      return this.renderNoDataSection(title, text, 'No ds_metrics data found for the selected graph presets.');
+      return this.renderNoDataSection(title, text, 'No metrics data found for the selected graph presets.');
     }
 
     return `

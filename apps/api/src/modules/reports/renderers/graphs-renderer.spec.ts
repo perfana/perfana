@@ -279,7 +279,7 @@ describe('GraphsRenderer', () => {
       dataFetcher.getMetricsTimeSeries.mockResolvedValue([]);
       const html = await renderer.renderGraphsSection(makeSection(), makeTestRun());
 
-      expect(html).toContain('No ds_metrics data found');
+      expect(html).toContain('No metrics data found');
     });
 
     it('should render per-panel fallback when all values are null', async () => {
@@ -339,6 +339,119 @@ describe('GraphsRenderer', () => {
       expect(html).toContain('JVM overview');
       // Presets replace discovery, they do not merely seed it
       expect(dataFetcher.getAvailableMetricsPanels).not.toHaveBeenCalled();
+    });
+
+    it('computes a preset series that names the synthetic run-wide aggregate', async () => {
+      // The bug this guards: the graphs card's "All aggregated" option has no
+      // ds_metrics rows, so the report queried a metric name nobody ever wrote
+      // and rendered an empty section for a preset that draws fine in the UI.
+      dataFetcher.getGraphPresetPanels.mockResolvedValue({
+        presets: [{
+          id: 'p1',
+          name: 'Run-wide RT',
+          panels: [{
+            dashboardLabel: 'Performance test metrics BrowseAndSearch',
+            panelTitle: 'Transaction RT P95',
+            metricName: 'All aggregated — Transaction RT P95',
+            aggregate: { metric: 'transaction_response_time', stat: 'p95', unit: 'ms' },
+          }],
+        }],
+        foundIds: ['p1'],
+      });
+      dataFetcher.getAggregatedSeries.mockResolvedValue([
+        { time: new Date('2026-08-30T18:21:00Z'), value: 120 },
+        { time: new Date('2026-08-30T18:22:00Z'), value: 140 },
+      ]);
+      const section = makeSection({ config: { graphPresetIds: ['p1'] } });
+
+      const html = await renderer.renderGraphsSection(section, makeTestRun(), 'user-1', ['user']);
+
+      expect(dataFetcher.getAggregatedSeries).toHaveBeenCalledWith(
+        expect.anything(), 'transaction_response_time', 'p95', expect.anything(), 'user-1', ['user'],
+      );
+      // The aggregate is not a ds_metrics series, so it must not be queried as one
+      expect(dataFetcher.getMetricsTimeSeries).not.toHaveBeenCalled();
+      expect(html).toContain('Run-wide RT');
+      expect(html).not.toContain('No metrics data found');
+    });
+
+    it('draws a preset that mixes a stored series with the aggregate on ONE chart', async () => {
+      // The bug this guards: the aggregate has to be split out of the preset's panel
+      // list before the ds_metrics query and joined back on afterwards. Sending it
+      // along asks for a metric name nobody wrote; dropping it loses half the chart.
+      dataFetcher.getGraphPresetPanels.mockResolvedValue({
+        presets: [{
+          id: 'p1',
+          name: 'Heap vs run-wide RT',
+          panels: [
+            { dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: 'heap_used' },
+            {
+              dashboardLabel: 'Performance test metrics BrowseAndSearch',
+              panelTitle: 'Transaction RT Avg',
+              metricName: 'All aggregated — Transaction RT Avg',
+              aggregate: { metric: 'transaction_response_time', stat: 'avg', unit: 'ms' },
+            },
+          ],
+        }],
+        foundIds: ['p1'],
+      });
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([
+        makePanel({ panelTitle: 'Heap', metricName: 'heap_used' }),
+      ]);
+      dataFetcher.getAggregatedSeries.mockResolvedValue([
+        { time: new Date('2025-06-01T10:00:00Z'), value: 120 },
+        { time: new Date('2025-06-01T10:01:00Z'), value: 140 },
+      ]);
+
+      const html = await renderer.renderGraphsSection(
+        makeSection({ config: { graphPresetIds: ['p1'] } }), makeTestRun(),
+      );
+
+      // Only the stored half is asked for as a ds_metrics series
+      expect(dataFetcher.getMetricsTimeSeries).toHaveBeenCalledWith(
+        expect.anything(),
+        [{ dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: 'heap_used' }],
+        expect.anything(), expect.anything(), expect.anything(),
+      );
+      // ...and both halves end up on the same set of axes
+      expect((html.match(/<svg /g) ?? []).length).toBe(1);
+      expect((html.match(/<path d=/g) ?? []).length).toBe(2);
+      expect(html).toContain('2 series');
+      expect(html).toContain('heap_used');
+      expect(html).toContain('All aggregated — Transaction RT Avg');
+    });
+
+    it('leaves a preset empty when its aggregate has nothing to compute from', async () => {
+      // A run with no transactions returns an empty aggregate. That preset must be
+      // reported as empty rather than drawn as a chart with no line — and it must
+      // not take the presets that do have data down with it.
+      dataFetcher.getGraphPresetPanels.mockResolvedValue({
+        presets: [
+          { id: 'p1', name: 'JVM overview', panels: PRESET_PANELS },
+          {
+            id: 'p2',
+            name: 'Run-wide RT',
+            panels: [{
+              dashboardLabel: 'Performance test metrics BrowseAndSearch',
+              panelTitle: 'Transaction RT P95',
+              metricName: 'All aggregated — Transaction RT P95',
+              aggregate: { metric: 'transaction_response_time', stat: 'p95', unit: 'ms' },
+            }],
+          },
+        ],
+        foundIds: ['p1', 'p2'],
+      });
+      dataFetcher.getAggregatedSeries.mockResolvedValue([]);
+
+      const html = await renderer.renderGraphsSection(
+        makeSection({ config: { graphPresetIds: ['p1', 'p2'] } }), makeTestRun(),
+      );
+
+      expect(html).toContain('No metrics data found for this preset in this test run.');
+      expect(html).not.toContain('No data points available');
+      // The preset that does have data still renders, and it is the only chart
+      expect((html.match(/<svg /g) ?? []).length).toBe(1);
+      expect(html).toContain('JVM overview');
     });
 
     it('keeps a preset that combines panels on ONE chart', async () => {
