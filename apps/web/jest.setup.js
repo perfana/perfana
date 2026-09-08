@@ -153,3 +153,13 @@ if (!global.fetch || !global.fetch._isMockFunction) {
     )
   )
 }
+
+// jsdom has no ResizeObserver; every real browser does. Stub it so components that
+// observe their container (ResponsivePlot) mount in tests.
+if (!global.ResizeObserver) {
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
