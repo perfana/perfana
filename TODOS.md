@@ -588,6 +588,44 @@ are unaffected. Either scope `unmountOnExit` to the Apdex branch or give the cha
 
 ---
 
+## Web charts
+
+### Nine Plotly call sites still resize on `window` only
+
+**Priority:** P3
+**Origin:** deliberate scope cut in v0.2.95.2 (`fix/plotly-hover-align-resize-observer`), which
+fixed the three anomaly-detection charts and left the rest.
+**Why:** `react-plotly.js` 2.6.0's `useResizeHandler` is a `window` resize listener and nothing
+else, so a chart whose *container* changes size without the window changing keeps Plotly's cached
+geometry. The visible symptom is a hover label whose text and background box drift apart — the text
+lands over the chart title and an empty box sits near the data point. It needs a container-only
+resize to reproduce, of which two are known: a MUI drawer animating a chart narrower, and a classic
+Windows scrollbar taking ~15px off a container the moment it appears. macOS overlay scrollbars take
+nothing, so none of this shows on a Mac and it will keep arriving as a Windows-only report.
+**What:** Swap `const Plot = dynamic(() => import('react-plotly.js'), { ssr: false })` for
+`import Plot from '@/components/ResponsivePlot'`. It is a two-line change per file, but it is not
+unconditionally free: `ResponsivePlot` adds a wrapper div at `width/height: 100%` between the call
+site and the chart, so anywhere the chart is sized or positioned by the element the call site
+currently renders needs a look. Do them in small batches with a visual check, not as one sweep.
+(Chart export is unaffected — the modebar handler is handed the graph div by Plotly itself, see
+`apps/web/lib/plotly.ts`.)
+**Where:** `compare/components/ComparisonPlot.tsx`, `dynatrace/HostPerformanceGraphs.tsx`,
+`graphs/GraphsChart.tsx`, `performance-analysis/RequestTimeSeriesModal.tsx`,
+`performance-analysis/error-analysis/components/ErrorsOverTimeChart.tsx`,
+`performance-analysis/transaction-graph-modal/components/TransactionChart.tsx`,
+`service-level-objectives/AggregatedSloChart.tsx`,
+`service-level-objectives/SLOMetricsChart.tsx`, `trends/components/TrendsChart.tsx` — all under
+`apps/web/app/test-runs/[id]/components/`.
+
+**Do not delete the `onEntered` resize kicks as part of this.** MUI clips a `Collapse` rather than
+resizing its content, so the observed box holds its final size for the whole animation and the
+observer fires only on `observe()`. The one-shot window kick is the only thing covering that case,
+and `ResponsivePlot` does not replace it. Same for `kickPlotlyResize` in
+`shared/ExpandableCardHeader.tsx`, which the Compare, Trends and Graphs cards use.
+
+---
+
+
 ## Compare card
 
 

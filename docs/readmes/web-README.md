@@ -42,7 +42,7 @@ lib/
 |------|--------|
 | Components | MUI v7 for interactive widgets |
 | Layout / spacing | Tailwind CSS utility classes |
-| Charts | ECharts (not Plotly) |
+| Charts | Plotly.js via `react-plotly.js` — wrap new charts in `components/ResponsivePlot.tsx` |
 | Auth | Keycloak with PKCE flow |
 | Real-time | Socket.IO over WebSocket |
 | State | React context + hooks (no Redux) |
