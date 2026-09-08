@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.5] - 2026-09-08
+
+### Fixed
+- **A report's Custom Graphs section now draws a graph preset built on "All aggregated".** Selecting such a preset produced an empty section reading "No ds_metrics data found for the selected graph presets", on a run whose Graphs card drew the same preset without complaint. The "All aggregated" entry in the metric dropdown is synthetic on the per-scenario performance metrics dashboards — it has no stored measurement rows anywhere, and the card computes it on the fly. The report only ever looked for stored rows, so it found nothing and said so. It now recognises the entry and computes it the same way the card does.
+
+  Two things that made the report's line differ from the card's were fixed with it, both of which would have rendered a plausible but wrong chart. The percentiles are now computed with the same estimator the card uses rather than an exact sort — the exact figure is the better number in isolation, but it is a different number, up to 21% apart on a spiky bucket, and the point of the section is to reproduce what you saw in the card. And the run-wide series is now trimmed at the END of the analysis window as well as the start, so a preset combining an "All aggregated" series with an ordinary metric no longer draws two lines that stop at different points on the x-axis.
+
+  The empty-state wording changed from "No ds_metrics data found" to "No metrics data found", which is what a reader of a report can act on.
+
 ## [0.2.95.4] - 2026-09-08
 
 ### Added

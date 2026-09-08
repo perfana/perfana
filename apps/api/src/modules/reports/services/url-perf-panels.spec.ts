@@ -1,4 +1,4 @@
-import { getUrlPanel, isUrlPanel } from './url-perf-panels';
+import { getUrlPanel, isUrlPanel, presetAggregateSpec } from './url-perf-panels';
 import { unitLabel } from '../renderers/unit-format';
 
 /**
@@ -36,5 +36,68 @@ describe('getUrlPanel units', () => {
     expect(getUrlPanel(201)).toBeNull();
     expect(isUrlPanel(216)).toBe(false);
     expect(isUrlPanel(undefined)).toBe(false);
+  });
+});
+
+describe('presetAggregateSpec', () => {
+  const series = (over: Record<string, unknown> = {}) => ({
+    metricName: 'All aggregated — Transaction RT P95',
+    dashboardLabel: 'Performance test metrics BrowseAndSearch',
+    panelId: 103,
+    ...over,
+  });
+
+  it('recognises the composed name a graph preset stores', () => {
+    expect(presetAggregateSpec(series())).toEqual({
+      metric: 'transaction_response_time', stat: 'p95', unit: 'ms',
+    });
+  });
+
+  it('leaves an ordinary series alone', () => {
+    expect(presetAggregateSpec(series({ metricName: 'T01_Homepage_Load' }))).toBeNull();
+  });
+
+  it('reads the all-aggregated dashboard as stored rows, not the synthetic aggregate', () => {
+    expect(presetAggregateSpec(series({
+      dashboardLabel: 'Performance test metrics all aggregated',
+    }))).toBeNull();
+  });
+
+  it('has no aggregate for a panel that is not aggregatable', () => {
+    expect(presetAggregateSpec(series({ panelId: 301 }))).toBeNull();
+  });
+});
+
+/**
+ * AGGREGATED_PERF_SPECS is a hand copy of AGGREGATABLE_PERF_PANELS in
+ * apps/web/lib/aggregated-perf-series.ts — the graphs card writes those panel ids into a
+ * preset and the report reads them back, so a one-sided edit silently makes the report draw
+ * a different statistic than the card. apps/api cannot import from apps/web, so the literals
+ * are pinned here the way all-aggregated-dashboard.test.ts pins the dashboard strings.
+ */
+describe('presetAggregateSpec panel table (drift guard vs apps/web)', () => {
+  const spec = (panelId: number) => presetAggregateSpec({
+    metricName: 'All aggregated — whatever', dashboardLabel: 'Performance test metrics Checkout', panelId,
+  });
+
+  it.each([
+    [101, 'transaction_response_time', 'avg', 'ms'],
+    [102, 'transaction_response_time', 'p90', 'ms'],
+    [103, 'transaction_response_time', 'p95', 'ms'],
+    [104, 'transaction_response_time', 'p99', 'ms'],
+    [105, 'error_percentage', 'avg', 'percent'],
+    [201, 'request_response_time', 'avg', 'ms'],
+    [202, 'request_response_time', 'p90', 'ms'],
+    [203, 'request_response_time', 'p95', 'ms'],
+    [204, 'request_response_time', 'p99', 'ms'],
+    [205, 'error_percentage', 'avg', 'percent'],
+  ])('panel %i resolves to %s/%s in %s', (panelId, metric, stat, unit) => {
+    expect(spec(panelId as number)).toEqual({ metric, stat, unit });
+  });
+
+  it('claims no panel the web table does not', () => {
+    for (const panelId of [100, 106, 200, 206, 210, 301]) {
+      expect(spec(panelId)).toBeNull();
+    }
   });
 });

@@ -114,3 +114,43 @@ export function isSyntheticAllAggregated(sel: {
     && sel.dashboardLabel !== ALL_AGGREGATED_DASHBOARD_LABEL
     && aggregatedKindFor(sel.panelId) !== null;
 }
+
+/** The (metric, stat, unit) a performance-test panel's synthetic run-wide aggregate stands for.
+ * Mirrors AGGREGATABLE_PERF_PANELS in apps/web/lib/aggregated-perf-series.ts — the graphs card
+ * writes these panel ids into a preset, so the two must not drift. Wider than
+ * `aggregatedKindFor`, which covers only the panels the baseline comparison can score. */
+const AGGREGATED_PERF_SPECS: Record<number, { metric: AggregatedSeriesMetric; stat: AggregatedSeriesStat; unit: string }> = {
+  101: { metric: 'transaction_response_time', stat: 'avg', unit: 'ms' },
+  102: { metric: 'transaction_response_time', stat: 'p90', unit: 'ms' },
+  103: { metric: 'transaction_response_time', stat: 'p95', unit: 'ms' },
+  104: { metric: 'transaction_response_time', stat: 'p99', unit: 'ms' },
+  105: { metric: 'error_percentage', stat: 'avg', unit: 'percent' },
+  201: { metric: 'request_response_time', stat: 'avg', unit: 'ms' },
+  202: { metric: 'request_response_time', stat: 'p90', unit: 'ms' },
+  203: { metric: 'request_response_time', stat: 'p95', unit: 'ms' },
+  204: { metric: 'request_response_time', stat: 'p99', unit: 'ms' },
+  205: { metric: 'error_percentage', stat: 'avg', unit: 'percent' },
+};
+
+export type AggregatedSeriesMetric = 'transaction_response_time' | 'request_response_time' | 'error_percentage';
+export type AggregatedSeriesStat = 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max';
+export interface AggregatedSeriesSpec { metric: AggregatedSeriesMetric; stat: AggregatedSeriesStat; unit: string }
+
+/**
+ * The aggregate a saved graph-preset series is asking for, or null when it is an ordinary
+ * ds_metrics series.
+ *
+ * A preset stores the COMPOSED name ("All aggregated — Transaction RT Avg", see
+ * buildAggregatedMetricName) rather than the bare option, so this matches on the prefix.
+ * The dashboard check is the same one the graphs card makes: on the all-aggregated dashboard
+ * that name is a real ds_metrics row and must be read as one.
+ */
+export function presetAggregateSpec(series: {
+  metricName?: string;
+  dashboardLabel?: string;
+  panelId?: number;
+}): AggregatedSeriesSpec | null {
+  if (!series.metricName?.startsWith(ALL_AGGREGATED_SERIES)) return null;
+  if (series.dashboardLabel === ALL_AGGREGATED_DASHBOARD_LABEL) return null;
+  return (series.panelId != null && AGGREGATED_PERF_SPECS[series.panelId]) || null;
+}

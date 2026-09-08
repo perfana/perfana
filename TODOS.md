@@ -797,16 +797,63 @@ dashboard carrying a genuine `All aggregated` series on every panel. The older s
 which fabricates the same name on four RT panels and answers it from `/aggregated-metric-timeseries`
 — now duplicates it, which is why that release had to add a collision guard in six places
 (`shouldOfferAllAggregated`'s `existingNames` parameter, `isAllAggregatedDashboard` at the three
-web add-series sites, and `isSyntheticAllAggregated` in the API report fetcher). The guard is
-permanent overhead for a transitional state.
+web add-series sites, and `isSyntheticAllAggregated` in the API report fetcher), and v0.2.95.5 a
+seventh (`presetAggregateSpec`, for saved graph presets). The guard is permanent overhead for a
+transitional state.
 **What to do:** once no retained run predates the real dashboard, delete `AGGREGATABLE_PERF_PANELS`,
 `offerAggregatedOption`, `shouldOfferAllAggregated`, `fetchAggregatedSeriesData`,
 `fetchAggregatedStatistics`, `normaliseLegacyAggregatedSeries`, both `/aggregated-metric-*`
-endpoints, the `getAggregatedSeriesRows`/`getAggregatedTrends` branches, and the collision guard
-itself — roughly 230 web lines plus the API endpoints.
+endpoints, the `getAggregatedSeriesRows`/`getAggregatedTrends` branches, `presetAggregateSpec` +
+`AGGREGATED_PERF_SPECS` and the `aggregate` arm of `GraphsRenderer.renderPresetCharts`, and the
+collision guard itself — roughly 230 web lines plus the API endpoints.
 **Blocked on:** presets store `isAggregated: true` with a metric name of `All aggregated — <panel>`
 (`apps/web/lib/trends-presets.ts`, `compare-presets.ts`), so this needs a preset migration, not just
 a deletion. Do not do it before that.
+
+### The synthetic "All aggregated" reroute ignores `source` — in the card AND the report
+
+**Priority:** P3
+**Origin:** adversarial review during /ship on `fix/report-graph-preset-aggregated-series` (2026-09-08).
+**Why:** `useGraphsData.fetchSeriesData` (`apps/web/.../graphs/hooks/useGraphsData.ts:393`) and
+`presetAggregateSpec` (`apps/api/.../reports/services/url-perf-panels.ts`) both reroute a series to
+the run-wide rollup on `metricName.startsWith('All aggregated')` + `!isAllAggregatedDashboard(...)`
++ a panel id in 101-105/201-205. Neither checks `source === 'performance-metrics'`, which IS stored
+in `series_config`. Panel ids are not unique across metrics sources — this dev DB has Grafana
+dashboards with panel id 101 — so a Grafana series whose legend begins `All aggregated` is silently
+answered from the transaction rollup. `shouldOfferAllAggregated` gets this right and its test pins
+it (`expect(shouldOfferAllAggregated('grafana', 102, [])).toBe(false)`); the two restore paths do not.
+**What to do:** add the `source` condition to BOTH sites in one change. Fixing only the API
+reintroduces the card/report divergence that v0.2.95.5 removed.
+**Blocked on:** `packages/shared/src/entities/graph-preset.entity.ts:9` declares
+`source: 'grafana' | 'dynatrace'` while the DTO (`create-graph-preset.dto.ts`) and every stored
+perf-test preset carry `'performance-metrics'`. Widen that union first, and rebuild
+`packages/shared/dist` — `apps/api` type-checks against dist, not src.
+
+### `GraphsRenderer` draws a preset's aggregate series after its stored ones, not in authored order
+
+**Priority:** P4
+**Origin:** pre-landing review during /ship on `fix/report-graph-preset-aggregated-series` (2026-09-08).
+**Why:** `renderPresetCharts` partitions `preset.panels` into stored and aggregate and concatenates
+stored-first, so a preset authored as `[All aggregated, Heap]` draws `[Heap, All aggregated]`. That
+changes each series' colour (`CHART_COLORS[(colorOffset + i) % …]`) and, on a multi-unit chart, which
+unit owns the left axis. Not a regression — before v0.2.95.5 a preset holding an aggregate rendered
+nothing at all — but reports are compared run to run, so a stable colour per series matters.
+**What to do:** re-sort the combined result back onto `preset.panels` order after the two fetches.
+The results are sparse (a selector with no rows is skipped), so match on
+`(dashboardLabel, panelTitle, metricName)` rather than by index.
+
+### `buildPresetAggregatedPanels` fetches its series serially
+
+**Priority:** P4
+**Origin:** adversarial review during /ship on `fix/report-graph-preset-aggregated-series` (2026-09-08).
+**Why:** the loop awaits one `getAggregatedSeries` at a time, and each is a `test_runs` round trip
+plus a full-run aggregation over `transactions` / `requests_raw` held inside the request's RLS
+transaction. Measured 1,128 ms per series on a 1.4 M-row run, and a preset can legitimately hold
+three (avg/p90/p95 of the same metric). The sibling `getAggregatedSeriesRows` already uses
+`Promise.all`. v0.2.95.5 removed the sort (t-digest instead of `PERCENTILE_CONT`), which is the bulk
+of it, so this is now a smaller win than it was.
+**What to do:** `Promise.all` the selectors, and hoist `getAnalysisWindowBounds` out of the loop —
+it returns the same answer for every selector on the same run.
 
 ### `MetricSelectionCascade` re-implements the "don't offer it twice" rule inline
 

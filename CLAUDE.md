@@ -616,7 +616,7 @@ Seven things a future reader will otherwise "fix":
    **synthetic** dropdown entry since v0.2.61 — offered on ten response-time panels only, and
    answered by `GET /test-runs/:id/aggregated-metric-timeseries`, which computes a run-wide figure on
    the fly precisely because no stored row existed for it. On the new dashboard the identical string
-   is an ordinary `ds_metrics` / `ds_metric_statistics` row, on *every* panel. Three guards keep them
+   is an ordinary `ds_metrics` / `ds_metric_statistics` row, on *every* panel. Four guards keep them
    apart and each one fails silently if removed:
    - `shouldOfferAllAggregated(source, panelId, existingNames)` — the third parameter is **required
      and must stay required**. Defaulting it to `[]` reads as "the name is not already there, so
@@ -631,6 +631,15 @@ Seven things a future reader will otherwise "fix":
      (a raw `PERCENTILE_CONT` over the run against the pipeline's per-bucket roll-up), and on every
      other panel `aggregatedKindFor` is null, so the name was stripped from the selection with
      nothing substituted and the section rendered blank.
+   - `presetAggregateSpec()` in the same file (v0.2.95.5), read by `getGraphPresetPanels`. A saved
+     **graph preset** stores the composed name `All aggregated — <panel title>` rather than the bare
+     option, so this one matches on the PREFIX; drop its `ALL_AGGREGATED_DASHBOARD_LABEL` check and a
+     preset on the real dashboard is answered from the raw tables instead of its own stored row.
+     Its panel table `AGGREGATED_PERF_SPECS` is a hand copy of `AGGREGATABLE_PERF_PANELS`, pinned
+     against drift by `url-perf-panels.spec.ts`. It does **not** check `series.source`, matching
+     `useGraphsData`'s restore path, which does not either — a Grafana panel in the 101-105/201-205
+     range whose series is named `All aggregated …` is misrouted identically in both, so the report
+     agrees with the card. Fixing that means fixing both sides at once; see TODOS.md.
 
    The dashboard label and uid are **duplicated as literals** in `aggregated-perf-series.ts` and
    `url-perf-panels.ts` rather than imported from the worker: the worker derives both from
@@ -638,6 +647,18 @@ Seven things a future reader will otherwise "fix":
    `generateScenarioDashboardUid`, so sharing the constant would share the wrong half.
    `apps/worker/src/test/unit/pipelines/all-aggregated-dashboard.test.ts` pins those generators to
    the exact literals so the copies cannot drift unnoticed.
+
+   **`ReportDataFetcherService.getAggregatedSeries` must stay value-identical to
+   `/aggregated-metric-timeseries`, not merely equivalent.** The Graphs card draws a preset's
+   synthetic series from the endpoint and the report draws the same series from this method, side by
+   side in the same review. Two things were divergent until v0.2.95.5, and both were invisible —
+   the report rendered a plausible line, just not the card's. It used exact `PERCENTILE_CONT` where
+   the endpoint uses `approx_percentile(percentile_agg(...))` (measured up to 21% / 580 ms apart on a
+   spiky p95 bucket; exact is the better number in isolation and the wrong one here), and it applied
+   only the START of the analysis window. That second one also broke a single chart internally:
+   `ds_metrics.ramp_up` is baked to exclude the ramp-DOWN band too, so a stored series and an
+   aggregate on one preset chart ended at different x positions. `getAnalysisWindowBounds` now
+   returns both cutoffs and `getRampUpCutoffTime` delegates to it.
 6. **A real scenario literally named `all aggregated` has its own row dropped in favour of the
    roll-up.** Both datasets land on the same dashboard and the two rows share
    `(dashboard, panel, metric_name, time)` inside one `ON CONFLICT DO UPDATE` batch, which Postgres
@@ -890,7 +911,7 @@ container mounts in tests at all.
 
 19. **A panel or metric dropdown is slow on a large run** → check the shape of the query before reaching for a new table or a hand-rolled loose index scan. A `GROUP BY` with `COUNT(DISTINCT)` / `ARRAY_AGG(DISTINCT)` over `ds_metrics` walks every data point (2035 ms on 12.8 M rows); making the inner set distinct first is index-only over `idx_ds_metrics_panel_lookup` (927 ms, v0.2.95.3). A plain single-column `SELECT DISTINCT` on that table is already fast — TimescaleDB SkipScans it in 3.9 ms — so EXPLAIN it before optimising it. See item 7 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 
-20. **"All aggregated" appears twice in a metric dropdown, or an "All aggregated" series renders blank or disagrees with the panel it sits on** → the *synthetic* run-wide aggregate is being offered or intercepted on the real `Performance test metrics all aggregated` dashboard, where that exact name is an ordinary stored series on every panel. Three guards keep the two apart and each fails silently when weakened: `shouldOfferAllAggregated`'s third parameter (required on purpose — defaulting it to `[]` fails open), `isAllAggregatedDashboard` at the three web add-series sites, and `isSyntheticAllAggregated` in the report data fetcher. A blank report section is the report-side symptom; a series whose numbers disagree with the panel is the chart-side one. See "The perf-test pipeline writes one extra dashboard, and its series name was already taken" above.
+20. **"All aggregated" appears twice in a metric dropdown, an "All aggregated" series renders blank or disagrees with the panel it sits on, or a report's Custom Graphs section says "No metrics data found for the selected graph presets"** → the *synthetic* run-wide aggregate is being offered or intercepted on the real `Performance test metrics all aggregated` dashboard, where that exact name is an ordinary stored series on every panel. Three guards keep the two apart and each fails silently when weakened: `shouldOfferAllAggregated`'s third parameter (required on purpose — defaulting it to `[]` fails open), `isAllAggregatedDashboard` at the three web add-series sites, and `isSyntheticAllAggregated` in the report data fetcher. A blank report section is the report-side symptom; a series whose numbers disagree with the panel is the chart-side one. The empty *graph preset* section was a fourth case, fixed in v0.2.95.5: the report read graph presets from `ds_metrics` only, where the synthetic series has no rows by definition. See "The perf-test pipeline writes one extra dashboard, and its series name was already taken" above.
 
 ## How-To Tutorials
 
