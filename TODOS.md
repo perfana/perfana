@@ -786,6 +786,47 @@ escaper go back to being broad without printing artifacts.
 ---
 
 
+## Metrics dropdowns
+
+### An unmatched dashboard/panel pair is an unindexed scan of the whole ds_metrics hypertable
+
+**Priority:** P1
+**Origin:** adversarial review during /ship on `perf/metric-dropdown-statistics-source` (2026-09-08).
+**Why:** Called without `testRunId` — the report-template path, where `MetricSelectionCascade`
+makes it conditional and fans one request out per selected panel — `getDistinctMetricNames` filters
+on `panel_id` + `application_dashboard_id` only. Neither `uniq_ds_metrics_upsert` nor
+`idx_ds_metrics_panel_lookup` leads with those, so there is no usable index prefix and no chunk
+exclusion. There is no `statement_timeout` on this path either (only
+`test-runs-performance-query.service.ts` sets one). Combined with the missing authorization above,
+an authenticated caller can aim it deliberately. Note the *scoped* call is fine and needs nothing:
+TimescaleDB applies a native `Custom Scan (SkipScan)` there — measured 3.9 ms, `Heap Fetches: 0`.
+**What:** A covering index for the unscoped shape (`application_dashboard_id, panel_id,
+metric_name`), a `SET LOCAL statement_timeout` on the path, or require `testRunId`. Measure before
+choosing — check whether the unscoped call is actually hot in production first.
+**Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getDistinctMetricNames`).
+
+---
+
+### The panel list is still ~0.9s, and the client refetches the whole run's aggregate per dashboard
+
+**Priority:** P2
+**Origin:** performance review during /ship on `perf/metric-dropdown-statistics-source` (2026-09-08),
+after the DISTINCT-first rewrite took it from 2035 ms to 927 ms.
+**Why:** 927 ms is an index-only scan over `idx_ds_metrics_panel_lookup` of every distinct
+(panel, metric) tuple in the run — better than walking every data point, but still linear in the
+run. The client makes it worse: `useGraphsData.fetchPerformanceTestPanels` and
+`useTrendsData.fetchPerformanceTestPanels` fetch the entire `/ds-metrics/available/:testRunId`
+aggregate and filter by `dashboard_label` in JavaScript, so selecting each dashboard re-runs the
+whole-run query. The response is also unbounded — one run here carries 381 panel rows and 4,631
+metric names in a single payload.
+**What:** Accept a `dashboardLabel` (or `applicationDashboardId`) query parameter so the client
+stops pulling the whole run to render one dashboard's panels. `ds_metric_statistics` is NOT the
+answer — see the comment in `getAvailableDashboards` for why it is both faster and wrong.
+**Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getAvailableDashboards`),
+`apps/web/app/test-runs/[id]/components/{graphs,trends}/hooks/`.
+
+---
+
 ## Quality gates
 
 ### The worker integration suite is dead code, not dormant coverage
@@ -975,6 +1016,28 @@ captured in a baseline/ignore list, then burn the list down by directory so each
 reviewable.
 
 ## Completed
+
+### `GET /metrics/ds-metrics/distinct-names` and `panels-by-dashboard` had no authorization
+
+**Completed:** v0.2.95.3 (2026-09-08)
+**Origin:** security + adversarial review during /ship on `perf/metric-dropdown-statistics-source`.
+**Was:** Neither `getDistinctMetricNames` nor `getPanelsByApplicationDashboard` took a principal —
+both controllers bound it as `@UserCtx() _ctx` and discarded it — and there is no RLS policy on
+either `ds_metrics` or `ds_metric_statistics` (120 policies in the consolidated schema, none names
+them). Any authenticated principal, including an API key from any organization, could enumerate
+another tenant's metric names by supplying arbitrary UUIDs. On panel 201 those names are
+`transaction_name.sampler_name`, i.e. the customer's business flow names.
+**Fixed by:** a private `validateDashboardAccess` alongside the existing `validateTestRunAccess`,
+which resolves the dashboard's `(organization_id, team_id, created_by)` and defers to
+`AuthorizationService.canAccessResource`. It fails closed on an unknown id. `getDistinctMetricNames`
+checks the run when `testRunId` is supplied and the dashboard otherwise — one check suffices because
+the query filters on both, so a row can only be returned when they belong to the same organization.
+Both controllers now thread `ctx.userId`/`ctx.roles` and validate their UUID query parameters, so a
+malformed id is a 400 rather than a caught 22P02. Four tests cover it, each verified to fail when
+the guard is removed.
+**Left open:** the underlying question of whether `ds_metrics` and `ds_metric_statistics` should be
+brought under Phase 5b RLS. They are policy-free by omission, not by a documented decision like the
+`api_keys` carve-out, so the service layer remains the only control on that data.
 
 ### "Apply analysis time range to all test runs" — blast-radius work
 

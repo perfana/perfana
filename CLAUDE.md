@@ -408,6 +408,14 @@ Four things to know before touching this path:
 
    The rule is not confined to those two pipelines — `DataSanityCheckPipeline` was never covered by it and paid the most. Its sparse-metric check grouped raw `ds_metrics` by `(metric_name, dashboard_label, panel_title)` with `HAVING COUNT(*) < $2`; none of those three columns is `compress_segmentby`, so every run was read in full to surface a handful of thin metrics. Profiled with `pg_stat_statements` across a re-evaluate of 4 large runs it was **92% of all block reads on the deployment**: 4 calls, 12,613,099 shared blocks read (~103 GB) against 1,154,636 hits, 70,062 ms, 6,234 rows returned — 16.5 MB read per row returned. It now sums the per-metric `count` that `StatisticsPipeline` writes into `ds_metric_statistics` in the stage immediately before (`SUM(count) … GROUP BY metric_name, dashboard_label, panel_title HAVING SUM(count) < $2`). That changes what the threshold means, deliberately: `ds_metric_statistics` counts only non-null values inside the analysis window (`ramp_up = false`) and only org-scoped dashboards, where the old count included ramp-up rows and NULLs — so it now measures points that actually reach analysis. Two consequences, both deliberate. It fires **more** often: a metric with 1000 raw points of which 998 are in a long ramp-up used to count 1000 and stay silent, and now counts 2 and warns — expect new warnings on existing runs with a large `analysisStartOffset`. And it fires **less** on one case: a metric whose points are *entirely* in ramp-up (or that sits on a dashboard outside the org scope) gets no `ds_metric_statistics` row at all, so it is not a group and cannot be flagged. That gap is **not** covered by the "No steady-state data" reason — that branch only runs when the whole run has zero statistics, so a handful of all-ramp-up metrics inside an otherwise healthy run now go unreported. Two smaller reads in the same pipeline went the same way: `SELECT COUNT(*) FROM ds_metrics WHERE test_run_id = $1`, whose result was only ever compared against zero, is an `EXISTS` probe (it was 11.1 s and 66k blocks), and the `avg_timestep_sec` in the warning text — the only remaining reason to pull `MIN(time)`/`MAX(time)` off that scan — is gone, replaced by the run duration the message already had in scope. Do not "restore" it by dividing the duration by the point count: 3 points clustered in the first 90 s of a 3600 s run are 45 s apart and that arithmetic would call them 1800 s.
 
+   **Nor is it confined to diagnostics — a user-facing read has the same shape (v0.2.95.3).** `MetricsService.getAvailableDashboards` (`apps/api/src/modules/metrics/metrics.service.ts`) builds the panel dropdown in the trends, compare and graphs cards and backs the MCP `get_available_metrics` tool. Its obvious form — `COUNT(DISTINCT metric_name)` and `ARRAY_AGG(DISTINCT metric_name)` grouped by `(dashboard_label, panel_title, panel_id, unit)` — made both aggregates walk every data point the run recorded: 2035 ms on a 12.8 M-row run, to describe 381 panels. Reducing to distinct `(dashboard_label, panel_title, panel_id, unit, metric_name)` tuples in a subquery and aggregating those is 927 ms and byte-identical, because the inner `DISTINCT` is index-only over `idx_ds_metrics_panel_lookup`, which carries exactly those columns after `test_run_id`. `metric_count` deliberately stays a bigint so the response contract does not move.
+
+   Three things measured on the way, each of which cost a dead end to learn:
+
+   - **A single-column `SELECT DISTINCT` over `ds_metrics` is not automatically slow. EXPLAIN before assuming it is.** TimescaleDB applies a native `Custom Scan (SkipScan)` when the leading index columns are fixed: `SELECT DISTINCT metric_name` for one panel of one run is **3.9 ms**, an Index Only Scan over `uniq_ds_metrics_upsert` with `Heap Fetches: 0`, returning 81 names out of 75,026 points. Hand-rolling a recursive-CTE loose index scan for that shape reimplements what the engine already does, for nothing.
+   - **A multi-column `GROUP BY` carrying `COUNT(DISTINCT)` / `ARRAY_AGG(DISTINCT)` gets no such help.** SkipScan covers one distinct column, not a grouped aggregate over a distinct one, which is why the same table answers in 3.9 ms one way and 2035 ms the other. Make the inner set distinct first and let the outer query aggregate the few hundred rows that survive.
+   - **A recursive-CTE loose index scan is NULL-unsafe and fails silently.** Postgres row comparison `(a,b,c) > (x,y,z)` returns NULL rather than true at the deciding column, so the recursion terminates early and the result is quietly truncated — and `ds_metrics.unit` is NULL on 20,292 rows here. The trap is the verification, not the SQL: an `EXCEPT`-both-ways check of the rewrite against the baseline returned **0 differences and was a false pass**, because every NULL-unit panel in that data happens to carry exactly one metric, so the hazard was never exercised. A diff against production data proves the rewrite agrees *on that data*, nothing more; when a rewrite has a NULL-dependent failure mode, construct the row that exercises it.
+
 8. **The analysis offsets must FIT inside the run, and the check lives in three mirrored places (v0.2.93.3, extended v0.2.95.0).** The analysis window is `[start + analysisStartOffset, end - analysisEndOffset]`. When a short run meets offsets configured for a long one, the leading and trailing exclusions overlap, every sample matches one of them, and the entire run is flagged outside the window. Nothing downstream reports that as a misconfiguration: `ds_metric_statistics` comes out empty, the Apdex rollup misses on every transaction and falls back to the slow path, and ADAPT writes INSUFFICIENT_DATA against a run that plainly has data. It is also the worst case for `refreshRampUpFlags`, which then rewrites every row of a compressed run instead of the boundary band the per-run bounds exist to narrow it to. The fallback is to analyse the **whole** run — the offsets are a request to trim, not to discard — guarded by `EXTRACT(EPOCH FROM (end_time - start_time)) > ramp_up + ramp_down`.
 
    **Measure the run from its timestamps, never from `test_runs.duration`.** `duration` is client-supplied (an updating test posts it, see `update-test-run.handler.ts`), so it can be seeded from a planned duration or left behind by an aborted run and disagree with the timestamps arbitrarily. `RAMP_UP_EXPR` uses the timestamps, so anything that measures a run differently lets the API and the pipeline disagree about the same run — accepting offsets the pipeline then silently ignores, while the user is told the trim was applied.
@@ -532,6 +540,37 @@ Two operational notes:
 
 **A dev database reproduces the estimate but not the timing.** The bad plan shape and the 41x error
 show up on a few million rows; the 5.2 GB spill needs production scale.
+
+### `ds_metric_statistics` is not a faster `ds_metrics`
+
+It looks like the obvious source for anything that needs to know which metrics a run has: already
+aggregated, one row per `(test_run_id, application_dashboard_id, panel_id, metric_name)`, and the
+panel-dropdown query reads it in **59 ms** against 2035 ms over `ds_metrics`. Sourcing a picker from
+it is wrong twice over, and both failures are silent — the endpoint returns a plausible, shorter
+list rather than an error.
+
+1. **It has two writers on different schedules, so "non-empty" does not mean "complete".**
+   `StatisticsPipeline.aggregateMetricStatistics` writes the Grafana and Dynatrace panels
+   atomically, in one `withAnalyticsTransaction`, at analyze time.
+   `PerformanceTestMetricsPipeline.computeAndSaveStatistics`
+   (`apps/worker/src/pipelines/PerformanceTestMetricsPipeline.ts`, ~line 623) writes **500-row
+   autocommit batches on every incremental tick of a live run**. So for the whole duration of a
+   running test the table holds performance-test rows and nothing else. A read that treats a
+   non-empty result as ready therefore returns the perf-test panels and omits every Grafana and
+   Dynatrace dashboard for that run — and because the result is not empty, a "fall back when empty"
+   guard never fires.
+2. **It is filtered, so it is strictly narrower than the chart it would feed.** Rows exist only for
+   `ramp_up = false AND value IS NOT NULL AND application_dashboard_id IN (allowed_dashboards)`
+   (`StatisticsPipeline.ts:439-442`). A metric that reports solely during ramp-up, or is all-NULL,
+   or sits on a dashboard outside the run's org scope, has no row at all — while `getMetricTimeSeries`
+   still plots its points, since `excludeRampUp` defaults to `false`. The picker would then offer
+   fewer metrics than the graph endpoint can draw, on a run whose other metrics all return rows, so
+   again nothing looks broken.
+
+The distinction to hold on to: `ds_metric_statistics` answers "what did analysis measure",
+`ds_metrics` answers "what did the run record". Anything feeding a chart wants the second. Where the
+first is genuinely the right source — the sparse-metric check in `DataSanityCheckPipeline`, item 7
+above — that is a deliberate change in what the number means, and it is documented as one.
 
 ### ADAPT runs with JIT off, on purpose
 
@@ -757,6 +796,10 @@ container mounts in tests at all.
 16. **A worker job shows as completed in BullMQ but its work plainly did not happen** → the processor reported failure by *returning* `{ status: 'failed' }` instead of throwing. `simple-workers.ts` does `return await processor(job)`, so that resolves and BullMQ marks it completed: no retry, no failed-set entry, nothing logged as an error. Grep `status: 'failed'` under `apps/worker/src/workers/`. Note `analyze.ts:243` still does this on its catch-all path by design-debt, and `incremental-metrics.ts` does it deliberately because a scheduler re-drives it. Do not confuse either with `softFail`, where the return value *is* the contract and the caller reads it via `assertStageSucceeded()`. See "A worker that reports failure by RETURNING is silently succeeding" above.
 
 17. **A hover tooltip's text sits away from its background box, or a chart is laid out at the wrong width after a drawer or panel animation** → that chart is a raw `dynamic(() => import('react-plotly.js'))` rather than `@/components/ResponsivePlot`, so it only relayouts when the *window* resizes. Most visible on Chrome under Windows, where a classic scrollbar takes ~15px off the container the moment it appears; macOS overlay scrollbars take nothing, so it does not reproduce on a Mac. Fixed for the anomaly-detection charts in v0.2.95.2. See "A Plotly chart must observe its own container, not the window" above.
+
+18. **A metrics picker lists only the performance-test panels while a run is still going, or omits a metric the graph endpoint will happily draw** → it is sourced from `ds_metric_statistics` instead of `ds_metrics`. That table has two writers on different schedules, and during a live run only `PerformanceTestMetricsPipeline` has written to it; it also holds rows only for non-null, non-ramp-up metrics on org-scoped dashboards. Neither symptom produces an empty result, so no fallback catches it. See "`ds_metric_statistics` is not a faster `ds_metrics`" above.
+
+19. **A panel or metric dropdown is slow on a large run** → check the shape of the query before reaching for a new table or a hand-rolled loose index scan. A `GROUP BY` with `COUNT(DISTINCT)` / `ARRAY_AGG(DISTINCT)` over `ds_metrics` walks every data point (2035 ms on 12.8 M rows); making the inner set distinct first is index-only over `idx_ds_metrics_panel_lookup` (927 ms, v0.2.95.3). A plain single-column `SELECT DISTINCT` on that table is already fast — TimescaleDB SkipScans it in 3.9 ms — so EXPLAIN it before optimising it. See item 7 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 
 ## How-To Tutorials
 

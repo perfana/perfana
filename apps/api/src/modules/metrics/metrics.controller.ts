@@ -1,4 +1,4 @@
-import { Controller, Get, Param, NotFoundException, BadRequestException, Query, Logger } from '@nestjs/common';
+import { Controller, Get, Param, NotFoundException, BadRequestException, Query, Logger, ParseUUIDPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -265,13 +265,17 @@ export class MetricsController {
   @ApiOperation({ summary: 'Get distinct panels for an application dashboard (from ds_metric_statistics)' })
   @ApiQuery({ name: 'applicationDashboardId', required: true, description: 'Application dashboard UUID' })
   async getPanelsByDashboard(
-    @UserCtx() _ctx: UserContext,
-    @Query('applicationDashboardId') applicationDashboardId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('applicationDashboardId', new ParseUUIDPipe()) applicationDashboardId: string,
   ) {
     if (!applicationDashboardId) {
       throw new BadRequestException('applicationDashboardId is required');
     }
-    return this.metricsService.getPanelsByApplicationDashboard(applicationDashboardId);
+    return this.metricsService.getPanelsByApplicationDashboard(
+      applicationDashboardId,
+      ctx.userId,
+      ctx.roles,
+    );
   }
 
   @Get('ds-metrics/distinct-names')
@@ -279,20 +283,25 @@ export class MetricsController {
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   @ApiQuery({ name: 'testRunId', required: false, description: 'Limit to the series this run recorded. Without it the answer spans every run the panel ever had, including series whose names are no longer produced.' })
   async getDistinctMetricNames(
-    @UserCtx() _ctx: UserContext,
-    @Query('applicationDashboardId') applicationDashboardId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('applicationDashboardId', new ParseUUIDPipe({ optional: true })) applicationDashboardId: string,
     @Query('panelId') panelId: string,
-    @Query('metricsSourceId') metricsSourceId?: string,
+    @Query('metricsSourceId', new ParseUUIDPipe({ optional: true })) metricsSourceId?: string,
     @Query('testRunId') testRunId?: string,
   ): Promise<string[]> {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
       throw new BadRequestException('Invalid panel ID');
     }
+    if (!applicationDashboardId && !metricsSourceId) {
+      throw new BadRequestException('applicationDashboardId or metricsSourceId is required');
+    }
 
     return this.metricsService.getDistinctMetricNames(
       applicationDashboardId,
       panelIdNumber,
+      ctx.userId,
+      ctx.roles,
       metricsSourceId,
       testRunId,
     );
