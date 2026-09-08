@@ -788,30 +788,6 @@ escaper go back to being broad without printing artifacts.
 
 ## Metrics dropdowns
 
-### `GET /metrics/ds-metrics/distinct-names` has no authorization, and neither ds_metrics table has RLS
-
-**Priority:** P0
-**Origin:** security + adversarial review during /ship on `perf/metric-dropdown-statistics-source`
-(2026-09-08). Pre-existing; the branch neither introduced nor widened it.
-**Why:** `MetricsService.getDistinctMetricNames` takes no `userId`/`roles`, calls no
-`validateTestRunAccess`, and applies no org filter — the controller binds the principal as
-`@UserCtx() _ctx` and discards it. There is no database backstop either: the consolidated schema
-has 120 `CREATE POLICY` statements and **none** names `ds_metrics` or `ds_metric_statistics`, and
-neither entity is in `OWNED_RESOURCE_ENTITIES`, so the service layer is the only control and it is
-absent. Any authenticated principal — including an API key from any organization — can enumerate
-another tenant's metric names by supplying arbitrary UUIDs. On panel 201 those names are
-`transaction_name.sampler_name`, i.e. the customer's business flow names.
-**What:** Give the method `(userId, roles)` like its sibling `getAvailableDashboards`: when
-`testRunId` is present call `validateTestRunAccess` and return `[]` on failure; otherwise resolve
-the dashboard's organization and check it against `getAccessibleOrganizations`. Rename `_ctx` to
-`ctx` in the controller and thread it through. Separately decide whether these two tables should be
-brought under Phase 5b RLS now that a UI dropdown reads one directly — they are policy-free by
-omission, not by a documented decision like the `api_keys` carve-out.
-**Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getDistinctMetricNames`),
-`apps/api/src/modules/metrics/metrics.controller.ts:277`.
-
----
-
 ### An unmatched dashboard/panel pair is an unindexed scan of the whole ds_metrics hypertable
 
 **Priority:** P1
@@ -1040,6 +1016,28 @@ captured in a baseline/ignore list, then burn the list down by directory so each
 reviewable.
 
 ## Completed
+
+### `GET /metrics/ds-metrics/distinct-names` and `panels-by-dashboard` had no authorization
+
+**Completed:** v0.2.95.3 (2026-09-08)
+**Origin:** security + adversarial review during /ship on `perf/metric-dropdown-statistics-source`.
+**Was:** Neither `getDistinctMetricNames` nor `getPanelsByApplicationDashboard` took a principal —
+both controllers bound it as `@UserCtx() _ctx` and discarded it — and there is no RLS policy on
+either `ds_metrics` or `ds_metric_statistics` (120 policies in the consolidated schema, none names
+them). Any authenticated principal, including an API key from any organization, could enumerate
+another tenant's metric names by supplying arbitrary UUIDs. On panel 201 those names are
+`transaction_name.sampler_name`, i.e. the customer's business flow names.
+**Fixed by:** a private `validateDashboardAccess` alongside the existing `validateTestRunAccess`,
+which resolves the dashboard's `(organization_id, team_id, created_by)` and defers to
+`AuthorizationService.canAccessResource`. It fails closed on an unknown id. `getDistinctMetricNames`
+checks the run when `testRunId` is supplied and the dashboard otherwise — one check suffices because
+the query filters on both, so a row can only be returned when they belong to the same organization.
+Both controllers now thread `ctx.userId`/`ctx.roles` and validate their UUID query parameters, so a
+malformed id is a 400 rather than a caught 22P02. Four tests cover it, each verified to fail when
+the guard is removed.
+**Left open:** the underlying question of whether `ds_metrics` and `ds_metric_statistics` should be
+brought under Phase 5b RLS. They are policy-free by omission, not by a documented decision like the
+`api_keys` carve-out, so the service layer remains the only control on that data.
 
 ### "Apply analysis time range to all test runs" — blast-radius work
 

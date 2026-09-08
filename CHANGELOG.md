@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.2.95.3] - 2026-09-08
 
+### Fixed
+- **The metric and panel dropdown endpoints now check who is asking.** `GET /metrics/ds-metrics/distinct-names` and `GET /metrics/ds-metrics/panels-by-dashboard` took a dashboard identifier straight from the query string and returned its metric and panel names without checking whether the caller's organization owned that dashboard. The tables behind them carry no row-level security policy, so nothing else was checking either: any signed-in user or API key could read another organization's metric names, which on the performance metrics dashboards are the transaction names. Both endpoints now verify access to the test run or the dashboard before querying, and refuse an unrecognised identifier rather than assuming it is safe.
+
 ### Changed
 - **The panel dropdown opens faster on runs with many transactions.** Picking a performance metrics dashboard in the trends, compare and graphs cards built the panel list by counting and collecting metric names across every measurement point the run recorded, which on a large run is millions of rows to describe a few hundred panels. The list is now assembled from the distinct panel/metric combinations instead, which is the same answer from the same data: measured 2.0 seconds down to 0.9 on a 12.8 million row run, returning an identical list. The metric dropdown was measured too and left alone — it was already fast.
 

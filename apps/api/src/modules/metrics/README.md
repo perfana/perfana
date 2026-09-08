@@ -70,11 +70,23 @@ on tens of thousands of rows.
 
 ## Authorization
 
-`getAvailableDashboards`, `findDSMetricsForPanel` and the statistics queries take `(userId, roles)`
-and go through the private `validateTestRunAccess`, returning `[]` / `null` on refusal rather than
-throwing. `getDistinctMetricNames` currently does **not** — see the open P0 in `TODOS.md` under
-"Metrics dropdowns". Neither `ds_metrics` nor `ds_metric_statistics` has an RLS policy, so the
-service layer is the only control on these tables.
+Every read here takes `(userId, roles)` and refuses by returning `[]` / `null` rather than throwing,
+so a refusal is indistinguishable from an empty result to the caller. Two private helpers do the
+work: `validateTestRunAccess` for anything scoped to a run, and `validateDashboardAccess` for
+anything scoped to an application dashboard. Both resolve the owned resource's
+`(organization_id, team_id, created_by)` and defer to `AuthorizationService.canAccessResource`, and
+both **fail closed** — an id that resolves to no row is a refusal, not a skip.
+
+`getDistinctMetricNames` checks the run when `testRunId` is supplied and the dashboard otherwise.
+One check is enough rather than both: the query always filters on the run AND the dashboard/source,
+so a row can only come back when the two belong to the same organization, and proving access to
+either rules out a cross-tenant read.
+
+This matters more here than in most modules: **neither `ds_metrics` nor `ds_metric_statistics` has
+an RLS policy** — the consolidated schema has 120 `CREATE POLICY` statements and none names either
+table, and neither entity is in `OWNED_RESOURCE_ENTITIES`. There is no database backstop, so these
+service-layer checks are the only control on that data. Anything new added to this module needs its
+own check for the same reason.
 
 ## Related
 
