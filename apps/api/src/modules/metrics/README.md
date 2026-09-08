@@ -27,7 +27,7 @@ Everything here is a read — collection is the worker's job
 | `GET ds-metrics/panels-by-dashboard` | `getPanelsByApplicationDashboard` | Panel list for one application dashboard |
 | `GET ds-metrics/distinct-names` | `getDistinctMetricNames` | Metric-name dropdown |
 
-## Two things to know before writing a query here
+## Three things to know before writing a query here
 
 ### `ds_metric_statistics` is not a faster `ds_metrics`
 
@@ -68,6 +68,24 @@ recursive-CTE loose index scan — besides duplicating the engine, row compariso
 returns NULL at the deciding column and silently truncates the result, and `ds_metrics.unit` is NULL
 on tens of thousands of rows.
 
+### `All aggregated` is two different things
+
+The perf-test pipeline writes a dashboard `Performance test metrics all aggregated` (uid
+`performance-test-metrics-all-aggregated`) whose single series on every panel is named
+`All aggregated` (v0.2.95.4). Those are ordinary `ds_metrics` / `ds_metric_statistics` rows and every
+endpoint here serves them like any other series — that is the point, and nothing in this module
+needs to know about them.
+
+The trap is that the same string is *also* a **synthetic** dropdown entry the web app fabricates on
+ten response-time panels of the per-scenario dashboards, answered by
+`GET /test-runs/:id/aggregated-metric-timeseries` (test-runs module) because no stored row exists for
+it. So do not add an interception here that recognises the name and reroutes it: on this dashboard
+that answers a stored series from a different computation, and on the panels outside that endpoint's
+spec it returns nothing at all. Both failures are silent. The dashboard, not the metric name, is what
+tells the two apart — `isAllAggregatedDashboard` in `apps/web/lib/aggregated-perf-series.ts` and
+`isSyntheticAllAggregated` in `apps/api/src/modules/reports/services/url-perf-panels.ts` are the two
+existing guards.
+
 ## Authorization
 
 Every read here takes `(userId, roles)` and refuses by returning `[]` / `null` rather than throwing,
@@ -91,5 +109,6 @@ own check for the same reason.
 ## Related
 
 - Worker pipelines: `apps/worker/src/pipelines/{MetricsPipeline,StatisticsPipeline,PerformanceTestMetricsPipeline}.ts`
-- CLAUDE.md: "ADAPT's baseline depends on the `pct_agg` sketch" (item 7) and
-  "`ds_metric_statistics` is not a faster `ds_metrics`"
+- CLAUDE.md: "ADAPT's baseline depends on the `pct_agg` sketch" (item 7),
+  "`ds_metric_statistics` is not a faster `ds_metrics`", and "The perf-test pipeline writes one extra
+  dashboard, and its series name was already taken"

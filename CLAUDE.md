@@ -572,6 +572,95 @@ The distinction to hold on to: `ds_metric_statistics` answers "what did analysis
 first is genuinely the right source — the sparse-metric check in `DataSanityCheckPipeline`, item 7
 above — that is a deliberate change in what the number means, and it is documented as one.
 
+### The perf-test pipeline writes one extra dashboard, and its series name was already taken
+
+`PerformanceTestMetricsPipeline` writes one dashboard per JMeter/Gatling scenario. Since v0.2.95.4
+it writes one more: **`Performance test metrics all aggregated`** (uid
+`performance-test-metrics-all-aggregated`), generated from the pseudo-scenario
+`ALL_AGGREGATED_SCENARIO = 'all aggregated'` in
+`apps/worker/src/constants/performance-metrics.ts`. It carries the same panels as any scenario
+dashboard with exactly **one** series on each, named `All aggregated`, rolled up over every
+scenario, transaction and sampler in the run.
+
+It is an ordinary `application_dashboards` + `metrics_sources` row with the usual
+`performance-test-metrics-` uid prefix, so all four dropdown surfaces — the trends, compare and
+graphs cards and the report configuration cascade — list it with no client-side plumbing at all.
+That is the design; do not add a special case to surface it.
+
+Seven things a future reader will otherwise "fix":
+
+1. **The roll-up is a second `GROUPING SETS` entry, and it is free.** `transactions-processor.ts`
+   and `requests-processor.ts` add `(bd.bucket_time)` beside the existing group key. It shares the
+   one scan, and the percentiles and Apdex brackets are computed over the raw rows — exact, not an
+   average of per-transaction values. Measured *faster*: requests 2994 ms → 2337 ms on a 1.4 M-row
+   run. The ordered-set aggregates (`PERCENTILE_CONT`) had already ruled out a HashAggregate, so
+   Postgres serves both levels from one sort, and `bucket_time` at the head of that sort matches the
+   hypertable's physical order and earns an Incremental Sort. Splitting it into a second query or a
+   JS pass over the per-transaction rows costs a scan and loses the exact percentiles.
+2. **The `ORDER BY` was deleted from both queries, deliberately.** It used to be a prefix of the
+   group-key sort and therefore free; with `bucket_time` now leading that sort it is a second,
+   top-level sort that spills — 22 MB (requests) / 3 MB (transactions) on that same run, growing
+   with the number of series. No consumer reads row order: both loops accumulate into a `Map` keyed
+   by scenario and bucket.
+3. **It is display-only — no `ds_compare_config` rows are written for it**, in any of the four
+   processors, so ADAPT never evaluates it. A run-wide average moves whenever the traffic mix
+   shifts, so trending it would fail runs in which no individual transaction regressed. Adding the
+   configs is a one-line change that puts every run's verdict at the mercy of its mix.
+4. **`DataSanityCheckPipeline` excludes the scenario-level panels by TITLE** — `Error Count`,
+   `Avg Active Threads`, `Max Active Threads` — not only by metric name. Those panels hold one point
+   by construction (written once at `end_time`). The pre-existing exclusion matched the
+   *per-scenario* metric-name spelling; on this dashboard the same three metrics are named
+   `All aggregated`, so without the title filter every run reports three sparse metrics, forever.
+5. **`All aggregated` was already a name, and the guards separating the two are load-bearing.**
+   `ALL_AGGREGATED_OPTION = 'All aggregated'` in `apps/web/lib/aggregated-perf-series.ts` has been a
+   **synthetic** dropdown entry since v0.2.61 — offered on ten response-time panels only, and
+   answered by `GET /test-runs/:id/aggregated-metric-timeseries`, which computes a run-wide figure on
+   the fly precisely because no stored row existed for it. On the new dashboard the identical string
+   is an ordinary `ds_metrics` / `ds_metric_statistics` row, on *every* panel. Three guards keep them
+   apart and each one fails silently if removed:
+   - `shouldOfferAllAggregated(source, panelId, existingNames)` — the third parameter is **required
+     and must stay required**. Defaulting it to `[]` reads as "the name is not already there, so
+     offer it", i.e. fail-open, and the dropdown lists the entry twice.
+   - `isAllAggregatedDashboard(labelOrUid)` at the three web add-series sites (`useTrendsData`,
+     `useGraphsData`, `useCompareHandlers`). On this dashboard the name must not be routed to
+     `/aggregated-metric-*`, whose spec covers ten panels and returns nothing for the rest.
+   - `isSyntheticAllAggregated()` in `apps/api/src/modules/reports/services/url-perf-panels.ts`,
+     folded into the three interception sites in `report-data-fetcher.service.ts`. That one was a
+     real bug, not a precaution: a report selection on the new dashboard was intercepted, so on
+     panels 101-104 / 201-204 the report answered from a *different* computation than the stored row
+     (a raw `PERCENTILE_CONT` over the run against the pipeline's per-bucket roll-up), and on every
+     other panel `aggregatedKindFor` is null, so the name was stripped from the selection with
+     nothing substituted and the section rendered blank.
+
+   The dashboard label and uid are **duplicated as literals** in `aggregated-perf-series.ts` and
+   `url-perf-panels.ts` rather than imported from the worker: the worker derives both from
+   `ALL_AGGREGATED_SCENARIO` through `generateScenarioDashboardLabel` /
+   `generateScenarioDashboardUid`, so sharing the constant would share the wrong half.
+   `apps/worker/src/test/unit/pipelines/all-aggregated-dashboard.test.ts` pins those generators to
+   the exact literals so the copies cannot drift unnoticed.
+6. **A real scenario literally named `all aggregated` has its own row dropped in favour of the
+   roll-up.** Both datasets land on the same dashboard and the two rows share
+   `(dashboard, panel, metric_name, time)` inside one `ON CONFLICT DO UPDATE` batch, which Postgres
+   rejects outright and which would fail the whole pipeline. `ErrorsProcessor` (both branches) and
+   `VirtualUsersProcessor` filter the real scenario out before appending the roll-up; the request and
+   transaction processors get it from the grouping set, where the roll-up row is the one with
+   `scenario_name IS NULL`. Losing one pathologically-named scenario's row beats failing every run.
+7. **The virtual-user roll-up is JS arithmetic, and grouping the raw rows does not work.**
+   Concurrent threads add across scenarios, so the run-wide figure is a sum — but each scenario's
+   average covers only its own samples, so a scenario active for a fraction of the run would
+   otherwise contribute its full average to the whole run. `VirtualUsersProcessor` weights each
+   scenario's average by its sample count against the longest-running scenario, which is that
+   fraction. Summing raw `virtual_users` rows grouped on `time` was tried and rejected: the samples
+   are sub-second and independent per scenario, so on real data only 6,662 of 128,919 distinct
+   timestamps carry more than one scenario and the sum degenerates to individual sample values —
+   **65.7 against an actual 1249**. The exact answer needs `time_bucket_gapfill` + `locf` per
+   scenario, which needs both window bounds, and `end_time` is null on a running test. The max is
+   the plain sum of per-scenario maxima — an upper bound when scenarios peak at different moments,
+   marked with a `ponytail:` comment rather than silently presented as a true peak.
+
+The roll-up is written at ingestion, so it appears on runs analysed from v0.2.95.4 onwards;
+re-analysing an older run produces it.
+
 ### ADAPT runs with JIT off, on purpose
 
 `AdaptPipeline` sets `jit = off` for its own transaction (`set_config('jit','off',true)`, first
@@ -800,6 +889,8 @@ container mounts in tests at all.
 18. **A metrics picker lists only the performance-test panels while a run is still going, or omits a metric the graph endpoint will happily draw** → it is sourced from `ds_metric_statistics` instead of `ds_metrics`. That table has two writers on different schedules, and during a live run only `PerformanceTestMetricsPipeline` has written to it; it also holds rows only for non-null, non-ramp-up metrics on org-scoped dashboards. Neither symptom produces an empty result, so no fallback catches it. See "`ds_metric_statistics` is not a faster `ds_metrics`" above.
 
 19. **A panel or metric dropdown is slow on a large run** → check the shape of the query before reaching for a new table or a hand-rolled loose index scan. A `GROUP BY` with `COUNT(DISTINCT)` / `ARRAY_AGG(DISTINCT)` over `ds_metrics` walks every data point (2035 ms on 12.8 M rows); making the inner set distinct first is index-only over `idx_ds_metrics_panel_lookup` (927 ms, v0.2.95.3). A plain single-column `SELECT DISTINCT` on that table is already fast — TimescaleDB SkipScans it in 3.9 ms — so EXPLAIN it before optimising it. See item 7 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
+
+20. **"All aggregated" appears twice in a metric dropdown, or an "All aggregated" series renders blank or disagrees with the panel it sits on** → the *synthetic* run-wide aggregate is being offered or intercepted on the real `Performance test metrics all aggregated` dashboard, where that exact name is an ordinary stored series on every panel. Three guards keep the two apart and each fails silently when weakened: `shouldOfferAllAggregated`'s third parameter (required on purpose — defaulting it to `[]` fails open), `isAllAggregatedDashboard` at the three web add-series sites, and `isSyntheticAllAggregated` in the report data fetcher. A blank report section is the report-side symptom; a series whose numbers disagree with the panel is the chart-side one. See "The perf-test pipeline writes one extra dashboard, and its series name was already taken" above.
 
 ## How-To Tutorials
 

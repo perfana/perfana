@@ -6,7 +6,8 @@
  * performance test tables (requests_raw, transactions, requests_error, virtual_users).
  *
  * IMPORTANT ARCHITECTURAL CHANGES:
- * - New structure uses one dashboard per scenario (instead of single fixed dashboard)
+ * - New structure uses one dashboard per scenario (instead of single fixed dashboard),
+ *   plus one extra roll-up dashboard across all scenarios (ALL_AGGREGATED_SCENARIO below)
  * - Panels are generated per transaction (hash-based IDs for stability)
  * - Special "scenario-level" panel for scenario-wide metrics
  * - Metric names are simplified (scenario/transaction names removed)
