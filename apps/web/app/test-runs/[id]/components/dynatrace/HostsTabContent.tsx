@@ -5,6 +5,7 @@ import { Box, Button, Typography } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { TestRun } from '@/types/test-runs';
 import { DynatraceConfig, fetchHostsOverview, HostOverviewRow } from '@/lib/dynatrace';
+import HostLabelChips from '@/components/HostLabelChips';
 import HostDetailPanel from './HostDetailPanel';
 import HostsOverviewTable from './HostsOverviewTable';
 
@@ -18,6 +19,7 @@ interface DynatraceEntityMapping {
   testEnvironment?: string;
   workload?: string;
   level: string;
+  labels?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -97,6 +99,7 @@ export default function HostsTabContent({ hostEntities, testRun, configs }: Host
           <Typography variant="h6" sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>
             {selectedHost.entityDisplayName}
           </Typography>
+          <HostLabelChips labels={selectedHost.labels} />
         </Box>
         <HostDetailPanel
           host={selectedHost}

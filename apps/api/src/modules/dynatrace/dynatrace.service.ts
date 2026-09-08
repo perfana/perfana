@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException, ConflictException, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
-import { DynatraceRepository } from './dynatrace.repository';
+import { DynatraceRepository, hostDashboardLabel } from './dynatrace.repository';
 import { CreateDynatraceConfigDto } from './dto/create-dynatrace-config.dto';
 import { UpdateDynatraceConfigDto } from './dto/update-dynatrace-config.dto';
 import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
@@ -1282,7 +1282,58 @@ export class DynatraceService {
       organizationIdOverride: existing.organizationId,
     });
     await this.repository.deleteEntityMapping(id);
+
+    // A HOST mapping owns the four metric queries createHostMetricQueries made for
+    // it. Leaving them behind keeps Perfana collecting metrics for a host nobody
+    // mapped any more. The artificial dashboard itself stays — see
+    // deleteHostMetricQueries for why it cannot be removed.
+    if (existing.entityType === 'HOST' && existing.testEnvironment && existing.workload) {
+      const applicationDashboardId = this.repository.generateDynatraceDashboardUuid(
+        existing.systemUnderTestId,
+        existing.testEnvironment,
+        hostDashboardLabel(existing.entityDisplayName),
+        existing.workload,
+      );
+      const removed = await this.repository.deleteHostMetricQueries(applicationDashboardId);
+      this.logger.log(`Deleted ${removed} host metric queries for ${existing.entityDisplayName}`);
+    }
+
     this.logger.log(`Dynatrace entity mapping ${id} deleted successfully by user ${userId}`);
+  }
+
+  /**
+   * Replace an entity mapping's labels. Labels are presentation-only, but the
+   * write goes through the same capability gate as any other mapping mutation.
+   */
+  async updateEntityMappingLabels(id: string, labels: string[], userId: string, roles: string[]) {
+    const existing = await this.repository.getEntityMappingById(id);
+    if (!existing) {
+      throw new NotFoundException(`Dynatrace entity mapping with ID ${id} not found`);
+    }
+
+    const caps = await this.authzService.getCapabilities(userId, roles, existing.organizationId);
+    if (!caps.includes(Capability.IntegrationDynatraceUpdate)) {
+      throw new ForbiddenException(
+        'You do not have permission to update this Dynatrace entity mapping',
+      );
+    }
+
+    // Trim, drop blanks, de-duplicate — the autocomplete is free-solo, so
+    // "appserver " and "appserver" would otherwise become two labels.
+    const clean = Array.from(
+      new Set(labels.map((l) => l.trim()).filter((l) => l.length > 0)),
+    );
+
+    const result = await this.repository.updateEntityMappingLabels(id, clean, userId);
+    this.auditService.logUpdate(this.toMappingAuditRef(existing), this.toMappingAuditRef(result), {
+      organizationIdOverride: existing.organizationId,
+    });
+    return result;
+  }
+
+  /** Every label already in use, for the label autocomplete. RLS scopes it to the caller. */
+  async getDistinctEntityLabels(): Promise<string[]> {
+    return this.repository.getDistinctEntityLabels();
   }
 
   // Metric Names for Dynatrace Card
@@ -1813,7 +1864,7 @@ export class DynatraceService {
     );
 
     // Each host gets its own dashboard label (Dashboard: Dynatrace host metrics {hostName})
-    const dashboardLabel = `Dynatrace host metrics ${hostDisplayName}`;
+    const dashboardLabel = hostDashboardLabel(hostDisplayName);
 
     // Generate deterministic UUID for the application dashboard
     // Each host gets its own dashboard

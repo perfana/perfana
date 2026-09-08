@@ -1,4 +1,4 @@
-import { IsString, IsUUID, IsOptional, IsIn, IsNotEmpty } from 'class-validator';
+import { IsString, IsUUID, IsOptional, IsIn, IsNotEmpty, IsArray, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateEntityMappingDto {
@@ -65,4 +65,28 @@ export class CreateEntityMappingDto {
   })
   @IsIn(['sut', 'sut_testenv', 'sut_testenv_workload'])
   level!: 'sut' | 'sut_testenv' | 'sut_testenv_workload';
+
+  @ApiProperty({
+    description: 'Free-form labels describing the role of the entity',
+    example: ['appserver', 'database'],
+    required: false,
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  labels?: string[];
+}
+
+export class UpdateEntityMappingLabelsDto {
+  @ApiProperty({
+    description: 'Full replacement set of labels',
+    example: ['appserver'],
+    type: [String],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  labels!: string[];
 }

@@ -64,6 +64,7 @@ describe('GraphsRenderer', () => {
           provide: ReportDataFetcherService,
           useValue: {
             getMetricsTimeSeries: jest.fn().mockResolvedValue([makePanel()]),
+            getDynatraceHostLabels: jest.fn().mockResolvedValue({}),
             getAvailableMetricsPanels: jest.fn().mockResolvedValue([
               { dashboardLabel: 'System Metrics', panelTitle: 'CPU Usage', metricName: 'cpu_usage_percent' },
             ] as MetricsPanelSelector[]),

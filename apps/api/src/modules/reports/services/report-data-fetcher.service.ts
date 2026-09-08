@@ -11,6 +11,7 @@ import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { percentDiff } from '../renderers/comparison-bands';
 import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isSyntheticAllAggregated, isUrlPanel, perfPanelTitle, presetAggregateSpec } from './url-perf-panels';
 import { CHANGE_POINT_WINDOW } from './trend-window';
+import { hostDashboardLabel } from '../../dynatrace/dynatrace.repository';
 
 // The shapes these queries return. Re-exported so the ten renderers that import them from
 // this module keep working unchanged.
@@ -2652,6 +2653,32 @@ export class ReportDataFetcherService {
       unit: 'ms',
       valuesByRun: Object.fromEntries(byKind.get(aggregatedKindFor(sel.panelId)!) ?? []),
     }));
+  }
+
+  /**
+   * `dashboard_label` → the Dynatrace host's labels, for every labelled HOST
+   * mapped to this run's system. A host dashboard's label is the only carrier of
+   * host identity in report data, so this is how a renderer gets from a group
+   * heading back to the host it describes. Scoped by the run's own system, which
+   * the caller has already been authorized for.
+   */
+  async getDynatraceHostLabels(testRun: TestRun | null): Promise<Record<string, string[]>> {
+    if (!testRun?.systemUnderTestId) return {};
+    const rows: Array<{ entity_display_name: string; labels: string[] }> = await this.dataSource.query(
+      `SELECT entity_display_name, labels
+         FROM dynatrace_entity_mappings
+        WHERE system_under_test_id = $1
+          AND entity_type = 'HOST'
+          AND cardinality(labels) > 0
+          AND (test_environment IS NULL OR test_environment = $2)
+          AND (workload IS NULL OR workload = $3)`,
+      [testRun.systemUnderTestId, testRun.testEnvironment ?? null, testRun.workload ?? null],
+    );
+    const map: Record<string, string[]> = {};
+    for (const row of rows) {
+      map[hostDashboardLabel(row.entity_display_name)] = row.labels ?? [];
+    }
+    return map;
   }
 
   async getMetricTrends(

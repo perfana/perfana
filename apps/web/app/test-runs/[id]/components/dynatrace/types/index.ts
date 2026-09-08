@@ -51,6 +51,8 @@ export interface DynatraceEntityMapping {
   testEnvironment?: string;
   workload?: string;
   level: string;
+  /** Free-form role labels ("appserver", "database", …). Presentation only. */
+  labels?: string[];
   createdAt: string;
   updatedAt: string;
 }

@@ -33,6 +33,7 @@ import { isUrlPanel } from '@/lib/url-perf-panels';
 import { ClippedUrl } from '@/components/ui/clipped-url';
 import { TestRun } from '@/types/test-runs';
 import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
+import HostLabelChips from '@/components/HostLabelChips';
 
 interface MetricRow {
   metricName: string;
@@ -172,7 +173,20 @@ export default function MetricsComparisonTable({
   testRun,
   relatedTestRuns,
   showToast,
+  addedSeries,
 }: MetricsComparisonTableProps) {
+  // The comparison rows carry only the dashboard label, so take the host's labels
+  // off the series that produced them.
+  const hostLabelsByDashboard = React.useMemo(
+    () =>
+      new Map(
+        addedSeries
+          .filter((s) => s.hostLabels && s.hostLabels.length > 0)
+          .map((s) => [s.dashboardLabel, s.hostLabels as string[]]),
+      ),
+    [addedSeries],
+  );
+
   const thresholds = toDiffThresholds(displayConfig);
   const columns = getMetricColumns(displayConfig);
   const gridTemplateColumns = `minmax(180px, 2fr) ${columns.map(() => 'minmax(150px, 1fr)').join(' ')} 44px`;
@@ -287,10 +301,13 @@ export default function MetricsComparisonTable({
             rows.some(row => bandFilter.has(worstBand(rowDiffs(row), thresholds)))))
         .map(([dashLabel, panels]) => (
         <Box key={dashLabel} sx={{ mb: 4 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5, pl: 1.5,
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, pl: 1.5,
             borderLeft: '4px solid', borderColor: 'primary.main' }}>
-            {dashLabel}
-          </Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+              {dashLabel}
+            </Typography>
+            <HostLabelChips labels={hostLabelsByDashboard.get(dashLabel)} />
+          </Box>
 
           {Array.from(panels.entries()).map(([panelLabel, rows]) => {
             const bandByRow = new Map(rows.map(row => [row, worstBand(rowDiffs(row), thresholds)]));

@@ -16,9 +16,11 @@ import {
 import {
   Delete as DeleteIcon,
   Link as LinkIcon,
+  LocalOffer as LabelIcon,
 } from '@mui/icons-material';
 import { DynatraceEntityMapping } from '../types';
 import { RequiresPermission } from '@/components/auth/RequiresPermission';
+import HostLabelChips from '@/components/HostLabelChips';
 import { getLevelDisplayName, getLevelColor } from '../utils';
 
 interface EntityMappingsTableProps {
@@ -27,6 +29,7 @@ interface EntityMappingsTableProps {
   onSelectAll: () => void;
   onSelectOne: (id: string) => void;
   onDelete: (mapping: DynatraceEntityMapping) => void;
+  onEditLabels: (mapping: DynatraceEntityMapping) => void;
 }
 
 export function EntityMappingsTable({
@@ -35,6 +38,7 @@ export function EntityMappingsTable({
   onSelectAll,
   onSelectOne,
   onDelete,
+  onEditLabels,
 }: EntityMappingsTableProps) {
   return (
     <TableContainer>
@@ -51,6 +55,7 @@ export function EntityMappingsTable({
             </TableCell>
             <TableCell>Entity Name</TableCell>
             <TableCell>Entity Type</TableCell>
+            <TableCell>Labels</TableCell>
             <TableCell>Dynatrace Instance</TableCell>
             <TableCell>Level</TableCell>
             <TableCell>Actions</TableCell>
@@ -90,6 +95,9 @@ export function EntityMappingsTable({
                 />
               </TableCell>
               <TableCell>
+                <HostLabelChips labels={mapping.labels} emptyText="—" />
+              </TableCell>
+              <TableCell>
                 <Typography variant="body2" fontWeight="medium">
                   {mapping.dynatraceLabel || 'Unknown'}
                 </Typography>
@@ -106,6 +114,21 @@ export function EntityMappingsTable({
                 {/* The button is the direct child: RequiresPermission clones it with
                     `disabled` and supplies its own tooltip when denied. Nesting a
                     MUI Tooltip in between would receive the `disabled` prop instead. */}
+                <RequiresPermission
+                  action="integration:dynatrace:update"
+                  orgId={mapping.organizationId}
+                  resourcePermissions={mapping._permissions}
+                  disabledReason="You do not have permission to edit this mapping"
+                >
+                  <IconButton
+                    size="small"
+                    title="Edit labels"
+                    aria-label="Edit labels"
+                    onClick={() => onEditLabels(mapping)}
+                  >
+                    <LabelIcon fontSize="small" />
+                  </IconButton>
+                </RequiresPermission>
                 <RequiresPermission
                   action="integration:dynatrace:delete"
                   orgId={mapping.organizationId}

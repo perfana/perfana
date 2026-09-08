@@ -4,6 +4,7 @@ import React from 'react';
 import { Box, Typography, Button, Chip, Collapse, Link } from '@mui/material';
 import { Close } from '@mui/icons-material';
 import { CompareSeries } from '../types/compare.types';
+import HostLabelChips from '@/components/HostLabelChips';
 
 interface AddedSeriesDisplayProps {
   addedSeries: CompareSeries[];
@@ -40,9 +41,12 @@ export default function AddedSeriesDisplay({
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       {[...byDashboard].map(([dashboardLabel, series]) => (
         <Box key={dashboardLabel}>
-          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, display: 'block', mb: 0.5 }}>
-            {dashboardLabel}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+              {dashboardLabel}
+            </Typography>
+            <HostLabelChips labels={series[0]?.hostLabels} />
+          </Box>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
             {series.map((s) => (
               <Chip

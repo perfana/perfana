@@ -85,6 +85,8 @@ interface UseDynatraceEntityMappingsReturn {
   setSelectedTagValue: (value: string) => void;
   selectedHosts: DynatraceEntity[];
   setSelectedHosts: (hosts: DynatraceEntity[]) => void;
+  newHostLabels: string[];
+  setNewHostLabels: (labels: string[]) => void;
 
   // Refs for input handling
   userTypingRef: React.MutableRefObject<boolean>;
@@ -98,6 +100,7 @@ interface UseDynatraceEntityMappingsReturn {
   handleDeleteEntity: (mapping: DynatraceEntityMapping) => void;
   handleInputChange: (event: unknown, newInputValue: string, reason?: string) => void;
   resetDialogState: () => void;
+  applyLabels: (mappingId: string, labels: string[]) => void;
 }
 
 export function useDynatraceEntityMappings({
@@ -142,6 +145,8 @@ export function useDynatraceEntityMappings({
   const [selectedTagKey, setSelectedTagKey] = useState<string>('');
   const [selectedTagValue, setSelectedTagValue] = useState<string>('');
   const [selectedHosts, setSelectedHosts] = useState<DynatraceEntity[]>([]);
+  // Applied to every host in one add; per-host edits happen from the table afterwards.
+  const [newHostLabels, setNewHostLabels] = useState<string[]>([]);
 
   // Refs for input handling
   const inputChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -339,6 +344,7 @@ export function useDynatraceEntityMappings({
     setSelectedTagKey('');
     setSelectedTagValue('');
     setSelectedHosts([]);
+    setNewHostLabels([]);
     userTypingRef.current = false;
     lastValidInputRef.current = '';
   }, []);
@@ -359,6 +365,7 @@ export function useDynatraceEntityMappings({
     entityDisplayName: entity.displayName,
     entityType: entity.entityType,
     level: selectedLevel,
+    labels: entity.entityType === 'HOST' ? newHostLabels : undefined,
   });
 
   const handleSubmitEntity = async () => {
@@ -471,6 +478,13 @@ export function useDynatraceEntityMappings({
       submittingRef.current = false;
     }
   };
+
+  // The PATCH already returned the saved labels; patch them in rather than refetching.
+  const applyLabels = useCallback((mappingId: string, labels: string[]) => {
+    setEntityMappings((prev) =>
+      prev.map((m) => (m.id === mappingId ? { ...m, labels } : m))
+    );
+  }, []);
 
   const filteredMappings = filterMappingsByContext(
     entityMappings,
@@ -634,6 +648,8 @@ export function useDynatraceEntityMappings({
     setSelectedTagValue,
     selectedHosts,
     setSelectedHosts,
+    newHostLabels,
+    setNewHostLabels,
 
     // Refs
     userTypingRef,
@@ -647,5 +663,6 @@ export function useDynatraceEntityMappings({
     handleDeleteEntity,
     handleInputChange,
     resetDialogState,
+    applyLabels,
   };
 }

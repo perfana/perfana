@@ -156,8 +156,10 @@ export class GraphsRenderer {
       return this.renderNoDataSection(title, text, 'No metrics data found for the selected panels.');
     }
 
+    const hostLabels = await this.dataFetcher.getDynatraceHostLabels(testRun);
     const charts = timeSeriesData
-      .map((panel, idx) => this.renderPanelChart(panel, idx, chartWidth, chartHeight, window, showLegend))
+      .map((panel, idx) =>
+        this.renderPanelChart(panel, idx, chartWidth, chartHeight, window, showLegend, hostLabels))
       .join('\n');
 
     return `
@@ -292,9 +294,16 @@ export class GraphsRenderer {
     height: number,
     window: ChartWindow,
     showLegend: boolean = true,
+    hostLabels: Record<string, string[]> = {},
   ): string {
+    // A chart title is plain text, so a host's labels ride along in brackets rather
+    // than as chips the way the trends and comparisons group headings render them.
+    const labels = panel.dashboardLabel ? hostLabels[panel.dashboardLabel] ?? [] : [];
+    const dashboard = labels.length
+      ? `${panel.dashboardLabel} [${labels.join(', ')}]`
+      : panel.dashboardLabel;
     const chartTitle = panel.dashboardLabel
-      ? `${panel.dashboardLabel} — ${panel.panelTitle}`
+      ? `${dashboard} — ${panel.panelTitle}`
       : panel.panelTitle;
     return this.renderChart(chartTitle, [panel], panelIdx, width, height, window, showLegend);
   }

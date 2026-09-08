@@ -31,6 +31,8 @@ export interface ApplicationDashboard {
   dashboard_uid: string;
   metrics_source_id?: string;
   source_type?: string;
+  /** Dynatrace host dashboards only: the labels given to the host. */
+  hostLabels?: string[];
   grafanaInstance?: {
     label: string;
   };
@@ -117,6 +119,8 @@ export interface CompareSeries {
   yAxesFormat?: string;
   /** True when this series is the run-wide "All aggregated" pseudo-metric. */
   isAggregated?: boolean;
+  /** Dynatrace host dashboards only: the labels given to the host. */
+  hostLabels?: string[];
 }
 
 /**
