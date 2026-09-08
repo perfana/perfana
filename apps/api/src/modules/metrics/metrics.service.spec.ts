@@ -22,6 +22,8 @@ describe('MetricsService', () => {
   let changePointsRepo: jest.Mocked<Repository<DsChangePoints>>;
   let adaptResultsRepo: jest.Mocked<Repository<DsAdaptResults>>;
   let testRunRepo: jest.Mocked<Repository<TestRunEntity>>;
+  let appDashboardRepo: jest.Mocked<Repository<ApplicationDashboard>>;
+  let authzMock: ReturnType<typeof createAuthorizationServiceMock>;
 
   const createMockRepository = () => ({
     find: jest.fn(),
@@ -79,8 +81,11 @@ describe('MetricsService', () => {
     changePointsRepo = module.get(getRepositoryToken(DsChangePoints));
     adaptResultsRepo = module.get(getRepositoryToken(DsAdaptResults));
     testRunRepo = module.get(getRepositoryToken(TestRunEntity));
+    appDashboardRepo = module.get(getRepositoryToken(ApplicationDashboard));
+    authzMock = module.get(AuthorizationService);
     // Default: validateTestRunAccess loads a row (canAccessResource mock allows by default)
     testRunRepo.query.mockResolvedValue([{ organization_id: 'org-1', created_by: 'creator' }]);
+    appDashboardRepo.findOne.mockResolvedValue({ id: 'dash-1', organizationId: 'org-1', createdBy: 'creator' } as never);
   });
 
   afterEach(() => {
@@ -1942,17 +1947,53 @@ describe('MetricsService', () => {
       const qb = makeQb();
       metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
 
-      const names = await service.getDistinctMetricNames('dash-1', 201, 'ms-1', 'run-18');
+      const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user'], 'ms-1', 'run-18');
 
       expect(qb.andWhere).toHaveBeenCalledWith('dsMetrics.test_run_id = :testRunId', { testRunId: 'run-18' });
       expect(names).toEqual(['T01.login']);
+    });
+
+    it('refuses a run the caller cannot access, without querying metrics', async () => {
+      // Neither ds_metrics nor ds_metric_statistics has an RLS policy, so this check is
+      // the only thing standing between a caller and another organization's data.
+      testRunRepo.query.mockResolvedValue([]);
+      const qb = makeQb();
+      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+
+      const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user'], undefined, 'other-org-run');
+
+      expect(names).toEqual([]);
+      expect(metricsRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('refuses a dashboard the caller cannot access when no run is given', async () => {
+      appDashboardRepo.findOne.mockResolvedValue({ id: 'dash-9', organizationId: 'other-org', createdBy: 'someone' } as never);
+      authzMock.canAccessResource.mockResolvedValue({ allowed: false, reason: 'not a member' });
+      const qb = makeQb();
+      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+
+      const names = await service.getDistinctMetricNames('dash-9', 201, 'user-1', ['user']);
+
+      expect(names).toEqual([]);
+      expect(metricsRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('fails closed on an unknown dashboard id', async () => {
+      appDashboardRepo.findOne.mockResolvedValue(null as never);
+      const qb = makeQb();
+      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+
+      const names = await service.getDistinctMetricNames('does-not-exist', 201, 'user-1', ['user']);
+
+      expect(names).toEqual([]);
+      expect(metricsRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
 
     it('stays unscoped when no testRunId is given', async () => {
       const qb = makeQb();
       metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
 
-      await service.getDistinctMetricNames('dash-1', 201);
+      await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user']);
 
       expect(qb.andWhere).not.toHaveBeenCalledWith(
         'dsMetrics.test_run_id = :testRunId', expect.anything());
@@ -2002,6 +2043,38 @@ describe('MetricsService', () => {
 
       expect(rows).toEqual([]);
       expect(metricsRepo.query).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getPanelsByApplicationDashboard', () => {
+    const makePanelsQb = (rows: Record<string, unknown>[] = [{ panel_id: 201, panel_title: 'RT', unit: 'ms' }]) => ({
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      groupBy: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue(rows),
+    });
+
+    it('returns panels for a dashboard the caller can access', async () => {
+      const qb = makePanelsQb();
+      metricStatisticsRepo.createQueryBuilder.mockReturnValue(qb as never);
+
+      const rows = await service.getPanelsByApplicationDashboard('dash-1', 'user-1', ['user']);
+
+      expect(rows).toEqual([{ panel_id: 201, panel_title: 'RT', unit: 'ms' }]);
+    });
+
+    it('refuses a dashboard in another organization', async () => {
+      appDashboardRepo.findOne.mockResolvedValue({ id: 'dash-9', organizationId: 'other-org', createdBy: 'someone' } as never);
+      authzMock.canAccessResource.mockResolvedValue({ allowed: false, reason: 'not a member' });
+      const qb = makePanelsQb();
+      metricStatisticsRepo.createQueryBuilder.mockReturnValue(qb as never);
+
+      const rows = await service.getPanelsByApplicationDashboard('dash-9', 'user-1', ['user']);
+
+      expect(rows).toEqual([]);
+      expect(metricStatisticsRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 });

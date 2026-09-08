@@ -89,6 +89,32 @@ export class MetricsService {
     return row?.id;
   }
 
+  /**
+   * Access check for a resource identified by an application dashboard rather than a run.
+   * The dashboard is the owned resource here — `ds_metrics` and `ds_metric_statistics`
+   * carry no RLS policy, so this is the only control on that data.
+   */
+  private async validateDashboardAccess(
+    applicationDashboardId: string,
+    userId: string,
+    roles: string[],
+  ): Promise<boolean> {
+    if (!applicationDashboardId) return false;
+    const row = await withRequestEm(this.applicationDashboardRepo).findOne({
+      where: { id: applicationDashboardId },
+      select: ['id', 'organizationId', 'teamId', 'createdBy'],
+    });
+    // Fail closed: an unknown id is a refusal, not a skip.
+    if (!row) return false;
+
+    const accessResult = await this.authzService.canAccessResource(userId, roles, {
+      organization_id: row.organizationId,
+      team_id: row.teamId,
+      created_by: row.createdBy ?? '',
+    } as OwnedResource);
+    return accessResult.allowed;
+  }
+
   private async validateTestRunAccess(
     testRunId: string,
     userId: string,
@@ -945,8 +971,18 @@ export class MetricsService {
    * Get distinct panels for an application dashboard from ds_metric_statistics.
    * Used by SLO dialogs for performance-test dashboards that aren't in Grafana.
    */
-  async getPanelsByApplicationDashboard(applicationDashboardId: string): Promise<Array<{ panel_id: number; panel_title: string; unit?: string }>> {
+  async getPanelsByApplicationDashboard(
+    applicationDashboardId: string,
+    userId: string,
+    roles: string[],
+  ): Promise<Array<{ panel_id: number; panel_title: string; unit?: string }>> {
     try {
+      // Same reason as getDistinctMetricNames below: the dashboard id comes straight off
+      // the query string and nothing downstream re-checks it.
+      if (!(await this.validateDashboardAccess(applicationDashboardId, userId, roles))) {
+        return [];
+      }
+
       const rows = await this.metricStatisticsRepo
         .createQueryBuilder('s')
         .select('s.panel_id', 'panel_id')
@@ -970,10 +1006,31 @@ export class MetricsService {
   async getDistinctMetricNames(
     applicationDashboardId: string,
     panelId: number,
+    userId: string,
+    roles: string[],
     metricsSourceId?: string,
     testRunId?: string,
   ): Promise<string[]> {
     try {
+      // Neither ds_metrics nor ds_metric_statistics has an RLS policy, so nothing below
+      // this line constrains which organization's rows come back — the ids are raw query
+      // parameters. One check is enough rather than two: the query always filters on the
+      // run AND the dashboard/source, so a row can only be returned when both belong to
+      // the same organization, and proving access to either one rules out a cross-tenant
+      // read. Prefer the run when it is supplied; it is the more direct check.
+      const permitted = testRunId
+        ? await this.validateTestRunAccess(testRunId, userId, roles)
+        : await this.validateDashboardAccess(
+            metricsSourceId
+              ? ((await this.resolveApplicationDashboardId(metricsSourceId)) ?? '')
+              : applicationDashboardId,
+            userId,
+            roles,
+          );
+      if (!permitted) {
+        return [];
+      }
+
       const qb = this.metricsRepo
         .createQueryBuilder('dsMetrics')
         .select('DISTINCT dsMetrics.metric_name', 'metric_name')
