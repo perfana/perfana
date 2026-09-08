@@ -1,4 +1,5 @@
 import { ControllerRef } from '../renderers/controller-sections';
+import { AggregatedSeriesSpec } from './url-perf-panels';
 /**
  * Shapes the report renderers consume.
  *
@@ -364,6 +365,11 @@ export interface MetricsPanelSelector {
   dashboardLabel?: string;
   panelTitle?: string;
   metricName?: string;
+  /**
+   * Set when the series is the SYNTHETIC run-wide aggregate: it has no ds_metrics rows,
+   * so it is computed from the raw tables instead (see presetAggregateSpec).
+   */
+  aggregate?: AggregatedSeriesSpec;
 }
 
 /** A single data point in a metrics time series */
