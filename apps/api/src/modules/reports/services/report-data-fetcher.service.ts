@@ -9,7 +9,7 @@ import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { percentDiff } from '../renderers/comparison-bands';
-import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isSyntheticAllAggregated, isUrlPanel, perfPanelTitle } from './url-perf-panels';
+import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isSyntheticAllAggregated, isUrlPanel, perfPanelTitle, presetAggregateSpec } from './url-perf-panels';
 import { CHANGE_POINT_WINDOW } from './trend-window';
 
 // The shapes these queries return. Re-exported so the ten renderers that import them from
@@ -176,26 +176,48 @@ export class ReportDataFetcherService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<Date | null> {
-    if (!excludeRampUp) return null;
+    return (await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles)).startCutoff;
+  }
+
+  /**
+   * BOTH ends of the analysis window, mirroring `getAnalysisBounds` in
+   * TestRunsPerformanceQueryService.
+   *
+   * The end cutoff is not optional padding. `ds_metrics.ramp_up` is baked by the worker to
+   * exclude the ramp-DOWN band as well, so a series read from that table is already trimmed
+   * at both ends. An aggregate computed from the raw tables with only a start cutoff runs
+   * past it, and the graphs section now draws the two on ONE chart — two lines ending at
+   * different x positions.
+   */
+  private async getAnalysisWindowBounds(
+    testRunId: string,
+    excludeRampUp: boolean,
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<{ startCutoff: Date | null; endCutoff: Date | null }> {
+    if (!excludeRampUp) return { startCutoff: null, endCutoff: null };
 
     // Internal/system calls (no userId) or admin users bypass org filtering
     const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
 
     const query = `
-      SELECT tr.start_time, tr.ramp_up
+      SELECT tr.start_time, tr.ramp_up, tr.end_time, tr.ramp_down
       FROM test_runs tr
       WHERE tr.test_run_id = $1
       ${orgFilter.clause}
     `;
     const result = await withRequestEm(this.testRunRepo).query(query, [testRunId, ...orgFilter.params]);
+    const row = result[0];
 
-    if (result[0]?.start_time && result[0]?.ramp_up) {
-      const startTime = new Date(result[0].start_time);
-      const analysisStartOffsetSeconds = parseInt(result[0].ramp_up);
-      return new Date(startTime.getTime() + analysisStartOffsetSeconds * 1000);
+    let startCutoff: Date | null = null;
+    let endCutoff: Date | null = null;
+    if (row?.start_time && row?.ramp_up) {
+      startCutoff = new Date(new Date(row.start_time).getTime() + parseInt(row.ramp_up) * 1000);
     }
-
-    return null;
+    if (row?.end_time && row?.ramp_down) {
+      endCutoff = new Date(new Date(row.end_time).getTime() - parseInt(row.ramp_down) * 1000);
+    }
+    return { startCutoff, endCutoff };
   }
 
   /**
@@ -742,10 +764,16 @@ export class ReportDataFetcherService {
    * Run-wide aggregate time-series across ALL transactions (no GROUP BY
    * transaction_name) — the same aggregate the /aggregated-metric-timeseries
    * endpoint produces, for report rendering.
-   * Re-derived (not a literal copy) from TestRunsPerformanceQueryService.getAggregatedMetricTimeseries:
-   * that endpoint uses TimescaleDB approx_percentile(percentile_agg(...)), while this uses core-Postgres
-   * PERCENTILE_CONT WITHIN GROUP (exact, sort-based), so p95/p99 values here will differ slightly from
-   * the endpoint's. avg is computed the same way either way, so it matches exactly.
+   * Re-derived (not a literal copy) from TestRunsPerformanceQueryService.getAggregatedMetricTimeseries,
+   * and it must stay value-identical to it: the graphs section draws a saved graph preset's
+   * "All aggregated" series from HERE while the Graphs card draws the same series from THERE, and a
+   * reader comparing the two is entitled to one line, not two.
+   *
+   * That is why the percentiles are TimescaleDB `approx_percentile(percentile_agg(...))` rather than
+   * core-Postgres `PERCENTILE_CONT` — exact would be the better number in isolation, but it is a
+   * different number: measured against the endpoint on a real run, up to 21% apart on a spiky bucket
+   * (580 ms on a p95). The t-digest is also the cheaper of the two, since it needs no sort.
+   * `avg` and `max` are the same expression either way.
    */
   async getAggregatedSeries(
     testRunId: string,
@@ -755,16 +783,16 @@ export class ReportDataFetcherService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<{ time: Date; value: number }[]> {
-    const cutoffTime = await this.getRampUpCutoffTime(testRunId, excludeRampUp, userId, roles);
-    // params: $1 testRunId, $2 cutoff; org params start at $3
-    const orgFilter = await this.resolveOrgFilter(userId, roles, 3, 'tr');
+    const { startCutoff, endCutoff } = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
+    // params: $1 testRunId, $2 start cutoff, $3 end cutoff; org params start at $4
+    const orgFilter = await this.resolveOrgFilter(userId, roles, 4, 'tr');
 
     const statExprMap: Record<typeof stat, string> = {
       avg: 'ROUND(AVG(t.response_time)::numeric, 2)',
-      p50: 'ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2)',
-      p90: 'ROUND(PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2)',
-      p95: 'ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2)',
-      p99: 'ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2)',
+      p50: 'ROUND(approx_percentile(0.50, percentile_agg(t.response_time::double precision))::numeric, 2)',
+      p90: 'ROUND(approx_percentile(0.90, percentile_agg(t.response_time::double precision))::numeric, 2)',
+      p95: 'ROUND(approx_percentile(0.95, percentile_agg(t.response_time::double precision))::numeric, 2)',
+      p99: 'ROUND(approx_percentile(0.99, percentile_agg(t.response_time::double precision))::numeric, 2)',
       max: 'MAX(t.response_time)::numeric',
     };
 
@@ -777,6 +805,7 @@ export class ReportDataFetcherService {
         JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         WHERE t.test_run_id = $1
           AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
+          AND ($3::timestamptz IS NULL OR t.time <= $3::timestamptz)
           ${orgFilter.clause}
         GROUP BY 1
         ORDER BY 1
@@ -789,6 +818,7 @@ export class ReportDataFetcherService {
         JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         WHERE t.test_run_id = $1
           AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
+          AND ($3::timestamptz IS NULL OR t.time <= $3::timestamptz)
           ${orgFilter.clause}
         GROUP BY 1
         ORDER BY 1
@@ -796,7 +826,7 @@ export class ReportDataFetcherService {
     }
 
     const rows: Array<{ time: string; value: string | null }> =
-      await withRequestEm(this.testRunRepo).query(query, [testRunId, cutoffTime, ...orgFilter.params]);
+      await withRequestEm(this.testRunRepo).query(query, [testRunId, startCutoff, endCutoff, ...orgFilter.params]);
     return rows.map((r) => ({ time: new Date(r.time), value: r.value == null ? 0 : Number(r.value) }));
   }
 
@@ -3162,6 +3192,10 @@ export class ReportDataFetcherService {
             dashboardLabel: series.dashboardLabel,
             panelTitle: series.panelTitle,
             metricName: series.metricName,
+            // The graphs card offers a run-wide aggregate that has no ds_metrics rows; the
+            // preset stores it like any other series, so it has to be recognised here or the
+            // report queries a metric name that was never written.
+            aggregate: presetAggregateSpec(series) ?? undefined,
           };
           const key = `${selector.dashboardLabel}\u0000${selector.panelTitle}\u0000${selector.metricName}`;
           if (seen.has(key)) continue;
