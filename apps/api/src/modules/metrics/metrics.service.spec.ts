@@ -1958,4 +1958,50 @@ describe('MetricsService', () => {
         'dsMetrics.test_run_id = :testRunId', expect.anything());
     });
   });
+
+  describe('getAvailableDashboards', () => {
+    const ROW = {
+      dashboard_label: 'Performance metrics',
+      panel_title: 'Response times',
+      panel_id: 201,
+      unit: 'ms',
+      metric_count: '3',
+      metric_names: ['T01.login', 'T02.browse', 'T03.checkout'],
+    };
+
+    it('reduces to distinct (panel, metric) tuples before aggregating', async () => {
+      // The inner DISTINCT is the whole optimisation: without it both aggregates walk
+      // every data point in the run (2035ms vs 927ms measured).
+      metricsRepo.query.mockResolvedValue([ROW]);
+
+      const rows = await service.getAvailableDashboards('run-18', 'user-1', ['user']);
+
+      expect(rows).toEqual([ROW]);
+      const [sql, params] = metricsRepo.query.mock.calls[0];
+      expect(sql).toMatch(/SELECT DISTINCT dashboard_label, panel_title, panel_id, unit, metric_name/);
+      expect(sql).not.toMatch(/COUNT\(DISTINCT/);
+      expect(params).toEqual(['run-18']);
+    });
+
+    it('reads ds_metrics, not ds_metric_statistics', async () => {
+      // ds_metric_statistics has two writers on different schedules and excludes
+      // ramp-up-only metrics, so it is not a valid source for this picker.
+      metricsRepo.query.mockResolvedValue([ROW]);
+
+      await service.getAvailableDashboards('run-18', 'user-1', ['user']);
+
+      expect(metricsRepo.query.mock.calls[0][0]).toContain('FROM ds_metrics');
+      expect(metricStatisticsRepo.query).not.toHaveBeenCalled();
+      expect(metricStatisticsRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('returns [] and queries nothing when the caller has no access', async () => {
+      testRunRepo.query.mockResolvedValue([]);
+
+      const rows = await service.getAvailableDashboards('run-18', 'user-1', ['user']);
+
+      expect(rows).toEqual([]);
+      expect(metricsRepo.query).not.toHaveBeenCalled();
+    });
+  });
 });
