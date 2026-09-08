@@ -110,3 +110,44 @@ it('stores "All aggregated" under its aggregated name and flags it', () => {
   expect(series[0]!.metricName).toContain('Request RT');
   expect(series[0]!.metricName).not.toBe(ALL_AGGREGATED_OPTION);
 });
+
+it('does NOT flag "All aggregated" on the all-aggregated dashboard — it is a real series there', () => {
+  // The perf-test pipeline writes a real ds_metrics series named "All aggregated" on
+  // this dashboard. Flagging it aggregated routes it to /aggregated-metric-*, which
+  // knows ten panel ids only and returns nothing for the rest.
+  const allAggDashboard: ApplicationDashboard = {
+    id: 'dash-3', dashboard_label: 'Performance test metrics all aggregated',
+    dashboard_name: 'Performance test metrics all aggregated',
+    dashboard_uid: 'performance-test-metrics-all-aggregated',
+    source_type: 'performance_test', metrics_source_id: 'ms-1',
+  };
+  const { result, setAddedSeries } = setup();
+
+  result.current.handleAddSeries([
+    { dashboard: allAggDashboard, panel: panelOf(allAggDashboard, 201, 'Request RT'), metricName: ALL_AGGREGATED_OPTION },
+  ]);
+
+  const series = added(setAddedSeries);
+  expect(series[0]!.isAggregated).toBe(false);
+  expect(series[0]!.metricName).toBe(ALL_AGGREGATED_OPTION);
+});
+
+it('does not flag it on a panel the aggregate endpoint has no spec for', () => {
+  // Panel 301 (scenario error count) is not in AGGREGATABLE_PERF_PANELS, but the
+  // all-aggregated dashboard carries a real "All aggregated" series on it.
+  const allAggDashboard: ApplicationDashboard = {
+    id: 'dash-3', dashboard_label: 'Performance test metrics all aggregated',
+    dashboard_name: 'Performance test metrics all aggregated',
+    dashboard_uid: 'performance-test-metrics-all-aggregated',
+    source_type: 'performance_test', metrics_source_id: 'ms-1',
+  };
+  const { result, setAddedSeries } = setup();
+
+  result.current.handleAddSeries([
+    { dashboard: allAggDashboard, panel: panelOf(allAggDashboard, 301, 'Error Count'), metricName: ALL_AGGREGATED_OPTION },
+  ]);
+
+  expect(added(setAddedSeries)[0]).toMatchObject({
+    isAggregated: false, metricName: ALL_AGGREGATED_OPTION, panelId: 301,
+  });
+});

@@ -125,6 +125,37 @@ it('asks only for the series this run recorded', async () => {
   expect(url).toContain('panelId=201');
 });
 
+it('does not offer a second "All aggregated" when the panel already has that series', async () => {
+  // On the all-aggregated dashboard the pipeline writes a real series under that exact
+  // name; prepending the synthetic option too lists it twice in the picker.
+  (authenticatedFetch as jest.Mock).mockResolvedValue({
+    ok: true, json: async () => ['All aggregated'],
+  });
+  const panel = {
+    id: 201, title: 'Request RT', type: 'timeseries', applicationDashboardId: 'dash-3',
+    metricsSourceId: 'ms-1',
+    dashboard: { ...perfDashboard, id: 'dash-3', dashboard_label: 'Performance test metrics all aggregated' },
+    dashboardLabel: 'Performance test metrics all aggregated', source: 'performance-metrics',
+  } as PanelOption;
+
+  const series = await fetchSeriesForPanel(panel, testRun);
+
+  expect(series.map((s) => s.metricName)).toEqual(['All aggregated']);
+});
+
+it('still offers "All aggregated" on an ordinary perf panel', async () => {
+  (authenticatedFetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ['T01.login'] });
+  const panel = {
+    id: 201, title: 'Request RT', type: 'timeseries', applicationDashboardId: 'dash-1',
+    metricsSourceId: 'ms-1', dashboard: perfDashboard, dashboardLabel: 'Perf',
+    source: 'performance-metrics',
+  } as PanelOption;
+
+  const series = await fetchSeriesForPanel(panel, testRun);
+
+  expect(series.map((s) => s.metricName)).toEqual(['All aggregated', 'T01.login']);
+});
+
 it('reads a Dynatrace dashboard through the Dynatrace metrics API, not ds-metrics', async () => {
   const dtDashboard: ApplicationDashboard = {
     id: 'dash-3', dashboard_label: 'Hosts', dashboard_name: 'Hosts',
