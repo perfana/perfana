@@ -294,6 +294,28 @@ export const APDEX_CONSTANTS = {
 // ---------------------------------------------------------------------------
 
 /**
+ * Pseudo-scenario whose dashboard carries one series per panel, rolled up over
+ * every scenario and every transaction/sampler in the run. Its dashboard is an
+ * ordinary scenario dashboard ("Performance test metrics all aggregated"), so it
+ * shows up in every dashboard dropdown without any client-side special case.
+ *
+ * The value shares a namespace with real scenario names, so a workload that genuinely
+ * has a scenario called "all aggregated" lands both datasets on one dashboard. The
+ * processors below drop the real scenario's own row in that case rather than emit two
+ * rows with the same (dashboard, panel, metric_name, time): they would collide inside a
+ * single `ON CONFLICT DO UPDATE` batch, which Postgres rejects outright and which would
+ * fail the whole pipeline. Losing one pathologically-named scenario's roll-up row beats
+ * failing every run.
+ *
+ * The exact casing and spacing are load-bearing for another app: apps/web derives
+ * ALL_AGGREGATED_DASHBOARD_LABEL / _UID from them (see apps/web/lib/aggregated-perf-series.ts).
+ */
+export const ALL_AGGREGATED_SCENARIO = 'all aggregated';
+
+/** The only metric name on the all-aggregated dashboard. */
+export const ALL_AGGREGATED_METRIC = 'All aggregated';
+
+/**
  * Fixed panel IDs for the panel-per-metric-type structure.
  */
 export const METRIC_TYPE_PANEL_IDS = {
