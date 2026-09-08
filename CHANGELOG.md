@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.7] - 2026-09-08
+
+### Added
+- **Dynatrace hosts can be labelled by role, and the labels follow the host everywhere it appears.** A host now carries any number of free-form labels — `loadgenerator`, `webserver`, `appserver`, `database`, `loadbalancer` and nine more are offered as suggestions, and anything typed becomes a label that is offered back the next time, across every system in the organisation.
+
+  Labels are set from **System under test → Configuration → Dynatrace → Entities**: on the whole batch while adding hosts, or per host afterwards from the tag button on its row. The entity table gains a Labels column and a "Filter by label" box.
+
+  They then show up wherever that host is used: the test run's Dynatrace card (Hosts tab, with its own label filter, and in the host detail header), the run comparison card (dashboard dropdown, added-series list and comparison table headings), the report configuration dropdown, and the generated report itself — as chips on the Trends and Comparisons group headings, and in brackets in a Custom Graphs chart title.
+
+### Changed
+- **Deleting a Dynatrace host now deletes the metric queries created for it.** Adding a host auto-creates four metric queries (CPU, memory, disk, network) plus their ADAPT comparison configuration; deleting the host left all of it behind, so Perfana kept collecting and comparing metrics for a host nobody had mapped any more. Both are now removed with the host. The host's existing measurement data and its dashboard are deliberately kept — they are that host's history, and other tables reference them.
+
+### Fixed
+- **The Dynatrace card no longer waits on a slow query to show what it already knows.** Both the collapsed card and the expanded Hosts tab sat on a spinner until the run's request-name list came back — a scan that takes seconds on a large run, and that neither view needs to draw its hosts. The card now renders from Perfana's own rows as soon as they land, the two queries it does need are issued together rather than one after the other, and the request-name list fills the drill-down filters in whenever it arrives. The per-host CPU, memory and problem figures continue to appear as Dynatrace answers for each host.
+
 ## [0.2.95.6] - 2026-09-08
 
 ### Changed

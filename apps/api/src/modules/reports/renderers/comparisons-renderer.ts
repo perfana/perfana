@@ -147,6 +147,7 @@ export class ComparisonsRenderer {
       ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
           { metrics, userId, roles, dashboardMap, selections })
       : null;
+    const hostLabels = await this.dataFetcher.getDynatraceHostLabels(testRun);
 
     if (!data || data.rows.length === 0) {
       // Five ways to end up empty, one message each — a silent empty section is
@@ -357,6 +358,7 @@ export class ComparisonsRenderer {
 
         const headingChips = [
           hasHost && hostName ? chip(hostName, 'info') : '',
+          ...(hostLabels[dashboard] ?? []).map((l) => chip(l, 'info')),
           chip(`${formatInt(panels.size)} panels`, 'neutral'),
           chip(`${formatInt(dashboardRows)} metrics`, 'neutral'),
         ];

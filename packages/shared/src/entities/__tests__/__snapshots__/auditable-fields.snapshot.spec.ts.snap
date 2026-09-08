@@ -122,6 +122,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "entityDisplayName",
     "entityType",
     "level",
+    "labels",
   ],
   "DynatraceQuery": [
     "dynatraceConfigId",

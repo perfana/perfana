@@ -322,6 +322,8 @@ export async function deleteDynatraceQuery(id: string): Promise<void> {
 // SLO Support Functions
 export interface DynatraceDashboard {
   dashboardLabel: string
+  /** Labels of the host this dashboard belongs to; empty for non-host dashboards. */
+  hostLabels?: string[]
 }
 
 export interface DynatraceMetric {

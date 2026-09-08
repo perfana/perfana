@@ -344,6 +344,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
       dashboard_name: d.dashboardLabel,
       dashboard_uid: `dynatrace-${d.dashboardLabel}`,
       source_type: 'dynatrace',
+      hostLabels: d.hostLabels,
     } as ApplicationDashboard));
     return [...grafanaOnly, ...perfTestOnly, ...dynatraceAsDashboards];
   }, [dashboards, dynatraceDashboards]);
@@ -361,6 +362,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         dashboard_name: d.dashboardLabel,
         dashboard_uid: `dynatrace-${d.dashboardLabel}`,
         source_type: 'dynatrace',
+        hostLabels: d.hostLabels,
       } as ApplicationDashboard));
     }
     return dashboards;

@@ -31,6 +31,7 @@ describe('ComparisonsRenderer', () => {
           provide: ReportDataFetcherService,
           useValue: {
             getBaselineRunComparison: jest.fn().mockResolvedValue(null),
+            getDynatraceHostLabels: jest.fn().mockResolvedValue({}),
             getAggregatedScalars: jest.fn(),
             getPreviousTestRun: jest.fn().mockResolvedValue(null),
             previousRunSloMiss: jest.fn().mockResolvedValue('none'),
@@ -800,6 +801,7 @@ describe('ComparisonsRenderer previous-run baseline', () => {
           provide: ReportDataFetcherService,
           useValue: {
             getBaselineRunComparison: jest.fn().mockResolvedValue(null),
+            getDynatraceHostLabels: jest.fn().mockResolvedValue({}),
             getAggregatedScalars: jest.fn(),
             getPreviousTestRun: jest
               .fn()

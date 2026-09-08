@@ -15,6 +15,7 @@ export class DynatraceEntityMapping {
     'entityDisplayName',
     'entityType',
     'level',
+    'labels',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -43,6 +44,11 @@ export class DynatraceEntityMapping {
 
   @Column({ type: 'varchar', length: 50 })
   level!: string;
+
+  // Free-form user labels ("appserver", "database", …). Presentation only —
+  // nothing filters metrics on them server-side.
+  @Column({ type: 'text', array: true, default: () => "'{}'" })
+  labels!: string[];
 
   // Ownership tracking (RBAC Phase 2)
   @Column({ type: 'uuid', name: 'organization_id' })

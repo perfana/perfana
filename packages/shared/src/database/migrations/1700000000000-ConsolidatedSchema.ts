@@ -954,6 +954,11 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       `ALTER TABLE public.notification_channels ADD COLUMN IF NOT EXISTS use_proxy boolean NOT NULL DEFAULT false`,
     );
 
+    // Free-form host labels on Dynatrace entity mappings — presentation only.
+    await queryRunner.query(
+      `ALTER TABLE public.dynatrace_entity_mappings ADD COLUMN IF NOT EXISTS labels text[] NOT NULL DEFAULT '{}'::text[]`,
+    );
+
     // organization_id is NOT NULL on every owned resource (Phase 4), but these three shipped
     // nullable in the schema-sql.ts dump, and three write paths took that as licence to omit it.
     // can_access_resource() fails closed on a NULL org, so such rows are invisible under RLS to

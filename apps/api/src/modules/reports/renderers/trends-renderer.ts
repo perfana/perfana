@@ -89,6 +89,7 @@ export class TrendsRenderer {
     const series = selections.length
       ? await this.dataFetcher.getMetricTrends(allRuns.map((r) => r.testRunId), selections)
       : [];
+    const hostLabels = await this.dataFetcher.getDynatraceHostLabels(testRun);
 
     return `
       <section class="trends-section">
@@ -103,7 +104,7 @@ export class TrendsRenderer {
         <h3 style="margin: 32px 0 16px 0; font-size: 10pt; font-weight: 700; color: ${REPORT_COLORS.mutedInk}; text-transform: uppercase; letter-spacing: 0.05em;">Run History</h3>
         ${this.renderRunHistoryTable([...allRuns].reverse(), currentRun.testRunId)}
 
-        ${this.renderDashboardTrends(series, allRuns)}
+        ${this.renderDashboardTrends(series, allRuns, hostLabels)}
       </section>
     `;
   }
@@ -116,7 +117,11 @@ export class TrendsRenderer {
    * in the Run History table directly above, so repeating them here would cost a third of
    * the page width per column.
    */
-  private renderDashboardTrends(series: MetricTrendSeries[], runs: TrendRunSummary[]): string {
+  private renderDashboardTrends(
+    series: MetricTrendSeries[],
+    runs: TrendRunSummary[],
+    hostLabels: Record<string, string[]> = {},
+  ): string {
     if (series.length === 0) return '';
 
     // Grouped the way the comparison section groups: a dashboard heads the block, each of its
@@ -205,6 +210,7 @@ export class TrendsRenderer {
 
       return `<div style="margin-top:32px;">
         ${groupHeader(dashboard, [
+          ...(hostLabels[dashboard] ?? []).map((l) => chip(l, 'info')),
           chip(`${formatInt(panels.size)} panels`, 'neutral'),
           chip(`${formatInt(dashboardSeries)} series`, 'neutral'),
         ])}

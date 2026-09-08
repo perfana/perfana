@@ -101,6 +101,7 @@ describe('TrendsRenderer', () => {
           useValue: {
             getTrendsData: jest.fn().mockResolvedValue(makeTrendsData()),
             getMetricTrends: jest.fn().mockResolvedValue([]),
+            getDynatraceHostLabels: jest.fn().mockResolvedValue({}),
           },
         },
       ],

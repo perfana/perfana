@@ -61,17 +61,29 @@ export function useDynatraceData({
     selectedSampler
   );
 
-  // Fetch Dynatrace data
+  // Fetch the card's own data: configs + entity mappings, both Perfana rows.
+  //
+  // `loading` covers ONLY these two. The request-name list is fetched alongside
+  // in its own effect below and deliberately not awaited here: it is a distinct
+  // scan over the run's requests and on a large run it took seconds, during which
+  // the collapsed card sat on a spinner for two counts it already had. The two
+  // requests are issued together rather than chained — the mappings query does not
+  // need the config list, it only used to be skipped when there were none.
   const fetchDynatraceData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Fetch configurations
-      const configsResponse = await authenticatedFetch('/dynatrace', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const [configsResponse, mappingsResponse] = await Promise.all([
+        authenticatedFetch('/dynatrace', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        }),
+        authenticatedFetch(
+          `/dynatrace/entities/mappings?systemId=${testRun.system_under_test_id}&environment=${testRun.test_environment}&workload=${testRun.workload}`,
+          { method: 'GET', headers: { 'Content-Type': 'application/json' } }
+        ),
+      ]);
 
       if (!configsResponse.ok) {
         throw new Error('Failed to fetch Dynatrace configurations');
@@ -80,34 +92,20 @@ export function useDynatraceData({
       const configsData = await configsResponse.json();
       setConfigs(configsData || []);
 
-      if (configsData && configsData.length > 0) {
-        // Fetch entity mappings
-        const mappingsResponse = await authenticatedFetch(
-          `/dynatrace/entities/mappings?systemId=${testRun.system_under_test_id}&environment=${testRun.test_environment}&workload=${testRun.workload}`,
-          { method: 'GET', headers: { 'Content-Type': 'application/json' } }
-        );
-
-        if (mappingsResponse.ok) {
-          const mappingsData = await mappingsResponse.json();
-          setEntityMappings(mappingsData || []);
-
-          // Convert to entities for backward compatibility
-          const convertedEntities = mappingsData.map((mapping: DynatraceEntityMapping) => ({
-            entityId: mapping.entityId,
-            displayName: mapping.entityDisplayName,
-            type: mapping.entityType,
-            tags: [],
-          }));
-          setEntities(convertedEntities);
-        }
-      }
-
-      // Fetch request names for hierarchical filtering
-      const requestNamesResponse = await authenticatedFetch(`/test-runs/${testRunId}/request-names`);
-      if (requestNamesResponse.ok) {
-        const requestNamesData = await requestNamesResponse.json();
-        setMetricNames(requestNamesData || []);
-      }
+      // No configured instance means no mapping can be actionable, so drop them
+      // rather than listing entities that link nowhere.
+      const mappingsData = configsData?.length && mappingsResponse.ok
+        ? await mappingsResponse.json()
+        : [];
+      setEntityMappings(mappingsData || []);
+      setEntities(
+        (mappingsData || []).map((mapping: DynatraceEntityMapping) => ({
+          entityId: mapping.entityId,
+          displayName: mapping.entityDisplayName,
+          type: mapping.entityType,
+          tags: [],
+        }))
+      );
     } catch (err) {
       const errorMessage = err && typeof err === 'object' && 'message' in err
         ? (err as Error).message
@@ -116,11 +114,21 @@ export function useDynatraceData({
       setConfigs([]);
       setEntities([]);
       setEntityMappings([]);
-      setMetricNames([]);
     } finally {
       setLoading(false);
     }
-  }, [testRun.system_under_test_id, testRun.test_environment, testRun.workload, testRunId]);
+  }, [testRun.system_under_test_id, testRun.test_environment, testRun.workload]);
+
+  // Request names drive the drill-down filter dropdowns only. Slow on a large run,
+  // so it never gates the card — the metrics badge just appears when it lands.
+  const fetchRequestNames = useCallback(async () => {
+    try {
+      const response = await authenticatedFetch(`/test-runs/${testRunId}/request-names`);
+      setMetricNames(response.ok ? (await response.json()) || [] : []);
+    } catch {
+      setMetricNames([]);
+    }
+  }, [testRunId]);
 
   // Fetch related test runs for comparison
   const fetchRelatedTestRuns = useCallback(async () => {
@@ -156,6 +164,10 @@ export function useDynatraceData({
   useEffect(() => {
     fetchDynatraceData();
   }, [fetchDynatraceData]);
+
+  useEffect(() => {
+    fetchRequestNames();
+  }, [fetchRequestNames]);
 
   // Fetch related test runs when expanded
   useEffect(() => {

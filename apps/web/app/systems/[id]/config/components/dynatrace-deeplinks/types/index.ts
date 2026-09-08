@@ -32,6 +32,8 @@ export interface DynatraceEntityMapping {
   entityDisplayName: string;
   entityType: string;
   level: EntityMappingLevel;
+  /** Free-form role labels ("appserver", "database", …). Presentation only. */
+  labels?: string[];
   organizationId?: string;
   /**
    * Per-resource capability hint from the API. The backend 403s a non-admin on

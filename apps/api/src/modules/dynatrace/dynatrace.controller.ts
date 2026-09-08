@@ -24,7 +24,7 @@ import { DynatraceConfigDto } from './dto/dynatrace-config.dto';
 import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
 import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { DynatraceQueryDto } from './dto/dynatrace-query.dto';
-import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
+import { CreateEntityMappingDto, UpdateEntityMappingLabelsDto } from './dto/create-entity-mapping.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
 import { StoreHostPropertiesDto, HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, HostOverviewRow } from './dto/host.dto';
 
@@ -637,6 +637,24 @@ export class DynatraceController {
     }
 
     return mapping;
+  }
+
+  @Get('entities/labels')
+  @ApiOperation({ summary: 'Get every label already used on an entity mapping (autocomplete)' })
+  @ApiResponse({ status: 200, description: 'Distinct labels', type: [String] })
+  async getEntityLabels() {
+    return this.dynatraceService.getDistinctEntityLabels();
+  }
+
+  @Patch('entities/mappings/:id/labels')
+  @ApiOperation({ summary: 'Replace the labels on a Dynatrace entity mapping' })
+  @ApiResponse({ status: 200, description: 'Labels updated successfully' })
+  async updateEntityMappingLabels(
+    @Param('id') id: string,
+    @Body() dto: UpdateEntityMappingLabelsDto,
+    @UserCtx() ctx: UserContext,
+  ) {
+    return this.dynatraceService.updateEntityMappingLabels(id, dto.labels, ctx.userId, ctx.roles);
   }
 
   @Delete('entities/mappings/:id')

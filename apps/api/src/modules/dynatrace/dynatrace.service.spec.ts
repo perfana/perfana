@@ -93,6 +93,9 @@ describe('DynatraceService', () => {
     ensureArtificialDashboardExists: jest.fn(),
     generateDynatraceDashboardUuid: jest.fn().mockReturnValue('generated-uuid-123'),
     createDsCompareConfigForMetric: jest.fn().mockResolvedValue(undefined),
+    deleteHostMetricQueries: jest.fn().mockResolvedValue(0),
+    updateEntityMappingLabels: jest.fn(),
+    getDistinctEntityLabels: jest.fn(),
   });
 
   beforeEach(async () => {
@@ -1431,6 +1434,89 @@ describe('DynatraceService', () => {
         await expect(service.deleteEntityMapping('nonexistent', mockUserId, mockRoles)).rejects.toThrow(
           NotFoundException
         );
+      });
+
+      it('deletes the host metric queries a HOST mapping owns', async () => {
+        repository.getEntityMappingById.mockResolvedValue({
+          id: 'mapping-2',
+          dynatraceConfigId: 'config-123',
+          systemUnderTestId: 'sys-123',
+          testEnvironment: 'production',
+          workload: 'load-test',
+          entityId: 'HOST-1',
+          entityDisplayName: 'web-1',
+          entityType: 'HOST',
+          level: 'sut_testenv_workload' as const,
+        } as any);
+        repository.deleteEntityMapping.mockResolvedValue(undefined);
+
+        await service.deleteEntityMapping('mapping-2', mockUserId, mockRoles);
+
+        expect(repository.generateDynatraceDashboardUuid).toHaveBeenCalledWith(
+          'sys-123',
+          'production',
+          'Dynatrace host metrics web-1',
+          'load-test',
+        );
+        expect(repository.deleteHostMetricQueries).toHaveBeenCalledWith('generated-uuid-123');
+      });
+
+      it('leaves queries alone for a non-HOST mapping', async () => {
+        repository.getEntityMappingById.mockResolvedValue({
+          id: 'mapping-3',
+          dynatraceConfigId: 'config-123',
+          systemUnderTestId: 'sys-123',
+          testEnvironment: 'production',
+          workload: 'load-test',
+          entityId: 'SERVICE-1',
+          entityDisplayName: 'checkout',
+          entityType: 'SERVICE',
+          level: 'sut' as const,
+        } as any);
+        repository.deleteEntityMapping.mockResolvedValue(undefined);
+
+        await service.deleteEntityMapping('mapping-3', mockUserId, mockRoles);
+
+        expect(repository.deleteHostMetricQueries).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('updateEntityMappingLabels', () => {
+      const mapping = {
+        id: 'mapping-1',
+        dynatraceConfigId: 'config-123',
+        systemUnderTestId: 'sys-123',
+        entityId: 'HOST-1',
+        entityDisplayName: 'web-1',
+        entityType: 'HOST',
+        level: 'sut' as const,
+        organizationId: 'org-1',
+      };
+
+      it('trims, drops blanks and de-duplicates before saving', async () => {
+        repository.getEntityMappingById.mockResolvedValue(mapping as any);
+        repository.updateEntityMappingLabels.mockResolvedValue({ ...mapping, labels: ['appserver'] } as any);
+
+        await service.updateEntityMappingLabels(
+          'mapping-1',
+          [' appserver ', 'appserver', '', '   '],
+          mockUserId,
+          mockRoles,
+        );
+
+        expect(repository.updateEntityMappingLabels).toHaveBeenCalledWith(
+          'mapping-1',
+          ['appserver'],
+          mockUserId,
+        );
+      });
+
+      it('throws NotFoundException for an unknown mapping', async () => {
+        repository.getEntityMappingById.mockResolvedValue(null);
+
+        await expect(
+          service.updateEntityMappingLabels('nope', ['appserver'], mockUserId, mockRoles),
+        ).rejects.toThrow(NotFoundException);
       });
     });
   });

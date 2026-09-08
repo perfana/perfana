@@ -28,6 +28,7 @@ import {
 import { TestRun } from '@/types/test-runs';
 import { getTestRunDisplayText, getTestRunSecondaryInfo } from '../utils/compare-utils';
 import { getSourceDisplayInfo } from '@/lib/metrics-source-utils';
+import HostLabelChips from '@/components/HostLabelChips';
 import {
   PanelOption,
   SeriesOption,
@@ -304,6 +305,7 @@ export function CompareSelectionPanel({
                 <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Box aria-hidden="true" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
                   <Typography variant="body2">{option.dashboard_label}</Typography>
+                  <HostLabelChips labels={option.hostLabels} />
                 </Box>
               );
             }}

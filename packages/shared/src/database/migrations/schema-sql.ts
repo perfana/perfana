@@ -2108,6 +2108,7 @@ CREATE TABLE public.dynatrace_entity_mappings (
     entity_display_name character varying(500) NOT NULL,
     entity_type character varying(100) NOT NULL,
     level character varying(50) NOT NULL,
+    labels text[] DEFAULT '{}'::text[] NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
     organization_id uuid NOT NULL,

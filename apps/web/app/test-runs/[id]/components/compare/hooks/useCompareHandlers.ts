@@ -75,6 +75,7 @@ export function useCompareHandlers({
           metricsSourceId: panel.metricsSourceId || dashboard.metrics_source_id,
           yAxesFormat: panel.yAxesFormat,
           isAggregated,
+          hostLabels: dashboard.hostLabels,
         };
       })
       .filter(newS => !addedSeries.some(

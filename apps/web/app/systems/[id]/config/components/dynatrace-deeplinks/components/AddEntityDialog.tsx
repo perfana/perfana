@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import {
   Box,
   Typography,
@@ -31,6 +32,7 @@ import {
   EntityMappingLevel,
 } from '../types';
 import { ENTITY_TYPES } from '../utils';
+import { fetchHostLabelOptions } from '@/lib/host-labels';
 
 interface AddEntityDialogProps {
   open: boolean;
@@ -68,6 +70,8 @@ interface AddEntityDialogProps {
   onTagValueChange: (value: string) => void;
   selectedHosts: DynatraceEntity[];
   onSelectedHostsChange: (hosts: DynatraceEntity[]) => void;
+  hostLabels: string[];
+  onHostLabelsChange: (labels: string[]) => void;
 }
 
 export function AddEntityDialog({
@@ -96,8 +100,17 @@ export function AddEntityDialog({
   onTagValueChange,
   selectedHosts,
   onSelectedHostsChange,
+  hostLabels,
+  onHostLabelsChange,
 }: AddEntityDialogProps) {
   const isHost = selectedEntityType === 'HOST';
+  const [labelOptions, setLabelOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (isHost && labelOptions.length === 0) {
+      fetchHostLabelOptions().then(setLabelOptions);
+    }
+  }, [isHost, labelOptions.length]);
 
   const handleInstanceChange = (e: SelectChangeEvent) => {
     onInstanceChange(e.target.value);
@@ -270,6 +283,27 @@ export function AddEntityDialog({
                 : 'Choose the type of Dynatrace entity you want to configure'}
             </FormHelperText>
           </FormControl>
+
+          {/* Applied to every host added in this batch — labelling twenty hosts one
+              at a time afterwards is the thing this dialog exists to avoid. */}
+          {isHost && (
+            <Autocomplete
+              multiple
+              freeSolo
+              autoSelect
+              options={labelOptions}
+              value={hostLabels}
+              onChange={(_event, value) => onHostLabelsChange(value as string[])}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Labels"
+                  placeholder="Type to add a label"
+                  helperText="Applied to every host selected below. Editable per host afterwards."
+                />
+              )}
+            />
+          )}
 
           {/* Tag filter — narrows the fetch server-side across the whole fleet,
               for HOST and non-HOST types alike. */}

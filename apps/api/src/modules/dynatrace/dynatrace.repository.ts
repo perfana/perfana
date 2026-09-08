@@ -8,11 +8,20 @@ import { DynatraceEntityMapping } from '../../entities';
 import { DsPanels } from '../../entities';
 import { DsMetrics } from '../../entities';
 import { MetricsSource } from '../../entities';
-import { withRequestEm } from '../../common/db/request-em';
+import { withRequestEm, withRequestQuery } from '../../common/db/request-em';
 import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
 import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { generateDeterministicUuid } from '../../utils/uuid-generator';
+
+/**
+ * The dashboard a host's four metric queries hang off. This string is the ONLY
+ * carrier of host identity downstream (ds_metrics, the compare card, reports),
+ * so it is built in exactly one place.
+ */
+export function hostDashboardLabel(hostDisplayName: string): string {
+  return `Dynatrace host metrics ${hostDisplayName}`;
+}
 
 /**
  * Optional ownership tuple passed by the service layer when creating /
@@ -489,7 +498,45 @@ export class DynatraceRepository {
     if (workload) qb.andWhere('query.workload = :workload', { workload });
     const results = await qb.orderBy('query.dashboardLabel', 'ASC').getRawMany();
 
-    return results.map(row => ({ dashboardLabel: row.dashboardLabel }));
+    // A host dashboard's only carrier of host identity is its label, so join the
+    // host's labels back on by name here — every consumer (compare card, report
+    // config, report HTML) reads this one endpoint and gets them for free.
+    const hostLabels = await this.getHostLabelsByDashboardLabel(systemId, environment, workload);
+
+    return results.map(row => ({
+      dashboardLabel: row.dashboardLabel,
+      hostLabels: hostLabels[row.dashboardLabel] ?? [],
+    }));
+  }
+
+  /**
+   * `dashboard_label` → the host's labels, for every HOST mapping in scope.
+   * Mirrors the label createHostMetricQueries builds; a mapping whose host was
+   * never given labels is simply absent.
+   */
+  async getHostLabelsByDashboardLabel(
+    systemId: string,
+    environment?: string,
+    workload?: string,
+  ): Promise<Record<string, string[]>> {
+    const qb = withRequestEm(this.entityMappingRepo)
+      .createQueryBuilder('mapping')
+      .select(['mapping.entityDisplayName', 'mapping.labels'])
+      .where('mapping.systemUnderTestId = :systemId', { systemId })
+      .andWhere(`mapping.entityType = 'HOST'`)
+      .andWhere('cardinality(mapping.labels) > 0');
+    if (environment) {
+      qb.andWhere('(mapping.testEnvironment IS NULL OR mapping.testEnvironment = :environment)', { environment });
+    }
+    if (workload) {
+      qb.andWhere('(mapping.workload IS NULL OR mapping.workload = :workload)', { workload });
+    }
+
+    const map: Record<string, string[]> = {};
+    for (const mapping of await qb.getMany()) {
+      map[hostDashboardLabel(mapping.entityDisplayName)] = mapping.labels ?? [];
+    }
+    return map;
   }
 
   async getPanelTitlesForDashboard(systemId: string, environment: string, workload: string | undefined, dashboardLabel: string) {
@@ -580,6 +627,7 @@ export class DynatraceRepository {
       entityDisplayName: dto.entityDisplayName,
       entityType: dto.entityType,
       level: dto.level,
+      labels: dto.labels ?? [],
       organizationId: ownership?.organizationId ?? parentOrgId,
       createdBy: ownership?.createdBy,
       updatedBy: ownership?.updatedBy ?? ownership?.createdBy,
@@ -611,6 +659,56 @@ export class DynatraceRepository {
     await withRequestEm(this.entityMappingRepo).delete(id);
   }
 
+  async updateEntityMappingLabels(id: string, labels: string[], updatedBy?: string) {
+    await withRequestEm(this.entityMappingRepo).update(id, { labels, updatedBy });
+    const result = await withRequestEm(this.entityMappingRepo)
+      .createQueryBuilder('mapping')
+      .leftJoinAndSelect('mapping.dynatraceConfig', 'config')
+      .where('mapping.id = :id', { id })
+      .getOne();
+    if (!result) {
+      throw new NotFoundException(`Dynatrace entity mapping with ID ${id} not found`);
+    }
+    return this.mapEntityMappingToDtoFieldsWithLabel(result);
+  }
+
+  /**
+   * Every label ever used, for the add/edit autocomplete. RLS scopes it to the
+   * caller's organisations, so no explicit org filter is needed here.
+   */
+  async getDistinctEntityLabels(): Promise<string[]> {
+    const rows = await withRequestEm(this.entityMappingRepo)
+      .createQueryBuilder('mapping')
+      .select('DISTINCT unnest(mapping.labels)', 'label')
+      .orderBy('label', 'ASC')
+      .getRawMany<{ label: string }>();
+    return rows.map((r) => r.label).filter(Boolean);
+  }
+
+  /**
+   * Delete the metric queries a HOST mapping owns, plus the ADAPT compare configs
+   * created beside them. There is no FK from a query to its host — the link is the
+   * deterministic dashboard id built from the host's display name in
+   * `createHostMetricQueries` — so this recomputes it and deletes by that.
+   *
+   * The artificial `application_dashboards` row is deliberately LEFT IN PLACE.
+   * Thirteen tables reference it ON DELETE NO ACTION, `ds_metrics` and
+   * `ds_metric_statistics` among them, so deleting it fails outright on any host
+   * that ever collected a data point — i.e. every host worth deleting. The rows it
+   * anchors are that host's history and outlive its mapping; without the queries
+   * nothing new is collected, and without the compare configs ADAPT stops
+   * evaluating a metric that can no longer produce data.
+   */
+  async deleteHostMetricQueries(applicationDashboardId: string): Promise<number> {
+    const { affected } = await withRequestEm(this.queryRepo).delete({ applicationDashboardId });
+    // Same request transaction as the mapping delete, so a rollback takes all of it.
+    await withRequestQuery(this.dataSource).query(
+      `DELETE FROM ds_compare_config WHERE application_dashboard_id = $1`,
+      [applicationDashboardId],
+    );
+    return affected ?? 0;
+  }
+
   private mapEntityMappingToDtoFields(entity: DynatraceEntityMapping) {
     return {
       id: entity.id,
@@ -622,6 +720,7 @@ export class DynatraceRepository {
       entityDisplayName: entity.entityDisplayName,
       entityType: entity.entityType,
       level: entity.level,
+      labels: entity.labels ?? [],
       organizationId: entity.organizationId,
       createdBy: entity.createdBy,
       updatedBy: entity.updatedBy,
@@ -642,6 +741,7 @@ export class DynatraceRepository {
       entityDisplayName: entity.entityDisplayName,
       entityType: entity.entityType,
       level: entity.level,
+      labels: entity.labels ?? [],
       // Needed by the service to resolve per-row capabilities for _permissions.
       organizationId: entity.organizationId,
       createdAt: entity.createdAt,

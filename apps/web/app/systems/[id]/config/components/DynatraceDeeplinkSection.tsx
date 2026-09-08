@@ -1,6 +1,9 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import {
+  Autocomplete,
+  TextField,
   Box,
   Typography,
   Button,
@@ -29,8 +32,9 @@ import { DynatraceDeeplinkSectionProps } from './dynatrace-deeplinks/types';
 import { useDynatraceEntityMappings } from './dynatrace-deeplinks/hooks';
 
 // Components
-import { EntityMappingsTable, AddEntityDialog } from './dynatrace-deeplinks/components';
+import { EntityMappingsTable, AddEntityDialog, EditLabelsDialog } from './dynatrace-deeplinks/components';
 import DeleteConfirmationDialog from './DeleteConfirmationDialog';
+import { DynatraceEntityMapping } from './dynatrace-deeplinks/types';
 
 export default function DynatraceDeeplinkSection({
   systemId,
@@ -90,6 +94,8 @@ export default function DynatraceDeeplinkSection({
     setSelectedTagValue,
     selectedHosts,
     setSelectedHosts,
+    newHostLabels,
+    setNewHostLabels,
 
     // Actions
     fetchDynatraceEntities,
@@ -98,12 +104,31 @@ export default function DynatraceDeeplinkSection({
     handleDeleteEntity,
     handleInputChange,
     resetDialogState,
+    applyLabels,
   } = useDynatraceEntityMappings({
     systemId,
     selectedEnvironment,
     selectedWorkload,
     onHostQueriesCreated,
   });
+
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
+  const [editingLabelsFor, setEditingLabelsFor] = useState<DynatraceEntityMapping | null>(null);
+
+  // Every label in play, so the filter offers only labels that would match something.
+  const labelOptions = useMemo(
+    () => Array.from(new Set(filteredMappings.flatMap((m) => m.labels ?? []))).sort(),
+    [filteredMappings],
+  );
+
+  // AND across the chosen labels — narrowing, which is what a multi-select filter reads as.
+  const visibleMappings = useMemo(
+    () =>
+      labelFilter.length === 0
+        ? filteredMappings
+        : filteredMappings.filter((m) => labelFilter.every((l) => (m.labels ?? []).includes(l))),
+    [filteredMappings, labelFilter],
+  );
 
   // Changing the data source invalidates any in-progress entity/host selection —
   // clear it so a selection made against instance A can't be submitted to instance B.
@@ -198,15 +223,34 @@ export default function DynatraceDeeplinkSection({
             </Paper>
           )}
 
+          {labelOptions.length > 0 && (
+            <Autocomplete
+              multiple
+              size="small"
+              options={labelOptions}
+              value={labelFilter}
+              onChange={(_event, value) => setLabelFilter(value)}
+              renderInput={(params) => <TextField {...params} label="Filter by label" />}
+              sx={{ mb: 2, maxWidth: 480 }}
+            />
+          )}
+
           <EntityMappingsTable
-            mappings={filteredMappings}
+            mappings={visibleMappings}
             selectedMappingIds={selectedMappingIds}
             onSelectAll={handleSelectAll}
             onSelectOne={handleSelectOne}
             onDelete={handleDeleteEntity}
+            onEditLabels={setEditingLabelsFor}
           />
         </>
       )}
+
+      <EditLabelsDialog
+        mapping={editingLabelsFor}
+        onClose={() => setEditingLabelsFor(null)}
+        onSaved={applyLabels}
+      />
 
       {/* Batch Delete Confirmation Dialog */}
       <Dialog open={batchDeleteDialogOpen} onClose={handleBatchDeleteCancel}>
@@ -276,6 +320,8 @@ export default function DynatraceDeeplinkSection({
         onTagValueChange={setSelectedTagValue}
         selectedHosts={selectedHosts}
         onSelectedHostsChange={setSelectedHosts}
+        hostLabels={newHostLabels}
+        onHostLabelsChange={setNewHostLabels}
       />
     </Box>
   );

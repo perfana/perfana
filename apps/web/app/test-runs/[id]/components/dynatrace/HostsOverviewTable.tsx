@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import {
+  Autocomplete,
   Box,
   Chip,
   InputAdornment,
@@ -19,12 +20,14 @@ import {
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { HostOverviewRow } from '@/lib/dynatrace';
+import HostLabelChips from '@/components/HostLabelChips';
 
 interface HostEntity {
   id: string;
   entityId: string;
   entityDisplayName: string;
   dynatraceConfigId: string;
+  labels?: string[];
 }
 
 interface HostsOverviewTableProps {
@@ -55,14 +58,25 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [filter, setFilter] = useState('');
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
 
   const byId = useMemo(() => new Map(rows.map((r) => [r.hostId, r])), [rows]);
 
+  const labelOptions = useMemo(
+    () => Array.from(new Set(hosts.flatMap((h) => h.labels ?? []))).sort(),
+    [hosts],
+  );
+
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    const filtered = needle
+    const byName = needle
       ? hosts.filter((h) => h.entityDisplayName.toLowerCase().includes(needle))
       : hosts;
+    // AND across the chosen labels — a multi-select filter reads as narrowing.
+    const filtered =
+      labelFilter.length === 0
+        ? byName
+        : byName.filter((h) => labelFilter.every((l) => (h.labels ?? []).includes(l)));
 
     const sign = sortDir === 'asc' ? 1 : -1;
     // A host Dynatrace returned no reading for sorts last in BOTH directions — it is
@@ -97,7 +111,7 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
         }
       }
     });
-  }, [hosts, byId, filter, sortKey, sortDir, loading]);
+  }, [hosts, byId, filter, labelFilter, sortKey, sortDir, loading]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -128,26 +142,40 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
 
   return (
     <Box>
-      <TextField
-        size="small"
-        placeholder="Filter hosts"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        sx={{ mb: 1.5, width: 280 }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchIcon fontSize="small" />
-            </InputAdornment>
-          ),
-        }}
-        inputProps={{ 'aria-label': 'Filter hosts' }}
-      />
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 1.5, flexWrap: 'wrap' }}>
+        <TextField
+          size="small"
+          placeholder="Filter hosts"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          sx={{ width: 280 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" />
+              </InputAdornment>
+            ),
+          }}
+          inputProps={{ 'aria-label': 'Filter hosts' }}
+        />
+        {labelOptions.length > 0 && (
+          <Autocomplete
+            multiple
+            size="small"
+            options={labelOptions}
+            value={labelFilter}
+            onChange={(_event, value) => setLabelFilter(value)}
+            renderInput={(params) => <TextField {...params} label="Filter by label" />}
+            sx={{ minWidth: 280 }}
+          />
+        )}
+      </Box>
       <TableContainer component={Paper} variant="outlined">
         <Table size="small" aria-label="hosts overview">
           <TableHead>
             <TableRow>
               <TableCell>{header('host', 'Host')}</TableCell>
+              <TableCell>Labels</TableCell>
               <TableCell align="right">{header('cpu', 'CPU avg')}</TableCell>
               <TableCell align="right">{header('mem', 'Memory avg')}</TableCell>
               <TableCell align="center">{header('problems', 'Problems')}</TableCell>
@@ -156,9 +184,9 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
           <TableBody>
             {visible.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4}>
+                <TableCell colSpan={5}>
                   <Typography variant="body2" color="text.secondary" align="center" py={2}>
-                    No hosts match &ldquo;{filter}&rdquo;
+                    No hosts match the current filters
                   </Typography>
                 </TableCell>
               </TableRow>
@@ -174,6 +202,9 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
                   onClick={() => onSelectHost(host.entityId)}
                 >
                   <TableCell>{host.entityDisplayName}</TableCell>
+                  <TableCell>
+                    <HostLabelChips labels={host.labels} />
+                  </TableCell>
                   <TableCell align="right">{pending ? <Skeleton width={40} /> : fmtPct(r?.cpuAvg)}</TableCell>
                   <TableCell align="right">{pending ? <Skeleton width={40} /> : fmtPct(r?.memAvg)}</TableCell>
                   <TableCell align="center">

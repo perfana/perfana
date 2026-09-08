@@ -19,6 +19,7 @@ import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace
 import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 import { ALL_AGGREGATED_OPTION, collapsePerfRtPanels, getAggregateSpec } from '@/lib/aggregated-perf-series';
 import { buildUrlPanels, fetchUrlDistinctNames, isUrlPanel } from '@/lib/url-perf-panels';
+import HostLabelChips from '@/components/HostLabelChips';
 
 export type MetricSource = 'performance-metrics' | 'grafana' | 'dynatrace';
 
@@ -26,6 +27,8 @@ export interface SourceDashboardOption {
   label: string;
   /** application_dashboards.id — the key both the panel and the series endpoints take */
   appDashboardId?: string;
+  /** Dynatrace host dashboards only: the labels given to the host. */
+  hostLabels?: string[];
 }
 
 /** The three cascading lists as they are stored in a section config. */
@@ -79,7 +82,9 @@ export function useSourceDashboards(
         .catch(() => { if (!cancelled) setDashboards([]); });
     } else if (workload) {
       fetchDynatraceDashboards(systemUnderTestId, environment, workload)
-        .then((data) => { if (!cancelled) setDashboards(data.map((d) => ({ label: d.dashboardLabel }))); })
+        .then((data) => {
+          if (!cancelled) setDashboards(data.map((d) => ({ label: d.dashboardLabel, hostLabels: d.hostLabels })));
+        })
         .catch(() => { if (!cancelled) setDashboards([]); });
     }
     return () => { cancelled = true; };
@@ -287,6 +292,16 @@ export function MetricSelectionCascade({
               helperText={`${dashboards.length} available`}
             />
           )}
+          renderOption={(props, option) => {
+            const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & { key?: string };
+            const hostLabels = dashboards.find((d) => d.label === option)?.hostLabels;
+            return (
+              <Box component="li" key={key ?? option} {...rest} sx={{ display: 'flex', gap: 1 }}>
+                <span>{option}</span>
+                <HostLabelChips labels={hostLabels} />
+              </Box>
+            );
+          }}
         />
         <Button
           size="small"
