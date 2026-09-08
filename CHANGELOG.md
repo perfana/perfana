@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.8] - 2026-09-08
+
+### Fixed
+- **Host labels now reach an existing database.** 0.2.95.7 added `dynatrace_entity_mappings.labels` to the entity and to the consolidated schema, which only ever runs on a new install — so on an upgraded deployment the column did not exist while the entity declared it, and every read of the table failed with `column mapping.labels does not exist`. The Dynatrace card and the SUT config entity list came back empty. Added as an incremental migration; existing rows get an empty label set.
+
 ## [0.2.95.7] - 2026-09-08
 
 ### Added
