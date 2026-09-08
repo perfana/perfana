@@ -49,6 +49,61 @@ missing **either** half (a transaction-only predicate skipped exactly the affect
 when a poll returns no ids it has not already served this invocation, since an unrepairable run
 stays a candidate forever.
 
+### The perf-test pipeline writes an extra "all aggregated" dashboard
+
+`PerformanceTestMetricsPipeline` writes one dashboard per scenario, plus — since v0.2.95.4 — one
+more: `Performance test metrics all aggregated` (uid `performance-test-metrics-all-aggregated`),
+generated from the pseudo-scenario `ALL_AGGREGATED_SCENARIO = 'all aggregated'` in
+`src/constants/performance-metrics.ts`. It carries the same panels with one series on each, named
+`All aggregated`, rolled up over every scenario, transaction and sampler in the run. Being an
+ordinary scenario dashboard is the whole trick — every dashboard dropdown in the web app lists it
+with no client-side special case.
+
+Five things not to undo:
+
+- **The roll-up is a second `GROUPING SETS` entry — `(bd.bucket_time)` — on the existing
+  aggregation in `helpers/transactions-processor.ts` and `helpers/requests-processor.ts`, and it is
+  free.** Measured *faster*: requests 2994 ms → 2337 ms on a 1.4M-row run. The ordered-set
+  aggregates (`PERCENTILE_CONT`) had already ruled out a HashAggregate, so Postgres serves both
+  levels from one sort, and `bucket_time` at the head of that sort matches the hypertable's physical
+  order and earns an Incremental Sort. It also keeps the percentiles and Apdex brackets **exact** —
+  they are computed over the raw rows, not averaged from per-transaction values. A separate query or
+  a JS pass over the per-transaction rows costs a scan and loses that. The roll-up row is the one
+  with `scenario_name IS NULL`; both processors branch on that.
+- **Neither query has an `ORDER BY` any more.** It used to be a prefix of the group-key sort and
+  therefore free; with `bucket_time` leading that sort it becomes a second, top-level sort that
+  spills — 22 MB (requests) / 3 MB (transactions) on the same run, growing with the series count.
+  Neither loop reads row order; both accumulate into a `Map` keyed by scenario and bucket.
+- **No `ds_compare_config` rows are created for it, in any of the four processors** — it is
+  display-only and ADAPT never evaluates it. A run-wide average moves whenever the traffic mix
+  shifts, so trending it would fail runs in which no individual transaction regressed.
+- **A real scenario named `all aggregated` gets its own row dropped in favour of the roll-up.** Both
+  land on one dashboard, and two rows sharing `(dashboard, panel, metric_name, time)` inside one
+  `ON CONFLICT DO UPDATE` batch are rejected by Postgres outright, failing the whole pipeline.
+  `ErrorsProcessor` (both branches) and `VirtualUsersProcessor` filter the real scenario out before
+  appending the roll-up. Losing one pathologically-named scenario's row beats failing every run.
+- **The virtual-user roll-up is JS arithmetic on purpose.** Threads add across scenarios, so the
+  run-wide figure is a sum — but each scenario's average covers only its own samples, so a scenario
+  active for part of the run would contribute its full average to the whole. `VirtualUsersProcessor`
+  weights each scenario's average by its sample count against the longest-running scenario. Grouping
+  raw `virtual_users` rows on `time` and summing was tried and rejected: samples are sub-second and
+  independent per scenario, so only 6,662 of 128,919 distinct timestamps carry more than one
+  scenario and the sum degenerates to individual sample values — 65.7 against an actual 1249. The
+  exact answer needs `time_bucket_gapfill` + `locf`, which needs both window bounds, and `end_time`
+  is null on a running test. The max is the sum of per-scenario maxima, an upper bound, flagged with
+  a `ponytail:` marker.
+
+`DataSanityCheckPipeline` pays for this too: its sparse-metric filter now excludes the
+scenario-level panels by **title** (`Error Count`, `Avg Active Threads`, `Max Active Threads`), not
+only by metric name. Those panels hold one point by construction, and the metric-name exclusion only
+matched the per-scenario spelling — on this dashboard they are all named `All aggregated`, so
+without the title filter every run reports three sparse metrics forever.
+
+The name `All aggregated` collides with a pre-existing **synthetic** dropdown entry in the web app
+and the report renderers, guarded on both sides; see "The perf-test pipeline writes one extra
+dashboard, and its series name was already taken" in [CLAUDE.md](../../CLAUDE.md) before touching
+either.
+
 ### `ds_adapt_results` is upserted, so `AdaptPipeline` also has to delete
 
 `ResultsProcessor.processAdaptResults` is a pure `INSERT … ON CONFLICT DO UPDATE` sourced from

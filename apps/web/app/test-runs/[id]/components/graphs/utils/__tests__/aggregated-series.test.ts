@@ -50,6 +50,14 @@ describe('offerAggregatedOption', () => {
   it('leaves the list untouched for a non-aggregatable perf panel', () => {
     expect(offerAggregatedOption('performance-metrics', 999, ['x'])).toEqual(['x']);
   });
+  it('does not offer the synthetic option on the all-aggregated dashboard', () => {
+    // That dashboard's panels already carry a REAL series named "All aggregated";
+    // prepending the synthetic one lists it twice, and the second copy routes to
+    // /aggregated-metric-* which has a spec for ten panels only.
+    const names = offerAggregatedOption('performance-metrics', 202, ['All aggregated']);
+    expect(names).toEqual(['All aggregated']);
+    expect(names.filter(n => n === 'All aggregated')).toHaveLength(1);
+  });
 });
 
 describe('fetchAggregatedSeriesData', () => {

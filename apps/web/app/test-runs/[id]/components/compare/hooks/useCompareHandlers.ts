@@ -11,7 +11,11 @@ import {
   MetricStatistic,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
-import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName } from '@/lib/aggregated-perf-series';
+import {
+  ALL_AGGREGATED_OPTION,
+  buildAggregatedMetricName,
+  isAllAggregatedDashboard,
+} from '@/lib/aggregated-perf-series';
 import { graphKeyOf } from '../utils/compare-utils';
 import type { SeriesPick } from '../components/CompareSelectionPanel';
 
@@ -58,7 +62,8 @@ export function useCompareHandlers({
 
     const newSeries: CompareSeries[] = picks
       .map(({ dashboard, panel, metricName }) => {
-        const isAggregated = metricName === ALL_AGGREGATED_OPTION;
+        const isAggregated = metricName === ALL_AGGREGATED_OPTION
+          && !isAllAggregatedDashboard(dashboard.dashboard_label);
         return {
           id: `${dashboard.id}-${panel.id}-${metricName}-${Date.now()}`,
           dashboardId: panel.applicationDashboardId || dashboard.id,

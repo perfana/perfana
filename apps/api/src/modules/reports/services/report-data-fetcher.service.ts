@@ -9,7 +9,7 @@ import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { percentDiff } from '../renderers/comparison-bands';
-import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isUrlPanel, perfPanelTitle } from './url-perf-panels';
+import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isSyntheticAllAggregated, isUrlPanel, perfPanelTitle } from './url-perf-panels';
 import { CHANGE_POINT_WINDOW } from './trend-window';
 
 // The shapes these queries return. Re-exported so the ten renderers that import them from
@@ -921,9 +921,7 @@ export class ReportDataFetcherService {
     selections: BaselineComparisonSelection[],
     opts: { metrics: ('avg' | 'p90' | 'p95' | 'p99')[]; userId: string; roles: string[] },
   ): Promise<BaselineComparisonRow[]> {
-    const wanted = selections.filter(
-      (s) => s.metricNames?.includes(ALL_AGGREGATED_SERIES) && aggregatedKindFor(s.panelId),
-    );
+    const wanted = selections.filter(isSyntheticAllAggregated);
     if (wanted.length === 0) return [];
 
     const kinds = new Set(wanted.map((s) => aggregatedKindFor(s.panelId)!));
@@ -2582,9 +2580,7 @@ export class ReportDataFetcherService {
     selections: BaselineComparisonSelection[],
     stat: 'avg' | 'p95' | 'p99',
   ): Promise<MetricTrendSeries[]> {
-    const wanted = selections.filter(
-      (s) => s.metricNames?.includes(ALL_AGGREGATED_SERIES) && aggregatedKindFor(s.panelId),
-    );
+    const wanted = selections.filter(isSyntheticAllAggregated);
     if (wanted.length === 0) return [];
 
     const pct = stat === 'p99' ? 0.99 : 0.95;
@@ -2846,8 +2842,10 @@ export class ReportDataFetcherService {
       const statSelections = selections
         .filter((s) => !isUrlPanel(s.panelId))
         // A panel that asked ONLY for the aggregate has no per-series query left to run.
-        .map((s) => (s.metricNames?.includes(ALL_AGGREGATED_SERIES)
-          ? { ...s, metricNames: s.metricNames.filter((m) => m !== ALL_AGGREGATED_SERIES) }
+        // Only the synthetic aggregate is substituted above; on the all-aggregated dashboard
+        // the name is a real statistics row and must stay in the per-series query.
+        .map((s) => (isSyntheticAllAggregated(s)
+          ? { ...s, metricNames: s.metricNames!.filter((m) => m !== ALL_AGGREGATED_SERIES) }
           : s))
         .filter((s) => !(s.metricNames && s.metricNames.length === 0));
       const stats = statSelections.length

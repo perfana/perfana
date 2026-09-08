@@ -788,6 +788,67 @@ escaper go back to being broad without printing artifacts.
 
 ## Metrics dropdowns
 
+### Retire the synthetic "All aggregated" option once every retained run has the real dashboard
+
+**Priority:** P3
+**Origin:** simplification + adversarial review during /ship on `feat/all-aggregated-perf-dashboard` (2026-09-08).
+**Why:** v0.2.95.4 gave the perf-test pipeline a real `Performance test metrics all aggregated`
+dashboard carrying a genuine `All aggregated` series on every panel. The older synthetic path —
+which fabricates the same name on four RT panels and answers it from `/aggregated-metric-timeseries`
+— now duplicates it, which is why that release had to add a collision guard in six places
+(`shouldOfferAllAggregated`'s `existingNames` parameter, `isAllAggregatedDashboard` at the three
+web add-series sites, and `isSyntheticAllAggregated` in the API report fetcher). The guard is
+permanent overhead for a transitional state.
+**What to do:** once no retained run predates the real dashboard, delete `AGGREGATABLE_PERF_PANELS`,
+`offerAggregatedOption`, `shouldOfferAllAggregated`, `fetchAggregatedSeriesData`,
+`fetchAggregatedStatistics`, `normaliseLegacyAggregatedSeries`, both `/aggregated-metric-*`
+endpoints, the `getAggregatedSeriesRows`/`getAggregatedTrends` branches, and the collision guard
+itself — roughly 230 web lines plus the API endpoints.
+**Blocked on:** presets store `isAggregated: true` with a metric name of `All aggregated — <panel>`
+(`apps/web/lib/trends-presets.ts`, `compare-presets.ts`), so this needs a preset migration, not just
+a deletion. Do not do it before that.
+
+### `MetricSelectionCascade` re-implements the "don't offer it twice" rule inline
+
+**Priority:** P3
+**Origin:** maintainability + coverage review during /ship on `feat/all-aggregated-perf-dashboard` (2026-09-08).
+**Why:** `apps/web/components/reports/report-generation/MetricSelectionCascade.tsx` builds its own
+predicate (`source === 'performance-metrics' && spec && RT-metric && !names.includes(...)`) rather
+than calling `shouldOfferAllAggregated`, because its panel set is deliberately narrower (RT panels
+only, excluding the error-percentage panels 105/205). The `!names.includes(ALL_AGGREGATED_OPTION)`
+clause now lives in two files with two independently-worded comments. Functionally correct today;
+it is where a future change to the rule will be missed.
+**What to do:** give the cascade its own named predicate next to `shouldOfferAllAggregated` in
+`apps/web/lib/aggregated-perf-series.ts` so both are visible in one file.
+
+### `metric-options.ts` contains literal NUL bytes, so git treats it as binary
+
+**Priority:** P2
+**Origin:** security review during /ship on `feat/all-aggregated-perf-dashboard` (2026-09-08).
+**Why:** `apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts` uses a real 0x00
+byte as a key separator (`panelKey`/`seriesKey`), so `file` reports `data` and every diff of it
+renders as `Bin 7776 -> 7783 bytes` in `git diff` and in GitHub PR review. Any future edit to this
+file passes code review showing nothing at all. Pre-existing; surfaced because v0.2.95.4 touched it.
+**What to do:** replace `\0` with a separator that cannot appear in a dashboard label or metric name
+but is not a NUL — `\u001f` (unit separator) keeps the same collision-avoidance property and leaves
+the file textual. Verify with `git diff --stat` showing line counts rather than bytes.
+
+### The VU roll-up's max is an upper bound, and its average is sample-count weighted
+
+**Priority:** P3
+**Origin:** eng + adversarial review during /ship on `feat/all-aggregated-perf-dashboard` (2026-09-08).
+**Why:** `VirtualUsersProcessor` computes the all-aggregated thread figures from the per-scenario
+aggregates: the average is weighted by each scenario's sample count against the longest-running
+scenario (correct duration weighting), but the max is the plain sum of per-scenario maxima, which
+overstates the peak whenever scenarios do not peak simultaneously. The exact answer needs a common
+time grid. Grouping the raw rows on `time` does NOT give one — measured on a real run, samples are
+sub-second and independent per scenario, so 128,919 of 128,919 timestamps carry one scenario each and
+the sum degenerates to individual sample values (65.7 against an actual 1249).
+**What to do:** `time_bucket_gapfill` + `locf` per scenario onto a 1s grid, then `SUM` per bucket and
+`AVG`/`MAX` over buckets. Needs both window bounds, and `end_time` is null on a running test, so the
+incremental path needs a fallback.
+
+
 ### An unmatched dashboard/panel pair is an unindexed scan of the whole ds_metrics hypertable
 
 **Priority:** P1

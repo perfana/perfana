@@ -122,10 +122,21 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
             // Request/Transaction panels (RT, Throughput, Apdex, etc.) produce one data
             // point per scenario execution — having few points is expected when a scenario
             // runs infrequently, not a data quality issue.
+            //
+            // The scenario-level panels are excluded by TITLE, not by metric name. They hold
+            // exactly one point by construction (written once at end_time), and the metric-name
+            // filter above only catches the per-scenario spelling — on the all-aggregated
+            // dashboard the same three metrics are named 'All aggregated', which would make
+            // every run report three sparse metrics forever.
+            const SCENARIO_LEVEL_PANEL_TITLES = new Set([
+              'Error Count', 'Avg Active Threads', 'Max Active Threads',
+            ]);
             sparseMetrics = sparseMetrics.filter(
               r => !(
                 r.dashboard_label.startsWith('Performance test metrics') &&
-                (r.panel_title.startsWith('Request ') || r.panel_title.startsWith('Transaction '))
+                (r.panel_title.startsWith('Request ') ||
+                 r.panel_title.startsWith('Transaction ') ||
+                 SCENARIO_LEVEL_PANEL_TITLES.has(r.panel_title))
               )
             );
 

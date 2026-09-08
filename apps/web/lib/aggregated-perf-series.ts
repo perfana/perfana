@@ -60,8 +60,41 @@ export function isAggregatablePanel(panelId: number): boolean {
  * Grafana/Dynatrace, so a bare panel-id check can collide) and the panel
  * being one we can aggregate.
  */
-export function shouldOfferAllAggregated(source: string, panelId: number): boolean {
-  return source === 'performance-metrics' && isAggregatablePanel(panelId);
+export function shouldOfferAllAggregated(
+  source: string,
+  panelId: number,
+  existingNames: readonly string[],
+): boolean {
+  return source === 'performance-metrics'
+    && isAggregatablePanel(panelId)
+    // The all-aggregated dashboard carries a real series under this exact name;
+    // offering the synthetic one too would list it twice.
+    && !existingNames.includes(ALL_AGGREGATED_OPTION);
+}
+
+/**
+ * Label and uid of the dashboard the perf-test pipeline writes with one real
+ * run-wide series per panel, named ALL_AGGREGATED_OPTION.
+ *
+ * A deliberate copy: the worker derives both strings from ALL_AGGREGATED_SCENARIO
+ * (`apps/worker/src/constants/performance-metrics.ts`) through
+ * `generateScenarioDashboardLabel` / `generateScenarioDashboardUid`, and sharing the
+ * constant without that derivation would share the wrong half.
+ * `apps/worker/src/test/unit/pipelines/all-aggregated-dashboard.test.ts` pins the
+ * generators to these exact literals so the copy cannot drift unnoticed.
+ */
+export const ALL_AGGREGATED_DASHBOARD_LABEL = 'Performance test metrics all aggregated';
+export const ALL_AGGREGATED_DASHBOARD_UID = 'performance-test-metrics-all-aggregated';
+
+/**
+ * True for that dashboard. On it the synthetic option must be neither offered
+ * (it would appear twice) nor routed to /aggregated-metric-* (which has a spec
+ * for ten panels only, and returns nothing for the rest). Its ds_metrics rows
+ * are the same rollup, computed once at ingestion and covering every panel.
+ */
+export function isAllAggregatedDashboard(labelOrUid?: string | null): boolean {
+  return labelOrUid === ALL_AGGREGATED_DASHBOARD_LABEL
+    || labelOrUid === ALL_AGGREGATED_DASHBOARD_UID;
 }
 
 /**

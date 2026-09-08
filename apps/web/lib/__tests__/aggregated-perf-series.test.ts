@@ -1,5 +1,8 @@
 import {
   ALL_AGGREGATED_OPTION,
+  ALL_AGGREGATED_DASHBOARD_LABEL,
+  ALL_AGGREGATED_DASHBOARD_UID,
+  isAllAggregatedDashboard,
   getAggregateSpec,
   isAggregatablePanel,
   shouldOfferAllAggregated,
@@ -29,10 +32,32 @@ describe('aggregated-perf-series', () => {
   });
 
   it('offers "All aggregated" only for the performance-metrics source', () => {
-    expect(shouldOfferAllAggregated('performance-metrics', 102)).toBe(true);
-    expect(shouldOfferAllAggregated('grafana', 102)).toBe(false);      // panel-id collision must not leak
-    expect(shouldOfferAllAggregated('dynatrace', 202)).toBe(false);
-    expect(shouldOfferAllAggregated('performance-metrics', 206)).toBe(false); // unsupported panel
+    expect(shouldOfferAllAggregated('performance-metrics', 102, [])).toBe(true);
+    expect(shouldOfferAllAggregated('grafana', 102, [])).toBe(false);      // panel-id collision must not leak
+    expect(shouldOfferAllAggregated('dynatrace', 202, [])).toBe(false);
+    expect(shouldOfferAllAggregated('performance-metrics', 206, [])).toBe(false); // unsupported panel
+  });
+
+  it('does not offer the synthetic entry when the panel already has the real series', () => {
+    // The all-aggregated dashboard carries a real ds_metrics series under this exact
+    // name, so offering the synthetic one too would list it twice — and route it to
+    // /aggregated-metric-*, which has no spec for most of that dashboard's panels.
+    expect(shouldOfferAllAggregated('performance-metrics', 101, [ALL_AGGREGATED_OPTION])).toBe(false);
+    expect(shouldOfferAllAggregated('performance-metrics', 101, ['checkout'])).toBe(true);
+  });
+
+  it('recognises the all-aggregated dashboard by label and uid', () => {
+    expect(isAllAggregatedDashboard(ALL_AGGREGATED_DASHBOARD_LABEL)).toBe(true);
+    expect(isAllAggregatedDashboard(ALL_AGGREGATED_DASHBOARD_UID)).toBe(true);
+    expect(isAllAggregatedDashboard('Performance test metrics loadtest')).toBe(false);
+  });
+
+  it('treats a missing label as not the all-aggregated dashboard', () => {
+    // Call sites pass dashboard_label / dashboardLabel straight through, and both are
+    // optional on their types — neither null nor '' may be mistaken for a match.
+    expect(isAllAggregatedDashboard(undefined)).toBe(false);
+    expect(isAllAggregatedDashboard(null)).toBe(false);
+    expect(isAllAggregatedDashboard('')).toBe(false);
   });
 
   it('collapses redundant RT percentile panels, relabelling the Avg keeper', () => {

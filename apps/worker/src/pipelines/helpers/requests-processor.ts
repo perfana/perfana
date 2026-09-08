@@ -23,6 +23,8 @@ import {
   METRIC_TYPE_PANEL_CLASSIFICATIONS,
   METRIC_TYPE_PANEL_ADAPT_AGGREGATION,
   DEFAULT_APDEX_THRESHOLD_MS,
+  ALL_AGGREGATED_SCENARIO,
+  ALL_AGGREGATED_METRIC,
 } from '../../constants/performance-metrics.js';
 import type {
   TestRunMetadata,
@@ -114,8 +116,13 @@ export class RequestsProcessor {
 
     // Process pre-aggregated data from database
     for (const row of aggregatedData) {
+      // The rollup grouping set leaves scenario_name/transaction_name/sampler_name NULL —
+      // those rows are the run-wide series and land on the "all aggregated" dashboard.
+      const isRollup = row.scenario_name === null;
+      const scenarioName: string = isRollup ? ALL_AGGREGATED_SCENARIO : row.scenario_name;
+
       // Skip rows for a scenario we already failed to set up (logged once below).
-      if (failedScenarios.has(row.scenario_name)) {
+      if (failedScenarios.has(scenarioName)) {
         continue;
       }
 
@@ -124,22 +131,25 @@ export class RequestsProcessor {
       let dashboard: DashboardMetadata;
       try {
         dashboard = await this.dashboardManager.getOrCreateScenarioDashboard(
-          row.scenario_name,
+          scenarioName,
           testRun.system_under_test_id,
           testRun.test_environment
         );
       } catch (err) {
-        failedScenarios.add(row.scenario_name);
+        failedScenarios.add(scenarioName);
         const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
         this.logger.error(
           { err },
-          `⚠️  Skipping scenario "${row.scenario_name}" — dashboard creation failed: ${msg}. Remaining scenarios will still be processed.`
+          `⚠️  Skipping scenario "${scenarioName}" — dashboard creation failed: ${msg}. Remaining scenarios will still be processed.`
         );
         continue;
       }
 
-      // Build the new metric name: "{transactionName}.{samplerName}"
-      const metricName = buildNewRequestMetricName(row.transaction_name, row.sampler_name);
+      // Build the new metric name: "{transactionName}.{samplerName}" (the rollup carries a
+      // single series per panel, so it gets the one fixed name).
+      const metricName = isRollup
+        ? ALL_AGGREGATED_METRIC
+        : buildNewRequestMetricName(row.transaction_name, row.sampler_name);
 
       // Apdex score is already computed in SQL via COUNT FILTER
 
@@ -186,11 +196,17 @@ export class RequestsProcessor {
       // Create panel-level compare configs ONCE per unique (dashboard, panel) combination.
       // Panel-level configs (metric_name IS NULL) apply to all metrics in the panel,
       // allowing user overrides at both panel and metric granularity.
-      this.ensurePanelCompareConfigs(testRun, dashboard, compareConfigs, compareConfigsCreated);
+      // Display-only: the all-aggregated dashboard gets no compare configs, so ADAPT does
+      // not evaluate the roll-up. A run-wide average moves on any traffic-mix shift, so
+      // trending it would fail runs in which no individual metric regressed.
+      if (!isRollup) {
+        this.ensurePanelCompareConfigs(testRun, dashboard, compareConfigs, compareConfigsCreated);
+      }
 
-      // Accumulate throughput for "total" metric
-      if (row.throughput !== null && row.throughput !== undefined) {
-        const bucketKey = `${row.scenario_name}::${row.bucket_time}`;
+      // Accumulate throughput for "total" metric. The rollup row's own throughput already
+      // covers every sampler, so it must not also produce a second "total" series.
+      if (!isRollup && row.throughput !== null && row.throughput !== undefined) {
+        const bucketKey = `${scenarioName}::${row.bucket_time}`;
         const existing = totalThroughputBuckets.get(bucketKey);
         if (existing) {
           existing.total += parseFloat(row.throughput);
@@ -390,8 +406,14 @@ export class RequestsProcessor {
         LEFT JOIN thresholds th
           ON th.transaction_name = CASE WHEN bd.transaction_name = 'overall' THEN NULL ELSE bd.transaction_name END
         CROSS JOIN (SELECT apdex_threshold FROM workload_threshold UNION ALL SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM workload_threshold)) wt
-        GROUP BY bd.scenario_name, bd.transaction_name, bd.sampler_name, bd.bucket_time,
-                 th.tx_threshold, wt.apdex_threshold
+        -- Second grouping set rolls every scenario, transaction and sampler up into one
+        -- series per bucket. It shares this scan, and the percentiles/Apdex brackets are
+        -- computed over the raw rows, so they are exact rather than an average of averages.
+        GROUP BY GROUPING SETS (
+          (bd.scenario_name, bd.transaction_name, bd.sampler_name, bd.bucket_time,
+           th.tx_threshold, wt.apdex_threshold),
+          (bd.bucket_time)
+        )
       )
       SELECT
         scenario_name,
@@ -416,7 +438,11 @@ export class RequestsProcessor {
           ELSE NULL
         END as apdex_score
       FROM aggregated
-      ORDER BY scenario_name, transaction_name, sampler_name, bucket_time
+      -- No ORDER BY: the loop accumulates into a Map keyed by scenario and bucket, so row
+      -- order is not read. Keeping it was free before the rollup, when it was a prefix of
+      -- the group-key sort; the rollup puts bucket_time at the head of that sort, so an
+      -- ORDER BY here becomes a second, top-level sort that spills (measured: 22 MB on a
+      -- 1.4M-row run, and it grows with the number of series).
     `;
 
     const params = [

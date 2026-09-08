@@ -214,7 +214,9 @@ export function MetricSelectionCascade({
       // comparison can aggregate.
       const spec = getAggregateSpec(panel.id);
       const aggregatable = source === 'performance-metrics' && spec
-        && (spec.metric === 'transaction_response_time' || spec.metric === 'request_response_time');
+        && (spec.metric === 'transaction_response_time' || spec.metric === 'request_response_time')
+        // The all-aggregated dashboard already lists a real series under this name.
+        && !names.includes(ALL_AGGREGATED_OPTION);
       const withAggregate = aggregatable ? [ALL_AGGREGATED_OPTION, ...names] : names;
       return (Array.isArray(withAggregate) ? withAggregate : []).map((metricName) => ({
         metricName, panelId: panel.id, panelTitle: panel.title, dashboardLabel,

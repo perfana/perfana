@@ -18,6 +18,7 @@ import { TestRun } from '@/types/test-runs';
 import { isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
 import {
   ALL_AGGREGATED_OPTION,
+  isAllAggregatedDashboard,
   getAggregateSpec,
   shouldOfferAllAggregated,
   buildAggregatedMetricName,
@@ -307,7 +308,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
 
       if (response.ok) {
         const metricNames: string[] = await response.json();
-        const withAggregate = shouldOfferAllAggregated(selectedSource, panelId)
+        const withAggregate = shouldOfferAllAggregated(selectedSource, panelId, metricNames)
           ? [ALL_AGGREGATED_OPTION, ...metricNames]
           : metricNames;
         setAvailableMetrics(withAggregate);
@@ -652,7 +653,8 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     const metricsSourceId = selectedMetric.metricsSourceId || selectedDashboard.metrics_source_id;
 
     const newSeries: TrendsSeries[] = selectedMetricNames.map(metricName => {
-      const isAggregated = metricName === ALL_AGGREGATED_OPTION;
+      const isAggregated = metricName === ALL_AGGREGATED_OPTION
+        && !isAllAggregatedDashboard(selectedDashboard.dashboard_label);
       return {
         id: `${applicationDashboardId}-${selectedMetric.id}-${metricName}-${Date.now()}-${Math.random()}`,
         dashboardId: applicationDashboardId,

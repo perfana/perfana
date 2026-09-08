@@ -86,3 +86,31 @@ export function aggregatedKindFor(panelId: number | undefined): 'transaction' | 
   if (panelId >= 201 && panelId <= 204) return 'request';
   return null;
 }
+
+/**
+ * The dashboard the perf-test pipeline writes with a REAL `All aggregated` series on every
+ * panel (ALL_AGGREGATED_SCENARIO in apps/worker/src/constants/performance-metrics.ts).
+ * Mirrors ALL_AGGREGATED_DASHBOARD_LABEL in apps/web/lib/aggregated-perf-series.ts.
+ */
+export const ALL_AGGREGATED_DASHBOARD_LABEL = 'Performance test metrics all aggregated';
+
+/**
+ * Whether a selection is asking for the SYNTHETIC run-wide aggregate — the one this service
+ * computes on the fly because no row exists for it.
+ *
+ * The dashboard check is load-bearing. On the all-aggregated dashboard the same name is an
+ * ordinary `ds_metric_statistics` row, and claiming it here breaks two ways: on panels
+ * 101-104/201-204 the report would answer from a different computation than the stored row
+ * (raw PERCENTILE_CONT over the run vs the pipeline's per-bucket rollup), and on every other
+ * panel `aggregatedKindFor` is null, so the name would be stripped from the selection with
+ * nothing substituted and the section would render empty. Both are silent.
+ */
+export function isSyntheticAllAggregated(sel: {
+  metricNames?: string[];
+  dashboardLabel?: string;
+  panelId?: number;
+}): boolean {
+  return !!sel.metricNames?.includes(ALL_AGGREGATED_SERIES)
+    && sel.dashboardLabel !== ALL_AGGREGATED_DASHBOARD_LABEL
+    && aggregatedKindFor(sel.panelId) !== null;
+}

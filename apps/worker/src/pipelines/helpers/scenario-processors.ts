@@ -19,6 +19,8 @@ import {
   METRIC_TYPE_PANEL_UNITS,
   METRIC_TYPE_PANEL_CLASSIFICATIONS,
   METRIC_TYPE_PANEL_ADAPT_AGGREGATION,
+  ALL_AGGREGATED_SCENARIO,
+  ALL_AGGREGATED_METRIC,
 } from '../../constants/performance-metrics.js';
 import type {
   TestRunMetadata,
@@ -89,11 +91,14 @@ export class ErrorsProcessor {
       const scenarioNames = scenarioRows.length > 0
         ? scenarioRows.map(r => r.scenario_name)
         : ['default'];
+      // Set, not push: a real scenario named "all aggregated" would otherwise be emitted
+      // twice on the same dashboard/panel/time and break the upsert batch.
+      const allScenarioNames = [...new Set([...scenarioNames, ALL_AGGREGATED_SCENARIO])];
 
       const panel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
       const metricTime = testRun.end_time || new Date();
 
-      for (const scenarioName of scenarioNames) {
+      for (const scenarioName of allScenarioNames) {
         const dashboard = await this.dashboardManager.getOrCreateScenarioDashboard(
           scenarioName,
           testRun.system_under_test_id,
@@ -105,7 +110,9 @@ export class ErrorsProcessor {
             testRunId,
             dashboard,
             panel,
-            buildScenarioMetricName('error_count'),
+            scenarioName === ALL_AGGREGATED_SCENARIO
+              ? ALL_AGGREGATED_METRIC
+              : buildScenarioMetricName('error_count'),
             0,
             metricTime,
             METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
@@ -115,15 +122,18 @@ export class ErrorsProcessor {
           )
         );
 
-        compareConfigs.push(
-          createDsCompareConfigRecordPanelLevel(
-            testRun,
-            dashboard,
-            panel,
-            METRIC_TYPE_PANEL_ADAPT_AGGREGATION[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
-            METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT]
-          )
-        );
+        // Display-only — see the note on the roll-up in transactions-processor.ts.
+        if (scenarioName !== ALL_AGGREGATED_SCENARIO) {
+          compareConfigs.push(
+            createDsCompareConfigRecordPanelLevel(
+              testRun,
+              dashboard,
+              panel,
+              METRIC_TYPE_PANEL_ADAPT_AGGREGATION[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
+              METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT]
+            )
+          );
+        }
       }
 
       return { metrics, compareConfigs };
@@ -132,10 +142,17 @@ export class ErrorsProcessor {
     const totalErrors = errorsData.reduce((sum, row) => sum + parseInt(row.error_count, 10), 0);
     this.logger.info(`📊 Processing ${totalErrors} errors across ${errorsData.length} scenarios`);
 
+    // Roll the scenarios up into the "all aggregated" dashboard's single series. A real
+    // scenario of that name is dropped in favour of the roll-up — its count is already in
+    // totalErrors, and two rows would collide inside one upsert batch.
+    const rows = errorsData
+      .filter(r => r.scenario_name !== ALL_AGGREGATED_SCENARIO)
+      .concat({ scenario_name: ALL_AGGREGATED_SCENARIO, error_count: String(totalErrors) });
+
     const panelConfigsCreated = new Set<string>();
 
     // Process each scenario (already grouped by SQL)
-    for (const row of errorsData) {
+    for (const row of rows) {
       const scenarioName = row.scenario_name;
       const errorCount = parseInt(row.error_count, 10);
 
@@ -155,7 +172,9 @@ export class ErrorsProcessor {
           testRunId,
           dashboard,
           panel,
-          buildScenarioMetricName('error_count'),
+          scenarioName === ALL_AGGREGATED_SCENARIO
+            ? ALL_AGGREGATED_METRIC
+            : buildScenarioMetricName('error_count'),
           errorCount,
           metricTime,
           METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
@@ -167,7 +186,7 @@ export class ErrorsProcessor {
 
       // Create panel-level compare config (once per dashboard)
       const panelKey = `${dashboard.dashboardId}::panel::${METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT}`;
-      if (!panelConfigsCreated.has(panelKey)) {
+      if (!panelConfigsCreated.has(panelKey) && scenarioName !== ALL_AGGREGATED_SCENARIO) {
         compareConfigs.push(
           createDsCompareConfigRecordPanelLevel(
             testRun,
@@ -233,7 +252,7 @@ export class VirtualUsersProcessor {
 
     query += ` GROUP BY scenario_name`;
 
-    const vuData = await this.dataSource.query<Array<{
+    let vuData = await this.dataSource.query<Array<{
       scenario_name: string;
       avg_active_threads: string | null;
       max_active_threads: string | null;
@@ -250,6 +269,42 @@ export class VirtualUsersProcessor {
     }
 
     this.logger.info(`📊 Processing virtual user data for ${vuData.length} scenarios`);
+
+    // Roll the scenarios up into the "all aggregated" dashboard's single series.
+    //
+    // Concurrent threads ADD across scenarios, so the run-wide figure is a sum, not a mean
+    // of means — but each scenario's average covers only its own samples, so a scenario
+    // active for a fraction of the run would otherwise contribute its full average to the
+    // whole run. Weighting by sample count against the longest-running scenario is that
+    // fraction, and costs one pass over at most a few dozen rows.
+    //
+    // Not done by grouping the raw rows on `time` and summing: the samples are sub-second
+    // and independent per scenario, so on real data almost every timestamp carries exactly
+    // one scenario (measured: 128,919 distinct timestamps, 6,662 with more than one) and
+    // that sum degenerates to the individual sample values — 65.7 against an actual 1249.
+    // Doing it properly needs `time_bucket_gapfill` + `locf` per scenario, which needs both
+    // window bounds and `end_time` is null on a running test.
+    //
+    // ponytail: the max is the sum of per-scenario maxima, an upper bound when scenarios
+    // peak at different moments — a true peak needs the same gapfilled grid.
+    const parse = (v: string | null) => (v ? parseFloat(v) : 0);
+    const counts = vuData.map(r => parseInt(r.active_thread_count, 10));
+    const longestRun = Math.max(...counts, 0);
+    const totalSamples = counts.reduce((a, b) => a + b, 0);
+    if (longestRun > 0) {
+      const weightedAvg = vuData.reduce(
+        (acc, r, i) => acc + parse(r.avg_active_threads) * (counts[i]! / longestRun), 0);
+      // A real scenario of the rollup's name is dropped in favour of the rollup — its
+      // samples are already counted, and two rows would collide inside one upsert batch.
+      vuData = vuData
+        .filter(r => r.scenario_name !== ALL_AGGREGATED_SCENARIO)
+        .concat({
+          scenario_name: ALL_AGGREGATED_SCENARIO,
+          avg_active_threads: String(weightedAvg),
+          max_active_threads: String(vuData.reduce((a, r) => a + parse(r.max_active_threads), 0)),
+          active_thread_count: String(totalSamples),
+        });
+    }
 
     const panelConfigsCreated = new Set<string>();
 
@@ -279,7 +334,9 @@ export class VirtualUsersProcessor {
               testRunId,
               dashboard,
               avgPanel,
-              buildScenarioMetricName('avg_active_threads'),
+              scenarioName === ALL_AGGREGATED_SCENARIO
+                ? ALL_AGGREGATED_METRIC
+                : buildScenarioMetricName('avg_active_threads'),
               avgActiveThreads,
               metricTime,
               METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS],
@@ -290,7 +347,7 @@ export class VirtualUsersProcessor {
           );
 
           const avgKey = `${dashboard.dashboardId}::panel::${METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS}`;
-          if (!panelConfigsCreated.has(avgKey)) {
+          if (!panelConfigsCreated.has(avgKey) && scenarioName !== ALL_AGGREGATED_SCENARIO) {
             compareConfigs.push(
               createDsCompareConfigRecordPanelLevel(
                 testRun,
@@ -311,7 +368,9 @@ export class VirtualUsersProcessor {
               testRunId,
               dashboard,
               maxPanel,
-              buildScenarioMetricName('max_active_threads'),
+              scenarioName === ALL_AGGREGATED_SCENARIO
+                ? ALL_AGGREGATED_METRIC
+                : buildScenarioMetricName('max_active_threads'),
               maxActiveThreads,
               metricTime,
               METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_MAX_THREADS],
@@ -322,7 +381,7 @@ export class VirtualUsersProcessor {
           );
 
           const maxKey = `${dashboard.dashboardId}::panel::${METRIC_TYPE_PANEL_IDS.SCENARIO_MAX_THREADS}`;
-          if (!panelConfigsCreated.has(maxKey)) {
+          if (!panelConfigsCreated.has(maxKey) && scenarioName !== ALL_AGGREGATED_SCENARIO) {
             compareConfigs.push(
               createDsCompareConfigRecordPanelLevel(
                 testRun,

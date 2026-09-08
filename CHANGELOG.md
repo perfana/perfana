@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.4] - 2026-09-08
+
+### Added
+- **A "Performance test metrics all aggregated" dashboard, rolled up across every scenario.** The trends, compare and graphs cards and every report configuration section now list it alongside the per-scenario performance metrics dashboards. It carries the same panels as any other performance metrics dashboard — response times, throughput, error rate, Apdex, latency, connect time, error count and thread counts — with a single series on each, named "All aggregated", covering every scenario, transaction and sampler in the run at once. Previously the only way to see a run-wide figure was an "All aggregated" entry in the metric dropdown, which existed on four of the response-time panels and nowhere else.
+
+  The roll-up is computed where the rest of the run's measurements are, so the percentiles are real percentiles over every sample in the bucket rather than an average of per-transaction percentiles, and the Apdex counts each request against its own transaction's threshold. It appears on runs analysed from this version onwards; re-analyse an older run to get it.
+
+  It is deliberately excluded from anomaly detection. A run-wide average moves whenever the traffic mix shifts, so trending it would fail runs in which no individual transaction had regressed.
+
 ## [0.2.95.3] - 2026-09-08
 
 ### Fixed
