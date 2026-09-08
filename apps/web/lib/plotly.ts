@@ -21,12 +21,19 @@ export interface PlotlyGraphDiv extends HTMLElement {
   };
 }
 
-/** The subset of the global Plotly API used for chart export. */
+/** The subset of the global Plotly API this app calls directly. */
 export interface PlotlyGlobal {
   toImage: (
     gd: PlotlyGraphDiv,
     opts: { format?: string; width?: number; height?: number; scale?: number },
   ) => Promise<string>;
+  Plots: {
+    /**
+     * Re-measure the graph div against its container and relayout. Rejects when the
+     * div is hidden, so callers must catch.
+     */
+    resize: (gd: PlotlyGraphDiv) => Promise<unknown>;
+  };
 }
 
 /**

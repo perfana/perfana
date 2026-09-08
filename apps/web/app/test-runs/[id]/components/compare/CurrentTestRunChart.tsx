@@ -3,13 +3,10 @@
 import type { Config, Data, Layout } from 'plotly.js';
 import React from 'react';
 import { Box, useTheme } from '@mui/material';
-import dynamic from 'next/dynamic';
+import Plot from '@/components/ResponsivePlot';
 import { useCurrentTestRunChart } from './current-test-run-chart/hooks';
 import { ChartLoadingState, ChartErrorState, ChartEmptyState } from './current-test-run-chart/components';
 import type { CurrentTestRunChartProps } from './current-test-run-chart/types';
-
-// Dynamically import react-plotly.js to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
 
 export default function CurrentTestRunChart({
   testRunId,

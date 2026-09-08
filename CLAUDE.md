@@ -687,6 +687,50 @@ enqueues are batched (`enqueueTransactionStatsRollupBulk`) rather than looped; a
 entity manager, an escaping rejection is an unhandled rejection that terminates the process — so
 everything in that hook logs and swallows.
 
+### A Plotly chart must observe its own container, not the window
+
+`react-plotly.js` 2.6.0's `useResizeHandler` is only
+`window.addEventListener('resize', () => Plotly.Plots.resize(el))`. There is no ResizeObserver in
+it. So a container that changes size while the **window** does not leaves Plotly's cached geometry
+stale, and the hover label is then measured and drawn against the old box: the tooltip text drifts
+away from its background box, leaving the text over the chart title and an empty box near the data
+point.
+
+Two such changes exist in the anomaly-detection rows, and neither moves the window: the statistical
+drawer's 0.3 s width transition, and — Windows only — a classic scrollbar appearing and taking ~15px
+off the container. macOS overlay scrollbars take nothing, which is why this reproduces on Chrome
+under Windows and not on a Mac.
+
+`apps/web/components/ResponsivePlot.tsx` (v0.2.95.2) is the fix: it wraps `react-plotly.js`,
+observes its own wrapper div, and calls `Plotly.Plots.resize` on **its own** graph div. New chart
+call sites should import it (`import Plot from '@/components/ResponsivePlot'`) rather than writing
+`dynamic(() => import('react-plotly.js'))` again.
+
+Four things about it are load-bearing:
+
+1. **It resizes that one chart, deliberately.** Dispatching a window resize instead — what
+   `kickPlotlyResize` in `app/test-runs/[id]/components/shared/ExpandableCardHeader.tsx` does — wakes
+   every Plotly listener on the page, and a drawer transition emits an observer callback per
+   animation frame. One local animation would relayout every unrelated chart, ~18 times over 300 ms.
+2. **The `onEntered={() => window.dispatchEvent(new Event('resize'))}` kicks on the Collapses that
+   wrap charts are NOT redundant now — do not delete them.** MUI *clips* a Collapse rather than
+   resizing its content, so the observed box keeps its final size throughout the animation and the
+   observer fires only once, on `observe()`. That case is invisible to the observer and the one-shot
+   kick is the only thing covering it.
+3. **Every guard in the effect has a failure behind it.** No `ResizeObserver` in the environment →
+   return (an effect that throws blanks the whole page rather than losing one chart's resize); a
+   `contentRect.width` of 0 (hidden tab panel) → skip, resizing to nothing is wasted work; no
+   `.js-plotly-plot` yet (the lazy chunk has not drawn) → skip, its first draw measures the current
+   size anyway; and `Plots.resize` rejects when the div is hidden, so the call is `.catch`ed or the
+   rejection surfaces as a page error.
+4. **Only three call sites use it so far** — `anomaly-detection/components/TrendChart.tsx`,
+   `anomaly-detection/.../AnomalyExpandedContent.tsx`, and `compare/CurrentTestRunChart.tsx`. Nine
+   others still call `dynamic(() => import('react-plotly.js'))` directly and therefore still respond
+   to a window resize only; that is deliberate scope, tracked in TODOS.md, not an oversight.
+
+jsdom has no `ResizeObserver`. `apps/web/jest.setup.js` stubs it so a component that observes its
+container mounts in tests at all.
+
 ### Common Issues
 
 1. **"Failed to fetch"** → Missing `...getAuthHeaders()` in fetch calls
@@ -711,6 +755,8 @@ everything in that hook logs and swallows.
 15. **A bulk analysis-window apply reports success but nothing changed for some runs** → three different causes, told apart in the API log. Either the runs were *skipped* and the dialog said so (`not-writable` / `running` / `too-short` — the handler logs the counts per reason), or the whole apply exceeded `MAX_BULK_ANALYSIS_TIME_RANGE_RUNS` (100) and was refused with a 400 naming the count, or the re-evaluate job was refused by the `sut:env:workload` scope lock and exhausted its 2 attempts. Only the third leaves `test_runs.ramp_up` written with `ds_metric_statistics` never recalculated; since v0.2.95.0 that job genuinely fails rather than being recorded completed, so look in BullMQ's failed set. Re-analysis is still fire-and-forget from the API — the open TODOS.md item. See "An analysis window belongs to a workload, not to a run" above.
 
 16. **A worker job shows as completed in BullMQ but its work plainly did not happen** → the processor reported failure by *returning* `{ status: 'failed' }` instead of throwing. `simple-workers.ts` does `return await processor(job)`, so that resolves and BullMQ marks it completed: no retry, no failed-set entry, nothing logged as an error. Grep `status: 'failed'` under `apps/worker/src/workers/`. Note `analyze.ts:243` still does this on its catch-all path by design-debt, and `incremental-metrics.ts` does it deliberately because a scheduler re-drives it. Do not confuse either with `softFail`, where the return value *is* the contract and the caller reads it via `assertStageSucceeded()`. See "A worker that reports failure by RETURNING is silently succeeding" above.
+
+17. **A hover tooltip's text sits away from its background box, or a chart is laid out at the wrong width after a drawer or panel animation** → that chart is a raw `dynamic(() => import('react-plotly.js'))` rather than `@/components/ResponsivePlot`, so it only relayouts when the *window* resizes. Most visible on Chrome under Windows, where a classic scrollbar takes ~15px off the container the moment it appears; macOS overlay scrollbars take nothing, so it does not reproduce on a Mac. Fixed for the anomaly-detection charts in v0.2.95.2. See "A Plotly chart must observe its own container, not the window" above.
 
 ## How-To Tutorials
 

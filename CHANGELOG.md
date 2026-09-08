@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.2] - 2026-09-08
+
+### Fixed
+- **Hover tooltips in the anomaly detection charts line up with the point again.** On Chrome under Windows the tooltip text drifted away from its background box, leaving the text over the chart title and an empty box near the data point. Plotly measures the tooltip once against the chart's size and never re-measures it, and the charts in an anomaly detection row change size after that measurement: the statistical analysis drawer animates the chart narrower over 0.3 seconds, and a Windows scrollbar takes about 15 pixels off the container the moment it appears — something macOS overlay scrollbars never do. The charts now watch their own container and re-measure whenever it changes size, so the tooltip is drawn against the size the chart actually has.
+
+
 ## [0.2.95.1] - 2026-09-06
 
 ### Fixed

@@ -17,7 +17,6 @@ import {
   Settings,
 } from '@mui/icons-material';
 import { useTheme, alpha } from '@mui/material/styles';
-import dynamic from 'next/dynamic';
 import { AnomalyData, MetricTrendData, DrawerData } from '../../types';
 import { TestRun } from '@/types/test-runs';
 import CurrentTestRunChart from '../../../compare/CurrentTestRunChart';
@@ -25,6 +24,7 @@ import type { AggregatedMetricSource } from '../../../compare/current-test-run-c
 import MetricConfigForm from '../../../configuration-comparison/MetricConfigForm';
 import { createTrendsPlot } from '../utils/trends-plot-utils';
 import { StatisticalDrawerContent } from './StatisticalDrawerContent';
+import Plot from '@/components/ResponsivePlot';
 
 const VALID_STATS = new Set(['avg', 'p50', 'p90', 'p95', 'p99', 'max']);
 
@@ -49,7 +49,6 @@ function parseAggregatedMetricSource(metricName: string, sourceType?: string | n
   return undefined;
 }
 
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
 
 interface AnomalyExpandedContentProps {
   row: AnomalyData;
@@ -113,11 +112,11 @@ export function AnomalyExpandedContent({
       in={isExpanded}
       timeout="auto"
       unmountOnExit
-      // Plotly draws once when it mounts. Inside a Collapse it mounts mid-animation
-      // at partial height and never re-measures (useResizeHandler only listens to
-      // window resize, not container resize), so hover-label geometry stays stale
-      // and the tooltip box detaches from its text. Kick a window resize when the
-      // Collapse settles so the existing useResizeHandler relayouts at full height.
+      // Belt and braces. Both charts below are ResponsivePlot, which re-measures on
+      // its own container, so this one-shot kick is only here for the case that
+      // observer cannot see: MUI clips a Collapse rather than resizing its content,
+      // so the chart box can keep its final size throughout the animation while
+      // Plotly still draws against a mid-animation viewport.
       onEntered={() => window.dispatchEvent(new Event('resize'))}
     >
       <Box sx={{

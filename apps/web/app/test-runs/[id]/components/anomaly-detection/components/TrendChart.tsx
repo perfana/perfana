@@ -1,11 +1,9 @@
 import type { Config, Data, Layout } from 'plotly.js';
 import React, { useEffect, useState } from 'react';
 import { Box, CircularProgress, Alert, useTheme } from '@mui/material';
-import dynamic from 'next/dynamic';
+import Plot from '@/components/ResponsivePlot';
 import { MetricTrendData } from '../types';
 import { createTrendsPlot } from '../utils';
-
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
 
 interface TrendChartProps {
   data: MetricTrendData[];
