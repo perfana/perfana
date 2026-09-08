@@ -207,7 +207,7 @@ describe('GraphsRenderer', () => {
       expect(dataFetcher.getMetricsTimeSeries).toHaveBeenCalledWith(
         'run-001',
         [{ dashboardLabel: 'DB', panelTitle: 'Queries', metricName: 'query_count' }],
-        true,
+        false,
         'user-1',
         ['user'],
       );
@@ -220,9 +220,8 @@ describe('GraphsRenderer', () => {
       expect(dataFetcher.getAvailableMetricsPanels).toHaveBeenCalledWith('run-001', 'user-1', ['user']);
     });
 
-    it('should pass excludeRampUp config', async () => {
-      const section = makeSection({ config: { excludeRampUp: false } });
-      await renderer.renderGraphsSection(section, makeTestRun());
+    it('always charts the whole run, so the analysis window has something to shade', async () => {
+      await renderer.renderGraphsSection(makeSection({ config: { excludeRampUp: true } }), makeTestRun());
 
       expect(dataFetcher.getMetricsTimeSeries).toHaveBeenCalledWith(
         expect.anything(),
@@ -250,7 +249,7 @@ describe('GraphsRenderer', () => {
       expect(html).toContain('All aggregated');
       expect(html).toContain('Transaction response time');
       expect(dataFetcher.getAggregatedSeries).toHaveBeenCalledWith(
-        'run-001', 'transaction_response_time', 'avg', true, '', [],
+        'run-001', 'transaction_response_time', 'avg', false, '', [],
       );
     });
 
@@ -577,7 +576,7 @@ describe('GraphsRenderer', () => {
     });
   });
 
-  describe('time range offsets', () => {
+  describe('analysis time range', () => {
     /** A run whose points span 10:00–10:09, one per minute. */
     const spanningPanel = () => makePanel({
       dataPoints: Array.from({ length: 10 }, (_, i) => ({
@@ -585,69 +584,75 @@ describe('GraphsRenderer', () => {
         value: 100 + i,
       })),
     });
-    const runWithClock = () => makeTestRun({
+    const runWithClock = (overrides?: Partial<TestRun>) => makeTestRun({
       startTime: new Date('2026-08-20T10:00:00Z'),
       endTime: new Date('2026-08-20T10:09:00Z'),
+      ...overrides,
     } as never);
 
     const pointCount = (html: string) => {
       const match = html.match(/([\d,]+) data points/);
       return match ? parseInt(match[1]!.replace(/,/g, ''), 10) : 0;
     };
+    /** The amber dashed boundary lines the overlay draws. */
+    const boundaries = (html: string) => (html.match(/stroke="#f59e0b"/g) ?? []).length;
 
-    it('trims from the start of the run', async () => {
+    beforeEach(() => {
       dataFetcher.getMetricsTimeSeries.mockResolvedValue([spanningPanel()]);
-
-      const html = await renderer.renderGraphsSection(
-        makeSection({ config: { timeRange: { startOffset: 3 } } }), runWithClock(),
-      );
-
-      // 10:03 onwards — the first three minutes are gone
-      expect(pointCount(html)).toBe(7);
     });
 
-    it('trims from the end of the run, the way the analysis time range does', async () => {
-      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spanningPanel()]);
-
+    it('marks both ends from the run\'s own offsets, without dropping data', async () => {
       const html = await renderer.renderGraphsSection(
-        makeSection({ config: { timeRange: { endOffset: 4 } } }), runWithClock(),
+        makeSection(),
+        runWithClock({ analysisStartOffset: 180, analysisEndOffset: 120 }),
       );
 
-      // up to 10:05 — endOffset counts back from the run's end, not forward
-      expect(pointCount(html)).toBe(6);
+      expect(boundaries(html)).toBe(2);
+      expect(html).toContain('opacity="0.18"');
+      expect(pointCount(html)).toBe(10);
     });
 
-    it('applies both ends at once', async () => {
-      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spanningPanel()]);
-
+    it('marks only the end that has an offset', async () => {
       const html = await renderer.renderGraphsSection(
-        makeSection({ config: { timeRange: { startOffset: 2, endOffset: 2 } } }), runWithClock(),
+        makeSection(), runWithClock({ analysisStartOffset: 180 }),
       );
 
-      expect(pointCount(html)).toBe(6);
+      expect(boundaries(html)).toBe(1);
     });
 
-    it('charts the whole run when no offset is set', async () => {
-      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spanningPanel()]);
-
+    it('marks nothing when the run has no offsets', async () => {
       const html = await renderer.renderGraphsSection(makeSection(), runWithClock());
 
+      expect(boundaries(html)).toBe(0);
       expect(pointCount(html)).toBe(10);
     });
 
-    it('leaves the window open when the run has no clock to anchor it to', async () => {
-      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spanningPanel()]);
-
+    it('marks nothing when the run has no clock to anchor the offsets to', async () => {
       const html = await renderer.renderGraphsSection(
-        makeSection({ config: { timeRange: { startOffset: 3 } } }),
-        makeTestRun({ startTime: undefined, endTime: undefined } as never),
+        makeSection(),
+        makeTestRun({
+          startTime: undefined, endTime: undefined,
+          analysisStartOffset: 180, analysisEndOffset: 120,
+        } as never),
       );
 
-      expect(pointCount(html)).toBe(10);
+      expect(boundaries(html)).toBe(0);
     });
   });
 
   describe('legend toggle', () => {
+    it('shows a legend for a single series when the toggle is on', async () => {
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([makePanel({ metricName: 'cpu_usage_percent' })]);
+
+      const withLegend = await renderer.renderGraphsSection(makeSection(), makeTestRun());
+      const without = await renderer.renderGraphsSection(
+        makeSection({ config: { showLegends: false } }), makeTestRun(),
+      );
+
+      expect(withLegend).toContain('CPU Usage · cpu_usage_percent');
+      expect(without).not.toContain('CPU Usage · cpu_usage_percent');
+    });
+
     it('hides the legend when showLegends is off', async () => {
       dataFetcher.getGraphPresetPanels.mockResolvedValue({
         presets: [{ id: 'p1', name: 'Two series', panels: [
