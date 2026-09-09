@@ -3,6 +3,7 @@ import { ComparisonsRenderer } from './comparisons-renderer';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
+import { percentDiffScaled } from './comparison-bands';
 
 const makeSection = (
   overrides?: Partial<ReportSectionConfig>,
@@ -398,6 +399,51 @@ describe('ComparisonsRenderer', () => {
     expect(html).toContain('>42<');
     expect(html).toContain('vs 40<');
     expect(html).not.toContain('vs 0.4<');
+  });
+
+  it('prints a delta chip that agrees with the pair beside it, cross-unit', async () => {
+    // The old fixtures hard-coded `diffPercent: 5` — a value the producer would never emit
+    // for this pair — which is why no test caught the delta being computed from the raw
+    // 42-vs-0.4. Here the chip is produced the way the fetcher produces it, so the assertion
+    // ties the number the reader sees to the two numbers it sits beside.
+    const diffPercent = percentDiffScaled(42, 0.4, 'percent', 'percentunit');
+    expect(diffPercent).toBeCloseTo(5);
+
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / CPU', dashboardLabel: 'JVM', panelTitle: 'CPU', label: 'cpu',
+        unit: 'percent', baselineUnit: 'percentunit',
+        metrics: [{ key: 'avg', current: 42, baseline: 0.4, diffPercent }] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    // 42 vs 40 is +5%, a "good" band — not the +10400% severe regression the raw pair gave.
+    expect(html).toContain('>42<');
+    expect(html).toContain('vs 40<');
+    expect(html).toContain('+5.0%');
+    expect(html).not.toContain('10400');
+  });
+
+  it('gates on the change the reader sees, not the stored one', async () => {
+    // percentunit stored 0.42/0.40 prints as 42 vs 40 — a change of 2. A minAbsolute of 1
+    // must therefore let it through; gating the raw 0.02 suppressed every percentunit row.
+    const data = { source: 'grafana', rows: [
+      { group: 'JVM / CPU', dashboardLabel: 'JVM', panelTitle: 'CPU', label: 'cpu',
+        unit: 'percentunit', baselineUnit: null,
+        metrics: [{ key: 'avg', current: 0.42, baseline: 0.4, diffPercent: 5 }] },
+    ] };
+    jest.spyOn(dataFetcher, 'getBaselineRunComparison').mockResolvedValue(data as any);
+    const html = await renderer.renderComparisonsSection(
+      { type: 'comparisons', order: 0, config: {
+        baselineTestRunId: 'base', source: 'grafana',
+        metrics: ['avg'], thresholds: { good: 10, warning: 50, minAbsolute: 1 } } } as any,
+      { testRunId: 'cur' } as any,
+    );
+    expect(html).toContain('+5.0%');
   });
 
   it('falls back to the row unit when no distinct baseline unit was recorded', async () => {

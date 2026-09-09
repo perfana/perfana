@@ -702,4 +702,93 @@ describe('GraphsRenderer', () => {
       expect(viewBox(html)).toBe('1200x400');
     });
   });
+
+  describe('analysis time range only', () => {
+    // A 5-minute run whose analysis window is 10:01-10:03. The 10:00 point (25.3)
+    // and the 10:04 point (31.9) are outside it; 55.2 at 10:03 is the in-window max.
+    const windowedRun = () =>
+      makeTestRun({
+        startTime: new Date('2025-06-01T10:00:00Z'),
+        endTime: new Date('2025-06-01T10:04:00Z'),
+        analysisStartOffset: 60,
+        analysisEndOffset: 60,
+      } as Partial<TestRun>);
+
+    // The out-of-window points are the EXTREMES here, so if the axis is scaled on
+    // the whole run its labels differ from the in-window scaling. 900 is a spike in
+    // the ramp-up that the reader cannot even see once the view is narrowed.
+    const spikyPanel = () =>
+      makePanel({
+        dataPoints: [
+          { time: new Date('2025-06-01T10:00:00Z'), value: 900 },
+          { time: new Date('2025-06-01T10:01:00Z'), value: 40 },
+          { time: new Date('2025-06-01T10:02:00Z'), value: 50 },
+          { time: new Date('2025-06-01T10:03:00Z'), value: 60 },
+          { time: new Date('2025-06-01T10:04:00Z'), value: 800 },
+        ],
+      });
+
+    /** The numeric labels on the left Y axis, biggest first. */
+    const yAxisLabels = (html: string): number[] =>
+      [...html.matchAll(/font-size="9" fill="#666">([^<]+)</g)]
+        .map((m) => m[1]!)
+        .filter((t) => !t.includes(':')) // drop the x-axis clock labels
+        .map((t) => Number(t.replace(/[^0-9.-]/g, '')))
+        .filter((n) => Number.isFinite(n))
+        .sort((a, b) => b - a);
+
+    it('scales the Y axis on the in-window data, not the whole run', async () => {
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spikyPanel()]);
+      const on = await renderer.renderGraphsSection(
+        makeSection({ config: { analysisRangeOnly: true } } as any),
+        windowedRun(),
+      );
+      const off = await renderer.renderGraphsSection(
+        makeSection({ config: { analysisRangeOnly: false } } as any),
+        windowedRun(),
+      );
+
+      // Whole-run scaling has to reach the 900 spike; in-window scaling tops out
+      // just above the in-window max of 60.
+      expect(yAxisLabels(off)[0]).toBeGreaterThan(800);
+      expect(yAxisLabels(on)[0]).toBeLessThan(100);
+      expect(yAxisLabels(on)[0]).toBeGreaterThanOrEqual(60);
+    });
+
+    it('clips the series so out-of-window points cannot draw over the axes', async () => {
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spikyPanel()]);
+      const html = await renderer.renderGraphsSection(
+        makeSection({ config: { analysisRangeOnly: true } } as any),
+        windowedRun(),
+      );
+      expect(html).toContain('<clipPath id="plot-clip-');
+      expect(html).toMatch(/<g clip-path="url\(#plot-clip-/);
+    });
+
+    it('keeps both boundary lines on the chart, inside the margin', async () => {
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spikyPanel()]);
+      const html = await renderer.renderGraphsSection(
+        makeSection({ config: { analysisRangeOnly: true } } as any),
+        windowedRun(),
+      );
+      // Two amber dashed boundaries — the margin is what leaves room for them.
+      const boundaries = html.match(/stroke="#f59e0b"/g) ?? [];
+      expect(boundaries).toHaveLength(2);
+    });
+
+    it('falls back to the full run when the run carries no analysis offsets', async () => {
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spikyPanel()]);
+      const html = await renderer.renderGraphsSection(
+        makeSection({ config: { analysisRangeOnly: true } } as any),
+        makeTestRun(), // no offsets -> no window to zoom to
+      );
+      expect(yAxisLabels(html)[0]).toBeGreaterThan(800);
+    });
+
+    it('is off by default', async () => {
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([spikyPanel()]);
+      const html = await renderer.renderGraphsSection(makeSection(), windowedRun());
+      expect(yAxisLabels(html)[0]).toBeGreaterThan(800);
+    });
+  });
 });

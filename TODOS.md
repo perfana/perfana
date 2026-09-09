@@ -684,45 +684,6 @@ an author actually wants when writing a sentence about a comparison.
 (`lookupVariableValues`), `packages/shared/src/utils/report-variables.ts` (the Comparison group
 hints), `apps/api/src/modules/reports/renderers/comparisons-renderer.ts` (`resolveBaseline`).
 
-### The minimum-absolute-change gate compares raw values against a scaled display
-
-**Priority:** P3
-**Origin:** adversarial review during /ship on `chore/misc-improvements` (2026-08-30), finding F8.
-Pre-existing — not introduced by that release, but it became easier to see once the unit was
-printed next to the number.
-**Why:** `comparison-bands.ts` documents `minAbsolute` as "minimum absolute change (in the
-metric's own units)", and `gatedDiffPercent` compares `|current - baseline|` on the RAW stored
-values. For a `percentunit` metric the cell shows `42% vs 40%` — a change of 2 in the units the
-reader sees — while the gate tests `0.02` against the number the user typed. Every percentunit
-row is therefore gated out unless `minAbsolute` is below 0.01, and the user has no way to tell
-from the UI. Same divergence in the web compare table, which gates on `c.current_value` while
-`fmt` shows the scaled value.
-**What:** scale both sides of the comparison with `toUnitScale` before the gate, so the threshold
-means what its label says. Changing it moves rows in and out of view for anyone already using
-`minAbsolute` on a percentunit panel, so it wants a CHANGELOG line rather than a silent fix.
-**Where:** `apps/api/src/modules/reports/renderers/comparison-bands.ts` (`gatedDiffPercent`),
-`apps/web/app/test-runs/[id]/components/compare/utils/compare-bands.ts`,
-`apps/web/app/test-runs/[id]/components/compare/components/MetricsComparisonTable.tsx`.
-
-### The comparison delta is computed from raw values the reader never sees
-
-**Priority:** P2
-**Origin:** pre-landing review during /ship on `chore/misc-improvements` (2026-08-30). Introduced
-by that release; shipped knowingly.
-**Why:** `baselineUnit` lets the two sides of a pairing carry different unit codes, and the
-renderer's `scaled()` helper formats each side with its OWN unit. `diffPercent`, though, is still
-`percentDiff(cv, bv)` over the raw pair. For a `percent` row (current 42) paired against a
-`percentunit` one (baseline 0.4) the cell reads `42 vs 40` beside a `+10400%` chip, and because
-that same `diffPercent` feeds the band, the row is ranked a severe regression. The two numbers
-the reader sees and the delta printed next to them are computed from different scales. Sibling
-of the `minAbsolute` divergence above (F8) — same root cause, different call site.
-**What:** scale both sides with `toUnitScale` before `percentDiff`, at all three
-`diffPercent: percentDiff(cv, bv)` sites. Add a renderer test that asserts the chip agrees with
-the pair it sits beside — the current cross-unit fixture hard-codes `diffPercent: 5`, a value the
-producer would never emit, which is why no test caught this.
-**Where:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts` (lines ~955,
-~2812, ~2913, ~3041), `apps/api/src/modules/reports/renderers/comparisons-renderer.spec.ts`.
-
 ### A Comparisons section reads another organization's run through the statistics path
 
 **Priority:** P1

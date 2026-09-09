@@ -135,13 +135,13 @@ export function sortValueOf(c: MetricComparison | undefined, mode: SortMode, min
     if (c.current_value == null || c.selected_value == null) return NaN;
     return c.current_value - c.selected_value;
   }
-  const d = gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, minAbsolute);
+  const d = gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, minAbsolute, c.yAxesFormat);
   return d == null ? NaN : d;
 }
 
 function Cell({ c, thresholds }: { c: MetricComparison | undefined; thresholds: DiffThresholds }) {
   if (!c) return <Box sx={{ px: 2, py: 1.5, textAlign: 'right', color: 'text.secondary' }}>—</Box>;
-  const d = gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, thresholds.minAbsolute);
+  const d = gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, thresholds.minAbsolute, c.yAxesFormat);
   const band = bandOf(d, thresholds);
   return (
     <Box sx={{ px: 2, py: 1.5, display: 'flex', flexDirection: 'column', gap: 0.75, alignItems: 'flex-end' }}>
@@ -262,7 +262,7 @@ export default function MetricsComparisonTable({
   const rowDiffs = (row: MetricRow): (number | null)[] =>
     columns.map((col) => {
       const c = row.byColumn[col];
-      return c ? gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, thresholds.minAbsolute) : null;
+      return c ? gatedDiffPercent(c.current_value, c.selected_value, c.percentage_difference, thresholds.minAbsolute, c.yAxesFormat) : null;
     });
 
   const legendDot = (color: string, label: string) => (
