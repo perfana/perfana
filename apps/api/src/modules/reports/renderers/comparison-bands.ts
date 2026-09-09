@@ -1,10 +1,11 @@
 import { REPORT_COLORS, type ReportStatus } from './report-style';
+import { toUnitScale } from './unit-format';
 
 export interface DiffThresholds {
   good: number;
   warning: number;
   /**
-   * Minimum absolute change (in the metric's own units) before a cell is
+   * Minimum absolute change, in the units the report PRINTS, before a cell is
    * flagged. |current − baseline| below this is treated as "no difference"
    * regardless of the percentage — suppresses noise on tiny baselines
    * (e.g. 1ms → 2ms is +100% but only 1ms). Undefined = no gate.
@@ -16,22 +17,64 @@ export interface DiffThresholds {
  * Effective percentage diff after the minimum-absolute-change gate: if the
  * absolute change is below `minAbsolute`, collapse to 0 so bandColor/deltaChip
  * render it as "no difference". Used by the baseline-run comparison renderer.
+ *
+ * Both sides are scaled to DISPLAY units first, because `minAbsolute` is a number
+ * the user typed while looking at the rendered table. A `percentunit` row shows
+ * `42 vs 40` — a change of 2 — while the stored pair is 0.42 and 0.40, a raw
+ * change of 0.02. Gating on the raw pair silenced every percentunit row unless
+ * the threshold was below 0.01, with nothing in the UI to explain why.
+ *
+ * `baselineUnit` defaults to `unit`: a pairing may legitimately carry different
+ * codes per side (see BaselineComparisonRow), and each side scales by its own.
  */
 export function gatedDiffPercent(
   current: number | null,
   baseline: number | null,
   diffPercent: number | null,
   minAbsolute?: number,
+  unit?: string | null,
+  baselineUnit?: string | null,
 ): number | null {
-  if (minAbsolute != null && current != null && baseline != null && Math.abs(current - baseline) < minAbsolute) {
-    return 0;
+  if (minAbsolute != null && current != null && baseline != null) {
+    const c = toUnitScale(current, unit ?? undefined);
+    const b = toUnitScale(baseline, (baselineUnit ?? unit) ?? undefined);
+    if (Math.abs(c - b) < minAbsolute) return 0;
   }
   return diffPercent;
 }
 
+/**
+ * Percentage change from `baseline` to `current`.
+ *
+ * Scale-invariant when both sides share a unit — multiplying both by 100 cancels —
+ * so callers whose pair is fixed to one unit need not scale first. A caller whose
+ * two sides can carry DIFFERENT unit codes must scale each side by its own before
+ * calling; see `percentDiffScaled`.
+ */
 export function percentDiff(current: number | null, baseline: number | null): number | null {
   if (current == null || baseline == null || baseline === 0) return null;
   return ((current - baseline) / Math.abs(baseline)) * 100;
+}
+
+/**
+ * `percentDiff` over a pair whose sides may be stored in different unit codes.
+ *
+ * The pairing identity is dashboard/panel/metric name and excludes the unit, so a
+ * `percent` row (42) can be paired against a `percentunit` one (0.4). Comparing
+ * those raw produced `+10400%` beside a cell reading `42 vs 40`, and because that
+ * same number feeds the band, the row was ranked a severe regression.
+ */
+export function percentDiffScaled(
+  current: number | null,
+  baseline: number | null,
+  unit?: string | null,
+  baselineUnit?: string | null,
+): number | null {
+  if (current == null || baseline == null) return null;
+  return percentDiff(
+    toUnitScale(current, unit ?? undefined),
+    toUnitScale(baseline, (baselineUnit ?? unit) ?? undefined),
+  );
 }
 
 /**

@@ -8,7 +8,7 @@ import { withRequestEm } from '../../../common/db/request-em';
 import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
-import { percentDiff } from '../renderers/comparison-bands';
+import { percentDiff, percentDiffScaled } from '../renderers/comparison-bands';
 import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isSyntheticAllAggregated, isUrlPanel, perfPanelTitle, presetAggregateSpec } from './url-perf-panels';
 import { CHANGE_POINT_WINDOW } from './trend-window';
 import { hostDashboardLabel } from '../../dynatrace/dynatrace.repository';
@@ -3090,10 +3090,19 @@ export class ReportDataFetcherService {
         // baseline's own code rather than scaling and labelling its number with the current
         // row's; the renderer falls back to `unit` when this is null.
         baselineUnit: b?.unit ?? null,
+        // percentDiffScaled, not percentDiff: this is the ONE builder whose two sides can
+        // carry different unit codes (see baselineUnit above), and the raw pair 42 (`percent`)
+        // against 0.4 (`percentunit`) reads as +10400% beside a cell printing `42 vs 40`.
+        // Everywhere else the pair is fixed to one unit, where percentDiff is scale-invariant.
         metrics: opts.metrics.map((k) => {
           const cv = c[fieldByKey[k]];
           const bv = b ? b[fieldByKey[k]] : null;
-          return { key: k, current: cv, baseline: bv, diffPercent: percentDiff(cv, bv) };
+          return {
+            key: k,
+            current: cv,
+            baseline: bv,
+            diffPercent: percentDiffScaled(cv, bv, c.unit, b?.unit ?? null),
+          };
         }),
       };
     });

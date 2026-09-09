@@ -162,14 +162,23 @@ export class ComparisonsRenderer {
     }
 
     // Effective diff after the minimum-absolute-change gate (thresholds.minAbsolute).
-    const effDiff = (m: { current: number | null; baseline: number | null; diffPercent: number | null }): number | null =>
-      gatedDiffPercent(m.current, m.baseline, m.diffPercent, thresholds.minAbsolute);
+    // The row's unit codes go in too: the gate is a threshold the user typed against the
+    // rendered numbers, so it has to be applied to the scaled pair, not the stored one.
+    const effDiff = (
+      m: { current: number | null; baseline: number | null; diffPercent: number | null },
+      unit?: string | null,
+      baselineUnit?: string | null,
+    ): number | null =>
+      gatedDiffPercent(m.current, m.baseline, m.diffPercent, thresholds.minAbsolute, unit, baselineUnit);
 
     // Rank a band color for row accents / worst-of-row aggregation.
     const rankFor = (hex: string): number =>
       hex === REPORT_COLORS.dot.bad ? 2 : hex === REPORT_COLORS.dot.warn ? 1 : 0;
     const worstRank = (row: BaselineComparisonRow): number =>
-      row.metrics.reduce((mx, m) => Math.max(mx, rankFor(bandColor(effDiff(m), thresholds))), 0);
+      row.metrics.reduce(
+        (mx, m) => Math.max(mx, rankFor(bandColor(effDiff(m, row.unit, row.baselineUnit), thresholds))),
+        0,
+      );
     const accent = (rank: number): string =>
       (rank === 2 ? REPORT_COLORS.dot.bad : rank === 1 ? REPORT_COLORS.dot.warn : REPORT_COLORS.dot.good);
     const rowBackground = (rank: number, idx: number): string =>
@@ -207,7 +216,7 @@ export class ComparisonsRenderer {
       unit?: string | null,
       baselineUnit?: string | null,
     ): string => {
-      const d = effDiff(m);
+      const d = effDiff(m, unit, baselineUnit);
       const dot = bandColor(d, thresholds);
       let left = 50, width = 0;
       if (d != null) {

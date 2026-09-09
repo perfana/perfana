@@ -1,4 +1,4 @@
-import { bandColor, gatedDiffPercent, percentDiff, statusFromConclusion } from './comparison-bands';
+import { bandColor, gatedDiffPercent, percentDiff, percentDiffScaled, statusFromConclusion } from './comparison-bands';
 
 describe('gatedDiffPercent (minimum absolute change gate)', () => {
   it('collapses to 0 when the absolute change is below minAbsolute', () => {
@@ -14,6 +14,49 @@ describe('gatedDiffPercent (minimum absolute change gate)', () => {
   it('passes null through (missing values cannot be gated)', () => {
     expect(gatedDiffPercent(null, 1, null, 5)).toBeNull();
     expect(gatedDiffPercent(2, null, null, 5)).toBeNull();
+  });
+
+  // The gate is a number the user typed against the RENDERED table. A percentunit
+  // pair stored 0.42/0.40 prints as "42 vs 40" — a change of 2 — so a threshold of 1
+  // must let it through. Gating the raw pair compared 0.02 against 1 and silenced
+  // every percentunit row.
+  it('gates a percentunit pair on the scaled change, not the stored one', () => {
+    expect(gatedDiffPercent(0.42, 0.4, 5, 1, 'percentunit')).toBe(5);
+    expect(gatedDiffPercent(0.42, 0.4, 5, 1)).toBe(0); // unit omitted = old behaviour
+  });
+  it('still gates a percentunit pair whose scaled change is genuinely small', () => {
+    // 40.1 vs 40.0 -> 0.1 scaled, under a threshold of 1.
+    expect(gatedDiffPercent(0.401, 0.4, 0.25, 1, 'percentunit')).toBe(0);
+  });
+  it('scales each side by its own unit when the pairing is cross-unit', () => {
+    // current 42 `percent`, baseline 0.4 `percentunit` -> 42 vs 40, a change of 2.
+    expect(gatedDiffPercent(42, 0.4, 5, 1, 'percent', 'percentunit')).toBe(5);
+  });
+  it('leaves a non-percentunit pair alone', () => {
+    expect(gatedDiffPercent(2, 1, 100, 5, 'ms')).toBe(0);
+    expect(gatedDiffPercent(60, 50, 20, 5, 'ms')).toBe(20);
+  });
+});
+
+describe('percentDiffScaled (cross-unit pairings)', () => {
+  it('agrees with the pair the reader sees when the sides carry different units', () => {
+    // 42 `percent` against 0.4 `percentunit` renders as "42 vs 40": +5%, not +10400%.
+    expect(percentDiffScaled(42, 0.4, 'percent', 'percentunit')).toBeCloseTo(5);
+    expect(percentDiff(42, 0.4)).toBeCloseTo(10400); // what it used to report
+  });
+  it('is identical to percentDiff when both sides share a unit', () => {
+    // Scaling both sides by the same factor cancels, which is why the same-unit
+    // call sites need no change.
+    for (const unit of ['ms', 'percentunit', 'percent', undefined]) {
+      expect(percentDiffScaled(110, 100, unit, unit)).toBeCloseTo(percentDiff(110, 100)!);
+    }
+  });
+  it('falls back to the current unit when baselineUnit is absent', () => {
+    expect(percentDiffScaled(0.42, 0.4, 'percentunit', null)).toBeCloseTo(percentDiff(42, 40)!);
+  });
+  it('returns null when either side is missing', () => {
+    expect(percentDiffScaled(null, 0.4, 'percent', 'percentunit')).toBeNull();
+    expect(percentDiffScaled(42, null, 'percent', 'percentunit')).toBeNull();
   });
 });
 

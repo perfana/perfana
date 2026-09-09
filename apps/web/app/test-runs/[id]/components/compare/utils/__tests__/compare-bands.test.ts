@@ -23,6 +23,18 @@ describe('compare-bands', () => {
     expect(gatedDiffPercent(20, 10, 100, 5)).toBe(100); // 10 absolute >= 5, keep
     expect(gatedDiffPercent(2, 1, 100, undefined)).toBe(100); // no gate
   });
+
+  // Mirrors the report renderer: minAbsolute is typed against the numbers the table
+  // prints, and a percentunit pair stored 0.42/0.40 prints as 42 and 40.
+  it('gates a percentunit pair on the scaled change', () => {
+    expect(gatedDiffPercent(0.42, 0.4, 5, 1, 'percentunit')).toBe(5);
+    expect(gatedDiffPercent(0.42, 0.4, 5, 1)).toBe(0); // unit omitted = old behaviour
+    expect(gatedDiffPercent(0.401, 0.4, 0.25, 1, 'percentunit')).toBe(0);
+  });
+  it('leaves a non-percentunit pair alone', () => {
+    expect(gatedDiffPercent(2, 1, 100, 5, 'ms')).toBe(0);
+    expect(gatedDiffPercent(20, 10, 100, 5, 'ms')).toBe(100);
+  });
   it('worstBand picks the most severe of a row', () => {
     expect(worstBand([2, 60, -5], T)).toBe('bad');
     expect(worstBand([2, 20], T)).toBe('warn');

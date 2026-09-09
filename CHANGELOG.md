@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.9] - 2026-09-09
+
+### Added
+- **Custom Graphs sections can draw the analysis time range only.** A new "Show analysis time range only" toggle narrows every chart in the section to the run's analysis window, keeping a thin margin either side so the two amber offset lines stay visible against the plot edge rather than merging with the border. Each Y axis is then scaled to the data **inside** the window: a ramp-up spike the chart no longer shows can no longer set the scale and flatten the band you asked to look at. Off by default, which keeps the existing view — the whole run, with the excluded bands dimmed. A run with no analysis offsets has no window to narrow to and renders unchanged either way.
+
+### Fixed
+- **A report's comparison delta now agrees with the two numbers it sits beside.** Rows pair on dashboard, panel and metric name — not on unit — so a `percent` panel (42) could be paired against a `percentunit` one (0.4). The cell printed `42 vs 40` while the chip beside it read `+10400%`, and because that same figure drives the severity band, the row was ranked a severe regression. Each side is now scaled by its own unit before the delta is computed.
+
+- **The "minimum absolute change" threshold now means what its label says.** It is documented as a change in the metric's own units, and the report prints `percentunit` values scaled to 0-100 — but the gate compared the stored 0.0-1.0 pair. A row showing `42 vs 40`, a change of 2, was tested as 0.02, so every `percentunit` row was suppressed unless the threshold was below 0.01, with nothing in the UI to say why. Both sides are now scaled before the comparison, in the report and in the test run's compare card. If you had set this threshold on a `percentunit` panel, rows previously hidden will reappear.
+
+### Changed
+- **The entity/migration pre-ship check now also audits already-merged columns.** It compared entity columns against migrations added *in the current branch*, so once a column reached `main` without an incremental migration the gap became invisible — which is how `dynatrace_entity_mappings.labels` shipped broken in 0.2.95.7. It now additionally audits every column in Phase 6 of the consolidated schema and fails when one has no incremental migration, whichever branch introduced it. Its output names what it checked either way.
+
+- **Four columns that had the same gap now have their migration**: `benchmarks.aggregate_metric`, `benchmarks.aggregate_stat`, `test_runs.ramp_down` and `requests_error.session_variables`. Each was only ever added in Phase 6, so a database provisioned before that line was written never received it. The statements are `IF NOT EXISTS`, so this is a no-op wherever the columns already exist.
+
 ## [0.2.95.8] - 2026-09-08
 
 ### Fixed

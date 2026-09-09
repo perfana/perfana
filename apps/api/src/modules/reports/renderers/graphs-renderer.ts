@@ -34,7 +34,21 @@ const QUALITY_SIZES: Record<string, { width: number; height: number }> = {
 interface ChartWindow {
   from: number | null;
   to: number | null;
+  /**
+   * Draw ONLY the analysis range (plus a thin margin), instead of the whole run
+   * with the excluded bands dimmed. Set from the section's
+   * `analysisRangeOnly` toggle.
+   */
+  only: boolean;
 }
+
+/**
+ * How far outside the analysis range the "analysis only" view still draws, as a
+ * fraction of the range. Without it the two boundary lines land exactly on the
+ * plot edges, where they are indistinguishable from the chart border — the
+ * margin is what makes the offsets visible, which is the point of the view.
+ */
+const ANALYSIS_ONLY_MARGIN = 0.025;
 
 /** Matches the amber dashed boundary the Graphs card draws. */
 const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
@@ -97,7 +111,9 @@ export class GraphsRenderer {
       return this.renderNoDataSection(title, text, 'No test run data available for graph rendering.');
     }
 
-    const window = this.analysisWindow(testRun);
+    // Off by default: the whole run with the excluded bands dimmed is the view
+    // that matches the Graphs card, and the toggle is a deliberate narrowing.
+    const window = this.analysisWindow(testRun, config.analysisRangeOnly === true);
 
     // Determine ds_metrics panels to render
     const includeAggregated = config.includeAggregated === true;
@@ -308,6 +324,16 @@ export class GraphsRenderer {
     return this.renderChart(chartTitle, [panel], panelIdx, width, height, window, showLegend);
   }
 
+  /** Stable, collision-tolerant id fragment for a chart's clipPath. */
+  private hashString(value: string): number {
+    let h = 0;
+    for (let i = 0; i < value.length; i++) {
+      h = ((h << 5) - h) + value.charCodeAt(i);
+      h |= 0;
+    }
+    return h;
+  }
+
   /**
    * The run's analysis time range, in epoch milliseconds.
    *
@@ -316,12 +342,13 @@ export class GraphsRenderer {
    * so the report and the card mark the same band. Without a clock to anchor
    * them to, neither end is marked.
    */
-  private analysisWindow(testRun: TestRun): ChartWindow {
+  private analysisWindow(testRun: TestRun, only = false): ChartWindow {
     const start = testRun.startTime ? new Date(testRun.startTime).getTime() : null;
     const end = testRun.endTime ? new Date(testRun.endTime).getTime() : null;
     return {
       from: start !== null && testRun.analysisStartOffset ? start + testRun.analysisStartOffset * 1000 : null,
       to: end !== null && testRun.analysisEndOffset ? end - testRun.analysisEndOffset * 1000 : null,
+      only,
     };
   }
 
@@ -363,11 +390,27 @@ export class GraphsRenderer {
     const allPoints = drawn.flatMap((s) => s.dataPoints);
     const dataPoints = drawn[0]!.dataPoints;
 
+    // "Analysis range only": the x-domain becomes the analysis window plus a thin
+    // margin, and — the part that matters — every Y scale is computed from the
+    // points INSIDE the window. Scaling on the whole run instead lets a ramp-up
+    // spike the reader cannot even see set the axis, flattening the band they
+    // asked to look at. Falls back to the full run when the run carries no
+    // offsets, since there is then no window to zoom to.
+    const inWindow = (t: number) =>
+      (window.from === null || t >= window.from) && (window.to === null || t <= window.to);
+    const analysisOnly = window.only && (window.from !== null || window.to !== null)
+      && allPoints.some((dp) => inWindow(dp.time.getTime()));
+    const scalePoints = analysisOnly
+      ? allPoints.filter((dp) => inWindow(dp.time.getTime()))
+      : allPoints;
+
     // One axis per distinct unit, in the order the units first appear, so the
     // left axis belongs to the first series drawn.
     const unitsInOrder = [...new Set(drawn.map((s) => s.unit || ''))];
     const range = (points: MetricsDataPoint[]) => {
       const values = points.map((dp) => dp.value!);
+      // A unit whose series all fall outside the window would give Infinity here.
+      if (values.length === 0) return { yMin: 0, yMax: 1 };
       const minVal = Math.min(...values);
       const maxVal = Math.max(...values);
       const pad = (maxVal - minVal || 1) * 0.1;
@@ -388,10 +431,21 @@ export class GraphsRenderer {
       unit,
       side: i === 0 ? ('left' as const) : ('right' as const),
       index: i,
-      ...range(collapse ? allPoints : drawn.filter((s) => (s.unit || '') === unit).flatMap((s) => s.dataPoints)),
+      ...range(
+        collapse
+          ? scalePoints
+          : drawn
+              .filter((s) => (s.unit || '') === unit)
+              .flatMap((s) => s.dataPoints)
+              .filter((dp) => !analysisOnly || inWindow(dp.time.getTime())),
+      ),
     }));
     const axisFor = (s: MetricsTimeSeriesPanel) =>
       axes.find((a) => a.unit === (s.unit || '')) ?? axes[0]!;
+
+    // Unique per chart: several charts share one HTML document, and a repeated
+    // clipPath id would make every chart use the first one's plot rectangle.
+    const clipId = `plot-clip-${colorOffset}-${Math.abs(this.hashString(chartTitle))}`;
 
     const padding = {
       top: 20,
@@ -407,8 +461,18 @@ export class GraphsRenderer {
 
     // Compute X-axis range
     const times = allPoints.map((dp) => dp.time.getTime());
-    const tMin = Math.min(...times);
-    const tMax = Math.max(...times);
+    const dataMin = Math.min(...times);
+    const dataMax = Math.max(...times);
+    let tMin = dataMin;
+    let tMax = dataMax;
+    if (analysisOnly) {
+      // A null bound means that end is not trimmed, so it stays at the data edge.
+      const wFrom = window.from ?? dataMin;
+      const wTo = window.to ?? dataMax;
+      const margin = Math.max((wTo - wFrom) * ANALYSIS_ONLY_MARGIN, 1000);
+      tMin = wFrom - margin;
+      tMax = wTo + margin;
+    }
     const tRange = tMax - tMin || 1;
 
     const scaleX = (t: number) => padding.left + ((t - tMin) / tRange) * chartWidth;
@@ -492,12 +556,17 @@ export class GraphsRenderer {
       })
       .join('');
 
-    // X-axis labels (up to 6 evenly spaced)
-    const xLabelCount = Math.min(6, dataPoints.length);
+    // X-axis labels (up to 6 evenly spaced). Drawn from the points inside the
+    // domain, or every label past the boundary would sit outside the plot.
+    const labelPoints = analysisOnly
+      ? (dataPoints.filter((dp) => inWindow(dp.time.getTime())) ?? dataPoints)
+      : dataPoints;
+    const labelSource = labelPoints.length > 0 ? labelPoints : dataPoints;
+    const xLabelCount = Math.min(6, labelSource.length);
     const xLabels: string[] = [];
     for (let i = 0; i < xLabelCount; i++) {
-      const idx = Math.round((i / (xLabelCount - 1)) * (dataPoints.length - 1));
-      const dp = dataPoints[idx]!;
+      const idx = xLabelCount === 1 ? 0 : Math.round((i / (xLabelCount - 1)) * (labelSource.length - 1));
+      const dp = labelSource[idx]!;
       const x = scaleX(dp.time.getTime());
       const yPos = padding.top + chartHeight + 10;
       const timeLabel = dp.time.toLocaleTimeString('en-US', {
@@ -539,6 +608,15 @@ export class GraphsRenderer {
 
         <div style="background: white; border-radius: 4px; border: 1px solid #e0e0e0; padding: 10px;">
           <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+            <!-- Series are clipped to the plot area: with the x-domain narrowed to the
+                 analysis range, the points outside it still have coordinates, and an
+                 unclipped path draws them over the axis labels and the page. -->
+            <defs>
+              <clipPath id="${clipId}">
+                <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}"/>
+              </clipPath>
+            </defs>
+
             <!-- Chart border -->
             <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}"
                   fill="none" stroke="#999" stroke-width="1"/>
@@ -554,6 +632,7 @@ export class GraphsRenderer {
             ${axes.filter((a) => a.side === 'right').map((a) => `<line x1="${axisX(a)}" y1="${padding.top}" x2="${axisX(a)}" y2="${padding.top + chartHeight}" stroke="#ccc" stroke-width="1"/>`).join('')}
 
             <!-- Data lines -->
+            <g clip-path="url(#${clipId})">
             ${lines.map(({ color, path }) => `<path d="${path}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}
 
             <!-- Data points: only worth drawing on a sparse single-series chart -->
@@ -562,6 +641,7 @@ export class GraphsRenderer {
               const cy = scaleY(dp.value!);
               return `<circle cx="${cx}" cy="${cy}" r="2.5" fill="${lines[0]!.color}"/>`;
             }).join('') : ''}
+            </g>
 
             <!-- X-axis labels -->
             ${xLabels.join('')}

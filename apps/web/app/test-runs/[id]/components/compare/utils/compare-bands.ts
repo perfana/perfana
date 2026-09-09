@@ -2,10 +2,12 @@
 // (bandColor/gatedDiffPercent) + REPORT_COLORS.dot palette. Keep in sync if the
 // report's band semantics change.
 
+import { toUnitScale } from '@/lib/units';
+
 export interface DiffThresholds {
   good: number;
   warning: number;
-  /** Min absolute change before a cell is flagged; |current-baseline| below this = "no difference". */
+  /** Min absolute change before a cell is flagged, in the units the TABLE prints. */
   minAbsolute?: number;
 }
 
@@ -18,15 +20,24 @@ export const BAND_COLORS: Record<Band, string> = {
   neutral: '#bdbdbd',
 };
 
-/** If |current-baseline| < minAbsolute, collapse the percentage to 0. */
+/**
+ * If |current-baseline| < minAbsolute, collapse the percentage to 0.
+ *
+ * `unit` is the panel's yAxesFormat, and both sides are scaled to display units
+ * before the comparison: the threshold is a number the user typed while looking at
+ * the table, where a `percentunit` pair stored 0.42/0.40 is printed `42` and `40`.
+ * Gating on the raw pair hid every percentunit row unless minAbsolute was under
+ * 0.01. Mirrors gatedDiffPercent in the report renderer.
+ */
 export function gatedDiffPercent(
   current: number | null,
   baseline: number | null,
   diffPercent: number | null,
   minAbsolute?: number,
+  unit?: string,
 ): number | null {
   if (minAbsolute != null && minAbsolute > 0 && current != null && baseline != null
-      && Math.abs(current - baseline) < minAbsolute) {
+      && Math.abs(toUnitScale(current, unit) - toUnitScale(baseline, unit)) < minAbsolute) {
     return 0;
   }
   return diffPercent;

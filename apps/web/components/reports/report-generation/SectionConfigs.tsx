@@ -1123,6 +1123,12 @@ export interface GraphsConfig {
   quality?: 'low' | 'standard' | 'high';
   showLegends?: boolean;
   /**
+   * Draw only the analysis time range (plus a thin margin), with each Y axis
+   * scaled to the data inside it. Off = the whole run with the excluded bands
+   * dimmed, which is what the Graphs card shows.
+   */
+  analysisRangeOnly?: boolean;
+  /**
    * No longer offered by the form. Kept on the type so a template saved before
    * the toggle was removed still type-checks and keeps rendering as it did.
    */
@@ -1231,10 +1237,21 @@ export function GraphsConfigForm({ config, onChange, text, onTextChange, testRun
         }
         label="Show Legends"
       />
+      <FormControlLabel
+        control={
+          <Switch
+            checked={config.analysisRangeOnly ?? false}
+            onChange={(e) => onChange({ ...config, analysisRangeOnly: e.target.checked })}
+          />
+        }
+        label="Show analysis time range only"
+      />
       {/* No offsets here: the chart shades the run's own analysis time range,
           the way the Graphs card does. */}
       <Typography variant="caption" color="text.secondary">
-        Charts cover the whole run; the analysis time range is marked on each chart.
+        {config.analysisRangeOnly
+          ? 'Charts cover the analysis time range only, with a small margin so the offset lines stay visible. Each Y axis is scaled to the data inside the range.'
+          : 'Charts cover the whole run; the analysis time range is marked on each chart.'}
       </Typography>
     </SectionConfigShell>
   );
