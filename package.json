@@ -64,6 +64,7 @@
     "ws": "^8.21.0",
     "webpack": "^5.104.1",
     "multer": "^2.2.0",
+    "maplibre-gl": "^6.4.1",
     "@typescript-eslint/typescript-estree": {
       "minimatch": "^9.0.9"
     }

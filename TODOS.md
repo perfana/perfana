@@ -658,6 +658,33 @@ scroll container, which may make the shared hook unnecessary; check before reach
 ---
 
 
+## Dependencies
+
+### plotly.js ships maplibre-gl in its prebuilt bundle, and we never draw a map
+
+**Priority:** P3
+**Origin:** clearing the critical `npm audit` advisories that broke every image build (v0.2.95.10).
+**Why:** `react-plotly.js` imports `plotly.js/dist/plotly` — the full prebuilt bundle, with
+`maplibre-gl` inlined (101 references in the dist file; the cartesian build has 5). So the
+`maplibre-gl: ^6.4.1` override in the root package.json cleans the dependency TREE and satisfies
+`npm audit`, but changes nothing about the JavaScript actually served. That is acceptable only
+because the code is unreachable: there is no `scattermap`, `scattermapbox`, `choropleth`,
+`densitymap` or `scattergeo` trace anywhere in `apps/web`, so `DOM.sanitize()` is never called.
+The next such advisory in that bundle gets the same non-answer.
+**What:** build the component from the cartesian bundle instead —
+`createPlotlyComponent(require('plotly.js/dist/plotly-cartesian'))` from `react-plotly.js/factory`
+— behind one shared module, and point the ten call sites at it. Every trace type in use is
+`scatter`, which cartesian covers. That removes maplibre from the shipped bundle for real and cuts
+a large amount of dead weight from `/test-runs/[id]`, currently the biggest route at 850 kB first
+load. Wants a browser pass over every chart, which is why it did not ride along with the security
+fix.
+**Where:** `apps/web/components/ResponsivePlot.tsx` plus the nine other
+`dynamic(() => import('react-plotly.js'))` call sites; the four test files that mock
+`react-plotly.js`.
+
+---
+
+
 ## Reports
 
 ### Prose `{perfana-previous-*}` and a `previous-successful` comparison name different runs

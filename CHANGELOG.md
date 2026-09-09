@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.10] - 2026-09-09
+
+### Security
+- **Image builds are unblocked: the three critical advisories in production dependencies are cleared.** Every Docker image build runs `npm audit --audit-level=critical --production`, and all five failed once these landed.
+
+  - **Next.js 15.5.18 → 15.5.25**, closing two criticals: unauthenticated remote code execution on Windows-hosted servers ([GHSA-p293-qw3h-jr36](https://github.com/advisories/GHSA-p293-qw3h-jr36)) and in the Image Optimization API when AVIF files are used ([GHSA-2xp9-vwfh-vxw4](https://github.com/advisories/GHSA-2xp9-vwfh-vxw4)). Also picks up eight high and moderate fixes in the same range. `eslint-config-next` moves with it — the two resolve each other, and leaving it behind broke `next lint` with "Cannot find module 'next/dist/compiled/babel/eslint-parser'".
+  - **`maplibre-gl` pinned to ^6.4.1** via an override, for an XSS sanitizer bypass ([GHSA-jrc7-96c5-q579](https://github.com/advisories/GHSA-jrc7-96c5-q579)). It reaches the tree only as a transitive dependency of `plotly.js`, through map traces Perfana never renders — there is no `scattermap`, `choropleth` or `mapbox` trace anywhere in the app, so the vulnerable sanitizer is never called.
+
+  Note what the override does and does not do: `react-plotly.js` loads `plotly.js/dist/plotly`, a **prebuilt** bundle with maplibre already inlined, so the override cleans the dependency tree without changing a byte of the shipped JavaScript. That is honest here only because the code is unreachable. Removing it from the bundle outright means switching to plotly's cartesian build, which is tracked in TODOS.md and would also cut a large amount of dead weight from the largest chunk.
+
 ## [0.2.95.9] - 2026-09-09
 
 ### Added
