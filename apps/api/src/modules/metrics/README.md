@@ -38,7 +38,7 @@ endpoint returns a plausible, shorter list rather than an error.
 
 - **Two writers on different schedules.** `StatisticsPipeline.aggregateMetricStatistics` writes the
   Grafana and Dynatrace panels atomically at analyze time.
-  `PerformanceTestMetricsPipeline.computeAndSaveStatistics` writes 500-row autocommit batches on
+  `upsertPerfTestStatistics` (`apps/worker/src/pipelines/helpers/perf-metrics-writer.ts`) writes a single `INSERT … SELECT` over `ds_metrics` on
   every incremental tick of a **live** run. So during a running test the table holds performance-test
   rows only, and a read that treats "non-empty" as "ready" omits every Grafana and Dynatrace
   dashboard for that run. The result is not empty, so a fall-back-when-empty guard never fires.

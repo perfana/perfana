@@ -384,7 +384,7 @@ export class JtlParserService {
       // Keep transactionName = samplerName (the label) on requests so
       // the UI's "get samplers for transaction" query can join:
       //   requests_raw.transaction_name = transactions.transaction_name
-      // The worker's buildNewRequestMetricName handles the case where
+      // The worker's request metric-name SQL handles the case where
       // transactionName === samplerName by skipping the redundant prefix.
     }
 

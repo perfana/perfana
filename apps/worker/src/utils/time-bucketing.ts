@@ -29,9 +29,9 @@ const DEFAULT_BUCKET_CONFIG: BucketSizeConfig = {
 };
 
 /**
- * Reduced target data points for full (non-incremental) collection.
- * Uses fewer data points since batch refresh doesn't need fine-grained resolution,
- * resulting in ~3x fewer ds_metrics rows to write and read.
+ * Target data points for perf-test bucket sizing. Applied to whatever window is being
+ * aggregated — a live tick's ~60s window still resolves to 1s buckets — not only to full
+ * collection, since the bucket size is derived from the window rather than from a flag.
  */
 export const FULL_COLLECTION_TARGET_DATA_POINTS = 250;
 

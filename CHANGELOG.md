@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.14] - 2026-09-10
+
+### Fixed
+- **A force-refetch re-evaluate no longer collects performance-test metrics at 1 s resolution over the whole run.** The worker was OOM-killed mid-analysis on a three-hour run: `FATAL ERROR: Reached heap limit`, after `Processing 1822503 aggregated request buckets`.
+
+  1.82 M is 4.5x more buckets than the full-collection path can produce for that run — 10,950 s at 60 s buckets is 183, and 2,236 distinct `(scenario, transaction, sampler)` series puts the ceiling at 409 k. The extra came from `simple-orchestrate-reevaluate-batch.ts`, which routes performance-test re-collection through the **incremental** pipeline with the run's **full** time range. `PerformanceTestMetricsPipeline` then saw `isIncremental` and hardcoded 1 s buckets, so a 3 h window produced 10,800 of them. The comment three lines above that call already says "Use full pipelines (not incremental) for force-refetch", and the `DELETE` above it exists specifically to avoid mixed-resolution data.
+
+  The bucket size is now taken from the window actually being aggregated rather than from the flag. A live tick's window is ~60 s and still resolves to 1 s; the force-refetch's 3 h window gets 60 s, the same as the full path. A long catch-up tick can now write coarser buckets mid-run, which is deliberate: analyze-time full collection deletes and rewrites the whole run anyway, and 30x the intended rows is the worse outcome.
+
+### Changed
+- **The performance-test metrics pipeline writes `ds_metrics` from SQL instead of building the rows in the heap.** The bucket fix above removed the 4.5x amplification, not the shape that made it fatal. `RequestsProcessor` and `TransactionsProcessor` pulled their entire aggregate into Node and emitted one `DsMetricsRecord` per (bucket x panel) — nine per row for requests — then the pipeline held that array while `computeAndSaveStatistics` built a filtered copy and a grouping `Map` over the same objects, concurrently with the insert. Three live references to millions of objects, against a 2 GB heap.
+
+  Both processors now hand their aggregate CTE to `insertDsMetricsFromAggregate`, which joins it to a VALUES table of resolved scenario dashboards and a constant panel table and issues one `INSERT ... SELECT`. Scenario dashboards are resolved up front by `resolveScenarioDashboards`; a scenario whose dashboard cannot be created is simply absent from the VALUES table, so its rows do not join — the same per-scenario resilience as before (issue #388), without the bookkeeping. The per-scenario "total" throughput series is a third `GROUPING SETS` entry rather than a JS `Map`. The errors and virtual-user processors are untouched: they emit a handful of points per scenario, and the virtual-user roll-up is deliberately JS arithmetic.
+
+  `computeAndSaveStatistics` is deleted. `upsertPerfTestStatistics` recomputes `ds_metric_statistics` from the rows just written, scoped to the run and its perf-test dashboards. Two consequences, both improvements: it fills `pct_agg`, which the JS pass left NULL and whose absence forces `ControlGroupStatisticsPipeline` down a raw scan that ends in ADAPT reporting INSUFFICIENT_DATA; and percentiles now come from `percentile_agg`/`approx_percentile` rather than exact interpolation, which is what the analyze-time `StatisticsPipeline` has always overwritten them with — so a live run and its final numbers agree instead of shifting once analysis lands.
+
+  The full-collection `DELETE FROM ds_metrics` moved out of `saveDsMetrics` into `execute()`, before the processors run: they now insert as they aggregate, so a later delete would take their own rows with it.
+
+  Verified against production-scale data rather than as a string. Rewriting `WERKNL-acceptatie-loadtest_perfana-00001` (2,453,228 rows) into a shadow table and FULL JOINing it against what the old path stored for that run: **zero rows only in one side or the other**, `ramp_up` identical on every row, and values identical except the `total` series — 5,951 rows of 2.45 M, because the summed count is now rounded once instead of summing already-rounded per-sampler throughputs (max 0.47 req/s on a 13.5 req/s bucket with ~140 samplers; the rounded sum is the accurate one). Heap stayed flat at 8 MB across the whole rewrite, and the statistics pass produced 19,265 rows with no NULL sketches.
+
+  One behaviour change beyond the parity check, and it is a fix: the statistics pass now reads the **run** rather than the tick. The JS version was handed only the current increment's records and upserted `count = EXCLUDED.count`, so for the whole duration of a live test `ds_metric_statistics` described the latest tick's slice instead of the run so far. It costs a scan that grows with the run rather than with the tick.
+
+  `buildNewRequestMetricName` and `buildNewTransactionMetricName` are gone — the naming rules, including the collapse when the transaction prefix adds nothing, are now the SQL `CASE` that is the only implementation.
+
 ## [0.2.95.13] - 2026-09-10
 
 ### Fixed

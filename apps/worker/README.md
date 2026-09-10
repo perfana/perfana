@@ -61,7 +61,8 @@ with no client-side special case.
 
 Five things not to undo:
 
-- **The roll-up is a second `GROUPING SETS` entry — `(bd.bucket_time)` — on the existing
+- **The roll-up is a second `GROUPING SETS` entry — `(bd.bucket_time)`, one of three, the third
+  being `(bd.scenario_name, bd.bucket_time)` for the per-scenario `total` series — on the existing
   aggregation in `helpers/transactions-processor.ts` and `helpers/requests-processor.ts`, and it is
   free.** Measured *faster*: requests 2994 ms → 2337 ms on a 1.4M-row run. The ordered-set
   aggregates (`PERCENTILE_CONT`) had already ruled out a HashAggregate, so Postgres serves both
@@ -69,11 +70,12 @@ Five things not to undo:
   order and earns an Incremental Sort. It also keeps the percentiles and Apdex brackets **exact** —
   they are computed over the raw rows, not averaged from per-transaction values. A separate query or
   a JS pass over the per-transaction rows costs a scan and loses that. The roll-up row is the one
-  with `scenario_name IS NULL`; both processors branch on that.
+  with `GROUPING(bd.scenario_name) = 1`; the SQL's `CASE` maps it to the pseudo-scenario, and
+  nothing branches on it in JS.
 - **Neither query has an `ORDER BY` any more.** It used to be a prefix of the group-key sort and
   therefore free; with `bucket_time` leading that sort it becomes a second, top-level sort that
   spills — 22 MB (requests) / 3 MB (transactions) on the same run, growing with the series count.
-  Neither loop reads row order; both accumulate into a `Map` keyed by scenario and bucket.
+  Neither aggregate reaches JS: both feed an `INSERT … SELECT`.
 - **No `ds_compare_config` rows are created for it, in any of the four processors** — it is
   display-only and ADAPT never evaluates it. A run-wide average moves whenever the traffic mix
   shifts, so trending it would fail runs in which no individual transaction regressed.

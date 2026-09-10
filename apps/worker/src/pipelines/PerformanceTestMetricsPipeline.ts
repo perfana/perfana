@@ -34,6 +34,7 @@ import { DEFAULT_APDEX_THRESHOLD_MS } from '../constants/performance-metrics.js'
 import { calculateBucketSize, FULL_COLLECTION_TARGET_DATA_POINTS } from '../utils/time-bucketing.js';
 import { DashboardManager } from './helpers/dashboard-manager.js';
 import { RequestsProcessor } from './helpers/requests-processor.js';
+import { upsertPerfTestStatistics } from './helpers/perf-metrics-writer.js';
 import { TransactionsProcessor } from './helpers/transactions-processor.js';
 import { ErrorsProcessor, VirtualUsersProcessor } from './helpers/scenario-processors.js';
 
@@ -88,22 +89,26 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         );
       }
 
-      // Calculate bucket size for time-series aggregation
-      // Incremental collection uses fixed 1s buckets to ensure consistent resolution
-      // throughout the test run regardless of elapsed time.
-      // Full collection uses dynamic bucket sizing based on total test duration.
+      // Calculate bucket size from the window actually being aggregated, not from the
+      // incremental flag. A live tick's window is ~60s and still resolves to 1s buckets,
+      // but a force-refetch reevaluate calls this "incrementally" with the run's FULL
+      // range (see simple-orchestrate-reevaluate-batch.ts): a fixed 1s bucket over a 3h
+      // run is 30x the rows the full path writes (1.8M buckets x 9 panels = 16M records
+      // materialised in JS), which is a worker OOM rather than a slow job.
       const effectiveEndTime = testRun.filter_to_time ?? testRun.end_time;
       const elapsedTimeSeconds = effectiveEndTime
         ? (effectiveEndTime.getTime() - testRun.start_time.getTime()) / 1000
         : 3600; // Default to 1 hour if no end time
+      const windowSeconds =
+        fromTime && effectiveEndTime
+          ? Math.max(1, (effectiveEndTime.getTime() - fromTime.getTime()) / 1000)
+          : elapsedTimeSeconds;
 
-      const bucketSizeSeconds = isIncremental
-        ? 1 // Fixed 1s buckets for incremental — avoids resolution changes mid-test
-        : calculateBucketSize(elapsedTimeSeconds, FULL_COLLECTION_TARGET_DATA_POINTS);
-      const estimatedBuckets = Math.ceil(elapsedTimeSeconds / bucketSizeSeconds);
+      const bucketSizeSeconds = calculateBucketSize(windowSeconds, FULL_COLLECTION_TARGET_DATA_POINTS);
+      const estimatedBuckets = Math.ceil(windowSeconds / bucketSizeSeconds);
 
       this.logger.info(
-        `📊 Using ${bucketSizeSeconds}s buckets for ${elapsedTimeSeconds.toFixed(0)}s elapsed time (estimated ${estimatedBuckets} buckets${isIncremental ? ', fixed for incremental' : ''})`
+        `📊 Using ${bucketSizeSeconds}s buckets for a ${windowSeconds.toFixed(0)}s window (estimated ${estimatedBuckets} buckets${isIncremental ? ', incremental' : ''})`
       );
 
       // Load Apdex thresholds
@@ -125,10 +130,25 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         apdexScores: 0,
       };
 
-      // Arrays to collect all metrics and compare configs
+      // Only the errors and virtual-user processors still build records in JS: they emit
+      // a handful of points per scenario. The requests and transactions processors write
+      // their millions of (bucket x panel) rows with INSERT ... SELECT and never return
+      // them — materialising those is what exhausted the heap.
       const allMetrics: DsMetricsRecord[] = [];
       const allCompareConfigs: DsCompareConfigRecord[] = [];
       const stepTiming: Array<{ step: string; duration: number; count: number }> = [];
+
+      // Full collection replaces the run's metrics wholesale. The DELETE has to happen
+      // before the processors, not inside saveDsMetrics, because they now insert as they
+      // aggregate — a later DELETE would take their rows with it.
+      if (!isIncremental) {
+        const deleteStart = Date.now();
+        await this.db.dataSource.query(
+          `DELETE FROM ds_metrics WHERE test_run_id = $1`,
+          [testRunId]
+        );
+        this.logger.info(`🧹 Deleted existing ds_metrics for ${testRunId} in ${Date.now() - deleteStart}ms`);
+      }
 
       // Process requests_raw table
       let stepStart = Date.now();
@@ -136,20 +156,18 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         testRunId,
         testRun,
         apdexThresholds,
-        bucketSizeSeconds
+        bucketSizeSeconds,
+        isIncremental
       );
-      // Use for-loop to avoid stack overflow with large arrays (push(...arr) fails at ~100k+ items)
-      for (let i = 0; i < requestsResult.metrics.length; i++) {
-        allMetrics.push(requestsResult.metrics[i]);
-      }
       for (let i = 0; i < requestsResult.compareConfigs.length; i++) {
         allCompareConfigs.push(requestsResult.compareConfigs[i]);
       }
-      breakdown.responseTimeMetrics += requestsResult.metrics.length;
+      breakdown.responseTimeMetrics += requestsResult.rowsInserted;
+      metricsCreated += requestsResult.rowsInserted;
       stepTiming.push({
         step: 'requests-processor',
         duration: Date.now() - stepStart,
-        count: requestsResult.metrics.length
+        count: requestsResult.rowsInserted
       });
 
       // Process transactions table
@@ -158,19 +176,18 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         testRunId,
         testRun,
         apdexThresholds,
-        bucketSizeSeconds
+        bucketSizeSeconds,
+        isIncremental
       );
-      for (let i = 0; i < transactionsResult.metrics.length; i++) {
-        allMetrics.push(transactionsResult.metrics[i]);
-      }
       for (let i = 0; i < transactionsResult.compareConfigs.length; i++) {
         allCompareConfigs.push(transactionsResult.compareConfigs[i]);
       }
-      breakdown.transactionMetrics += transactionsResult.metrics.length;
+      breakdown.transactionMetrics += transactionsResult.rowsInserted;
+      metricsCreated += transactionsResult.rowsInserted;
       stepTiming.push({
         step: 'transactions-processor',
         duration: Date.now() - stepStart,
-        count: transactionsResult.metrics.length
+        count: transactionsResult.rowsInserted
       });
 
       // Process requests_error table
@@ -211,22 +228,35 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         count: vuResult.metrics.length
       });
 
-      // Save all metrics to database and compute statistics in parallel
-      // Deduplication is handled at the DB level via ON CONFLICT (incremental)
-      // or DELETE + INSERT (full collection), avoiding large in-memory Maps.
+      // Save the scenario-level metrics the two small processors built in JS.
       if (allMetrics.length > 0) {
         stepStart = Date.now();
-        await Promise.all([
-          this.saveDsMetrics(allMetrics, testRunId, testRun, isIncremental),
-          this.computeAndSaveStatistics(allMetrics, testRunId, testRun),
-        ]);
-        metricsCreated = allMetrics.length;
+        await this.saveDsMetrics(allMetrics, testRunId, testRun, isIncremental);
+        metricsCreated += allMetrics.length;
         stepTiming.push({
-          step: 'save-metrics+statistics',
+          step: 'save-scenario-metrics',
+          duration: Date.now() - stepStart,
+          count: allMetrics.length
+        });
+      }
+
+      if (metricsCreated > 0) {
+        // Statistics are recomputed from the rows just written rather than from a
+        // second and third copy of them in the heap. See upsertPerfTestStatistics.
+        stepStart = Date.now();
+        await upsertPerfTestStatistics(
+          this.db.dataSource,
+          testRunId,
+          this.dashboardManager.getResolvedDashboardIds(),
+          testRun,
+          this.logger
+        );
+        stepTiming.push({
+          step: 'statistics',
           duration: Date.now() - stepStart,
           count: metricsCreated
         });
-        this.logger.info(`💾 Saved ${metricsCreated} ds_metrics records and computed statistics in parallel`);
+        this.logger.info(`💾 Saved ${metricsCreated} ds_metrics records and computed statistics`);
 
         // Update dashboard panels based on saved metrics
         stepStart = Date.now();
@@ -487,8 +517,8 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
    * Save ds_metrics records to database using parallel batch inserts.
    *
    * Two modes:
-   * - **Full collection** (isIncremental=false): DELETE existing metrics for the test run
-   *   first, then use plain INSERT with large batch sizes. This is 2-3x faster because
+   * - **Full collection** (isIncremental=false): plain INSERT with large batch sizes — the
+   *   run-wide DELETE happens in `execute()`, before the requests/transactions processors insert. This is 2-3x faster because
    *   PostgreSQL skips unique-index conflict checking and lock contention is eliminated.
    * - **Incremental collection** (isIncremental=true): Use INSERT...ON CONFLICT (UPSERT)
    *   with smaller batch sizes to handle overlapping time ranges safely.
@@ -503,15 +533,8 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       return;
     }
 
-    // For full collection, delete existing metrics first to enable plain INSERT
-    if (!isIncremental) {
-      const deleteStart = Date.now();
-      await this.db.dataSource.query(
-        `DELETE FROM ds_metrics WHERE test_run_id = $1`,
-        [testRunId]
-      );
-      this.logger.info(`🧹 Deleted existing ds_metrics for ${testRunId} in ${Date.now() - deleteStart}ms`);
-    }
+    // The run-wide DELETE for full collection happens in execute(), before the
+    // requests/transactions processors insert.
 
     // Full collection: plain INSERT (no conflict check), larger batches
     // Incremental: INSERT...ON CONFLICT (upsert), smaller batches for lock safety
@@ -613,309 +636,6 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       this.logger.error(`❌ ${failures.length} batch inserts failed`);
       throw new Error(`Failed to save ${failures.length} batches of metrics`);
     }
-  }
-
-  /**
-   * Compute statistics from in-memory metrics and save to ds_metric_statistics.
-   * This runs in parallel with saveDsMetrics to avoid the separate StatisticsPipeline
-   * round-trip (which reads ds_metrics back from the database).
-   */
-  private async computeAndSaveStatistics(
-    allMetrics: DsMetricsRecord[],
-    testRunId: string,
-    testRun: TestRunMetadata,
-  ): Promise<void> {
-    const statsStart = Date.now();
-
-    // Filter: ramp_up === false and value is not null/undefined
-    const filtered = allMetrics.filter(m => !m.ramp_up && m.value !== null && m.value !== undefined);
-
-    if (filtered.length === 0) {
-      this.logger.info('⏭️  No non-ramp-up metrics for in-memory statistics');
-      return;
-    }
-
-    // Group by (test_run_id, application_dashboard_id, panel_id, metric_name).
-    // CRITICAL: truncate metric_name to 255 chars in the key so it matches what
-    // is actually stored (line ~783). Two metrics whose first 255 chars match
-    // would otherwise produce two stat records with the same persisted key, and
-    // the bulk INSERT ... ON CONFLICT DO UPDATE would then trip Postgres's
-    // `cardinality_violation` ("ON CONFLICT DO UPDATE command cannot affect
-    // row a second time"). Pre-#134 the same collision tripped a duplicate-key
-    // error against uniq_ds_metric_statistics — this is a sibling defect, not
-    // a new one, but the upsert form makes it easier to surface.
-    const groups = new Map<string, DsMetricsRecord[]>();
-    for (const m of filtered) {
-      const truncatedMetricName = m.metric_name?.substring(0, 255) ?? '';
-      const key = `${m.test_run_id}|${m.application_dashboard_id}|${m.panel_id}|${truncatedMetricName}`;
-      let group = groups.get(key);
-      if (!group) {
-        group = [];
-        groups.set(key, group);
-      }
-      group.push(m);
-    }
-
-    this.logger.info(
-      `📊 Computing in-memory statistics for ${groups.size} metric groups from ${filtered.length} data points`
-    );
-
-    // Compute statistics for each group
-    interface StatRecord {
-      test_run_id: string;
-      application_dashboard_id: string;
-      metrics_source_id: string | null;
-      panel_id: number;
-      metric_name: string;
-      benchmark_id: string | null;
-      dashboard_uid: string;
-      dashboard_label: string;
-      panel_title: string;
-      unit: string | null;
-      count: number;
-      mean: number;
-      median: number;
-      min_value: number;
-      max_value: number;
-      std_dev: number;
-      last_value: number;
-      n_missing: number;
-      n_non_zero: number;
-      q10: number;
-      q25: number;
-      q75: number;
-      q90: number;
-      q95: number;
-      q99: number;
-      percentiles: string;
-      iqr: number;
-      idr: number;
-      is_constant: boolean;
-      constant_value: boolean;
-      all_missing: boolean;
-      pct_missing: number;
-      missing_percentage: number;
-      test_run_start: Date;
-      organization_id: string | null;
-      team_id: string | null;
-    }
-
-    const statRecords: StatRecord[] = [];
-
-    // Helper: linear interpolation percentile on sorted array
-    const percentile = (sorted: number[], p: number): number => {
-      const n = sorted.length;
-      if (n === 1) { return sorted[0]; }
-      const rank = (p / 100) * (n - 1);
-      const lower = Math.floor(rank);
-      const upper = Math.ceil(rank);
-      if (lower === upper) { return sorted[lower]; }
-      return sorted[lower] + (rank - lower) * (sorted[upper] - sorted[lower]);
-    };
-
-    for (const [, records] of groups) {
-      // Coerce to number: DB may return numeric values as strings at runtime
-      const values = records.map(r => Number(r.value));
-      const n = values.length;
-
-      // Sort for percentile calculation
-      const sorted = [...values].sort((a, b) => a - b);
-
-      // Basic statistics
-      const sum = values.reduce((acc, v) => acc + v, 0);
-      const mean = sum / n;
-      const minVal = sorted[0];
-      const maxVal = sorted[n - 1];
-
-      // Population standard deviation
-      const variance = values.reduce((acc, v) => acc + (v - mean) ** 2, 0) / n;
-      const stdDev = Math.sqrt(variance);
-
-      // Percentiles
-      const q10 = percentile(sorted, 10);
-      const q25 = percentile(sorted, 25);
-      const median = percentile(sorted, 50);
-      const q75 = percentile(sorted, 75);
-      const q90 = percentile(sorted, 90);
-      const q95 = percentile(sorted, 95);
-      const q99 = percentile(sorted, 99);
-
-      // Last value by time
-      let lastRecord = records[0];
-      for (let i = 1; i < records.length; i++) {
-        if (records[i].time.getTime() > lastRecord.time.getTime()) {
-          lastRecord = records[i];
-        }
-      }
-
-      // Distinct values → is_constant
-      const distinctValues = new Set(values);
-      const isConstant = distinctValues.size === 1;
-
-      // Non-zero count
-      const nNonZero = values.filter(v => v > 0).length;
-
-      // Use first record for metadata
-      const first = records[0];
-
-      statRecords.push({
-        test_run_id: first.test_run_id,
-        application_dashboard_id: first.application_dashboard_id,
-        metrics_source_id: first.metrics_source_id || null,
-        panel_id: first.panel_id,
-        metric_name: first.metric_name?.substring(0, 255),
-        benchmark_id: first.benchmark_ids?.[0] || null,
-        dashboard_uid: first.dashboard_uid?.substring(0, 255),
-        dashboard_label: (first.dashboard_label || 'missing').substring(0, 255),
-        panel_title: (first.panel_title || 'missing').substring(0, 500),
-        unit: first.unit?.substring(0, 50) || null,
-        count: n,
-        mean,
-        median,
-        min_value: minVal,
-        max_value: maxVal,
-        std_dev: stdDev,
-        last_value: Number(lastRecord.value),
-        n_missing: 0,
-        n_non_zero: nNonZero,
-        q10, q25, q75, q90, q95, q99,
-        percentiles: JSON.stringify({
-          p10: q10, p25: q25, p50: median, p75: q75, p90: q90, p95: q95, p99: q99,
-        }),
-        iqr: q75 - q25,
-        idr: q90 - q10,
-        is_constant: isConstant,
-        constant_value: isConstant,
-        all_missing: false,
-        pct_missing: 0,
-        missing_percentage: 0,
-        test_run_start: testRun.start_time,
-        organization_id: testRun.organization_id ?? null,
-        team_id: testRun.team_id ?? null,
-      });
-    }
-
-    // Bulk UPSERT — 36 params per record, batch size 500 = 18000 params (under 65535 limit).
-    // ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name) DO UPDATE
-    // is required: IncrementalCollectionScheduler can fire overlapping ticks for the same
-    // test_run_id, and the prior DELETE+INSERT pattern (which could take 90+ s under load)
-    // raced and tripped uniq_ds_metric_statistics. See issue #134.
-    const batchSize = 500;
-    let totalInserted = 0;
-
-    for (let i = 0; i < statRecords.length; i += batchSize) {
-      const batch = statRecords.slice(i, i + batchSize);
-      const values: unknown[] = [];
-      const placeholders: string[] = [];
-
-      batch.forEach((rec, idx) => {
-        const base = idx * 36;
-        placeholders.push(
-          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, ` +
-          `$${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, ` +
-          `$${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, ` +
-          `$${base + 16}, $${base + 17}, $${base + 18}, $${base + 19}, $${base + 20}, ` +
-          `$${base + 21}, $${base + 22}, $${base + 23}, $${base + 24}, $${base + 25}, ` +
-          `$${base + 26}, $${base + 27}, $${base + 28}, $${base + 29}, $${base + 30}, ` +
-          `$${base + 31}, $${base + 32}, NOW(), $${base + 33}, $${base + 34}, $${base + 35}, ` +
-          `$${base + 36}, 'worker-pipeline', 'worker-pipeline')`
-        );
-        values.push(
-          rec.test_run_id,                // 1
-          rec.application_dashboard_id,   // 2
-          rec.panel_id,                   // 3
-          rec.metric_name,                // 4
-          rec.benchmark_id,               // 5
-          rec.dashboard_uid,              // 6
-          rec.dashboard_label,            // 7
-          rec.panel_title,                // 8
-          rec.unit,                       // 9
-          rec.count,                      // 10
-          rec.mean,                       // 11
-          rec.median,                     // 12
-          rec.min_value,                  // 13
-          rec.max_value,                  // 14
-          rec.std_dev,                    // 15
-          rec.last_value,                 // 16
-          rec.n_missing,                  // 17
-          rec.n_non_zero,                 // 18
-          rec.q10,                        // 19
-          rec.q25,                        // 20
-          rec.q75,                        // 21
-          rec.q90,                        // 22
-          rec.q95,                        // 23
-          rec.q99,                        // 24
-          rec.percentiles,                // 25
-          rec.iqr,                        // 26
-          rec.idr,                        // 27
-          rec.is_constant,                // 28
-          rec.constant_value,             // 29
-          rec.all_missing,                // 30
-          rec.pct_missing,                // 31
-          rec.missing_percentage,         // 32
-          rec.test_run_start,             // 33
-          rec.organization_id,            // 34
-          rec.team_id,                    // 35
-          rec.metrics_source_id,          // 36
-        );
-      });
-
-      const query = `
-        INSERT INTO ds_metric_statistics (
-          test_run_id, application_dashboard_id, panel_id, metric_name, benchmark_id,
-          dashboard_uid, dashboard_label, panel_title, unit,
-          count, mean, median, min_value, max_value, std_dev, last_value,
-          n_missing, n_non_zero,
-          q10, q25, q75, q90, q95, q99, percentiles,
-          iqr, idr, is_constant, constant_value, all_missing, pct_missing, missing_percentage,
-          updated_at, test_run_start, organization_id, team_id,
-          metrics_source_id, created_by, updated_by
-        ) VALUES ${placeholders.join(', ')}
-        ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name)
-        DO UPDATE SET
-          benchmark_id        = EXCLUDED.benchmark_id,
-          dashboard_uid       = EXCLUDED.dashboard_uid,
-          dashboard_label     = EXCLUDED.dashboard_label,
-          panel_title         = EXCLUDED.panel_title,
-          unit                = EXCLUDED.unit,
-          count               = EXCLUDED.count,
-          mean                = EXCLUDED.mean,
-          median              = EXCLUDED.median,
-          min_value           = EXCLUDED.min_value,
-          max_value           = EXCLUDED.max_value,
-          std_dev             = EXCLUDED.std_dev,
-          last_value          = EXCLUDED.last_value,
-          n_missing           = EXCLUDED.n_missing,
-          n_non_zero          = EXCLUDED.n_non_zero,
-          q10                 = EXCLUDED.q10,
-          q25                 = EXCLUDED.q25,
-          q75                 = EXCLUDED.q75,
-          q90                 = EXCLUDED.q90,
-          q95                 = EXCLUDED.q95,
-          q99                 = EXCLUDED.q99,
-          percentiles         = EXCLUDED.percentiles,
-          iqr                 = EXCLUDED.iqr,
-          idr                 = EXCLUDED.idr,
-          is_constant         = EXCLUDED.is_constant,
-          constant_value      = EXCLUDED.constant_value,
-          all_missing         = EXCLUDED.all_missing,
-          pct_missing         = EXCLUDED.pct_missing,
-          missing_percentage  = EXCLUDED.missing_percentage,
-          updated_at          = NOW(),
-          test_run_start      = EXCLUDED.test_run_start,
-          organization_id     = EXCLUDED.organization_id,
-          team_id             = EXCLUDED.team_id,
-          metrics_source_id   = EXCLUDED.metrics_source_id,
-          updated_by          = EXCLUDED.updated_by
-      `;
-
-      await this.db.dataSource.query(query, values);
-      totalInserted += batch.length;
-    }
-
-    this.logger.info(
-      `✅ In-memory statistics: ${totalInserted} records upserted in ${Date.now() - statsStart}ms`
-    );
   }
 
   /**

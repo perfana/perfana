@@ -4,7 +4,7 @@
  *
  * - RequestsProcessor — same NULL-scenario grouping-set contract as
  *   TransactionsProcessor, but its rollup rows also have a NULL sampler_name, so the
- *   metric name must bypass buildNewRequestMetricName entirely.
+ *   metric name must not be built from those columns.
  * - ErrorsProcessor — appends the rollup in BOTH the has-errors and the zero-errors
  *   branch; only the second one reaches the requests_raw scenario lookup.
  * - VirtualUsersProcessor — the rollup is computed in JS (sum of per-scenario avg and
@@ -74,72 +74,150 @@ const testRun = {
 const isAggregated = (m: { dashboard_label: string | null }) =>
   m.dashboard_label === `Performance test metrics ${ALL_AGGREGATED_SCENARIO}`;
 
+/**
+ * RequestsProcessor writes ds_metrics with one INSERT ... SELECT rather than returning
+ * records, so its roll-up contract is asserted against the SQL and its parameters.
+ * `mockDataSource` answers the scenario lookup first, then the insert.
+ */
+const mockDataSource = (scenarios: string[] = ['loadtest']) => ({
+  query: vi
+    .fn()
+    .mockResolvedValueOnce(scenarios.map((scenario_name) => ({ scenario_name })))
+    .mockResolvedValue([[], 42]),
+});
+
+const insertSql = (dataSource: { query: { mock: { calls: unknown[][] } } }) =>
+  (dataSource.query.mock.calls[1]![0] as string).replace(/\s+/g, ' ');
+
+const insertParams = (dataSource: { query: { mock: { calls: unknown[][] } } }) =>
+  dataSource.query.mock.calls[1]![1] as unknown[];
+
 describe('RequestsProcessor rollup rows', () => {
-  it('maps a NULL scenario/transaction/sampler row onto the aggregated dashboard under one name', async () => {
-    const dataSource = {
-      query: vi.fn(async () => [
-        requestRow('loadtest', 'checkout', 'GET /cart'),
-        requestRow(null, null, null),
-      ]),
-    };
+  it('gives the roll-up grouping set one fixed name instead of "null.null"', async () => {
+    const dataSource = mockDataSource();
     const processor = new RequestsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
 
-    const { metrics } = await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60);
+    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
 
-    const aggregated = metrics.filter(isAggregated);
-    expect(aggregated.length).toBeGreaterThan(0);
-    // buildNewRequestMetricName would have produced "null.null" from these columns.
-    expect(new Set(aggregated.map(m => m.metric_name))).toEqual(new Set([ALL_AGGREGATED_METRIC]));
-    expect(aggregated.some(m => m.panel_id === METRIC_TYPE_PANEL_IDS.REQ_APDEX)).toBe(true);
+    const sql = insertSql(dataSource);
+    const params = insertParams(dataSource);
+    const rollupMetricParam = `$${params.indexOf(ALL_AGGREGATED_METRIC) + 1}`;
+
+    // The roll-up's sampler_name/transaction_name are NULL; without this arm the
+    // concatenation below would produce "null.null".
+    expect(sql).toContain(`WHEN c.g_scenario = 1 THEN ${rollupMetricParam}`);
+    expect(params).toContain(`dash-${ALL_AGGREGATED_SCENARIO}`);
+    // Apdex is one of the emitted panels.
+    expect(sql).toContain(`(${METRIC_TYPE_PANEL_IDS.REQ_APDEX}, c.apdex_score::double precision)`);
   });
 
-  it('does not emit a second "total" throughput series for the rollup', async () => {
-    const dataSource = {
-      query: vi.fn(async () => [
-        requestRow('loadtest', 'checkout', 'GET /cart'),
-        requestRow('loadtest', 'checkout', 'GET /item'),
-        requestRow(null, null, null),
-      ]),
-    };
+  it('does not emit a second "total" throughput series for the roll-up', async () => {
+    const dataSource = mockDataSource();
     const processor = new RequestsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
 
-    const { metrics } = await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60);
+    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
 
-    expect(metrics.filter(isAggregated).some(m => m.metric_name === 'total')).toBe(false);
-    // The per-scenario dashboard still gets its summed "total" series.
-    const total = metrics.find(m => m.metric_name === 'total');
-    expect(total?.dashboard_label).toBe('Performance test metrics loadtest');
-    expect(total?.value).toBe(20);
+    expect(insertSql(dataSource)).toContain(
+      `SELECT c.scenario_name, 'total', ${METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT},` +
+      ' c.throughput::double precision, c.bucket_time, c.timestep FROM computed c' +
+      ' WHERE c.g_scenario = 0 AND c.g_txn = 1'
+    );
   });
 
-  it('leaves per-scenario metric names built from transaction and sampler', async () => {
-    const dataSource = {
-      query: vi.fn(async () => [requestRow('loadtest', 'checkout', 'GET /cart'), requestRow(null, null, null)]),
-    };
+  it('builds per-scenario metric names from transaction and sampler', async () => {
+    const dataSource = mockDataSource();
     const processor = new RequestsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
 
-    const { metrics } = await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60);
+    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
 
-    expect(metrics.some(m => m.metric_name === 'checkout.GET /cart')).toBe(true);
+    const sql = insertSql(dataSource);
+    // "{transaction}.{sampler}", collapsed when the prefix adds nothing.
+    expect(sql).toContain("ELSE c.transaction_name || '.' || c.sampler_name");
+    expect(sql).toContain("OR c.transaction_name = 'overall'");
+    expect(sql).toContain('OR c.transaction_name = c.sampler_name THEN c.sampler_name');
   });
 
-  it('remembers the rollup scenario by its resolved name when its dashboard fails', async () => {
-    // failedScenarios is keyed on the resolved name; keyed on the raw NULL it would
-    // retry the dashboard for every rollup row in the run.
+  it('issues no insert at all when every scenario dashboard fails', async () => {
     const dashboardManager = makeDashboardManager(async () => {
       throw new Error('boom');
     });
-    const dataSource = {
-      query: vi.fn(async () => [requestRow(null, null, null), requestRow(null, null, null)]),
-    };
+    const dataSource = mockDataSource();
     const processor = new RequestsProcessor(dataSource as never, dashboardManager, silentLogger());
 
-    const { metrics } = await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60);
+    const { rowsInserted } = await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
 
-    expect(metrics).toEqual([]);
-    expect(dashboardManager.getOrCreateScenarioDashboard).toHaveBeenCalledTimes(1);
+    expect(rowsInserted).toBe(0);
+    // Only the scenario lookup ran — with no dashboards there is nothing to join to.
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
+    // Both the real scenario and the roll-up were attempted, once each.
+    expect(dashboardManager.getOrCreateScenarioDashboard).toHaveBeenCalledTimes(2);
     expect(dashboardManager.getOrCreateScenarioDashboard)
       .toHaveBeenCalledWith(ALL_AGGREGATED_SCENARIO, 'sut-1', 'acc');
+  });
+
+  it('binds only the parameters the scenario lookup references when the run has no end_time', async () => {
+    // This query's highest placeholder is $3, so a spare parameter is a hard bind
+    // failure rather than the harmless unused one the aggregates tolerate.
+    const dataSource = mockDataSource();
+    const processor = new RequestsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    await processor.process(
+      'run-1',
+      { ...testRun, end_time: null } as never,
+      {} as ApdexThresholdLookup, 60, false
+    );
+
+    const [sql, params] = dataSource.query.mock.calls[0]! as [string, unknown[]];
+    expect(sql).not.toContain('$3');
+    expect(params).toHaveLength(2);
+  });
+
+  it('bakes ramp_up from the run start and offset, defaulting to false when unset', async () => {
+    const dataSource = mockDataSource();
+    const processor = new RequestsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    await processor.process('run-1', { ...testRun, ramp_up_time: 300 } as never, {} as ApdexThresholdLookup, 60, false);
+
+    const sql = insertSql(dataSource);
+    const params = insertParams(dataSource);
+    const rampParam = `$${params.indexOf(300) + 1}`;
+    expect(params).toContain(300);
+    expect(params).toContain(testRun.start_time);
+    // createDsMetricsRecord treated a missing offset as "no ramp-up"; keep that arm.
+    expect(sql).toContain(`WHEN ${rampParam}::double precision IS NULL THEN false`);
+    expect(sql).toContain(`< ${rampParam}::double precision`);
+  });
+
+  it('upserts instead of plain-inserting on an incremental tick', async () => {
+    const dataSource = mockDataSource();
+    const processor = new RequestsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, true);
+
+    const sql = insertSql(dataSource);
+    expect(sql).toContain(
+      'ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name, time) DO UPDATE SET'
+    );
+    expect(sql).toContain('value = EXCLUDED.value');
+  });
+
+  it('lists only the scenarios that resolved in the dashboard VALUES table', async () => {
+    const dashboardManager = makeDashboardManager(async (scenarioName: string) => {
+      if (scenarioName === 'broken') { throw new Error('boom'); }
+      return {
+        dashboardId: `dash-${scenarioName}`,
+        dashboardUid: `uid-${scenarioName}`,
+        dashboardLabel: `Performance test metrics ${scenarioName}`,
+      };
+    });
+    const dataSource = mockDataSource(['loadtest', 'broken']);
+    const processor = new RequestsProcessor(dataSource as never, dashboardManager, silentLogger());
+
+    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
+
+    const params = insertParams(dataSource);
+    expect(params).toContain('dash-loadtest');
+    expect(params).not.toContain('dash-broken');
   });
 });
 

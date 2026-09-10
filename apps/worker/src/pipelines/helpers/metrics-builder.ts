@@ -4,9 +4,10 @@
  * Handles building cleaned metric names and creating ds_metrics/ds_compare_config records
  * according to the new architecture:
  * - Metric names exclude scenario and transaction names (moved to dashboard/panel structure)
- * - Request-level: "{samplerName}.{metricType}.{aggregation}"
- * - Transaction-level: "{metricType}.{aggregation}"
  * - Scenario-level: "{metricType}" (e.g., "avg_active_threads")
+ *
+ * Request- and transaction-level metric names are built in SQL — see the `CASE` in
+ * `requests-processor.ts` / `transactions-processor.ts`.
  */
 
 import type { DashboardMetadata, PanelMetadata } from './dashboard-manager.js';
@@ -33,42 +34,6 @@ import type {
  */
 export function buildScenarioMetricName(metricType: string): string {
   return metricType;
-}
-
-// ---------------------------------------------------------------------------
-// Panel-per-metric-type naming helpers (v2)
-// ---------------------------------------------------------------------------
-
-/**
- * Build a metric name for the new panel-per-metric-type structure (transaction level).
- * Returns just the transaction name — the metric type is implied by the panel.
- *
- * @param transactionName - e.g. "checkout"
- * @returns e.g. "checkout"
- */
-export function buildNewTransactionMetricName(transactionName: string): string {
-  return transactionName;
-}
-
-/**
- * Build a metric name for the new panel-per-metric-type structure (request level).
- * Returns "{transactionName}.{samplerName}" — the metric type is implied by the panel.
- * When transactionName equals samplerName (no JMeter Transaction Controller — each
- * request IS its own transaction), or is empty/'overall', returns just the samplerName
- * to avoid redundant "label.label" metric names.
- *
- * @param transactionName - e.g. "checkout", "" for standalone samplers, or same as samplerName
- * @param samplerName - e.g. "GET /api/cart"
- * @returns e.g. "checkout.GET /api/cart" or "GET /api/cart"
- */
-export function buildNewRequestMetricName(
-  transactionName: string,
-  samplerName: string
-): string {
-  if (!transactionName || transactionName === 'overall' || transactionName === samplerName) {
-    return samplerName;
-  }
-  return `${transactionName}.${samplerName}`;
 }
 
 /**

@@ -189,6 +189,17 @@ export class DashboardManager {
   }
 
   /**
+   * Every scenario dashboard resolved so far in this pipeline run.
+   *
+   * The statistics pass needs the set of dashboards this pipeline wrote to, and the
+   * cache already holds exactly that — the processors each resolve their own scenarios
+   * through `getOrCreateScenarioDashboard`, hitting this cache after the first.
+   */
+  getResolvedDashboardIds(): string[] {
+    return [...new Set([...this.dashboardCache.values()].map((d) => d.dashboardId))];
+  }
+
+  /**
    * Create a scenario-specific dashboard in the database.
    * No synthetic GrafanaDashboard is created — grafana columns are NULL for perf-test sources.
    */

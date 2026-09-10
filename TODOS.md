@@ -359,6 +359,59 @@ aggregate that runs on every statistics job.
 trailing scrape excluded by the bound would keep its stale flag forever — and take the margin from
 the collector's step, not zero.
 
+### A full perf-test collection is not atomic, and now fails wider
+
+**Priority:** P3
+**Origin:** adversarial review during /ship on `perf/perf-test-metrics-sql-insert` (2026-09-10).
+**Why:** `PerformanceTestMetricsPipeline.execute` deletes the run's `ds_metrics` and then rebuilds
+them, with no transaction around the pair. That was already true — the old code's DELETE was
+followed by up to six concurrent batch INSERTs, any of which could fail — but the window widened
+when the DELETE moved ahead of the requests/transactions processors: a statement timeout on the
+aggregate, or a bind failure, now leaves the run with **zero** perf-test metrics rather than
+partial ones. The catch block returns `{ success: false }` and nothing rolls back.
+
+It is recoverable — the metrics are derived from `requests_raw`/`transactions` and a re-analyse
+rebuilds them, and `analyze.ts` now genuinely fails the job so the retry policy fires — so this is
+a widened blast radius, not a new class of loss. It stops being recoverable for a run whose source
+tables have aged out of retention, which is the same shape as the `EXISTS` probes guarding
+`StatisticsPipeline`'s DELETE and `repairEmptySamplerRollup`.
+**What to do:** wrap the DELETE and all four processors in one `dataSource.transaction`. The
+processors only ever call `.query`, so the change is to widen their constructor parameter from
+`DataSource` to a minimal `{ query(sql, params?) }` and hand them the transaction's
+`EntityManager`; the statistics upsert stays outside, after the commit, since it only reads back
+what was written. Deliberately not done in the rewrite itself — it is a three-file change that has
+nothing to do with the OOM, and doing both at once would have made the real-data diff harder to
+attribute.
+
+### `ds_metrics.timestep` depends on the writer's session TimeZone
+
+**Priority:** P3
+**Origin:** verifying the perf-test SQL rewrite against production data on the dev database
+(2026-09-10) — a byte-for-byte diff of old vs new output came back with every one of 2,453,228
+rows differing in `timestep` and nothing else.
+**Why:** both perf-test aggregates compute
+`FLOOR(EXTRACT(EPOCH FROM (bucket_time - $5::timestamp)) / $4)::integer as timestep`, where `$5`
+is the run's `start_time`, a **timestamptz**. The `::timestamp` cast drops the zone using the
+session's `TimeZone`, while `bucket_time` keeps it — so the subtraction is off by the session's
+UTC offset and `timestep` shifts by `offset / bucket_size` buckets. Measured: a worker in
+Europe/Amsterdam and a session in UTC produced timesteps 240 apart on a 30 s bucket (7200 s / 30).
+The same expression is in `requests-processor.ts` and `transactions-processor.ts`; it predates the
+rewrite and was not changed by it.
+
+Nothing has broken visibly because `timestep` is only ever compared within a run, and in practice
+every writer for a given run is the same container with the same `TimeZone`. It stops being true
+the moment two writers disagree: a worker redeployed with a different `TZ`, an operator backfill
+run from a laptop, or a deploy that moves across a DST boundary — after which a run's incremental
+rows and its final full-collection rows carry different origins for the same instant. The
+`time_bucket` origin has the same cast and the same exposure, but is harmless when the shift is a
+whole multiple of the bucket size (it was, in the measurement above) and silently re-grids the
+whole run when it is not.
+**What to do:** drop the cast — `bucket_time - $5::timestamptz` — in both processors, and decide
+what to do about existing rows. A rewrite is not obviously worth it: correcting stored `timestep`
+means recomputing it per run against the origin the writer actually used, which is not recorded.
+Check who reads the column before spending anything on it; if nobody does beyond ordering within a
+run, fixing the expression and leaving history alone is enough.
+
 ### `StatisticsPipeline.test.ts` repeats the same four-line mock chain 35 times
 
 **Priority:** P4
