@@ -552,9 +552,10 @@ list rather than an error.
 1. **It has two writers on different schedules, so "non-empty" does not mean "complete".**
    `StatisticsPipeline.aggregateMetricStatistics` writes the Grafana and Dynatrace panels
    atomically, in one `withAnalyticsTransaction`, at analyze time.
-   `PerformanceTestMetricsPipeline.computeAndSaveStatistics`
-   (`apps/worker/src/pipelines/PerformanceTestMetricsPipeline.ts`, ~line 623) writes **500-row
-   autocommit batches on every incremental tick of a live run**. So for the whole duration of a
+   `upsertPerfTestStatistics` (`apps/worker/src/pipelines/helpers/perf-metrics-writer.ts`) writes
+   **one `INSERT … SELECT` over `ds_metrics`, on every incremental tick of a live run** (it reads
+   the run rather than the tick, so a live run's numbers are cumulative and its percentiles no
+   longer shift when analysis lands). So for the whole duration of a
    running test the table holds performance-test rows and nothing else. A read that treats a
    non-empty result as ready therefore returns the perf-test panels and omits every Grafana and
    Dynatrace dashboard for that run — and because the result is not empty, a "fall back when empty"
@@ -589,8 +590,10 @@ That is the design; do not add a special case to surface it.
 
 Seven things a future reader will otherwise "fix":
 
-1. **The roll-up is a second `GROUPING SETS` entry, and it is free.** `transactions-processor.ts`
-   and `requests-processor.ts` add `(bd.bucket_time)` beside the existing group key. It shares the
+1. **The roll-up is a second `GROUPING SETS` entry — one of three — and it is free.**
+   `transactions-processor.ts` and `requests-processor.ts` add `(bd.bucket_time)` for the run-wide
+   roll-up and `(bd.scenario_name, bd.bucket_time)` for the per-scenario `total` series, beside the
+   existing group key. It shares the
    one scan, and the percentiles and Apdex brackets are computed over the raw rows — exact, not an
    average of per-transaction values. Measured *faster*: requests 2994 ms → 2337 ms on a 1.4 M-row
    run. The ordered-set aggregates (`PERCENTILE_CONT`) had already ruled out a HashAggregate, so
@@ -600,8 +603,8 @@ Seven things a future reader will otherwise "fix":
 2. **The `ORDER BY` was deleted from both queries, deliberately.** It used to be a prefix of the
    group-key sort and therefore free; with `bucket_time` now leading that sort it is a second,
    top-level sort that spills — 22 MB (requests) / 3 MB (transactions) on that same run, growing
-   with the number of series. No consumer reads row order: both loops accumulate into a `Map` keyed
-   by scenario and bucket.
+   with the number of series. No consumer reads row order: the aggregate feeds an
+   `INSERT … SELECT` and never reaches JS.
 3. **It is display-only — no `ds_compare_config` rows are written for it**, in any of the four
    processors, so ADAPT never evaluates it. A run-wide average moves whenever the traffic mix
    shifts, so trending it would fail runs in which no individual transaction regressed. Adding the
@@ -661,11 +664,13 @@ Seven things a future reader will otherwise "fix":
    returns both cutoffs and `getRampUpCutoffTime` delegates to it.
 6. **A real scenario literally named `all aggregated` has its own row dropped in favour of the
    roll-up.** Both datasets land on the same dashboard and the two rows share
-   `(dashboard, panel, metric_name, time)` inside one `ON CONFLICT DO UPDATE` batch, which Postgres
-   rejects outright and which would fail the whole pipeline. `ErrorsProcessor` (both branches) and
+   `(dashboard, panel, metric_name, time)` in one statement, which Postgres rejects outright and
+   which would fail the whole pipeline — a unique violation on a full collection's plain `INSERT`,
+   a `cardinality_violation` on an incremental tick's `ON CONFLICT DO UPDATE`. `ErrorsProcessor` (both branches) and
    `VirtualUsersProcessor` filter the real scenario out before appending the roll-up; the request and
    transaction processors get it from the grouping set, where the roll-up row is the one with
-   `scenario_name IS NULL`. Losing one pathologically-named scenario's row beats failing every run.
+   `GROUPING(bd.scenario_name) = 1`. Losing one pathologically-named scenario's row beats failing
+   every run.
 7. **The virtual-user roll-up is JS arithmetic, and grouping the raw rows does not work.**
    Concurrent threads add across scenarios, so the run-wide figure is a sum — but each scenario's
    average covers only its own samples, so a scenario active for a fraction of the run would

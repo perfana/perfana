@@ -5,21 +5,23 @@
  * - Scenario -> Dashboard
  * - Metric type -> Panel (one panel per metric type, all transactions in one panel)
  * - Metric name = "{transactionName}.{samplerName}"
+ *
+ * The aggregate is written straight to ds_metrics by `insertDsMetricsFromAggregate`.
+ * Nothing here builds a row in JS: a run with a few thousand samplers produces
+ * millions of (bucket x panel) pairs, and materialising those was a worker OOM.
  */
 
 import { DataSource } from 'typeorm';
 import type { Logger } from 'pino';
 import type { DashboardManager, DashboardMetadata } from './dashboard-manager.js';
 import {
-  buildNewRequestMetricName,
-  createDsMetricsRecord,
   createDsCompareConfigRecordPanelLevel,
   createDsCompareConfigRecordPanelLevelNoClassification,
 } from './metrics-builder.js';
-// calculateApdexScore no longer needed — Apdex is computed in SQL
+import { insertDsMetricsFromAggregate } from './perf-metrics-writer.js';
+import { resolveScenarioDashboards } from './scenario-dashboards.js';
 import {
   METRIC_TYPE_PANEL_IDS,
-  METRIC_TYPE_PANEL_UNITS,
   METRIC_TYPE_PANEL_CLASSIFICATIONS,
   METRIC_TYPE_PANEL_ADAPT_AGGREGATION,
   DEFAULT_APDEX_THRESHOLD_MS,
@@ -29,36 +31,28 @@ import {
 import type {
   TestRunMetadata,
   ApdexThresholdLookup,
-  DsMetricsRecord,
   DsCompareConfigRecord,
 } from '../../types/performance-metrics.js';
 
 export interface RequestsProcessorResult {
-  metrics: DsMetricsRecord[];
+  rowsInserted: number;
   compareConfigs: DsCompareConfigRecord[];
 }
 
-/**
- * Mapping from a row field name to its panel ID.
- * Used by the helper to avoid repetition.
- */
-interface RequestMetricMapping {
-  field: string;
-  panelId: number;
-}
-
-/** All request-level metric mappings (excluding apdex which needs special calculation). */
-const REQUEST_METRIC_MAPPINGS: RequestMetricMapping[] = [
-  { field: 'avg_response_time', panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_AVG },
-  { field: 'p90_response_time', panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_P90 },
-  { field: 'p95_response_time', panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_P95 },
-  { field: 'p99_response_time', panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_P99 },
-  { field: 'error_rate', panelId: METRIC_TYPE_PANEL_IDS.REQ_ERROR_RATE },
-  { field: 'throughput', panelId: METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT },
-  // apdex_score handled separately (needs threshold calculation)
-  { field: 'avg_latency', panelId: METRIC_TYPE_PANEL_IDS.REQ_LATENCY },
-  { field: 'avg_connect_time', panelId: METRIC_TYPE_PANEL_IDS.REQ_CONNECT_TIME },
+/** Panel ID -> the `computed` column holding its value. */
+const REQUEST_PANEL_VALUES: Array<{ panelId: number; column: string }> = [
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_AVG, column: 'avg_response_time' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_P90, column: 'p90_response_time' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_P95, column: 'p95_response_time' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_P99, column: 'p99_response_time' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_ERROR_RATE, column: 'error_rate' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT, column: 'throughput' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_APDEX, column: 'apdex_score' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_LATENCY, column: 'avg_latency' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_CONNECT_TIME, column: 'avg_connect_time' },
 ];
+
+const REQUEST_PANEL_IDS = REQUEST_PANEL_VALUES.map((m) => m.panelId);
 
 /**
  * Panel IDs that get classified compare configs (with ADAPT comparison).
@@ -82,235 +76,107 @@ export class RequestsProcessor {
     testRunId: string,
     testRun: TestRunMetadata,
     _apdexThresholds: ApdexThresholdLookup,
-    bucketSizeSeconds: number
+    bucketSizeSeconds: number,
+    isIncremental: boolean
   ): Promise<RequestsProcessorResult> {
-    const metrics: DsMetricsRecord[] = [];
     const compareConfigs: DsCompareConfigRecord[] = [];
-    const compareConfigsCreated = new Set<string>();
 
-    // Use database-side aggregation for better performance
-    const aggregatedData = await this.aggregateRequestsInDatabase(
+    const { dashboards, scenarioNames } = await resolveScenarioDashboards({
+      dataSource: this.dataSource,
+      dashboardManager: this.dashboardManager,
+      logger: this.logger,
+      table: 'requests_raw',
+      testRunId,
+      testRun,
+    });
+
+    if (scenarioNames.length === 0) {
+      this.logger.warn(`⚠️  No requests_raw data found for test run ${testRunId}`);
+      return { rowsInserted: 0, compareConfigs };
+    }
+
+    // Panel-level compare configs, one set per real scenario. Display-only: the
+    // all-aggregated dashboard gets none, so ADAPT does not evaluate the roll-up —
+    // a run-wide average moves on any traffic-mix shift.
+    for (const scenarioName of scenarioNames) {
+      const dashboard = dashboards.get(scenarioName);
+      if (dashboard) {
+        this.addPanelCompareConfigs(testRun, dashboard, compareConfigs);
+      }
+    }
+
+    const { aggregateCte, rowsSelect, params } = this.buildRequestsAggregate(
       testRunId,
       testRun,
       bucketSizeSeconds
     );
 
-    if (!aggregatedData || aggregatedData.length === 0) {
-      this.logger.warn(`⚠️  No requests_raw data found for test run ${testRunId}`);
-      return { metrics, compareConfigs };
-    }
+    const rowsInserted = await insertDsMetricsFromAggregate({
+      dataSource: this.dataSource,
+      aggregateCte,
+      rowsSelect,
+      params,
+      dashboards,
+      panelIds: REQUEST_PANEL_IDS,
+      testRunId,
+      testRun,
+      isIncremental,
+    });
 
-    this.logger.info(`📊 Processing ${aggregatedData.length} aggregated request buckets (database-side aggregation)`);
+    this.logger.info(`✅ Created ${rowsInserted} request metrics`);
 
-    // Accumulate total throughput per (scenario, bucket) for "total" metric
-    const totalThroughputBuckets = new Map<string, {
-      total: number;
-      dashboard: DashboardMetadata;
-      bucketTime: Date;
-      timestep: number;
-    }>();
-
-    // Scenarios whose dashboard could not be created — skipped without aborting
-    // the whole run, so remaining scenarios still yield ds_metrics (issue #388).
-    const failedScenarios = new Set<string>();
-
-    // Process pre-aggregated data from database
-    for (const row of aggregatedData) {
-      // The rollup grouping set leaves scenario_name/transaction_name/sampler_name NULL —
-      // those rows are the run-wide series and land on the "all aggregated" dashboard.
-      const isRollup = row.scenario_name === null;
-      const scenarioName: string = isRollup ? ALL_AGGREGATED_SCENARIO : row.scenario_name;
-
-      // Skip rows for a scenario we already failed to set up (logged once below).
-      if (failedScenarios.has(scenarioName)) {
-        continue;
-      }
-
-      // Get/create dashboard for this scenario. A single failing scenario must
-      // not abort the entire pipeline — log it, remember it, and move on.
-      let dashboard: DashboardMetadata;
-      try {
-        dashboard = await this.dashboardManager.getOrCreateScenarioDashboard(
-          scenarioName,
-          testRun.system_under_test_id,
-          testRun.test_environment
-        );
-      } catch (err) {
-        failedScenarios.add(scenarioName);
-        const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Unknown error';
-        this.logger.error(
-          { err },
-          `⚠️  Skipping scenario "${scenarioName}" — dashboard creation failed: ${msg}. Remaining scenarios will still be processed.`
-        );
-        continue;
-      }
-
-      // Build the new metric name: "{transactionName}.{samplerName}" (the rollup carries a
-      // single series per panel, so it gets the one fixed name).
-      const metricName = isRollup
-        ? ALL_AGGREGATED_METRIC
-        : buildNewRequestMetricName(row.transaction_name, row.sampler_name);
-
-      // Apdex score is already computed in SQL via COUNT FILTER
-
-      // Emit one metric record per metric type, each to its own panel
-      for (const mapping of REQUEST_METRIC_MAPPINGS) {
-        if (row[mapping.field] !== null && row[mapping.field] !== undefined) {
-          const panel = this.dashboardManager.getMetricTypePanel(mapping.panelId);
-          metrics.push(
-            createDsMetricsRecord(
-              testRunId,
-              dashboard,
-              panel,
-              metricName,
-              row[mapping.field],
-              row.bucket_time,
-              METRIC_TYPE_PANEL_UNITS[mapping.panelId],
-              row.timestep,
-              testRun.start_time,
-              testRun.ramp_up_time
-            )
-          );
-        }
-      }
-
-      // Apdex (needs special threshold calculation done above)
-      if (row.apdex_score !== null && row.apdex_score !== undefined) {
-        const apdexPanel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.REQ_APDEX);
-        metrics.push(
-          createDsMetricsRecord(
-            testRunId,
-            dashboard,
-            apdexPanel,
-            metricName,
-            row.apdex_score,
-            row.bucket_time,
-            METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.REQ_APDEX],
-            row.timestep,
-            testRun.start_time,
-            testRun.ramp_up_time
-          )
-        );
-      }
-
-      // Create panel-level compare configs ONCE per unique (dashboard, panel) combination.
-      // Panel-level configs (metric_name IS NULL) apply to all metrics in the panel,
-      // allowing user overrides at both panel and metric granularity.
-      // Display-only: the all-aggregated dashboard gets no compare configs, so ADAPT does
-      // not evaluate the roll-up. A run-wide average moves on any traffic-mix shift, so
-      // trending it would fail runs in which no individual metric regressed.
-      if (!isRollup) {
-        this.ensurePanelCompareConfigs(testRun, dashboard, compareConfigs, compareConfigsCreated);
-      }
-
-      // Accumulate throughput for "total" metric. The rollup row's own throughput already
-      // covers every sampler, so it must not also produce a second "total" series.
-      if (!isRollup && row.throughput !== null && row.throughput !== undefined) {
-        const bucketKey = `${scenarioName}::${row.bucket_time}`;
-        const existing = totalThroughputBuckets.get(bucketKey);
-        if (existing) {
-          existing.total += parseFloat(row.throughput);
-        } else {
-          totalThroughputBuckets.set(bucketKey, {
-            total: parseFloat(row.throughput),
-            dashboard,
-            bucketTime: row.bucket_time,
-            timestep: row.timestep,
-          });
-        }
-      }
-    }
-
-    // Emit "total" throughput metrics (sum of all requests per bucket)
-    const throughputPanel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT);
-    for (const bucket of totalThroughputBuckets.values()) {
-      metrics.push(
-        createDsMetricsRecord(
-          testRunId,
-          bucket.dashboard,
-          throughputPanel,
-          'total',
-          Math.round(bucket.total * 100) / 100,
-          bucket.bucketTime,
-          METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT],
-          bucket.timestep,
-          testRun.start_time,
-          testRun.ramp_up_time
-        )
-      );
-
-      // Panel-level configs already cover the "total" metric (created above)
-    }
-
-    this.logger.info(`✅ Created ${metrics.length} request metrics`);
-
-    return { metrics, compareConfigs };
+    return { rowsInserted, compareConfigs };
   }
 
   /**
-   * Ensure one panel-level compare config exists per (dashboard, panel).
-   * Idempotent — skips panels already registered in `created` set.
+   * One panel-level compare config per (dashboard, panel).
+   * Panel-level configs (metric_name IS NULL) apply to every metric in the panel,
+   * leaving per-metric overrides free to take priority in the ADAPT hierarchy.
    */
-  private ensurePanelCompareConfigs(
+  private addPanelCompareConfigs(
     testRun: TestRunMetadata,
     dashboard: DashboardMetadata,
-    compareConfigs: DsCompareConfigRecord[],
-    created: Set<string>
+    compareConfigs: DsCompareConfigRecord[]
   ): void {
-    const allRequestPanelIds = [
-      ...REQUEST_METRIC_MAPPINGS.map((m) => m.panelId),
-      METRIC_TYPE_PANEL_IDS.REQ_APDEX,
-    ];
-
-    for (const panelId of allRequestPanelIds) {
-      const key = `${dashboard.dashboardId}::panel::${panelId}`;
-      if (created.has(key)) { continue; }
-
+    for (const panelId of REQUEST_PANEL_IDS) {
       const panel = this.dashboardManager.getMetricTypePanel(panelId);
       const aggregation = METRIC_TYPE_PANEL_ADAPT_AGGREGATION[panelId];
 
-      if (CLASSIFIED_REQUEST_PANELS.has(panelId)) {
-        compareConfigs.push(
-          createDsCompareConfigRecordPanelLevel(
-            testRun,
-            dashboard,
-            panel,
-            aggregation,
-            METRIC_TYPE_PANEL_CLASSIFICATIONS[panelId]
-          )
-        );
-      } else {
-        compareConfigs.push(
-          createDsCompareConfigRecordPanelLevelNoClassification(
-            testRun,
-            dashboard,
-            panel,
-            aggregation
-          )
-        );
-      }
-
-      created.add(key);
+      compareConfigs.push(
+        CLASSIFIED_REQUEST_PANELS.has(panelId)
+          ? createDsCompareConfigRecordPanelLevel(
+              testRun,
+              dashboard,
+              panel,
+              aggregation,
+              METRIC_TYPE_PANEL_CLASSIFICATIONS[panelId]
+            )
+          : createDsCompareConfigRecordPanelLevelNoClassification(
+              testRun,
+              dashboard,
+              panel,
+              aggregation
+            )
+      );
     }
   }
 
   /**
-   * Aggregate requests data at database level for much better performance
-   * Uses TimescaleDB's time_bucket() and PostgreSQL's PERCENTILE_CONT
+   * Aggregate requests data at database level.
+   * Uses TimescaleDB's time_bucket() and PostgreSQL's PERCENTILE_CONT.
    *
    * Apdex is computed entirely in SQL by LEFT JOINing threshold tables and
-   * using COUNT FILTER, eliminating the need to transfer response_time arrays
-   * to JS (which caused memory exhaustion on large datasets).
+   * using COUNT FILTER, so no response-time arrays are transferred to JS.
    *
    * For incremental collection:
    * - Bucket alignment uses original start_time for consistency across increments
    * - WHERE clause uses filter_from_time/filter_to_time for time range filtering
    */
-  private async aggregateRequestsInDatabase(
+  private buildRequestsAggregate(
     testRunId: string,
     testRun: TestRunMetadata,
     bucketSizeSeconds: number
-  ) {
+  ): { aggregateCte: string; rowsSelect: string; params: unknown[] } {
     // Determine effective filter times (use filter times if set, otherwise use start/end)
     const filterFromTime = testRun.filter_from_time ?? testRun.start_time;
     const filterToTime = testRun.filter_to_time ?? testRun.end_time;
@@ -323,11 +189,13 @@ export class RequestsProcessor {
     // $4 = bucketSizeSeconds
     // $5 = start_time (original, for bucket alignment)
     // $6 = system_under_test_id (for threshold lookups)
-    // $7 = test_environment (for threshold lookups)
-    // $8 = workload (for threshold lookups)
+    // $7 = test_environment
+    // $8 = workload
     // $9 = default apdex threshold (fallback)
-    const query = `
-      WITH thresholds AS (
+    // $10 = roll-up scenario name
+    // $11 = roll-up metric name
+    const aggregateCte = `
+      thresholds AS (
         -- Pre-load per-transaction and workload-level Apdex thresholds
         SELECT
           wtat.transaction_name,
@@ -368,6 +236,11 @@ export class RequestsProcessor {
       ),
       aggregated AS (
         SELECT
+          -- Which grouping set produced this row. Set 1 is the per-sampler series,
+          -- set 2 the run-wide roll-up, set 3 the per-scenario "total" throughput
+          -- that the JS loop used to accumulate into a Map.
+          GROUPING(bd.scenario_name) as g_scenario,
+          GROUPING(bd.transaction_name) as g_txn,
           bd.scenario_name,
           bd.transaction_name,
           bd.sampler_name,
@@ -390,7 +263,6 @@ export class RequestsProcessor {
 
           -- SQL-side Apdex: compute satisfied/tolerating counts using threshold fallback chain
           -- Priority: transaction-specific -> workload -> system default ($9)
-          COALESCE(th.tx_threshold, wt.apdex_threshold, $9) as effective_threshold,
           COUNT(*) FILTER (WHERE bd.response_time IS NOT NULL) as apdex_total,
           COUNT(*) FILTER (
             WHERE bd.response_time IS NOT NULL
@@ -409,41 +281,83 @@ export class RequestsProcessor {
         -- Second grouping set rolls every scenario, transaction and sampler up into one
         -- series per bucket. It shares this scan, and the percentiles/Apdex brackets are
         -- computed over the raw rows, so they are exact rather than an average of averages.
+        -- Third set is the per-scenario "total" series. It rounds the summed count
+        -- rather than summing already-rounded per-sampler throughputs, which the JS
+        -- Map did: measured up to 0.47 req/s apart on a 13.5 req/s bucket with ~140
+        -- samplers. The rounded sum is the accurate one; it too is free here, where summing
+        -- already-rounded per-sampler throughputs in JS was not.
         GROUP BY GROUPING SETS (
           (bd.scenario_name, bd.transaction_name, bd.sampler_name, bd.bucket_time,
            th.tx_threshold, wt.apdex_threshold),
-          (bd.bucket_time)
+          (bd.bucket_time),
+          (bd.scenario_name, bd.bucket_time)
         )
-      )
+      ),
+      computed AS (
+        SELECT
+          g_scenario,
+          g_txn,
+          scenario_name,
+          transaction_name,
+          sampler_name,
+          bucket_time,
+          avg_response_time,
+          p90_response_time,
+          p95_response_time,
+          p99_response_time,
+          avg_latency,
+          avg_connect_time,
+          ROUND((error_count::numeric / NULLIF(request_count, 0) * 100)::numeric, 2) as error_rate,
+          ROUND((request_count::numeric / $4)::numeric, 2) as throughput,
+          FLOOR(EXTRACT(EPOCH FROM (bucket_time - $5::timestamp)) / $4)::integer as timestep,
+          -- Apdex score: (satisfied + tolerating/2) / total
+          CASE
+            WHEN apdex_total > 0
+            THEN ROUND(((apdex_satisfied + apdex_tolerating / 2.0) / apdex_total)::numeric, 4)
+            ELSE NULL
+          END as apdex_score
+        FROM aggregated
+      )`;
+
+    const panelValues = REQUEST_PANEL_VALUES.map(
+      (m) => `(${m.panelId}, c.${m.column}::double precision)`
+    ).join(', ');
+
+    const rowsSelect = `
       SELECT
-        scenario_name,
-        transaction_name,
-        sampler_name,
-        bucket_time,
-        request_count,
-        error_count,
-        avg_response_time,
-        p90_response_time,
-        p95_response_time,
-        p99_response_time,
-        avg_latency,
-        avg_connect_time,
-        ROUND((error_count::numeric / NULLIF(request_count, 0) * 100)::numeric, 2) as error_rate,
-        ROUND((request_count::numeric / $4)::numeric, 2) as throughput,
-        FLOOR(EXTRACT(EPOCH FROM (bucket_time - $5::timestamp)) / $4)::integer as timestep,
-        -- Apdex score: (satisfied + tolerating/2) / total
+        CASE WHEN c.g_scenario = 1 THEN $10 ELSE c.scenario_name END as scenario_name,
         CASE
-          WHEN apdex_total > 0
-          THEN ROUND(((apdex_satisfied + apdex_tolerating / 2.0) / apdex_total)::numeric, 4)
-          ELSE NULL
-        END as apdex_score
-      FROM aggregated
-      -- No ORDER BY: the loop accumulates into a Map keyed by scenario and bucket, so row
-      -- order is not read. Keeping it was free before the rollup, when it was a prefix of
-      -- the group-key sort; the rollup puts bucket_time at the head of that sort, so an
-      -- ORDER BY here becomes a second, top-level sort that spills (measured: 22 MB on a
-      -- 1.4M-row run, and it grows with the number of series).
-    `;
+          WHEN c.g_scenario = 1 THEN $11
+          WHEN c.g_txn = 1 THEN 'total'
+          -- Metric name for the request level: drop the transaction prefix when it
+          -- adds nothing (no Transaction Controller, or it equals the sampler).
+          WHEN c.transaction_name IS NULL
+            OR c.transaction_name = ''
+            OR c.transaction_name = 'overall'
+            OR c.transaction_name = c.sampler_name THEN c.sampler_name
+          ELSE c.transaction_name || '.' || c.sampler_name
+        END as metric_name,
+        v.panel_id,
+        v.value,
+        c.bucket_time,
+        c.timestep
+      FROM computed c
+      CROSS JOIN LATERAL (VALUES ${panelValues}) AS v(panel_id, value)
+      WHERE c.g_txn = 0 OR c.g_scenario = 1
+
+      UNION ALL
+
+      -- Per-scenario "total" throughput. The roll-up row already covers every sampler,
+      -- so it must not also produce a second "total" series.
+      SELECT
+        c.scenario_name,
+        'total',
+        ${METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT},
+        c.throughput::double precision,
+        c.bucket_time,
+        c.timestep
+      FROM computed c
+      WHERE c.g_scenario = 0 AND c.g_txn = 1`;
 
     const params = [
       testRunId,
@@ -455,9 +369,10 @@ export class RequestsProcessor {
       testRun.test_environment,
       testRun.workload,
       DEFAULT_APDEX_THRESHOLD_MS,
+      ALL_AGGREGATED_SCENARIO,
+      ALL_AGGREGATED_METRIC,
     ];
 
-    return this.dataSource.query(query, params);
+    return { aggregateCte, rowsSelect, params };
   }
-
 }

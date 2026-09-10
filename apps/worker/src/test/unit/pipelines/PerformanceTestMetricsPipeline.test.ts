@@ -7,8 +7,8 @@
  * - Test run metadata loading (UUID vs. name-based systemUnderTestId)
  * - Apdex threshold loading (workload, benchmark, transaction-level, with/without orgId)
  * - Metric processor orchestration (requests, transactions, errors, virtual users)
- * - saveDsMetrics: full-collection (DELETE + INSERT) vs incremental (UPSERT), batch sizing
- * - computeAndSaveStatistics: grouping, percentile math, empty/ramp-up filtering
+ * - saveDsMetrics: scenario-level records only; requests/transactions insert in SQL
+ * - statistics upsert: SQL scoping, grouping key, ramp-up/null filtering, ON CONFLICT
  * - saveDsCompareConfigs / insertCompareConfigBatch: panel-level vs metric-specific splits
  * - updateDashboardPanels: no-dashboards early-exit, successful update
  * - Error handling: processor failure, DB failures, missing test run
@@ -114,6 +114,17 @@ const createProcessorResult = (
   ),
 });
 
+/**
+ * The requests and transactions processors write ds_metrics themselves with one
+ * INSERT ... SELECT, so they report a row count instead of returning records.
+ */
+const createSqlProcessorResult = (rowsInserted = 0, compareConfigCount = 0) => ({
+  rowsInserted,
+  compareConfigs: Array.from({ length: compareConfigCount }, (_, i) =>
+    createMockCompareConfig({ panel_id: 201 + i })
+  ),
+});
+
 // ---------------------------------------------------------------------------
 // Mock logger
 // ---------------------------------------------------------------------------
@@ -159,9 +170,9 @@ describe('PerformanceTestMetricsPipeline', () => {
     vi.mocked(getDatabaseService).mockReturnValue(mockDatabaseService);
 
     // Default processor mock instances
-    mockDashboardManagerInstance = {};
-    mockRequestsProcessorInstance = { process: vi.fn().mockResolvedValue(createProcessorResult()) };
-    mockTransactionsProcessorInstance = { process: vi.fn().mockResolvedValue(createProcessorResult()) };
+    mockDashboardManagerInstance = { getResolvedDashboardIds: vi.fn(() => ['dash-1']) };
+    mockRequestsProcessorInstance = { process: vi.fn().mockResolvedValue(createSqlProcessorResult()) };
+    mockTransactionsProcessorInstance = { process: vi.fn().mockResolvedValue(createSqlProcessorResult()) };
     mockErrorsProcessorInstance = { process: vi.fn().mockResolvedValue(createProcessorResult()) };
     mockVirtualUsersProcessorInstance = { process: vi.fn().mockResolvedValue(createProcessorResult()) };
 
@@ -447,8 +458,8 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should aggregate metrics from all four processors into the output', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(3, 1));
-      mockTransactionsProcessorInstance.process.mockResolvedValue(createProcessorResult(2, 1));
+      mockRequestsProcessorInstance.process.mockResolvedValue(createSqlProcessorResult(3, 1));
+      mockTransactionsProcessorInstance.process.mockResolvedValue(createSqlProcessorResult(2, 1));
       mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1, 0));
       mockVirtualUsersProcessorInstance.process.mockResolvedValue(createProcessorResult(2, 0));
 
@@ -469,6 +480,10 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(mockTransactionsProcessorInstance.process).toHaveBeenCalledOnce();
       expect(mockErrorsProcessorInstance.process).toHaveBeenCalledOnce();
       expect(mockVirtualUsersProcessorInstance.process).toHaveBeenCalledOnce();
+
+      // Requests/transactions need isIncremental too: it selects INSERT vs upsert.
+      expect(mockRequestsProcessorInstance.process.mock.calls[0].length).toBe(5);
+      expect(mockTransactionsProcessorInstance.process.mock.calls[0]!.at(-1)).toBe(false);
 
       // Errors and VU processors receive only 2 args (no apdex or bucket size)
       const errorsArgs = mockErrorsProcessorInstance.process.mock.calls[0];
@@ -536,15 +551,40 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(incrementalLogCalls.length).toBe(0);
     });
 
-    it('should use 1s buckets for incremental collection', async () => {
+    it('should use 1s buckets for a live incremental tick', async () => {
       await pipeline.execute({
         testRunId: 'tr-001',
         fromTime: new Date('2024-01-01T00:10:00Z'),
-        toTime: new Date('2024-01-01T00:20:00Z'),
+        toTime: new Date('2024-01-01T00:11:00Z'),
       });
 
       // The "1s buckets" log message should appear
       expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('1s buckets')
+      );
+    });
+
+    it('should not use 1s buckets when the "increment" spans the whole run', async () => {
+      // A force-refetch reevaluate calls the incremental path with the run's full
+      // range (simple-orchestrate-reevaluate-batch.ts). 1s buckets over 3h produced
+      // ~30x the rows of the full path and OOM'd the worker.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({
+          startTime: new Date('2024-01-01T00:00:00Z'),
+          endTime: new Date('2024-01-01T03:00:00Z'),
+        })
+      );
+
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:00:00Z'),
+        toTime: new Date('2024-01-01T03:00:00Z'),
+      });
+
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('60s buckets for a 10800s window')
+      );
+      expect(mockLogger.info).not.toHaveBeenCalledWith(
         expect.stringContaining('1s buckets')
       );
     });
@@ -562,7 +602,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should issue a DELETE before INSERT for full-collection mode', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
@@ -574,7 +614,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should NOT issue DELETE for incremental mode', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       await pipeline.execute({
         testRunId: 'tr-001',
@@ -589,7 +629,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should use ON CONFLICT upsert query for incremental mode', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       await pipeline.execute({
         testRunId: 'tr-001',
@@ -605,7 +645,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should use plain INSERT (no ON CONFLICT) for full-collection mode', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
@@ -627,7 +667,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should return failure when a batch insert rejects', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
       // Make the actual INSERT fail
       mockWriteDataSource.query.mockRejectedValueOnce(new Error('DB write failure'));
 
@@ -639,42 +679,123 @@ describe('PerformanceTestMetricsPipeline', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 7. computeAndSaveStatistics
+  // 7. upsertPerfTestStatistics
   // -------------------------------------------------------------------------
 
-  describe('computeAndSaveStatistics', () => {
+  describe('full-collection DELETE ordering', () => {
     beforeEach(() => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
       mockDataSource.query.mockResolvedValue([]);
       mockWriteDataSource.query.mockResolvedValue([]);
     });
 
-    it('should log skip message when all metrics have ramp_up=true', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(
-        createProcessorResult(1, 0, { ramp_up: true })
-      );
+    const deleteCalls = () => mockDataSource.query.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('DELETE FROM ds_metrics')
+    );
 
+    it('should delete the run\'s metrics BEFORE the processors insert', async () => {
+      // The processors write as they aggregate now, so a DELETE that ran after them —
+      // where it used to live, inside saveDsMetrics — would take their own rows with it.
       await pipeline.execute({ testRunId: 'tr-001' });
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('No non-ramp-up metrics')
+      expect(deleteCalls()).toHaveLength(1);
+      const deleteOrder = mockDataSource.query.mock.invocationCallOrder[
+        mockDataSource.query.mock.calls.findIndex(
+          (call: any[]) => String(call[0]).includes('DELETE FROM ds_metrics')
+        )
+      ];
+      expect(deleteOrder).toBeLessThan(
+        mockRequestsProcessorInstance.process.mock.invocationCallOrder[0]
       );
     });
 
-    it('should compute statistics for non-ramp-up metrics', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(
-        createProcessorResult(3, 0, { ramp_up: false })
+    it('should not delete anything on an incremental tick', async () => {
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:10:00Z'),
+        toTime: new Date('2024-01-01T00:11:00Z'),
+      });
+
+      expect(deleteCalls()).toHaveLength(0);
+    });
+
+    it('should pass isIncremental through so the processors pick INSERT vs upsert', async () => {
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:10:00Z'),
+        toTime: new Date('2024-01-01T00:11:00Z'),
+      });
+
+      expect(mockRequestsProcessorInstance.process.mock.calls[0]!.at(-1)).toBe(true);
+      expect(mockTransactionsProcessorInstance.process.mock.calls[0]!.at(-1)).toBe(true);
+    });
+  });
+
+  describe('statistics upsert', () => {
+    beforeEach(() => {
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
+      mockDataSource.query.mockResolvedValue([]);
+      mockWriteDataSource.query.mockResolvedValue([]);
+    });
+
+    /** The one INSERT INTO ds_metric_statistics the run issues, whitespace-normalised. */
+    const statisticsSql = (): string => {
+      const calls = mockDataSource.query.mock.calls.filter(
+        (call: any[]) => String(call[0]).includes('INSERT INTO ds_metric_statistics')
       );
+      expect(calls.length).toBe(1);
+      return String(calls[0][0]).replace(/\s+/g, ' ');
+    };
+
+    it('should skip the statistics pass entirely when nothing was written', async () => {
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      const insertStatsCalls = mockDataSource.query.mock.calls.filter(
+        (call: any[]) => String(call[0]).includes('INSERT INTO ds_metric_statistics')
+      );
+      expect(insertStatsCalls.length).toBe(0);
+    });
+
+    it('should recompute from the rows just written, scoped to this run and its dashboards', async () => {
+      mockRequestsProcessorInstance.process.mockResolvedValue(createSqlProcessorResult(3));
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Computing in-memory statistics')
+      const sql = statisticsSql();
+      expect(sql).toContain('FROM ds_metrics m');
+      expect(sql).toContain('WHERE m.test_run_id = $1');
+      expect(sql).toContain('AND m.application_dashboard_id = ANY($2::uuid[])');
+
+      const params = mockDataSource.query.mock.calls.find(
+        (call: any[]) => String(call[0]).includes('INSERT INTO ds_metric_statistics')
+      )![1];
+      expect(params[0]).toBe('tr-001');
+      expect(params[1]).toEqual(['dash-1']);
+    });
+
+    it('should exclude ramp-up and null samples, as the in-memory pass did', async () => {
+      mockRequestsProcessorInstance.process.mockResolvedValue(createSqlProcessorResult(1));
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(statisticsSql()).toContain('AND m.ramp_up = false AND m.value IS NOT NULL');
+    });
+
+    it('should group on the TRUNCATED metric name (issue #134)', async () => {
+      // Two names whose first 255 chars match persist under the same metric_name, so
+      // grouping on the raw name would emit two rows for one key and Postgres would
+      // throw cardinality_violation — a single statement cannot affect a row twice.
+      mockRequestsProcessorInstance.process.mockResolvedValue(createSqlProcessorResult(1));
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(statisticsSql()).toContain(
+        'GROUP BY m.application_dashboard_id, m.panel_id, left(m.metric_name, 255)'
       );
     });
 
     it('should NOT issue a DELETE before the upsert (issue #134)', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockRequestsProcessorInstance.process.mockResolvedValue(createSqlProcessorResult(1));
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
@@ -685,18 +806,11 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should UPSERT statistics with ON CONFLICT DO UPDATE on the unique key (issue #134)', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockRequestsProcessorInstance.process.mockResolvedValue(createSqlProcessorResult(1));
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
-      const insertStatsCalls = mockDataSource.query.mock.calls.filter(
-        (call: any[]) => String(call[0]).includes('INSERT INTO ds_metric_statistics')
-      );
-      expect(insertStatsCalls.length).toBeGreaterThan(0);
-
-      const sql = String(insertStatsCalls[0][0]);
-      // Normalize whitespace so future SQL reformatting doesn't break us.
-      const normalized = sql.replace(/\s+/g, ' ');
+      const normalized = statisticsSql();
       // Idempotent against the uniq_ds_metric_statistics index added in #132.
       expect(normalized).toContain(
         'ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name)'
@@ -715,46 +829,16 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(normalized).toMatch(/updated_by\s*=\s*EXCLUDED\.updated_by/);
     });
 
-    it('should group metrics by (test_run_id, application_dashboard_id, panel_id, metric_name)', async () => {
-      // Two metrics with same group key → one stat record
-      const sameGroupMetrics = {
-        metrics: [
-          createMockMetric({ metric_name: 'checkout.response_time.avg', value: 100 }),
-          createMockMetric({ metric_name: 'checkout.response_time.avg', value: 200 }),
-        ],
-        compareConfigs: [],
-      };
-      mockRequestsProcessorInstance.process.mockResolvedValue(sameGroupMetrics);
+    it('should write pct_agg, which the in-memory pass left NULL', async () => {
+      // ControlGroupStatisticsPipeline pools these sketches; a NULL forces the slow
+      // raw-scan path and ends in ADAPT reporting INSUFFICIENT_DATA.
+      mockRequestsProcessorInstance.process.mockResolvedValue(createSqlProcessorResult(1));
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('1 metric groups')
-      );
-    });
-
-    it('should dedupe metric_names that collide after 255-char truncation (issue #134)', async () => {
-      // Two metric names whose first 255 chars are identical but tails differ.
-      // Storage truncates to 255 chars, so both would persist with the same
-      // metric_name. If grouping used the raw name (untruncated), we would
-      // emit two stat records with the same persisted key — and Postgres would
-      // throw `cardinality_violation` on the bulk INSERT ... ON CONFLICT
-      // DO UPDATE because a single statement cannot affect the same row twice.
-      const prefix = 'T01_Homepage_Load.' + 'x'.repeat(240); // total 258 chars; first 255 identical
-      const collidingMetrics = {
-        metrics: [
-          createMockMetric({ metric_name: prefix + 'A', value: 100 }),
-          createMockMetric({ metric_name: prefix + 'B', value: 200 }),
-        ],
-        compareConfigs: [],
-      };
-      mockRequestsProcessorInstance.process.mockResolvedValue(collidingMetrics);
-
-      await pipeline.execute({ testRunId: 'tr-001' });
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('1 metric groups')
-      );
+      const sql = statisticsSql();
+      expect(sql).toContain('percentile_agg(m.value) AS pct_agg');
+      expect(sql).toMatch(/pct_agg\s*=\s*EXCLUDED\.pct_agg/);
     });
   });
 
@@ -779,7 +863,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should insert panel-level compare configs', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue({
+      mockErrorsProcessorInstance.process.mockResolvedValue({
         metrics: [],
         compareConfigs: [createMockCompareConfig({ metric_name: null })],
       });
@@ -804,7 +888,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should insert metric-specific compare configs with a different ON CONFLICT clause', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue({
+      mockErrorsProcessorInstance.process.mockResolvedValue({
         metrics: [],
         compareConfigs: [createMockCompareConfig({ metric_name: 'checkout.response_time.avg' })],
       });
@@ -825,7 +909,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     });
 
     it('should log the number of created compare configs', async () => {
-      mockRequestsProcessorInstance.process.mockResolvedValue({
+      mockErrorsProcessorInstance.process.mockResolvedValue({
         metrics: [],
         compareConfigs: [createMockCompareConfig()],
       });
@@ -853,7 +937,7 @@ describe('PerformanceTestMetricsPipeline', () => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
       // Default: no metrics returned, so saveDsMetrics is skipped; but we can
       // still exercise updateDashboardPanels via spying on the private method
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
     });
 
     it('should log skip message when no dashboards found for the test run', async () => {
@@ -1073,7 +1157,7 @@ describe('PerformanceTestMetricsPipeline', () => {
       await pipeline.execute({ testRunId: 'tr-001' });
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringMatching(/\d+s buckets for 3600s elapsed/)
+        expect.stringMatching(/\d+s buckets for a 3600s window/)
       );
     });
 
@@ -1085,18 +1169,18 @@ describe('PerformanceTestMetricsPipeline', () => {
       await pipeline.execute({ testRunId: 'tr-001' });
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringMatching(/3600s elapsed/)
+        expect.stringMatching(/3600s window/)
       );
     });
 
-    it('should report 1s fixed buckets for incremental collection', async () => {
+    it('should report 1s buckets for a live incremental tick', async () => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
       mockDataSource.query.mockResolvedValue([]);
 
       await pipeline.execute({
         testRunId: 'tr-001',
         fromTime: new Date('2024-01-01T00:10:00Z'),
-        toTime: new Date('2024-01-01T00:20:00Z'),
+        toTime: new Date('2024-01-01T00:11:00Z'),
       });
 
       expect(mockLogger.info).toHaveBeenCalledWith(
@@ -1113,7 +1197,7 @@ describe('PerformanceTestMetricsPipeline', () => {
     it('should log timing for each pipeline step', async () => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
       mockDataSource.query.mockResolvedValue([]);
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
@@ -1147,14 +1231,15 @@ describe('PerformanceTestMetricsPipeline', () => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(run);
       mockDataSource.query.mockResolvedValue([]);
       mockWriteDataSource.query.mockResolvedValue([]);
-      mockRequestsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       const result = await pipeline.execute({ testRunId: 'tr-no-org' });
 
       expect(result.success).toBe(true);
     });
 
-    it('should handle metrics with null value (filtered in statistics)', async () => {
+    it('should still write a metric whose value is null', async () => {
+      // The row is stored; the statistics pass excludes it in SQL rather than in JS.
       const nullValueMetrics = {
         metrics: [
           createMockMetric({ ramp_up: false, value: null as any }),
@@ -1164,14 +1249,17 @@ describe('PerformanceTestMetricsPipeline', () => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
       mockDataSource.query.mockResolvedValue([]);
       mockWriteDataSource.query.mockResolvedValue([]);
-      mockRequestsProcessorInstance.process.mockResolvedValue(nullValueMetrics);
+      mockErrorsProcessorInstance.process.mockResolvedValue(nullValueMetrics);
 
-      await pipeline.execute({ testRunId: 'tr-001' });
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
 
-      // null values are filtered before statistics — should skip statistics
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('No non-ramp-up metrics')
-      );
+      expect(result.success).toBe(true);
+      const statsSql = String(
+        mockDataSource.query.mock.calls.find(
+          (call: any[]) => String(call[0]).includes('INSERT INTO ds_metric_statistics')
+        )![0]
+      ).replace(/\s+/g, ' ');
+      expect(statsSql).toContain('m.value IS NOT NULL');
     });
 
     it('should handle multiple compare configs that span both panel-level and metric-specific', async () => {
@@ -1184,7 +1272,7 @@ describe('PerformanceTestMetricsPipeline', () => {
       });
       mockWriteDataSource.query.mockResolvedValue([]);
 
-      mockRequestsProcessorInstance.process.mockResolvedValue({
+      mockErrorsProcessorInstance.process.mockResolvedValue({
         metrics: [],
         compareConfigs: [
           createMockCompareConfig({ metric_name: null }),
@@ -1202,37 +1290,23 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(insertCalls.length).toBe(2);
     });
 
-    it('should find the last value by time when a group has metrics with different timestamps', async () => {
-      // Both metrics share the same group key but have different times.
-      // The second one has a later timestamp → it should become the "last record".
-      const multiTimeMetrics = {
-        metrics: [
-          createMockMetric({
-            metric_name: 'checkout.response_time.avg',
-            value: 100,
-            time: new Date('2024-01-01T00:01:00Z'),
-          }),
-          createMockMetric({
-            metric_name: 'checkout.response_time.avg',
-            value: 200,
-            time: new Date('2024-01-01T00:05:00Z'), // later
-          }),
-        ],
-        compareConfigs: [],
-      };
+    it('should take the last value by time from the aggregate, not a lateral probe', async () => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
       mockDataSource.query.mockResolvedValue([]);
       mockWriteDataSource.query.mockResolvedValue([]);
-      mockRequestsProcessorInstance.process.mockResolvedValue(multiTimeMetrics);
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(2));
 
       const result = await pipeline.execute({ testRunId: 'tr-001' });
 
-      // Verify the statistics INSERT was triggered (meaning last-record selection ran)
-      const insertStatsCalls = mockDataSource.query.mock.calls.filter(
-        (call: any[]) => String(call[0]).includes('INSERT INTO ds_metric_statistics')
-      );
       expect(result.success).toBe(true);
-      expect(insertStatsCalls.length).toBeGreaterThan(0);
+      const statsSql = String(
+        mockDataSource.query.mock.calls.find(
+          (call: any[]) => String(call[0]).includes('INSERT INTO ds_metric_statistics')
+        )![0]
+      ).replace(/\s+/g, ' ');
+      // The FILTER is load-bearing: unlike every other aggregate, last() returns the
+      // value AT the greatest time even when that value is NULL.
+      expect(statsSql).toContain('last(m.value, m.time) FILTER (WHERE m.value IS NOT NULL)');
     });
 
     it('should pass the testRunId as the first argument to each processor', async () => {

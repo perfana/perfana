@@ -55,29 +55,63 @@ const testRun = {
   organization_id: 'org-1',
 } as unknown as TestRunMetadata;
 
+/**
+ * The processors no longer return ds_metrics records — they write them with one
+ * INSERT ... SELECT — so the roll-up contract is asserted against the SQL and its
+ * parameters. `mockDataSource` answers the scenario lookup first, then the insert.
+ */
+const mockDataSource = (scenarios: string[] = ['loadtest']) => ({
+  query: vi
+    .fn()
+    .mockResolvedValueOnce(scenarios.map((scenario_name) => ({ scenario_name })))
+    .mockResolvedValue([[], 42]),
+});
+
+const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) as never;
+
+/** The INSERT is the second statement; the scenario lookup is the first. */
+const insertSql = (dataSource: { query: { mock: { calls: unknown[][] } } }) =>
+  (dataSource.query.mock.calls[1]![0] as string).replace(/\s+/g, ' ');
+
+const insertParams = (dataSource: { query: { mock: { calls: unknown[][] } } }) =>
+  dataSource.query.mock.calls[1]![1] as unknown[];
+
 describe('all-aggregated rollup rows', () => {
-  it('maps NULL-scenario rows to the aggregated dashboard and one metric name', async () => {
-    const dataSource = { query: vi.fn(async () => [row('loadtest', 'checkout'), row(null, null)]) };
-    const processor = new TransactionsProcessor(
-      dataSource as never,
-      dashboardManager,
-      { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never
+  it('routes the roll-up grouping set to the aggregated dashboard under one metric name', async () => {
+    const dataSource = mockDataSource();
+    const processor = new TransactionsProcessor(dataSource as never, dashboardManager, silentLogger());
+
+    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
+
+    const sql = insertSql(dataSource);
+    const params = insertParams(dataSource);
+
+    // g_scenario = 1 is the run-wide set: it carries the roll-up scenario and the one
+    // fixed metric name, both passed as parameters rather than inlined.
+    const rollupScenarioParam = `$${params.indexOf(ALL_AGGREGATED_SCENARIO) + 1}`;
+    const rollupMetricParam = `$${params.indexOf(ALL_AGGREGATED_METRIC) + 1}`;
+    expect(params).toContain(ALL_AGGREGATED_SCENARIO);
+    expect(params).toContain(ALL_AGGREGATED_METRIC);
+    expect(sql).toContain(`CASE WHEN c.g_scenario = 1 THEN ${rollupScenarioParam} ELSE c.scenario_name END`);
+    expect(sql).toContain(`WHEN c.g_scenario = 1 THEN ${rollupMetricParam}`);
+
+    // The aggregated dashboard is in the VALUES table, so the join finds it.
+    expect(params).toContain(`dash-${ALL_AGGREGATED_SCENARIO}`);
+  });
+
+  it('does not emit a second "total" throughput series for the roll-up', async () => {
+    const dataSource = mockDataSource();
+    const processor = new TransactionsProcessor(dataSource as never, dashboardManager, silentLogger());
+
+    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
+
+    // The "total" arm is the per-scenario grouping set only (g_scenario = 0, g_txn = 1);
+    // the roll-up row's own throughput already covers every transaction.
+    expect(insertSql(dataSource)).toContain(
+      `SELECT c.scenario_name, 'total', ${METRIC_TYPE_PANEL_IDS.TXN_THROUGHPUT},` +
+      ' c.throughput::double precision, c.bucket_time, c.timestep FROM computed c' +
+      ' WHERE c.g_scenario = 0 AND c.g_txn = 1'
     );
-
-    const { metrics } = await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60);
-
-    const aggregated = metrics.filter(m => m.dashboard_label.endsWith(ALL_AGGREGATED_SCENARIO));
-    expect(aggregated.length).toBeGreaterThan(0);
-    expect(new Set(aggregated.map(m => m.metric_name))).toEqual(new Set([ALL_AGGREGATED_METRIC]));
-
-    // The rollup's own throughput already covers every transaction — no second "total".
-    expect(aggregated.some(m => m.panel_id === METRIC_TYPE_PANEL_IDS.TXN_THROUGHPUT)).toBe(true);
-    expect(aggregated.some(m => m.metric_name === 'total')).toBe(false);
-
-    // Per-scenario rows are untouched.
-    const scenario = metrics.filter(m => m.dashboard_label.endsWith('loadtest'));
-    expect(scenario.some(m => m.metric_name === 'checkout')).toBe(true);
-    expect(scenario.some(m => m.metric_name === 'total')).toBe(true);
   });
 });
 
@@ -86,14 +120,10 @@ describe('all-aggregated rollup rows', () => {
 // suppress its own synthetic "All aggregated" option. Renaming the scenario breaks that.
 describe('the aggregated dashboard is display-only', () => {
   it('creates no compare configs, so ADAPT does not evaluate the roll-up', async () => {
-    const dataSource = { query: vi.fn(async () => [row('loadtest', 'checkout'), row(null, null)]) };
-    const processor = new TransactionsProcessor(
-      dataSource as never,
-      dashboardManager,
-      { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never
-    );
+    const dataSource = mockDataSource();
+    const processor = new TransactionsProcessor(dataSource as never, dashboardManager, silentLogger());
 
-    const { compareConfigs } = await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60);
+    const { compareConfigs } = await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
 
     expect(compareConfigs.length).toBeGreaterThan(0);
     expect(compareConfigs.map(c => c.application_dashboard_id))
@@ -103,21 +133,19 @@ describe('the aggregated dashboard is display-only', () => {
 
 describe('the rollup grouping set', () => {
   it('is in the SQL the processor issues', async () => {
-    // Tripwire. Every other test here hand-feeds a scenario_name:null row, so deleting the
-    // GROUPING SETS clause — the substance of this feature — would leave them all green.
-    const dataSource = { query: vi.fn(async () => [row('loadtest', 'checkout'), row(null, null)]) };
-    const processor = new TransactionsProcessor(
-      dataSource as never,
-      dashboardManager,
-      { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never
-    );
+    // Tripwire: deleting the GROUPING SETS clause — the substance of this feature —
+    // would leave the parameter assertions above green.
+    const dataSource = mockDataSource();
+    const processor = new TransactionsProcessor(dataSource as never, dashboardManager, silentLogger());
 
-    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60);
+    await processor.process('run-1', testRun, {} as ApdexThresholdLookup, 60, false);
 
-    const sql = dataSource.query.mock.calls[0]![0] as string;
+    const sql = insertSql(dataSource);
     expect(sql).toContain('GROUPING SETS');
     // The rollup groups by bucket alone — that is what makes it run-wide.
-    expect(sql.replace(/\s+/g, ' ')).toContain('(bd.bucket_time)');
+    expect(sql).toContain('(bd.bucket_time)');
+    // ...and the per-scenario total groups by scenario and bucket.
+    expect(sql).toContain('(bd.scenario_name, bd.bucket_time)');
   });
 });
 
