@@ -4,7 +4,7 @@ import { Repository, LessThan } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
 import { ConfigService } from '@nestjs/config';
 import { TestRun as TestRunEntity } from '../../../entities';
-import { QueueService } from '../../queue/queue.service';
+import { BullMQClientService } from '../../data-science/services/bullmq-client.service';
 import { TestRunsGateway } from '../gateways/test-runs.gateway';
 import { TestRunEventType } from '../types/realtime-events.types';
 import { mapEntityToTestRun } from '../handlers/entity-mapper';
@@ -19,7 +19,7 @@ export class TestRunsStaleDetectionService {
   constructor(
     @InjectRepository(TestRunEntity)
     private testRunRepo: Repository<TestRunEntity>,
-    private queueService: QueueService,
+    private bullmqClientService: BullMQClientService,
     private configService: ConfigService,
     private testRunsGateway: TestRunsGateway,
     private readonly authzService: AuthorizationService,
@@ -133,21 +133,31 @@ export class TestRunsStaleDetectionService {
   }
 
   /**
-   * Trigger automated analysis for a stale test run
-   * Sends the test run to the worker queue for processing
+   * Trigger automated analysis for a stale test run.
+   *
+   * This MUST enqueue exactly what the normal-completion path enqueues. Until #584 it
+   * published `analyzeTestRun` to `perfana-jobs`, a queue with no consumer anywhere in
+   * the monorepo — the worker only ever creates workers for `perfana-analyze` and
+   * `perfana-batch` (`apps/worker/src/workers/simple-workers.ts`). So every run that
+   * ended via stale detection rather than a clean completion POST was silently never
+   * analysed: no SLO check results, no ADAPT conclusion, and a queue that only grew.
+   *
+   * That path is far easier to hit than "the client went away": STALE_TIMEOUT_MINUTES
+   * defaults to 2, so a client whose request timeout equals its keep-alive interval
+   * exhausts the window after two slow responses.
+   *
+   * The reference implementation is `TestRunsMutationService.handleCompletedTest()`;
+   * keep the options identical to it.
    */
   private async triggerAnalysisForStaleRun(testRun: TestRunEntity): Promise<void> {
     try {
-      const jobId = await this.queueService.sendJob('analyzeTestRun', {
-        testRunId: testRun.testRunId,
-        systemUnderTestId: testRun.systemUnderTestId,
-        testEnvironment: testRun.testEnvironment,
-        workload: testRun.workload,
-        reason: 'stale_detection',
+      const result = await this.bullmqClientService.analyzeTest(testRun.testRunId, {
+        adapt: true,
+        benchmarksOnly: false,
       });
 
       this.logger.log(
-        `Triggered analysis for stale test run ${testRun.testRunId} (job ID: ${jobId})`
+        `Triggered analysis for stale test run ${testRun.testRunId} (job ID: ${result.jobId})`
       );
     } catch (error) {
       this.logger.error(

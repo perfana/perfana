@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.15] - 2026-09-10
+
+### Fixed
+- **Stale-detected test runs are analysed again (#584).** `TestRunsStaleDetectionService.triggerAnalysisForStaleRun()` published `analyzeTestRun` to `perfana-jobs` — a queue with **no consumer anywhere in the monorepo**. The worker only ever creates workers for `perfana-analyze` and `perfana-batch`, so every run that ended via stale detection rather than a clean completion `POST /api/test` was silently never analysed: no SLO check results, no ADAPT conclusion, and a queue that only grew. It now calls `BullMQClientService.analyzeTest(testRunId, { adapt: true, benchmarksOnly: false })`, exactly what `handleCompletedTest()` does. Enqueue failures are still logged and swallowed so the run stays marked stale/completed.
+
+  This is not a rare path. `STALE_TIMEOUT_MINUTES` defaults to 2 and the cron ticks at `:00`/`:30`, so detection lands 2:00–2:30 after the last successful write. A client whose HTTP timeout equals its keep-alive interval spends ~60 s per failed cycle, so **two** slow responses during a three-hour test are enough to exhaust the window — after which the completion POST arrives to a run already marked complete and gets a silent 409. `SONAR-acceptatie-loadtest_perfana-00010` was completed by the stale cron 2 m 24 s after its last keep-alive and never analysed.
+
+  `QueueService`, the `BULL_QUEUE` provider and the `perfana-jobs` queue are removed rather than left as a producer-only queue; stale detection was their only producer. `QueueModule` stays — every other importer wants its `REDIS_CLIENT`, which is what the module now exports on its own.
+
+- **Both performance-test SQL writers reported 0 rows written.** `insertDsMetricsFromAggregate` and `upsertPerfTestStatistics` read their row count as `result[1]`, on the comment "TypeORM surfaces a write as `[rows, rowCount]`". That holds for `DELETE`/`UPDATE` but not for the `INSERT ... SELECT` these two issue, which comes back as the rows array alone — so `result[1]` was `undefined` and the count silently read 0.
+
+  Not cosmetic: the number becomes `totalDataPoints` → `testRunReceivedData` → `testRunsWithNewData`, which gates the statistics-recalculation stage in `simple-orchestrate-reevaluate-batch.ts:614`. Measured on a force-refetch of `SONAR-acceptatie-loadtest_perfana-00010`: 1,946,825 rows written by the two SQL processors, reported as **0**; the pipeline logged `Saved 41 ds_metrics records`, the 41 being the errors/virtual-users JS path, which is the only reason the run cleared the `> 0` gate at all. A run with no error or virtual-user rows would have reported 0, skipped rebuilding `ds_metric_statistics`, and landed back on `No metrics data collected` behind a green job.
+
+  Both statements now end in `RETURNING 1` wrapped in a `SELECT count(*)::int AS n FROM ins` CTE, so the count is computed in Postgres and nothing materialises per inserted row in JS.
+
 ## [0.2.95.14] - 2026-09-10
 
 ### Fixed

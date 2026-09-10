@@ -47,6 +47,28 @@ export interface InsertDsMetricsOptions {
 }
 
 /**
+ * Row count of an `INSERT ... RETURNING 1` wrapped in a `SELECT count(*) AS n` CTE.
+ *
+ * The obvious `result[1]` does NOT work here. TypeORM surfaces a write as
+ * `[rows, rowCount]` only for DELETE/UPDATE; a bare `INSERT ... SELECT` comes back as
+ * the rows array alone, so `result[1]` is undefined and the count silently reads 0.
+ * That is not cosmetic: the number becomes `totalDataPoints` -> `testRunsWithNewData`,
+ * which gates the statistics-recalculation stage in simple-orchestrate-reevaluate-batch.
+ * A force-refetch that wrote 1.9M rows reported 0 and would have skipped rebuilding
+ * ds_metric_statistics, landing back on 'No metrics data collected' behind a green job.
+ *
+ * Counting in Postgres keeps the fix free: the CTE returns one integer row, so nothing
+ * materialises per inserted row in JS.
+ */
+function readInsertedCount(result: unknown): number {
+  if (!Array.isArray(result)) {
+    return 0;
+  }
+  const n = (result[0] as { n?: unknown } | undefined)?.n;
+  return typeof n === 'number' ? n : Number(n ?? 0) || 0;
+}
+
+/**
  * Insert one ds_metrics row per emitted metric, entirely inside Postgres.
  * Returns the number of rows written.
  */
@@ -121,7 +143,8 @@ export async function insertDsMetricsFromAggregate(
     ),
     emitted AS (
       ${rowsSelect}
-    )
+    ),
+    ins AS (
     INSERT INTO ds_metrics (
       test_run_id, application_dashboard_id, metrics_source_id, dashboard_uid, panel_id, time,
       metric_name, panel_title, dashboard_label, benchmark_ids, errors,
@@ -156,11 +179,13 @@ export async function insertDsMetricsFromAggregate(
     JOIN metric_panels p ON p.panel_id = e.panel_id
     WHERE e.value IS NOT NULL
     ${onConflict}
+    RETURNING 1
+    )
+    SELECT count(*)::int AS n FROM ins
   `;
 
   const result = await dataSource.query(sql, values);
-  // TypeORM surfaces a write as [rows, rowCount].
-  return Array.isArray(result) ? (result[1] ?? 0) : 0;
+  return readInsertedCount(result);
 }
 
 /**
@@ -229,7 +254,8 @@ export async function upsertPerfTestStatistics(
         AND m.ramp_up = false
         AND m.value IS NOT NULL
       GROUP BY m.application_dashboard_id, m.panel_id, left(m.metric_name, 255)
-    )
+    ),
+    ins AS (
     INSERT INTO ds_metric_statistics (
       test_run_id, application_dashboard_id, panel_id, metric_name, benchmark_id,
       dashboard_uid, dashboard_label, panel_title, unit,
@@ -304,6 +330,9 @@ export async function upsertPerfTestStatistics(
       pct_agg             = EXCLUDED.pct_agg,
       sum_value           = EXCLUDED.sum_value,
       sum_sq_value        = EXCLUDED.sum_sq_value
+    RETURNING 1
+    )
+    SELECT count(*)::int AS n FROM ins
   `;
 
   const started = Date.now();
@@ -314,7 +343,7 @@ export async function upsertPerfTestStatistics(
     testRun.organization_id ?? null,
     testRun.team_id ?? null,
   ]);
-  const rowCount = Array.isArray(result) ? (result[1] ?? 0) : 0;
+  const rowCount = readInsertedCount(result);
 
   logger.info(
     `✅ Performance-test statistics: ${rowCount} records upserted in ${Date.now() - started}ms`
