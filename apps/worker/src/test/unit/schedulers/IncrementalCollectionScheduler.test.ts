@@ -462,6 +462,172 @@ describe('IncrementalCollectionScheduler', () => {
       });
     });
 
+    // A config whose every query is disabled must not be scheduled. Without `AND
+    // dq.enabled` the source is enqueued every minute, the collector (which DOES filter on
+    // it) returns 0 data points, and incremental-metrics records a zero-width range each
+    // time. calculateCoverage divides by the number of registered sources, so a source
+    // that can never contribute drags the run to "Data collection coverage is 0%" and the
+    // sanity check marks it invalid — blaming coverage for a config toggle.
+    // Seen on SONAR-acceptatie-loadtest_perfana-00010 (141 queries disabled 37h earlier,
+    // 179 zero-width ranges). The mock returns rows regardless of the predicate, so the
+    // SQL text is what this asserts; it is the whole fix.
+    it('should only consider dynatrace configs that have enabled queries', async () => {
+      (scheduler as unknown as { databaseService: typeof mockDb }).databaseService = mockDb;
+      mockTestRunRepo.find.mockResolvedValue([makeTestRun()]);
+      mockApplicationDashboardRepo.find.mockResolvedValue([]);
+      mockDataSource.query.mockResolvedValue([]);
+
+      await scheduler.handleCron();
+
+      const dtQuery = mockDataSource.query.mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .find((sql: string) => sql.includes('FROM dynatrace_queries'));
+
+      expect(dtQuery).toBeDefined();
+      expect(dtQuery).toMatch(/AND\s+dq\.enabled/);
+    });
+
+    // The Grafana mirror of the dq.enabled bug. A source registered on dashboards Grafana
+    // cannot answer for burns a round trip every tick and returns nothing, which
+    // incremental-metrics records as a zero-width range and calculateCoverage counts
+    // against the run. On SONAR-acceptatie-loadtest_perfana-00010, 52 of the 53
+    // application_dashboards carrying a grafana_instance_id were artificial Dynatrace
+    // placeholders and the 53rd was tagged no-anomaly-detection.
+    describe('Grafana dashboards that cannot be collected', () => {
+      function arrangeDashboards(dashboards: Array<Record<string, unknown>>) {
+        (scheduler as unknown as { databaseService: typeof mockDb }).databaseService = mockDb;
+        mockTestRunRepo.find.mockResolvedValue([makeTestRun()]);
+        mockApplicationDashboardRepo.find.mockResolvedValue(dashboards);
+      }
+
+      // The mock stands in for the database: the exclusion query returns the ids of rows
+      // that are artificial or tagged, exactly as `grafana_json IS NULL OR $2 = ANY(tags)`
+      // would. A scheduler that skips the filter never asks, and enqueues them anyway.
+      function excludeGrafanaDashboardIds(ids: string[]) {
+        mockDataSource.query.mockImplementation((sql: string) => {
+          if (String(sql).includes('FROM grafana_dashboards')) {
+            return Promise.resolve(ids.map(id => ({ id })));
+          }
+          return Promise.resolve([]);
+        });
+      }
+
+      function exclusionQueryCall(): [string, unknown[]] {
+        const call = mockDataSource.query.mock.calls.find((c: unknown[]) =>
+          String(c[0]).includes('FROM grafana_dashboards')
+        );
+        expect(call).toBeDefined();
+        return [String(call![0]), call![1] as unknown[]];
+      }
+
+      // The predicate is the part of this fix with a documented wrong answer in this
+      // repo's history, and the behavioural tests below cannot see it: they mock the
+      // query by table name, so a rewrite using `grafana_id >= 800000` — which CLAUDE.md
+      // records as classifying the ENTIRE table as artificial — passes all of them green.
+      // Likewise a `dashboard_uid` join, which is wrong because a uid is unique only
+      // within a Grafana instance. Constrain the SQL itself.
+      it('detects artificial rows by grafana_json and the tag, resolving through the id', async () => {
+        arrangeDashboards([
+          { id: 'ad-1', grafanaInstanceId: 'inst-A', grafanaDashboardId: 'gd-1' },
+        ]);
+        excludeGrafanaDashboardIds([]);
+
+        await scheduler.handleCron();
+
+        const [sql, params] = exclusionQueryCall();
+
+        // Artificial rows are identified by the absence of dashboard JSON.
+        expect(sql).toMatch(/grafana_json\s+IS\s+NULL/i);
+        // ...never by a grafana_id range. 40 of 46 real dashboards on the dev database
+        // sit above 900000, so that test would exclude almost everything.
+        expect(sql).not.toMatch(/grafana_id/i);
+
+        // The tag arm binds the shared marker as a parameter rather than inlining a
+        // second copy of the literal.
+        expect(sql).toMatch(/ANY\s*\(\s*COALESCE\s*\(\s*tags/i);
+        expect(params[1]).toBe('no-anomaly-detection');
+
+        // Resolution is by primary key, not by uid: the same uid legitimately exists on
+        // several Grafana instances, so a uid match lets one instance's row vouch for
+        // another's.
+        expect(sql).toMatch(/id\s*=\s*ANY\s*\(\s*\$1::uuid\[\]\s*\)/i);
+        expect(sql).not.toMatch(/dashboard_uid/i);
+        expect(params[0]).toEqual(['gd-1']);
+      });
+
+      it('does not enqueue a grafana source when every dashboard is artificial or tagged out', async () => {
+        arrangeDashboards([
+          { id: 'ad-1', grafanaInstanceId: 'inst-A', grafanaDashboardId: 'gd-artificial' },
+          { id: 'ad-2', grafanaInstanceId: 'inst-A', grafanaDashboardId: 'gd-tagged' },
+        ]);
+        excludeGrafanaDashboardIds(['gd-artificial', 'gd-tagged']);
+
+        await scheduler.handleCron();
+
+        const sourceTypes = mockQueueAdd.mock.calls.map(
+          (c: unknown[]) => (c[1] as Record<string, unknown>).sourceType
+        );
+        expect(sourceTypes).not.toContain('grafana');
+        // performance_test is unaffected and must still be enqueued.
+        expect(sourceTypes).toContain('performance_test');
+      });
+
+      it('still enqueues the grafana source for the dashboards that remain collectable', async () => {
+        arrangeDashboards([
+          { id: 'ad-1', grafanaInstanceId: 'inst-A', grafanaDashboardId: 'gd-artificial' },
+          { id: 'ad-2', grafanaInstanceId: 'inst-A', grafanaDashboardId: 'gd-real' },
+        ]);
+        excludeGrafanaDashboardIds(['gd-artificial']);
+
+        await scheduler.handleCron();
+
+        const grafanaCall = mockQueueAdd.mock.calls.find(
+          (c: unknown[]) => (c[1] as Record<string, unknown>).sourceType === 'grafana'
+        );
+        expect(grafanaCall).toBeDefined();
+        expect((grafanaCall![1] as Record<string, unknown>).applicationDashboardIds).toEqual(['ad-2']);
+      });
+
+      // Fails open, two ways. Dropping a live dashboard from collection is worse than
+      // keeping a dead one, so neither of these may exclude.
+      it('keeps a dashboard that carries no grafana_dashboards foreign key', async () => {
+        arrangeDashboards([
+          { id: 'ad-1', grafanaInstanceId: 'inst-A', grafanaDashboardId: undefined },
+        ]);
+        excludeGrafanaDashboardIds([]);
+
+        await scheduler.handleCron();
+
+        const grafanaCall = mockQueueAdd.mock.calls.find(
+          (c: unknown[]) => (c[1] as Record<string, unknown>).sourceType === 'grafana'
+        );
+        expect(grafanaCall).toBeDefined();
+        expect((grafanaCall![1] as Record<string, unknown>).applicationDashboardIds).toEqual(['ad-1']);
+        // With no id to resolve there is nothing to ask, so the query must not run at all.
+        const asked = mockDataSource.query.mock.calls.some((c: unknown[]) =>
+          String(c[0]).includes('FROM grafana_dashboards')
+        );
+        expect(asked).toBe(false);
+      });
+
+      it('keeps a dashboard whose grafana_dashboards row no longer exists', async () => {
+        arrangeDashboards([
+          { id: 'ad-1', grafanaInstanceId: 'inst-A', grafanaDashboardId: 'gd-deleted' },
+          { id: 'ad-2', grafanaInstanceId: 'inst-A', grafanaDashboardId: 'gd-artificial' },
+        ]);
+        // The deleted row returns from nothing, so only the artificial one comes back.
+        excludeGrafanaDashboardIds(['gd-artificial']);
+
+        await scheduler.handleCron();
+
+        const grafanaCall = mockQueueAdd.mock.calls.find(
+          (c: unknown[]) => (c[1] as Record<string, unknown>).sourceType === 'grafana'
+        );
+        expect(grafanaCall).toBeDefined();
+        expect((grafanaCall![1] as Record<string, unknown>).applicationDashboardIds).toEqual(['ad-1']);
+      });
+    });
+
     it('should use testRun.startTime as fromTime when no last collected time exists', async () => {
       // Arrange
       (scheduler as unknown as { databaseService: typeof mockDb }).databaseService = mockDb;

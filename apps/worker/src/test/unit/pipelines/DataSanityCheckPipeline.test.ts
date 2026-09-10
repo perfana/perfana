@@ -16,6 +16,10 @@ const mockDb = {
   getTestRunByTestRunId: vi.fn(),
   updateTestRunByTestRunId: vi.fn(),
   getAllCollectionStatuses: vi.fn().mockResolvedValue([]),
+  removeCollectionStatus: vi.fn().mockResolvedValue(undefined),
+  // getConfiguredSourceKeys resolves Grafana sources through this repo.
+  applicationDashboardRepo: { find: vi.fn().mockResolvedValue([]) },
+  dataSource: { query: vi.fn().mockResolvedValue([]) },
 };
 
 vi.mock('../../../common/database-accessor.js', () => ({
@@ -271,6 +275,79 @@ describe('DataSanityCheckPipeline', () => {
         reasonsNotValid: null,
         dataWarnings: null,
       });
+    });
+  });
+
+  describe('orphaned collection sources (step 5)', () => {
+    // Disabling every Dynatrace query for a SUT is, to a run already in flight, the same
+    // as removing the config: the status row it left behind can never collect anything
+    // again. calculateCoverage divides by the number of registered sources, so leaving it
+    // in place pins the run at "Data collection coverage is 0%" forever — the state
+    // SONAR-acceptatie-loadtest_perfana-00010 was found in.
+    //
+    // The mock stands in for the database: the UNFILTERED query still finds the config
+    // (its rows exist, they are just disabled), the `AND enabled` one finds nothing. So a
+    // pipeline that drops the predicate keeps the row and this test goes red.
+    function mockWithDisabledDynatraceQueries() {
+      mockDb.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'dynatrace', source_id: 'dt-config-1', is_complete: false, failed_ranges: [] },
+      ]);
+      mockDb.dataSource.query.mockImplementation((sql: string) =>
+        Promise.resolve(sql.includes('enabled') ? [] : [{ dynatrace_config_id: 'dt-config-1' }])
+      );
+      mockDb.query.mockImplementation((sql: string) => {
+        if (sql.includes('ds_metrics') && sql.includes('EXISTS')) {
+          return Promise.resolve([{ has_metrics: 'true' }]);
+        }
+        if (sql.includes('ds_metric_statistics')) {
+          return Promise.resolve(sql.includes('GROUP BY') ? [] : [{ total: '100', all_missing: '0' }]);
+        }
+        return Promise.resolve([]);
+      });
+    }
+
+    it('removes a dynatrace source whose queries have all been disabled', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
+      mockWithDisabledDynatraceQueries();
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(mockDb.removeCollectionStatus).toHaveBeenCalledWith(
+        'test-run-001',
+        'dynatrace',
+        'dt-config-1'
+      );
+    });
+
+    // Must use the SAME predicate-aware mock as its sibling above, not the shared
+    // setupQueryMock: that helper's dynatrace_queries branch returns dtConfigs
+    // unconditionally, ignoring the predicate, so this test would pass with `AND enabled`
+    // reverted and read as the negative case for a fix it does not exercise.
+    it('keeps a dynatrace source that still has enabled queries', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
+      mockDb.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'dynatrace', source_id: 'dt-config-1', is_complete: true, failed_ranges: [] },
+      ]);
+      // Enabled queries exist, so BOTH the filtered and unfiltered forms find them.
+      mockDb.dataSource.query.mockResolvedValue([{ dynatrace_config_id: 'dt-config-1' }]);
+      mockDb.query.mockImplementation((sql: string) => {
+        if (sql.includes('ds_metrics') && sql.includes('EXISTS')) {
+          return Promise.resolve([{ has_metrics: 'true' }]);
+        }
+        if (sql.includes('ds_metric_statistics')) {
+          return Promise.resolve(sql.includes('GROUP BY') ? [] : [{ total: '100', all_missing: '0' }]);
+        }
+        return Promise.resolve([]);
+      });
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(mockDb.removeCollectionStatus).not.toHaveBeenCalled();
+      // The sweep must ask the filtered question, or the row above was kept by accident.
+      const dtQuery = mockDb.dataSource.query.mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .find((sql: string) => sql.includes('dynatrace_queries'));
+      expect(dtQuery).toMatch(/AND\s+enabled/);
     });
   });
 
