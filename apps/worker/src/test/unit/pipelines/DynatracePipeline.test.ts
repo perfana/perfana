@@ -48,6 +48,8 @@ const mockDatabaseService = {
   query: vi.fn(),
   getTestRunByTestRunId: vi.fn(),
   transaction: vi.fn(),
+  updateCollectedRanges: vi.fn(),
+  markCollectionComplete: vi.fn(),
 };
 
 // Mock logger
@@ -180,6 +182,8 @@ describe('DynatracePipeline', () => {
     // Setup default database service behaviors
     mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
     mockDatabaseService.query.mockResolvedValue([]);
+    mockDatabaseService.updateCollectedRanges.mockResolvedValue(undefined);
+    mockDatabaseService.markCollectionComplete.mockResolvedValue(undefined);
     mockDatabaseService.transaction.mockImplementation(async (callback) => {
       const mockManager = {
         query: vi.fn().mockResolvedValue([]),
@@ -785,6 +789,125 @@ describe('DynatracePipeline', () => {
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('No Dynatrace metrics found')
       );
+    });
+
+    // `metricsDocuments.length === 0` is the SAME signal for "ran fine, no data" and
+    // "every query failed": executeBatchQueries catches per query and returns
+    // { result: null, error }, and DataProcessor only builds a metrics doc when
+    // !result.error. `is_complete` is sticky and makes PipelineOrchestrator skip every
+    // collection stage on the next analyze, so completing here would make an expired token
+    // permanent — the operator fixes it, re-analyzes, and nothing is collected.
+    it('does NOT mark the source complete when the queries returned no metrics', async () => {
+      const input = { testRunIds: ['test-run-123'] };
+
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue([createMockQuery()]);
+      mockRepository.getDynatraceConfigById.mockResolvedValue(createMockDynatraceConfig());
+      mockAPIClient.executeBatchQueries.mockResolvedValue([
+        { tileId: 'tile-1', tileTitle: 'Panel', result: { records: [] }, error: null },
+      ]);
+      mockDataProcessor.processDynatraceResults.mockResolvedValue({
+        panelDocuments: [],
+        metricsDocuments: [],
+      });
+
+      const result = await pipeline.execute(input);
+
+      expect(result.success).toBe(true);
+      expect(mockDatabaseService.markCollectionComplete).not.toHaveBeenCalled();
+    });
+
+    // The failure case the zero-metrics signal cannot distinguish. A revoked token makes
+    // every query come back with an error; the config must stay incomplete so the next
+    // analyze re-collects it.
+    it('does NOT mark the source complete when every query errored', async () => {
+      const input = { testRunIds: ['test-run-123'] };
+
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue([createMockQuery()]);
+      mockRepository.getDynatraceConfigById.mockResolvedValue(createMockDynatraceConfig());
+      mockAPIClient.executeBatchQueries.mockResolvedValue([
+        { tileId: 'tile-1', tileTitle: 'Panel', result: null, error: '401 Unauthorized' },
+      ]);
+      // Even if a later change made a failed query still yield a document, the config
+      // must not be marked complete.
+      mockDataProcessor.processDynatraceResults.mockResolvedValue({
+        panelDocuments: [],
+        metricsDocuments: [createMockMetricsDocument()],
+      });
+
+      const result = await pipeline.execute(input);
+
+      expect(result.success).toBe(true);
+      expect(mockDatabaseService.markCollectionComplete).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('queries failed')
+      );
+    });
+
+    // A config the loop skipped entirely (config row gone, missing api token, SaaS without
+    // a platform token) executes zero queries. It used to be a key of queriesByConfig and
+    // got marked complete anyway.
+    it('does NOT mark a config complete when the config row is gone', async () => {
+      const input = { testRunIds: ['test-run-123'] };
+
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue([createMockQuery()]);
+      // The loop's first `continue`: queries reference a config that no longer exists.
+      mockRepository.getDynatraceConfigById.mockResolvedValue(null);
+      mockDataProcessor.processDynatraceResults.mockResolvedValue({
+        panelDocuments: [],
+        metricsDocuments: [createMockMetricsDocument()],
+      });
+
+      const result = await pipeline.execute(input);
+
+      expect(result.success).toBe(true);
+      expect(mockAPIClient.executeBatchQueries).not.toHaveBeenCalled();
+      expect(mockDatabaseService.markCollectionComplete).not.toHaveBeenCalled();
+    });
+
+    // The normal path, and the config id it is keyed on. Asserting expect.any(String)
+    // here would pass for a bug that tracked the testRunId or an applicationDashboardId
+    // instead, so bind the real id.
+    it('marks the source complete on the normal collection path, keyed on the config id', async () => {
+      const input = { testRunIds: ['test-run-123'] };
+      const query = createMockQuery();
+
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue([query]);
+      mockRepository.getDynatraceConfigById.mockResolvedValue(createMockDynatraceConfig());
+      mockAPIClient.executeBatchQueries.mockResolvedValue([
+        { tileId: 'tile-1', tileTitle: 'Panel', result: { records: [] }, error: null },
+      ]);
+      mockDataProcessor.processDynatraceResults.mockResolvedValue({
+        panelDocuments: [],
+        metricsDocuments: [createMockMetricsDocument()],
+      });
+
+      const result = await pipeline.execute(input);
+
+      expect(result.success).toBe(true);
+      expect(mockDatabaseService.markCollectionComplete).toHaveBeenCalledWith(
+        'test-run-123',
+        'dynatrace',
+        query.dynatraceConfigId
+      );
+    });
+
+    // Distinct from the case above and deliberately so: a config whose every query is
+    // disabled must register NO source at all, rather than a complete one. The scheduler
+    // and DataSanityCheckPipeline's orphan sweep both filter on dq.enabled; marking it
+    // complete here would resurrect a row they exist to remove.
+    it('does not touch collection status when no enabled queries are configured', async () => {
+      const input = { testRunIds: ['test-run-123'] };
+
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue([]);
+
+      const result = await pipeline.execute(input);
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('No Dynatrace queries configured')
+      );
+      expect(mockDatabaseService.updateCollectedRanges).not.toHaveBeenCalled();
+      expect(mockDatabaseService.markCollectionComplete).not.toHaveBeenCalled();
     });
 
     it('should store metrics with correct conflict handling', async () => {

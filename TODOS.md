@@ -1088,6 +1088,22 @@ reviewable.
 
 ## Completed
 
+### `analyze.ts`'s catch-all still reports failure by returning
+
+**Priority:** P3
+**Origin:** carried over from v0.2.95.0 (only the scope-lock branch was fixed then); re-surfaced
+during /ship on `fix/dynatrace-disabled-queries-coverage` (2026-09-10).
+**Why:** `simple-workers.ts` does `return await processor(job)`, so `analyze.ts:243`'s
+`{ status: 'failed' }` resolves the promise and BullMQ records the job **completed** — no retry, no
+failed-set entry, nothing for an operator to find. A failed analysis is indistinguishable from a
+successful one at the queue level. Documented as design-debt in CLAUDE.md ("A worker that reports
+failure by RETURNING is silently succeeding") and `apps/worker/README.md`, but never filed.
+**What to do:** throw from the catch-all, after deciding the retry policy — `analyze-test` is
+enqueued from several places and an analysis retried blind re-runs ten stages. Check the enqueue
+sites' `attempts` before flipping it, the way the reevaluate orchestrator's fix did.
+**Completed:** v0.2.95.13 (2026-09-10)
+
+
 ### plotly.js shipped maplibre-gl in its prebuilt bundle, and we never drew a map
 
 **Completed:** v0.2.95.11 (2026-09-10)

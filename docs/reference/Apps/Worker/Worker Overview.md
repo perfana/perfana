@@ -80,8 +80,13 @@ Stage 10: ADAPT Analysis (optional — skipped when adapt=false)
       has a ds_metric_statistics row (`delete-orphaned-results`), then concludes
 
 Stage 11: Data Sanity Check (runs outside the orchestrator)
+  └── Sweeps ds_metric_collection_status for sources no longer configured — a removed
+      Dynatrace config, one whose every query is now `enabled = false`, or a Grafana
+      dashboard that is artificial or tagged `no-anomaly-detection`
   └── Collects invalidating reasons: no start/end time, no dashboard panels, no metrics
-      data, statistics not calculated, ADAPT ran but produced no results
+      data, statistics not calculated, collection coverage below
+      SANITY_CHECK_MIN_COVERAGE (default 80), sources with failed ranges, ADAPT ran but
+      produced no results
   └── valid = reasons.length === 0
   └── Never fails the job — the verdict is returned as `dataSanity` in the job result
 ```

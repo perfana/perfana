@@ -353,7 +353,7 @@ Non-Grafana metrics sources need somewhere to hang their panels, so `ensureArtif
 Anything that reads this table has to decide whether it means "real dashboards" or "all rows". Four traps:
 
 1. **The API's `findAll` filter is deliberately loose — do not "fix" it.** It hides artificial rows with a `NOT EXISTS` on `metrics_sources.source_type != 'grafana'`, but only when no `uid` is supplied (`grafana-dashboards.service.ts`, `if (!query.uid)`), so `GET /grafana/dashboards?uid=…` still returns them by design. Two callers need that: the SLO dialog (an SLO on a Dynatrace host metric is the point) and `useAddSLOForm`'s by-uid lookup. **Tightening `findAll` breaks both**, and `apps/web/app/systems/[id]/config/hooks/__tests__/useDashboardManagement.artificialDashboards.test.ts` exists to guard against exactly that. The picker-side filter belongs in the client: `isArtificialDashboard` in `apps/web/lib/metrics-source-utils.ts`, applied in `useDashboardManagement`.
-2. **`source_type != 'grafana'` is not airtight anyway.** It misses artificial application dashboards that arrived via a **SUT import** — those have `metrics_source_id` NULL, so they join to no source type. Where a filter genuinely has to hold (the grafana-sync restore sweep), `grafana_json` is what catches them.
+2. **`source_type != 'grafana'` is not airtight anyway.** It misses artificial application dashboards that arrived via a **SUT import** — those have `metrics_source_id` NULL, so they join to no source type. Where a filter genuinely has to hold, `grafana_json` is what catches them. Two sites depend on that: the grafana-sync restore sweep, and `filterCollectableGrafanaDashboards` in `apps/worker/src/services/collectable-sources.ts`, which must not register a Grafana collection source for a placeholder (v0.2.95.12).
 3. **A dashboard `uid` is unique only within a Grafana instance.** The same uid routinely exists on several, so every lookup by uid must also scope by `grafana_instance_id` — otherwise one instance's rows vouch for another's. Both sites do: the grafana-sync restore sweep, and the uid arm of `GrafanaDashboardsService.remove`'s delete pre-check. v0.2.89.0 shipped that second one unscoped and it refused deletes nothing referenced (a false 409); fixed in v0.2.89.1.
 4. **Deleting one is not free.** `application_dashboards.grafana_dashboard_id` is `ON DELETE NO ACTION`, and app dashboards can also reference by `dashboard_uid` with a NULL foreign key. `DELETE /api/grafana/dashboards/:id` refuses with **409** rather than cascading, because Grafana dashboards are shared and a SUT delete deliberately leaves them behind. Remove the referencing rows first via `/api/grafana/application-dashboards`.
 
@@ -753,6 +753,62 @@ re-analysis must not delete every other metric's results). Two things about it a
    baseline. A metric that keeps its statistics but loses its control-group row therefore keeps its
    stale verdict. That is the known baseline-timeout case above, unchanged.
 
+### A source that is switched off must not be registered for collection
+
+`MetricCollectionGapService.calculateCoverage` sums the merged `collected_ranges` of **every** row
+in `ds_metric_collection_status` for the run and divides by (run duration x number of rows), and
+`DataSanityCheckPipeline` invalidates the run below `SANITY_CHECK_MIN_COVERAGE` (default `80`, read
+straight from `process.env`, not from `environment.ts`). Coverage is therefore an average over
+*registered* sources: one that can never contribute drags the number down, and a run whose only
+registered sources are all dead reads **0%** — failed for a config toggle.
+
+Nothing else recovers it. `incremental-metrics.ts` records a **zero-width** range when
+`dataPoints === 0`, on purpose, so the same window is retried rather than skipped past data the API
+had not published yet. The incremental ticks never accumulate coverage by themselves; the single
+full-span range written at analyze time is the only thing that makes coverage read 100%.
+
+Two switches say "this source is off", and the code that decided a source *exists* read neither
+(v0.2.95.12): `dynatrace_queries.enabled = false` (filtered by `DynatraceRepository` and the
+incremental collector, but not the scheduler) and the Grafana `no-anomaly-detection` tag (honoured by
+`createPanelDocuments`, which skips a tagged dashboard so it yields no `ds_panels`, but nowhere
+else). The artificial `grafana_dashboards` placeholders belong with them: they carry a
+`grafana_instance_id` on their `application_dashboards` row, so anything reading only that column
+mistakes them for Grafana dashboards.
+
+**All three call sites now share `services/collectable-sources.ts`.** They used to answer "which
+sources exist" independently — the scheduler, `PipelineOrchestrator.removeOrphanedCollectionSources`
+(which runs FIRST, before any stage, and had neither filter) and the identically-named method in
+`DataSanityCheckPipeline` (which runs last). A row the sanity check would have swept survived the
+orchestrator's sweep, got gap-filled, and could flip `isCollectionComplete()` to true.
+
+Four rules for anything in this path:
+
+1. **Detect an artificial row by `grafana_json`, never by a `grafana_id` range** — see
+   "`grafana_dashboards` is a mixed table" above. Resolve through `grafana_dashboard_id`, not
+   `dashboard_uid`: a uid is unique only within an instance.
+2. **The filter fails OPEN, including on its own error.** No FK, a deleted row, or a throwing query
+   all keep the dashboard. It runs inside the tick that also enqueues the Dynatrace and
+   performance-test jobs, so an exception there would abandon all collection for that minute.
+3. **`NO_ANOMALY_DETECTION_MARKER` lives in `constants/dashboard-tags.ts`**, a leaf module, so the
+   resolver can share it without pulling in the panel builder's module-level logger.
+4. **"Complete" is sticky and suppresses re-collection — never set it on a maybe.** Only a
+   force-refetch reevaluate clears `is_complete`, and `PipelineOrchestrator` skips
+   `dynatrace-collection`, `panels-processing`, `performance-test-metrics` and `metrics-collection`
+   once every status row is complete. `metricsDocuments.length === 0` is the SAME signal for "ran
+   fine, no data" and "every query failed" — `executeBatchQueries` catches per query and returns
+   `{ result: null, error }`, and `DataProcessor` only builds a document when `!result.error` — so
+   completing there would make an expired token permanent. A Dynatrace config is marked complete only
+   when its batch ran and every query succeeded; configs the loop skips (row gone, no api token, SaaS
+   without a platform token) execute nothing and are not marked. `MetricsPipeline` does not complete
+   the Grafana source on its "no panel documents" path either: an empty `ds_panels` is frequently a
+   transient config state. A source that is genuinely off is handled by not registering it, not by
+   completing it.
+
+Related: **`ds_panels` has two writers and its reader has no source filter.** `PanelsPipeline` writes
+the real Grafana panels, `DynatracePipeline` writes its own, and `getDsPanelsByTestRun` is a bare
+find on `test_run_id`. So `MetricsPipeline`'s `panels.length === 0` guard turns on rows it does not
+own, and `DynatracePipeline` early-returns at "no queries configured" *before* writing any.
+
 ### A worker that reports failure by RETURNING is silently succeeding
 
 `simple-workers.ts` wraps every registered processor as `return await processor(job)`. Returning a
@@ -772,8 +828,15 @@ remaining ones are deliberate, so know which kind you are writing:
   policy that applies is the one `reevaluateBatch` sets at enqueue time (`bullmq-client.service.ts`:
   `attempts: 2`, fixed 10 s), **not** the queue-level default in `simple-queues.ts` — a reader
   chasing this finds the wrong one first.
-- **`analyze.ts` now throws on the scope-lock refusal only.** Its catch-all still returns
-  `{ status: 'failed' }` (`analyze.ts:243`) — a remaining instance of this trap, not a fixed one.
+- **`analyze.ts` now throws from both branches (v0.2.95.13).** The scope-lock refusal threw from
+  v0.2.95.0; the catch-all followed. Returning there recorded a run whose ten-stage analysis blew
+  up as *completed*, and it also meant the retry policy the job type has always carried
+  (`attempts: 3`, exponential from 5 s — `SIMPLE_JOB_OPTIONS['analyze-test']` and the
+  `perfana-analyze` queue default agree) never once fired. Retrying is safe because every stage
+  deletes and rewrites its own rows, and the `sut:env:workload` lock is released in the `finally`
+  before BullMQ reschedules — that release is what the retry depends on, so it is pinned by a test.
+  The `partial` return above it is untouched: that one is the orchestrator deliberately reporting a
+  stage failure under `errorHandling: 'abort'`, not an unhandled exception.
   The lock branch mattered because a bulk analysis-window apply holds `sut:env:workload` across all
   of its chunks, and every run that finishes during that window used to take the returning branch
   and be recorded as analysed without ever being analysed: no benchmarks, no ADAPT, no rollup.
@@ -903,7 +966,7 @@ container mounts in tests at all.
 
 15. **A bulk analysis-window apply reports success but nothing changed for some runs** → three different causes, told apart in the API log. Either the runs were *skipped* and the dialog said so (`not-writable` / `running` / `too-short` — the handler logs the counts per reason), or the whole apply exceeded `MAX_BULK_ANALYSIS_TIME_RANGE_RUNS` (100) and was refused with a 400 naming the count, or the re-evaluate job was refused by the `sut:env:workload` scope lock and exhausted its 2 attempts. Only the third leaves `test_runs.ramp_up` written with `ds_metric_statistics` never recalculated; since v0.2.95.0 that job genuinely fails rather than being recorded completed, so look in BullMQ's failed set. Re-analysis is still fire-and-forget from the API — the open TODOS.md item. See "An analysis window belongs to a workload, not to a run" above.
 
-16. **A worker job shows as completed in BullMQ but its work plainly did not happen** → the processor reported failure by *returning* `{ status: 'failed' }` instead of throwing. `simple-workers.ts` does `return await processor(job)`, so that resolves and BullMQ marks it completed: no retry, no failed-set entry, nothing logged as an error. Grep `status: 'failed'` under `apps/worker/src/workers/`. Note `analyze.ts:243` still does this on its catch-all path by design-debt, and `incremental-metrics.ts` does it deliberately because a scheduler re-drives it. Do not confuse either with `softFail`, where the return value *is* the contract and the caller reads it via `assertStageSucceeded()`. See "A worker that reports failure by RETURNING is silently succeeding" above.
+16. **A worker job shows as completed in BullMQ but its work plainly did not happen** → the processor reported failure by *returning* `{ status: 'failed' }` instead of throwing. `simple-workers.ts` does `return await processor(job)`, so that resolves and BullMQ marks it completed: no retry, no failed-set entry, nothing logged as an error. Grep `status: 'failed'` under `apps/worker/src/workers/`. Note `incremental-metrics.ts` does this deliberately, because a scheduler re-drives it; `analyze.ts`'s catch-all did until v0.2.95.13. Do not confuse either with `softFail`, where the return value *is* the contract and the caller reads it via `assertStageSucceeded()`. See "A worker that reports failure by RETURNING is silently succeeding" above.
 
 17. **A hover tooltip's text sits away from its background box, or a chart is laid out at the wrong width after a drawer or panel animation** → that chart is a raw `dynamic(() => import('@/components/plotly-cartesian'))` rather than `@/components/ResponsivePlot`, so it only relayouts when the *window* resizes. Most visible on Chrome under Windows, where a classic scrollbar takes ~15px off the container the moment it appears; macOS overlay scrollbars take nothing, so it does not reproduce on a Mac. Fixed for the anomaly-detection charts in v0.2.95.2. See "A Plotly chart must observe its own container, not the window" above.
 
@@ -912,6 +975,10 @@ container mounts in tests at all.
 19. **A panel or metric dropdown is slow on a large run** → check the shape of the query before reaching for a new table or a hand-rolled loose index scan. A `GROUP BY` with `COUNT(DISTINCT)` / `ARRAY_AGG(DISTINCT)` over `ds_metrics` walks every data point (2035 ms on 12.8 M rows); making the inner set distinct first is index-only over `idx_ds_metrics_panel_lookup` (927 ms, v0.2.95.3). A plain single-column `SELECT DISTINCT` on that table is already fast — TimescaleDB SkipScans it in 3.9 ms — so EXPLAIN it before optimising it. See item 7 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 
 20. **"All aggregated" appears twice in a metric dropdown, an "All aggregated" series renders blank or disagrees with the panel it sits on, or a report's Custom Graphs section says "No metrics data found for the selected graph presets"** → the *synthetic* run-wide aggregate is being offered or intercepted on the real `Performance test metrics all aggregated` dashboard, where that exact name is an ordinary stored series on every panel. Three guards keep the two apart and each fails silently when weakened: `shouldOfferAllAggregated`'s third parameter (required on purpose — defaulting it to `[]` fails open), `isAllAggregatedDashboard` at the three web add-series sites, and `isSyntheticAllAggregated` in the report data fetcher. A blank report section is the report-side symptom; a series whose numbers disagree with the panel is the chart-side one. The empty *graph preset* section was a fourth case, fixed in v0.2.95.5: the report read graph presets from `ds_metrics` only, where the synthetic series has no rows by definition. See "The perf-test pipeline writes one extra dashboard, and its series name was already taken" above.
+
+21. **A run is marked invalid with "Data collection coverage is 0% (threshold: 80%)" on a system whose sources were deliberately switched off** → not a data-quality problem. `calculateCoverage` divides by the number of rows in `ds_metric_collection_status`, so a source registered for collection that can never return anything pins the average at 0, and the incremental ticks cannot rescue it — a tick with no data deliberately records a **zero-width** range so its window is retried. Two switches the registration path used to ignore: `dynatrace_queries.enabled = false` and the Grafana `no-anomaly-detection` tag, plus the artificial `grafana_dashboards` placeholders that are not Grafana dashboards at all. Fixed in v0.2.95.12; on an older deploy, delete the dead `ds_metric_collection_status` rows for the run and re-analyse. See "A source that is switched off must not be registered for collection" above.
+
+22. **Dynatrace data stops arriving, the token is fixed, and a re-analyse still collects nothing** → the config was marked `is_complete` while every query was failing, and `PipelineOrchestrator` skips all four collection stages once every status row is complete. Only a force-refetch reevaluate clears it. Fixed in v0.2.95.12 (a config is completed only when its batch ran and every query succeeded); on an older deploy, force-refetch or clear `is_complete` for the run. The tell is that `metricsDocuments.length === 0` is the same signal for "no data" and "all queries errored" — check the worker log for per-query errors rather than the collection status.
 
 ## How-To Tutorials
 

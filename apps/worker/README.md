@@ -242,6 +242,38 @@ the `DELETE` so a run whose `ds_metrics` have aged out keeps its statistics inst
 wiped and replaced with nothing. Every number the removed logs carried is in the `INSERT`'s row
 count already.
 
+### A switched-off source still counted against coverage
+
+`MetricCollectionGapService.calculateCoverage` divides the summed `collected_ranges` by (run duration
+x number of `ds_metric_collection_status` rows), and `DataSanityCheckPipeline` invalidates the run
+below `SANITY_CHECK_MIN_COVERAGE`. Registering a source that cannot collect is therefore enough to
+fail a run on its own — with no other live source, coverage is 0% and the reason reads
+`Data collection coverage is 0% (threshold: 80%)`.
+
+The incremental ticks cannot save it: `incremental-metrics.ts` writes a **zero-width** range when
+`dataPoints === 0`, deliberately, so the window is retried instead of skipped. The full-span range
+written at analyze time is the only thing that ever makes coverage read 100%.
+
+Two switches mean "off", and registration used to read neither (v0.2.95.12):
+
+| Switch | Honoured in |
+|---|---|
+| `dynatrace_queries.enabled = false` | `services/collectable-sources.ts`, shared by the scheduler and **both** orphan sweeps |
+| Grafana `no-anomaly-detection` tag, and artificial rows (`grafana_json IS NULL`) | the same module, before `groupDashboardsBySource`. Fails **open** — no FK, a deleted row, or a throwing query all keep the dashboard |
+
+`getConfiguredSourceKeys` exists because three call sites answered "which sources exist"
+independently and disagreed. `PipelineOrchestrator`'s sweep runs FIRST, before any stage, and had
+neither filter, so a dead source it kept was gap-filled and could flip `isCollectionComplete()`.
+
+**`is_complete` is sticky, so never set it on a maybe.** Only a force-refetch reevaluate clears it,
+and `PipelineOrchestrator` skips `dynatrace-collection`, `panels-processing`,
+`performance-test-metrics` and `metrics-collection` once every row is complete.
+`metricsDocuments.length === 0` is the same signal for "ran fine, no data" and "every query failed"
+(`executeBatchQueries` catches per query and returns `{ result: null, error }`), so a Dynatrace
+config is completed only when its batch ran and every query succeeded. `MetricsPipeline` does not
+complete the Grafana source on its "no panel documents" path either — an empty `ds_panels` is
+frequently transient.
+
 ### Complex Workers (custom logic)
 
 - `analyzeTestWorker` — orchestrates full test analysis (`analyze-test`)
@@ -327,7 +359,7 @@ it. Throwing is the only way a job fails.
 | Site | Behaviour |
 |---|---|
 | `simple-orchestrate-reevaluate-batch.ts` | **Throws** since v0.2.95.0, on a scope-lock refusal and from its catch-all. Returning left `test_runs.ramp_up` written with `ds_metric_statistics` never recalculated, behind a green job; with chunking it also leaves earlier chunks rewritten and the rest on the old window. Retries come from the enqueue (`bullmq-client.service.ts`: `attempts: 2`, fixed 10s), **not** the queue default in `simple-queues.ts`. |
-| `analyze.ts` | **Throws on the scope-lock refusal only** (v0.2.95.0). Its catch-all still returns — a remaining instance, not a fixed one. The lock branch mattered because a workload-wide analysis-window apply holds `sut:env:workload` across all its chunks, and every run finishing in that window was recorded as analysed without benchmarks, ADAPT or rollup. |
+| `analyze.ts` | **Throws from both branches** — the scope-lock refusal since v0.2.95.0, the catch-all since v0.2.95.13. The lock branch mattered because a workload-wide analysis-window apply holds `sut:env:workload` across all its chunks, and every run finishing in that window was recorded as analysed without benchmarks, ADAPT or rollup. The catch-all mattered because a ten-stage analysis that blew up was recorded as completed, and because `attempts: 3` / exponential-from-5s (queue default and `SIMPLE_JOB_OPTIONS` agree) had never once fired. The retry depends on the `finally` handing the `sut:env:workload` lock back before BullMQ reschedules; that release is pinned by a test. The `partial` return above the catch-all is untouched — it is the orchestrator deliberately reporting a stage failure under `errorHandling: 'abort'`. |
 | `incremental-metrics.ts` | Returns **deliberately** — a scheduler re-drives it next cycle, so a BullMQ failure would double the retry. |
 
 ### The re-evaluate orchestrator chunks its heavy stages

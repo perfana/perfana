@@ -11,6 +11,7 @@ import { getConfig } from '../config/environment.js';
 import { JOB_NAMES } from '../types/jobs.js';
 import { TestRun, ApplicationDashboard } from '@perfana/shared/entities';
 import { LessThan as _LessThan, MoreThan } from 'typeorm';
+import { filterCollectableGrafanaDashboards } from '../services/collectable-sources.js';
 
 /**
  * Incremental Collection Scheduler
@@ -408,8 +409,15 @@ export class IncrementalCollectionScheduler {
         relations: ['grafanaInstance'],
       });
 
-      // Group Grafana dashboards by instance
-      const grafanaGroups = this.groupDashboardsBySource(applicationDashboards);
+      // Group Grafana dashboards by instance, after dropping the ones Grafana can never
+      // answer for. Without this the source is registered on the strength of rows the
+      // panel builder discards, and every tick is a round trip that returns nothing.
+      const collectableDashboards = await filterCollectableGrafanaDashboards(
+        this.databaseService,
+        applicationDashboards,
+        this.logger
+      );
+      const grafanaGroups = this.groupDashboardsBySource(collectableDashboards);
 
       for (const [sourceKey, dashboards] of grafanaGroups.entries()) {
         const { sourceType, sourceId } = this.parseSourceKey(sourceKey);
@@ -473,7 +481,14 @@ export class IncrementalCollectionScheduler {
         );
       }
 
-      // 2. Get unique Dynatrace configs for this test run
+      // 2. Get unique Dynatrace configs for this test run.
+      // `AND dq.enabled` matches DynatraceRepository.getQueries and the incremental
+      // collector, which both filter on it. Without it a config whose every query is
+      // disabled still gets enqueued every minute: the collector filters all of them
+      // out, returns 0 data points, and incremental-metrics records a zero-width range.
+      // calculateCoverage divides by the number of registered sources, so a source that
+      // can never contribute drags the run's coverage down and the sanity check fails it
+      // with "Data collection coverage is 0%".
       const dynatraceConfigs = await this.databaseService.dataSource.query(`
         SELECT DISTINCT dq.dynatrace_config_id
         FROM dynatrace_queries dq
@@ -481,6 +496,7 @@ export class IncrementalCollectionScheduler {
           AND dq.test_environment = $2
           AND dq.workload = $3
           AND dq.dynatrace_config_id IS NOT NULL
+          AND dq.enabled
       `, [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload]);
 
       for (const row of dynatraceConfigs) {

@@ -116,6 +116,14 @@ export class MetricsPipeline extends BasePipelineTypeORM {
 
       if (panels.length === 0) {
         this.logger.warn(`⚠️ No panel documents found for test run ${testRunId}`);
+        // Deliberately does NOT mark the source complete. `is_complete` is sticky — the
+        // only reset is a force-refetch reevaluate — and PipelineOrchestrator skips every
+        // collection stage once all statuses are complete. An empty ds_panels is often
+        // TRANSIENT (grafana-sync has not written grafana_json for a new dashboard yet, or
+        // an application_dashboard's uid matches no grafana_dashboards row), so completing
+        // here would let one bad analyze permanently suppress collection for the run.
+        // A source that is genuinely switched off is handled where it belongs, by not
+        // registering it at all — see services/collectable-sources.ts.
         return this.createSuccessResult({
           testRunId,
           metricsCollected: 0,
@@ -152,22 +160,7 @@ export class MetricsPipeline extends BasePipelineTypeORM {
       }
 
       // Track collection status for gap detection by refresh-missing-data
-      try {
-        const grafanaInstanceId = getGrafanaInstanceId();
-        if (testRun.startTime && testRun.endTime) {
-          await this.db.updateCollectedRanges(
-            testRunId,
-            'grafana',
-            grafanaInstanceId,
-            { from: testRun.startTime, to: testRun.endTime }
-          );
-          await this.db.markCollectionComplete(testRunId, 'grafana', grafanaInstanceId);
-          this.logger.info(`📋 Collection status tracked: grafana/${grafanaInstanceId ?? 'null'} marked complete`);
-        }
-      } catch (statusError) {
-        // Non-fatal: collection status tracking failure shouldn't fail the pipeline
-        this.logger.warn(`⚠️ Failed to track collection status: ${statusError}`);
-      }
+      await this.trackCollectionStatus(testRunId, testRun);
 
       const duration = Date.now() - startTime;
       const totalDataPoints = flattenedRecords.length;
@@ -203,6 +196,42 @@ export class MetricsPipeline extends BasePipelineTypeORM {
         { testRunId },
         duration
       );
+    }
+  }
+
+  /**
+   * Record that Grafana collection has been fully processed for this run.
+   *
+   * Called only after Grafana was actually queried. It writes one full-span range and
+   * marks the source complete, which is what makes coverage read 100%; the incremental
+   * ticks contribute nothing, because a tick that returns no data deliberately records a
+   * zero-width range so its window is retried (see incremental-metrics.ts).
+   *
+   * NOT called from the two "no panels" returns: `is_complete` is sticky and suppresses
+   * every later collection stage, and an empty ds_panels is frequently a transient config
+   * state rather than a deliberate switch-off.
+   *
+   * Never throws: a failure to write bookkeeping must not fail a collection that worked.
+   */
+  private async trackCollectionStatus(
+    testRunId: string,
+    testRun: { startTime?: Date; endTime?: Date }
+  ): Promise<void> {
+    try {
+      const grafanaInstanceId = getGrafanaInstanceId();
+      if (testRun.startTime && testRun.endTime) {
+        await this.db.updateCollectedRanges(
+          testRunId,
+          'grafana',
+          grafanaInstanceId,
+          { from: testRun.startTime, to: testRun.endTime }
+        );
+        await this.db.markCollectionComplete(testRunId, 'grafana', grafanaInstanceId);
+        this.logger.info(`📋 Collection status tracked: grafana/${grafanaInstanceId ?? 'null'} marked complete`);
+      }
+    } catch (statusError) {
+      // Non-fatal: collection status tracking failure shouldn't fail the pipeline
+      this.logger.warn(`⚠️ Failed to track collection status: ${statusError}`);
     }
   }
 

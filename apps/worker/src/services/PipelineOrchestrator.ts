@@ -20,6 +20,7 @@ import { MetricCollectionGapService } from './MetricCollectionGapService.js';
 import { WorkerDatabaseService } from '../common/database.service.js';
 import { ProgressReporter } from './ProgressReporter.js';
 import type { DsMetricCollectionStatus } from '@perfana/shared/entities';
+import { getConfiguredSourceKeys } from './collectable-sources.js';
 
 /**
  * Pipeline Orchestrator - Coordinates the execution of pipeline stages
@@ -294,35 +295,12 @@ export class PipelineOrchestrator {
       return statuses;
     }
 
-    // Build the set of currently configured source keys
-    const configuredSources = new Set<string>();
-
-    // performance_test is always valid
-    configuredSources.add('performance_test::null');
-
-    // Grafana sources: application_dashboards for this SUT/env
-    const appDashboards = await this.databaseService.applicationDashboardRepo.find({
-      where: {
-        systemUnderTestId: testRun.systemUnderTestId,
-        testEnvironment: testRun.testEnvironment,
-      },
-    });
-    for (const ad of appDashboards) {
-      if (ad.grafanaInstanceId) {
-        configuredSources.add(`grafana::${ad.grafanaInstanceId}`);
-      }
-    }
-
-    // Dynatrace sources: dynatrace_queries for this SUT/env/workload
-    const dtConfigs = await this.databaseService.dataSource.query<Array<{ dynatrace_config_id: string }>>(
-      `SELECT DISTINCT dynatrace_config_id FROM dynatrace_queries
-       WHERE system_under_test_id = $1 AND test_environment = $2 AND workload = $3
-         AND dynatrace_config_id IS NOT NULL`,
-      [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload]
-    );
-    for (const row of dtConfigs) {
-      configuredSources.add(`dynatrace::${row.dynatrace_config_id}`);
-    }
+    // Shared with DataSanityCheckPipeline's sweep and with IncrementalCollectionScheduler.
+    // This copy previously had NEITHER the dq.enabled filter nor the artificial/tagged
+    // Grafana filter, and it runs FIRST — before any stage — so a dead source it kept was
+    // gap-filled, and could flip isCollectionComplete() to true and skip every collection
+    // stage for the run.
+    const configuredSources = await getConfiguredSourceKeys(this.databaseService, testRun);
 
     // Remove statuses that reference sources no longer configured
     const remaining: DsMetricCollectionStatus[] = [];

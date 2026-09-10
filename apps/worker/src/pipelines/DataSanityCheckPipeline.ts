@@ -1,6 +1,7 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
+import { getConfiguredSourceKeys } from '../services/collectable-sources.js';
 
 interface DataSanityCheckInput {
   testRunId: string;
@@ -348,29 +349,10 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
       return;
     }
 
-    // Build set of currently configured sources
-    const configured = new Set<string>();
-    configured.add('performance_test::null');
-
-    const appDashboards = await this.query<{ grafana_instance_id: string }>(
-      `SELECT DISTINCT grafana_instance_id FROM application_dashboards
-       WHERE system_under_test_id = $1 AND test_environment = $2
-         AND grafana_instance_id IS NOT NULL`,
-      [testRun.systemUnderTestId, testRun.testEnvironment]
-    );
-    for (const row of appDashboards) {
-      configured.add(`grafana::${row.grafana_instance_id}`);
-    }
-
-    const dtConfigs = await this.query<{ dynatrace_config_id: string }>(
-      `SELECT DISTINCT dynatrace_config_id FROM dynatrace_queries
-       WHERE system_under_test_id = $1 AND test_environment = $2 AND workload = $3
-         AND dynatrace_config_id IS NOT NULL`,
-      [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload]
-    );
-    for (const row of dtConfigs) {
-      configured.add(`dynatrace::${row.dynatrace_config_id}`);
-    }
+    // Shared with PipelineOrchestrator's sweep and with the scheduler. These three used to
+    // answer "which sources exist" independently and disagreed; a row one of them would
+    // have removed survived, and coverage counted it.
+    const configured = await getConfiguredSourceKeys(this.db, testRun);
 
     // Remove orphaned records
     for (const status of statuses) {
