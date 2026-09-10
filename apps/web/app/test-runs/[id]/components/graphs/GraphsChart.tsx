@@ -31,7 +31,7 @@ import { ChartLoadingState, ChartEmptyState } from './components';
 import { mergeEventShapesIntoIndexedLayout } from '../shared/event-lines';
 
 // Dynamically import Plotly to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 /**
  * GraphsChart Component

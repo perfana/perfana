@@ -3,14 +3,14 @@
 import React from 'react';
 import { Box, CircularProgress, Typography, useTheme, type Theme } from '@mui/material';
 import dynamic from 'next/dynamic';
-import { Layout, Config } from 'plotly.js';
+import type { Layout, Config } from 'plotly.js';
 import { GraphData, Panel, RelatedTestRun } from '../types/compare.types';
 import { TestRun } from '@/types/test-runs';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
 
 // Dynamically import Plotly to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface ComparisonPlotProps {
   metricName: string;

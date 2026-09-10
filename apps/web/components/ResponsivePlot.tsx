@@ -5,7 +5,7 @@ import React, { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { getPlotly, type PlotlyGraphDiv } from '@/lib/plotly';
 
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 /**
  * react-plotly.js 2.6.0's `useResizeHandler` only does
@@ -40,8 +40,9 @@ export default function ResponsivePlot(props: PlotParams) {
       // A hidden tab panel reports 0x0. Resizing to nothing is wasted work.
       if (!entry || entry.contentRect.width === 0) return;
       // No graph div means the lazy plotly chunk has not drawn yet; its first draw
-      // measures the current size anyway. That same chunk (plotly.js/dist/plotly)
-      // sets window.Plotly unconditionally, so getPlotly() resolves past this point.
+      // measures the current size anyway. That same chunk (@/components/plotly-cartesian,
+      // built on plotly.js/dist/plotly-cartesian) sets window.Plotly, so getPlotly()
+      // resolves past this point.
       const gd = el.querySelector<PlotlyGraphDiv>('.js-plotly-plot');
       if (!gd) return;
       // Rejects when the div is hidden; nothing to do, and an unhandled rejection

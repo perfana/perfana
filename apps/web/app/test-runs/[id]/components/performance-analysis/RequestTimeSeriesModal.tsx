@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { Config } from 'plotly.js';
+import type { Config } from 'plotly.js';
 import {
   Dialog,
   DialogTitle,
@@ -28,7 +28,7 @@ import {
 import { authenticatedFetch } from '@/lib/api';
 
 // Dynamically import Plot to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface TimeSeriesDataPoint {
   time_bucket: string;

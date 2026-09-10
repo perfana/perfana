@@ -13,7 +13,7 @@ import ErrorsByCodeTable from './ErrorsByCodeTable';
 import { ErrorByCode } from '../types';
 
 // Dynamically import Plot to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface ErrorsOverTimeChartProps {
   errorsOverTime: ErrorOverTime[];

@@ -10,7 +10,7 @@ import { generatePlotlyData, getMetricLabel, buildPlotLayout, buildPlotConfig } 
 import { mergeEventShapesIntoLayout } from '../../../shared/event-lines';
 
 // Dynamically import Plot to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface TransactionChartProps {
   data: TimeSeriesResponse;

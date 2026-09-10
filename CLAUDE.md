@@ -853,7 +853,7 @@ under Windows and not on a Mac.
 `apps/web/components/ResponsivePlot.tsx` (v0.2.95.2) is the fix: it wraps `react-plotly.js`,
 observes its own wrapper div, and calls `Plotly.Plots.resize` on **its own** graph div. New chart
 call sites should import it (`import Plot from '@/components/ResponsivePlot'`) rather than writing
-`dynamic(() => import('react-plotly.js'))` again.
+`dynamic(() => import('@/components/plotly-cartesian'))` again.
 
 Four things about it are load-bearing:
 
@@ -874,7 +874,7 @@ Four things about it are load-bearing:
    rejection surfaces as a page error.
 4. **Only three call sites use it so far** — `anomaly-detection/components/TrendChart.tsx`,
    `anomaly-detection/.../AnomalyExpandedContent.tsx`, and `compare/CurrentTestRunChart.tsx`. Nine
-   others still call `dynamic(() => import('react-plotly.js'))` directly and therefore still respond
+   others still call `dynamic(() => import('@/components/plotly-cartesian'))` directly and therefore still respond
    to a window resize only; that is deliberate scope, tracked in TODOS.md, not an oversight.
 
 jsdom has no `ResizeObserver`. `apps/web/jest.setup.js` stubs it so a component that observes its
@@ -905,7 +905,7 @@ container mounts in tests at all.
 
 16. **A worker job shows as completed in BullMQ but its work plainly did not happen** → the processor reported failure by *returning* `{ status: 'failed' }` instead of throwing. `simple-workers.ts` does `return await processor(job)`, so that resolves and BullMQ marks it completed: no retry, no failed-set entry, nothing logged as an error. Grep `status: 'failed'` under `apps/worker/src/workers/`. Note `analyze.ts:243` still does this on its catch-all path by design-debt, and `incremental-metrics.ts` does it deliberately because a scheduler re-drives it. Do not confuse either with `softFail`, where the return value *is* the contract and the caller reads it via `assertStageSucceeded()`. See "A worker that reports failure by RETURNING is silently succeeding" above.
 
-17. **A hover tooltip's text sits away from its background box, or a chart is laid out at the wrong width after a drawer or panel animation** → that chart is a raw `dynamic(() => import('react-plotly.js'))` rather than `@/components/ResponsivePlot`, so it only relayouts when the *window* resizes. Most visible on Chrome under Windows, where a classic scrollbar takes ~15px off the container the moment it appears; macOS overlay scrollbars take nothing, so it does not reproduce on a Mac. Fixed for the anomaly-detection charts in v0.2.95.2. See "A Plotly chart must observe its own container, not the window" above.
+17. **A hover tooltip's text sits away from its background box, or a chart is laid out at the wrong width after a drawer or panel animation** → that chart is a raw `dynamic(() => import('@/components/plotly-cartesian'))` rather than `@/components/ResponsivePlot`, so it only relayouts when the *window* resizes. Most visible on Chrome under Windows, where a classic scrollbar takes ~15px off the container the moment it appears; macOS overlay scrollbars take nothing, so it does not reproduce on a Mac. Fixed for the anomaly-detection charts in v0.2.95.2. See "A Plotly chart must observe its own container, not the window" above.
 
 18. **A metrics picker lists only the performance-test panels while a run is still going, or omits a metric the graph endpoint will happily draw** → it is sourced from `ds_metric_statistics` instead of `ds_metrics`. That table has two writers on different schedules, and during a live run only `PerformanceTestMetricsPipeline` has written to it; it also holds rows only for non-null, non-ramp-up metrics on org-scoped dashboards. Neither symptom produces an empty result, so no fallback catches it. See "`ds_metric_statistics` is not a faster `ds_metrics`" above.
 
