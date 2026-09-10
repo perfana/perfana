@@ -828,8 +828,15 @@ remaining ones are deliberate, so know which kind you are writing:
   policy that applies is the one `reevaluateBatch` sets at enqueue time (`bullmq-client.service.ts`:
   `attempts: 2`, fixed 10 s), **not** the queue-level default in `simple-queues.ts` — a reader
   chasing this finds the wrong one first.
-- **`analyze.ts` now throws on the scope-lock refusal only.** Its catch-all still returns
-  `{ status: 'failed' }` (`analyze.ts:243`) — a remaining instance of this trap, not a fixed one.
+- **`analyze.ts` now throws from both branches (v0.2.95.13).** The scope-lock refusal threw from
+  v0.2.95.0; the catch-all followed. Returning there recorded a run whose ten-stage analysis blew
+  up as *completed*, and it also meant the retry policy the job type has always carried
+  (`attempts: 3`, exponential from 5 s — `SIMPLE_JOB_OPTIONS['analyze-test']` and the
+  `perfana-analyze` queue default agree) never once fired. Retrying is safe because every stage
+  deletes and rewrites its own rows, and the `sut:env:workload` lock is released in the `finally`
+  before BullMQ reschedules — that release is what the retry depends on, so it is pinned by a test.
+  The `partial` return above it is untouched: that one is the orchestrator deliberately reporting a
+  stage failure under `errorHandling: 'abort'`, not an unhandled exception.
   The lock branch mattered because a bulk analysis-window apply holds `sut:env:workload` across all
   of its chunks, and every run that finishes during that window used to take the returning branch
   and be recorded as analysed without ever being analysed: no benchmarks, no ADAPT, no rollup.
@@ -959,7 +966,7 @@ container mounts in tests at all.
 
 15. **A bulk analysis-window apply reports success but nothing changed for some runs** → three different causes, told apart in the API log. Either the runs were *skipped* and the dialog said so (`not-writable` / `running` / `too-short` — the handler logs the counts per reason), or the whole apply exceeded `MAX_BULK_ANALYSIS_TIME_RANGE_RUNS` (100) and was refused with a 400 naming the count, or the re-evaluate job was refused by the `sut:env:workload` scope lock and exhausted its 2 attempts. Only the third leaves `test_runs.ramp_up` written with `ds_metric_statistics` never recalculated; since v0.2.95.0 that job genuinely fails rather than being recorded completed, so look in BullMQ's failed set. Re-analysis is still fire-and-forget from the API — the open TODOS.md item. See "An analysis window belongs to a workload, not to a run" above.
 
-16. **A worker job shows as completed in BullMQ but its work plainly did not happen** → the processor reported failure by *returning* `{ status: 'failed' }` instead of throwing. `simple-workers.ts` does `return await processor(job)`, so that resolves and BullMQ marks it completed: no retry, no failed-set entry, nothing logged as an error. Grep `status: 'failed'` under `apps/worker/src/workers/`. Note `analyze.ts:243` still does this on its catch-all path by design-debt, and `incremental-metrics.ts` does it deliberately because a scheduler re-drives it. Do not confuse either with `softFail`, where the return value *is* the contract and the caller reads it via `assertStageSucceeded()`. See "A worker that reports failure by RETURNING is silently succeeding" above.
+16. **A worker job shows as completed in BullMQ but its work plainly did not happen** → the processor reported failure by *returning* `{ status: 'failed' }` instead of throwing. `simple-workers.ts` does `return await processor(job)`, so that resolves and BullMQ marks it completed: no retry, no failed-set entry, nothing logged as an error. Grep `status: 'failed'` under `apps/worker/src/workers/`. Note `incremental-metrics.ts` does this deliberately, because a scheduler re-drives it; `analyze.ts`'s catch-all did until v0.2.95.13. Do not confuse either with `softFail`, where the return value *is* the contract and the caller reads it via `assertStageSucceeded()`. See "A worker that reports failure by RETURNING is silently succeeding" above.
 
 17. **A hover tooltip's text sits away from its background box, or a chart is laid out at the wrong width after a drawer or panel animation** → that chart is a raw `dynamic(() => import('@/components/plotly-cartesian'))` rather than `@/components/ResponsivePlot`, so it only relayouts when the *window* resizes. Most visible on Chrome under Windows, where a classic scrollbar takes ~15px off the container the moment it appears; macOS overlay scrollbars take nothing, so it does not reproduce on a Mac. Fixed for the anomaly-detection charts in v0.2.95.2. See "A Plotly chart must observe its own container, not the window" above.
 
