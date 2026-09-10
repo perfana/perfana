@@ -61,8 +61,9 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
     it('copies the survivors aside, deletes wholesale, then restores them — in one transaction', async () => {
       txQuery
         .mockResolvedValueOnce([[], 0]) // CREATE TEMP TABLE ... AS SELECT
+        .mockResolvedValueOnce([{ n: 3120 }]) // SELECT count(*) FROM ds_metrics_keep
         .mockResolvedValueOnce([[], 2620348]) // DELETE
-        .mockResolvedValueOnce([[], 3120]); // INSERT back
+        .mockResolvedValueOnce([[], 0]); // INSERT back — no RETURNING, so no usable count
 
       const result = await service.deletePerfTestMetricsForRun('tr-1', ['performance_test', 'grafana']);
 
@@ -72,11 +73,14 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
       const sqls = txQuery.mock.calls.map((c: unknown[]) => String(c[0]));
       expect(sqls[0]).toContain('CREATE TEMP TABLE ds_metrics_keep');
       expect(sqls[0]).toContain('ON COMMIT DROP');
-      expect(sqls[1]).toContain('DELETE FROM ds_metrics WHERE test_run_id = $1');
-      expect(sqls[2]).toContain('INSERT INTO ds_metrics SELECT * FROM ds_metrics_keep');
+      // The survivor count comes from the temp table, never from the INSERT result:
+      // an INSERT without RETURNING has no rowCount in TypeORM's [rows, rowCount] shape.
+      expect(sqls[1]).toContain('count(*)::int AS n FROM ds_metrics_keep');
+      expect(sqls[2]).toContain('DELETE FROM ds_metrics WHERE test_run_id = $1');
+      expect(sqls[3]).toContain('INSERT INTO ds_metrics SELECT * FROM ds_metrics_keep');
 
       // The delete itself stays segment-targeted even here.
-      expect(sqls[1]).not.toContain('metrics_source_id');
+      expect(sqls[2]).not.toContain('metrics_source_id');
       // Nothing ran outside the transaction.
       expect(query).not.toHaveBeenCalled();
     });
@@ -98,7 +102,7 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
 
       await service.deletePerfTestMetricsForRun('tr-1', ['performance_test', 'grafana', 'dynatrace']);
 
-      expect(txQuery).toHaveBeenCalledTimes(3);
+      expect(txQuery).toHaveBeenCalledTimes(4);
       expect(String(txQuery.mock.calls[0][0])).toContain('CREATE TEMP TABLE ds_metrics_keep');
     });
   });

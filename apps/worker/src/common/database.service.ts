@@ -1024,13 +1024,20 @@ export class WorkerDatabaseService implements OnModuleInit {
         [testRunId]
       );
 
+      // Count the survivors from the temp table, NOT from the INSERT's result.
+      // TypeORM surfaces `[rows, rowCount]` for DELETE/UPDATE but an INSERT without
+      // RETURNING comes back as the rows array alone, so `insertResult[1]` is undefined
+      // and silently reads 0 — the same trap that made the perf-test writers report
+      // writing nothing. The temp table is a few thousand rows, so counting it is free.
+      const keepCount: Array<{ n: number }> = await manager.query(
+        `SELECT count(*)::int AS n FROM ds_metrics_keep`
+      );
+      const restored = Number(keepCount?.[0]?.n ?? 0) || 0;
+
       const deleteResult = await manager.query(`DELETE FROM ds_metrics WHERE test_run_id = $1`, [testRunId]);
       const deleted = Array.isArray(deleteResult) ? (deleteResult[1] ?? 0) : 0;
 
-      const insertResult = await manager.query(
-        `INSERT INTO ds_metrics SELECT * FROM ds_metrics_keep`
-      );
-      const restored = Array.isArray(insertResult) ? (insertResult[1] ?? 0) : 0;
+      await manager.query(`INSERT INTO ds_metrics SELECT * FROM ds_metrics_keep`);
 
       return { deleted: deleted - restored, restored };
     });
