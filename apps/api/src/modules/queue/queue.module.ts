@@ -1,9 +1,16 @@
 import { Global, Module, Logger } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { Queue, ConnectionOptions } from 'bullmq';
 import IORedis from 'ioredis';
-import { QueueService } from './queue.service';
 
+/**
+ * Provides the shared Redis client. Despite the name, this module no longer owns a
+ * queue: it used to also create a BullMQ `perfana-jobs` queue and a `QueueService`
+ * wrapper, whose sole producer was stale detection. Nothing in the monorepo ever
+ * consumed that queue (#584), so jobs accumulated in it forever. Analysis is enqueued
+ * through BullMQClientService onto `perfana-analyze`, which the worker actually reads.
+ *
+ * Every other importer of this module wants REDIS_CLIENT, not a queue.
+ */
 @Global()
 @Module({
   imports: [ConfigModule],
@@ -35,32 +42,7 @@ import { QueueService } from './queue.service';
       },
       inject: [ConfigService],
     },
-    {
-      provide: 'BULL_QUEUE',
-      useFactory: (redis: IORedis) => {
-        const logger = new Logger('BullMQFactory');
-        logger.log('Initializing BullMQ queue...');
-
-        const queue = new Queue('perfana-jobs', {
-          connection: redis as unknown as ConnectionOptions,
-          defaultJobOptions: {
-            removeOnComplete: 100,
-            removeOnFail: 50,
-            attempts: 3,
-            backoff: {
-              type: 'exponential',
-              delay: 2000,
-            },
-          },
-        });
-
-        logger.log('BullMQ queue initialized successfully');
-        return queue;
-      },
-      inject: ['REDIS_CLIENT'],
-    },
-    QueueService,
   ],
-  exports: ['REDIS_CLIENT', 'BULL_QUEUE', QueueService],
+  exports: ['REDIS_CLIENT'],
 })
 export class QueueModule {}
