@@ -602,8 +602,10 @@ lands over the chart title and an empty box sits near the data point. It needs a
 resize to reproduce, of which two are known: a MUI drawer animating a chart narrower, and a classic
 Windows scrollbar taking ~15px off a container the moment it appears. macOS overlay scrollbars take
 nothing, so none of this shows on a Mac and it will keep arriving as a Windows-only report.
-**What:** Swap `const Plot = dynamic(() => import('react-plotly.js'), { ssr: false })` for
-`import Plot from '@/components/ResponsivePlot'`. It is a two-line change per file, but it is not
+**What:** Swap `const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false })`
+for `import Plot from '@/components/ResponsivePlot'`. (v0.2.95.11 moved every call site off
+`react-plotly.js` onto the cartesian bundle, so that is the string to grep for now — the swap
+itself is unchanged, and `ResponsivePlot` loads the same module.) It is a two-line change per file, but it is not
 unconditionally free: `ResponsivePlot` adds a wrapper div at `width/height: 100%` between the call
 site and the chart, so anywhere the chart is sized or positioned by the element the call site
 currently renders needs a look. Do them in small batches with a visual check, not as one sweep.
@@ -1085,6 +1087,26 @@ captured in a baseline/ignore list, then burn the list down by directory so each
 reviewable.
 
 ## Completed
+
+### plotly.js shipped maplibre-gl in its prebuilt bundle, and we never drew a map
+
+**Completed:** v0.2.95.11 (2026-09-10)
+**Origin:** clearing the critical `npm audit` advisories that broke every image build (v0.2.95.10).
+**Was:** `react-plotly.js` imports `plotly.js/dist/plotly` — the full prebuilt bundle, with
+`maplibre-gl` inlined (101 references in the dist file; the cartesian build has 5, all stylesheet).
+So the `maplibre-gl: ^6.4.1` override added in v0.2.95.10 cleaned the dependency TREE and satisfied
+`npm audit` while changing nothing about the JavaScript actually served. That was acceptable only
+because the code was unreachable — no `scattermap`, `scattermapbox`, `choropleth`, `densitymap` or
+`scattergeo` trace exists in `apps/web`, so `DOM.sanitize()` was never called — but the next
+advisory in that bundle would have got the same non-answer.
+**Fixed by:** `apps/web/components/plotly-cartesian.ts`, which builds the component with
+`createPlotlyComponent(plotly.js/dist/plotly-cartesian)` from `react-plotly.js/factory`; all ten
+call sites load it through `dynamic()` as before. Chart chunk 4,616,818 -> 1,379,632 bytes (-70%),
+zero maplibre JS symbols in the output. The override stays: `plotly.js` still declares the
+dependency, so the tree still needs it pinned.
+**Guarded by:** `apps/web/__tests__/components/plotly-cartesian.trace-coverage.test.tsx`, which
+asserts against the real bundle that the used trace types are registered and draw marks, and that
+the excluded ones are absent — a swap back to the full build fails there.
 
 ### `GET /metrics/ds-metrics/distinct-names` and `panels-by-dashboard` had no authorization
 

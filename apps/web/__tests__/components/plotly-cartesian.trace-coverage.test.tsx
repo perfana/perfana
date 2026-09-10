@@ -4,7 +4,7 @@
  *
  * `@/components/plotly-cartesian` builds the chart component from
  * `plotly.js/dist/plotly-cartesian` rather than the full `plotly.js/dist/plotly`,
- * dropping the 3-D, map, polar and ternary families and `maplibre-gl` with them,
+ * dropping the 3-D, map and polar families and `maplibre-gl` with them,
  * which is the reason for the switch.
  *
  * The failure mode if a chart reaches for a type the bundle does not carry is
@@ -17,13 +17,44 @@ import React from 'react';
 import { render, waitFor } from '@testing-library/react';
 import Plot from '@/components/plotly-cartesian';
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — no type declarations ship for plotly's individual dist bundles.
-import Plotly from 'plotly.js/dist/plotly-cartesian';
-
 type PlotlySchema = { PlotSchema: { get: () => { traces: Record<string, unknown> } } };
-const registered = (): string[] =>
-  Object.keys((Plotly as PlotlySchema).PlotSchema.get().traces);
+
+/**
+ * The trace types of the bundle THE COMPONENT loaded — read off `window.Plotly`,
+ * which plotly's factory body assigns when the component's own import evaluates.
+ *
+ * This file used to `import Plotly from 'plotly.js/dist/plotly-cartesian'` directly
+ * and assert against that — decoupled from `components/plotly-cartesian.ts`, so it
+ * described a bundle the component need not have been loading. Reading the global
+ * makes these assertions true of the real thing.
+ *
+ * It does NOT, on its own, catch the component being repointed, and measuring that
+ * is the only way to know: a swap to `plotly-basic` still passes every test here
+ * (basic carries `scatter` and `bar` and lacks the excluded types, so both halves
+ * hold), and a swap to the full `plotly.js/dist/plotly` kills the suite at
+ * `Tests: 0` with a jsdom "getContext not implemented" error that reads as a
+ * missing `canvas` package rather than as a regression. What actually catches both
+ * is the exact-import assertion in `plotly-cartesian.bundle-contract.test.tsx`,
+ * which is mutation-verified against both swaps. Keep the two together.
+ *
+ * Requires a render first: no component, no global.
+ */
+const registered = (): string[] => {
+  const plotly = (window as unknown as { Plotly?: PlotlySchema }).Plotly;
+  if (!plotly) throw new Error('window.Plotly unset — render a Plot before reading the registry');
+  return Object.keys(plotly.PlotSchema.get().traces);
+};
+
+/** Mount once so the component's bundle evaluates and sets window.Plotly. */
+beforeAll(async () => {
+  const { container } = render(
+    React.createElement(Plot as never, {
+      data: [{ type: 'scatter', x: [1], y: [1] }],
+      layout: { width: 200, height: 150 },
+    } as never),
+  );
+  await waitFor(() => expect(container.querySelector('.js-plotly-plot')).toBeTruthy());
+});
 
 /** Every `type:` the app passes to a plot. Extend with the commit that adds one. */
 const USED_TRACE_TYPES = ['scatter', 'bar'];

@@ -3,7 +3,7 @@
  *
  * `react-plotly.js`'s own entry point imports `plotly.js/dist/plotly` — the full
  * bundle, which carries every trace family plotly ships: 3D (gl3d), geographic
- * maps, and with them `maplibre-gl`. This app draws `scatter` and nothing else,
+ * maps, and with them `maplibre-gl`. This app draws only `scatter` and `bar`,
  * so all of that is dead weight in the largest route's chunk, and its CVEs are
  * ours to answer for anyway. `maplibre-gl` alone has produced one critical
  * advisory (GHSA-jrc7-96c5-q579) that could only be answered with a dependency
@@ -19,12 +19,18 @@
  * custom one via `plotly.js/lib/core` plus explicit `Plotly.register` calls — not
  * adding the trace type to a chart and wondering why it renders empty, which is
  * the whole failure mode, and it is silent.
- * `plotly-cartesian.trace-coverage.test.tsx` pins that list against the types the
- * app actually draws.
+ * `plotly-cartesian.trace-coverage.test.tsx` checks the types the app draws against
+ * the bundle this module loaded; `plotly-cartesian.bundle-contract.test.tsx` pins the
+ * full twelve, sweeps the source for a dropped type or a stray `react-plotly.js`
+ * import, and asserts the import line below — that last one is what actually catches
+ * this module being repointed at another bundle.
  *
- * Both dists are the same UMD wrapper and both assign `window.Plotly`, so
- * `getPlotly()` in `@/lib/plotly` keeps resolving — that is what the modebar's
- * copy-to-clipboard button and ResponsivePlot's resize both depend on.
+ * `window.Plotly` keeps getting set, so `getPlotly()` in `@/lib/plotly` still
+ * resolves — the modebar's copy-to-clipboard button and ResponsivePlot's resize both
+ * depend on it. Note the mechanism is NOT the UMD wrapper: under webpack that takes
+ * the `module.exports` arm and its `root.moduleName` fallback never runs. The global
+ * comes from an explicit assignment inside plotly's own factory body, which both
+ * dists carry.
  *
  * Import this through `next/dynamic` with `ssr: false`, exactly as
  * `react-plotly.js` was imported: plotly touches `document` at module scope.

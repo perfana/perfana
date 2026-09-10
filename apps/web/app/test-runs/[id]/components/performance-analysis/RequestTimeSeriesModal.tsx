@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { Config } from 'plotly.js';
+import type { Config } from 'plotly.js';
 import {
   Dialog,
   DialogTitle,

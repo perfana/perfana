@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { Box, Paper, Typography, useTheme } from '@mui/material';
 import dynamic from 'next/dynamic';
-import { Config } from 'plotly.js';
+import type { Config } from 'plotly.js';
 import { HostMetricsResponse } from '@/lib/dynatrace';
 
 const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });

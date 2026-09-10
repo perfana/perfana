@@ -7,13 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.2.95.11] - 2026-09-10
 
 ### Changed
-- **Charts now load plotly's cartesian bundle instead of the full one, cutting the chart chunk by 70%.** Every chart went through `react-plotly.js`, whose entry point imports `plotly.js/dist/plotly` — the complete build, carrying the 3-D, map, polar and ternary trace families this app has never drawn, and `maplibre-gl` along with them. The charts are built from `plotly.js/dist/plotly-cartesian` instead, behind one shared module.
+- **Charts now load plotly's cartesian bundle instead of the full one, cutting the chart chunk by 70%.** Every chart went through `react-plotly.js`, whose entry point imports `plotly.js/dist/plotly` — the complete build, carrying the 3-D, map and polar trace families this app has never drawn, and `maplibre-gl` along with them. The charts are built from `plotly.js/dist/plotly-cartesian` instead, behind one shared module.
 
   The lazily-loaded chart chunk drops from **4.62 MB to 1.38 MB** — 3.24 MB less JavaScript to fetch and parse the first time a chart is opened. Route sizes are unchanged, because the chart component was already loaded on demand rather than counted in any route's first load.
 
   This also finishes what 0.2.95.10 could only paper over: the `maplibre-gl` XSS advisory ([GHSA-jrc7-96c5-q579](https://github.com/advisories/GHSA-jrc7-96c5-q579)) was answered there with a dependency override that satisfied `npm audit` without changing a byte of the shipped bundle, because the vulnerable code was inlined in that prebuilt dist. It is now genuinely gone from the build — no maplibre JavaScript symbols remain in the output, only its stylesheet, which plotly still injects. The override stays, since `plotly.js` continues to declare the dependency.
 
-  Nothing about how charts look or behave changes. The bundle registers all twelve 2-D trace families, including the two the app draws (`scatter` and `bar`); a test pins that list so a future chart reaching for a type the bundle lacks fails in CI rather than rendering an empty plot, which is how it would otherwise show up.
+  Nothing about how charts look or behave changes. The bundle registers twelve trace families, including the two the app draws (`scatter` and `bar`). Two tests guard it: one checks those types against the bundle the component actually loaded, the other pins all twelve, sweeps the source tree for a chart asking for a dropped type or importing `react-plotly.js` directly, and asserts the module's own import line. Without that sweep the regression is silent — an unregistered trace renders an empty plot and logs nothing.
 
 ## [0.2.95.10] - 2026-09-09
 
