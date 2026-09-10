@@ -28,6 +28,10 @@ export const createWriteTypeOrmConfig = (): TypeOrmModuleOptions => {
       connectionTimeoutMillis: 30000,
       statementTimeout: 60000,  // 1 minute — writes should be fast
       queryTimeout: 60000,
+      // Attributable in pg_stat_activity. A batch re-evaluate's decompress/delete runs
+      // on this pool, and it used to show as `(unset)` — indistinguishable from any
+      // other backend while it was generating the most WAL on the box (#563).
+      applicationName: 'perfana-worker-write',
     }),
     name: 'write', // Named connection for injection
   };
@@ -61,5 +65,6 @@ export const createTypeOrmConfig = (): TypeOrmModuleOptions => {
     connectionTimeoutMillis: 60000, // 1 minute to acquire a connection from pool
     statementTimeout: 600000, // 10 minute global timeout (analytics get shorter via SET LOCAL)
     queryTimeout: 600000, // 10 minute query timeout
+    applicationName: 'perfana-worker',
   });
 };

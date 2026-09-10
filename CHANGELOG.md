@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.16] - 2026-09-10
+
+### Fixed
+- **A force re-fetch no longer decompresses whole shared `ds_metrics` chunks to delete one run's rows (#563).** `test_run_id` **is** ds_metrics' `compress_segmentby` column, so a `DELETE` filtered on it alone is segment-targeted and needs no decompression at all. The per-source delete carried one extra predicate — `metrics_source_id IN (...)`, not a segmentby column — which defeats that and forces TimescaleDB to decompress the run's segments as DML. The up-front `decompressChunksForRange` existed only to keep that from hitting `max_tuples_decompressed_per_dml_transaction`, and it paid the same cost: chunks are shared, so it rewrote every *other* run in the same time window too.
+
+  Measured on one 2,453,285-row run sitting in a compressed chunk (TimescaleDB 2.28.3 / PG 15.18), each in a rolled-back transaction:
+
+  | path | time | WAL |
+  |---|---|---|
+  | **before** — `decompress_chunk` + filtered delete | 162,743 ms (153.5 s of it decompression) | **11 GB** |
+  | filtered delete alone, no up-front decompression | 54,233 ms, then `ERROR: tuple decompression limit exceeded` | 4,023 MB |
+  | **after** — `DELETE WHERE test_run_id = $1` | **181 ms** | **41 MB** |
+
+  ~900x less WAL and ~900x faster. The force-refetch now takes that path whenever every source type holding rows for the run is also being re-collected — the default, since the dialog enables all three. `canDeleteWholesale` decides it and **fails closed**: a source present but not selected, or rows with a NULL `metrics_source_id` (reported as `'unknown'`, and re-collected by nothing), both force the old filtered path rather than delete something nothing will put back.
+
+- **Decompression is one chunk per transaction, and the chunks are put back.** `decompressChunksForRange` ran a single `SELECT decompress_chunk(...) FROM timescaledb_information.chunks WHERE ...`, decompressing every matching chunk inside **one** transaction — 267 s and climbing in the original report, pinning the xmin horizon throughout, so none of the ~49M rows the caller then deleted could be vacuumed and unrelated tables sat at 2100% dead tuples. Discovery and decompression are now separate statements, one per chunk. A batch of runs sharing a time window still only decompresses each chunk once, because the `is_compressed` predicate no longer matches a chunk that was already decompressed — no cache, nothing to go stale against a policy run.
+
+  `recompressTouchedChunks()` puts back exactly what this process decompressed, once per stage rather than per run (recompressing between two runs sharing a chunk would just make the second decompress it again). Best-effort by contract: the caller has already committed. Previously this was left to the columnstore policy, which during the original measurement had not run for 10.5 h — until it does, every query over those chunks scans row store.
+
+- **`StatisticsPipeline` is explicitly ruled out of the segment-targeting fix, and now recompresses.** Its `refreshRampUpFlags` guards on `ramp_up`, which is neither segmentby nor orderby, so unlike the force-refetch delete it genuinely cannot avoid decompression. It already narrowed to each run's disagreeing-row span (v0.2.93.3); it now also gets the per-chunk transactions and calls `recompressTouchedChunks()` after its transaction commits.
+
+### Changed
+- **The worker's connection pools report an `application_name`.** Both were `(unset)` in `pg_stat_activity`, so the heaviest WAL producer on the box was indistinguishable from any other backend while it ran. They are now `perfana-worker` and `perfana-worker-write`, via a new optional `applicationName` on the shared `DatabaseConfig`.
+
 ## [0.2.95.15] - 2026-09-10
 
 ### Fixed

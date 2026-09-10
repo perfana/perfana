@@ -134,7 +134,8 @@ describe('StatisticsPipeline', () => {
         }
         return Promise.resolve([undefined, 0]);
       }),
-      decompressChunksForRange: vi.fn().mockResolvedValue(undefined)
+      decompressChunksForRange: vi.fn().mockResolvedValue(undefined),
+      recompressTouchedChunks: vi.fn().mockResolvedValue(undefined)
     };
 
     vi.mocked(databaseAccessor.getDatabaseService).mockReturnValue(mockDb as any);

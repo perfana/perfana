@@ -67,6 +67,7 @@ describe('StatisticsPipeline delete-count logging (#552)', () => {
             )
       ),
       decompressChunksForRange: vi.fn().mockResolvedValue(undefined),
+      recompressTouchedChunks: vi.fn().mockResolvedValue(undefined),
     };
 
     vi.mocked(databaseAccessor.getDatabaseService).mockReturnValue(mockDb as never);

@@ -853,23 +853,54 @@ export class WorkerDatabaseService implements OnModuleInit {
    *
    * No-op (and cheap) when compression is disabled or nothing is compressed.
    */
+  /**
+   * Chunks this process decompressed on a caller's behalf, so they can be put back.
+   *
+   * Recompression used to be left to the columnstore policy, which meant the cost
+   * landed hours after the job reported done — during the window measured in #563 the
+   * policy had not run for 10.5 h, so every query over those chunks scanned row store
+   * in the meantime. Keyed by fully-qualified chunk name; a chunk is only ever added
+   * here if THIS process is the one that decompressed it.
+   */
+  private readonly decompressedChunks = new Set<string>();
+
+  /**
+   * Decompress the chunks overlapping [from, to], one per transaction.
+   *
+   * Two properties matter and both are easy to lose:
+   *
+   * 1. **One chunk per statement, therefore per transaction.** This used to be a single
+   *    `SELECT decompress_chunk(...) FROM timescaledb_information.chunks WHERE ...`,
+   *    which decompresses every matching chunk inside ONE transaction. On a 134 GB
+   *    `ds_metrics` that transaction ran 267 s and climbing, pinning the xmin horizon
+   *    the whole time — so none of the ~49M rows the caller then deleted could be
+   *    vacuumed, and unrelated tables sat at 2100% dead tuples (#563).
+   * 2. **`is_compressed` is the dedupe.** A second call over an overlapping range finds
+   *    nothing, because the chunks it would have picked are no longer compressed. That
+   *    is what keeps a batch of runs sharing a time window from decompressing the same
+   *    chunk N times — do not "optimise" it with a cache that could go stale against a
+   *    policy run.
+   *
+   * Decompression is chunk-granular, so this unavoidably converts every OTHER run in
+   * those chunks to row store too. Prefer not calling it at all: a DELETE filtered on
+   * `test_run_id` alone is segment-targeted (it is `compress_segmentby`) and needs no
+   * decompression — 181 ms and 41 MB of WAL, against 54 s and 4 GB for the same delete
+   * with one extra non-segmentby predicate. Only reach for this when the predicate
+   * genuinely cannot be expressed on the segmentby column.
+   */
   async decompressChunksForRange(hypertable: string, from: Date, to: Date): Promise<void> {
+    let chunks: Array<{ qualified: string }>;
     try {
-      const rows: Array<{ chunk: string | null }> = await this.dataSource.query(
-        `SELECT decompress_chunk(format('%I.%I', chunk_schema, chunk_name)::regclass, if_compressed => true) AS chunk
+      chunks = await this.dataSource.query(
+        `SELECT format('%I.%I', chunk_schema, chunk_name) AS qualified
          FROM timescaledb_information.chunks
          WHERE hypertable_name = $1
            AND is_compressed
            AND range_start < $3::timestamptz
-           AND range_end   > $2::timestamptz`,
+           AND range_end   > $2::timestamptz
+         ORDER BY range_start`,
         [hypertable, from, to]
       );
-      const n = Array.isArray(rows) ? rows.filter((r) => r.chunk).length : 0;
-      if (n > 0) {
-        this.logger.log(
-          `Decompressed ${n} ${hypertable} chunk(s) for refetch over [${from.toISOString()} - ${to.toISOString()}]`
-        );
-      }
     } catch (err) {
       // Compression not enabled, timescaledb missing, or table not a hypertable → nothing to do.
       //
@@ -879,7 +910,83 @@ export class WorkerDatabaseService implements OnModuleInit {
       // `tuple decompression limit exceeded` with nothing in the log explaining why.
       const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'unknown error';
       this.logger.warn(`decompressChunksForRange(${hypertable}) skipped: ${msg}`);
+      return;
     }
+
+    if (!Array.isArray(chunks) || chunks.length === 0) {
+      return;
+    }
+
+    let decompressed = 0;
+    for (const { qualified } of chunks) {
+      try {
+        // Its own statement, so node-postgres runs it in its own implicit transaction.
+        await this.dataSource.query(`SELECT decompress_chunk($1::regclass, if_compressed => true)`, [qualified]);
+        this.decompressedChunks.add(qualified);
+        decompressed++;
+      } catch (err) {
+        const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'unknown error';
+        this.logger.warn(`decompressChunksForRange(${hypertable}): chunk ${qualified} skipped: ${msg}`);
+      }
+    }
+
+    if (decompressed > 0) {
+      this.logger.log(
+        `Decompressed ${decompressed} ${hypertable} chunk(s) for refetch over [${from.toISOString()} - ${to.toISOString()}]`
+      );
+    }
+  }
+
+  /**
+   * Recompress everything this process decompressed, one chunk per transaction.
+   *
+   * Best-effort by contract: the caller has already finished its real work, so a
+   * failure here must not fail the job. A chunk that cannot be recompressed is left
+   * for the columnstore policy — the same place it used to be left unconditionally.
+   *
+   * Call it once per stage rather than per run: recompressing between two runs that
+   * share a chunk would make the second run decompress it again.
+   */
+  async recompressTouchedChunks(): Promise<void> {
+    if (this.decompressedChunks.size === 0) {
+      return;
+    }
+
+    const chunks = Array.from(this.decompressedChunks);
+    this.decompressedChunks.clear();
+
+    const started = Date.now();
+    let recompressed = 0;
+    for (const qualified of chunks) {
+      try {
+        await this.dataSource.query(`SELECT compress_chunk($1::regclass, if_not_compressed => true)`, [qualified]);
+        recompressed++;
+      } catch (err) {
+        const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'unknown error';
+        this.logger.warn(`recompressTouchedChunks: chunk ${qualified} left uncompressed: ${msg}`);
+      }
+    }
+
+    this.logger.log(
+      `Recompressed ${recompressed}/${chunks.length} chunk(s) in ${Date.now() - started}ms`
+    );
+  }
+
+  /**
+   * The metrics source types that actually have `ds_metrics` rows for this run.
+   *
+   * A row whose `metrics_source_id` is NULL is reported as `'unknown'`: it belongs to no
+   * source, so nothing re-collects it, and it must therefore block the wholesale delete.
+   */
+  async getRunMetricsSourceTypes(testRunId: string): Promise<string[]> {
+    const rows: Array<{ source_type: string }> = await this.dataSource.query(
+      `SELECT DISTINCT COALESCE(ms.source_type, 'unknown') AS source_type
+       FROM ds_metrics m
+       LEFT JOIN metrics_sources ms ON ms.id = m.metrics_source_id
+       WHERE m.test_run_id = $1`,
+      [testRunId]
+    );
+    return Array.isArray(rows) ? rows.map((r) => r.source_type) : [];
   }
 
   // ============================================================================
