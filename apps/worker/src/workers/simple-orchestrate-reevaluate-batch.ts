@@ -542,6 +542,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                   `${restored > 0 ? `, ${restored} row(s) from other sources preserved` : ''}) ` +
                   `in ${Date.now() - deleteStart}ms`
               );
+            } else {
+              // No delete ran, so the run's segments are still compressed — and the Grafana
+              // and Dynatrace re-collection below is an `INSERT ... ON CONFLICT DO UPDATE`
+              // (metric-processor.ts, DynatracePipeline.ts), which decompresses the matching
+              // segments as DML and can hit max_tuples_decompressed_per_dml_transaction.
+              // The delete branch does not need this: it leaves the run's rows in row store.
+              await db.decompressChunksForRange('ds_metrics', fromTime, toTime);
             }
 
             // Refresh panel documents BEFORE metric collection so newly-added dashboards

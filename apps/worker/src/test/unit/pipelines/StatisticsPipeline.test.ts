@@ -1023,6 +1023,10 @@ describe('StatisticsPipeline', () => {
       // is chunk-granular and a chunk holds every run in its window, so a wider
       // range puts other runs into row store too.
       expect(mockDb.decompressChunksForRange).toHaveBeenCalledWith('ds_metrics', from, to);
+      // Deliberately does NOT recompress: this pipeline runs once per REEVALUATE_CHUNK_SIZE
+      // chunk of runs, and putting the chunks back between those calls makes the next chunk
+      // decompress them again. The re-evaluate orchestrator recompresses once, at job end.
+      expect(mockDb.recompressTouchedChunks).not.toHaveBeenCalled();
 
       // The UPDATE is bounded by the same span, on compress_segmentby +
       // compress_orderby, so TimescaleDB can skip batches instead of decompressing

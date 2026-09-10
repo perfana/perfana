@@ -28,9 +28,11 @@ export const createWriteTypeOrmConfig = (): TypeOrmModuleOptions => {
       connectionTimeoutMillis: 30000,
       statementTimeout: 60000,  // 1 minute — writes should be fast
       queryTimeout: 60000,
-      // Attributable in pg_stat_activity. A batch re-evaluate's decompress/delete runs
-      // on this pool, and it used to show as `(unset)` — indistinguishable from any
-      // other backend while it was generating the most WAL on the box (#563).
+      // Attributable in pg_stat_activity; both pools used to show as `(unset)`, so the
+      // heaviest WAL producer on the box was indistinguishable from any other backend
+      // (#563). Note the re-evaluate's decompress/delete does NOT run here — it uses
+      // WorkerDatabaseService.dataSource, the main pool, and reports `perfana-worker`.
+      // Filtering on this name for that work finds nothing.
       applicationName: 'perfana-worker-write',
     }),
     name: 'write', // Named connection for injection

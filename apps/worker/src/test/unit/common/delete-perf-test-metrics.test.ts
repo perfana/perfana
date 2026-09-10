@@ -22,9 +22,20 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
     query = vi.fn().mockResolvedValue([[], 0]);
     txQuery = vi.fn().mockResolvedValue([[], 0]);
 
+    // dataSource.transaction(isolationLevel, cb) — the isolation level is load-bearing here
+    // (see the REPEATABLE READ comment in deletePerfTestMetricsForRun), so the fake accepts
+    // the two-arg form and the tests assert on it.
     const dataSource = {
       query,
-      transaction: vi.fn(async (cb: (m: { query: typeof txQuery }) => unknown) => cb({ query: txQuery })),
+      transaction: vi.fn(
+        async (
+          levelOrCb: string | ((m: { query: typeof txQuery }) => unknown),
+          maybeCb?: (m: { query: typeof txQuery }) => unknown
+        ) => {
+          const cb = typeof levelOrCb === 'function' ? levelOrCb : maybeCb!;
+          return cb({ query: txQuery });
+        }
+      ),
     };
 
     service = Object.create(WorkerDatabaseService.prototype) as WorkerDatabaseService;
@@ -70,6 +81,12 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
       // deleted excludes what was put straight back
       expect(result).toEqual({ deleted: 2620348 - 3120, restored: 3120 });
 
+      // One snapshot for the copy and the delete. At READ COMMITTED a row committed between
+      // them would be deleted without ever being copied, and narrowing the DELETE to spare it
+      // would reintroduce the non-segmentby predicate this method exists to avoid.
+      const ds = (service as unknown as { dataSource: { transaction: ReturnType<typeof vi.fn> } }).dataSource;
+      expect(ds.transaction.mock.calls[0][0]).toBe('REPEATABLE READ');
+
       const sqls = txQuery.mock.calls.map((c: unknown[]) => String(c[0]));
       expect(sqls[0]).toContain('CREATE TEMP TABLE ds_metrics_keep');
       expect(sqls[0]).toContain('ON COMMIT DROP');
@@ -95,15 +112,48 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
     });
 
     it('preserves other sources even when they are ALSO being re-collected', async () => {
-      // The signature takes only what is PRESENT, never what is selected — an external source
-      // may return nothing, and its stored rows are then the only copy. Making this depend on
-      // the refetch selection is the regression these tests exist to prevent.
-      expect(service.deletePerfTestMetricsForRun.length).toBe(2);
-
+      // An external source may return nothing on the refetch, and its stored rows are then
+      // the only copy. So presence alone decides — a caller passing the SELECTED source types
+      // instead would take the no-preserve branch here and delete them.
       await service.deletePerfTestMetricsForRun('tr-1', ['performance_test', 'grafana', 'dynatrace']);
 
       expect(txQuery).toHaveBeenCalledTimes(4);
       expect(String(txQuery.mock.calls[0][0])).toContain('CREATE TEMP TABLE ds_metrics_keep');
+      // The bare delete is the branch that would have destroyed them.
+      expect(query).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getRunMetricsSourceTypes — the input the preserve decision is made from
+  // -------------------------------------------------------------------------
+
+  describe('getRunMetricsSourceTypes', () => {
+    it('LEFT JOINs and reports a NULL metrics_source_id as unknown', async () => {
+      // Both halves are load-bearing. An INNER JOIN would drop the orphan rows from the
+      // result, `hasRowsToPreserve` would then read false, and the wholesale delete would
+      // remove rows nothing re-collects — with every other test in this file still green.
+      query.mockResolvedValue([{ source_type: 'grafana' }, { source_type: 'unknown' }]);
+
+      await expect(service.getRunMetricsSourceTypes('tr-1')).resolves.toEqual([
+        'grafana',
+        'unknown',
+      ]);
+
+      const [sql, params] = query.mock.calls[0];
+      expect(sql).toContain('LEFT JOIN metrics_sources');
+      expect(sql).toContain("COALESCE(ms.source_type, 'unknown')");
+      expect(params).toEqual(['tr-1']);
+    });
+
+    it('returns [] for a run with no ds_metrics rows', async () => {
+      query.mockResolvedValue([]);
+      await expect(service.getRunMetricsSourceTypes('tr-1')).resolves.toEqual([]);
+    });
+
+    it('returns [] rather than throwing when the driver hands back a non-array', async () => {
+      query.mockResolvedValue(undefined as never);
+      await expect(service.getRunMetricsSourceTypes('tr-1')).resolves.toEqual([]);
     });
   });
 });

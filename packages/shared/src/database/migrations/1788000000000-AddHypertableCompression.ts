@@ -8,13 +8,16 @@ import { MigrationInterface, QueryRunner } from "typeorm";
  * segmentby = test_run_id: all rows for a run land in the same compressed
  * segments, which is the natural access + delete unit.
  *
- * Force-refetch (orchestrate-reevaluate-batch) DELETE/UPSERTs ds_metrics for an
- * existing run. On an already-compressed chunk that filters on a NON-segmentby
- * column (metrics_source_id), TimescaleDB must decompress the run's segments and
- * would hit timescaledb.max_tuples_decompressed_per_dml_transaction (default
- * 100k) for large runs. The worker guards this by decompressing the run's chunks
- * first (WorkerDatabaseService.decompressChunksForRange); the policy recompresses
- * them on its next run. See simple-orchestrate-reevaluate-batch.ts.
+ * That choice is what makes a force-refetch cheap, and only while the DELETE stays
+ * on test_run_id ALONE. Adding a NON-segmentby predicate (metrics_source_id) forces
+ * TimescaleDB to decompress the run's segments as DML and hit
+ * timescaledb.max_tuples_decompressed_per_dml_transaction (default 100k): measured at
+ * 162,743 ms / 11 GB WAL against 181 ms / 41 MB for the single-column form (#563).
+ * WorkerDatabaseService.deletePerfTestMetricsForRun therefore preserves the rows that
+ * must survive around a wholesale delete rather than narrowing the predicate, and the
+ * force-refetch no longer decompresses at all. decompressChunksForRange survives for
+ * StatisticsPipeline.refreshRampUpFlags, whose guard is on ramp_up (neither segmentby
+ * nor orderby) and genuinely cannot avoid it.
  *
  * Idempotent: also runs on greenfield (after the consolidated migration creates
  * the hypertables) and re-runs safely on existing DBs.

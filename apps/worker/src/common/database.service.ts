@@ -990,10 +990,17 @@ export class WorkerDatabaseService implements OnModuleInit {
    * sources upsert over their own, so a re-collection that returned nothing left the old rows
    * intact. Deleting them on the promise of a refetch would destroy the only remaining copy.
    * Perf-test rows carry no such risk: they rebuild from `requests_raw`/`transactions` in this
-   * same database, and the old code deleted them unconditionally too.
+   * same database, and the old code deleted them unconditionally too. One exception, inherited
+   * rather than introduced: on a SUT-imported run `ds_metrics` ships as a `core` resource while
+   * `requests_raw`/`transactions` are the optional `raw` group, so there may be nothing to
+   * rebuild from. The delete this replaces carried the same exposure.
    *
    * The keep-set is small — 85k Grafana + 17k Dynatrace rows across an entire 14.4M-row
-   * production-shaped table, ~3k per run — so reading and re-inserting it is cheap. The read
+   * production-shaped table, ~3k per run — so reading and re-inserting it is cheap. That is a
+   * property of a perf-test-dominated deployment, NOT a guarantee: on a Grafana-heavy SUT the
+   * survivors could be most of the run, and copying them out and back would rebuild the very
+   * long transaction and WAL burst this exists to remove. The preserved count is logged by the
+   * caller for exactly that reason; see TODOS.md for the guard that is owed here. The read
    * does touch a non-segmentby column, but a SELECT only decompresses transiently and rewrites
    * nothing (~1 s on 2.6M rows), unlike the DML guard that made this expensive.
    *
@@ -1011,7 +1018,12 @@ export class WorkerDatabaseService implements OnModuleInit {
       return { deleted: Array.isArray(result) ? (result[1] ?? 0) : 0, restored: 0 };
     }
 
-    return await this.dataSource.transaction(async (manager) => {
+    // REPEATABLE READ, not the default READ COMMITTED: the CTAS below and the DELETE are
+    // separate statements, so at READ COMMITTED they take separate snapshots and a row
+    // committed between them is deleted without ever being copied. Narrowing the DELETE to
+    // exclude it is not an option — that is the non-segmentby predicate this whole method
+    // exists to avoid. One snapshot turns that silent loss into a serialization error.
+    return await this.dataSource.transaction('REPEATABLE READ', async (manager) => {
       // CREATE TEMP TABLE ... AS SELECT * keeps ds_metrics' exact column order, so the
       // restore below can stay a bare `INSERT INTO ds_metrics SELECT *`. ON COMMIT DROP
       // ties its lifetime to this transaction — the connection is pooled and reused.

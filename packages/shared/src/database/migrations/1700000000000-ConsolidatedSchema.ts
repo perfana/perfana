@@ -496,9 +496,10 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         }
 
         // Enable native compression + a 7-day policy. Big storage win (ds_metrics ~97%).
-        // segmentby=test_run_id. Force-refetch decompresses affected chunks first to avoid
-        // the per-txn decompression limit — see WorkerDatabaseService.decompressChunksForRange
-        // and migration 1788000000000-AddHypertableCompression (existing-DB counterpart).
+        // segmentby=test_run_id, which is what lets a force-refetch delete a whole run
+        // without decompressing anything — provided the DELETE stays on that column alone
+        // (#563; see WorkerDatabaseService.deletePerfTestMetricsForRun) — and migration
+        // 1788000000000-AddHypertableCompression (existing-DB counterpart).
         // Nested savepoint so a compression failure never rolls back the hypertable itself.
         await queryRunner.query(`SAVEPOINT ${savepointName}_c`);
         try {
