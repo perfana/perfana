@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.12] - 2026-09-10
+
+### Fixed
+- **Switching a metric source off no longer fails the run with "Data collection coverage is 0%".** Disabling every `dynatrace_queries` row for a system, or tagging its Grafana dashboard `no-anomaly-detection`, is a config decision. It surfaced as a data-quality failure: `SONAR-acceptatie-loadtest_perfana-00010` was marked invalid after a clean three-hour run.
+
+  `calculateCoverage` divides the summed `collected_ranges` by (run duration x number of `ds_metric_collection_status` rows), so a source that can never return data drags the average down purely by existing. The incremental ticks cannot rescue it either — a tick that collects nothing deliberately records a **zero-width** range so its window is retried rather than skipped past data the API had not published yet. That run accumulated 179 of them against two dead sources and read 0%.
+
+  Both switches are now honoured where a source is decided to exist, rather than only where it is queried. `dynatrace_queries.enabled` was already filtered in `DynatraceRepository` and the incremental collector but not in the scheduler; the Grafana `no-anomaly-detection` tag was honoured by the panel builder but nowhere else. The artificial `grafana_dashboards` placeholders that Dynatrace hangs its panels on are excluded alongside them — they carry a `grafana_instance_id`, so anything reading only that column mistakes them for Grafana dashboards.
+
+  Three call sites answered "which sources does this run have" independently and disagreed: the scheduler, `PipelineOrchestrator`'s orphan sweep (which runs before every stage and had neither filter) and `DataSanityCheckPipeline`'s identically-named sweep (which runs after). They now share one implementation in `services/collectable-sources.ts`. Artificial rows are detected by `grafana_json`, never by a `grafana_id` range, and resolved through `grafana_dashboard_id` rather than `dashboard_uid` — a uid is unique only within one Grafana instance. The filter fails open in every direction, including when its own query throws: it runs inside the tick that also enqueues the Dynatrace and performance-test jobs, and dropping a live dashboard from collection is the worse error.
+
+- **A failed Dynatrace collection is no longer recorded as a completed one.** `executeBatchQueries` catches per query and returns `{ result: null, error }`, and only error-free results become metrics documents — so "every query returned 401" and "everything succeeded with no data" arrive downstream as the same empty list. `is_complete` is sticky (only a force-refetch reevaluate clears it) and `PipelineOrchestrator` skips `dynatrace-collection`, `panels-processing`, `performance-test-metrics` and `metrics-collection` once every status row is complete. Marking that state complete would have made an expired token permanent: the operator fixes it, re-analyses, and nothing is collected.
+
+  A Dynatrace config is now marked complete only when its batch actually ran and every query in it succeeded. Configs the loop skips entirely — the row is gone, no API token, a SaaS instance with no platform token — execute zero queries and are no longer marked complete either. `MetricsPipeline` likewise does not complete the Grafana source on its "no panel documents" path: an empty `ds_panels` is frequently transient (grafana-sync has not written `grafana_json` for a new dashboard yet, or an application dashboard's uid matches no `grafana_dashboards` row), and completing there let one bad analysis suppress collection for good.
+
 ## [0.2.95.11] - 2026-09-10
 
 ### Changed
