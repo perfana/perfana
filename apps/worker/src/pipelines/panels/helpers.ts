@@ -1,5 +1,6 @@
 import { TestRun } from '../../types/pipeline.js';
 import { getLogger } from '../../lib/utils/logger.js';
+import { NO_ANOMALY_DETECTION_MARKER } from '../../constants/dashboard-tags.js';
 
 interface PoolLike {
   query(sql: string, params?: unknown[]): Promise<{ rows: unknown[] }>;
@@ -77,7 +78,10 @@ const SUPPORTED_PANEL_TYPES = [
 ];
 
 // Tag/description to exclude dashboards and panels from anomaly detection
-const NO_ANOMALY_DETECTION_MARKER = 'no-anomaly-detection';
+// Re-exported for existing importers; the definition lives in a leaf module so
+// services/collectable-sources.ts can share it without importing this file's
+// module-level logger. See constants/dashboard-tags.ts.
+export { NO_ANOMALY_DETECTION_MARKER };
 
 /**
  * Determines if a panel should be stored in the database
