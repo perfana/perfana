@@ -79,6 +79,7 @@ describe('StatisticsPipeline per-run metrics probe', () => {
     transaction: ReturnType<typeof vi.fn>;
     query: ReturnType<typeof vi.fn>;
     decompressChunksForRange: ReturnType<typeof vi.fn>;
+    recompressTouchedChunks: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -153,6 +154,7 @@ describe('StatisticsPipeline per-run metrics probe', () => {
       decompressChunksForRange: vi.fn(async (...args: unknown[]) => {
         decompressCalls.push(args);
       }),
+      recompressTouchedChunks: vi.fn().mockResolvedValue(undefined),
     };
 
     vi.mocked(databaseAccessor.getDatabaseService).mockReturnValue(mockDb as never);

@@ -49,6 +49,8 @@ const findOne = vi.fn();
 vi.mock('../../../common/database-accessor.js', () => ({
   getDatabaseService: vi.fn(() => ({
     testRunRepo: { findOne },
+    // #563: the force-refetch stage puts back whatever it decompressed before it reports done.
+    recompressTouchedChunks: vi.fn().mockResolvedValue(undefined),
   })),
 }));
 

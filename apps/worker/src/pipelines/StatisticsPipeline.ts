@@ -188,6 +188,14 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
         return await this.aggregateMetricStatistics(manager, runIds);
       });
 
+      // Deliberately does NOT recompress here. refreshRampUpFlags guards on `ramp_up`, which
+      // is neither segmentby nor orderby, so this pipeline genuinely cannot avoid decompression
+      // (that is why it is ruled out of #563's segment-targeting fix) — but it is also called
+      // several times per re-evaluate, once per REEVALUATE_CHUNK_SIZE chunk of runs. Putting
+      // the chunks back between those calls would make each next chunk decompress them again.
+      // The re-evaluate orchestrator recompresses once, after every stage, via the shared
+      // WorkerDatabaseService tracking set.
+
       const duration = Date.now() - startTime;
       this.logPerformance('statistics-aggregation', startTime, {
         testRunIds: testRunIds.length,

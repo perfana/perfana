@@ -511,12 +511,45 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
             logger.info(`  ${testRunId}: force re-fetching ${sourcesToRefetch.length} sources over [${fromTime.toISOString()} - ${toTime.toISOString()}]`);
 
-            // ds_metrics may be compressed if this run is older than the compression policy interval.
-            // The per-source DELETE/UPSERT below filters on metrics_source_id (a non-segmentby column),
-            // which forces TimescaleDB to decompress the run's segments inline and hit
-            // max_tuples_decompressed_per_dml_transaction (100k) on large runs. Decompress the run's
-            // chunk(s) up front; the compression policy recompresses them afterward.
-            await db.decompressChunksForRange('ds_metrics', fromTime, toTime);
+            // What actually has rows for this run, and what is about to be re-collected.
+            // `getRunMetricsSourceTypes` reports a NULL metrics_source_id as 'unknown'.
+            const presentSourceTypes = await db.getRunMetricsSourceTypes(testRunId);
+            const refetchedSourceTypes = sourcesToRefetch.map((sr) => sr.source_type);
+
+            // `test_run_id` is ds_metrics' compress_segmentby column, so a DELETE filtered on
+            // it ALONE is segment-targeted and needs no decompression at all. Adding one
+            // non-segmentby predicate — `metrics_source_id IN (...)`, which is what the delete
+            // here used to carry — defeats that and forces TimescaleDB to decompress the run's
+            // segments as DML. Measured on one 2,453,285-row run in a compressed chunk (#563):
+            //
+            //   decompress_chunk + filtered delete   162,743 ms    11 GB WAL
+            //   filtered delete alone                 54,233 ms  4,023 MB WAL, then ERROR
+            //                                                    (tuple decompression limit)
+            //   DELETE WHERE test_run_id = $1            181 ms     41 MB WAL
+            //
+            // deletePerfTestMetricsForRun takes the third form and preserves the non-perf-test
+            // rows around it, so no decompression is needed here at all. It runs only when
+            // perf-test is actually being re-collected, matching the delete it replaces.
+            if (refetchedSourceTypes.includes('performance_test')) {
+              const deleteStart = Date.now();
+              const { deleted, restored } = await db.deletePerfTestMetricsForRun(
+                testRunId,
+                presentSourceTypes
+              );
+              logger.info(
+                `    🧹 Deleted ${deleted} performance_test ds_metrics for ${testRunId} ` +
+                  `(segment-targeted, no decompression` +
+                  `${restored > 0 ? `, ${restored} row(s) from other sources preserved` : ''}) ` +
+                  `in ${Date.now() - deleteStart}ms`
+              );
+            } else {
+              // No delete ran, so the run's segments are still compressed — and the Grafana
+              // and Dynatrace re-collection below is an `INSERT ... ON CONFLICT DO UPDATE`
+              // (metric-processor.ts, DynatracePipeline.ts), which decompresses the matching
+              // segments as DML and can hit max_tuples_decompressed_per_dml_transaction.
+              // The delete branch does not need this: it leaves the run's rows in row store.
+              await db.decompressChunksForRange('ds_metrics', fromTime, toTime);
+            }
 
             // Refresh panel documents BEFORE metric collection so newly-added dashboards
             // (e.g. a dashboard linked to a SUT after the original collection ran) are included
@@ -538,17 +571,6 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             for (const status of sourcesToRefetch) {
               try {
                 let dataPoints = 0;
-
-                // Delete old performance_test metrics before re-collection to avoid
-                // mixed-resolution data from incremental collection (1s early, 5s later)
-                if (status.source_type === 'performance_test') {
-                  const deleteResult = await db.dataSource.query(
-                    `DELETE FROM ds_metrics WHERE test_run_id = $1 AND metrics_source_id IS NOT NULL
-                     AND metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')`,
-                    [testRunId]
-                  );
-                  logger.info(`    🧹 Deleted ${deleteResult?.[1] ?? '?'} old performance_test ds_metrics for ${testRunId}`);
-                }
 
                 if (status.source_type === 'dynatrace') {
                   // Use the full DynatracePipeline — same as the analyze worker's dynatrace-collection stage
@@ -1082,6 +1104,25 @@ ${breakdown}
       // the old window, so a silent success here is a half-applied batch nobody learns about.
       throw error;
     } finally {
+      // Put back whatever this process decompressed, ONCE, after every stage is done.
+      //
+      // Not at the end of the force-refetch stage, and not inside StatisticsPipeline: the
+      // statistics stage runs next in this same job and refreshRampUpFlags needs the very
+      // same chunks uncompressed. Recompressing between them would make it decompress them a
+      // second time — and with REEVALUATE_CHUNK_SIZE splitting a batch into several statistics
+      // jobs, once per chunk of runs. On the 153 s-per-decompression this issue measured, that
+      // turns a saving into a regression. The `is_compressed` predicate makes the repeated
+      // decompress calls free only while nothing recompresses in between.
+      //
+      // WorkerDatabaseService is a process singleton, so the statistics jobs this orchestrator
+      // awaits share its tracking set. A statistics job that lands on another worker process
+      // leaves its chunks to the columnstore policy, exactly as before.
+      try {
+        await getDatabaseService().recompressTouchedChunks();
+      } catch (recompressError) {
+        logger.error(`Failed to recompress chunks for job ${job.id}:`, recompressError);
+      }
+
       // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
       // of a lock we just handed back.
       stopLockRenewal?.();

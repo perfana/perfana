@@ -24,6 +24,13 @@ export interface DatabaseConfig {
   // Environment and logging
   nodeEnv?: string;
 
+  /**
+   * Reported as `application_name`, so work is attributable in pg_stat_activity and
+   * pg_stat_statements instead of showing as `(unset)`. Without it a heavy re-evaluate
+   * cannot be told apart from an ordinary API query when diagnosing WAL or lock pressure.
+   */
+  applicationName?: string;
+
   // Timeout configurations
   idleTimeoutMillis?: number;
   connectionTimeoutMillis?: number;
@@ -76,6 +83,7 @@ export const createTypeOrmConfig = (config: DatabaseConfig): TypeOrmModuleOption
       connectionTimeoutMillis: config.connectionTimeoutMillis || 30000,
       statement_timeout: config.statementTimeout || 300000, // 5 minute query timeout
       query_timeout: config.queryTimeout || 300000,
+      ...(config.applicationName ? { application_name: config.applicationName } : {}),
     },
 
     // Auto-load entities - works with forFeature() registrations in modules

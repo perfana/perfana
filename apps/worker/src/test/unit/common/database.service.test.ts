@@ -259,22 +259,40 @@ describe('WorkerDatabaseService', () => {
     const from = new Date('2026-01-10T00:00:00Z');
     const to = new Date('2026-01-10T02:00:00Z');
 
-    it('queries compressed chunks overlapping the range and passes [hypertable, from, to]', async () => {
-      const { service, dataSource } = buildService({
-        query: vi.fn().mockResolvedValue([{ chunk: '_timescaledb_internal._hyper_1_9_chunk' }]),
-      });
+    const twoChunks = () =>
+      vi.fn().mockResolvedValue([
+        { qualified: '_timescaledb_internal._hyper_1_9_chunk' },
+        { qualified: '_timescaledb_internal._hyper_1_10_chunk' },
+      ]);
+
+    it('discovers compressed chunks overlapping the range and passes [hypertable, from, to]', async () => {
+      const { service, dataSource } = buildService({ query: twoChunks() });
 
       await service.decompressChunksForRange('ds_metrics', from, to);
 
-      expect(dataSource.query).toHaveBeenCalledTimes(1);
       const [sql, params] = dataSource.query.mock.calls[0];
       // range-overlap on timescaledb_information.chunks, NOT show_chunks (boundary-based)
       expect(sql).toContain('timescaledb_information.chunks');
       expect(sql).toContain('is_compressed');
       expect(sql).toContain('range_start <');
       expect(sql).toContain('range_end');
-      expect(sql).toContain('decompress_chunk');
       expect(params).toEqual(['ds_metrics', from, to]);
+      // The discovery query must NOT also decompress: that is what put every chunk in
+      // one transaction, pinning the xmin horizon for minutes (#563).
+      expect(sql).not.toContain('decompress_chunk');
+    });
+
+    it('decompresses one chunk per statement, so each gets its own transaction', async () => {
+      const { service, dataSource } = buildService({ query: twoChunks() });
+
+      await service.decompressChunksForRange('ds_metrics', from, to);
+
+      const decompressCalls = dataSource.query.mock.calls.filter(
+        (c: unknown[]) => String(c[0]).includes('decompress_chunk')
+      );
+      expect(decompressCalls).toHaveLength(2);
+      expect(decompressCalls[0][1]).toEqual(['_timescaledb_internal._hyper_1_9_chunk']);
+      expect(decompressCalls[1][1]).toEqual(['_timescaledb_internal._hyper_1_10_chunk']);
     });
 
     it('is a no-op when nothing is compressed (empty result)', async () => {
@@ -283,11 +301,85 @@ describe('WorkerDatabaseService', () => {
       expect(dataSource.query).toHaveBeenCalledTimes(1);
     });
 
-    it('swallows errors (compression disabled / not a hypertable) without throwing', async () => {
+    it('swallows discovery errors (compression disabled / not a hypertable) without throwing', async () => {
       const { service } = buildService({
         query: vi.fn().mockRejectedValue(new Error('relation "timescaledb_information.chunks" does not exist')),
       });
       await expect(service.decompressChunksForRange('ds_metrics', from, to)).resolves.toBeUndefined();
+    });
+
+    it('keeps going when one chunk fails to decompress', async () => {
+      const query = twoChunks();
+      query.mockImplementationOnce(() =>
+        Promise.resolve([
+          { qualified: '_timescaledb_internal._hyper_1_9_chunk' },
+          { qualified: '_timescaledb_internal._hyper_1_10_chunk' },
+        ])
+      );
+      query.mockRejectedValueOnce(new Error('must be owner of table'));
+      const { service, dataSource } = buildService({ query });
+
+      await expect(service.decompressChunksForRange('ds_metrics', from, to)).resolves.toBeUndefined();
+      const decompressCalls = dataSource.query.mock.calls.filter(
+        (c: unknown[]) => String(c[0]).includes('decompress_chunk')
+      );
+      expect(decompressCalls).toHaveLength(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // recompressTouchedChunks (#563 — do not leave the cost to the policy)
+  // -------------------------------------------------------------------------
+
+  describe('recompressTouchedChunks', () => {
+    const from = new Date('2026-01-10T00:00:00Z');
+    const to = new Date('2026-01-10T02:00:00Z');
+
+    it('recompresses exactly what it decompressed, one chunk per statement', async () => {
+      const { service, dataSource } = buildService({
+        query: vi.fn().mockResolvedValue([
+          { qualified: '_timescaledb_internal._hyper_1_9_chunk' },
+          { qualified: '_timescaledb_internal._hyper_1_10_chunk' },
+        ]),
+      });
+
+      await service.decompressChunksForRange('ds_metrics', from, to);
+      dataSource.query.mockClear();
+      await service.recompressTouchedChunks();
+
+      const calls = dataSource.query.mock.calls;
+      expect(calls).toHaveLength(2);
+      expect(calls.every((c: unknown[]) => String(c[0]).includes('compress_chunk'))).toBe(true);
+      expect(calls[0][1]).toEqual(['_timescaledb_internal._hyper_1_9_chunk']);
+      expect(calls[1][1]).toEqual(['_timescaledb_internal._hyper_1_10_chunk']);
+    });
+
+    it('does nothing when it decompressed nothing', async () => {
+      const { service, dataSource } = buildService();
+      await service.recompressTouchedChunks();
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('clears its list, so a second call is not a double recompress', async () => {
+      const { service, dataSource } = buildService({
+        query: vi.fn().mockResolvedValue([{ qualified: '_timescaledb_internal._hyper_1_9_chunk' }]),
+      });
+
+      await service.decompressChunksForRange('ds_metrics', from, to);
+      await service.recompressTouchedChunks();
+      dataSource.query.mockClear();
+      await service.recompressTouchedChunks();
+
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('never throws — the caller has already committed its real work', async () => {
+      const query = vi.fn().mockResolvedValue([{ qualified: '_timescaledb_internal._hyper_1_9_chunk' }]);
+      const { service } = buildService({ query });
+      await service.decompressChunksForRange('ds_metrics', from, to);
+      query.mockRejectedValue(new Error('deadlock detected'));
+
+      await expect(service.recompressTouchedChunks()).resolves.toBeUndefined();
     });
   });
 
