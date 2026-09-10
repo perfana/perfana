@@ -85,30 +85,6 @@ async function runStatisticsChunks(
  * throwing, so BullMQ marks the job completed. Without this check the orchestrator
  * logs a green tick and walks into the next stage on empty data.
  */
-/**
- * Is every source type that has `ds_metrics` rows for this run also being re-collected?
- *
- * When it is, the run's rows can be removed with `DELETE ... WHERE test_run_id = $1`,
- * which is segment-targeted (`test_run_id` is ds_metrics' `compress_segmentby`) and needs
- * no decompression — 181 ms / 41 MB WAL, against 54 s / 4 GB and a `tuple decompression
- * limit exceeded` error for the same delete carrying one extra non-segmentby predicate.
- *
- * Fails CLOSED on purpose. An empty `present` means the probe found nothing to delete, so
- * there is no wholesale delete to make; and an unrecognised type — including `'unknown'`,
- * which is what a row with a NULL `metrics_source_id` reports as — is by definition not
- * being re-collected, so it must force the filtered path rather than be silently dropped.
- *
- * Exported for its own test: the decision is three lines and the consequence of getting it
- * wrong is deleting metrics nothing will put back.
- */
-export function canDeleteWholesale(present: string[], refetched: string[]): boolean {
-  if (present.length === 0) {
-    return false;
-  }
-  const refetching = new Set(refetched);
-  return present.every((t) => refetching.has(t));
-}
-
 export function assertStageSucceeded(stage: string, returnValue: unknown): void {
   const result = returnValue as { status?: string; errors?: { message?: string }[] } | undefined;
   if (result?.status === 'failed') {
@@ -535,49 +511,37 @@ export function simpleOrchestrateReevaluateBatchWorker() {
 
             logger.info(`  ${testRunId}: force re-fetching ${sourcesToRefetch.length} sources over [${fromTime.toISOString()} - ${toTime.toISOString()}]`);
 
-            // `test_run_id` is ds_metrics' compress_segmentby column, so a DELETE filtered on
-            // it ALONE is segment-targeted and needs no decompression at all. Adding one
-            // non-segmentby predicate — `metrics_source_id IN (...)`, which is what the
-            // per-source delete below used to carry unconditionally — defeats that and forces
-            // TimescaleDB to decompress the run's segments as DML. Measured on one 2,453,285-row
-            // run in a compressed chunk (#563):
-            //
-            //   DELETE ... WHERE test_run_id = $1                    181 ms      41 MB WAL
-            //   DELETE ... WHERE test_run_id = $1 AND source IN (…)  54,233 ms  4,023 MB WAL
-            //                                                        └─ and still ERRORed on
-            //                                                           max_tuples_decompressed_per_dml_transaction
-            //
-            // The up-front decompression exists only to stop that error, and it pays the same
-            // cost: chunks are shared, so it rewrites every OTHER run in the same time window too.
-            //
-            // So take the segment-targeted path whenever everything we are about to delete is
-            // also about to be re-collected — which is the default, since the dialog enables all
-            // three source types. `getRunMetricsSourceTypes` reports rows with a NULL
-            // metrics_source_id as 'unknown', and nothing re-collects those, so their presence
-            // correctly forces the fallback rather than silently dropping them.
+            // What actually has rows for this run, and what is about to be re-collected.
+            // `getRunMetricsSourceTypes` reports a NULL metrics_source_id as 'unknown'.
             const presentSourceTypes = await db.getRunMetricsSourceTypes(testRunId);
             const refetchedSourceTypes = sourcesToRefetch.map((sr) => sr.source_type);
-            const wholesaleDeleteIsSafe = canDeleteWholesale(presentSourceTypes, refetchedSourceTypes);
 
-            if (wholesaleDeleteIsSafe) {
+            // `test_run_id` is ds_metrics' compress_segmentby column, so a DELETE filtered on
+            // it ALONE is segment-targeted and needs no decompression at all. Adding one
+            // non-segmentby predicate — `metrics_source_id IN (...)`, which is what the delete
+            // here used to carry — defeats that and forces TimescaleDB to decompress the run's
+            // segments as DML. Measured on one 2,453,285-row run in a compressed chunk (#563):
+            //
+            //   decompress_chunk + filtered delete   162,743 ms    11 GB WAL
+            //   filtered delete alone                 54,233 ms  4,023 MB WAL, then ERROR
+            //                                                    (tuple decompression limit)
+            //   DELETE WHERE test_run_id = $1            181 ms     41 MB WAL
+            //
+            // deletePerfTestMetricsForRun takes the third form and preserves the non-perf-test
+            // rows around it, so no decompression is needed here at all. It runs only when
+            // perf-test is actually being re-collected, matching the delete it replaces.
+            if (refetchedSourceTypes.includes('performance_test')) {
               const deleteStart = Date.now();
-              const deleteResult = await db.dataSource.query(
-                `DELETE FROM ds_metrics WHERE test_run_id = $1`,
-                [testRunId]
+              const { deleted, restored } = await db.deletePerfTestMetricsForRun(
+                testRunId,
+                presentSourceTypes
               );
               logger.info(
-                `    🧹 Deleted ${deleteResult?.[1] ?? '?'} ds_metrics for ${testRunId} ` +
-                  `(segment-targeted, no decompression) in ${Date.now() - deleteStart}ms`
+                `    🧹 Deleted ${deleted} performance_test ds_metrics for ${testRunId} ` +
+                  `(segment-targeted, no decompression` +
+                  `${restored > 0 ? `, ${restored} row(s) from other sources preserved` : ''}) ` +
+                  `in ${Date.now() - deleteStart}ms`
               );
-            } else {
-              // Something present is not being re-collected, so the delete has to discriminate
-              // on a non-segmentby column and the decompression is unavoidable. It is now one
-              // chunk per transaction, and the chunks are recompressed at the end of the stage.
-              logger.info(
-                `    ${testRunId}: keeping ${presentSourceTypes.filter((t) => !refetchedSourceTypes.includes(t)).join(', ')} ` +
-                  `— falling back to a filtered delete over decompressed chunks`
-              );
-              await db.decompressChunksForRange('ds_metrics', fromTime, toTime);
             }
 
             // Refresh panel documents BEFORE metric collection so newly-added dashboards
@@ -600,18 +564,6 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             for (const status of sourcesToRefetch) {
               try {
                 let dataPoints = 0;
-
-                // Delete old performance_test metrics before re-collection to avoid
-                // mixed-resolution data from incremental collection (1s early, 5s later).
-                // Skipped when the wholesale segment-targeted delete above already removed them.
-                if (status.source_type === 'performance_test' && !wholesaleDeleteIsSafe) {
-                  const deleteResult = await db.dataSource.query(
-                    `DELETE FROM ds_metrics WHERE test_run_id = $1 AND metrics_source_id IS NOT NULL
-                     AND metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')`,
-                    [testRunId]
-                  );
-                  logger.info(`    🧹 Deleted ${deleteResult?.[1] ?? '?'} old performance_test ds_metrics for ${testRunId}`);
-                }
 
                 if (status.source_type === 'dynatrace') {
                   // Use the full DynatracePipeline — same as the analyze worker's dynatrace-collection stage
@@ -658,11 +610,6 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             { testRunId, index: i + 1, total: testRunIds.length }
           );
         }
-
-        // Put back anything the fallback path decompressed, once for the whole stage rather
-        // than per run — two runs sharing a chunk would otherwise make the second decompress
-        // it again. Best-effort: the collection above has already committed.
-        await db.recompressTouchedChunks();
 
         const forceRefetchDuration = Date.now() - forceRefetchStart;
         stageTiming.push({ stage: 'force-refetch', duration: forceRefetchDuration });
@@ -1150,6 +1097,25 @@ ${breakdown}
       // the old window, so a silent success here is a half-applied batch nobody learns about.
       throw error;
     } finally {
+      // Put back whatever this process decompressed, ONCE, after every stage is done.
+      //
+      // Not at the end of the force-refetch stage, and not inside StatisticsPipeline: the
+      // statistics stage runs next in this same job and refreshRampUpFlags needs the very
+      // same chunks uncompressed. Recompressing between them would make it decompress them a
+      // second time — and with REEVALUATE_CHUNK_SIZE splitting a batch into several statistics
+      // jobs, once per chunk of runs. On the 153 s-per-decompression this issue measured, that
+      // turns a saving into a regression. The `is_compressed` predicate makes the repeated
+      // decompress calls free only while nothing recompresses in between.
+      //
+      // WorkerDatabaseService is a process singleton, so the statistics jobs this orchestrator
+      // awaits share its tracking set. A statistics job that lands on another worker process
+      // leaves its chunks to the columnstore policy, exactly as before.
+      try {
+        await getDatabaseService().recompressTouchedChunks();
+      } catch (recompressError) {
+        logger.error(`Failed to recompress chunks for job ${job.id}:`, recompressError);
+      }
+
       // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
       // of a lock we just handed back.
       stopLockRenewal?.();

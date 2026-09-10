@@ -188,13 +188,13 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
         return await this.aggregateMetricStatistics(manager, runIds);
       });
 
-      // Put the chunks back now rather than leaving them to the columnstore policy, which
-      // during the #563 measurement had not run for 10.5 h — until it does, every query over
-      // that window scans row store. Ruled out for the segment-targeting fix that issue also
-      // asks for: refreshRampUpFlags guards on `ramp_up`, which is neither segmentby nor
-      // orderby, so unlike the force-refetch DELETE it genuinely cannot avoid decompression.
-      // Outside the transaction, and after it, so a rollback does not leave it recompressed.
-      await this.db.recompressTouchedChunks();
+      // Deliberately does NOT recompress here. refreshRampUpFlags guards on `ramp_up`, which
+      // is neither segmentby nor orderby, so this pipeline genuinely cannot avoid decompression
+      // (that is why it is ruled out of #563's segment-targeting fix) — but it is also called
+      // several times per re-evaluate, once per REEVALUATE_CHUNK_SIZE chunk of runs. Putting
+      // the chunks back between those calls would make each next chunk decompress them again.
+      // The re-evaluate orchestrator recompresses once, after every stage, via the shared
+      // WorkerDatabaseService tracking set.
 
       const duration = Date.now() - startTime;
       this.logPerformance('statistics-aggregation', startTime, {

@@ -973,6 +973,70 @@ export class WorkerDatabaseService implements OnModuleInit {
   }
 
   /**
+   * Remove a run's `performance_test` ds_metrics without decompressing anything.
+   *
+   * `test_run_id` is ds_metrics' `compress_segmentby`, so `DELETE ... WHERE test_run_id = $1`
+   * is segment-targeted — 181 ms and 41 MB of WAL on a 2.45M-row run, against 162 s and 11 GB
+   * for the decompress-then-filtered-delete it replaces (#563). Adding the
+   * `metrics_source_id IN (...)` predicate that would narrow it to perf-test rows is exactly
+   * what defeats that, so instead: copy the rows that must survive aside, delete the run
+   * wholesale, put them back.
+   *
+   * **The survivors are every non-`performance_test` row, regardless of what is being
+   * re-collected.** That is not a coverage question and must not be turned back into one.
+   * Grafana and Dynatrace are external and may no longer hold the window — retention expires,
+   * tokens lapse — and Perfana's whole purpose is keeping those metrics after the source has
+   * dropped them. The delete this replaced only ever removed perf-test rows and let the other
+   * sources upsert over their own, so a re-collection that returned nothing left the old rows
+   * intact. Deleting them on the promise of a refetch would destroy the only remaining copy.
+   * Perf-test rows carry no such risk: they rebuild from `requests_raw`/`transactions` in this
+   * same database, and the old code deleted them unconditionally too.
+   *
+   * The keep-set is small — 85k Grafana + 17k Dynatrace rows across an entire 14.4M-row
+   * production-shaped table, ~3k per run — so reading and re-inserting it is cheap. The read
+   * does touch a non-segmentby column, but a SELECT only decompresses transiently and rewrites
+   * nothing (~1 s on 2.6M rows), unlike the DML guard that made this expensive.
+   *
+   * All three statements share one transaction so the survivors can never be lost between the
+   * delete and the restore.
+   */
+  async deletePerfTestMetricsForRun(
+    testRunId: string,
+    presentSourceTypes: string[]
+  ): Promise<{ deleted: number; restored: number }> {
+    const hasRowsToPreserve = presentSourceTypes.some((t) => t !== 'performance_test');
+
+    if (!hasRowsToPreserve) {
+      const result = await this.dataSource.query(`DELETE FROM ds_metrics WHERE test_run_id = $1`, [testRunId]);
+      return { deleted: Array.isArray(result) ? (result[1] ?? 0) : 0, restored: 0 };
+    }
+
+    return await this.dataSource.transaction(async (manager) => {
+      // CREATE TEMP TABLE ... AS SELECT * keeps ds_metrics' exact column order, so the
+      // restore below can stay a bare `INSERT INTO ds_metrics SELECT *`. ON COMMIT DROP
+      // ties its lifetime to this transaction — the connection is pooled and reused.
+      await manager.query(
+        `CREATE TEMP TABLE ds_metrics_keep ON COMMIT DROP AS
+         SELECT * FROM ds_metrics
+         WHERE test_run_id = $1
+           AND (metrics_source_id IS NULL
+                OR metrics_source_id NOT IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test'))`,
+        [testRunId]
+      );
+
+      const deleteResult = await manager.query(`DELETE FROM ds_metrics WHERE test_run_id = $1`, [testRunId]);
+      const deleted = Array.isArray(deleteResult) ? (deleteResult[1] ?? 0) : 0;
+
+      const insertResult = await manager.query(
+        `INSERT INTO ds_metrics SELECT * FROM ds_metrics_keep`
+      );
+      const restored = Array.isArray(insertResult) ? (insertResult[1] ?? 0) : 0;
+
+      return { deleted: deleted - restored, restored };
+    });
+  }
+
+  /**
    * The metrics source types that actually have `ds_metrics` rows for this run.
    *
    * A row whose `metrics_source_id` is NULL is reported as `'unknown'`: it belongs to no
