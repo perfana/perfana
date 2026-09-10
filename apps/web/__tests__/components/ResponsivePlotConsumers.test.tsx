@@ -5,8 +5,9 @@
  * container and calling Plotly.Plots.resize on its own graph div — react-plotly.js
  * 2.6.0's `useResizeHandler` is nothing but a window-resize listener, so a
  * container that resizes without the window never reaches it. That means the
- * fix is completely inert at any call site that imports react-plotly.js directly
- * (via `dynamic()`) instead of the wrapper: the container is then unobserved.
+ * fix is completely inert at any call site that loads the plot component
+ * directly (via `dynamic()` on `@/components/plotly-cartesian`) instead of the
+ * wrapper: the container is then unobserved.
  * `useResizeHandler` is still asserted per call site because it remains the
  * path for a real window resize.
  *

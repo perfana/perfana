@@ -18,7 +18,7 @@ import {
 } from './utils/slo-chart-utils';
 import type { CheckResult, TestRunInfo } from './types';
 
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface AggregatedSloChartProps {
   testRunId: string;

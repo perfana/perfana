@@ -10,7 +10,7 @@ import { DEFAULT_CHART_HEIGHT } from './utils/slo-chart-utils';
 import type { SLOMetricsChartProps } from './types';
 
 // Dynamically import react-plotly.js to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 export default function SLOMetricsChart({
   testRunId,

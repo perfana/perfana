@@ -61,7 +61,7 @@ jest.mock('@/lib/dynatrace', () => ({
 }));
 
 // Mock Plotly (heavy charting library)
-jest.mock('react-plotly.js', () => {
+jest.mock('@/components/plotly-cartesian', () => {
   return function MockPlot({ data, layout }: any) {
     return (
       <div data-testid="mock-plot">

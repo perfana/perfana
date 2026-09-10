@@ -11,7 +11,7 @@ import dynamic from 'next/dynamic';
 import { TrendsSeries, MetricStatistic} from '../types';
 import { TrendsAddedSeriesList } from './TrendsAddedSeriesList';
 
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface TrendsChartProps {
   addedSeries: TrendsSeries[];

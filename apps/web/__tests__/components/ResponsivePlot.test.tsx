@@ -6,7 +6,7 @@ import ResponsivePlot from '@/components/ResponsivePlot';
 // Each instance gets its own testid so a two-chart test can tell them apart.
 const plotProps: Array<Record<string, unknown>> = [];
 let plotSeq = 0;
-jest.mock('react-plotly.js', () => ({
+jest.mock('@/components/plotly-cartesian', () => ({
   __esModule: true,
   default: (props: Record<string, unknown>) => {
     plotProps.push(props);

@@ -22,7 +22,7 @@ jest.mock('@/lib/api', () => ({
   authenticatedFetch: jest.fn(),
 }));
 
-// Mock react-plotly.js dynamic import
+// Mock the dynamic() import of the plotly component
 jest.mock('next/dynamic', () => ({
   __esModule: true,
   default: (fn: any) => {

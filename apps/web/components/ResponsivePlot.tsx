@@ -5,7 +5,7 @@ import React, { useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { getPlotly, type PlotlyGraphDiv } from '@/lib/plotly';
 
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 /**
  * react-plotly.js 2.6.0's `useResizeHandler` only does

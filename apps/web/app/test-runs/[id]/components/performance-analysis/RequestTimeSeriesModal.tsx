@@ -28,7 +28,7 @@ import {
 import { authenticatedFetch } from '@/lib/api';
 
 // Dynamically import Plot to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface TimeSeriesDataPoint {
   time_bucket: string;

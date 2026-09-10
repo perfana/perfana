@@ -10,7 +10,7 @@ import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
 
 // Dynamically import Plotly to avoid SSR issues
-const Plot = dynamic(() => import('react-plotly.js'), { ssr: false });
+const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface ComparisonPlotProps {
   metricName: string;
