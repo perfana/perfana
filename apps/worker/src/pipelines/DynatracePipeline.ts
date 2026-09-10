@@ -151,6 +151,12 @@ export class DynatracePipeline extends BasePipelineTypeORM {
 
     // Step 4: Execute queries for each Dynatrace instance
     const allQueryResults: DynatraceQueryResult[] = [];
+    // Only configs whose batch actually ran may be marked complete. The loop below has
+    // three `continue` branches (config row gone, missing api token, SaaS without a
+    // platform token) that execute ZERO queries — marking those complete tells the
+    // orchestrator the run is fully collected and it skips every collection stage next
+    // time, so a revoked token would silently become permanent.
+    const executedConfigIds = new Set<string>();
 
     for (const [dynatraceConfigId, configQueries] of queriesByConfig) {
       this.logger.info(`Loading Dynatrace config: ${dynatraceConfigId} (${configQueries.length} queries)`);
@@ -200,6 +206,19 @@ export class DynatracePipeline extends BasePipelineTypeORM {
         );
 
         allQueryResults.push(...configQueryResults);
+        // A query that failed comes back as { result: null, error } — executeBatchQueries
+        // catches per query and never throws — so "everything 401'd" is indistinguishable
+        // from "everything succeeded with no data" downstream. Require every query in the
+        // batch to have succeeded before calling this config collected.
+        if (configQueryResults.every(r => !r.error)) {
+          executedConfigIds.add(dynatraceConfigId);
+        } else {
+          this.logger.warn(
+            `Dynatrace config ${dynatraceConfigId}: ` +
+            `${configQueryResults.filter(r => r.error).length}/${configQueryResults.length} ` +
+            `queries failed — not marking collection complete so it is retried`
+          );
+        }
       } finally {
         await apiClient.close();
       }
@@ -213,7 +232,13 @@ export class DynatracePipeline extends BasePipelineTypeORM {
       testRun
     );
 
-    // Skip storage if no data was returned from Dynatrace
+    // Skip storage if no data was returned. Deliberately does NOT mark the source
+    // complete: `metricsDocuments.length === 0` is the SAME signal for "ran fine, no data"
+    // and "every query failed" (see the error check above), and `is_complete` is sticky —
+    // it makes PipelineOrchestrator skip every collection stage on the next analyze, so an
+    // expired token would never be re-collected after it was fixed. A config that is
+    // genuinely switched off should register no source at all; that is handled by
+    // services/collectable-sources.ts, not here.
     if (metricsDocuments.length === 0) {
       this.logger.info(`No Dynatrace metrics found for test run ${testRunId} - skipping storage`);
       return {
@@ -229,29 +254,48 @@ export class DynatracePipeline extends BasePipelineTypeORM {
     this.logger.info(`✅ Completed ${queries.length} Dynatrace queries: ${panelDocuments.length} panels, ${metricsDocuments.length} metrics docs`);
 
     // Track collection status per dynatrace config for gap detection by refresh-missing-data
-    if (testRun.startTime && testRun.endTime) {
-      for (const dynatraceConfigId of queriesByConfig.keys()) {
-        try {
-          await this.db.updateCollectedRanges(
-            testRunId,
-            'dynatrace',
-            dynatraceConfigId,
-            { from: testRun.startTime, to: testRun.endTime }
-          );
-          await this.db.markCollectionComplete(testRunId, 'dynatrace', dynatraceConfigId);
-          this.logger.info(`📋 Collection status tracked: dynatrace/${dynatraceConfigId} marked complete`);
-        } catch (statusError) {
-          // Non-fatal: collection status tracking failure shouldn't fail the pipeline
-          this.logger.warn(`⚠️ Failed to track collection status for dynatrace/${dynatraceConfigId}: ${statusError}`);
-        }
-      }
-    }
+    await this.trackCollectionStatus(testRunId, testRun, executedConfigIds);
 
     return {
       panelCount: panelDocuments.length,
       metricsCount: metricsDocuments.length,
       queryCount: queries.length
     };
+  }
+
+  /**
+   * Record that each Dynatrace config has been fully processed for this run.
+   *
+   * Writes one full-span range and marks the source complete. That range is what makes
+   * coverage read 100%: the incremental ticks contribute nothing, because a tick with no
+   * data deliberately records a zero-width range so its window is retried.
+   *
+   * Never throws: a failure to write bookkeeping must not fail a collection that worked.
+   */
+  private async trackCollectionStatus(
+    testRunId: string,
+    testRun: { startTime?: Date | null; endTime?: Date | null },
+    dynatraceConfigIds: Iterable<string>
+  ): Promise<void> {
+    if (!testRun.startTime || !testRun.endTime) {
+      return;
+    }
+
+    for (const dynatraceConfigId of dynatraceConfigIds) {
+      try {
+        await this.db.updateCollectedRanges(
+          testRunId,
+          'dynatrace',
+          dynatraceConfigId,
+          { from: testRun.startTime, to: testRun.endTime }
+        );
+        await this.db.markCollectionComplete(testRunId, 'dynatrace', dynatraceConfigId);
+        this.logger.info(`📋 Collection status tracked: dynatrace/${dynatraceConfigId} marked complete`);
+      } catch (statusError) {
+        // Non-fatal: collection status tracking failure shouldn't fail the pipeline
+        this.logger.warn(`⚠️ Failed to track collection status for dynatrace/${dynatraceConfigId}: ${statusError}`);
+      }
+    }
   }
 
   /**

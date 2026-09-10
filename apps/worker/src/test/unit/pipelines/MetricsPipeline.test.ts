@@ -135,13 +135,17 @@ describe('MetricsPipeline', () => {
       query: vi.fn().mockResolvedValue([])
     };
 
+    vi.mocked(grafanaConfigCache.getGrafanaInstanceId).mockReturnValue('grafana-instance-1');
+
     // Setup mock database service
     mockDb = {
       getTestRunByTestRunId: vi.fn(),
       getDsPanelsByTestRun: vi.fn(),
       transaction: vi.fn((fn) => fn(mockEntityManager)),
       writeTransaction: vi.fn((fn) => fn(mockEntityManager)),
-      query: vi.fn().mockResolvedValue([undefined, 0]) // Mock cleanup query
+      query: vi.fn().mockResolvedValue([undefined, 0]), // Mock cleanup query
+      updateCollectedRanges: vi.fn().mockResolvedValue(undefined),
+      markCollectionComplete: vi.fn().mockResolvedValue(undefined)
     };
 
     vi.mocked(databaseAccessor.getDatabaseService).mockReturnValue(mockDb as any);
@@ -525,6 +529,86 @@ describe('MetricsPipeline', () => {
           })
         ]),
         expect.any(Object)
+      );
+    });
+  });
+
+  describe('Collection status tracking', () => {
+    // `is_complete` is sticky — the only reset is a force-refetch reevaluate — and
+    // PipelineOrchestrator skips dynatrace-collection, panels-processing,
+    // performance-test-metrics AND metrics-collection once every status row is complete.
+    // An empty ds_panels is often transient (grafana-sync has not written grafana_json for
+    // a new dashboard yet, or an application_dashboard's uid matches no grafana_dashboards
+    // row), so completing on that path lets one bad analyze permanently suppress
+    // collection. A source that is genuinely off is never registered in the first place.
+    test('does NOT mark the source complete when there are no panel documents', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
+      mockDb.getDsPanelsByTestRun.mockResolvedValue([]);
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.success).toBe(true);
+      expect(mockDb.markCollectionComplete).not.toHaveBeenCalled();
+      expect(mockDb.updateCollectedRanges).not.toHaveBeenCalled();
+    });
+
+    test('does NOT mark the source complete when benchmarksOnly filters every panel out', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
+      mockDb.getDsPanelsByTestRun.mockResolvedValue([
+        createMockPanel({ benchmark_ids: null })
+      ]);
+
+      const result = await pipeline.execute({
+        testRunId: 'test-run-001',
+        benchmarksOnly: true
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockDb.markCollectionComplete).not.toHaveBeenCalled();
+    });
+
+    // The normal path. The refactor from an inline block to trackCollectionStatus is
+    // invisible to every other test in this file, so a refactor that dropped this call
+    // would leave the source incomplete on runs that collected fine.
+    test('marks the grafana source complete on the normal collection path', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
+      mockDb.getDsPanelsByTestRun.mockResolvedValue([createMockPanel()]);
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.success).toBe(true);
+      expect(mockDb.markCollectionComplete).toHaveBeenCalledWith(
+        'test-run-001',
+        'grafana',
+        'grafana-instance-1'
+      );
+    });
+
+    // endTime is null on a live run; a range written against it would be meaningless.
+    test('writes no range when the run has no end time', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue({
+        ...createMockTestRun(),
+        endTime: undefined,
+      });
+      mockDb.getDsPanelsByTestRun.mockResolvedValue([createMockPanel()]);
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.success).toBe(true);
+      expect(mockDb.updateCollectedRanges).not.toHaveBeenCalled();
+      expect(mockDb.markCollectionComplete).not.toHaveBeenCalled();
+    });
+
+    test('a bookkeeping failure does not fail a collection that worked', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
+      mockDb.getDsPanelsByTestRun.mockResolvedValue([createMockPanel()]);
+      mockDb.markCollectionComplete.mockRejectedValue(new Error('deadlock'));
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to track collection status')
       );
     });
   });
