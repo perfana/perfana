@@ -60,16 +60,19 @@ vi.mock('../../../config/redis-pool.js', () => ({
   })),
 }));
 
-// Mock JobLockService
+// Mock JobLockService. The instance is captured so tests can assert the scope lock is
+// handed back — see the release-on-throw test below.
+const mockReleaseLock = vi.fn().mockResolvedValue(true);
+const mockStopLockRenewal = vi.fn();
 vi.mock('../../../services/JobLockService.js', () => ({
   JobLockService: vi.fn().mockImplementation(() => ({
     acquireLock: vi.fn().mockResolvedValue({
       acquired: true,
       lockKey: 'test-lock-key',
     }),
-    releaseLock: vi.fn().mockResolvedValue(true),
+    releaseLock: mockReleaseLock,
     // Returns the stop function the worker calls in its finally.
-    startLockRenewal: vi.fn().mockReturnValue(vi.fn()),
+    startLockRenewal: vi.fn().mockReturnValue(mockStopLockRenewal),
   })),
 }));
 
@@ -299,7 +302,9 @@ describe('analyzeTestWorker', () => {
   });
 
   describe('Input Validation', () => {
-    it('should return failed status for invalid input', async () => {
+    // Throws rather than returning. A malformed job will never succeed, but recording it
+    // as COMPLETED hides it entirely; the failed set is where an operator can find it.
+    it('should throw for invalid input', async () => {
       // Arrange
       const invalidDataCases = [
         { adapt: true }, // Missing testRunId
@@ -311,9 +316,7 @@ describe('analyzeTestWorker', () => {
 
       // Act & Assert
       for (const invalidData of invalidDataCases) {
-        const result = await worker({ data: invalidData });
-        expect(result.status).toBe('failed');
-        expect(result.message).toContain('failed');
+        await expect(worker({ data: invalidData })).rejects.toThrow();
       }
     });
   });
@@ -350,7 +353,12 @@ describe('analyzeTestWorker', () => {
       expect(result.message).toContain('completed with some failures');
     });
 
-    it('should handle pipeline error and return failed status', async () => {
+    // simple-workers.ts does `return await processor(job)`, so ANY resolved value marks
+    // the job completed — no retry, no failed-set entry, nothing an operator can find.
+    // A ten-stage analysis that blew up must reject, or it is indistinguishable from one
+    // that succeeded. Rejecting is also what activates the attempts:3 / 5s exponential
+    // backoff this job type has always been configured with and never used.
+    it('should REJECT on a pipeline error, not resolve with a failed status', async () => {
       // Arrange
       const jobData = {
         testRunId: 'test-run-error',
@@ -360,24 +368,14 @@ describe('analyzeTestWorker', () => {
       const expectedError = new Error('Database connection timeout');
       mockOrchestrator.executeSequentialPipeline.mockRejectedValue(expectedError);
 
-      // Act
-      const result = await worker({ data: jobData });
-
-      // Assert
-      expect(result.status).toBe('failed');
-      expect(result.message).toContain('Analysis failed');
-      expect(result.message).toContain('Database connection timeout');
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]).toMatchObject({
-        message: 'Database connection timeout',
-        code: 'ANALYZE_TEST_ERROR',
-        details: {
-          testRunId: 'test-run-error',
-        },
-      });
+      // Act & Assert — the original error instance propagates, so BullMQ's failed-set
+      // entry carries the real stack rather than a re-wrapped message.
+      await expect(worker({ data: jobData })).rejects.toThrow('Database connection timeout');
+      await expect(worker({ data: jobData })).rejects.toBe(expectedError);
     });
 
-    it('should handle non-Error exceptions', async () => {
+    // A thrown non-Error still has to reject, and BullMQ needs a real Error to record.
+    it('should reject with a real Error when a non-Error was thrown', async () => {
       // Arrange
       const jobData = {
         testRunId: 'test-run-string-error',
@@ -386,12 +384,28 @@ describe('analyzeTestWorker', () => {
 
       mockOrchestrator.executeSequentialPipeline.mockRejectedValue('String error message');
 
+      // Act & Assert
+      await expect(worker({ data: jobData })).rejects.toThrow('String error message');
+      await expect(worker({ data: jobData })).rejects.toBeInstanceOf(Error);
+    });
+
+    // Load-bearing for the retry. The catch-all now throws, and BullMQ reschedules the
+    // job on the same sut:env:workload scope. If the finally did not hand the lock back,
+    // every retry would hit the scope-lock refusal branch — which also throws — and the
+    // job would burn all three attempts without re-running a single stage.
+    it('releases the scope lock and stops renewal when the pipeline throws', async () => {
+      // Arrange
+      mockReleaseLock.mockClear();
+      mockStopLockRenewal.mockClear();
+      mockOrchestrator.executeSequentialPipeline.mockRejectedValue(new Error('boom'));
+
       // Act
-      const result = await worker({ data: jobData });
+      await expect(worker({ data: { testRunId: 'test-run-lock', adapt: true } }))
+        .rejects.toThrow('boom');
 
       // Assert
-      expect(result.status).toBe('failed');
-      expect(result.message).toContain('String error message');
+      expect(mockStopLockRenewal).toHaveBeenCalled();
+      expect(mockReleaseLock).toHaveBeenCalled();
     });
 
     it('should handle orchestrator timeout', async () => {
@@ -404,12 +418,8 @@ describe('analyzeTestWorker', () => {
       const timeoutError = new Error('Pipeline execution timed out after 600000ms');
       mockOrchestrator.executeSequentialPipeline.mockRejectedValue(timeoutError);
 
-      // Act
-      const result = await worker({ data: jobData });
-
-      // Assert
-      expect(result.status).toBe('failed');
-      expect(result.message).toContain('timed out');
+      // Act & Assert
+      await expect(worker({ data: jobData })).rejects.toThrow('timed out');
     });
   });
 

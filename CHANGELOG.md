@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.13] - 2026-09-10
+
+### Fixed
+- **An analysis that blows up now fails its job instead of being recorded as completed.** `simple-workers.ts` wraps every processor as `return await processor(job)`, so `analyze.ts`'s catch-all returning `{ status: 'failed' }` **resolved** that promise and BullMQ marked the job **completed** — no retry, no entry in the failed set, nothing for an operator to find. A run whose ten-stage pipeline threw looked exactly like one that succeeded.
+
+  It also meant the retry policy this job type has always carried never once fired: `attempts: 3` with exponential backoff from 5 s, agreed on by both `SIMPLE_JOB_OPTIONS['analyze-test']` and the `perfana-analyze` queue default. Throwing activates it. Re-running is safe — every stage deletes and rewrites its own rows — and the `sut:env:workload` scope lock is released in the `finally` before BullMQ reschedules. That release is what the retry depends on, so it is now pinned by its own test: without it every attempt would hit the scope-lock refusal branch, which also throws, and the job would burn all three attempts without re-running a single stage.
+
+  The original error instance propagates rather than a re-wrapped message, so the failed-set entry carries the real stack. A thrown non-Error is converted to an `Error` first, because that is what BullMQ records. Invalid job data throws too: it will never succeed on retry, but recording it as completed hides it entirely.
+
+  The `partial` return above the catch-all is deliberately untouched — that is the orchestrator reporting a stage failure under `errorHandling: 'abort'`, a readable outcome rather than an unhandled exception.
+
 ## [0.2.95.12] - 2026-09-10
 
 ### Fixed

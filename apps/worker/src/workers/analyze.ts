@@ -239,18 +239,24 @@ export function analyzeTestWorker() {
         await progressReporter.fail(errorMessage);
       }
 
-      return {
-        status: 'failed',
-        message: `Analysis failed for test run: ${errorMessage}`,
-        errors: [{
-          message: errorMessage,
-          code: 'ANALYZE_TEST_ERROR',
-          details: {
-            testRunId: validatedData?.testRunId,
-            duration: `${duration}ms`
-          }
-        }]
-      };
+      // THROW, do not return. `simple-workers.ts` wraps every processor as
+      // `return await processor(job)`, so returning { status: 'failed' } RESOLVES that
+      // promise and BullMQ records the job completed: no retry, no failed-set entry,
+      // nothing for an operator to find. A run whose ten-stage analysis blew up looked
+      // exactly like one that succeeded.
+      //
+      // Throwing activates the retry policy this job already had and never used:
+      // attempts 3, exponential backoff from 5s (SIMPLE_JOB_OPTIONS['analyze-test'] and
+      // the perfana-analyze queue default agree on both numbers). Re-running the pipeline
+      // is safe — every stage deletes and rewrites its own rows, and the sut:env:workload
+      // scope lock is released in the finally below before the retry is scheduled.
+      //
+      // Distinct from the `partial` return above, which is the orchestrator reporting that
+      // some stage failed under `errorHandling: 'abort'`. That one is a deliberate,
+      // readable outcome; this is an unhandled exception.
+      throw error instanceof Error
+        ? error
+        : new Error(`Analysis failed for test run ${validatedData?.testRunId ?? 'unknown'}: ${errorMessage}`);
     } finally {
       // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
       // of a lock we just handed back.
