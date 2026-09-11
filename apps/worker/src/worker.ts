@@ -12,6 +12,9 @@ import { registerSimpleWorkers, stopSimpleWorkers } from './workers/simple-worke
 import type Redis from 'ioredis';
 import { bootstrapNestJS, shutdownNestJS } from './nestjs-bootstrap.js';
 import { StuckJobScanner } from './services/StuckJobScanner.js';
+import { QueuedJobAnnouncer } from './services/QueuedJobAnnouncer.js';
+import { createSimpleQueue } from './workers/simple-worker-factory.js';
+import { SIMPLE_QUEUES } from './config/simple-queues.js';
 
 export class PerfanaWorkerApp {
   private redisConnection: Redis | null = null;
@@ -20,6 +23,7 @@ export class PerfanaWorkerApp {
   private isShuttingDown = false;
   private poolMonitorInterval: NodeJS.Timeout | null = null;
   private stuckJobScanner: StuckJobScanner | null = null;
+  private queuedJobAnnouncer: QueuedJobAnnouncer | null = null;
   private scannerRedis: Redis | null = null;
 
   constructor() {
@@ -70,6 +74,10 @@ export class PerfanaWorkerApp {
       this.stuckJobScanner = new StuckJobScanner(this.scannerRedis);
       this.stuckJobScanner.start();
       this.logger.info('✅ StuckJobScanner started (scans every 2 minutes)');
+
+      // Tell the UI about analyze jobs still waiting for a worker slot (same Redis as the scanner).
+      this.queuedJobAnnouncer = new QueuedJobAnnouncer(this.scannerRedis, createSimpleQueue(SIMPLE_QUEUES.ANALYZE));
+      this.queuedJobAnnouncer.start();
 
       // Set up graceful shutdown
       this.setupGracefulShutdown();
@@ -124,6 +132,18 @@ export class PerfanaWorkerApp {
       // Quick sanity check - try to query something simple
       await dbService.dataSource.query('SELECT 1');
       this.logger.info('✅ TypeORM database connection verified');
+
+      // ds_metrics/requests_raw use 1-day chunks with no retention policy (migration 1804),
+      // and every hot query locks every chunk. The lock table is this x max_connections;
+      // at the default 64 it runs out as "out of shared memory" after a few hundred chunks.
+      const [{ max_locks }] = await dbService.dataSource.query<[{ max_locks: string }]>(
+        "SELECT current_setting('max_locks_per_transaction') AS max_locks"
+      );
+      if (Number(max_locks) < 256) {
+        this.logger.error(
+          `max_locks_per_transaction is ${max_locks}; raise it to 256+ (Postgres restart) before ds_metrics accumulates a few hundred 1-day chunks`
+        );
+      }
     } catch (error) {
       this.logger.error('❌ TypeORM database connection test failed:', error);
       throw new Error('TypeORM database connection test failed');
@@ -184,6 +204,8 @@ export class PerfanaWorkerApp {
 
   private async cleanup(): Promise<void> {
     const cleanupPromises: Promise<void>[] = [];
+
+    await this.queuedJobAnnouncer?.stop().catch((err) => this.logger.error('❌ Error stopping QueuedJobAnnouncer:', err));
 
     // Stop StuckJobScanner
     if (this.stuckJobScanner) {

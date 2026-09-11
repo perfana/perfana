@@ -1,4 +1,4 @@
-import type { Job } from 'bullmq';
+import { DelayedError, type Job } from 'bullmq';
 import type Redis from 'ioredis';
 import { getLogger, logPipelineStart, logPipelineSuccess as _logPipelineSuccess, logPipelineError } from '../lib/utils/logger.js';
 import { AnalyzeTestJobSchema, type AnalyzeTestJob, type JobResult } from '../types/jobs.js';
@@ -8,9 +8,14 @@ import { DataSanityCheckPipeline } from '../pipelines/DataSanityCheckPipeline.js
 import { getRedisPool } from '../config/redis-pool.js';
 import { JobLockService } from '../services/JobLockService.js';
 import { ProgressReporter } from '../services/ProgressReporter.js';
+import { HeavyStageMutex } from '../services/HeavyStageMutex.js';
 import { JobType } from '@perfana/shared/types';
 
 const logger = getLogger('analyze-test-worker');
+
+/** How long a run may wait for its workload's scope lock before the refusal is final. */
+const BLOCKED_REPARK_MS = 60_000;
+const BLOCKED_MAX_WAIT_MS = 2 * 60 * 60_000;
 
 /**
  * Analyze Test Worker - Main entry point for complete test analysis
@@ -28,7 +33,7 @@ const logger = getLogger('analyze-test-worker');
  * 9. ADAPT Analysis (difference detection, if enabled)
  */
 export function analyzeTestWorker() {
-  return async (job: Job): Promise<JobResult> => {
+  return async (job: Job, token?: string): Promise<JobResult> => {
     const startTime = Date.now();
     let validatedData: AnalyzeTestJob | undefined;
     let redis: Redis | null = null;
@@ -95,9 +100,21 @@ export function analyzeTestWorker() {
         //
         // This was survivable while every holder of the sut:env:workload lock finished in
         // seconds. It is not now: a workload-wide analysis-window apply holds that lock
-        // across all of its statistics, control-group and ADAPT chunks, which on a large
-        // workload is a long window — and every run that FINISHES during it takes this
-        // branch. Throwing lets BullMQ retry instead of silently dropping the analysis.
+        // across all of its statistics, control-group and ADAPT chunks, and since the
+        // HeavyStageMutex those stages also queue behind every other analysis in the
+        // deployment — a holder can sit on the scope for an hour. Two runs of one workload
+        // finishing together is the normal case, and the job's retry policy is 3 attempts at
+        // 5 s / 10 s: throwing here drops the second run for good ~15 s after pickup.
+        //
+        // So: re-park the job (moveToDelayed + DelayedError consumes no attempt) and try
+        // again in a minute, for up to BLOCKED_MAX_WAIT_MS. Only then is the refusal a
+        // thrown error that goes through the retry policy and lands in the failed set.
+        const blockedSince = (job.data as { blockedSince?: number }).blockedSince ?? Date.now();
+        if (token && Date.now() - blockedSince < BLOCKED_MAX_WAIT_MS) {
+          await job.updateData({ ...(job.data as object), blockedSince });
+          await job.moveToDelayed(Date.now() + BLOCKED_REPARK_MS, token);
+          throw new DelayedError();
+        }
         const blockedError = new Error(
           `Job blocked: ${lockResult.blockingInfo?.reason || 'Another job is processing this scope'}` +
             ` (blocking job ${lockResult.blockingInfo?.existingJobId ?? 'unknown'})`
@@ -164,7 +181,11 @@ export function analyzeTestWorker() {
         {
           stages: orchestratedStages,
           errorHandling: 'abort', // Stop pipeline if a critical stage fails
-          timeoutMs: 600000, // 10 minute total timeout
+          // Per stage, not per pipeline, and only for the stages outside HEAVY_STAGES; those
+          // are bounded by Postgres and serialised across the deployment instead. See
+          // executeSequentialPipeline.
+          timeoutMs: 600000,
+          heavyStageMutex: new HeavyStageMutex(redis, job.id!),
           // We run the sanity check after this returns, so we publish the terminal progress
           // event ourselves once that is done. Otherwise job:completed lands first and the web
           // client discards the sanity stage entirely — it renders "Stage 10 of 11 / 91%" as the
@@ -198,6 +219,16 @@ export function analyzeTestWorker() {
         logger.warn(
           `Data sanity check marked ${testRunId} invalid: ${(dataSanity.reasons ?? []).join('; ') || 'no reason given'}`,
         );
+      }
+
+      // A stage that failed for a reason unrelated to the run — the heavy-stage lock gave up
+      // after its ceiling, or Redis errored inside the acquire — must be RETRIED, not recorded
+      // as 'partial' (BullMQ completed, no retry, analysis silently dropped). The orchestrator
+      // marks those stage results RETRYABLE; rethrow them into the retry policy.
+      const stageResults = (result.data as { stages?: Array<{ result?: { error?: { code?: string; message?: string } } }> } | undefined)?.stages ?? [];
+      const retryable = stageResults.find((s) => s.result?.error?.code === 'RETRYABLE');
+      if (retryable) {
+        throw new Error(`Retryable stage failure for ${testRunId}: ${retryable.result?.error?.message ?? 'unknown'}`);
       }
 
       // Terminal progress event, after every stage the UI lists has been reported.
