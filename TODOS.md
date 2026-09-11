@@ -463,6 +463,26 @@ never pays it.
 
 ### Decide whether to reduce `ds_metrics` chunk_time_interval from 7 days
 
+**DONE in v0.2.95.17** (`1804000000000-ChunkIntervalAndChunkCompressionWrappers`): 1-day chunks on
+`ds_metrics` and `requests_raw`, plus `max_locks_per_transaction=256` in `docker-compose.infra.yml`.
+Forced by production on 2026-09-11: 227 GB of 228 GB on disk was the two open 7-day chunks, at
+~16 GB/day of ingest (the compressed history averaged 1.4 GB/day). The same migration ships the
+`SECURITY DEFINER` decompress/compress wrappers, so the worker can finally decompress (it never
+could — `must be owner of hypertable`). Retention on `ds_metrics` is still undecided.
+
+**Still open — `compress_after` 7 days → 2 days on `ds_metrics`.** This is the step that turns the
+227 GB into ~40 GB (2–3 days of row store at ~16 GB/day, the rest at 86x). Two preconditions: (1)
+verify on production that an analysis-window change on a run older than 7 days now succeeds, i.e.
+the wrappers work there — with a 2-day `compress_after` every re-analysis of a 2-7-day-old run hits
+compressed data, which is exactly when people re-tune windows; (2) schedule it: the previous 113 GB
+chunk qualifies the moment the policy is added, and `add_compression_policy` fires immediately, so
+pass `initial_start` for a quiet hour or `compress_chunk` that one by hand at night. No CAGG reads
+`ds_metrics`, so the 7-day CAGG `start_offset` is unaffected; do NOT shorten `requests_raw`'s
+compression without moving those offsets. Re-measure the "time bound buys nothing" conclusion above
+under 1-day chunks — it was taken when a run sat inside one chunk.
+
+**Original analysis (2026-09-04):**
+
 **Priority:** P3
 **Origin:** split out of the v0.2.94.6 work after adversarial review (2026-09-04).
 **Why:** the active chunk was 79 GB / 82.5 M rows against `shared_buffers` of 4 GB, giving a 4.4%
@@ -488,6 +508,33 @@ helps. 1 day would give ~11 GB chunks at the measured ~11.3 GB/day, a ~7x smalle
 changing anything, and pair any reduction with a retention policy and a `max_background_workers`
 raise. The genuine win on the other side: `decompressChunksForRange` and the per-run bounded ramp-up
 `UPDATE` both get *better* with narrower chunks (less collateral decompression).
+
+### Heavy-stage serialisation follow-ups (v0.2.95.17)
+
+**Priority:** P3
+**Origin:** /ship review of `fix/heavy-stage-mutex` (2026-09-11). Rollout plan with timings:
+`docs/superpowers/plans/2026-09-11-heavy-stage-mutex-rollout.md`.
+
+- **Parked-ceiling abort cannot remove an `active` child.** `waitForJobs` gives up after 1 h of
+  parked time and calls `job.remove()`, but BullMQ refuses `remove()` on a locked (active) job —
+  a child parked behind the heavy-stage mutex is `active`. It later acquires the lock and runs the
+  stale stage unobserved. Pre-existing shape for running children; needs a cancel flag the child
+  polls before taking the lock.
+- **API guard: never let a `waiting` frame replace an `active` scope entry** in
+  `JobProgressService.handleProgressEvent`, and have `useJobProgress` ignore a `waiting` frame for a
+  different run while it holds an `active` one. `QueuedJobAnnouncer` already skips runs whose
+  scope lock is held, so this is belt-and-braces.
+- **Measure planning time on the panel-render path (`metrics.service.ts`) against ~365 chunks**
+  before the deploy gets there (about a year at 1-day chunks), and re-measure the "time bound
+  buys nothing" conclusion above under 1-day chunks.
+- **`QueuedJobAnnouncer` runs per worker replica** (N publishes per job per 30 s). Add a leader
+  key when there is more than one replica.
+- **No fairness in `HeavyStageMutex`.** `SET NX` polled every 5 s; whoever's timer fires first after
+  a release wins, and each analyze job acquires three times. Under a burst of finished runs a
+  re-evaluate child can lose every poll for an hour. Upgrade path: a FIFO ticket (`INCR` + serving
+  counter) behind the same TTL'd holder key. Trigger: `stayed queued behind` in the log.
+- **A removed queued job shows "Queued" for up to 5 min.** The announcer's record has the 5 min TTL
+  and nothing else clears it; `useJobProgress.isRunning` gates the analyze buttons meanwhile.
 
 ### The 2.5M ADAPT plan cost that triggers JIT may be an ANALYZE artifact
 
