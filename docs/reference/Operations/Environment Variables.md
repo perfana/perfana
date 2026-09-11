@@ -51,6 +51,7 @@ All configuration is managed through environment variables, loaded from `.env.lo
 | `SWAGGER_ENABLED` | `true` | Enable Swagger docs |
 | `CORS_ORIGINS` | `http://localhost:3000` | Allowed CORS origins |
 | `HYPERTABLE_SPACE_PARTITIONS` | `4` | Hash partition count applied to `system_under_test` on `requests_raw`, `requests_error`, `transactions` on fresh installs. Read once at migration time; range 2–64, defaults to 4. (`1` is rejected — it's functionally identical to no space dimension but leaves permanent dimension metadata on the hypertable.) See [[Hypertable Space Rebuild]]. |
+| `DS_METRICS_COMPRESS_INITIAL_START` | next 02:00 UTC | Read by the **migration runner** only, by migration 1805 (v0.2.95.18): ISO-8601 timestamp, with a zone designator and in the future, for the first run of the 2-day `ds_metrics` compression policy. That first run compresses the previous 7-day chunk (~113 GB on a large deploy) in one `compress_chunk` call — hours of I/O and WAL — so put it in a quiet window; later runs follow every 24 h from it. A value that is unparseable, zone-less, in the past, or outside years 1..9999 is ignored with a warning and the default applies rather than aborting the deploy. See [[Migrations]]. |
 
 ## Frontend
 
