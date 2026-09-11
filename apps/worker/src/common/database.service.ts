@@ -863,6 +863,19 @@ export class WorkerDatabaseService implements OnModuleInit {
    * here if THIS process is the one that decompressed it.
    */
   private readonly decompressedChunks = new Set<string>();
+  /**
+   * Chunks a decompression already failed on in this process. A legacy 7-day chunk is
+   * ~10 GB of row store and can outlast the budget; every stale run overlapping it would
+   * otherwise pay the same failed attempt, all while the heavy-stage mutex is held.
+   * Cleared together with decompressedChunks, i.e. once per re-evaluate.
+   */
+  private readonly undecompressableChunks = new Set<string>();
+  /**
+   * Per-chunk budget, in its own transaction so Postgres cancels cleanly. Kept below the
+   * pool's client-side query_timeout (600 s): at equal deadlines node-postgres destroys
+   * the connection instead of letting the statement be cancelled.
+   */
+  private static readonly DECOMPRESS_STATEMENT_TIMEOUT_MS = 540_000;
 
   /**
    * Decompress the chunks overlapping [from, to], one per transaction.
@@ -889,10 +902,10 @@ export class WorkerDatabaseService implements OnModuleInit {
    * genuinely cannot be expressed on the segmentby column.
    */
   async decompressChunksForRange(hypertable: string, from: Date, to: Date): Promise<void> {
-    let chunks: Array<{ qualified: string }>;
+    let chunks: Array<{ qualified: string; range_start: string; range_end: string }>;
     try {
       chunks = await this.dataSource.query(
-        `SELECT format('%I.%I', chunk_schema, chunk_name) AS qualified
+        `SELECT format('%I.%I', chunk_schema, chunk_name) AS qualified, range_start, range_end
          FROM timescaledb_information.chunks
          WHERE hypertable_name = $1
            AND is_compressed
@@ -905,9 +918,9 @@ export class WorkerDatabaseService implements OnModuleInit {
       // Compression not enabled, timescaledb missing, or table not a hypertable → nothing to do.
       //
       // warn, not debug: callers rely on this having decompressed before they run a
-      // DML guard on a non-segmentby column. When it silently no-ops (chunk owned by
-      // another role, recompressed in between, TimescaleDB error) the caller hits
-      // `tuple decompression limit exceeded` with nothing in the log explaining why.
+      // DML guard on a non-segmentby column. When it silently no-ops (recompressed in
+      // between, TimescaleDB error) the caller hits `tuple decompression limit exceeded`
+      // with nothing in the log explaining why.
       const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'unknown error';
       this.logger.warn(`decompressChunksForRange(${hypertable}) skipped: ${msg}`);
       return;
@@ -918,14 +931,33 @@ export class WorkerDatabaseService implements OnModuleInit {
     }
 
     let decompressed = 0;
-    for (const { qualified } of chunks) {
+    for (const { qualified, range_start, range_end } of chunks) {
+      if (this.undecompressableChunks.has(qualified)) {
+        this.logger.warn(`decompressChunksForRange(${hypertable}): chunk ${qualified} skipped: failed earlier in this process`);
+        continue;
+      }
       try {
-        // Its own statement, so node-postgres runs it in its own implicit transaction.
-        await this.dataSource.query(`SELECT decompress_chunk($1::regclass, if_compressed => true)`, [qualified]);
+        // A legacy 7-day chunk is ~10 GB of row store once decompressed; say which one so a
+        // slow re-analysis or a disk spike is attributable to it.
+        this.logger.log(`Decompressing ${hypertable} chunk ${qualified} [${range_start} - ${range_end}]`);
+        // One chunk per transaction (see above), with its own statement budget. Through the
+        // SECURITY DEFINER wrapper (migration 1804): this connection runs as perfana_system,
+        // which does not own the hypertable, and TimescaleDB refuses a direct
+        // decompress_chunk with `must be owner of hypertable`.
+        await this.dataSource.transaction(async (em) => {
+          await em.query('SELECT set_config($1, $2, true)', [
+            'statement_timeout',
+            String(WorkerDatabaseService.DECOMPRESS_STATEMENT_TIMEOUT_MS),
+          ]);
+          await em.query(`SELECT perfana_decompress_chunk($1::regclass)`, [qualified]);
+        });
         this.decompressedChunks.add(qualified);
         decompressed++;
       } catch (err) {
+        // Includes `function perfana_decompress_chunk(regclass) does not exist` on a database
+        // that has not run migration 1804 — the message names it, so leave it in the log.
         const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'unknown error';
+        this.undecompressableChunks.add(qualified);
         this.logger.warn(`decompressChunksForRange(${hypertable}): chunk ${qualified} skipped: ${msg}`);
       }
     }
@@ -954,12 +986,22 @@ export class WorkerDatabaseService implements OnModuleInit {
 
     const chunks = Array.from(this.decompressedChunks);
     this.decompressedChunks.clear();
+    this.undecompressableChunks.clear();
 
     const started = Date.now();
     let recompressed = 0;
     for (const qualified of chunks) {
       try {
-        await this.dataSource.query(`SELECT compress_chunk($1::regclass, if_not_compressed => true)`, [qualified]);
+        // Same budget and transaction shape as the decompress: below the pool's 600 s
+        // query_timeout so a slow compress is cancelled by Postgres, not by a torn socket
+        // that lets the server finish and commit while the worker logs "left uncompressed".
+        await this.dataSource.transaction(async (em) => {
+          await em.query('SELECT set_config($1, $2, true)', [
+            'statement_timeout',
+            String(WorkerDatabaseService.DECOMPRESS_STATEMENT_TIMEOUT_MS),
+          ]);
+          await em.query(`SELECT perfana_compress_chunk($1::regclass)`, [qualified]);
+        });
         recompressed++;
       } catch (err) {
         const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'unknown error';

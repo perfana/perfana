@@ -452,6 +452,85 @@ describe('PipelineOrchestrator', () => {
       expect(result.data.stages[0].result.error?.message).toContain('timed out');
     }, 10000);
 
+    it('does not apply the wall-clock timeout to a heavy stage', async () => {
+      // The race only abandons the promise; the aggregation keeps running on Postgres, which
+      // already bounds it with statement_timeout. Heavy stages therefore skip the race.
+      mockPipelines.statistics.execute.mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({ success: true, duration: 300 }), 300))
+      );
+
+      const result = await orchestrator.executeSequentialPipeline('test-run-heavy', {
+        stages: ['statistics-calculation'],
+        timeoutMs: 100,
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it('holds the heavy-stage mutex for exactly the heavy stages and releases it on failure', async () => {
+      const release = vi.fn().mockResolvedValue(undefined);
+      const mutex = { acquire: vi.fn().mockResolvedValue(release) };
+      mockPipelines.panels.execute.mockResolvedValue({ success: true, duration: 1 });
+      mockPipelines.statistics.execute.mockRejectedValue(new Error('canceling statement due to statement timeout'));
+
+      const result = await orchestrator.executeSequentialPipeline('test-run-mutex', {
+        stages: ['panels-processing', 'statistics-calculation'],
+        errorHandling: 'abort',
+        heavyStageMutex: mutex as never,
+      });
+
+      expect(result.success).toBe(false);
+      expect(mutex.acquire).toHaveBeenCalledTimes(1); // panels-processing is not heavy
+      expect(release).toHaveBeenCalledTimes(1); // released although the stage threw
+    });
+
+    it('reports Queued while waiting for the heavy-stage lock, then clears it — also when acquire gives up', async () => {
+      const reporter = { startStage: vi.fn(), completeStage: vi.fn(), setWaiting: vi.fn().mockResolvedValue(undefined) };
+      mockPipelines.statistics.execute.mockResolvedValue({ success: true, duration: 1 });
+      const release = vi.fn().mockResolvedValue(undefined);
+      const mutex = { acquire: vi.fn(async (onWaiting: (h: string) => Promise<void>) => { await onWaiting('analyze-other'); return release; }) };
+
+      await orchestrator.executeSequentialPipeline('run-q', {
+        stages: ['statistics-calculation'], errorHandling: 'abort', heavyStageMutex: mutex as never,
+      }, reporter as never);
+
+      const msgs = reporter.setWaiting.mock.calls.map((c) => c[0]);
+      expect(msgs[0]).toContain('Queued');
+      expect(msgs[0]).not.toContain('analyze-other'); // holder id is log-only
+      expect(msgs[msgs.length - 1]).toBeNull();
+      expect(release).toHaveBeenCalledTimes(1);
+
+      // Give-up path: the stage fails with the mutex error, nothing is released, and the
+      // reporter is not left parked on "Queued" for the terminal record.
+      reporter.setWaiting.mockClear();
+      const giveUp = { acquire: vi.fn().mockRejectedValue(new Error('Heavy-stage lock not acquired after 3600s (held by x)')) };
+      const result = await orchestrator.executeSequentialPipeline('run-q', {
+        stages: ['statistics-calculation'], errorHandling: 'continue', heavyStageMutex: giveUp as never,
+      }, reporter as never);
+      expect(result.success).toBe(false);
+      expect(result.data.stages[0].result.error?.message).toContain('Heavy-stage lock');
+      expect(reporter.setWaiting).toHaveBeenLastCalledWith(null);
+    });
+
+    it('keeps the progress record alive while a heavy stage runs', async () => {
+      vi.useFakeTimers();
+      try {
+        const reporter = { startStage: vi.fn(), completeStage: vi.fn(), setWaiting: vi.fn(), touch: vi.fn().mockResolvedValue(undefined) };
+        mockPipelines.statistics.execute.mockImplementation(
+          () => new Promise((resolve) => setTimeout(() => resolve({ success: true, duration: 1 }), 150_000))
+        );
+        const run = orchestrator.executeSequentialPipeline('run-k', { stages: ['statistics-calculation'] }, reporter as never);
+        await vi.advanceTimersByTimeAsync(150_000);
+        await run;
+        // 60 s cadence against a 5 min record TTL: two touches in 150 s, none after the stage.
+        expect(reporter.touch).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(reporter.touch).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('should handle unknown stage name', async () => {
       // Arrange
       const testRunId = 'test-run-unknown';
