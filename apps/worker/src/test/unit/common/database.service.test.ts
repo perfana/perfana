@@ -264,6 +264,11 @@ describe('WorkerDatabaseService', () => {
         { qualified: '_timescaledb_internal._hyper_1_9_chunk' },
         { qualified: '_timescaledb_internal._hyper_1_10_chunk' },
       ]);
+    /** Each decompression runs in its own transaction; route the em's query to the same mock. */
+    const withTx = (query: ReturnType<typeof vi.fn>) => ({
+      query,
+      transaction: vi.fn(async (fn: (em: { query: typeof query }) => Promise<unknown>) => fn({ query })),
+    });
 
     it('discovers compressed chunks overlapping the range and passes [hypertable, from, to]', async () => {
       const { service, dataSource } = buildService({ query: twoChunks() });
@@ -282,17 +287,25 @@ describe('WorkerDatabaseService', () => {
       expect(sql).not.toContain('decompress_chunk');
     });
 
-    it('decompresses one chunk per statement, so each gets its own transaction', async () => {
-      const { service, dataSource } = buildService({ query: twoChunks() });
+    it('decompresses one chunk per transaction, through the SECURITY DEFINER wrapper, under its own statement budget', async () => {
+      const { service, dataSource } = buildService(withTx(twoChunks()));
 
       await service.decompressChunksForRange('ds_metrics', from, to);
 
+      expect(dataSource.transaction).toHaveBeenCalledTimes(2);
       const decompressCalls = dataSource.query.mock.calls.filter(
         (c: unknown[]) => String(c[0]).includes('decompress_chunk')
       );
       expect(decompressCalls).toHaveLength(2);
+      // The wrapper, never the bare call: perfana_system does not own the hypertable and a
+      // direct decompress_chunk was a silent no-op for months (migration 1804).
+      expect(decompressCalls[0][0]).toContain('perfana_decompress_chunk(');
+      expect(decompressCalls[0][0]).not.toMatch(/\bdecompress_chunk\(/);
       expect(decompressCalls[0][1]).toEqual(['_timescaledb_internal._hyper_1_9_chunk']);
       expect(decompressCalls[1][1]).toEqual(['_timescaledb_internal._hyper_1_10_chunk']);
+      // Bounded below the pool's 600 s query_timeout so a slow chunk cancels, not the connection.
+      const budget = dataSource.query.mock.calls.find((c: unknown[]) => String(c[0]).includes('set_config'));
+      expect(budget?.[1]).toEqual(['statement_timeout', '540000']);
     });
 
     it('is a no-op when nothing is compressed (empty result)', async () => {
@@ -308,22 +321,31 @@ describe('WorkerDatabaseService', () => {
       await expect(service.decompressChunksForRange('ds_metrics', from, to)).resolves.toBeUndefined();
     });
 
-    it('keeps going when one chunk fails to decompress', async () => {
+    it('keeps going when one chunk fails to decompress, and does not retry that chunk in this process', async () => {
       const query = twoChunks();
-      query.mockImplementationOnce(() =>
-        Promise.resolve([
-          { qualified: '_timescaledb_internal._hyper_1_9_chunk' },
-          { qualified: '_timescaledb_internal._hyper_1_10_chunk' },
-        ])
-      );
-      query.mockRejectedValueOnce(new Error('must be owner of table'));
-      const { service, dataSource } = buildService({ query });
+      // Discovery, then chunk 9's set_config OK, chunk 9's decompress fails, chunk 10 succeeds.
+      query
+        .mockImplementationOnce(() =>
+          Promise.resolve([
+            { qualified: '_timescaledb_internal._hyper_1_9_chunk' },
+            { qualified: '_timescaledb_internal._hyper_1_10_chunk' },
+          ])
+        )
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(new Error('canceling statement due to statement timeout'));
+      const { service, dataSource } = buildService(withTx(query));
 
       await expect(service.decompressChunksForRange('ds_metrics', from, to)).resolves.toBeUndefined();
-      const decompressCalls = dataSource.query.mock.calls.filter(
+      const decompressCalls = () => dataSource.query.mock.calls.filter(
         (c: unknown[]) => String(c[0]).includes('decompress_chunk')
       );
-      expect(decompressCalls).toHaveLength(2);
+      expect(decompressCalls()).toHaveLength(2);
+
+      // Second sweep over the same range: chunk 9 is remembered as undecompressable and
+      // skipped — a legacy 7-day chunk must not cost every stale run the same failed attempt.
+      await service.decompressChunksForRange('ds_metrics', from, to);
+      const secondSweep = decompressCalls().slice(2);
+      expect(secondSweep.map((c: unknown[]) => (c[1] as string[])[0])).toEqual(['_timescaledb_internal._hyper_1_10_chunk']);
     });
   });
 
@@ -336,22 +358,27 @@ describe('WorkerDatabaseService', () => {
     const to = new Date('2026-01-10T02:00:00Z');
 
     it('recompresses exactly what it decompressed, one chunk per statement', async () => {
+      const query = vi.fn().mockResolvedValue([
+        { qualified: '_timescaledb_internal._hyper_1_9_chunk' },
+        { qualified: '_timescaledb_internal._hyper_1_10_chunk' },
+      ]);
       const { service, dataSource } = buildService({
-        query: vi.fn().mockResolvedValue([
-          { qualified: '_timescaledb_internal._hyper_1_9_chunk' },
-          { qualified: '_timescaledb_internal._hyper_1_10_chunk' },
-        ]),
+        query,
+        transaction: vi.fn(async (fn: (em: { query: typeof query }) => Promise<unknown>) => fn({ query })),
       });
 
       await service.decompressChunksForRange('ds_metrics', from, to);
       dataSource.query.mockClear();
       await service.recompressTouchedChunks();
 
-      const calls = dataSource.query.mock.calls;
+      // One transaction per chunk, each with its own 540 s budget ahead of the compress.
+      expect(dataSource.transaction).toHaveBeenCalledTimes(4); // 2 decompress + 2 recompress
+      const calls = dataSource.query.mock.calls.filter((c: unknown[]) => String(c[0]).includes('perfana_compress_chunk('));
       expect(calls).toHaveLength(2);
-      expect(calls.every((c: unknown[]) => String(c[0]).includes('compress_chunk'))).toBe(true);
       expect(calls[0][1]).toEqual(['_timescaledb_internal._hyper_1_9_chunk']);
       expect(calls[1][1]).toEqual(['_timescaledb_internal._hyper_1_10_chunk']);
+      const budgets = dataSource.query.mock.calls.filter((c: unknown[]) => String(c[0]).includes('set_config'));
+      expect(budgets).toHaveLength(2);
     });
 
     it('does nothing when it decompressed nothing', async () => {

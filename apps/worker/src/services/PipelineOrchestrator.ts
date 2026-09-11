@@ -19,6 +19,7 @@ import { IncrementalMetricsPipeline } from '../pipelines/IncrementalMetricsPipel
 import { MetricCollectionGapService } from './MetricCollectionGapService.js';
 import { WorkerDatabaseService } from '../common/database.service.js';
 import { ProgressReporter } from './ProgressReporter.js';
+import { HEAVY_STAGES, HeavyStageMutex } from './HeavyStageMutex.js';
 import type { DsMetricCollectionStatus } from '@perfana/shared/entities';
 import { getConfiguredSourceKeys } from './collectable-sources.js';
 
@@ -420,7 +421,21 @@ export class PipelineOrchestrator {
     config: {
       stages: string[];
       errorHandling?: 'strict' | 'continue' | 'abort';
+      /**
+       * Wall-clock budget PER STAGE (not for the pipeline), applied to every stage outside
+       * HEAVY_STAGES. The HEAVY_STAGES are exempt: Postgres already bounds every statement they run
+       * (statement_timeout, 540 s), and a wall-clock race on top of that cancels nothing —
+       * it only abandons the promise, so the aggregation keeps running on the database
+       * while the job reports `partial`, frees its slot, and the next job starts on top of
+       * it. That is how 4 parallel analyses became 3 failures on 2026-09-11.
+       */
       timeoutMs?: number;
+      /**
+       * Serialises the HEAVY_STAGES across the deployment. Omit to run them unguarded
+       * (tests, and the re-evaluate orchestrator, which drives those pipelines as
+       * separate jobs it waits on for at most JOB_WAIT_TIMEOUT_MS).
+       */
+      heavyStageMutex?: HeavyStageMutex;
       /**
        * Whether this method publishes the terminal progress event. Default true.
        *
@@ -433,7 +448,7 @@ export class PipelineOrchestrator {
     },
     progressReporter?: ProgressReporter
   ): Promise<PipelineResult> {
-    const { stages, errorHandling = 'continue', timeoutMs = 600000, finalizeProgress = true } = config;
+    const { stages, errorHandling = 'continue', timeoutMs = 600000, finalizeProgress = true, heavyStageMutex } = config;
     const startTime = Date.now();
 
     logPipelineStart(this.logger, 'sequential-pipeline', {
@@ -488,7 +503,47 @@ export class PipelineOrchestrator {
 
           this.logger.info(`🔷 Starting stage: ${stageName} for test run ${testRunId}`);
 
-          const result = await this.executeStage(stageName, testRunId, timeoutMs);
+          const heavy = HEAVY_STAGES.has(stageName);
+          let releaseHeavyStage: (() => Promise<void>) | null = null;
+          if (heavy && heavyStageMutex) {
+            try {
+              // The holder id names another run (possibly another organisation's), so it goes
+              // to the worker log only; the progress record everyone in the scope sees is neutral.
+              releaseHeavyStage = await heavyStageMutex.acquire(async (holder) => {
+                this.logger.info(`${stageName} for ${testRunId} queued behind heavy stage of ${holder}`);
+                await progressReporter?.setWaiting(
+                  `Queued: waiting for another analysis to finish its database-heavy stage before ${stageName} can start`,
+                );
+              });
+            } catch (acquireError) {
+              // Nothing about the RUN failed — the lock gave up after its ceiling, or Redis
+              // errored. Tag it so analyze.ts rethrows into the retry policy instead of
+              // recording 'partial' (BullMQ completed, analysis silently dropped).
+              (acquireError as Error & { retryable?: boolean }).retryable = true;
+              throw acquireError;
+            } finally {
+              // On the give-up throw too, or the terminal progress record says "Queued: ...".
+              await progressReporter?.setWaiting(null);
+            }
+          }
+
+          // A heavy stage publishes nothing while it runs and has no wall-clock bound, but the
+          // progress record expires after LOCK_TTL_SECONDS (5 min): the API then evicts the
+          // job from the scope and the UI goes blank while the scope lock still refuses new
+          // runs. Keep the record alive for the duration.
+          const keepAlive = heavy && progressReporter
+            ? setInterval(() => void progressReporter.touch(), 60_000)
+            : null;
+
+          let result: PipelineResult;
+          try {
+            result = await this.executeStage(stageName, testRunId, heavy ? null : timeoutMs);
+          } finally {
+            if (keepAlive) {clearInterval(keepAlive);}
+            // Release on every path, including the timeout one, or a stage that exits early
+            // holds the lock for its full TTL and every other analysis queues behind a ghost.
+            await releaseHeavyStage?.();
+          }
           const stageDuration = Date.now() - stageStartTime;
 
           results.push({ stage: stageName, result, duration: stageDuration });
@@ -529,7 +584,7 @@ export class PipelineOrchestrator {
               duration: stageDuration,
               error: {
                 message: errorMessage,
-                code: 'STAGE_EXECUTION_ERROR'
+                code: (stageError as { retryable?: boolean } | null)?.retryable ? 'RETRYABLE' : 'STAGE_EXECUTION_ERROR'
               }
             }
           });
@@ -651,15 +706,18 @@ ${results.map(r => {
   private async executeStage(
     stageName: string,
     testRunId: string,
-    timeoutMs: number = 300000
+    timeoutMs: number | null = 300000
   ): Promise<PipelineResult> {
     // Create proper input format - most pipelines expect { testRunIds: string[] }
     const batchInput = { testRunIds: [testRunId] };
     const singleInput = { testRunId };
 
-    // Create a timeout promise with cleanup
-    let timeoutHandle: ReturnType<typeof setTimeout>;
+    // Wall-clock race. null = none: the stage is bounded by Postgres instead (see the
+    // timeoutMs doc on executeSequentialPipeline). A rejected race does NOT stop the
+    // pipeline promise — it keeps running to completion on the database.
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<PipelineResult>((_, reject) => {
+      if (timeoutMs === null) {return;}
       timeoutHandle = setTimeout(() => {
         reject(new Error(`Stage ${stageName} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
@@ -763,17 +821,20 @@ ${results.map(r => {
       return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const retryable = Boolean((error as { retryable?: boolean } | null)?.retryable);
       return {
         success: false,
         stage: stageName,
         error: {
           message: errorMessage,
-          code: error instanceof Error && error.message.includes('timed out') ? 'TIMEOUT' : 'EXECUTION_ERROR'
+          code: retryable
+            ? 'RETRYABLE'
+            : error instanceof Error && error.message.includes('timed out') ? 'TIMEOUT' : 'EXECUTION_ERROR'
         }
       };
     } finally {
       // Always clear the timeout to prevent unhandled rejection after Promise.race completes
-      clearTimeout(timeoutHandle!);
+      clearTimeout(timeoutHandle);
     }
   }
 

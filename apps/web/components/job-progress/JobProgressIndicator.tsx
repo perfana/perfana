@@ -26,7 +26,7 @@ import {
   Alert,
   AlertTitle,
 } from '@mui/material';
-import { AccessTime, CheckCircle, Error as ErrorIcon, LockOpen, Warning } from '@mui/icons-material';
+import { AccessTime, CheckCircle, Error as ErrorIcon, HourglassEmpty, LockOpen, Warning } from '@mui/icons-material';
 import { useJobProgress } from '@/hooks/useJobProgress';
 import type { JobProgress } from '@perfana/shared/types';
 
@@ -80,6 +80,7 @@ function getProgressColor(progress: JobProgress): 'primary' | 'success' | 'error
   if (progress.status === 'failed') return 'error';
   if (progress.status === 'stuck') return 'warning';
   if (progress.status === 'completed') return 'success';
+  if (progress.status === 'waiting') return 'warning';
   return 'primary';
 }
 
@@ -98,6 +99,35 @@ function formatCurrentTestRun(progress: JobProgress): string | null {
       ? `run ${progress.currentTestRunIndex}/${progress.totalTestRuns}: `
       : '';
   return `${position}${progress.currentTestRunId}`;
+}
+
+/**
+ * `waiting` is published in two situations, and both mean "nothing is running for this
+ * run yet": the job is still in BullMQ's waiting list (QueuedJobAnnouncer), or the worker
+ * has it but is parked behind another job's database-heavy stage (HeavyStageMutex).
+ * `progress.message` says which.
+ */
+function isQueued(progress: JobProgress): boolean {
+  return progress.status === 'waiting';
+}
+
+/** "Stage 3 of 11: Statistics" — or the queue reason when nothing is running yet. */
+function stageLine(progress: JobProgress): string {
+  return isQueued(progress)
+    ? progress.message
+    : `Stage ${progress.stageIndex} of ${progress.totalStages}: ${progress.stageName}`;
+}
+
+function QueuedChip(): JSX.Element {
+  return (
+    <Chip
+      icon={<HourglassEmpty sx={{ fontSize: '1rem' }} />}
+      label="Queued"
+      size="small"
+      color="warning"
+      variant="outlined"
+    />
+  );
 }
 
 /**
@@ -121,7 +151,7 @@ function CompactProgressIndicator({ progress }: { progress: JobProgress }): JSX.
         Job Progress
       </Typography>
       <Typography variant="body2" sx={{ color: 'white', fontSize: '0.75rem', mb: 0.5 }}>
-        Stage {progress.stageIndex}/{progress.totalStages}: {progress.stageName}
+        {stageLine(progress)}
       </Typography>
       {formatCurrentTestRun(progress) && (
         <Typography
@@ -160,6 +190,9 @@ function CompactProgressIndicator({ progress }: { progress: JobProgress }): JSX.
       }}
     >
       <Box
+        // Focusable so the tooltip (the only place the compact variant explains itself) is
+        // reachable by keyboard.
+        tabIndex={0}
         sx={{
           width: 100,
           display: 'flex',
@@ -175,7 +208,7 @@ function CompactProgressIndicator({ progress }: { progress: JobProgress }): JSX.
           sx={{ height: 8, borderRadius: 4 }}
         />
         <Typography variant="caption" color="text.secondary" align="center" display="block">
-          {Math.round(progress.overallProgress)}%
+          {isQueued(progress) ? 'Queued' : `${Math.round(progress.overallProgress)}%`}
         </Typography>
       </Box>
     </Tooltip>
@@ -204,6 +237,9 @@ function DetailedProgressIndicator({ progress }: { progress: JobProgress }): JSX
     if (progress.status === 'failed' || progress.status === 'stuck') {
       return <ErrorIcon sx={{ color: 'error.main', fontSize: '1.25rem' }} />;
     }
+    if (progress.status === 'waiting') {
+      return <HourglassEmpty sx={{ color: 'warning.main', fontSize: '1.25rem' }} />;
+    }
     return <AccessTime sx={{ color: 'primary.main', fontSize: '1.25rem' }} />;
   }, [progress.status]);
 
@@ -215,7 +251,7 @@ function DetailedProgressIndicator({ progress }: { progress: JobProgress }): JSX
         mb: 3,
         backgroundColor: 'rgba(25, 118, 210, 0.04)',
         borderLeft: '4px solid',
-        borderColor: getProgressColor(progress) === 'error' ? 'error.main' : 'primary.main',
+        borderColor: `${getProgressColor(progress)}.main`,
       }}
     >
       <Stack spacing={2}>
@@ -229,18 +265,21 @@ function DetailedProgressIndicator({ progress }: { progress: JobProgress }): JSX
               {progress.jobType === 'reevaluate' && 'Re-evaluating Test Run'}
             </Typography>
           </Box>
-          <Chip
-            label={`Elapsed: ${elapsed}`}
-            size="small"
-            variant="outlined"
-            sx={{ fontFamily: 'monospace' }}
-          />
+          <Stack direction="row" spacing={1}>
+            {isQueued(progress) && <QueuedChip />}
+            <Chip
+              label={`Elapsed: ${elapsed}`}
+              size="small"
+              variant="outlined"
+              sx={{ fontFamily: 'monospace' }}
+            />
+          </Stack>
         </Box>
 
         {/* Stage Information */}
         <Box>
           <Typography variant="body2" color="text.secondary" gutterBottom>
-            Stage {progress.stageIndex} of {progress.totalStages}: {progress.stageName}
+            {stageLine(progress)}
           </Typography>
           {formatCurrentTestRun(progress) && (
             <Typography
@@ -272,10 +311,12 @@ function DetailedProgressIndicator({ progress }: { progress: JobProgress }): JSX
           </Box>
         </Box>
 
-        {/* Progress Message */}
-        <Typography variant="caption" color="text.secondary">
-          {progress.message}
-        </Typography>
+        {/* Progress Message (the stage line already carries it while queued) */}
+        {!isQueued(progress) && (
+          <Typography variant="caption" color="text.secondary">
+            {progress.message}
+          </Typography>
+        )}
       </Stack>
     </Paper>
   );
@@ -364,12 +405,23 @@ function ModalProgressIndicator({ progress }: { progress: JobProgress }): JSX.El
 
           {/* Stage info */}
           <Box sx={{ width: '100%', textAlign: 'center' }}>
-            <Typography variant="body1" color="text.secondary" gutterBottom>
-              Stage {progress.stageIndex} of {progress.totalStages}
-            </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 500, color: 'primary.main' }}>
-              {progress.stageName}
-            </Typography>
+            {isQueued(progress) ? (
+              <>
+                <QueuedChip />
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  {progress.message}
+                </Typography>
+              </>
+            ) : (
+              <>
+                <Typography variant="body1" color="text.secondary" gutterBottom>
+                  Stage {progress.stageIndex} of {progress.totalStages}
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 500, color: 'primary.main' }}>
+                  {progress.stageName}
+                </Typography>
+              </>
+            )}
           </Box>
 
           {/* Linear progress bar */}

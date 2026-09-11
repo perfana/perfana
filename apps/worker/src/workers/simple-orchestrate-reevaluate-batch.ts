@@ -17,6 +17,7 @@ import { getDatabaseService } from '../common/database-accessor.js';
 import { getRedisPool } from '../config/redis-pool.js';
 import { JobLockService } from '../services/JobLockService.js';
 import { ProgressReporter } from '../services/ProgressReporter.js';
+import { HEAVY_STAGE_MAX_WAIT_MS } from '../services/HeavyStageMutex.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
 import { IncrementalMetricsPipeline } from '../pipelines/IncrementalMetricsPipeline.js';
 import { DynatracePipeline } from '../pipelines/DynatracePipeline.js';
@@ -27,8 +28,41 @@ import { chunkTestRunIds, REEVALUATE_CHUNK_SIZE } from '../lib/utils/chunking.js
 
 const logger = getLogger('simple-orchestrate-reevaluate-batch');
 
-/** Maximum time (ms) to wait for a child job to complete before timing out (10 minutes) */
+/**
+ * Maximum time (ms) a child job may spend RUNNING before we give up on it (10 minutes).
+ *
+ * Time the child spends parked does not count: in BullMQ's waiting list behind two
+ * analyze-test jobs, or active but queued behind the HeavyStageMutex (its progress is
+ * `{ queuedBehind }`, set by the registry). Counting that time turned a busy database
+ * into a failed re-evaluate. Parked time has its own, longer ceiling below.
+ */
 const JOB_WAIT_TIMEOUT_MS = 600_000;
+/** Same policy as the mutex's own give-up, and must not be shorter (see HEAVY_STAGE_MAX_WAIT_MS). */
+const JOB_PARKED_CEILING_MS = HEAVY_STAGE_MAX_WAIT_MS;
+/** How often waitForJobs re-reads the child's state to decide whose clock is running. */
+const JOB_WAIT_POLL_MS = 10_000;
+
+const FREE_WORKER = 'a free analysis worker';
+
+const RETRY_BACKOFF = 'its retry backoff';
+
+/**
+ * What a child is doing right now: parked behind a holder (string), running (null), or
+ * already finished (`completed` / `failed`) — the last so a QueueEvents reconnect that
+ * dropped the completion event does not charge a finished child to the running clock.
+ */
+async function parkedBehind(queue: Queue, jobId: string): Promise<string | null | 'completed' | 'failed'> {
+  const job = await queue.getJob(jobId);
+  if (!job) {return null;} // gone; let the running clock decide
+  const state = await job.getState();
+  if (state === 'completed' || state === 'failed') {return state;}
+  if (state === 'delayed') {return RETRY_BACKOFF;}
+  if (state === 'waiting' || state === 'prioritized' || state === 'waiting-children') {
+    return FREE_WORKER;
+  }
+  const progress = job.progress as { queuedBehind?: string } | number | undefined;
+  return typeof progress === 'object' && progress?.queuedBehind ? `job ${progress.queuedBehind}` : null;
+}
 
 /**
  * Enqueue StatisticsPipeline for `testRunIds`, chunked and sequential, waiting on each.
@@ -66,7 +100,7 @@ async function runStatisticsChunks(
     );
 
     logger.info(`Waiting for statistics job ${statsJob.id} (chunk ${c + 1}/${chunks.length})...`);
-    await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+    await waitForJobs(analyzeEvents, [statsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue, progressReporter);
     // Report RUNS done, not chunks: the UI renders this as "run X of N", and the chunk
     // size is an internal budget detail nobody watching a progress bar cares about.
     done += chunk.length;
@@ -136,11 +170,12 @@ function createQueueEvents(queueName: string): QueueEvents {
  * CRITICAL FIX: Event listeners must be set up BEFORE checking job states
  * to prevent missing events for jobs that complete during the state check.
  */
-async function waitForJobs(
+export async function waitForJobs(
   queueEvents: QueueEvents,
   jobIds: string[],
   timeoutMs: number = JOB_WAIT_TIMEOUT_MS,
-  queue?: Queue
+  queue?: Queue,
+  progressReporter?: ProgressReporter | null
 ): Promise<void> {
   // Ensure QueueEvents is connected before we start listening
   await queueEvents.waitUntilReady();
@@ -155,11 +190,7 @@ async function waitForJobs(
         return;
       }
       if (completedJobs.size + failedJobs.size === jobIds.length) {
-        resolved = true;
-        // Remove listeners to prevent memory leaks
-        queueEvents.off('completed', onCompleted);
-        queueEvents.off('failed', onFailed);
-        clearTimeout(timeoutHandle);
+        teardown();
 
         if (failedJobs.size > 0) {
           reject(new Error(`${failedJobs.size} jobs failed: ${Array.from(failedJobs).join(', ')}`));
@@ -169,11 +200,24 @@ async function waitForJobs(
       }
     };
 
-    const timeoutHandle = setTimeout(() => {
+    // Two clocks: running time (timeoutMs) and parked time (JOB_PARKED_CEILING_MS). Each
+    // poll charges the elapsed slice to whichever applies to the pending children now.
+    let runningMs = 0;
+    let parkedMs = 0;
+    let lastTick = Date.now();
+    let parkedBehindHolder: string | null = null;
+    // Shared exit path: stop listening, stop the clock, clear a lingering "Queued" record.
+    const teardown = () => {
+      resolved = true;
+      queueEvents.off('completed', onCompleted);
+      queueEvents.off('failed', onFailed);
+      clearInterval(clock);
+      if (parkedBehindHolder) {void progressReporter?.setWaiting(null);}
+    };
+
+    const abort = (why: string) => {
       if (!resolved) {
-        resolved = true;
-        queueEvents.off('completed', onCompleted);
-        queueEvents.off('failed', onFailed);
+        teardown();
 
         // Give up waiting AND stop the work. Timing out only abandoned the wait, leaving
         // the child job running unobserved — which was survivable while the orchestrator
@@ -195,10 +239,70 @@ async function waitForJobs(
             }
           })
         ).finally(() => {
-          reject(new Error(`Timeout waiting for jobs after ${timeoutMs}ms. Completed: ${completedJobs.size}, Failed: ${failedJobs.size}, Total: ${jobIds.length}`));
+          reject(new Error(`Timeout waiting for jobs (${why}). Completed: ${completedJobs.size}, Failed: ${failedJobs.size}, Total: ${jobIds.length}`));
         });
       }
-    }, timeoutMs);
+    };
+
+    let ticking = false;
+    const tick = async () => {
+      // A Redis stall longer than the poll must not stack overlapping state reads.
+      if (resolved || ticking) {return;}
+      ticking = true;
+      try {
+        await tickBody();
+      } finally {
+        ticking = false;
+      }
+    };
+    const tickBody = async () => {
+      const now = Date.now();
+      const slice = now - lastTick;
+      lastTick = now;
+
+      let holder: string | null = null;
+      if (queue) {
+        const pending = jobIds.filter((id) => !completedJobs.has(id) && !failedJobs.has(id));
+        try {
+          const states = await Promise.all(pending.map((id) => parkedBehind(queue, id)));
+          // Terminal states the event stream missed: settle them here.
+          states.forEach((st, i) => {
+            if (st === 'completed') {completedJobs.add(pending[i]!);}
+            if (st === 'failed') {failedJobs.add(pending[i]!);}
+          });
+          if (completedJobs.size + failedJobs.size === jobIds.length) {checkCompletion(); return;}
+          const holders = states.filter((st) => st !== 'completed' && st !== 'failed');
+          // All pending children parked → nobody's running clock should advance.
+          holder = holders.length > 0 && holders.every(Boolean) ? holders[0]! : null;
+        } catch (err) {
+          logger.warn(`Could not read child job state, charging the running clock: ${err}`);
+        }
+      }
+      // Re-publish on every parked tick, not only on change: the record expires after 5 min
+      // and the API evicts the job once it is gone.
+      // The awaits above can outlast the child's completed/failed event; a publish now would
+      // leave the reporter parked on "Queued" for every later stage.
+      if (resolved) {return;}
+      if (holder) {
+        if (holder !== parkedBehindHolder) {logger.info(`Child job(s) ${jobIds.join(',')} queued behind ${holder}`);}
+        await progressReporter?.setWaiting(
+          holder === FREE_WORKER
+            ? 'Queued: waiting for a free analysis worker before this stage can start'
+            : holder === RETRY_BACKOFF
+              ? 'Queued: a step failed and is waiting for its retry'
+              : 'Queued: waiting for another analysis to finish its database-heavy stage before this stage can start',
+        );
+      } else if (parkedBehindHolder) {
+        await progressReporter?.setWaiting(null);
+      }
+      parkedBehindHolder = holder;
+      if (holder) {parkedMs += slice;} else {runningMs += slice;}
+
+      if (runningMs > timeoutMs) {abort(`ran for ${Math.round(runningMs / 1000)}s`);}
+      else if (parkedMs > JOB_PARKED_CEILING_MS) {abort(`stayed queued behind ${holder} for ${Math.round(parkedMs / 1000)}s`);}
+    };
+
+    const clock = setInterval(() => void tick(), JOB_WAIT_POLL_MS);
 
     // Event handlers
     const onCompleted = ({ jobId }: { jobId: string }) => {
@@ -891,7 +995,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
         );
 
         logger.info(`Waiting for checks job ${checksJob.id}...`);
-        await waitForJobs(analyzeEvents, [checksJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+        await waitForJobs(analyzeEvents, [checksJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue, progressReporter);
 
         const stage2Duration = Date.now() - stage2Start;
         logger.info(`✅ Checks evaluation completed`);
@@ -921,7 +1025,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           );
 
           logger.info(`Waiting for control groups job ${controlGroupsJob.id}...`);
-          await waitForJobs(analyzeEvents, [controlGroupsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+          await waitForJobs(analyzeEvents, [controlGroupsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue, progressReporter);
           const controlGroupsDuration = Date.now() - controlGroupsStart;
           logger.info('✅ Control groups completed');
           stageTiming.push({ stage: 'control-groups-creation', duration: controlGroupsDuration });
@@ -947,7 +1051,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             );
 
             logger.info(`Waiting for control group statistics job ${controlStatsJob.id}...`);
-            await waitForJobs(analyzeEvents, [controlStatsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+            await waitForJobs(analyzeEvents, [controlStatsJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue, progressReporter);
 
             // control-group-statistics is registered with softFail, so a failed
             // aggregation still completes the BullMQ job. Read the return value or we
@@ -1010,7 +1114,7 @@ export function simpleOrchestrateReevaluateBatchWorker() {
           );
 
           logger.info(`Waiting for ADAPT job ${adaptJob.id} (chunk ${c + 1}/${adaptChunks.length})...`);
-          await waitForJobs(analyzeEvents, [adaptJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue);
+          await waitForJobs(analyzeEvents, [adaptJob.id!], JOB_WAIT_TIMEOUT_MS, analyzeQueue, progressReporter);
           adaptDone += chunk.length;
           await progressReporter?.updateStageProgress(
             Math.round((adaptDone / testRunIds.length) * 100),

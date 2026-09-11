@@ -15,7 +15,46 @@ import { getLogger } from '../lib/utils/logger.js';
 import { type JobResult } from '../types/jobs.js';
 import { type ZodSchema } from 'zod';
 import type pino from 'pino';
+import type { Job } from 'bullmq';
 import { type PipelineResult } from '../types/pipeline.js';
+import { getRedisPool } from '../config/redis-pool.js';
+import { HEAVY_STAGES, HeavyStageMutex } from '../services/HeavyStageMutex.js';
+
+/** The slice of a BullMQ Job the registry processors touch. */
+export type RegistryJob = Pick<Job, 'id' | 'data' | 'updateProgress'>;
+
+/**
+ * Serialise a heavy pipeline job behind the deployment-wide HeavyStageMutex — the same
+ * lock the analyze-test orchestrator takes around these stages, so a re-evaluate's
+ * statistics job and a finishing test's statistics stage never aggregate at once.
+ *
+ * The CHILD holds the lock, not the re-evaluate orchestrator that enqueued it: the
+ * orchestrator runs on perfana-batch while analyze-test jobs park on perfana-analyze
+ * waiting for the same lock, so an orchestrator-held lock could pin both analyze slots
+ * behind a child that can never be picked up. While parked the job's BullMQ progress is
+ * `{ queuedBehind: <holder> }`, which waitForJobs reads to stop its own clock.
+ */
+async function withHeavyStageLock<T>(jobName: string, job: RegistryJob, fn: () => Promise<T>): Promise<T> {
+  if (!HEAVY_STAGES.has(jobName)) {return fn();}
+  const pool = getRedisPool();
+  const redis = await pool.acquire();
+  try {
+    if (!job.id) {throw new Error(`${jobName} job has no id; refusing to take the heavy-stage lock anonymously`);}
+    const release = await new HeavyStageMutex(redis, job.id).acquire(async (holder) => {
+      await job.updateProgress({ queuedBehind: holder });
+    });
+    try {
+      // Clears { queuedBehind } so waitForJobs starts charging the running clock —
+      // parkedBehind() reads that marker; without this reset the child looks parked forever.
+      await job.updateProgress(0);
+      return await fn();
+    } finally {
+      await release();
+    }
+  } finally {
+    pool.release(redis);
+  }
+}
 
 interface PipelineInstance {
   execute(input: unknown): Promise<unknown>;
@@ -63,11 +102,11 @@ function formatError(error: unknown): string {
  * Build a processor map from all registered pipelines.
  * Returns { [jobName]: async (job) => JobResult } ready for the analyze queue.
  */
-export function createProcessorFromRegistry(): Record<string, (job: { data: unknown }) => Promise<JobResult>> {
-  const processors: Record<string, (job: { data: unknown }) => Promise<JobResult>> = {};
+export function createProcessorFromRegistry(): Record<string, (job: RegistryJob) => Promise<JobResult>> {
+  const processors: Record<string, (job: RegistryJob) => Promise<JobResult>> = {};
 
   for (const reg of registry) {
-    processors[reg.jobName] = async (job: { data: unknown }): Promise<JobResult> => {
+    processors[reg.jobName] = async (job: RegistryJob): Promise<JobResult> => {
       const pipelineLogger = getLogger(reg.jobName);
 
       try {
@@ -91,8 +130,8 @@ export function createProcessorFromRegistry(): Record<string, (job: { data: unkn
           throw new Error(`Invalid input data for ${reg.jobName}`);
         }
 
-        // Step 4: Execute
-        const r = await pipeline.execute(pipelineInput) as PipelineResult;
+        // Step 4: Execute (heavy pipelines one at a time across the deployment)
+        const r = await withHeavyStageLock(reg.jobName, job, () => pipeline.execute(pipelineInput)) as PipelineResult;
 
         // Step 5: Handle result
         if (!r.success) {

@@ -132,9 +132,11 @@ Stage 11: Data Sanity Check (runs outside the orchestrator)
 
 | Service | Purpose |
 |---|---|
-| `PipelineOrchestrator` | Coordinates 11 pipeline implementations; dispatches the 10 stage names in `ORCHESTRATED_STAGES` |
-| `JobLockService` | Prevents concurrent jobs on same scope |
-| `ProgressReporter` | Redis pub/sub for real-time UI progress. `complete()` / `fail()` are terminal — publish them only after the last stage the UI lists, or that stage is never rendered |
+| `PipelineOrchestrator` | Coordinates 11 pipeline implementations; dispatches the 10 stage names in `ORCHESTRATED_STAGES`. Its `timeoutMs` is a wall-clock race **per stage**, not per pipeline, and since v0.2.95.17 it does not apply to the three heavy stages at all — they are bounded by `statement_timeout` and serialised by `HeavyStageMutex` instead |
+| `JobLockService` | Prevents concurrent jobs on same scope (`sut:env:workload`). Since v0.2.95.17 an `analyze-test` job refused by it is re-parked (`moveToDelayed`, 60 s at a time for up to 2 h) rather than retried and dropped |
+| `HeavyStageMutex` | Deployment-wide Redis lock (`SET NX PX`, 5 min TTL, 60 s heartbeat, 1 h give-up) around `statistics-calculation`, `control-group-statistics` and `adapt-analysis`, so two multi-minute aggregations never run on Postgres at once. Held by whichever job runs the pipeline: the analyze orchestrator, or the registry processor for a re-evaluate's child job — never the re-evaluate orchestrator itself |
+| `ProgressReporter` | Redis pub/sub for real-time UI progress. `complete()` / `fail()` are terminal — publish them only after the last stage the UI lists, or that stage is never rendered. `setWaiting(reason)` publishes `status: 'waiting'` (rendered as **Queued**) and `touch()` republishes unchanged; both exist because the record expires after 5 min and the API evicts the job once it is gone |
+| `QueuedJobAnnouncer` | Every 30 s, publishes a `waiting` record for each `analyze-test` job still in BullMQ's waiting list, so the UI can say Queued before any processor has picked the job up. Skips a run whose scope lock is held by another job |
 | `StuckJobScanner` | Scans every 2 min for jobs stuck >10 min |
 | `MetricCollectionGapService` | Detects and fills incomplete collections |
 | `DatabaseService` | TypeORM wrapper for all data access |
@@ -158,7 +160,9 @@ new data. Since v0.2.95.0 it splits its three heaviest stages — `statistics-re
 `REEVALUATE_CHUNK_SIZE` runs (default 5). Each of those pipelines does its work in one transaction
 over every id it is handed, against a ceiling that scales with the batch: ADAPT's 120s statement
 timeout, the per-transaction decompression budget shared by the `ramp_up` updates, and the 540s
-aggregation budget inside a 600s wait for the child job.
+aggregation budget inside a 600s wait for the child job. Since v0.2.95.17 that wait charges only
+the child's *running* time: time it spends in BullMQ's waiting list or parked behind the
+`HeavyStageMutex` goes to a separate 1 h ceiling, so a busy database no longer fails a re-evaluate.
 
 The chunking has to happen **inside** the one job rather than by enqueuing several batch jobs,
 because `JobLockService` keys its lock on `{systemUnderTestId}:{testEnvironment}:{workload}` — a
@@ -192,6 +196,7 @@ enableReadyCheck: false
 |---|---|---|
 | `IncrementalCollectionScheduler` | Every 2 min | Collect metrics for running tests |
 | `StuckJobScanner` | Every 2 min | Detect and recover stuck jobs |
+| `QueuedJobAnnouncer` | Every 30 s | Publish a `waiting` progress record for every `analyze-test` job still in BullMQ's waiting list, so the UI shows **Queued** before a worker picks it up |
 | `AuditRetentionManager` | On boot + 03:00 UTC daily | Delete `audit_logs` rows past `AUDIT_RETENTION_MONTHS` (default 24), 10k at a time. The boot pass is not awaited, so it never delays BullMQ worker registration. |
 
 > [!note] Schedulers cannot issue DDL
@@ -205,10 +210,11 @@ enableReadyCheck: false
 1. Load environment config
 2. Bootstrap NestJS (TypeORM DI)
 3. Initialize Redis pool (20 max, 5 min connections)
-4. Test connections
+4. Test connections (logs an error if `max_locks_per_transaction` < 256 — needed for the 1-day chunks from migration 1804)
 5. Register simplified workers
 6. Start StuckJobScanner
-7. Setup graceful shutdown handlers
+7. Start QueuedJobAnnouncer
+8. Setup graceful shutdown handlers
 
 > [!warning] Multi-tenant Security Fix
 > Worker pipelines originally did NOT filter by `organization_id`, causing cross-organization data leakage. This was identified as a critical security issue and fixed by adding `organization_id` filtering to all `WorkerDatabaseService` query methods. See [[Multi-tenancy]].

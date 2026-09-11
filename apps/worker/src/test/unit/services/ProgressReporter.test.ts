@@ -81,4 +81,47 @@ describe('ProgressReporter current test run', () => {
 
     expect(lastPublished().currentTestRunId).toBeUndefined();
   });
+
+  test('setWaiting parks the job as waiting with its reason, publishes at once, and resumes cleanly', async () => {
+    await reporter.startStage('force-refetch');
+    const before = redis.setex.mock.calls.length;
+
+    await reporter.setWaiting('Queued: waiting for another analysis');
+    // Immediate, not debounced: the caller invokes this on every poll to keep lastProgressAt fresh.
+    expect(redis.setex.mock.calls.length).toBe(before + 1);
+    let p = lastPublished();
+    expect(p.status).toBe('waiting');
+    expect(p.message).toBe('Queued: waiting for another analysis');
+
+    await reporter.setWaiting(null);
+    p = lastPublished();
+    expect(p.status).toBe('active');
+    expect(p.message).not.toContain('Queued');
+    expect(p.message).toContain('%');
+  });
+
+  test('a new stage, completion and failure never carry a stale Queued message forward', async () => {
+    await reporter.startStage('force-refetch');
+    await reporter.setWaiting('Queued: waiting');
+    await reporter.startStage('adapt-analysis');
+    let p = lastPublished();
+    expect(p.status).toBe('active');
+    expect(p.message).not.toContain('Queued');
+
+    await reporter.setWaiting('Queued: waiting');
+    await reporter.fail('boom');
+    p = lastPublished();
+    expect(p.status).toBe('failed');
+    expect(p.message).not.toContain('Queued');
+  });
+
+  test('touch republishes the current state unchanged', async () => {
+    await reporter.startStage('force-refetch');
+    const before = lastPublished();
+    await reporter.touch();
+    const after = lastPublished();
+    expect(after.stage).toBe(before.stage);
+    expect(after.status).toBe('active');
+    expect(Date.parse(after.lastProgressAt)).toBeGreaterThanOrEqual(Date.parse(before.lastProgressAt));
+  });
 });

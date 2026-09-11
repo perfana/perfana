@@ -34,6 +34,8 @@ export class ProgressReporter {
   private startedAt: string;
   private lastProgressAt: string;
   private status: JobStatus = 'active';
+  /** Set while the job is parked behind another job's heavy stage; overrides the stage message. */
+  private waitingMessage: string | null = null;
   /**
    * The run the current stage is working on. Cleared by startStage so a
    * batch-wide stage never inherits the previous stage's run.
@@ -81,12 +83,36 @@ export class ProgressReporter {
     this.currentStageIndex = stageIndex + 1; // 1-based for display
     this.currentStageProgress = 0;
     this.currentTestRun = null;
+    // A stage starting means nothing is parked any more; never carry "Queued: …" forward.
+    this.waitingMessage = null;
+    if (this.status === 'waiting') {this.status = 'active';}
 
     logger.info(`🔷 Stage started: ${stageName} (${this.currentStageIndex}/${this.stages.length})`, {
       jobId: this.job.id,
       testRunId: this.testRunInfo.testRunId,
     });
 
+    await this.publishProgress();
+  }
+
+  /**
+   * Park the job as `waiting` with a reason (queued behind another job's heavy stage), or
+   * pass null to resume `active`. Publishes immediately, not debounced: the caller invokes
+   * this on every poll while waiting precisely to keep the record alive — it expires after
+   * LOCK_TTL_SECONDS (5 min) and the API evicts the job once it is gone.
+   */
+  async setWaiting(message: string | null): Promise<void> {
+    this.status = message === null ? 'active' : 'waiting';
+    this.waitingMessage = message;
+    await this.publishProgress();
+  }
+
+  /**
+   * Republish the current state unchanged. The Redis record expires after
+   * LOCK_TTL_SECONDS (5 min) and the API evicts the job once it is gone; a heavy stage
+   * publishes nothing for as long as it runs, so its caller calls this on a timer.
+   */
+  async touch(): Promise<void> {
     await this.publishProgress();
   }
 
@@ -128,6 +154,7 @@ export class ProgressReporter {
    */
   async complete(): Promise<void> {
     this.status = 'completed';
+    this.waitingMessage = null;
     this.currentStageProgress = 100;
 
     logger.info(`🎉 Job completed: ${this.job.id}`, {
@@ -163,6 +190,7 @@ export class ProgressReporter {
    */
   async fail(error: string): Promise<void> {
     this.status = 'failed';
+    this.waitingMessage = null;
 
     logger.error(`❌ Job failed: ${this.job.id}`, {
       testRunId: this.testRunInfo.testRunId,
@@ -259,7 +287,7 @@ export class ProgressReporter {
     );
 
     const stageName = getStageName(this.currentStage);
-    const message = formatProgressMessage(stageName, overallProgress);
+    const message = this.waitingMessage ?? formatProgressMessage(stageName, overallProgress);
 
     return {
       jobId: this.job.id!,

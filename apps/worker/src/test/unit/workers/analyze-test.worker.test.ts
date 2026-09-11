@@ -26,6 +26,8 @@ vi.mock('../../../nestjs-bootstrap.js', () => ({
 
 // Mock PipelineOrchestrator
 vi.mock('../../../services/PipelineOrchestrator.js');
+import { HeavyStageMutex } from '../../../services/HeavyStageMutex.js';
+import { DelayedError } from 'bullmq';
 
 // Mock DataSanityCheckPipeline
 vi.mock('../../../pipelines/DataSanityCheckPipeline.js', () => ({
@@ -195,6 +197,8 @@ describe('analyzeTestWorker', () => {
           ]),
           errorHandling: 'abort',
           timeoutMs: 600000,
+          // Drop this line in analyze.ts and every heavy stage runs unguarded again.
+          heavyStageMutex: expect.any(HeavyStageMutex),
         }),
         expect.any(Object) // ProgressReporter
       );
@@ -231,6 +235,8 @@ describe('analyzeTestWorker', () => {
           stages: expect.not.arrayContaining(['adapt-analysis']),
           errorHandling: 'abort',
           timeoutMs: 600000,
+          // Drop this line in analyze.ts and every heavy stage runs unguarded again.
+          heavyStageMutex: expect.any(HeavyStageMutex),
         }),
         expect.any(Object) // ProgressReporter
       );
@@ -353,6 +359,20 @@ describe('analyzeTestWorker', () => {
       expect(result.message).toContain('completed with some failures');
     });
 
+    it('rethrows a RETRYABLE stage failure so BullMQ retries instead of recording partial', async () => {
+      // The heavy-stage lock gave up (or Redis errored inside acquire): nothing about the
+      // run failed, and 'partial' would be a completed job with the analysis dropped.
+      mockOrchestrator.executeSequentialPipeline.mockResolvedValue({
+        success: false,
+        data: {
+          stages: [
+            { stage: 'statistics-calculation', result: { success: false, error: { code: 'RETRYABLE', message: 'Heavy-stage lock not acquired after 3600s (held by x)' } } },
+          ],
+        },
+      });
+      await expect(worker({ data: { testRunId: 'test-run-retry', adapt: true } })).rejects.toThrow(/Retryable stage failure.*Heavy-stage lock/);
+    });
+
     // simple-workers.ts does `return await processor(job)`, so ANY resolved value marks
     // the job completed — no retry, no failed-set entry, nothing an operator can find.
     // A ten-stage analysis that blew up must reject, or it is indistinguishable from one
@@ -420,6 +440,49 @@ describe('analyzeTestWorker', () => {
 
       // Act & Assert
       await expect(worker({ data: jobData })).rejects.toThrow('timed out');
+    });
+  });
+
+  describe('Scope lock refused', () => {
+    // A workload holder can sit on sut:env:workload for an hour now that its heavy stages
+    // queue behind every other analysis; the job's retry policy is 3 attempts inside 15 s.
+    // Re-park with moveToDelayed (no attempt consumed) instead of throwing.
+    it('re-parks the job for a minute without consuming an attempt', async () => {
+      const { JobLockService } = await import('../../../services/JobLockService.js');
+      vi.mocked(JobLockService).mockImplementationOnce(() => ({
+        acquireLock: vi.fn().mockResolvedValue({ acquired: false, blockingInfo: { reason: 'busy', existingJobId: 'analyze-a' } }),
+        releaseLock: mockReleaseLock,
+        startLockRenewal: vi.fn(),
+      }) as never);
+      const job = {
+        id: 'analyze-b', data: { testRunId: 'test-run-123', adapt: true },
+        updateData: vi.fn().mockResolvedValue(undefined), moveToDelayed: vi.fn().mockResolvedValue(undefined),
+      };
+      const before = Date.now();
+
+      await expect((worker as never as (j: unknown, t?: string) => Promise<unknown>)(job, 'tok')).rejects.toBeInstanceOf(DelayedError);
+
+      expect(job.moveToDelayed).toHaveBeenCalledTimes(1);
+      expect(job.moveToDelayed.mock.calls[0]![0]).toBeGreaterThanOrEqual(before + 60_000);
+      expect(job.moveToDelayed.mock.calls[0]![1]).toBe('tok');
+      expect(job.updateData).toHaveBeenCalledWith(expect.objectContaining({ blockedSince: expect.any(Number) }));
+      expect(mockOrchestrator.executeSequentialPipeline).not.toHaveBeenCalled();
+      expect(mockReleaseLock).not.toHaveBeenCalled(); // never acquired, nothing to hand back
+    });
+
+    it('gives up with a thrown blocked error once the re-park budget is spent', async () => {
+      const { JobLockService } = await import('../../../services/JobLockService.js');
+      vi.mocked(JobLockService).mockImplementationOnce(() => ({
+        acquireLock: vi.fn().mockResolvedValue({ acquired: false, blockingInfo: { reason: 'busy', existingJobId: 'analyze-a' } }),
+        releaseLock: mockReleaseLock,
+        startLockRenewal: vi.fn(),
+      }) as never);
+      const job = {
+        id: 'analyze-b', data: { testRunId: 'test-run-123', adapt: true, blockedSince: Date.now() - 3 * 60 * 60_000 },
+        updateData: vi.fn(), moveToDelayed: vi.fn(),
+      };
+      await expect((worker as never as (j: unknown, t?: string) => Promise<unknown>)(job, 'tok')).rejects.toThrow(/Job blocked/);
+      expect(job.moveToDelayed).not.toHaveBeenCalled();
     });
   });
 

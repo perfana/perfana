@@ -43,8 +43,10 @@ function createAnalyzeQueueProcessor() {
     [JOB_NAMES.INCREMENTAL_COLLECTION]: incrementalMetricsWorker(),
   };
 
-  return async (job: Job) => {
-    const processor = processors[job.name as keyof typeof processors];
+  return async (job: Job, token?: string) => {
+    const processor = processors[job.name as keyof typeof processors] as
+      | ((job: Job, token?: string) => Promise<unknown>)
+      | undefined;
 
     if (!processor) {
       logger.error(`No processor found for job: ${job.name}`);
@@ -52,7 +54,7 @@ function createAnalyzeQueueProcessor() {
     }
 
     logger.info(`Processing job: ${job.name} (ID: ${job.id})`);
-    return await processor(job);
+    return await processor(job, token);
   };
 }
 
@@ -69,8 +71,10 @@ function createBatchQueueProcessor() {
     [JOB_NAMES.ORCHESTRATE_REEVALUATE_BATCH]: simpleOrchestrateReevaluateBatchWorker(), // Simplified orchestrator
   };
 
-  return async (job: Job) => {
-    const processor = processors[job.name as keyof typeof processors];
+  return async (job: Job, token?: string) => {
+    const processor = processors[job.name as keyof typeof processors] as
+      | ((job: Job, token?: string) => Promise<unknown>)
+      | undefined;
 
     if (!processor) {
       logger.error(`No processor found for batch job: ${job.name}`);
@@ -78,7 +82,7 @@ function createBatchQueueProcessor() {
     }
 
     logger.info(`Processing batch job: ${job.name} (ID: ${job.id})`);
-    return await processor(job);
+    return await processor(job, token);
   };
 }
 

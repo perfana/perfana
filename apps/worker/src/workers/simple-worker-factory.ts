@@ -65,7 +65,7 @@ export function createSimpleQueue(queueName: SimpleQueueName): Queue {
  */
 export function createSimpleWorker(
   queueName: SimpleQueueName,
-  processor: (job: Job) => Promise<unknown>
+  processor: (job: Job, token?: string) => Promise<unknown>
 ): Worker {
   // Get worker configuration
   const workerConfig = getWorkerConfig(queueName);
@@ -78,7 +78,7 @@ export function createSimpleWorker(
   });
 
   // Wrap processor to ensure DB connection is alive and not overloaded before each job
-  const wrappedProcessor = async (job: Job) => {
+  const wrappedProcessor = async (job: Job, token?: string) => {
     try {
       const db = getDatabaseService();
       await db.ensureConnection();
@@ -112,7 +112,7 @@ export function createSimpleWorker(
     } catch (error) {
       logger.warn(`Pre-job health check failed for ${job.name}, proceeding anyway:`, error);
     }
-    return processor(job);
+    return processor(job, token);
   };
 
   const worker = new Worker(

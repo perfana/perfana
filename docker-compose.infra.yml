@@ -30,10 +30,25 @@ services:
     # background worker" instead of running the continuous-aggregate refreshes -
     # the CAGGs silently stop being materialised and every query that reads one
     # falls back to scanning the raw hypertable. Nothing errors; pages just crawl.
+    #
+    # max_locks_per_transaction: ds_metrics and requests_raw use 1-day chunks (migration
+    # 1804) and have no retention policy, and every hot query filters on test_run_id with
+    # no time predicate, so one query locks every chunk plus its compressed twin. The
+    # lock table is this value x max_connections; the default 64 runs out as
+    # `out of shared memory` once a few hundred chunks exist and several backends
+    # plan at once.
     command:
       - postgres
       - -c
       - max_worker_processes=32
+      - -c
+      - max_locks_per_transaction=256
+      # A worker that dies mid-aggregation frees the heavy-stage lock after its 5 min TTL,
+      # but Postgres only notices the closed socket when it next writes, and an
+      # aggregation writes nothing until it finishes: the next holder would overlap the
+      # orphan for up to the statement budget. Poll the socket instead (PG14+).
+      - -c
+      - client_connection_check_interval=10000
     environment:
       POSTGRES_DB: perfana
       POSTGRES_USER: perfana

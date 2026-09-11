@@ -400,7 +400,9 @@ Four things to know before touching this path:
    - **Reads: one probe per output group.** `StatisticsPipeline` fetched `last_value` with a `LEFT JOIN LATERAL`. TimescaleDB *does* push `ORDER BY time DESC LIMIT 1` into the columnar scan, so a metric still reporting at the end of the run was found in the first batch (~0.04 ms/loop) — the cost is metrics that **stop reporting early**, which force a deep backward walk (~0.97 ms/loop, 24x worse). Enough of those and you exceed the budget (this was measured against the 120 s `ANALYTICS_STATEMENT_TIMEOUT_MS` cap that applied before v0.2.93.3): 60.1 s over 12,370 groups, against 1.19 s for `last(value, time)` in the aggregate pass already running. Aggregate in the single pass. `last()` is core `timescaledb` (not toolkit), `PARALLEL SAFE`, and deterministic here because `uniq_ds_metrics_upsert` is UNIQUE on the group key plus `time`, so no group can hold two rows at the same instant. It needs its own `FILTER (WHERE value IS NOT NULL)`: unlike every other aggregate there, `last()` returns the value *at* the greatest time even when that value is NULL.
    - **Writes: a predicate on a non-segmentby column decompresses the whole run as DML.** `refreshRampUpFlags` runs `UPDATE ds_metrics … WHERE m.ramp_up IS DISTINCT FROM <expr>` immediately before the aggregation, in the same transaction. `ramp_up` is neither segmentby nor orderby, so TimescaleDB decompresses the run's entire segment just to evaluate the guard — **even when zero rows change**. Measured: 53.7 s and 2,620,348 tuples on a 2.6 M-row run whose flags were already correct, ending in `tuple decompression limit exceeded by operation` (`max_tuples_decompressed_per_dml_transaction` defaults to 100 000). "Only rows that actually change are written" does not make such an UPDATE cheap — the guard *is* the expensive part. Ask with a SELECT first (a read decompresses transiently and rewrites nothing: 939 ms on 2.6 M rows, scaling roughly linearly — budget ~8 s on a 20 M-row run — and the chunks stay compressed), and when a write really is needed call `decompressChunksForRange` outside the transaction first, the way `StatisticsPipeline.refreshRampUpFlags` does. It is the only caller left — the force-refetch delete used to be the other one and no longer needs it; see the two v0.2.95.16 bullets below.
 
-   - **Decompress the narrowest span that works, per run — widening it is not free (v0.2.93.3).** `decompress_chunk` works at **chunk** granularity and a chunk holds every run in its time range, so an over-wide range converts other runs' data to row store too, and every later query over that window scans row store until the compression policy catches up. `findRunsWithStaleRampUpFlags` therefore returns `MIN(m.time)`/`MAX(m.time)` **over the disagreeing rows** rather than the run's `start_time`/`end_time`, and both `decompressChunksForRange` and the `UPDATE` are bound to those per-run bounds — one statement per run, never one global min/max across a batch. A stale trailing flag spans minutes; the run-wide bounds it replaced decompressed hours, and a batch of stale runs spanning months decompressed the months between them. The per-run `UPDATE` also earns chunk exclusion: `test_run_id` is `compress_segmentby` and `time` is `compress_orderby`, so TimescaleDB can skip whole batches on their min/max metadata instead of decompressing the run's entire segment to evaluate the `ramp_up` guard. Splitting per run does **not** buy each run its own decompression budget — `max_tuples_decompressed_per_dml_transaction` is charged per **transaction** and all N statements share one. The up-front `decompressChunksForRange` is the only thing keeping the loop under it, which is why its "skipped" path logs at **warn**, not debug (v0.2.93.3): when it silently no-ops (chunk owned by another role, recompressed in between, TimescaleDB error) the caller hits `tuple decompression limit exceeded` with nothing in the log explaining why.
+   - **Decompression only works through the `perfana_decompress_chunk` / `perfana_compress_chunk` wrappers (migration 1804, v0.2.95.17).** The worker connects as `perfana_system`, which does not own the hypertables, and TimescaleDB refuses a direct `decompress_chunk` with `must be owner of hypertable "ds_metrics"` — so every `decompressChunksForRange` before this was a silent no-op (logged as `skipped`) and the ramp-up `UPDATE` it guards ran as DML on the compressed chunk. The wrappers are `SECURITY DEFINER`, owned by the migration role (the hypertable owner), `EXECUTE` granted to `perfana_system` only (revoked from `perfana_app`, which the consolidated migration's default privileges would otherwise hand it). A database that has not run 1804 falls back to the old behaviour; the `skipped:` warning then names the missing function.
+   - **`ds_metrics` and `requests_raw` use 1-day chunks from migration 1804 on.** Existing chunks keep their 7-day range until they close. That is what bounds the collateral of a decompression to one day of other runs, and what makes a run's aggregation read ~16 GB instead of ~113 GB of chunk. The price is chunk count: no retention policy on `ds_metrics`, so ~365 chunks a year plus compressed twins, and every hot query (`test_run_id`, no time predicate) locks all of them — `max_locks_per_transaction` must be raised (256 in `docker-compose.infra.yml`; a deploy on its own Postgres has to do it too, restart required) or the symptom is `out of shared memory` under concurrency. `compress_after` stays at 7 days on purpose until the wrappers are proven on production; shortening it is the step that actually shrinks the 227 GB of row store, and it is filed in TODOS.md.
+   - **Decompress the narrowest span that works, per run — widening it is not free (v0.2.93.3).** `decompress_chunk` works at **chunk** granularity and a chunk holds every run in its time range, so an over-wide range converts other runs' data to row store too, and every later query over that window scans row store until the compression policy catches up. `findRunsWithStaleRampUpFlags` therefore returns `MIN(m.time)`/`MAX(m.time)` **over the disagreeing rows** rather than the run's `start_time`/`end_time`, and both `decompressChunksForRange` and the `UPDATE` are bound to those per-run bounds — one statement per run, never one global min/max across a batch. A stale trailing flag spans minutes; the run-wide bounds it replaced decompressed hours, and a batch of stale runs spanning months decompressed the months between them. The per-run `UPDATE` also earns chunk exclusion: `test_run_id` is `compress_segmentby` and `time` is `compress_orderby`, so TimescaleDB can skip whole batches on their min/max metadata instead of decompressing the run's entire segment to evaluate the `ramp_up` guard. Splitting per run does **not** buy each run its own decompression budget — `max_tuples_decompressed_per_dml_transaction` is charged per **transaction** and all N statements share one. The up-front `decompressChunksForRange` is the only thing keeping the loop under it, which is why its "skipped" path logs at **warn**, not debug (v0.2.93.3): when it silently no-ops (`perfana_decompress_chunk` missing on a database that has not run migration 1804, recompressed in between, TimescaleDB error) the caller hits `tuple decompression limit exceeded` with nothing in the log explaining why.
 
    - **A DELETE filtered on `test_run_id` ALONE needs no decompression at all — one extra predicate destroys that (v0.2.95.16, #563).** `test_run_id` is `compress_segmentby`, so `DELETE FROM ds_metrics WHERE test_run_id = $1` drops whole compressed segments. The force-refetch delete carried one more column — `metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')` — and that alone forced TimescaleDB to decompress the run's segments as DML, which is the entire reason `decompressChunksForRange` had to run in front of it. Measured on one 2,453,285-row run in a compressed chunk (TimescaleDB 2.28.3 / PG 15.18), each in a rolled-back transaction: `decompress_chunk` + filtered delete **162,743 ms / 11 GB WAL** (153.5 s of it decompression); the filtered delete alone **54,233 ms / 4,023 MB, then `ERROR: tuple decompression limit exceeded`**; `DELETE WHERE test_run_id = $1` **181 ms / 41 MB**. ~900x faster, ~275x less WAL.
 
@@ -862,6 +864,84 @@ Distinct from, and easily confused with, `softFail` (below): that one is a *deli
 `{ status: 'failed' }` by a pipeline whose caller reads `returnvalue` via `assertStageSucceeded()`.
 A worker with no such reader gets no such contract.
 
+### The heavy analyze stages run one at a time, and their wall-clock timeout is gone
+
+`statistics-calculation`, `control-group-statistics` and `adapt-analysis` each run a multi-minute
+aggregation over `ds_metrics`. Two of them on the same Postgres at once evict each other's pages
+and spill each other's sorts: on 2026-09-11 four large runs finished together, the cache hit
+ratio fell to 16 %, temp files hit 90 MB/s, and three of the four analyses failed. Nothing was
+waiting on a lock — the "Sessions waiting on a lock" panel was empty — the jobs blocked each
+other on the database itself. Two things changed in v0.2.95.17, and they only work as a pair:
+
+1. **`HeavyStageMutex`** (`apps/worker/src/services/HeavyStageMutex.ts`) is a deployment-wide
+   Redis `SET NX PX` lock, held around exactly those three stages by **whichever job runs the
+   pipeline**: `PipelineOrchestrator` for `analyze-test`, and the registry processor
+   (`pipeline-registry.ts:withHeavyStageLock`) for the same three job names when the re-evaluate
+   orchestrator enqueues them. The **child** holds it, never the re-evaluate orchestrator: that
+   one runs on `perfana-batch` while `analyze-test` jobs park on `perfana-analyze` waiting for
+   the same lock, so an orchestrator-held lock could pin both analyze slots behind a child that
+   can never be picked up. The cheap stages still overlap; only the aggregation is serialised.
+   `ponytail:` it is a single lock, not a semaphore — make it one if one heavy stage at a time
+   leaves the database idle.
+2. **`executeStage` no longer races those three stages against a `setTimeout`.** The race only
+   ever abandoned the promise: the aggregation kept running on Postgres until `statement_timeout`
+   (540 s) while the job returned `partial` (BullMQ *completed*, so the failed count never moved),
+   released its scope lock and its concurrency slot, and the next queued job started on top of the
+   orphan. Postgres already bounds every statement they run, so the wall-clock race is kept only
+   for the stages outside `HEAVY_STAGES` (collection, checks, control-group creation, rollup),
+   where an HTTP call can hang. The `timeoutMs` in `analyze.ts` is
+   **per stage**, not per pipeline, despite what its old comment said.
+
+Eight consequences to know about:
+
+- **A parked job publishes `status: 'waiting'`, and keeps publishing it.** The API evicts a job
+  whose `lastProgressAt` is 5 min old and `StuckJobScanner` releases its scope lock at 10, so the
+  mutex's `onWaiting` fires on every 5 s poll and `ProgressReporter.setWaiting` publishes each
+  time. The UI renders `waiting` as a **Queued** chip with the reason in place of the stage line.
+  A job still in BullMQ's waiting list gets the same record from `QueuedJobAnnouncer`
+  (`apps/worker/src/services/QueuedJobAnnouncer.ts`, every 30 s) — nothing else can publish for a
+  job no processor has picked up yet.
+- **The re-evaluate orchestrator's `waitForJobs` no longer counts parked time.** It polls the
+  child every 10 s and charges the slice to a running clock (`JOB_WAIT_TIMEOUT_MS`, 600 s) or a
+  parked clock (`JOB_PARKED_CEILING_MS`, 1 h) depending on whether the child is in BullMQ's
+  waiting list or active with progress `{ queuedBehind }`. Before this a child queued behind two
+  analyses hit the 600 s wait, was removed, and failed the whole re-evaluate.
+- **A parked analyze job still occupies its `perfana-analyze` slot.** With
+  `WORKER_ANALYZE_CONCURRENCY=2`, holder + parked fills the queue, so incremental-collection
+  ticks for live tests and re-evaluate children wait for the whole heavy stage rather than
+  sharing the database with it. Throughput is unchanged (before, both slots ran heavy work
+  concurrently and slowly); latency for a tick is now bounded by the heavy stage. Raise the
+  concurrency to 3 if that shows up as coverage warnings.
+- **A run refused by its workload's scope lock is re-parked, not retried.** `analyze.ts` used
+  to throw on `sut:env:workload` refusal and rely on the job's retry policy (3 attempts at
+  5 s / 10 s). Now that a holder's heavy stages queue behind every other analysis, a holder
+  can sit on the scope for an hour, and two runs of one workload finishing together is the
+  normal case — the second would have been dropped ~15 s after pickup, with no progress
+  record ever created. It is now `moveToDelayed` + `DelayedError` (no attempt consumed),
+  60 s at a time for up to 2 h (`blockedSince` in the job data), and only then the thrown
+  refusal. The processor takes BullMQ's `token` for that; `simple-workers.ts` and the
+  factory pass it through.
+- **A heavy-stage lock give-up, or a Redis error inside `acquire`, is RETRYABLE, not
+  `partial`.** The orchestrator tags the stage result `code: 'RETRYABLE'` and `analyze.ts`
+  rethrows it into the retry policy. Left as `partial` it would be a BullMQ-completed job
+  with the analysis silently dropped — the exact failure mode the "returning is succeeding"
+  section describes.
+- **A heavy stage keeps its progress record alive.** The record expires after
+  `LOCK_TTL_SECONDS` (5 min), a heavy stage publishes nothing while it runs and now has no
+  wall-clock bound, and the API evicts a job whose record is gone — so the UI went blank
+  while the scope lock still refused new runs. `PipelineOrchestrator` calls
+  `ProgressReporter.touch()` every 60 s around a heavy stage. Note `StuckJobScanner`
+  cannot be what catches this: it needs 10 min without progress on a record that expires
+  at 5, so for a non-terminal record it is inert; the 5 min expiry is the real cliff.
+- **A dead holder's statement outlives its lock.** The lock TTL frees the mutex 5 min
+  after the worker dies, but Postgres notices a closed socket only on its next write and an
+  aggregation writes nothing until it finishes, so the next holder overlaps the orphan for
+  up to the statement budget. `docker-compose.infra.yml` sets
+  `client_connection_check_interval=10000`; a deploy on its own Postgres has to as well.
+- **Every wait has a ceiling and names the holder.** `HeavyStageMutex` gives up after 1 h with
+  `held by <jobId>` in the message; a job that queues longer than that has a stuck holder, not a
+  busy one. The lock TTL is 5 min with a 60 s heartbeat, so a dead holder frees it by itself.
+
 ### An analysis window belongs to a workload, not to a run
 
 Trimming one run's analysis window in isolation quietly breaks the comparison it feeds. ADAPT
@@ -996,6 +1076,8 @@ container mounts in tests at all.
 22. **Dynatrace data stops arriving, the token is fixed, and a re-analyse still collects nothing** → the config was marked `is_complete` while every query was failing, and `PipelineOrchestrator` skips all four collection stages once every status row is complete. Only a force-refetch reevaluate clears it. Fixed in v0.2.95.12 (a config is completed only when its batch ran and every query succeeded); on an older deploy, force-refetch or clear `is_complete` for the run. The tell is that `metricsDocuments.length === 0` is the same signal for "no data" and "all queries errored" — check the worker log for per-query errors rather than the collection status.
 
 23. **A force-refetch re-evaluate generates gigabytes of WAL and pins autovacuum for minutes** → something is deleting `ds_metrics` with a predicate on a column other than `test_run_id`, or calling `decompressChunksForRange` to make such a delete survivable. `test_run_id` is `compress_segmentby`, so the single-column `DELETE` is segment-targeted and free (181 ms / 41 MB against 162,743 ms / 11 GB). Fixed in v0.2.95.16; the tell on an older deploy is a long `decompress_chunk` transaction in `pg_stat_activity` (now attributable — the worker pools report `perfana-worker` / `perfana-worker-write` rather than `(unset)`) with unrelated tables climbing in dead tuples behind it. See the two v0.2.95.16 bullets in item 6 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
+
+24. **Three of four analyses that finished together fail with `Stage statistics-calculation timed out after 600000ms`, the buffer cache hit ratio collapses, temp files spike, and nothing is waiting on a lock** → the heavy stages were contending on the database and the per-stage wall-clock race turned that into partial results while the abandoned aggregation kept running. Fixed in v0.2.95.17 (`HeavyStageMutex` serialises the three heavy stages; they are bounded by `statement_timeout` instead of a race). The UI shows **Queued** while a job waits for the lock or for a worker slot. On an older deploy, set `WORKER_ANALYZE_CONCURRENCY=1`. See "The heavy analyze stages run one at a time" above.
 
 ## How-To Tutorials
 

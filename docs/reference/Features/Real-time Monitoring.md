@@ -71,13 +71,26 @@ interface JobProgress {
   status: 'waiting' | 'active' | 'completed' | 'failed' | 'stuck' | 'blocked';
   stage: string;           // stage id, e.g. 'adapt-analysis'
   stageName: string;       // display name, e.g. 'ADAPT analysis'
-  stageIndex: number;      // 1-based; 1-11 for analyze-test
-  totalStages: number;     // 11 for analyze-test (10 when adapt=false)
+  stageIndex: number;      // 1-based; 1-11 for analyze-test (0 while queued, see below)
+  totalStages: number;     // 11 for analyze-test (10 when adapt=false; 0 while queued)
   stageProgress: number;   // 0-100%
   overallProgress: number; // 0-100%
   message: string;
 }
 ```
+
+> [!note] `status: 'waiting'` renders as **Queued** (v0.2.95.17)
+> Two worker-side producers publish it, and `message` says which: `QueuedJobAnnouncer` (every
+> 30 s, for an `analyze-test` job still in BullMQ's waiting list, with `stageIndex` and
+> `totalStages` at `0` because no processor has it yet), and `ProgressReporter.setWaiting()` (on
+> every 5 s poll while the job is parked behind another job's database-heavy stage — the
+> deployment-wide `HeavyStageMutex`). The re-publish cadence is not optional: the progress key
+> expires after `JOB_DEFAULTS.LOCK_TTL_SECONDS` (5 min) and `JobProgressService` evicts a job whose
+> `lastProgressAt` is that old, so a queued job that stopped publishing would vanish from the UI
+> while its scope lock still refused new runs. `useJobProgress` treats `waiting` as `isRunning`.
+> The message is neutral on purpose: the holder's job id may belong to another organisation's run
+> and is logged by the worker only. See [[Worker Overview]] for the producers and
+> `apps/web/components/job-progress/README.md` for how each indicator variant renders it.
 
 Abridged — see `JobProgress` in `packages/shared/src/types/job-progress.types.ts` for the full
 shape (`jobId`, the scope fields, `startedAt`, `lastProgressAt`).
