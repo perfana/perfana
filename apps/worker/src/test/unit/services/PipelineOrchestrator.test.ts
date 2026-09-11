@@ -74,6 +74,7 @@ describe('PipelineOrchestrator', () => {
     transaction: ReturnType<typeof vi.fn>;
     applicationDashboardRepo: { find: ReturnType<typeof vi.fn> };
     dataSource: { query: ReturnType<typeof vi.fn> };
+    decompressChunksForRange: ReturnType<typeof vi.fn>;
   };
   let mockGapService: {
     isCollectionComplete: ReturnType<typeof vi.fn>;
@@ -112,6 +113,7 @@ describe('PipelineOrchestrator', () => {
       updateCollectedRanges: vi.fn().mockResolvedValue(undefined),
       removeCollectionStatus: vi.fn().mockResolvedValue(undefined),
       markCollectionComplete: vi.fn().mockResolvedValue(undefined),
+      decompressChunksForRange: vi.fn().mockResolvedValue(undefined),
       testRunRepo: { findOne: vi.fn() },
       dsMetricsRepo: { count: vi.fn() },
       transaction: vi.fn(),
@@ -529,6 +531,25 @@ describe('PipelineOrchestrator', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('decompresses the run span before a full collection, and not when collection is skipped', async () => {
+      // A re-analysis of a run older than compress_after re-collects into columnstore:
+      // thousands of upserts decompressing batch by batch, stuck at "Metric collection".
+      const bounds = { startTime: new Date('2026-09-01T10:00:00Z'), endTime: new Date('2026-09-01T11:00:00Z') };
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(bounds);
+      mockPipelines.metrics.execute.mockResolvedValue({ success: true, duration: 1 });
+
+      mockGapService.isCollectionComplete.mockResolvedValue(false);
+      await orchestrator.executeSequentialPipeline('run-old', { stages: ['metrics-collection'] });
+      expect(mockDatabaseService.decompressChunksForRange).toHaveBeenCalledWith('ds_metrics', bounds.startTime, bounds.endTime);
+
+      mockDatabaseService.decompressChunksForRange.mockClear();
+      mockGapService.isCollectionComplete.mockResolvedValue(true);
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([{ source_type: 'grafana', source_id: 'g1', is_complete: true, collected_ranges: [], failed_ranges: [] }]);
+      mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([{ grafanaInstanceId: 'g1' }]); // keeps the status from being swept as orphaned
+      await orchestrator.executeSequentialPipeline('run-fresh', { stages: ['metrics-collection'] });
+      expect(mockDatabaseService.decompressChunksForRange).not.toHaveBeenCalled();
     });
 
     it('should handle unknown stage name', async () => {
@@ -1717,6 +1738,8 @@ describe('PipelineOrchestrator', () => {
           workload: 'load',
           annotations: [],
         })
+        // decompressRunSpanForCollection's read (collection not skipped)
+        .mockResolvedValueOnce({ startTime: new Date('2024-01-01T10:00:00Z'), endTime: new Date('2024-01-01T11:00:00Z') })
         .mockResolvedValueOnce({
           annotations: [],
         });

@@ -29,14 +29,22 @@ import { chunkTestRunIds, REEVALUATE_CHUNK_SIZE } from '../lib/utils/chunking.js
 const logger = getLogger('simple-orchestrate-reevaluate-batch');
 
 /**
- * Maximum time (ms) a child job may spend RUNNING before we give up on it (10 minutes).
+ * Maximum time (ms) a child job may spend RUNNING before we give up on it (30 minutes).
  *
  * Time the child spends parked does not count: in BullMQ's waiting list behind two
  * analyze-test jobs, or active but queued behind the HeavyStageMutex (its progress is
  * `{ queuedBehind }`, set by the registry). Counting that time turned a busy database
  * into a failed re-evaluate. Parked time has its own, longer ceiling below.
+ *
+ * 30 min, not the 10 it was: that budget was sized against one 540 s aggregation, when
+ * `decompressChunksForRange` inside the statistics job was a silent no-op. Since
+ * migration 1804 it is real — up to 540 s PER compressed chunk the batch's runs touch,
+ * a legacy 7-day chunk being ~10 GB of row store — then the ramp-up UPDATE, then the
+ * aggregation. Each of those steps is bounded by its own statement_timeout; this only
+ * has to be their sum, or the parent gives up on a child that is working correctly and
+ * (an active child cannot be removed) leaves it running unobserved.
  */
-const JOB_WAIT_TIMEOUT_MS = 600_000;
+const JOB_WAIT_TIMEOUT_MS = 30 * 60_000;
 /** Same policy as the mutex's own give-up, and must not be shorter (see HEAVY_STAGE_MAX_WAIT_MS). */
 const JOB_PARKED_CEILING_MS = HEAVY_STAGE_MAX_WAIT_MS;
 /** How often waitForJobs re-reads the child's state to decide whose clock is running. */
