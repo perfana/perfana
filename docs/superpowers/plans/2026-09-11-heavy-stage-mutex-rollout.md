@@ -62,7 +62,7 @@ snapshot (~16 GB/day of `ds_metrics` ingest, 7-day chunks, `shared_buffers` 4 GB
 
 9. **`compress_after` 7 days → 2 days on `ds_metrics`** — written as
    `1805000000000-ShortenDsMetricsCompressAfter`; **merge only after step 6 is green.** Effect:
-   row store drops from 7–14 days (~110–230 GB) to 2–2.5 days (~32–40 GB); the rest sits at
+   row store drops from 7–14 days (~110–230 GB) to 2–3 days (~32–48 GB); the rest sits at
    ~86x. The migration refuses if the 1804 wrappers are absent, schedules the first policy
    run at the next 02:00 UTC (override: `DS_METRICS_COMPRESS_INITIAL_START` on the
    migration runner), and keeps the 12 h schedule. That first run compresses the previous
