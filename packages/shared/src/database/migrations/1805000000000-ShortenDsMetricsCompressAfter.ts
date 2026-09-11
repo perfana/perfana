@@ -13,18 +13,20 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * ── What compression costs on the READ side (measured, TimescaleDB 2.28.3) ───────────
  *
  * `compress_segmentby = test_run_id` makes whole-run reads (the statistics aggregation,
- * ADAPT) as cheap on compressed data as on hot data. Per-series reads are NOT: the
- * orderby is `time DESC` only, so every 1000-row batch holds a few timestamps of EVERY
- * metric in the run and nothing can prune a batch by metric. Measured on a 94,810-row
- * compressed run against a row-store one: one series of one panel 7.9 ms (all 95
- * batches decompressed, 94,668 rows filtered out) vs 0.3 ms; the `getAvailableDashboards`
- * shape 179 ms with a 10 MB external sort vs 97 ms. Per row that is ~150x and ~10x,
- * linear in run size — roughly 200 ms per series on a 2.6 M-row run, 1 s on 12.8 M —
- * and a trends/compare card issues one such query per series. Before this migration that
- * cost applied to runs older than ~7.5 days; after it, to runs older than ~3 days. The
- * structural fix is an orderby that carries metric identity
- * (`application_dashboard_id, panel_id, metric_name, time DESC`), which only affects
- * chunks compressed after it lands — filed in TODOS.md, not part of this migration.
+ * ADAPT) as cheap on compressed data as on hot data. Per-series reads are slower but
+ * small in absolute terms: the orderby is `time DESC` only, so every 1000-row batch holds
+ * a few timestamps of every metric in the run, but the 2.28 bloom sparse index on
+ * `metric_name` prunes the batches first. Measured on a 2,453,285-row compressed run:
+ * one series of one panel 15–18 ms (2.45 M → 249 k rows filtered), one panel's series
+ * 51 ms, the available-dashboards dropdown 3.4 s, the whole-run aggregate 313 ms —
+ * against ~0.3 ms per series in row store. Before this migration that applied to runs
+ * older than ~7.5 days; after it, to runs older than ~3 days.
+ *
+ * A metric-first orderby (`application_dashboard_id, panel_id, metric_name, time DESC`)
+ * was measured on the same run and rejected: 2 ms per series and 87 MB instead of
+ * 127 MB, but 555 ms on the whole-run aggregate and 261 ms instead of 18 ms on the
+ * time-bounded reads the ramp-up refresh and `decompressChunksForRange` bounds depend
+ * on. The pipeline's reads outnumber the chart's.
  *
  * Only `ds_metrics`. `requests_raw`/`transactions`/`requests_error` stay at 7 days on
  * purpose: their 15 continuous aggregates refresh with `start_offset` 7 days, chosen to

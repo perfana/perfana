@@ -528,6 +528,12 @@ raise. The genuine win on the other side: `decompressChunksForRange` and the per
   a release wins, and each analyze job acquires three times. Under a burst of finished runs a
   re-evaluate child can lose every poll for an hour. Upgrade path: a FIFO ticket (`INCR` + serving
   counter) behind the same TTL'd holder key. Trigger: `stayed queued behind` in the log.
+- **Do NOT switch `ds_metrics` to a metric-first `compress_orderby`.** Measured 2026-09-11 on a
+  2.45 M-row run: 8x faster single-series reads (2 ms vs 15–18 ms) and 30 % smaller, but 1.7x
+  slower whole-run aggregation and 15x slower time-bounded reads (261 ms vs 18 ms), which the
+  ramp-up refresh and decompression bounds use. Per-series reads on compressed runs are 15–18 ms
+  on that run thanks to the bloom sparse index on `metric_name`; revisit only if a chart shows
+  hundreds of ms per series on production.
 - **A removed queued job shows "Queued" for up to 5 min.** The announcer's record has the 5 min TTL
   and nothing else clears it; `useJobProgress.isRunning` gates the analyze buttons meanwhile.
 
