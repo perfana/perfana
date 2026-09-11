@@ -470,16 +470,11 @@ Forced by production on 2026-09-11: 227 GB of 228 GB on disk was the two open 7-
 `SECURITY DEFINER` decompress/compress wrappers, so the worker can finally decompress (it never
 could — `must be owner of hypertable`). Retention on `ds_metrics` is still undecided.
 
-**Still open — `compress_after` 7 days → 2 days on `ds_metrics`.** This is the step that turns the
-227 GB into ~40 GB (2–3 days of row store at ~16 GB/day, the rest at 86x). Two preconditions: (1)
-verify on production that an analysis-window change on a run older than 7 days now succeeds, i.e.
-the wrappers work there — with a 2-day `compress_after` every re-analysis of a 2-7-day-old run hits
-compressed data, which is exactly when people re-tune windows; (2) schedule it: the previous 113 GB
-chunk qualifies the moment the policy is added, and `add_compression_policy` fires immediately, so
-pass `initial_start` for a quiet hour or `compress_chunk` that one by hand at night. No CAGG reads
-`ds_metrics`, so the 7-day CAGG `start_offset` is unaffected; do NOT shorten `requests_raw`'s
-compression without moving those offsets. Re-measure the "time bound buys nothing" conclusion above
-under 1-day chunks — it was taken when a run sat inside one chunk.
+**`compress_after` 7 days → 2 days on `ds_metrics`: DONE in v0.2.95.18** (migration 1805, first run
+at the next 02:00 UTC or `DS_METRICS_COMPRESS_INITIAL_START`). It refuses without the 1804 wrappers
+but cannot prove they work on the deploy: **merge only after** an analysis-window change on a
+run older than 7 days succeeds on production. Still to do under 1-day chunks: re-measure the
+"time bound buys nothing" conclusion above — it was taken when a run sat inside one chunk.
 
 **Original analysis (2026-09-04):**
 
