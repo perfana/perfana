@@ -85,6 +85,9 @@ snapshot (~16 GB/day of `ds_metrics` ingest, 7-day chunks, `shared_buffers` 4 GB
    02:00 slot and compresses whenever a worker frees). Runs from the legacy 7-day chunks
    cannot be decompressed within the worker's 540 s budget once compressed (~45 min for
    113 GB), so analysis-window changes on Sep 3–10 runs are frozen either way.
+   On a worker older than v0.2.95.19 the `Decompressing` / `Recompressed` lines are
+   suppressed in production (Nest logger at error/warn); prove the wrappers ran with
+   `SELECT calls FROM pg_stat_statements WHERE query ILIKE '%perfana_decompress_chunk%'`.
    Per-series chart reads on compressed runs cost 15–18 ms on a 2.45 M-row run (bloom
    index prunes); a metric-first orderby was measured and rejected (TODOS.md).
 10. Re-measure the TODOS.md conclusion that a `time BETWEEN start_time AND end_time` bound

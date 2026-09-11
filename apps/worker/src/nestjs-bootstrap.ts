@@ -35,12 +35,14 @@ export async function bootstrapNestJS(): Promise<INestApplicationContext> {
   try {
     logger.info('Initializing NestJS application context...');
 
-    // Keep error/warn logging in production for visibility into initialization failures
-    // In development, include 'log' level for debugging framework initialization
-    const isProduction = process.env.NODE_ENV === 'production';
-    const nestLoggerConfig: false | LogLevel[] = isProduction
-      ? ['error', 'warn']
-      : ['error', 'warn', 'log'];
+    // 'log' in production too. Almost everything in the worker logs through pino, but the
+    // Nest-injected WorkerDatabaseService uses Nest's Logger, and its `log`-level lines are
+    // the only trace of multi-minute operations: `Decompressing ds_metrics chunk …`,
+    // `Decompressed N chunk(s)`, `Recompressed N/N`. With ['error','warn'] a production
+    // re-evaluate that decompressed a 10 GB chunk for nine minutes left nothing in the log
+    // at all — indistinguishable from the decompress never having run. The extra cost is a
+    // dozen Nest module-init lines at boot.
+    const nestLoggerConfig: LogLevel[] = ['error', 'warn', 'log'];
 
     // Create application context (no HTTP server)
     appContext = await NestFactory.createApplicationContext(AppModule, {
