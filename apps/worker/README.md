@@ -482,7 +482,7 @@ throws and retries, the retry would re-enqueue the same stage for the same ids w
 still running.
 
 Since v0.2.95.17 it runs **two clocks**, polling the child every 10 s (`JOB_WAIT_POLL_MS`) and
-charging each slice to whichever applies: the running clock (`JOB_WAIT_TIMEOUT_MS`, 600 s) while
+charging each slice to whichever applies: the running clock (`JOB_WAIT_TIMEOUT_MS`, 30 min since v0.2.95.19) while
 the child is active and working, or the parked clock (`JOB_PARKED_CEILING_MS`, 1 h, pinned to
 `HEAVY_STAGE_MAX_WAIT_MS` so the parent never gives up before the child's own lock would) while
 the child sits in BullMQ's waiting list, is delayed for a retry, or is active but parked behind the

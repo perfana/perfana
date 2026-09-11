@@ -40,13 +40,22 @@ snapshot (~16 GB/day of `ds_metrics` ingest, 7-day chunks, `shared_buffers` 4 GB
    statistics / control-group statistics / ADAPT, then proceeds. Both succeed. The
    Grafana cache-hit-ratio panel should not fall below ~60 % during either.
 6. **Wrappers:** change the analysis window on a run **older than 7 days** (its chunks are
-   compressed). Expected: `Decompressing ds_metrics chunk _hyper_… [range]` in the worker
+   compressed) **with "Apply to all test runs of this workload" ticked** — that is the
+   re-evaluate path (`recalculateStatistics`), which skips collection and goes straight to
+   the statistics stage where the decompress happens. Without the tick the dialog enqueues
+   a full `analyze-test`, whose stage 5 re-collects every panel from Grafana into the
+   compressed chunk and sits at "Metric collection" (fixed in v0.2.95.19, but it is still
+   not the path that exercises the wrappers). Pick a workload with a handful of runs; the
+   apply is refused above 100. Expected: `Decompressing ds_metrics chunk _hyper_… [range]` in the worker
    log, the statistics stage succeeds, and `Recompressed N/N chunk(s)` at the end of the
    re-evaluate. Before this PR that path failed with `tuple decompression limit exceeded`.
    This is the gate for step 9: do not shorten `compress_after` until this is green.
    Budget: the first such decompression is of a legacy 7-day chunk (~10 GB row store) and
    is bounded at 540 s per chunk; if it is cancelled, the chunk is remembered as
-   undecompressable for that process and the run stays as it was.
+   undecompressable for that process and the run stays as it was. Expect the whole
+   re-evaluate to take 30–60 min on legacy chunks (decompress + UPDATE + aggregation per
+   batch of 5 runs, then recompress); `pg_stat_activity` filtered on
+   `application_name LIKE 'perfana-worker%'` shows which step is running.
 7. **Queued announcer:** start 3+ analyses at once. The ones still in BullMQ's waiting list
    should show **Queued** ("waiting for a free analysis worker") within 30 s. A run whose
    workload already has a running analysis is deliberately not announced.

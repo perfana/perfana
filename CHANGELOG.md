@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.19] - 2026-09-11
+
+### Fixed
+- **Re-analysing a run older than the compression window no longer sits at "Metric collection".** The window-change dialog without "apply to all" runs a full analysis, whose collection stage upserts every panel into a compressed chunk; TimescaleDB decompressed batch by batch as DML until the per-transaction limit stopped it, ten minutes in. The orchestrator now decompresses the run's span before a full collection (a no-op on a fresh run) and puts the chunks back when the job ends. The re-evaluate orchestrator's per-child running budget goes from 10 to 30 min for the same reason: a statistics batch on a legacy 7-day chunk now spends up to 9 min decompressing before it aggregates.
+
 ## [0.2.95.18] - 2026-09-11
 
 ### Changed
