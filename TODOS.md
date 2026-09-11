@@ -528,6 +528,11 @@ raise. The genuine win on the other side: `decompressChunksForRange` and the per
   a release wins, and each analyze job acquires three times. Under a burst of finished runs a
   re-evaluate child can lose every poll for an hour. Upgrade path: a FIFO ticket (`INCR` + serving
   counter) behind the same TTL'd holder key. Trigger: `stayed queued behind` in the log.
+- **Legacy 7-day chunks make every first decompression slow** (~10 GB of row store each, 540 s
+  cap, measured ~3 min per 7.7 GB locally). They age out only when nothing re-analyses them; a
+  one-off `compress_chunk` after splitting is not possible. Accept, or hand-migrate the data of
+  the busiest week into 1-day chunks (decompress → `CREATE TABLE ... AS` → reinsert) if the
+  first re-evaluates on production keep hitting the cap.
 - **Do NOT switch `ds_metrics` to a metric-first `compress_orderby`.** Measured 2026-09-11 on a
   2.45 M-row run: 8x faster single-series reads (2 ms vs 15–18 ms) and 30 % smaller, but 1.7x
   slower whole-run aggregation and 15x slower time-bounded reads (261 ms vs 18 ms), which the

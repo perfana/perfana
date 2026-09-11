@@ -115,6 +115,7 @@ describe('analyzeTestWorker', () => {
       dsMetricsRepo: {
         count: vi.fn().mockResolvedValue(100),
       },
+      recompressTouchedChunks: vi.fn().mockResolvedValue(undefined),
     };
 
     // Configure getDatabaseService to return our mock
@@ -413,6 +414,17 @@ describe('analyzeTestWorker', () => {
     // job on the same sut:env:workload scope. If the finally did not hand the lock back,
     // every retry would hit the scope-lock refusal branch — which also throws — and the
     // job would burn all three attempts without re-running a single stage.
+    it('puts decompressed chunks back in its finally, on success and on failure', async () => {
+      mockOrchestrator.executeSequentialPipeline.mockResolvedValue({ success: true, duration: 1, data: { stages: [] } });
+      await worker({ data: { testRunId: 'test-run-123', adapt: true } });
+      expect(mockDb.recompressTouchedChunks).toHaveBeenCalledTimes(1);
+
+      mockDb.recompressTouchedChunks.mockClear();
+      mockOrchestrator.executeSequentialPipeline.mockRejectedValue(new Error('boom'));
+      await expect(worker({ data: { testRunId: 'test-run-123', adapt: true } })).rejects.toThrow('boom');
+      expect(mockDb.recompressTouchedChunks).toHaveBeenCalledTimes(1);
+    });
+
     it('releases the scope lock and stops renewal when the pipeline throws', async () => {
       // Arrange
       mockReleaseLock.mockClear();

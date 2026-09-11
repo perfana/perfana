@@ -289,6 +289,15 @@ export function analyzeTestWorker() {
         ? error
         : new Error(`Analysis failed for test run ${validatedData?.testRunId ?? 'unknown'}: ${errorMessage}`);
     } finally {
+      // Put back any chunk this job decompressed for a full collection on an old run
+      // (PipelineOrchestrator.decompressRunSpanForCollection). Best-effort, like the
+      // re-evaluate orchestrator's; a chunk left behind goes to the columnstore policy.
+      try {
+        await getDatabaseService().recompressTouchedChunks();
+      } catch (recompressError) {
+        logger.warn(`recompressTouchedChunks failed for job ${job.id}:`, recompressError);
+      }
+
       // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
       // of a lock we just handed back.
       stopLockRenewal?.();

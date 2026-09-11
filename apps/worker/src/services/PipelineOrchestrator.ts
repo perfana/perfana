@@ -408,6 +408,18 @@ export class PipelineOrchestrator {
     }
   }
 
+  /** Best-effort: a failure here leaves the collection to hit the DML limit it always did. */
+  private async decompressRunSpanForCollection(testRunId: string): Promise<void> {
+    try {
+      const run = await this.databaseService.getTestRunByTestRunId(testRunId);
+      if (!run?.startTime) {return;}
+      await this.databaseService.decompressChunksForRange('ds_metrics', run.startTime, run.endTime ?? new Date());
+    } catch (err) {
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : String(err);
+      this.logger.warn(`Could not decompress ${testRunId}'s span before collection: ${msg}`);
+    }
+  }
+
   /**
    * Execute Sequential Pipeline - Single test run analysis
    * Replicates Python's analyze_test_task pipeline execution
@@ -482,6 +494,16 @@ export class PipelineOrchestrator {
         if (metricsComplete) {
           skipMetricCollectionStages = true;
           this.logger.info(`⏭️ Skipping metric collection stages (incremental collection complete)`);
+        } else {
+          // A full collection on a run whose chunks are already compressed — a re-analysis
+          // of a run older than compress_after (2 days since migration 1805, 7 before) whose
+          // incremental status never completed — is thousands of INSERT ... ON CONFLICT DO
+          // UPDATE into columnstore. TimescaleDB decompresses each matching batch as DML,
+          // which reads as a stage stuck at "Metric collection" for ten minutes and then
+          // `tuple decompression limit exceeded`. Decompress the run's span first, the way
+          // the force re-fetch does; on a fresh run every chunk is row store and this is a
+          // no-op. The chunks go back in analyze.ts's finally.
+          await this.decompressRunSpanForCollection(testRunId);
         }
       }
 
