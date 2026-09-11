@@ -227,12 +227,25 @@ segment as DML even when zero rows change, up to
    wider range converts other runs' data to row store too and slows every later query over that
    window until the compression policy catches up. A stale trailing flag spans minutes; run-wide
    bounds decompressed hours, and a batch spanning months decompressed the months between.
+   Since migration 1804 (v0.2.95.17) `ds_metrics` and `requests_raw` create 1-day chunks, which
+   bounds that collateral to one day; chunks created earlier keep their 7-day range.
 3. The `UPDATE` runs once per run, bound to the same `test_run_id` + `time` bounds — both
    compression-aware columns, so TimescaleDB skips whole batches on their min/max metadata.
 
-Its "skipped" path logs at **warn**: a silent no-op (chunk owned by another role, recompressed in
-between, TimescaleDB error) surfaces later as `tuple decompression limit exceeded` with nothing in
-the log explaining why.
+The decompression goes through `perfana_decompress_chunk`, a `SECURITY DEFINER` wrapper from
+migration 1804 (its twin `perfana_compress_chunk` is what `recompressTouchedChunks` calls). The
+worker connects as `perfana_system`, which does not own the hypertables, and TimescaleDB refuses a
+direct `decompress_chunk` with `must be owner of hypertable` — so before v0.2.95.17 every call was
+a silent no-op and the `UPDATE` ran as DML on the compressed chunk. Each chunk is decompressed in
+its own transaction under a 540 s `statement_timeout` (`DECOMPRESS_STATEMENT_TIMEOUT_MS`, kept
+below the pool's 600 s `query_timeout`), and a chunk that fails is remembered in
+`undecompressableChunks` and not retried by the same process — a legacy 7-day chunk is ~10 GB of
+row store, and every stale run overlapping it would otherwise pay the same failed attempt while the
+heavy-stage lock is held.
+
+Its "skipped" path logs at **warn**: a silent no-op (`perfana_decompress_chunk` missing on a
+database that has not run migration 1804, recompressed in between, TimescaleDB error) surfaces
+later as `tuple decompression limit exceeded` with nothing in the log explaining why.
 
 **Do not add a diagnostic `COUNT` back to either pipeline.** Three of them existed only to log
 "will process N unique metrics" and warn on an expected-vs-actual mismatch, and each read
@@ -276,6 +289,58 @@ config is completed only when its batch ran and every query succeeded. `MetricsP
 complete the Grafana source on its "no panel documents" path either — an empty `ds_panels` is
 frequently transient.
 
+### The heavy analyze stages run one at a time (v0.2.95.17)
+
+`statistics-calculation`, `control-group-statistics` and `adapt-analysis` (`HEAVY_STAGES` in
+`src/services/HeavyStageMutex.ts`, sourced from `JOB_NAMES` so a rename cannot leave one unguarded)
+each aggregate tens of millions of `ds_metrics` rows. Two of them on the same Postgres evict each
+other's pages and spill each other's sorts — on 2026-09-11 four runs finished together, the cache
+hit ratio fell to 16 %, and three of the four analyses failed with nothing waiting on a lock.
+
+`HeavyStageMutex` is a deployment-wide Redis lock (`job:heavy-stage-lock`, `SET NX PX`, 5 min
+TTL, 60 s heartbeat, 5 s poll, 1 h give-up) with a per-acquisition nonce in the token: a BullMQ
+job id is reused by a stalled-job re-dispatch or a retry, and with the bare id as token the old
+instance's release would delete the new instance's lock. It is held by whichever job runs the
+pipeline — `PipelineOrchestrator` for `analyze-test` (pass `heavyStageMutex` in the config; omit it
+in tests), the registry processor for the same three job names when the re-evaluate orchestrator
+enqueues them. The cheap stages still overlap. `ponytail:` it is one lock, not a semaphore.
+
+What changed around it:
+
+- **`timeoutMs` in `executeSequentialPipeline` is per stage, and the heavy stages are exempt.**
+  The `Promise.race` against a `setTimeout` only ever abandoned the promise: the aggregation kept
+  running on Postgres until `statement_timeout` (540 s) while the job returned `partial` (BullMQ
+  *completed*), freed its scope lock and its slot, and the next job started on top of the orphan.
+  The heavy stages are bounded by Postgres instead; the race stays for the stages where an HTTP
+  call can hang.
+- **A parked job publishes `status: 'waiting'` on every poll.** The progress record expires after
+  5 min and the API evicts the job once it is gone, so `ProgressReporter.setWaiting()` is not
+  debounced. While a heavy stage *runs* it publishes nothing and now has no wall-clock bound, so
+  the orchestrator calls `ProgressReporter.touch()` every 60 s to keep the record alive.
+- **`QueuedJobAnnouncer`** (`src/services/QueuedJobAnnouncer.ts`, started in `worker.ts` next to
+  `StuckJobScanner`) publishes the same `waiting` record every 30 s for every `analyze-test` job
+  still in BullMQ's waiting list — nothing else can, since `ProgressReporter` only exists once a
+  processor runs. It writes with a `SETEX`-unless-live script so it never overwrites a record a
+  running job owns, and skips a run whose workload scope lock is held by another job, so the
+  holder's live frame is not displaced. One instance per worker replica (N publishes per job with
+  N replicas; add a leader key when that matters).
+- **A parked `analyze-test` job still occupies its `perfana-analyze` slot.** With
+  `WORKER_ANALYZE_CONCURRENCY=2`, holder + parked fills the queue; incremental-collection ticks
+  then wait for the heavy stage rather than sharing the database with it. Raise the concurrency to
+  3 if that shows up as coverage warnings.
+- **A lock give-up or a Redis error inside `acquire` is `RETRYABLE`, not `partial`.** The
+  orchestrator tags the stage result and `analyze.ts` rethrows it into the retry policy.
+- **A dead holder frees the lock after 5 min, but its statement runs on** until Postgres notices
+  the closed socket, which an aggregation that writes nothing does only when it finishes.
+  `docker-compose.infra.yml` sets `client_connection_check_interval=10000`; a deploy on its own
+  Postgres has to as well.
+
+The scope-lock re-park in `analyze.ts` (table below) exists because of this lock: a holder can now
+sit on `sut:env:workload` for an hour, and two runs of one workload finishing together is normal.
+The full write-up, with the failure modes, is in the "The heavy analyze stages run one at a time"
+section of [CLAUDE.md](../../CLAUDE.md); the rollout plan with timings is
+`docs/superpowers/plans/2026-09-11-heavy-stage-mutex-rollout.md`.
+
 ### Complex Workers (custom logic)
 
 - `analyzeTestWorker` — orchestrates full test analysis (`analyze-test`)
@@ -306,8 +371,16 @@ Worker-specific tuning (full schema and defaults in `src/config/environment.ts`)
 | `AGGREGATION_STATEMENT_TIMEOUT_MS` | `540000` | Budget for `StatisticsPipeline` / `ControlGroupStatisticsPipeline`. Must stay strictly under the analytics pool's client-side `query_timeout` (600000). |
 | `AGGREGATION_WORK_MEM` | `128MB` | `work_mem` for those two. Keeps ~20k `percentile_agg` sketches in a HashAggregate; spilling turns the aggregation into a GroupAggregate that sorts every input row to disk. Charged per hash/sort node, per parallel worker, and per concurrent job — deploy-wide peak is roughly this x (1 + `max_parallel_workers_per_gather`) x 4. |
 | `REEVALUATE_CHUNK_SIZE` | `5` | Runs per `statistics-calculation` / `control-group-statistics` / `adapt-analysis` job inside the re-evaluate orchestrator, and per `StatisticsPipeline` invocation inside `backfillMissingSketches`. Read in `lib/utils/chunking.ts`, not `environment.ts`, so a pipeline can import it without pulling in BullMQ. |
-| `WORKER_ANALYZE_CONCURRENCY` / `WORKER_BATCH_CONCURRENCY` | `2` / `2` | Concurrent jobs per queue. Both multiply the `work_mem` peak above. |
+| `WORKER_ANALYZE_CONCURRENCY` / `WORKER_BATCH_CONCURRENCY` | `2` / `2` | Concurrent jobs per queue. Both multiply the `work_mem` peak above. Since v0.2.95.17 the heavy stages are serialised by `HeavyStageMutex`, so a second analyze job parks in its slot while the first aggregates; raise the analyze concurrency to 3 if incremental-collection ticks start missing coverage. |
 | `AUDIT_RETENTION_MONTHS` | `24` | `AuditRetentionManager` deletes `audit_logs` rows older than this on boot and daily at 03:00 UTC. |
+
+Two Postgres settings the worker depends on but cannot set (both in `docker-compose.infra.yml`; a
+deploy running its own Postgres has to set them too, restart required):
+
+| Setting | Value | Why |
+|---|---|---|
+| `max_locks_per_transaction` | `256` | `ds_metrics` and `requests_raw` use 1-day chunks from migration 1804 with no retention policy, and every hot query filters on `test_run_id` with no time predicate, so it locks every chunk plus its compressed twin. At the default 64 the lock table runs out as `out of shared memory` under concurrency. The worker logs an error at boot when the value is lower. |
+| `client_connection_check_interval` | `10000` | A worker that dies mid-aggregation frees the heavy-stage lock after its 5 min TTL, but Postgres only notices the closed socket on its next write, and an aggregation writes nothing until it finishes. Polling the socket cancels the orphan within seconds instead of letting it overlap the next holder for up to the statement budget (PG14+). |
 
 ## Adding a Pipeline
 
@@ -361,7 +434,7 @@ it. Throwing is the only way a job fails.
 | Site | Behaviour |
 |---|---|
 | `simple-orchestrate-reevaluate-batch.ts` | **Throws** since v0.2.95.0, on a scope-lock refusal and from its catch-all. Returning left `test_runs.ramp_up` written with `ds_metric_statistics` never recalculated, behind a green job; with chunking it also leaves earlier chunks rewritten and the rest on the old window. Retries come from the enqueue (`bullmq-client.service.ts`: `attempts: 2`, fixed 10s), **not** the queue default in `simple-queues.ts`. |
-| `analyze.ts` | **Throws from both branches** — the scope-lock refusal since v0.2.95.0, the catch-all since v0.2.95.13. The lock branch mattered because a workload-wide analysis-window apply holds `sut:env:workload` across all its chunks, and every run finishing in that window was recorded as analysed without benchmarks, ADAPT or rollup. The catch-all mattered because a ten-stage analysis that blew up was recorded as completed, and because `attempts: 3` / exponential-from-5s (queue default and `SIMPLE_JOB_OPTIONS` agree) had never once fired. The retry depends on the `finally` handing the `sut:env:workload` lock back before BullMQ reschedules; that release is pinned by a test. The `partial` return above the catch-all is untouched — it is the orchestrator deliberately reporting a stage failure under `errorHandling: 'abort'`. |
+| `analyze.ts` | **Throws from both branches** — the scope-lock refusal since v0.2.95.0, the catch-all since v0.2.95.13. The lock branch mattered because a workload-wide analysis-window apply holds `sut:env:workload` across all its chunks, and every run finishing in that window was recorded as analysed without benchmarks, ADAPT or rollup. The catch-all mattered because a ten-stage analysis that blew up was recorded as completed, and because `attempts: 3` / exponential-from-5s (queue default and `SIMPLE_JOB_OPTIONS` agree) had never once fired. The retry depends on the `finally` handing the `sut:env:workload` lock back before BullMQ reschedules; that release is pinned by a test. Since v0.2.95.17 the scope-lock refusal is **re-parked first**: `moveToDelayed` + `DelayedError` (no attempt consumed) 60 s at a time for up to 2 h (`blockedSince` in the job data), because a holder's heavy stages now queue behind every other analysis and 3 attempts inside 15 s dropped the second run of a workload for good. Only past that ceiling does it throw. A stage result tagged `code: 'RETRYABLE'` (heavy-stage lock give-up, Redis error inside the acquire) is also rethrown rather than recorded as `partial`. The `partial` return above the catch-all is otherwise untouched — it is the orchestrator deliberately reporting a stage failure under `errorHandling: 'abort'`. |
 | `incremental-metrics.ts` | Returns **deliberately** — a scheduler re-drives it next cycle, so a BullMQ failure would double the retry. |
 
 ### The re-evaluate orchestrator chunks its heavy stages
@@ -372,7 +445,7 @@ it. Throwing is the only way a job fails.
 work in one transaction over every id it is handed, against a ceiling that scales with the batch —
 ADAPT's 120s `ANALYTICS_STATEMENT_TIMEOUT_MS` (it never calls `setAggregationBudget`), the
 decompression budget shared by `refreshRampUpFlags`' per-run UPDATEs, and the 540s aggregation
-budget inside a 600s `JOB_WAIT_TIMEOUT_MS` wait.
+budget inside a 600s `JOB_WAIT_TIMEOUT_MS` wait (running time only — see below).
 
 Three things to keep in mind:
 
@@ -391,6 +464,23 @@ Three things to keep in mind:
 survivable while the orchestrator returned a failure BullMQ recorded as completed; now that it
 throws and retries, the retry would re-enqueue the same stage for the same ids while the orphan is
 still running.
+
+Since v0.2.95.17 it runs **two clocks**, polling the child every 10 s (`JOB_WAIT_POLL_MS`) and
+charging each slice to whichever applies: the running clock (`JOB_WAIT_TIMEOUT_MS`, 600 s) while
+the child is active and working, or the parked clock (`JOB_PARKED_CEILING_MS`, 1 h, pinned to
+`HEAVY_STAGE_MAX_WAIT_MS` so the parent never gives up before the child's own lock would) while
+the child sits in BullMQ's waiting list, is delayed for a retry, or is active but parked behind the
+heavy-stage lock — the registry sets its BullMQ progress to `{ queuedBehind: <holder> }` for that
+and resets it to `0` once the lock is taken. Before this a child queued behind two analyses hit the
+600 s wait and failed the whole re-evaluate. While parked, the orchestrator's `ProgressReporter`
+publishes `status: 'waiting'` on every poll so the UI shows **Queued** and the record does not
+expire. Note the parked-ceiling abort cannot remove an `active` child (BullMQ refuses `remove()` on
+a locked job) — see TODOS.md.
+
+The `HeavyStageMutex` is taken by the **child** job (`pipeline-registry.ts:withHeavyStageLock`),
+never by this orchestrator: it runs on `perfana-batch` while `analyze-test` jobs park on
+`perfana-analyze` for the same lock, so an orchestrator-held lock could pin both analyze slots
+behind a child that can never be picked up.
 
 `recalculateStatistics` (a boolean on `OrchestrateReevaluateBatchJobSchema`) runs
 `statistics-recalculation` with no data collection, for the case where the analysis *window* moved

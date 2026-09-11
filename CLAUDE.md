@@ -892,7 +892,7 @@ other on the database itself. Two things changed in v0.2.95.17, and they only wo
    where an HTTP call can hang. The `timeoutMs` in `analyze.ts` is
    **per stage**, not per pipeline, despite what its old comment said.
 
-Three consequences to know about:
+Eight consequences to know about:
 
 - **A parked job publishes `status: 'waiting'`, and keeps publishing it.** The API evicts a job
   whose `lastProgressAt` is 5 min old and `StuckJobScanner` releases its scope lock at 10, so the

@@ -62,17 +62,34 @@ Located at: `/apps/web/components/job-progress/JobProgressIndicator.tsx`
 **Variants**:
 
 1. **Compact** (for list views):
-   - Progress bar with percentage
-   - Tooltip with full details
+   - Progress bar with percentage (reads "Queued" instead of a percentage while the job waits)
+   - Tooltip with full details (the box is focusable so the tooltip is reachable by keyboard)
    - Minimal space usage
 
 2. **Detailed** (for detail views):
    - Full stage breakdown
    - Job type label
-   - Elapsed time chip
+   - Elapsed time chip, preceded by a **Queued** chip while the job waits
    - Progress bar with percentage
-   - Stage information
+   - Stage information (replaced by the queue reason while the job waits)
    - Progress message
+
+**Queued state (v0.2.95.17)**: a `JobProgress` with `status: 'waiting'` means nothing is running
+for this run yet. `isQueued()` switches every variant to the queued rendering: the stage line
+(`Stage N of M: ...`) is replaced by `progress.message`, which names the reason; the bar, the
+detailed variant's left border, and the status icon (`HourglassEmpty`) turn `warning`; and the
+separate progress-message line is hidden because the stage line already carries it. Two producers
+publish it, and `progress.message` says which:
+
+| Message starts with | Published by | Meaning |
+|---|---|---|
+| `Queued: waiting for an analysis worker to become free` | `QueuedJobAnnouncer` (worker, every 30 s) | The job is still in BullMQ's waiting list; no processor has picked it up. `stageIndex` and `totalStages` are `0`. |
+| `Queued: waiting for another analysis to finish its database-heavy stage ...` | `ProgressReporter.setWaiting()` (every 5 s poll) | The worker has the job but it is parked behind the deployment-wide `HeavyStageMutex`. Re-evaluates publish the same for a child job parked behind the lock, waiting for a free worker, or waiting for its retry backoff. |
+
+The message is deliberately neutral: the holder's job id would name another organisation's run,
+so it goes to the worker log only. `useJobProgress` counts `waiting` as `isRunning`, so the
+Re-evaluate / Refresh actions stay disabled while a job is queued. Queue *position* is not shown.
+`__tests__/components/job-progress/JobProgressIndicator.queued.test.tsx` pins the rendering.
 
 **Usage**:
 ```typescript
@@ -258,7 +275,7 @@ Potential improvements for future iterations:
 
 1. **Progress History**: Show historical job progress for completed jobs
 2. **Job Cancellation**: Allow users to cancel running jobs
-3. **Priority Queue**: Display queue position when job is waiting
+3. **Queue Position**: The "Queued" state (v0.2.95.17) says *that* a job is waiting and why, but not its position in the queue
 4. **Estimated Time Remaining**: Calculate and show ETA based on stage progress
 5. **Notifications**: Browser notifications for job completion/failure
 
