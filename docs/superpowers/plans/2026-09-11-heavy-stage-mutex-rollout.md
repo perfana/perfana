@@ -44,7 +44,7 @@ snapshot (~16 GB/day of `ds_metrics` ingest, 7-day chunks, `shared_buffers` 4 GB
    re-evaluate path (`recalculateStatistics`), which skips collection and goes straight to
    the statistics stage where the decompress happens. Without the tick the dialog enqueues
    a full `analyze-test`, whose stage 5 re-collects every panel from Grafana into the
-   compressed chunk and sits at "Metric collection" (fixed in v0.2.95.18, but it is still
+   compressed chunk and sits at "Metric collection" (fixed in v0.2.95.19, but it is still
    not the path that exercises the wrappers). Pick a workload with a handful of runs; the
    apply is refused above 100. Expected: `Decompressing ds_metrics chunk _hyper_… [range]` in the worker
    log, the statistics stage succeeds, and `Recompressed N/N chunk(s)` at the end of the
