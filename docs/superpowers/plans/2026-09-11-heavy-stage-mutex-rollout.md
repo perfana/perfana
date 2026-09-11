@@ -58,20 +58,26 @@ snapshot (~16 GB/day of `ds_metrics` ingest, 7-day chunks, `shared_buffers` 4 GB
    `SELECT count(*), max(range_end) - min(range_start) FROM timescaledb_information.chunks WHERE hypertable_name='ds_metrics' AND range_start > now() - interval '3 days';`
    shows daily ranges.
 
-## Day 7–10 — shrink the 227 GB (separate PR, migration 1805)
+## Day 7–10 — shrink the 227 GB (migration 1805, v0.2.95.18)
 
-9. **`compress_after` 7 days → 2 days on `ds_metrics`**, after step 6 is green. Effect:
+9. **`compress_after` 7 days → 2 days on `ds_metrics`** — written as
+   `1805000000000-ShortenDsMetricsCompressAfter`; **merge only after step 6 is green.** Effect:
    row store drops from 7–14 days (~110–230 GB) to 2–3 days (~32–48 GB); the rest sits at
-   ~86x. Do it as:
-   ```sql
-   SELECT remove_compression_policy('ds_metrics');
-   SELECT add_compression_policy('ds_metrics', INTERVAL '2 days',
-            initial_start => <tonight 02:00 UTC>);
-   ```
-   The previous 113 GB chunk qualifies the moment the policy is added, and compressing it
-   takes hours of I/O — hence `initial_start` in a quiet window, or `compress_chunk` that
-   one by hand at night first. Do NOT shorten `requests_raw`'s compression: the 15 CAGGs
-   have `start_offset` 7 days chosen to match it.
+   ~86x. The migration refuses if the 1804 wrappers are absent, schedules the first policy
+   run at the next 02:00 UTC (override: `DS_METRICS_COMPRESS_INITIAL_START` on the
+   migration runner), and keeps the 12 h schedule. That first run compresses the previous
+   ~113 GB chunk in one call — hours of I/O — which is why it is scheduled, not immediate.
+   `requests_raw` is untouched: the 15 CAGGs have `start_offset` 7 days chosen to match it.
+   Before `initial_start` fires on production, check: free space on the data volume
+   (compressing the 113 GB chunk was measured at ~1 GB WAL + ~1.7 GB temp per 4.7 GB of
+   row store → budget ~26 GB WAL, ~41 GB temp), `temp_file_limit`, `max_wal_size`, no
+   `statement_timeout` on the hypertable owner role, and that the compression job's
+   recent `job_history` has no `failed to start job` (a starved scheduler misses the
+   02:00 slot and compresses whenever a worker frees). Runs from the legacy 7-day chunks
+   cannot be decompressed within the worker's 540 s budget once compressed (~45 min for
+   113 GB), so analysis-window changes on Sep 3–10 runs are frozen either way.
+   Per-series chart reads on compressed runs cost 15–18 ms on a 2.45 M-row run (bloom
+   index prunes); a metric-first orderby was measured and rejected (TODOS.md).
 10. Re-measure the TODOS.md conclusion that a `time BETWEEN start_time AND end_time` bound
     on the aggregation buys nothing — it was taken under 7-day chunks. Under 1-day chunks
     a run spans one or two chunks and chunk exclusion may finally pay; it would also stop

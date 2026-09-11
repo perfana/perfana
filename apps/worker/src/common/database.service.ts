@@ -876,6 +876,15 @@ export class WorkerDatabaseService implements OnModuleInit {
    * the connection instead of letting the statement be cancelled.
    */
   private static readonly DECOMPRESS_STATEMENT_TIMEOUT_MS = 540_000;
+  /**
+   * How many chunks this process may hold in row store at once. A 1-day chunk is ~16 GB
+   * decompressed at the ingest rate this was sized for, and recompression happens once, at
+   * the end of the re-evaluate — so a bulk apply over 100 runs on distinct days would
+   * otherwise inflate the volume by ~1.6 TB with nothing checking free space.
+   * ponytail: a count, not a byte budget; 8 chunks ≈ 128 GB. Runs beyond it fail their
+   * write stage visibly (tuple decompression limit) instead of filling the disk.
+   */
+  private static readonly MAX_DECOMPRESSED_CHUNKS = 8;
 
   /**
    * Decompress the chunks overlapping [from, to], one per transaction.
@@ -934,6 +943,12 @@ export class WorkerDatabaseService implements OnModuleInit {
     for (const { qualified, range_start, range_end } of chunks) {
       if (this.undecompressableChunks.has(qualified)) {
         this.logger.warn(`decompressChunksForRange(${hypertable}): chunk ${qualified} skipped: failed earlier in this process`);
+        continue;
+      }
+      if (this.decompressedChunks.size >= WorkerDatabaseService.MAX_DECOMPRESSED_CHUNKS) {
+        this.logger.warn(
+          `decompressChunksForRange(${hypertable}): chunk ${qualified} skipped: ${this.decompressedChunks.size} chunks already in row store (ceiling ${WorkerDatabaseService.MAX_DECOMPRESSED_CHUNKS}); re-evaluate fewer runs at a time`
+        );
         continue;
       }
       try {

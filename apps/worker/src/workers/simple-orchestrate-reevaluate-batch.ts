@@ -845,6 +845,13 @@ export function simpleOrchestrateReevaluateBatchWorker() {
                 const fromDate = range.from instanceof Date ? range.from : new Date(range.from);
                 const toDate = range.to instanceof Date ? range.to : new Date(range.to);
 
+                // Same reason as the force branch above: the gap fill is an
+                // `INSERT ... ON CONFLICT DO UPDATE` (metric-processor.ts), which decompresses
+                // the matching segments as DML on a compressed chunk and trips
+                // max_tuples_decompressed_per_dml_transaction. With compress_after at 2 days
+                // (migration 1805) that is any gap on a run more than ~3 days old.
+                await db.decompressChunksForRange('ds_metrics', fromDate, toDate);
+
                 try {
                   const result = await incrementalPipeline.execute({
                     testRunId,

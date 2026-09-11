@@ -470,16 +470,11 @@ Forced by production on 2026-09-11: 227 GB of 228 GB on disk was the two open 7-
 `SECURITY DEFINER` decompress/compress wrappers, so the worker can finally decompress (it never
 could — `must be owner of hypertable`). Retention on `ds_metrics` is still undecided.
 
-**Still open — `compress_after` 7 days → 2 days on `ds_metrics`.** This is the step that turns the
-227 GB into ~40 GB (2–3 days of row store at ~16 GB/day, the rest at 86x). Two preconditions: (1)
-verify on production that an analysis-window change on a run older than 7 days now succeeds, i.e.
-the wrappers work there — with a 2-day `compress_after` every re-analysis of a 2-7-day-old run hits
-compressed data, which is exactly when people re-tune windows; (2) schedule it: the previous 113 GB
-chunk qualifies the moment the policy is added, and `add_compression_policy` fires immediately, so
-pass `initial_start` for a quiet hour or `compress_chunk` that one by hand at night. No CAGG reads
-`ds_metrics`, so the 7-day CAGG `start_offset` is unaffected; do NOT shorten `requests_raw`'s
-compression without moving those offsets. Re-measure the "time bound buys nothing" conclusion above
-under 1-day chunks — it was taken when a run sat inside one chunk.
+**`compress_after` 7 days → 2 days on `ds_metrics`: DONE in v0.2.95.18** (migration 1805, first run
+at the next 02:00 UTC or `DS_METRICS_COMPRESS_INITIAL_START`). It refuses without the 1804 wrappers
+but cannot prove they work on the deploy: **merge only after** an analysis-window change on a
+run older than 7 days succeeds on production. Still to do under 1-day chunks: re-measure the
+"time bound buys nothing" conclusion above — it was taken when a run sat inside one chunk.
 
 **Original analysis (2026-09-04):**
 
@@ -533,6 +528,12 @@ raise. The genuine win on the other side: `decompressChunksForRange` and the per
   a release wins, and each analyze job acquires three times. Under a burst of finished runs a
   re-evaluate child can lose every poll for an hour. Upgrade path: a FIFO ticket (`INCR` + serving
   counter) behind the same TTL'd holder key. Trigger: `stayed queued behind` in the log.
+- **Do NOT switch `ds_metrics` to a metric-first `compress_orderby`.** Measured 2026-09-11 on a
+  2.45 M-row run: 8x faster single-series reads (2 ms vs 15–18 ms) and 30 % smaller, but 1.7x
+  slower whole-run aggregation and 15x slower time-bounded reads (261 ms vs 18 ms), which the
+  ramp-up refresh and decompression bounds use. Per-series reads on compressed runs are 15–18 ms
+  on that run thanks to the bloom sparse index on `metric_name`; revisit only if a chart shows
+  hundreds of ms per series on production.
 - **A removed queued job shows "Queued" for up to 5 min.** The announcer's record has the 5 min TTL
   and nothing else clears it; `useJobProgress.isRunning` gates the analyze buttons meanwhile.
 

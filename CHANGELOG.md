@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.18] - 2026-09-11
+
+### Changed
+- **`ds_metrics` is compressed after 2 days instead of 7** (migration 1805). With 1-day chunks this leaves 2–3 days of row store — ~32–48 GB at the 16 GB/day seen on 2026-09-11, against the 227 GB that sat uncompressed in two 7-day chunks. Reads are unaffected (`test_run_id` is the segmentby column). The migration refuses to run unless migration 1804's decompress wrappers exist, since every rewrite of a run older than the window depends on them, and schedules the policy's first run at the next 02:00 UTC (`DS_METRICS_COMPRESS_INITIAL_START` to override) because that run compresses the previous 7-day chunk in one go. `requests_raw` and the other hypertables stay at 7 days to match their continuous aggregates' refresh window.
+- **Two worker guards the shorter window makes necessary.** The `missing-data` re-evaluate now decompresses a run's chunks before its gap-fill upsert, as the force re-fetch already did — on a run older than ~3 days that upsert would otherwise stop at `tuple decompression limit exceeded`. And a worker process now keeps at most 8 `ds_metrics` chunks in row store at once (~128 GB at 16 GB/day): a bulk analysis-window apply over 100 runs on distinct days could otherwise inflate the volume by ~1.6 TB. Past the ceiling a run's write stage fails with a warning naming it (`re-evaluate fewer runs at a time`) instead of filling the disk.
+
 ## [0.2.95.17] - 2026-09-11
 
 ### Fixed

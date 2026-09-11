@@ -212,7 +212,8 @@ provide.
 
 ### Updating `ramp_up` on compressed `ds_metrics`
 
-`ds_metrics` is compressed with `compress_segmentby = 'test_run_id'` from 7 days on, and `ramp_up`
+`ds_metrics` is compressed with `compress_segmentby = 'test_run_id'` from 2 days on (migration 1805,
+v0.2.95.18; 7 days before that), and `ramp_up`
 is neither segmentby nor orderby — so an `UPDATE` guarded on it decompresses the run's entire
 segment as DML even when zero rows change, up to
 `max_tuples_decompressed_per_dml_transaction` (100k, charged per **transaction**).
@@ -246,6 +247,21 @@ heavy-stage lock is held.
 Its "skipped" path logs at **warn**: a silent no-op (`perfana_decompress_chunk` missing on a
 database that has not run migration 1804, recompressed in between, TimescaleDB error) surfaces
 later as `tuple decompression limit exceeded` with nothing in the log explaining why.
+
+`StatisticsPipeline` is not the only caller. The re-evaluate orchestrator decompresses before two
+upsert paths as well: the force-refetch branch when no delete ran (the Grafana/Dynatrace
+re-collection is an `INSERT ... ON CONFLICT DO UPDATE`, which decompresses the matching segments
+as DML), and since v0.2.95.18 the missing-data gap fill, for the same reason — with `compress_after`
+at 2 days that is any gap on a run more than ~3 days old. All of it is put back once, by
+`recompressTouchedChunks` in the orchestrator's `finally`.
+
+`MAX_DECOMPRESSED_CHUNKS` (8, `WorkerDatabaseService`) caps how many chunks one process holds in
+row store at a time. A 1-day chunk is ~16 GB decompressed and recompression happens only at the
+end of the re-evaluate, so a bulk apply over 100 runs on distinct days would otherwise inflate the
+volume by ~1.6 TB with nothing checking free space. Past the ceiling a chunk is skipped with a
+warning (`chunks already in row store (ceiling 8); re-evaluate fewer runs at a time`) and that
+run's write stage fails visibly with `tuple decompression limit exceeded` instead of filling the
+disk. It is a count, not a byte budget.
 
 **Do not add a diagnostic `COUNT` back to either pipeline.** Three of them existed only to log
 "will process N unique metrics" and warn on an expected-vs-actual mismatch, and each read
