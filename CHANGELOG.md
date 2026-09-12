@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.20] - 2026-09-12
+
+### Fixed
+- **A completed run no longer deletes and re-collects everything its incremental ticks stored.** `analyze-test` gap-fills the incremental collection at the start and was meant to skip the collection stages afterwards. It did, but only when *every* source came out complete; one source with a range that still failed sent the run down the full path — all four collection stages, opening with `DELETE FROM ds_metrics WHERE test_run_id` for the whole run and a re-fetch of the whole window from Grafana and Dynatrace. The gap fill had just retried each of those ranges per source, so the full pass could not return anything more; it only cost. On 2026-09-12 two large runs completing together did this at once: 30 M row-store deletes in a minute, 203 MB/s of WAL, a WAL-driven checkpoint every minute for eight minutes, and the API's keep-alive endpoint unreachable for long enough that a third, still-running test was closed by the stale detector. A source ends up incomplete when a tick's range failed outright — the collector threw (an upsert failure, a config row gone, the query load failing) rather than a panel or query answering with an error, which both collectors tolerate — and the retry at completion fails again or the range has already been retried five times. Now a run that had incremental collection keeps it, complete or not — which is what the `proceeding with partial data` warning has always claimed. The incomplete sources keep `is_complete = false`, so the sanity check still scores their coverage and a later re-analysis retries their failed ranges. The full collection path remains for runs with no incremental data at all (SUT imports, legacy runs).
+
 ## [0.2.95.19] - 2026-09-11
 
 ### Fixed

@@ -102,15 +102,31 @@ export class PipelineOrchestrator {
    * 1. Checks if incremental collection was used for this test run
    * 2. Determines if collection is complete (all sources marked complete)
    * 3. If incomplete, detects gaps and attempts to fill them
-   * 4. Returns completion status and any warnings
+   * 4. Returns whether the full collection stages can be skipped, and any warnings
+   *
+   * `skipCollection` is "incremental collection existed", NOT "every source is complete".
+   * Until v0.2.95.20 an incomplete source sent the run down the full-collection path —
+   * every stage, every source, opening with `DELETE FROM ds_metrics WHERE test_run_id`
+   * and a re-fetch of the whole window from Grafana and Dynatrace — even though this
+   * method had just retried every missing and failed range per source, so the full
+   * pass could not return anything the retry had not. On a large run that was tens of
+   * millions of row-store deletes and ~200 MB/s of WAL on every completion, and one
+   * source that errors throughout a run (a bad DQL, an expired token) made it happen on
+   * every analysis of that workload, forever. The warning emitted below has always said
+   * "proceeding with partial data"; now the code does what it says. The incomplete
+   * sources keep `is_complete = false`, so the sanity check scores their coverage and a
+   * later re-analysis retries their failed ranges (capped at 5 attempts).
    *
    * @param testRunId - The test run ID to check
-   * @returns Object with completion status and warnings array
+   * @returns Object with skipCollection flag and warnings array
    */
   private async checkAndFillMetricGaps(
     testRunId: string
-  ): Promise<{ complete: boolean; warnings: string[] }> {
+  ): Promise<{ skipCollection: boolean; warnings: string[] }> {
     const warnings: string[] = [];
+    // Set once we know incremental collection ran, so a failure later in this method
+    // (detectGaps throwing, a fill erroring) still means "keep what was collected".
+    let hadIncremental = false;
 
     try {
       // Check if incremental collection was used
@@ -119,7 +135,7 @@ export class PipelineOrchestrator {
       if (statuses.length === 0) {
         // No incremental collection - run traditional pipeline
         this.logger.debug(`No incremental collection statuses found for ${testRunId}`);
-        return { complete: false, warnings: [] };
+        return { skipCollection: false, warnings: [] };
       }
 
       // Remove orphaned collection status records for sources that are no longer
@@ -127,15 +143,16 @@ export class PipelineOrchestrator {
       statuses = await this.removeOrphanedCollectionSources(testRunId, statuses);
 
       if (statuses.length === 0) {
-        return { complete: false, warnings: [] };
+        return { skipCollection: false, warnings: [] };
       }
+      hadIncremental = true;
 
       this.logger.info(`📊 Checking incremental collection completeness for ${testRunId}`);
 
       // Check if collection is already complete
       if (await this.gapService.isCollectionComplete(testRunId)) {
         this.logger.info(`✅ Incremental collection complete for ${testRunId}, skipping metric collection stages`);
-        return { complete: true, warnings: [] };
+        return { skipCollection: true, warnings: [] };
       }
 
       // Detect gaps in collection
@@ -266,18 +283,18 @@ export class PipelineOrchestrator {
           `Metric collection incomplete - proceeding with partial data (${summary.completeSources}/${summary.totalSources} sources complete, ${summary.coverage.toFixed(1)}% coverage)`
         );
         this.logger.warn(
-          `⚠️ Collection incomplete for ${testRunId}: ${summary.completeSources}/${summary.totalSources} complete, ${summary.coverage.toFixed(1)}% coverage`
+          `⚠️ Collection incomplete for ${testRunId}: ${summary.completeSources}/${summary.totalSources} complete, ${summary.coverage.toFixed(1)}% coverage — keeping the incremental data, not re-collecting`
         );
       } else {
         this.logger.info(`✅ All gaps filled successfully for ${testRunId}`);
       }
 
-      return { complete: isComplete, warnings };
+      return { skipCollection: true, warnings };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`❌ Error checking/filling gaps for ${testRunId}: ${errorMessage}`);
       warnings.push(`Gap filling process failed: ${errorMessage}`);
-      return { complete: false, warnings };
+      return { skipCollection: hadIncremental, warnings };
     }
   }
 
@@ -487,13 +504,14 @@ export class PipelineOrchestrator {
       const firstMetricStageIndex = stages.findIndex(stage => metricCollectionStages.includes(stage));
 
       if (firstMetricStageIndex !== -1) {
-        // We have metric collection stages - check if incremental collection is complete
-        const { complete: metricsComplete, warnings } = await this.checkAndFillMetricGaps(testRunId);
+        // We have metric collection stages - gap-fill the incremental collection if there
+        // was one. The full stages run only when there was none (SUT import, legacy run).
+        const { skipCollection, warnings } = await this.checkAndFillMetricGaps(testRunId);
         collectionWarnings = warnings;
 
-        if (metricsComplete) {
+        if (skipCollection) {
           skipMetricCollectionStages = true;
-          this.logger.info(`⏭️ Skipping metric collection stages (incremental collection complete)`);
+          this.logger.info(`⏭️ Skipping metric collection stages (incremental collection gap-filled)`);
         } else {
           // A full collection on a run whose chunks are already compressed — a re-analysis
           // of a run older than compress_after (2 days since migration 1805, 7 before) whose
