@@ -1133,6 +1133,45 @@ sized database before committing to either.
 
 ---
 
+## Log viewer
+
+### The full log download cannot be cancelled, shows no progress, and has no first-byte heartbeat
+
+**Priority:** P4
+**Origin:** /ship on `feat/logviewer-full-download` (v0.2.95.21, 2026-09-12). Adversarial-review
+findings deliberately left out of scope; none lose data.
+**Why:** the download exists to fetch logs that are too big for the tab, so the rough edges show
+up exactly on the large logs it was built for.
+
+1. **No cancel and no byte counter.** The button is disabled while downloading and the
+   `AbortController` in `apps/web/app/admin/logs/download.ts` fires only on failure. Navigating
+   away does not abort the fetch: on the Blob path (Firefox/Safari) the chunks keep accumulating
+   in the detached component until the tab dies, and the server holds the daemon connection and
+   its zlib handle until the browser finally closes the socket. `readWithProgress` already reports
+   bytes; the page discards them. Mirror `ExportSystemDialog`: hold the controller in a ref, abort
+   on unmount, show the count, turn the button into a cancel while running.
+
+2. **Nothing is written until zlib fills its first 16 KiB output chunk.** The SUT export
+   sync-flushes gzip every 2 s (`GZIP_FLUSH_INTERVAL_MS`) so a proxy never sees an idle socket;
+   `GET /logs/containers/:id/download` does not, so a daemon that is slow to deliver the first
+   frames (journald driver decompressing rotated files, host under I/O pressure) can trip nginx's
+   60 s `proxy_read_timeout` before byte one, which the dialog reports as a bare error.
+
+3. **No concurrency cap and no audit entry.** Each download occupies a libuv threadpool slot for
+   zlib for the duration, and the route exfiltrates every container's complete history in one
+   admin request with no `auditService` record. A `Semaphore(2)` and a read-audit line would
+   close both.
+
+4. **`DockerLogDemux` trusts a validated header's length.** A TTY container whose first 4 bytes
+   happen to be `\x00-\x02` followed by three zeros is treated as framed, and an absurd `len`
+   then makes every chunk `Buffer.concat` into the heap with nothing pushed. Cap `len` (a daemon
+   frame is one log message; treat > 16 MiB as raw). No compose service sets `tty: true` today.
+
+**What:** (1) first — it is the one an admin will hit. (2) is a two-line copy of the export's
+timer. (3) and (4) are hardening.
+
+---
+
 ## SUT transfer
 
 ### The SUT export has no completion signal, and leaves an empty file behind on cancel
