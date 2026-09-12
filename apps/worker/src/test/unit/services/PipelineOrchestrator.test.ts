@@ -977,10 +977,41 @@ describe('PipelineOrchestrator', () => {
         errorHandling: 'continue',
       });
 
-      // Assert — collection warning added about incomplete coverage
+      // Assert — collection warning added about incomplete coverage, and the run keeps
+      // its incremental data: the gap fill already retried the range, so a full
+      // re-collection (which opens with DELETE FROM ds_metrics for the whole run) could
+      // not return anything more. Before v0.2.95.20 this path ran every collection stage.
       expect(result.data.collectionWarnings).toEqual(
         expect.arrayContaining([expect.stringContaining('Metric collection incomplete')])
       );
+      expect(mockPipelines.metrics.execute).not.toHaveBeenCalled();
+    });
+
+    it('should keep incremental data when the gap check throws after statuses were found', async () => {
+      // Arrange — statuses exist (incremental collection ran), then detectGaps blows up.
+      // A transient error here must not trigger the full-collection storm either.
+      const testRunId = 'test-gap-error-after-statuses';
+      const stages = ['metrics-collection'];
+
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'grafana', source_id: 'g1', is_complete: false, collected_ranges: [], failed_ranges: [] },
+      ]);
+      mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([{ grafanaInstanceId: 'g1' }]);
+      mockGapService.isCollectionComplete.mockResolvedValue(false);
+      mockGapService.detectGaps.mockRejectedValue(new Error('DB connection lost'));
+      mockPipelines.metrics.execute.mockResolvedValue({ success: true, duration: 1000 });
+
+      // Act
+      const result = await orchestrator.executeSequentialPipeline(testRunId, {
+        stages,
+        errorHandling: 'continue',
+      });
+
+      // Assert — warning attached, collection stage NOT run
+      expect(result.data.collectionWarnings).toEqual(
+        expect.arrayContaining([expect.stringContaining('Gap filling process failed')])
+      );
+      expect(mockPipelines.metrics.execute).not.toHaveBeenCalled();
     });
 
     it('should handle error thrown during gap check gracefully', async () => {
@@ -1285,8 +1316,9 @@ describe('PipelineOrchestrator', () => {
       expect(mockLogger.error).toHaveBeenCalledWith(
         expect.stringContaining('Failed to mark grafana/g1 as complete')
       );
-      // Stage still runs (collection stays incomplete so metrics-collection is not skipped)
-      expect(mockPipelines.metrics.execute).toHaveBeenCalled();
+      // The range was collected; only the completeness flag failed to persist. That is
+      // not a reason to throw the incremental data away and re-collect the whole run.
+      expect(mockPipelines.metrics.execute).not.toHaveBeenCalled();
       expect(result.success).toBe(true);
     });
 
@@ -2072,9 +2104,9 @@ describe('PipelineOrchestrator', () => {
       const testRunId = 'test-perf-metrics';
       const stages = ['performance-test-metrics'];
 
-      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
-        { source_type: 'performance_test', source_id: null, is_complete: false },
-      ]);
+      // No incremental collection for this run — the only case that still runs the
+      // full collection stages.
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([]);
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue({
         systemUnderTestId: 'sut-1',
         testEnvironment: 'prod',
@@ -2083,7 +2115,6 @@ describe('PipelineOrchestrator', () => {
       });
       mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([]);
 
-      // Not complete — metric collection stages run
       mockGapService.isCollectionComplete.mockResolvedValue(false);
       mockGapService.detectGaps.mockResolvedValue([]);
       mockGapService.getCollectionSummary.mockResolvedValue({
