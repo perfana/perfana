@@ -22,6 +22,7 @@ describe('SutTransferController.export', () => {
       on: jest.fn(),
       status: jest.fn(),
       destroy: jest.fn(),
+      removeHeader: jest.fn(),
       headersSent: false,
     };
     const controller = new SutTransferController(
@@ -78,6 +79,7 @@ describe('SutTransferController.export', () => {
 
     expect(res.status).toHaveBeenCalledWith(500);
     expect(json).toHaveBeenCalledWith(expect.objectContaining({ message: 'Export failed' }));
+    expect(res.removeHeader).toHaveBeenCalledWith('Content-Disposition');
     expect(res.destroy).not.toHaveBeenCalled();
   });
 

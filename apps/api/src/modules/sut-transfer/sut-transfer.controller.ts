@@ -65,8 +65,9 @@ export class SutTransferController {
       // request cap kills the connection. The header is ignored by anything that is not nginx.
       'X-Accel-Buffering': 'no',
     });
-    // No res.flushHeaders() here, unlike the sibling streaming route in logs.controller.ts.
-    // That one is SSE, where the event stream is not established until the headers land. This
+    // No res.flushHeaders() here, unlike the SSE route `GET /logs/containers/:id/stream` in
+    // logs.controller.ts (its `/download` sibling follows this route's convention). SSE needs it
+    // because the event stream is not established until the headers land. This
     // is a download, and the header above is enough for nginx — it reads it whenever the
     // headers arrive, which the export service's 2 s gzip heartbeat already guarantees.
     // Not flushing also leaves the error path below a window in which it can still reply.
@@ -82,8 +83,15 @@ export class SutTransferController {
       // UND_ERR_SOCKET, not a 500. Reply properly while the headers are still unsent (an
       // export that fails on its first table), and only destroy once the body is in flight,
       // where an abrupt close is the only signal a truncated gzip can carry.
-      if (res.headersSent) res.destroy(err);
-      else res.status(500).json({ message: 'Export failed' });
+      if (res.headersSent) {
+        res.destroy(err);
+      } else {
+        // res.json() keeps an existing Content-Type, so drop the download headers or the
+        // error body arrives as a corrupt .ndjson.gz attachment.
+        res.removeHeader('Content-Type');
+        res.removeHeader('Content-Disposition');
+        res.status(500).json({ message: 'Export failed' });
+      }
     });
   }
 

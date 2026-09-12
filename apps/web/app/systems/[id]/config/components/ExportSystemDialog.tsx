@@ -35,14 +35,17 @@ function safeFilePart(name: string): string {
  *
  * Must be called straight out of the click handler — the picker needs transient user activation.
  */
-export async function pickDiskSink(suggestedName: string): Promise<DiskSink | null> {
+export async function pickDiskSink(
+  suggestedName: string,
+  description = 'Gzipped NDJSON',
+): Promise<DiskSink | null> {
   const picker = (window as unknown as {
     showSaveFilePicker?: (o: unknown) => Promise<{ createWritable(): Promise<DiskSink> }>;
   }).showSaveFilePicker;
   if (!picker) return null;
   const handle = await picker({
     suggestedName,
-    types: [{ description: 'Gzipped NDJSON', accept: { 'application/gzip': ['.gz'] } }],
+    types: [{ description, accept: { 'application/gzip': ['.gz'] } }],
   });
   return handle.createWritable();
 }

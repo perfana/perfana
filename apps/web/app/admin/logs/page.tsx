@@ -29,10 +29,12 @@ import {
   Close as CloseIcon,
   DeleteSweep as DeleteSweepIcon,
   Download as DownloadIcon,
+  Archive as ArchiveIcon,
   FiberManualRecord as DotIcon,
 } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
 import { parseSseChunk } from './sse';
+import { downloadContainerLog } from './download';
 
 interface LogContainer {
   id: string;
@@ -52,6 +54,8 @@ export default function LogsPage() {
   const [filter, setFilter] = useState('');
   const [lines, setLines] = useState<string[]>([]);
   const [connecting, setConnecting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
@@ -72,6 +76,7 @@ export default function LogsPage() {
     if (!selected) return;
     stopStream();
     setLines([]);
+    setDownloadError(null);
     setConnecting(true);
     const ac = new AbortController();
     abortRef.current = ac;
@@ -127,6 +132,20 @@ export default function LogsPage() {
     a.download = `${selectedContainer?.service || selectedContainer?.name || 'logs'}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const downloadFull = async () => {
+    if (!selectedContainer) return;
+    setDownloadError(null);
+    setDownloading(true);
+    const safe = (selectedContainer.service || selectedContainer.name).replace(/[^a-z0-9._-]/gi, '-');
+    try {
+      await downloadContainerLog(selectedContainer.id, `${safe}-${new Date().toISOString().slice(0, 10)}.log.gz`);
+    } catch (err) {
+      setDownloadError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Download failed');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -293,6 +312,19 @@ export default function LogsPage() {
               <span>
                 <IconButton size="small" onClick={download} disabled={!visible.length}>
                   <DownloadIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title={downloadError ?? 'Download complete log (gzip)'}>
+              <span>
+                <IconButton
+                  size="small"
+                  aria-label="Download complete log"
+                  onClick={downloadFull}
+                  disabled={!selectedContainer || downloading}
+                  color={downloadError ? 'error' : 'default'}
+                >
+                  {downloading ? <CircularProgress size={20} color="inherit" /> : <ArchiveIcon fontSize="small" />}
                 </IconButton>
               </span>
             </Tooltip>

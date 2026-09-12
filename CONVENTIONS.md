@@ -83,19 +83,39 @@ response. Two rules, both learned the hard way in v0.2.94.3:
   while it is false, and only destroy once the body is in flight, where an abrupt close is the
   only signal a truncated payload can carry.
 
+  The reply also has to drop the download headers first (v0.2.95.21). `res.json()` keeps a
+  `Content-Type` that is already set, so a bare `res.status(500).json(...)` after
+  `res.set({ 'Content-Type': 'application/gzip', 'Content-Disposition': 'attachment; ...' })`
+  arrives as a corrupt `.gz` attachment with the JSON inside it, and the browser saves a file
+  instead of showing an error.
+
   ```typescript
   stream.on('error', (err) => {
     this.logger.error(`Export stream failed: ${err.message}`);
-    if (res.headersSent) res.destroy(err);
-    else res.status(500).json({ message: 'Export failed' });
+    if (res.headersSent) {
+      res.destroy(err);
+    } else {
+      res.removeHeader('Content-Type');
+      res.removeHeader('Content-Disposition');
+      res.status(500).json({ message: 'Export failed' });
+    }
   });
   ```
 
 - **`res.flushHeaders()` is for SSE, not for downloads.** It commits the status line up front,
-  which closes the window the branch above depends on. `logs.controller.ts` needs it because an
-  SSE stream is not established until the headers land; a file download does not. If a proxy
-  needs to know not to buffer, the `X-Accel-Buffering: no` header carries that on its own —
-  nginx reads it whenever the headers arrive.
+  which closes the window the branch above depends on. The SSE route
+  `GET /logs/containers/:id/stream` in `logs.controller.ts` needs it because an SSE stream is
+  not established until the headers land; its `/download` sibling in the same file is a file
+  download and does not. If a proxy needs to know not to buffer, the `X-Accel-Buffering: no`
+  header carries that on its own — nginx reads it whenever the headers arrive.
+
+- **A stream that never touches Postgres carries `@SkipRls()`.** `RlsTransactionInterceptor`
+  opens a per-request transaction on a pooled connection and holds it until the handler's
+  observable completes, so a route that keeps the response open for minutes holds one of the
+  pool's 50 connections idle-in-transaction for that long. Both log routes are Docker-only and
+  are marked `@SkipRls()` (`apps/api/src/common/db/skip-rls.decorator.ts`, v0.2.95.21). The SUT
+  export is not: it reads Postgres, and a route that skips RLS must not touch RLS-protected
+  tables except through a helper that opens its own short-lived transaction.
 
 Also give any long stream a periodic flush. nginx buffers a proxied response by default and a
 load balancer will cut an apparently idle connection, so a slow producer that emits nothing for

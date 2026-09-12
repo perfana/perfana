@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.21] - 2026-09-12
+
+### Added
+- **The log viewer can download a container's complete log, not just the visible tail.** A new archive button next to the existing "download visible lines" one streams the whole log from Docker through gzip (`GET /logs/containers/:id/download`) as `<service>-<date>.log.gz`. On Chrome and Edge the browser writes it straight to disk through the same save-file picker the SUT export uses, so a container that has been up for weeks never has to fit in the tab; elsewhere it falls back to a Blob, exactly like the export. Errors show on the button and clear when you switch container.
+
+### Fixed
+- **Full logs no longer buffer in the API.** dockerode returns a non-follow log as one Buffer, and docker-modem's demuxer ignores backpressure, so either path would have held the entire log in the API's heap. Both routes now read the daemon through a streaming request and a small `Transform` that strips Docker's 8-byte frame headers, gets backpressure from `pipe()`, passes TTY containers through raw, and keeps a truncated trailing frame instead of dropping it. The two log routes also skip the per-request RLS transaction: they never touch Postgres and should not hold a pooled connection while a stream is open.
+- **A streamed download that fails before its first byte now answers a JSON 500 instead of a corrupt archive.** `res.json()` keeps an already-set `Content-Type`, so the error body for both the log download and the SUT export left as an `application/gzip` attachment. The download headers are dropped before the error reply.
+
 ## [0.2.95.20] - 2026-09-12
 
 ### Fixed
