@@ -798,12 +798,19 @@ Three things to hold on to:
    annotations naming the ranges, and the next re-analysis retries the failed ranges again (capped
    at 5 attempts per range). A gap fill that throws part-way keeps the data too: the flag is
    "incremental collection existed", set as soon as the status rows are read.
-3. **The two collectors define failure differently, and Dynatrace is the strict one.** The Grafana
-   collector fails a tick only when the whole collect throws — per-panel errors are recorded but
-   `success` stays true. The Dynatrace collector returns `success: errors.length === 0`, so a single
-   erroring query in a config of twenty fails that config's tick, every tick, and every one of its
-   ranges lands in `failed_ranges`. That asymmetry is unchanged; it decides how often the warning
-   fires, not what happens afterwards.
+3. **A tick fails only when its collector throws; a panel or query that answers with an error
+   does not fail it.** Both collectors save the data of the panels/queries that succeeded and record
+   the range as collected. Grafana carries the per-panel errors in the tick result's `errors[]`
+   (`metric-processor.ts:processDocumentErrors`) with `success` still true; Dynatrace swallows
+   per-query errors earlier (`DynatraceAPIClient.executeBatchQueries` → `DataProcessor`, which
+   builds no document for them) so they never reach `errors[]` at all. What throws — and so lands
+   the range in `failed_ranges` — is the upsert itself (`upsertMetricsToDatabase` is outside the
+   per-document `try`), a config row that no longer exists, or the query/panel load failing. Do not
+   "align" Grafana to `success: errors.length === 0`: one broken panel would then fail every tick
+   of that instance for the whole run. The consequence of the two designs is that an expired
+   Dynatrace token reads as "no data", not as a failure — CLAUDE.md #22 — and a run whose only
+   incomplete source is one that threw at every tick was already carrying the real error in
+   `failed_ranges` before this change.
 
 ### A source that is switched off must not be registered for collection
 
@@ -1113,7 +1120,7 @@ container mounts in tests at all.
 23. **A force-refetch re-evaluate generates gigabytes of WAL and pins autovacuum for minutes** → something is deleting `ds_metrics` with a predicate on a column other than `test_run_id`, or calling `decompressChunksForRange` to make such a delete survivable. `test_run_id` is `compress_segmentby`, so the single-column `DELETE` is segment-targeted and free (181 ms / 41 MB against 162,743 ms / 11 GB). Fixed in v0.2.95.16; the tell on an older deploy is a long `decompress_chunk` transaction in `pg_stat_activity` (now attributable — the worker pools report `perfana-worker` / `perfana-worker-write` rather than `(unset)`) with unrelated tables climbing in dead tuples behind it. See the two v0.2.95.16 bullets in item 6 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 
 24. **Three of four analyses that finished together fail with `Stage statistics-calculation timed out after 600000ms`, the buffer cache hit ratio collapses, temp files spike, and nothing is waiting on a lock** → the heavy stages were contending on the database and the per-stage wall-clock race turned that into partial results while the abandoned aggregation kept running. Fixed in v0.2.95.17 (`HeavyStageMutex` serialises the three heavy stages; they are bounded by `statement_timeout` instead of a race). The UI shows **Queued** while a job waits for the lock or for a worker slot. On an older deploy, set `WORKER_ANALYZE_CONCURRENCY=1`. See "The heavy analyze stages run one at a time" above.
-25. **Every completion of a large run produces a burst of tens of millions of `ds_metrics` deletes, ~200 MB/s of WAL and a checkpoint a minute, and during it the API stops answering `/api/test`** → the run was gap-filled and then sent down the full collection path anyway, because one source's ranges still failed. Fixed in v0.2.95.20 (a run that had incremental collection keeps it, complete or not). On an older deploy the worker log shows `⚠️ Collection incomplete for <id>` immediately followed by `🧹 Deleted existing ds_metrics for <id> in Nms`; the failing source's error text is in `ds_metric_collection_status.failed_ranges` and is almost always one Dynatrace query, since a single query error fails the whole config's tick. Fix the query. See "Gap-filling a completed run must never fall back to a full re-collection" above.
+25. **Every completion of a large run produces a burst of tens of millions of `ds_metrics` deletes, ~200 MB/s of WAL and a checkpoint a minute, and during it the API stops answering `/api/test`** → the run was gap-filled and then sent down the full collection path anyway, because one source's ranges still failed. Fixed in v0.2.95.20 (a run that had incremental collection keeps it, complete or not). On an older deploy the worker log shows `⚠️ Collection incomplete for <id>` immediately followed by `🧹 Deleted existing ds_metrics for <id> in Nms`; the failing source's error text is in `ds_metric_collection_status.failed_ranges` — a range fails only when the collector threw (an upsert error under load, a config row deleted mid-run, the panel or query load failing), never because a single panel or query answered with an error. See "Gap-filling a completed run must never fall back to a full re-collection" above.
 
 ## How-To Tutorials
 
