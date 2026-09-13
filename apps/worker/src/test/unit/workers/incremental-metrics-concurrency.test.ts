@@ -43,6 +43,8 @@ vi.mock('../../../pipelines/IncrementalMetricsPipeline.js', () => ({
 const mockAcquireKeyLock = vi.fn();
 const mockReleaseKeyLock = vi.fn().mockResolvedValue(true);
 vi.mock('../../../services/JobLockService.js', () => ({
+  perfTestTickLockKey: (id: string) => `job:lock:perf-test-metrics:${id}`,
+  PERF_TEST_TICK_LOCK_TTL_SECONDS: 15 * 60,
   JobLockService: vi.fn().mockImplementation(() => ({
     acquireKeyLock: mockAcquireKeyLock,
     releaseKeyLock: mockReleaseKeyLock,

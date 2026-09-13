@@ -29,9 +29,9 @@ const DEFAULT_BUCKET_CONFIG: BucketSizeConfig = {
 };
 
 /**
- * Target data points for perf-test bucket sizing. Applied to whatever window is being
- * aggregated — a live tick's ~60s window still resolves to 1s buckets — not only to full
- * collection, since the bucket size is derived from the window rather than from a flag.
+ * Target data points for perf-test bucket sizing. Both sizing inputs go through it — the
+ * planned duration a live tick sizes from and the actual length a completed run sizes
+ * from — see perfTestBucketSizes. The window being aggregated is never consulted.
  */
 export const FULL_COLLECTION_TARGET_DATA_POINTS = 250;
 
@@ -57,6 +57,9 @@ export const FULL_COLLECTION_TARGET_DATA_POINTS = 250;
  * calculateBucketSize(7200);   // 7200s test → 10s buckets (720 data points)
  * calculateBucketSize(14400);  // 14400s test → 30s buckets (480 data points)
  * calculateBucketSize(86400);  // 86400s test → 120s buckets (720 data points)
+ * // The perf-test path passes FULL_COLLECTION_TARGET_DATA_POINTS (250) instead:
+ * calculateBucketSize(3600, 250);   // → 15s buckets
+ * calculateBucketSize(10800, 250);  // → 60s buckets
  * ```
  */
 export function calculateBucketSize(
@@ -101,4 +104,57 @@ export function calculateBucketSize(
 
   // For larger durations, round to nearest minute
   return Math.ceil(idealBucketSize / 60) * 60;
+}
+
+/**
+ * Bucket size for a live perf-test tick when the run has no planned duration. Fixed, so
+ * every tick of a run agrees; `perfTestBucketSizes` decides at analyze time whether the
+ * rebuild is still needed.
+ */
+export const TICK_BUCKET_FALLBACK_SECONDS = 60;
+
+/**
+ * Rows can land in requests_raw after the tick that covered their timestamp (up to ~36 s
+ * observed). Every tick re-aggregates at least this much of the previous window, aligned
+ * down to a bucket boundary, so a late row and a bucket straddling the tick edge are both
+ * recomputed from all their samples.
+ */
+export const PERF_TEST_OVERLAP_SECONDS = 60;
+
+/**
+ * The two bucket sizes a perf-test run can be written at.
+ *
+ * `tick` is what the live ticks use: derived from `planned_duration` when the test posted
+ * one at start, else `TICK_BUCKET_FALLBACK_SECONDS`. It must be knowable while the run is
+ * live, and stable for its whole duration — `duration` is not (it is the elapsed time the
+ * client keeps posting), and neither is `end_time`, which the keep-alive update moves to
+ * "now" on every post. Only `completed` says the run's length is known.
+ *
+ * `final` is what the analyze-time rebuild uses: the size the run's actual length calls for.
+ * When the two agree the ticks already wrote the rebuild's shape and the rebuild can be
+ * skipped; when they differ (aborted run, no planned duration) the rebuild replaces the
+ * tick rows. Both paths route through here so the comparison cannot drift from the writers.
+ */
+export function perfTestBucketSizes(run: {
+  plannedDuration?: number | null;
+  startTime: Date;
+  endTime?: Date | null;
+  completed?: boolean;
+}): { tick: number; final: number | null } {
+  const planned = run.plannedDuration ?? 0;
+  const tick =
+    planned > 0
+      ? calculateBucketSize(planned, FULL_COLLECTION_TARGET_DATA_POINTS)
+      : TICK_BUCKET_FALLBACK_SECONDS;
+  const elapsed =
+    run.completed && run.endTime ? (run.endTime.getTime() - run.startTime.getTime()) / 1000 : 0;
+  const final = elapsed > 0 ? calculateBucketSize(elapsed, FULL_COLLECTION_TARGET_DATA_POINTS) : null;
+  return { tick, final };
+}
+
+/** Align `time` down to the bucket boundary the run's buckets are built on (its start_time). */
+export function alignToBucket(time: Date, startTime: Date, bucketSizeSeconds: number): Date {
+  const ms = bucketSizeSeconds * 1000;
+  const offset = Math.floor((time.getTime() - startTime.getTime()) / ms) * ms;
+  return new Date(startTime.getTime() + Math.max(0, offset));
 }

@@ -221,6 +221,133 @@ describe('RequestsProcessor rollup rows', () => {
   });
 });
 
+describe('ErrorsProcessor on a live tick', () => {
+  const liveRun = {
+    ...testRun,
+    completed: false,
+    filter_from_time: new Date('2026-01-01T00:10:00Z'),
+    filter_to_time: new Date('2026-01-01T00:11:00Z'),
+  } as unknown as TestRunMetadata;
+
+  it('counts from start_time, not from the tick window, and writes the point at start_time', async () => {
+    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]) };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', liveRun);
+
+    // [start_time, filter_to_time]: cumulative, so every tick agrees with the rebuild's run total.
+    expect(dataSource.query.mock.calls[0]![1]).toEqual(['run-1', testRun.start_time, liveRun.filter_to_time]);
+    // One fixed timestamp while the run is live; the final pass moves it to end_time.
+    expect(metrics.every(m => m.time.getTime() === testRun.start_time.getTime())).toBe(true);
+  });
+
+  it('flags the interim point ramp_up under an analysis start offset, and the final one not', async () => {
+    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]) };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const live = await processor.process('run-1', { ...liveRun, ramp_up_time: 60 } as TestRunMetadata);
+    const done = await processor.process('run-1', { ...liveRun, ramp_up_time: 60, completed: true } as TestRunMetadata);
+
+    expect(live.metrics.every(m => m.ramp_up)).toBe(true);
+    expect(done.metrics.every(m => !m.ramp_up)).toBe(true);
+  });
+
+  it('writes the point at end_time once the run is completed', async () => {
+    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]) };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', { ...liveRun, completed: true } as TestRunMetadata);
+
+    expect(metrics.every(m => m.time.getTime() === testRun.end_time!.getTime())).toBe(true);
+  });
+
+  it('writes the zero-error points at start_time too while the run is live', async () => {
+    // The zero-errors branch builds its own rows from the requests_raw scenario lookup;
+    // it has to land on the same interim timestamp or the final pass cannot drop it.
+    const dataSource = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ scenario_name: 'loadtest' }]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', liveRun);
+
+    expect(metrics.length).toBeGreaterThan(0);
+    expect(metrics.every(m => m.time.getTime() === testRun.start_time.getTime())).toBe(true);
+  });
+
+  it('falls back to start_time when a completed run carries no end_time', async () => {
+    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]) };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', {
+      ...liveRun,
+      completed: true,
+      end_time: null,
+    } as unknown as TestRunMetadata);
+
+    expect(metrics.every(m => m.time.getTime() === testRun.start_time.getTime())).toBe(true);
+  });
+});
+
+describe('VirtualUsersProcessor on a live tick', () => {
+  const liveRun = {
+    ...testRun,
+    completed: false,
+    filter_from_time: new Date('2026-01-01T00:10:00Z'),
+    filter_to_time: new Date('2026-01-01T00:11:00Z'),
+  } as unknown as TestRunMetadata;
+  const vuRows = async () => [
+    { scenario_name: 'loadtest', avg_active_threads: '10', max_active_threads: '20', active_thread_count: '100' },
+  ];
+
+  it('averages from start_time, not from the tick window, and writes the point at start_time', async () => {
+    const dataSource = { query: vi.fn(vuRows) };
+    const processor = new VirtualUsersProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', liveRun);
+
+    // [start_time, filter_to_time]: cumulative, so the tick's average and max are the
+    // rebuild's run-wide figures so far, not the minute's.
+    expect(dataSource.query.mock.calls[0]![1]).toEqual(['run-1', testRun.start_time, liveRun.filter_to_time]);
+    expect(metrics.length).toBeGreaterThan(0);
+    expect(metrics.every(m => m.time.getTime() === testRun.start_time.getTime())).toBe(true);
+  });
+
+  it('writes the points at end_time on a force re-fetch of a completed run', async () => {
+    // Same filter window as a tick, but the run is completed: the rows must land where
+    // every baseline holds them, and where the final pass expects them.
+    const dataSource = { query: vi.fn(vuRows) };
+    const processor = new VirtualUsersProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', { ...liveRun, completed: true } as TestRunMetadata);
+
+    expect(dataSource.query.mock.calls[0]![1]).toEqual(['run-1', testRun.start_time, liveRun.filter_to_time]);
+    expect(metrics.every(m => m.time.getTime() === testRun.end_time!.getTime())).toBe(true);
+  });
+
+  it('bounds the query by end_time on a full rebuild with no filter window', async () => {
+    const dataSource = { query: vi.fn(vuRows) };
+    const processor = new VirtualUsersProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    await processor.process('run-1', { ...testRun, completed: true } as TestRunMetadata);
+
+    expect(dataSource.query.mock.calls[0]![1]).toEqual(['run-1', testRun.start_time, testRun.end_time]);
+  });
+
+  it('leaves the upper bound open on a live run without a filter window or end_time', async () => {
+    const dataSource = { query: vi.fn(vuRows) };
+    const processor = new VirtualUsersProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    await processor.process('run-1', { ...testRun, end_time: null } as unknown as TestRunMetadata);
+
+    expect(dataSource.query.mock.calls[0]![1]).toEqual(['run-1', testRun.start_time]);
+    expect(String(dataSource.query.mock.calls[0]![0])).not.toContain('time <= $3');
+  });
+});
+
 describe('ErrorsProcessor rollup row', () => {
   it('adds a rollup series carrying the total across scenarios', async () => {
     const dataSource = {
