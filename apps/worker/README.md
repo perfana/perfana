@@ -277,7 +277,10 @@ count already.
 
 `MetricCollectionGapService.calculateCoverage` divides the summed `collected_ranges` by (run duration
 x number of `ds_metric_collection_status` rows), and `DataSanityCheckPipeline` invalidates the run
-below `SANITY_CHECK_MIN_COVERAGE`. Registering a source that cannot collect is therefore enough to
+below `SANITY_CHECK_MIN_COVERAGE`. Since v0.2.95.22 the `performance_test` row is left out of that
+average: it is rebuilt from `requests_raw` at analyze time, so its ranges say nothing about what was
+collected, and averaging its ~100% in would let a Grafana source at 65% pass the 80% gate. A
+JMeter-only run (perf-test row only) reads 100%. Registering a source that cannot collect is therefore enough to
 fail a run on its own — with no other live source, coverage is 0% and the reason reads
 `Data collection coverage is 0% (threshold: 80%)`.
 
@@ -295,10 +298,20 @@ Two switches mean "off", and registration used to read neither (v0.2.95.12):
 `getConfiguredSourceKeys` exists because three call sites answered "which sources exist"
 independently and disagreed. `PipelineOrchestrator`'s sweep runs FIRST, before any stage, and had
 neither filter, so a dead source it kept was gap-filled and could flip `isCollectionComplete()`.
+The keys it returns, and the keys both sweeps compare against, are built by `collectionSourceKey()`
+in the same module (v0.2.95.22). `ds_metric_collection_status.source_id` is `NOT NULL` with `''`
+for `performance_test`, and a hand-written `performance_test::null` in the whitelist never matched
+the sweeps' `performance_test::` — so every analyze swept the perf-test row first, and a
+JMeter-only run then had no status rows left and took the full delete-and-rebuild path.
 
 **`is_complete` is sticky, so never set it on a maybe.** Only a force-refetch reevaluate clears it,
-and `PipelineOrchestrator` skips `dynatrace-collection`, `panels-processing`,
-`performance-test-metrics` and `metrics-collection` once every row is complete.
+and `PipelineOrchestrator` skips `dynatrace-collection`, `panels-processing` and
+`metrics-collection` once the run's incremental collection has been gap-filled.
+`performance-test-metrics` is never skipped (v0.2.95.22): the per-minute ticks write 1 s buckets
+and one scenario-level point per minute, the analyze-time rebuild writes run-sized buckets and one
+run-total point, and every baseline holds the rebuild's form — so its DELETE
+(`deletePerfTestMetricsForRun`) preserves the gap-filled Grafana/Dynatrace rows beside it and it
+runs on every analyze. `detectGaps` never reports a `performance_test` gap for the same reason.
 `metricsDocuments.length === 0` is the same signal for "ran fine, no data" and "every query failed"
 (`executeBatchQueries` catches per query and returns `{ result: null, error }`), so a Dynatrace
 config is completed only when its batch ran and every query succeeded. `MetricsPipeline` does not
@@ -309,7 +322,11 @@ frequently transient.
 
 `statistics-calculation`, `control-group-statistics` and `adapt-analysis` (`HEAVY_STAGES` in
 `src/services/HeavyStageMutex.ts`, sourced from `JOB_NAMES` so a rename cannot leave one unguarded)
-each aggregate tens of millions of `ds_metrics` rows. Two of them on the same Postgres evict each
+each aggregate tens of millions of `ds_metrics` rows. `performance-test-metrics` joined the set in
+v0.2.95.22: the analyze-time rebuild reads `requests_raw` and then `percentile_agg`s the whole run
+for `ds_metric_statistics`, the same shape as `statistics-calculation`, and two of them beside a
+heavy stage pushed one past the 600 s wall clock. The live per-minute tick runs the same pipeline
+through `incremental-metrics` and does not take the lock. Two of them on the same Postgres evict each
 other's pages and spill each other's sorts — on 2026-09-11 four runs finished together, the cache
 hit ratio fell to 16 %, and three of the four analyses failed with nothing waiting on a lock.
 
@@ -318,7 +335,7 @@ TTL, 60 s heartbeat, 5 s poll, 1 h give-up) with a per-acquisition nonce in the 
 job id is reused by a stalled-job re-dispatch or a retry, and with the bare id as token the old
 instance's release would delete the new instance's lock. It is held by whichever job runs the
 pipeline — `PipelineOrchestrator` for `analyze-test` (pass `heavyStageMutex` in the config; omit it
-in tests), the registry processor for the same three job names when the re-evaluate orchestrator
+in tests), the registry processor for the same job names when the re-evaluate orchestrator
 enqueues them. The cheap stages still overlap. `ponytail:` it is one lock, not a semaphore.
 
 What changed around it:
