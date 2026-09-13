@@ -19,15 +19,17 @@ The `IncrementalCollectionScheduler` enables real-time metrics visibility during
    - Fetches associated `ApplicationDashboards` (by `systemUnderTestId` + `testEnvironment`)
    - Groups dashboards by source:
      - Grafana: `grafana:{instanceId}`
-     - Dynatrace: `dynatrace:{configId}` (future)
-     - Performance Test: `performance_test:null` (future)
+     - Dynatrace: `dynatrace:{configId}`
+     - Performance Test: `performance_test:` — the status row's `source_id` is `''`, not
+       NULL (`NOT NULL DEFAULT ''` since #146); keys are built by `collectionSourceKey()`
+       in `services/collectable-sources.ts`, never by hand
 
-4. **Job Enqueueing**: Creates one `metrics-collection` job per unique source with payload:
+4. **Job Enqueueing**: Creates one `incremental-collection` job per unique source with payload:
    ```typescript
    {
      testRunId: string,           // Test run UUID
      sourceType: 'grafana' | 'dynatrace' | 'performance_test',
-     sourceId: string | null,     // Grafana instance ID, Dynatrace config ID, or null
+     sourceId: string | null,     // Grafana instance ID, Dynatrace config ID, or null (perf-test)
      applicationDashboardIds: string[],
      fromTime: string,            // ISO datetime (last collection or test start)
      toTime: string,              // ISO datetime (now)
