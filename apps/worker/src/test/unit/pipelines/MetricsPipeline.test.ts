@@ -746,17 +746,18 @@ describe('MetricsPipeline', () => {
       expect(mockEntityManager.query).toHaveBeenCalledTimes(2);
     });
 
-    test('should clean up stale application dashboards', async () => {
+    test('never issues the whole-hypertable stale-dashboard DELETE on ds_metrics', async () => {
+      // No test_run_id predicate → DML decompression across every chunk, ~180 s per
+      // analyze and then a swallowed failure. It was removed on purpose.
       const mockTestRun = createMockTestRun();
       const mockPanels = [createMockPanel()];
 
       mockDb.getTestRunByTestRunId.mockResolvedValue(mockTestRun);
       mockDb.getDsPanelsByTestRun.mockResolvedValue(mockPanels);
-      mockDb.query.mockResolvedValue([undefined, 5]); // 5 rows deleted
 
       await pipeline.execute({ testRunId: 'test-run-001' });
 
-      expect(mockDb.query).toHaveBeenCalledWith(
+      expect(mockDb.query).not.toHaveBeenCalledWith(
         expect.stringContaining('DELETE FROM ds_metrics')
       );
     });

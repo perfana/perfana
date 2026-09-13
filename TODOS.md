@@ -359,6 +359,47 @@ aggregate that runs on every statistics job.
 trailing scrape excluded by the bound would keep its stale flag forever — and take the margin from
 the collector's step, not zero.
 
+### Make the perf-test ticks write the rebuild's shape, so the rebuild can be skipped
+
+**Priority:** P2
+**Origin:** adversarial review during /ship on `fix/perf-test-status-swept-as-orphan` (2026-09-13).
+**Why:** `performance-test-metrics` always runs at analyze time (v0.2.95.22) because the
+per-minute ticks do not produce what the rebuild produces, and every baseline holds the
+rebuild's form. That rebuild is the last multi-minute stage on a run whose external sources
+were gap-filled: 102 s on BMS, ~7 min on a SONAR-sized run. Four things differ, each with a
+known fix:
+
+1. **Bucket size.** `calculateBucketSize(windowSeconds)` sees the ~60 s tick window and picks
+   1 s; the rebuild sees the run's duration and picks 60 s on a 3 h run. Pick the size at tick
+   time from something known then — `test_runs.duration` when the test posts a planned duration
+   at start, else a fixed 60 s — and at analyze time compute the final size from the actual
+   duration the same way and **rebuild only if it differs** (aborted run, no planned duration).
+   That turns the rebuild into a rare fallback.
+2. **Boundary bucket.** Tick N aggregates `[from, to]`, tick N+1 `[to, …]`; the bucket
+   straddling `to` is computed twice from half its samples and `ON CONFLICT DO UPDATE` keeps the
+   second half. Start each tick at the previous bucket boundary (buckets are already aligned to
+   `start_time`) so it is recomputed from all of them.
+3. **Late rows.** A tick records `[from, now]` as collected and the next starts at `now`; a
+   `requests_raw` row that lands after the query (up to 36 s, CLAUDE.md) is never aggregated.
+   Re-aggregate a trailing window of ~2 buckets every tick and at the final gap fill — the same
+   idea as the Dynatrace arm's `maxDataTimestamp` lag, and those buckets are tiny.
+4. **Scenario-level `Error Count` / `Active Threads`.** `scenario-processors.ts` writes
+   `metricTime = end_time ?? now` with the count over the window: one run-total point on the
+   rebuild, one per-minute point per tick. Count over `[start_time, now]` each tick, write it at
+   one fixed timestamp, and move it to `end_time` at the final gap fill.
+
+VUs already bucket the same way once the size matches, `upsertPerfTestStatistics` already reads
+the whole run per tick, and the force-refetch path uses the same processors with the full range,
+so it agrees by construction once the bucket rule is shared.
+**What to do:** the four changes above in `requests-processor.ts`, `transactions-processor.ts`,
+`scenario-processors.ts`, `PerformanceTestMetricsPipeline.ts` and the scheduler's window
+computation; then drop `performance-test-metrics` from the always-run set in
+`PipelineOrchestrator` behind the bucket-size comparison. Verify the output, not the
+intermediate: run one real test both ways and diff the two `ds_metrics` sets for the run —
+including a NULL-unit panel and a scenario named `all aggregated` — before flipping the skip.
+Transition note: existing baselines for short runs sit at whatever `calculateBucketSize` gave
+them (7 s for a 30-min run); the planned-duration rule reproduces that, a fixed 60 s does not.
+
 ### A full perf-test collection is not atomic, and now fails wider
 
 **Priority:** P3

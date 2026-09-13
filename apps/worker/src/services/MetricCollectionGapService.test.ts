@@ -221,6 +221,23 @@ describe('MetricCollectionGapService', () => {
     });
   });
 
+  describe('detectGaps and the performance_test row', () => {
+    it('never reports a performance_test gap — the analyze-time rebuild owns that source', async () => {
+      const start = new Date('2024-01-01T10:00:00Z');
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue({
+        testRunId: 'test-run-1', startTime: start, endTime: new Date(start.getTime() + 3_600_000),
+      } as unknown as TestRun);
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'performance_test', source_id: '', collected_ranges: [], failed_ranges: [] },
+        { source_type: 'grafana', source_id: 'g1', collected_ranges: [], failed_ranges: [] },
+      ] as never);
+
+      const gaps = await service.detectGaps('test-run-1');
+
+      expect(gaps.map((g) => g.sourceType)).toEqual(['grafana']);
+    });
+  });
+
   describe('calculateCoverage', () => {
     it('should return 0 when test run not found', async () => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(null);
@@ -228,6 +245,33 @@ describe('MetricCollectionGapService', () => {
       const coverage = await service.calculateCoverage('test-run-1');
 
       expect(coverage).toBe(0);
+    });
+
+    // perf-test is rebuilt from requests_raw at analyze time, so its ranges are not coverage.
+    it('ignores the perf-test row: a 60% Grafana source stays 60%, not (100+60)/2', async () => {
+      const start = new Date('2024-01-01T10:00:00Z');
+      const min = (m: number) => new Date(start.getTime() + m * 60_000);
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue({
+        testRunId: 'test-run-1', startTime: start, endTime: min(60),
+      } as unknown as TestRun);
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'performance_test', source_id: '', collected_ranges: [{ from: start, to: min(60) }] },
+        { source_type: 'grafana', source_id: 'g1', collected_ranges: [{ from: start, to: min(36) }] },
+      ] as never);
+
+      expect(await service.calculateCoverage('test-run-1')).toBeCloseTo(60, 5);
+    });
+
+    it('reports 100% for a JMeter-only run, whose only row is perf-test', async () => {
+      const start = new Date('2024-01-01T10:00:00Z');
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue({
+        testRunId: 'test-run-1', startTime: start, endTime: new Date(start.getTime() + 3_600_000),
+      } as unknown as TestRun);
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'performance_test', source_id: '', collected_ranges: [{ from: start, to: new Date(start.getTime() + 300_000) }] },
+      ] as never);
+
+      expect(await service.calculateCoverage('test-run-1')).toBe(100);
     });
 
     it('should return 0 when no collection statuses exist', async () => {

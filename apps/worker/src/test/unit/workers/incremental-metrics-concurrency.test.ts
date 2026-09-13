@@ -19,10 +19,12 @@ vi.mock('../../../nestjs-bootstrap.js', () => ({
 
 const mockUpdateCollectedRanges = vi.fn().mockResolvedValue(undefined);
 const mockRecordFailedRange = vi.fn().mockResolvedValue(undefined);
+const mockGetTestRunByTestRunId = vi.fn().mockResolvedValue({ completed: false });
 vi.mock('../../../common/database-accessor.js', () => ({
   getDatabaseService: vi.fn(() => ({
     updateCollectedRanges: mockUpdateCollectedRanges,
     recordFailedRange: mockRecordFailedRange,
+    getTestRunByTestRunId: mockGetTestRunByTestRunId,
   })),
 }));
 
@@ -129,5 +131,17 @@ describe('incrementalMetricsWorker — performance_test concurrency guard (issue
       'job:lock:perf-test-metrics:tr-001',
       'bullmq-job-id-1'
     );
+  });
+
+  it('leaves a run that is already completed to the analyze-time rebuild', async () => {
+    // A tick queued just before completion would race the rebuild and splice 1 s buckets
+    // into its run-sized ones.
+    mockGetTestRunByTestRunId.mockResolvedValueOnce({ completed: true });
+    const worker = incrementalMetricsWorker();
+    const result = await worker(makePerfTestJob());
+    expect(result.status).toBe('success');
+    expect((result.data as Record<string, unknown>).skipped).toBe('run-completed');
+    expect(mockAcquireKeyLock).not.toHaveBeenCalled();
+    expect(mockUpdateCollectedRanges).not.toHaveBeenCalled();
   });
 });

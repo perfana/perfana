@@ -164,6 +164,8 @@ describe('PerformanceTestMetricsPipeline', () => {
       writeDataSource: mockWriteDataSource,
       getTestRunByTestRunId: vi.fn(),
       query: vi.fn().mockResolvedValue([]),
+      getRunMetricsSourceTypes: vi.fn().mockResolvedValue(['performance_test']),
+      deletePerfTestMetricsForRun: vi.fn().mockResolvedValue({ deleted: 0, restored: 0 }),
     };
 
     // Ensure getDatabaseService returns our mock
@@ -601,19 +603,31 @@ describe('PerformanceTestMetricsPipeline', () => {
       mockWriteDataSource.query.mockResolvedValue([]);
     });
 
-    it('should issue a DELETE before INSERT for full-collection mode', async () => {
+    it('should delete the run\'s perf-test rows, preserving other sources, for full-collection mode', async () => {
       mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      mockDatabaseService.getRunMetricsSourceTypes.mockResolvedValue(['performance_test', 'grafana']);
 
       await pipeline.execute({ testRunId: 'tr-001' });
 
-      const deleteCalls = mockDataSource.query.mock.calls.filter(
-        (call: any[]) => String(call[0]).includes('DELETE FROM ds_metrics')
-      );
-      expect(deleteCalls.length).toBe(1);
-      expect(deleteCalls[0][1]).toContain('tr-001');
+      // Never the bare wholesale DELETE: this stage also runs beside gap-filled Grafana/
+      // Dynatrace rows that nothing re-collects.
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).toHaveBeenCalledWith('tr-001', ['performance_test', 'grafana']);
+      expect(mockDataSource.query.mock.calls.some((c: any[]) => String(c[0]).includes('DELETE FROM ds_metrics'))).toBe(false);
     });
 
-    it('should NOT issue DELETE for incremental mode', async () => {
+    it('keeps the existing rows when there is nothing to rebuild from (SUT import without raw data)', async () => {
+      mockDataSource.query.mockImplementation((sql: string) =>
+        Promise.resolve(sql.includes('requests_raw') && sql.includes('EXISTS') ? [{ has_rows: false }] : [])
+      );
+
+      const result = await pipeline.execute({ testRunId: 'tr-imported' });
+
+      expect(result.success).toBe(true);
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
+      expect(mockRequestsProcessorInstance.process).not.toHaveBeenCalled();
+    });
+
+    it('should NOT delete anything for incremental mode', async () => {
       mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 
       await pipeline.execute({
@@ -622,10 +636,7 @@ describe('PerformanceTestMetricsPipeline', () => {
         toTime: new Date('2024-01-01T00:20:00Z'),
       });
 
-      const deleteCalls = mockDataSource.query.mock.calls.filter(
-        (call: any[]) => String(call[0]).includes('DELETE FROM ds_metrics')
-      );
-      expect(deleteCalls.length).toBe(0);
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
     });
 
     it('should use ON CONFLICT upsert query for incremental mode', async () => {
@@ -689,22 +700,13 @@ describe('PerformanceTestMetricsPipeline', () => {
       mockWriteDataSource.query.mockResolvedValue([]);
     });
 
-    const deleteCalls = () => mockDataSource.query.mock.calls.filter(
-      (call: any[]) => String(call[0]).includes('DELETE FROM ds_metrics')
-    );
-
     it('should delete the run\'s metrics BEFORE the processors insert', async () => {
       // The processors write as they aggregate now, so a DELETE that ran after them —
       // where it used to live, inside saveDsMetrics — would take their own rows with it.
       await pipeline.execute({ testRunId: 'tr-001' });
 
-      expect(deleteCalls()).toHaveLength(1);
-      const deleteOrder = mockDataSource.query.mock.invocationCallOrder[
-        mockDataSource.query.mock.calls.findIndex(
-          (call: any[]) => String(call[0]).includes('DELETE FROM ds_metrics')
-        )
-      ];
-      expect(deleteOrder).toBeLessThan(
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).toHaveBeenCalledTimes(1);
+      expect(mockDatabaseService.deletePerfTestMetricsForRun.mock.invocationCallOrder[0]).toBeLessThan(
         mockRequestsProcessorInstance.process.mock.invocationCallOrder[0]
       );
     });
@@ -716,7 +718,7 @@ describe('PerformanceTestMetricsPipeline', () => {
         toTime: new Date('2024-01-01T00:11:00Z'),
       });
 
-      expect(deleteCalls()).toHaveLength(0);
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
     });
 
     it('should pass isIncremental through so the processors pick INSERT vs upsert', async () => {

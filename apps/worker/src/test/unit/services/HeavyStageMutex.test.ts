@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { HeavyStageMutex, HEAVY_STAGE_LOCK_KEY } from '../../../services/HeavyStageMutex.js';
+import { HeavyStageMutex, HEAVY_STAGE_LOCK_KEY, HEAVY_STAGES } from '../../../services/HeavyStageMutex.js';
 
 vi.mock('../../../lib/utils/logger.js', () => ({
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -94,5 +94,11 @@ describe('HeavyStageMutex', () => {
     await expect(
       new HeavyStageMutex(redis as never, 'job-b', { pollMs: 5, maxWaitMs: 10 }).acquire(),
     ).rejects.toThrow(/held by job-a/);
+  });
+});
+
+describe('HEAVY_STAGES', () => {
+  it('guards performance-test-metrics — it aggregates the whole run like statistics-calculation', () => {
+    expect(HEAVY_STAGES.has('performance-test-metrics')).toBe(true);
   });
 });

@@ -798,7 +798,38 @@ Three things to hold on to:
    annotations naming the ranges, and the next re-analysis retries the failed ranges again (capped
    at 5 attempts per range). A gap fill that throws part-way keeps the data too: the flag is
    "incremental collection existed", set as soon as the status rows are read.
-3. **A tick fails only when its collector throws; a panel or query that answers with an error
+3. **The perf-test status row has `source_id = ''`, not NULL, and `performance-test-metrics`
+   is never one of the skipped stages (v0.2.95.22).** `getConfiguredSourceKeys` whitelisted
+   `'performance_test::null'` from before #146 made the column `NOT NULL DEFAULT ''`, while the
+   sweeps built `${source_type}::${source_id ?? 'null'}` — `performance_test::` on a real row.
+   So every analyze swept the perf-test row first, and a JMeter-only run then had **no** status
+   rows left and took the full path above (58 s delete, 7–8 min rebuild), while a run with a
+   Grafana or Dynatrace row beside it skipped all four stages in ~2 min. The unit fixtures used
+   `source_id: null`, which is why the tests never saw it. All key building now goes through
+   `collectionSourceKey()` in `collectable-sources.ts`.
+
+   Fixing the key exposed the second half: the skip list included `performance-test-metrics`,
+   and the ticks do **not** write what the rebuild writes. A tick's window is ~60 s, so
+   `calculateBucketSize` gives 1 s buckets where the rebuild gives run-sized ones (60 s on a
+   3 h run); the scenario-level `Error Count` / `Active Threads` panels get one point per tick
+   with that minute's count where the rebuild writes one run-total point at `end_time`; a
+   bucket straddling a tick edge is overwritten by its second half; and a `requests_raw` row
+   arriving after its tick is never aggregated. Every baseline was written by the rebuild, so
+   skipping it makes ADAPT compare errors-per-minute against errors-per-run. The mixed-source
+   runs that already took the skip path have been carrying exactly that. Now the rebuild always
+   runs — it reads `requests_raw` in this database, so it is always possible — and its DELETE is
+   `deletePerfTestMetricsForRun`, which preserves the gap-filled Grafana/Dynatrace rows beside
+   it. Three guards keep the two paths apart: `detectGaps` never reports a `performance_test`
+   gap (every caller — the orchestrator, the re-evaluate missing-data branch — would otherwise
+   tick over the tail and splice 1 s buckets into the rebuilt run), `calculateCoverage` leaves
+   the perf-test row out of the average (it is 100% by construction and used to be excluded by
+   the accidental sweep; a JMeter-only run reads 100%), and a perf-test tick for a run that is
+   already `completed` exits without collecting, so the one queued just before completion
+   cannot race the rebuild. The rebuild also refuses to delete when the run has no
+   `requests_raw`/`transactions` to rebuild from — a SUT import without the `raw` group — and
+   keeps the imported rows instead. Making the ticks produce the rebuild's shape, so the
+   rebuild can be skipped when the bucket size would not change, is the open item in TODOS.md.
+4. **A tick fails only when its collector throws; a panel or query that answers with an error
    does not fail it.** Both collectors save the data of the panels/queries that succeeded and record
    the range as collected. Grafana carries the per-panel errors in the tick result's `errors[]`
    (`metric-processor.ts:processDocumentErrors`) with `success` still true; Dynatrace swallows
@@ -811,6 +842,18 @@ Three things to hold on to:
    Dynatrace token reads as "no data", not as a failure — CLAUDE.md #22 — and a run whose only
    incomplete source is one that threw at every tick was already carrying the real error in
    `failed_ranges` before this change.
+
+### `cleanupStaleApplicationDashboards` must never be pointed at a hypertable
+
+`BasePipelineTypeORM.cleanupStaleApplicationDashboards(tables)` deletes rows whose
+`application_dashboard_id` no longer exists, with **no `test_run_id` predicate**. On the small
+result tables that is a cheap anti-join. `MetricsPipeline` also ran it on `ds_metrics` at the
+start of every `metrics-collection` stage: a DELETE across every chunk of a 134 GB compressed
+hypertable, i.e. DML decompression until the tuple limit — measured 175–187 s per analyze on
+2026-09-13, then a failure the `catch` swallowed (and logged without the error text, because the
+`logger.warn(msg, error)` argument order was pino's backwards). A stage with zero panel
+documents took three minutes for this alone, and it ran beside the other runs' aggregations.
+Removed in v0.2.95.22; the helper's doc comment now says small tables only.
 
 ### A source that is switched off must not be registered for collection
 
@@ -852,8 +895,8 @@ Four rules for anything in this path:
    resolver can share it without pulling in the panel builder's module-level logger.
 4. **"Complete" is sticky and suppresses re-collection — never set it on a maybe.** Only a
    force-refetch reevaluate clears `is_complete`, and `PipelineOrchestrator` skips
-   `dynatrace-collection`, `panels-processing`, `performance-test-metrics` and `metrics-collection`
-   once every status row is complete. `metricsDocuments.length === 0` is the SAME signal for "ran
+   `dynatrace-collection`, `panels-processing` and `metrics-collection` whenever the run had an
+   incremental collection at all (`performance-test-metrics` always runs, v0.2.95.22). `metricsDocuments.length === 0` is the SAME signal for "ran
    fine, no data" and "every query failed" — `executeBatchQueries` catches per query and returns
    `{ result: null, error }`, and `DataProcessor` only builds a document when `!result.error` — so
    completing there would make an expired token permanent. A Dynatrace config is marked complete only
@@ -916,22 +959,26 @@ waiting on a lock — the "Sessions waiting on a lock" panel was empty — the j
 other on the database itself. Two things changed in v0.2.95.17, and they only work as a pair:
 
 1. **`HeavyStageMutex`** (`apps/worker/src/services/HeavyStageMutex.ts`) is a deployment-wide
-   Redis `SET NX PX` lock, held around exactly those three stages by **whichever job runs the
+   Redis `SET NX PX` lock, held around those three stages — and, since v0.2.95.22,
+   `performance-test-metrics`, whose `upsertPerfTestStatistics` is a `percentile_agg` over the
+   run's whole `ds_metrics` (same shape as `statistics-calculation`; one of two running side by
+   side crossed the 600 s wall clock and was recorded completed with the analysis dropped) — by **whichever job runs the
    pipeline**: `PipelineOrchestrator` for `analyze-test`, and the registry processor
-   (`pipeline-registry.ts:withHeavyStageLock`) for the same three job names when the re-evaluate
+   (`pipeline-registry.ts:withHeavyStageLock`) for the same job names when the re-evaluate
    orchestrator enqueues them. The **child** holds it, never the re-evaluate orchestrator: that
    one runs on `perfana-batch` while `analyze-test` jobs park on `perfana-analyze` waiting for
    the same lock, so an orchestrator-held lock could pin both analyze slots behind a child that
    can never be picked up. The cheap stages still overlap; only the aggregation is serialised.
    `ponytail:` it is a single lock, not a semaphore — make it one if one heavy stage at a time
    leaves the database idle.
-2. **`executeStage` no longer races those three stages against a `setTimeout`.** The race only
+2. **`executeStage` no longer races the `HEAVY_STAGES` against a `setTimeout`.** The race only
    ever abandoned the promise: the aggregation kept running on Postgres until `statement_timeout`
    (540 s) while the job returned `partial` (BullMQ *completed*, so the failed count never moved),
    released its scope lock and its concurrency slot, and the next queued job started on top of the
    orphan. Postgres already bounds every statement they run, so the wall-clock race is kept only
-   for the stages outside `HEAVY_STAGES` (collection, checks, control-group creation, rollup),
-   where an HTTP call can hang. The `timeoutMs` in `analyze.ts` is
+   for the stages outside `HEAVY_STAGES` (Grafana/Dynatrace collection, panels, checks,
+   control-group creation, rollup), where an HTTP call can hang. `performance-test-metrics` is
+   in the set since v0.2.95.22 and so is exempt like the rest: bounded by `statement_timeout`. The `timeoutMs` in `analyze.ts` is
    **per stage**, not per pipeline, despite what its old comment said.
 
 Eight consequences to know about:
@@ -1119,8 +1166,10 @@ container mounts in tests at all.
 
 23. **A force-refetch re-evaluate generates gigabytes of WAL and pins autovacuum for minutes** → something is deleting `ds_metrics` with a predicate on a column other than `test_run_id`, or calling `decompressChunksForRange` to make such a delete survivable. `test_run_id` is `compress_segmentby`, so the single-column `DELETE` is segment-targeted and free (181 ms / 41 MB against 162,743 ms / 11 GB). Fixed in v0.2.95.16; the tell on an older deploy is a long `decompress_chunk` transaction in `pg_stat_activity` (now attributable — the worker pools report `perfana-worker` / `perfana-worker-write` rather than `(unset)`) with unrelated tables climbing in dead tuples behind it. See the two v0.2.95.16 bullets in item 6 of "ADAPT's baseline depends on the `pct_agg` sketch" above.
 
-24. **Three of four analyses that finished together fail with `Stage statistics-calculation timed out after 600000ms`, the buffer cache hit ratio collapses, temp files spike, and nothing is waiting on a lock** → the heavy stages were contending on the database and the per-stage wall-clock race turned that into partial results while the abandoned aggregation kept running. Fixed in v0.2.95.17 (`HeavyStageMutex` serialises the three heavy stages; they are bounded by `statement_timeout` instead of a race). The UI shows **Queued** while a job waits for the lock or for a worker slot. On an older deploy, set `WORKER_ANALYZE_CONCURRENCY=1`. See "The heavy analyze stages run one at a time" above.
+24. **Three of four analyses that finished together fail with `Stage statistics-calculation timed out after 600000ms`, the buffer cache hit ratio collapses, temp files spike, and nothing is waiting on a lock** → the heavy stages were contending on the database and the per-stage wall-clock race turned that into partial results while the abandoned aggregation kept running. Fixed in v0.2.95.17 (`HeavyStageMutex` serialises the stages in `HEAVY_STAGES`; they are bounded by `statement_timeout` instead of a race). The UI shows **Queued** while a job waits for the lock or for a worker slot. On an older deploy, set `WORKER_ANALYZE_CONCURRENCY=1`. See "The heavy analyze stages run one at a time" above.
 25. **Every completion of a large run produces a burst of tens of millions of `ds_metrics` deletes, ~200 MB/s of WAL and a checkpoint a minute, and during it the API stops answering `/api/test`** → the run was gap-filled and then sent down the full collection path anyway, because one source's ranges still failed. Fixed in v0.2.95.20 (a run that had incremental collection keeps it, complete or not). On an older deploy the worker log shows `⚠️ Collection incomplete for <id>` immediately followed by `🧹 Deleted existing ds_metrics for <id> in Nms`; the failing source's error text is in `ds_metric_collection_status.failed_ranges` — a range fails only when the collector threw (an upsert error under load, a config row deleted mid-run, the panel or query load failing), never because a single panel or query answered with an error. See "Gap-filling a completed run must never fall back to a full re-collection" above.
+26. **Every analyze logs `🗑️ Removing orphaned collection status for performance_test::`, and a JMeter-only run then takes the full delete-and-rebuild path while a run with a Grafana or Dynatrace source skips collection** → the orphan sweep's whitelist said `performance_test::null` and the row says `''`. Fixed in v0.2.95.22, which also stopped skipping the perf-test rebuild on the gap-filled path: the ticks' 1 s buckets and per-minute scenario points are not what the baselines hold, so a mixed-source run analysed between v0.2.95.20 and this fix has tick-shaped perf-test panels and needs a re-analyse. See item 3 of "Gap-filling a completed run must never fall back to a full re-collection" above.
+27. **A `metrics-collection` stage with no panel documents takes ~3 minutes and logs `Failed to clean up stale data in ds_metrics:` with nothing after the colon** → the whole-hypertable stale-dashboard DELETE. Fixed in v0.2.95.22. See "`cleanupStaleApplicationDashboards` must never be pointed at a hypertable" above.
 
 ## How-To Tutorials
 
