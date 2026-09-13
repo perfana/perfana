@@ -133,6 +133,15 @@ export interface TestRunMetadata {
   ramp_up_time: number; // in seconds
   end_time: Date | null;
 
+  /**
+   * Whether the run has finished. `end_time` alone does not say so: the keep-alive update
+   * moves it to "now" on every post, so a live run carries one too.
+   */
+  completed?: boolean;
+
+  /** Planned duration in seconds, posted by the test at start; what the live ticks size their buckets from. */
+  planned_duration?: number | null;
+
   /** Organization ID for RBAC ownership tracking (nullable for backward compat) */
   organization_id?: string | null;
 

@@ -147,11 +147,16 @@ export class MetricCollectionGapService {
       return false;
     }
 
-    const allComplete = statuses.every((s) => s.is_complete);
+    // The perf-test row is not collection in this sense (detectGaps and calculateCoverage
+    // leave it out too): its is_complete is set by the perf-test stage itself, which runs
+    // after this check, so counting it here would report every JMeter-only run incomplete
+    // on its first analyze.
+    const collectable = statuses.filter((s) => s.source_type !== 'performance_test');
+    const allComplete = collectable.every((s) => s.is_complete);
 
     this.logger.debug(
       `Collection complete check for ${testRunId}: ${allComplete} ` +
-        `(${statuses.filter((s) => s.is_complete).length}/${statuses.length} complete)`
+        `(${collectable.filter((s) => s.is_complete).length}/${collectable.length} complete)`
     );
 
     return allComplete;

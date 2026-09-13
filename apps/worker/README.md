@@ -278,8 +278,11 @@ count already.
 `MetricCollectionGapService.calculateCoverage` divides the summed `collected_ranges` by (run duration
 x number of `ds_metric_collection_status` rows), and `DataSanityCheckPipeline` invalidates the run
 below `SANITY_CHECK_MIN_COVERAGE`. Since v0.2.95.22 the `performance_test` row is left out of that
-average: it is rebuilt from `requests_raw` at analyze time, so its ranges say nothing about what was
-collected, and averaging its ~100% in would let a Grafana source at 65% pass the 80% gate. A
+average: its data comes from `requests_raw` in this database, never from an external source that
+can go missing, so its ranges say nothing about what was collected, and averaging its ~100% in
+would let a Grafana source at 65% pass the 80% gate. `isCollectionComplete` leaves the row out for
+the same reason (v0.2.95.23): its `is_complete` is the perf-test stage's own finalisation marker,
+set after this check runs, not a collection result. A
 JMeter-only run (perf-test row only) reads 100%. Registering a source that cannot collect is therefore enough to
 fail a run on its own — with no other live source, coverage is 0% and the reason reads
 `Data collection coverage is 0% (threshold: 80%)`.
@@ -307,11 +310,26 @@ JMeter-only run then had no status rows left and took the full delete-and-rebuil
 **`is_complete` is sticky, so never set it on a maybe.** Only a force-refetch reevaluate clears it,
 and `PipelineOrchestrator` skips `dynatrace-collection`, `panels-processing` and
 `metrics-collection` once the run's incremental collection has been gap-filled.
-`performance-test-metrics` is never skipped (v0.2.95.22): the per-minute ticks write 1 s buckets
-and one scenario-level point per minute, the analyze-time rebuild writes run-sized buckets and one
-run-total point, and every baseline holds the rebuild's form — so its DELETE
-(`deletePerfTestMetricsForRun`) preserves the gap-filled Grafana/Dynatrace rows beside it and it
-runs on every analyze. `detectGaps` never reports a `performance_test` gap for the same reason.
+`performance-test-metrics` is never skipped by the orchestrator (v0.2.95.22): the pipeline decides
+for itself, in `PerformanceTestMetricsPipeline.planFullCollection` (v0.2.95.23). Since v0.2.95.23
+the per-minute ticks write the same shape the rebuild writes — buckets sized from
+`planned_duration` via `perfTestBucketSizes` (`src/utils/time-bucketing.ts`; 60 s when the test
+posted none), each tick re-aggregating `PERF_TEST_OVERLAP_SECONDS` (60 s) of the previous window
+aligned to the bucket grid, and the scenario-level `Error Count` / `Active Threads` points counted
+over the whole run so far. At analyze the stage picks one of three: **skip** when the perf-test
+status row is already `is_complete` and the rows sit on the final grid; **tail** when the tick size
+equals the size the run's actual length calls for — aggregate from the last tick, move the
+scenario-level points to `end_time`, then set `is_complete`; **rebuild** when the ticks could not
+have produced the final shape — no status row (SUT import, legacy run), `tick !== final` (an
+aborted run or no plan), or rows off the grid (pre-v0.2.95.23 ticks wrote 1 s buckets, which fail
+the grid probe). The rebuild's DELETE (`deletePerfTestMetricsForRun`) preserves the gap-filled
+Grafana/Dynatrace rows beside it. Before v0.2.95.23 the ticks wrote 1 s buckets and one
+scenario-level point per minute, so the rebuild ran on every analyze. `detectGaps` never reports a
+`performance_test` gap, and `PipelineOrchestrator.checkAndFillMetricGaps` no longer marks the
+perf-test row complete: only the stage's full pass and a force re-fetch set `is_complete` on it,
+and nothing is certified when nothing was written. The full pass also holds the live tick's key
+lock (`perfTestTickLockKey` in `src/services/JobLockService.ts`, up to 3 min, best-effort) so a
+tick that started before completion cannot land after it.
 `metricsDocuments.length === 0` is the same signal for "ran fine, no data" and "every query failed"
 (`executeBatchQueries` catches per query and returns `{ result: null, error }`), so a Dynatrace
 config is completed only when its batch ran and every query succeeded. `MetricsPipeline` does not
@@ -325,7 +343,9 @@ frequently transient.
 each aggregate tens of millions of `ds_metrics` rows. `performance-test-metrics` joined the set in
 v0.2.95.22: the analyze-time rebuild reads `requests_raw` and then `percentile_agg`s the whole run
 for `ds_metric_statistics`, the same shape as `statistics-calculation`, and two of them beside a
-heavy stage pushed one past the 600 s wall clock. The live per-minute tick runs the same pipeline
+heavy stage pushed one past the 600 s wall clock. It stays in the set after v0.2.95.23 even though
+the stage now usually only aggregates the tail after the last tick (the rebuild is the fallback);
+the lock is held for however long the stage takes. The live per-minute tick runs the same pipeline
 through `incremental-metrics` and does not take the lock. Two of them on the same Postgres evict each
 other's pages and spill each other's sorts — on 2026-09-11 four runs finished together, the cache
 hit ratio fell to 16 %, and three of the four analyses failed with nothing waiting on a lock.

@@ -6,7 +6,7 @@ import { PerformanceTestMetricsPipeline as _PerformanceTestMetricsPipeline } fro
 import { getDatabaseService } from '../common/database-accessor.js';
 import { randomBytes } from 'node:crypto';
 import { acquireRedisConnection, releaseRedisConnection } from '../config/redis-pool.js';
-import { JobLockService } from '../services/JobLockService.js';
+import { JobLockService, perfTestTickLockKey, PERF_TEST_TICK_LOCK_TTL_SECONDS } from '../services/JobLockService.js';
 
 /**
  * Per-test_run_id lock key for performance-test incremental collection.
@@ -20,8 +20,6 @@ import { JobLockService } from '../services/JobLockService.js';
  * crashed worker releases the lock reasonably fast so the next scheduler tick
  * can proceed.
  */
-const PERF_TEST_LOCK_PREFIX = 'job:lock:perf-test-metrics:';
-const PERF_TEST_LOCK_TTL_SECONDS = 15 * 60;
 
 const logger = getLogger('incremental-metrics-worker');
 
@@ -429,7 +427,7 @@ async function collectPerformanceTestMetrics(
   toTime: Date,
   ownerToken?: string
 ): Promise<CollectionResult> {
-  const lockKey = `${PERF_TEST_LOCK_PREFIX}${testRunId}`;
+  const lockKey = perfTestTickLockKey(testRunId);
   // 8 random bytes appended so two concurrent fallback tokens computed in the
   // same millisecond cannot collide on the release path.
   const token = ownerToken ?? `${testRunId}:${Date.now()}:${randomBytes(8).toString('hex')}`;
@@ -444,7 +442,7 @@ async function collectPerformanceTestMetrics(
     lockAcquired = await lockService.acquireKeyLock(
       lockKey,
       token,
-      PERF_TEST_LOCK_TTL_SECONDS
+      PERF_TEST_TICK_LOCK_TTL_SECONDS
     );
 
     if (!lockAcquired) {

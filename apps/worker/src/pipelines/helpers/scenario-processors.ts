@@ -34,6 +34,19 @@ export interface ScenarioProcessorResult {
 }
 
 /**
+ * Where a run's single scenario-level point is written. A completed run puts it at end_time,
+ * which is what every baseline holds. A live run does not know its end_time yet (the
+ * keep-alive update moves it to "now" on every post), so the ticks upsert the cumulative
+ * value at start_time — one fixed timestamp, so a run never carries more than one interim
+ * point — and the final pass in PerformanceTestMetricsPipeline moves it to end_time.
+ * The interim point is flagged ramp_up when the run has an analysis start offset, so the
+ * live statistics leave it out; the final one is not.
+ */
+export function scenarioMetricTime(testRun: TestRunMetadata): Date {
+  return testRun.completed && testRun.end_time ? testRun.end_time : testRun.start_time;
+}
+
+/**
  * Errors Processor
  * Processes requests_error table and creates scenario-level error metrics (Panel 301)
  *
@@ -53,10 +66,13 @@ export class ErrorsProcessor {
     const metrics: DsMetricsRecord[] = [];
     const compareConfigs: DsCompareConfigRecord[] = [];
 
-    // Determine effective filter times (use filter times if set, otherwise use start/end)
-    const filterFromTime = testRun.filter_from_time ?? testRun.start_time;
+    // Cumulative from start_time, whatever window the caller is aggregating: these panels
+    // hold one point per run, so a tick must count what the rebuild counts — the whole run
+    // so far — not the minute it covers. See scenarioMetricTime for where it is written.
+    const filterFromTime = testRun.start_time;
     const filterToTime = testRun.filter_to_time ?? testRun.end_time;
     const hasFilterEndTime = filterToTime !== null;
+    const metricTime = scenarioMetricTime(testRun);
 
     // Aggregate error counts per scenario in SQL (avoids loading all error rows into JS)
     let query = `
@@ -96,8 +112,6 @@ export class ErrorsProcessor {
       const allScenarioNames = [...new Set([...scenarioNames, ALL_AGGREGATED_SCENARIO])];
 
       const panel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
-      const metricTime = testRun.end_time || new Date();
-
       for (const scenarioName of allScenarioNames) {
         const dashboard = await this.dashboardManager.getOrCreateScenarioDashboard(
           scenarioName,
@@ -164,8 +178,6 @@ export class ErrorsProcessor {
       );
 
       const panel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
-      const metricTime = testRun.end_time || new Date();
-
       // Create error count metric
       metrics.push(
         createDsMetricsRecord(
@@ -229,10 +241,13 @@ export class VirtualUsersProcessor {
     const metrics: DsMetricsRecord[] = [];
     const compareConfigs: DsCompareConfigRecord[] = [];
 
-    // Determine effective filter times (use filter times if set, otherwise use start/end)
-    const filterFromTime = testRun.filter_from_time ?? testRun.start_time;
+    // Cumulative from start_time, whatever window the caller is aggregating: these panels
+    // hold one point per run, so a tick must count what the rebuild counts — the whole run
+    // so far — not the minute it covers. See scenarioMetricTime for where it is written.
+    const filterFromTime = testRun.start_time;
     const filterToTime = testRun.filter_to_time ?? testRun.end_time;
     const hasFilterEndTime = filterToTime !== null;
+    const metricTime = scenarioMetricTime(testRun);
 
     // Aggregate VU metrics per scenario in SQL (avoids loading all VU rows into JS)
     let query = `
@@ -324,8 +339,6 @@ export class VirtualUsersProcessor {
       if (activeThreadCount > 0) {
         const avgActiveThreads = row.avg_active_threads ? parseFloat(row.avg_active_threads) : null;
         const maxActiveThreads = row.max_active_threads ? parseFloat(row.max_active_threads) : null;
-
-        const metricTime = testRun.end_time || new Date();
 
         if (avgActiveThreads !== null) {
           const avgPanel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS);

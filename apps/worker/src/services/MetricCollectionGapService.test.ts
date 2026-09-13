@@ -162,6 +162,16 @@ describe('MetricCollectionGapService', () => {
       expect(result).toBe(false);
     });
 
+    it('ignores the perf-test row — its is_complete is the perf-test stage\'s own marker', async () => {
+      const statuses: Partial<DsMetricCollectionStatus>[] = [
+        { source_type: 'grafana', is_complete: true } as unknown as DsMetricCollectionStatus,
+        { source_type: 'performance_test', is_complete: false } as unknown as DsMetricCollectionStatus,
+      ];
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue(statuses as DsMetricCollectionStatus[]);
+
+      expect(await service.isCollectionComplete('test-run-1')).toBe(true);
+    });
+
     it('should return true when all statuses are complete', async () => {
       const statuses: Partial<DsMetricCollectionStatus>[] = [
         { is_complete: true } as unknown as DsMetricCollectionStatus,

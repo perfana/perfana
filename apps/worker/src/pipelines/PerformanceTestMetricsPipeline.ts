@@ -30,13 +30,25 @@ import {
   DsMetricsRecord,
   DsCompareConfigRecord,
 } from '../types/performance-metrics.js';
-import { DEFAULT_APDEX_THRESHOLD_MS } from '../constants/performance-metrics.js';
-import { calculateBucketSize, FULL_COLLECTION_TARGET_DATA_POINTS } from '../utils/time-bucketing.js';
+import { DEFAULT_APDEX_THRESHOLD_MS, METRIC_TYPE_PANEL_IDS } from '../constants/performance-metrics.js';
+import { alignToBucket, perfTestBucketSizes, PERF_TEST_OVERLAP_SECONDS } from '../utils/time-bucketing.js';
+import { acquireRedisConnection, releaseRedisConnection } from '../config/redis-pool.js';
+import { JobLockService, perfTestTickLockKey, PERF_TEST_TICK_LOCK_TTL_SECONDS } from '../services/JobLockService.js';
 import { DashboardManager } from './helpers/dashboard-manager.js';
 import { RequestsProcessor } from './helpers/requests-processor.js';
 import { upsertPerfTestStatistics } from './helpers/perf-metrics-writer.js';
 import { TransactionsProcessor } from './helpers/transactions-processor.js';
 import { ErrorsProcessor, VirtualUsersProcessor } from './helpers/scenario-processors.js';
+
+/** Panels written as one point per run rather than one per bucket. */
+const SCENARIO_PANEL_IDS = [
+  METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT,
+  METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS,
+  METRIC_TYPE_PANEL_IDS.SCENARIO_MAX_THREADS,
+];
+
+/** How long a full pass waits for an in-flight tick before proceeding without the lock. */
+const TICK_LOCK_WAIT_MS = 3 * 60 * 1000;
 
 /**
  * Performance Test Metrics Pipeline
@@ -59,281 +71,16 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
     const startTime = Date.now();
 
     try {
-      // Validate input
       const validatedInput = this.validateAndParseInput(input);
-      const { testRunId, fromTime, toTime } = validatedInput;
-
-      const isIncremental = fromTime !== undefined || toTime !== undefined;
-      this.logger.info(
-        `🎯 Starting performance test metrics collection for test run: ${testRunId}${isIncremental ? ' (incremental)' : ''}`
-      );
-
-      // Initialize processors with dataSource
-      this.initializeProcessors();
-
-      // Load test run metadata
-      const originalTestRun = await this.loadTestRunMetadata(testRunId);
-
-      // For incremental collection, set filter times while keeping original start_time for bucket alignment
-      const testRun: TestRunMetadata = {
-        ...originalTestRun,
-        // Keep original start_time for consistent bucket alignment across increments
-        // Use filter times for WHERE clause filtering
-        filter_from_time: fromTime,
-        filter_to_time: toTime,
-      };
-
-      if (isIncremental) {
-        this.logger.info(
-          `📅 Filter time range: ${fromTime!.toISOString()} to ${toTime!.toISOString()} (bucket origin: ${originalTestRun.start_time.toISOString()})`
-        );
-      }
-
-      // Calculate bucket size from the window actually being aggregated, not from the
-      // incremental flag. A live tick's window is ~60s and still resolves to 1s buckets,
-      // but a force-refetch reevaluate calls this "incrementally" with the run's FULL
-      // range (see simple-orchestrate-reevaluate-batch.ts): a fixed 1s bucket over a 3h
-      // run is 30x the rows the full path writes (1.8M buckets x 9 panels = 16M records
-      // materialised in JS), which is a worker OOM rather than a slow job.
-      const effectiveEndTime = testRun.filter_to_time ?? testRun.end_time;
-      const elapsedTimeSeconds = effectiveEndTime
-        ? (effectiveEndTime.getTime() - testRun.start_time.getTime()) / 1000
-        : 3600; // Default to 1 hour if no end time
-      const windowSeconds =
-        fromTime && effectiveEndTime
-          ? Math.max(1, (effectiveEndTime.getTime() - fromTime.getTime()) / 1000)
-          : elapsedTimeSeconds;
-
-      const bucketSizeSeconds = calculateBucketSize(windowSeconds, FULL_COLLECTION_TARGET_DATA_POINTS);
-      const estimatedBuckets = Math.ceil(windowSeconds / bucketSizeSeconds);
-
-      this.logger.info(
-        `📊 Using ${bucketSizeSeconds}s buckets for a ${windowSeconds.toFixed(0)}s window (estimated ${estimatedBuckets} buckets${isIncremental ? ', incremental' : ''})`
-      );
-
-      // Load Apdex thresholds
-      const apdexThresholds = await this.loadApdexThresholds(
-        testRun.system_under_test_id,
-        testRun.test_environment,
-        testRun.workload,
-        testRun.organization_id || undefined
-      );
-
-      // Initialize counters
-      let metricsCreated = 0;
-      let compareConfigsCreated = 0;
-      const breakdown = {
-        responseTimeMetrics: 0,
-        transactionMetrics: 0,
-        errorMetrics: 0,
-        virtualUserMetrics: 0,
-        apdexScores: 0,
-      };
-
-      // Only the errors and virtual-user processors still build records in JS: they emit
-      // a handful of points per scenario. The requests and transactions processors write
-      // their millions of (bucket x panel) rows with INSERT ... SELECT and never return
-      // them — materialising those is what exhausted the heap.
-      const allMetrics: DsMetricsRecord[] = [];
-      const allCompareConfigs: DsCompareConfigRecord[] = [];
-      const stepTiming: Array<{ step: string; duration: number; count: number }> = [];
-
-      // Full collection replaces the run's perf-test metrics. The DELETE has to happen
-      // before the processors, not inside saveDsMetrics, because they now insert as they
-      // aggregate — a later DELETE would take their rows with it. It preserves every
-      // non-perf-test row: this stage now also runs after a gap-filled incremental
-      // collection (v0.2.95.22), where the Grafana/Dynatrace rows beside it are the only
-      // copy and nothing re-collects them.
-      if (!isIncremental) {
-        // A SUT import without the optional `raw` group ships the perf-test ds_metrics but
-        // nothing to rebuild them from. Deleting on the promise of a rebuild that finds no
-        // rows would silently strip the run of its metrics and ADAPT results. Same rule as
-        // every other delete-then-rewrite here: the probe stays strict because the statement
-        // deletes.
-        const raw: Array<{ has_rows: boolean }> = await this.db.dataSource.query(
-          `SELECT EXISTS (SELECT 1 FROM requests_raw WHERE test_run_id = $1)
-               OR EXISTS (SELECT 1 FROM transactions WHERE test_run_id = $1) AS has_rows`,
-          [testRunId]
-        );
-        // Postgres always answers one boolean row; only an explicit false means "nothing here".
-        if (raw[0]?.has_rows === false) {
-          this.logger.warn(
-            `⏭️ No requests_raw/transactions for ${testRunId} — keeping its existing perf-test ds_metrics`
-          );
-          return this.createSuccessResult(
-            { testRunId, metricsCreated: 0, compareConfigsCreated: 0, skipped: 'no-raw-data' },
-            Date.now() - startTime
-          );
-        }
-
-        const deleteStart = Date.now();
-        const { deleted, restored } = await this.db.deletePerfTestMetricsForRun(
-          testRunId,
-          await this.db.getRunMetricsSourceTypes(testRunId)
-        );
-        this.logger.info(
-          `🧹 Deleted ${deleted} perf-test ds_metrics for ${testRunId} (${restored} other-source rows preserved) in ${Date.now() - deleteStart}ms`
-        );
-      }
-
-      // Process requests_raw table
-      let stepStart = Date.now();
-      const requestsResult = await this.requestsProcessor.process(
-        testRunId,
-        testRun,
-        apdexThresholds,
-        bucketSizeSeconds,
-        isIncremental
-      );
-      for (let i = 0; i < requestsResult.compareConfigs.length; i++) {
-        allCompareConfigs.push(requestsResult.compareConfigs[i]);
-      }
-      breakdown.responseTimeMetrics += requestsResult.rowsInserted;
-      metricsCreated += requestsResult.rowsInserted;
-      stepTiming.push({
-        step: 'requests-processor',
-        duration: Date.now() - stepStart,
-        count: requestsResult.rowsInserted
-      });
-
-      // Process transactions table
-      stepStart = Date.now();
-      const transactionsResult = await this.transactionsProcessor.process(
-        testRunId,
-        testRun,
-        apdexThresholds,
-        bucketSizeSeconds,
-        isIncremental
-      );
-      for (let i = 0; i < transactionsResult.compareConfigs.length; i++) {
-        allCompareConfigs.push(transactionsResult.compareConfigs[i]);
-      }
-      breakdown.transactionMetrics += transactionsResult.rowsInserted;
-      metricsCreated += transactionsResult.rowsInserted;
-      stepTiming.push({
-        step: 'transactions-processor',
-        duration: Date.now() - stepStart,
-        count: transactionsResult.rowsInserted
-      });
-
-      // Process requests_error table
-      stepStart = Date.now();
-      const errorsResult = await this.errorsProcessor.process(
-        testRunId,
-        testRun
-      );
-      for (let i = 0; i < errorsResult.metrics.length; i++) {
-        allMetrics.push(errorsResult.metrics[i]);
-      }
-      for (let i = 0; i < errorsResult.compareConfigs.length; i++) {
-        allCompareConfigs.push(errorsResult.compareConfigs[i]);
-      }
-      breakdown.errorMetrics += errorsResult.metrics.length;
-      stepTiming.push({
-        step: 'errors-processor',
-        duration: Date.now() - stepStart,
-        count: errorsResult.metrics.length
-      });
-
-      // Process virtual_users table
-      stepStart = Date.now();
-      const vuResult = await this.virtualUsersProcessor.process(
-        testRunId,
-        testRun
-      );
-      for (let i = 0; i < vuResult.metrics.length; i++) {
-        allMetrics.push(vuResult.metrics[i]);
-      }
-      for (let i = 0; i < vuResult.compareConfigs.length; i++) {
-        allCompareConfigs.push(vuResult.compareConfigs[i]);
-      }
-      breakdown.virtualUserMetrics += vuResult.metrics.length;
-      stepTiming.push({
-        step: 'virtual-users-processor',
-        duration: Date.now() - stepStart,
-        count: vuResult.metrics.length
-      });
-
-      // Save the scenario-level metrics the two small processors built in JS.
-      if (allMetrics.length > 0) {
-        stepStart = Date.now();
-        await this.saveDsMetrics(allMetrics, testRunId, testRun, isIncremental);
-        metricsCreated += allMetrics.length;
-        stepTiming.push({
-          step: 'save-scenario-metrics',
-          duration: Date.now() - stepStart,
-          count: allMetrics.length
-        });
-      }
-
-      if (metricsCreated > 0) {
-        // Statistics are recomputed from the rows just written rather than from a
-        // second and third copy of them in the heap. See upsertPerfTestStatistics.
-        stepStart = Date.now();
-        await upsertPerfTestStatistics(
-          this.db.dataSource,
-          testRunId,
-          this.dashboardManager.getResolvedDashboardIds(),
-          testRun,
-          this.logger
-        );
-        stepTiming.push({
-          step: 'statistics',
-          duration: Date.now() - stepStart,
-          count: metricsCreated
-        });
-        this.logger.info(`💾 Saved ${metricsCreated} ds_metrics records and computed statistics`);
-
-        // Update dashboard panels based on saved metrics
-        stepStart = Date.now();
-        await this.updateDashboardPanels(testRunId, testRun.start_time, testRun.end_time);
-        stepTiming.push({
-          step: 'update-panels',
-          duration: Date.now() - stepStart,
-          count: 0
-        });
-      }
-
-      // Save all compare configs to database
-      if (allCompareConfigs.length > 0) {
-        stepStart = Date.now();
-        compareConfigsCreated = await this.saveDsCompareConfigs(allCompareConfigs, testRun);
-        stepTiming.push({
-          step: 'save-compare-configs',
-          duration: Date.now() - stepStart,
-          count: compareConfigsCreated
-        });
-        this.logger.info(
-          `📊 Created/updated ${compareConfigsCreated} ds_compare_config records`
-        );
-      }
-
-      const duration = Date.now() - startTime;
-      const output: PerformanceTestMetricsOutput = {
-        metricsCreated,
-        compareConfigsCreated,
-        breakdown,
-      };
-
-      // Log detailed timing breakdown
-      this.logger.info('⏱️  Performance Test Metrics Pipeline - Step Timing:');
-      stepTiming.forEach(({ step, duration: stepDuration, count }) => {
-        const percentage = ((stepDuration / duration) * 100).toFixed(1);
-        const bar = '█'.repeat(Math.round((stepDuration / duration) * 20));
-        this.logger.info(
-          `   ${step.padEnd(25)} ${stepDuration.toString().padStart(6)}ms ${percentage.padStart(5)}% ${bar} (${count} records)`
-        );
-      });
-
-      this.logger.info(
-        `✅ Performance test metrics collection completed in ${(duration / 1000).toFixed(2)}s`
-      );
-
-      return {
-        success: true,
-        data: output,
-        duration,
-      };
+      const isIncremental = validatedInput.fromTime !== undefined || validatedInput.toTime !== undefined;
+      // A full pass finishes or replaces what the ticks wrote, so it must not overlap one.
+      // The worker stops ticks that START after completion; one that started before it can
+      // still be running, and landing after this pass would overwrite a finished bucket
+      // with its partial one and put an interim scenario point back — permanently, since
+      // the pass marks the run final. Hold the tick's own key lock for the duration.
+      return isIncremental
+        ? await this.collect(validatedInput, startTime)
+        : await this.withTickLock(validatedInput.testRunId, () => this.collect(validatedInput, startTime));
     } catch (error) {
       const duration = Date.now() - startTime;
       const stack = error instanceof Error ? error.stack : undefined;
@@ -348,6 +95,411 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         duration,
       };
     }
+  }
+
+  /**
+   * Best-effort by contract: the lock keeps a straggling tick from landing after the pass,
+   * and proceeding without it is what every full pass did before it existed. So a Redis
+   * error, or a holder that outlives any real tick, is logged and the pass runs anyway —
+   * failing the only writer of a ticked run's final rows over a lock would be the worse trade.
+   */
+  private async withTickLock<T>(testRunId: string, fn: () => Promise<T>): Promise<T> {
+    const key = perfTestTickLockKey(testRunId);
+    const token = `analyze:${testRunId}:${Date.now()}`;
+    let redis: Awaited<ReturnType<typeof acquireRedisConnection>> | null = null;
+    let locks: JobLockService | null = null;
+    let held = false;
+    try {
+      redis = await acquireRedisConnection();
+      locks = new JobLockService(redis);
+      const deadline = Date.now() + TICK_LOCK_WAIT_MS;
+      while (!(held = await locks.acquireKeyLock(key, token, PERF_TEST_TICK_LOCK_TTL_SECONDS))) {
+        if (Date.now() >= deadline) {
+          this.logger.warn(`⚠️ Perf-test tick lock for ${testRunId} still held after ${TICK_LOCK_WAIT_MS / 1000}s — proceeding without it`);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`⚠️ Could not take the perf-test tick lock for ${testRunId} (${msg}) — proceeding without it`);
+    }
+    try {
+      return await fn();
+    } finally {
+      if (held && locks) {await locks.releaseKeyLock(key, token);}
+      if (redis) {releaseRedisConnection(redis);}
+    }
+  }
+
+  private async collect(validatedInput: PerformanceTestMetricsInput, startTime: number): Promise<PipelineResult> {
+    const { testRunId } = validatedInput;
+    let { fromTime, toTime } = validatedInput;
+
+    const isIncremental = fromTime !== undefined || toTime !== undefined;
+    this.logger.info(
+      `🎯 Starting performance test metrics collection for test run: ${testRunId}${isIncremental ? ' (incremental)' : ''}`
+    );
+
+    // Initialize processors with dataSource
+    this.initializeProcessors();
+
+    // Load test run metadata
+    const originalTestRun = await this.loadTestRunMetadata(testRunId);
+
+    // One bucket rule for every writer. A live tick sizes from the planned duration (the
+    // run's length is not known yet); a completed run — rebuild, force re-fetch, or the
+    // final pass below — from its actual length. See perfTestBucketSizes.
+    const { tick, final } = perfTestBucketSizes({
+      plannedDuration: originalTestRun.planned_duration,
+      startTime: originalTestRun.start_time,
+      endTime: originalTestRun.end_time,
+      completed: originalTestRun.completed,
+    });
+    const bucketSizeSeconds = final ?? tick;
+
+    // A full collection on a run the ticks already wrote at this bucket size only has to
+    // finish their work: aggregate the tail after the last tick and move the scenario-level
+    // points to end_time. The delete-and-rebuild is the fallback, not the rule.
+    let finalPass = false;
+    // Whether the run has a perf-test collection status row, i.e. was ticked at all.
+    let ticked = false;
+    if (!isIncremental) {
+      const plan = await this.planFullCollection(originalTestRun, tick, final);
+      ticked = plan.ticked;
+      if (plan.kind === 'skip') {
+        this.logger.info(`⏭️ Perf-test metrics for ${testRunId} are already final (${bucketSizeSeconds}s buckets, ticks covered the run)`);
+        return this.createSuccessResult(
+          { testRunId, metricsCreated: 0, compareConfigsCreated: 0, skipped: 'ticks-final' },
+          Date.now() - startTime
+        );
+      }
+      if (plan.kind === 'tail') {
+        finalPass = true;
+        fromTime = plan.from;
+        toTime = originalTestRun.end_time!;
+        this.logger.info(`🧵 Finishing the ticks' perf-test metrics for ${testRunId}: tail from ${fromTime.toISOString()}`);
+      } else {
+        this.logger.info(`🔁 Rebuilding perf-test metrics for ${testRunId}: ${plan.reason}`);
+      }
+    }
+    // Upsert whenever the run already holds rows for the window: a tick, a force re-fetch, the tail.
+    const upsert = isIncremental || finalPass;
+
+    // A tick re-aggregates a trailing window of the previous one, aligned down to a
+    // bucket boundary: the bucket straddling the tick edge is recomputed from all its
+    // samples instead of keeping whichever half landed second, and a requests_raw row
+    // that arrives after the tick that covered its timestamp (up to ~36 s observed) is
+    // still picked up. On a full-range call (force re-fetch) this clamps to start_time.
+    if (fromTime) {
+      fromTime = alignToBucket(
+        new Date(fromTime.getTime() - PERF_TEST_OVERLAP_SECONDS * 1000),
+        originalTestRun.start_time,
+        bucketSizeSeconds
+      );
+    }
+
+    if (finalPass) {
+      // The tail upserts into, and deletes from, rows the ticks already wrote — both with
+      // predicates below test_run_id, which on a compressed chunk is DML decompression up
+      // to `tuple decompression limit exceeded`. A run analysed within compress_after (2
+      // days) of completing is row store and this finds nothing; a late first analysis
+      // (worker outage, retried job) is what it is for. analyze.ts recompresses in its
+      // finally. The rebuild path does not need it: its DELETE drops whole segments.
+      // ponytail: the interim DELETE at start_time is outside this span on a run crossing a
+      // chunk boundary; `time` is the orderby column so that is a few batches, not a segment.
+      await this.db.decompressChunksForRange('ds_metrics', fromTime!, toTime!);
+    }
+
+    // For incremental collection, set filter times while keeping original start_time for bucket alignment
+    const testRun: TestRunMetadata = {
+      ...originalTestRun,
+      // Keep original start_time for consistent bucket alignment across increments
+      // Use filter times for WHERE clause filtering
+      filter_from_time: fromTime,
+      filter_to_time: toTime,
+    };
+
+    if (fromTime && toTime) {
+      this.logger.info(
+        `📅 Filter time range: ${fromTime.toISOString()} to ${toTime.toISOString()} (bucket origin: ${originalTestRun.start_time.toISOString()})`
+      );
+    }
+
+    const effectiveEndTime = toTime ?? testRun.end_time ?? new Date();
+    const windowSeconds = Math.max(1, (effectiveEndTime.getTime() - (fromTime ?? testRun.start_time).getTime()) / 1000);
+    this.logger.info(
+      `📊 Using ${bucketSizeSeconds}s buckets for a ${windowSeconds.toFixed(0)}s window (estimated ${Math.ceil(windowSeconds / bucketSizeSeconds)} buckets${upsert ? ', upsert' : ''})`
+    );
+
+    // Load Apdex thresholds
+    const apdexThresholds = await this.loadApdexThresholds(
+      testRun.system_under_test_id,
+      testRun.test_environment,
+      testRun.workload,
+      testRun.organization_id || undefined
+    );
+
+    // Initialize counters
+    let metricsCreated = 0;
+    let compareConfigsCreated = 0;
+    const breakdown = {
+      responseTimeMetrics: 0,
+      transactionMetrics: 0,
+      errorMetrics: 0,
+      virtualUserMetrics: 0,
+      apdexScores: 0,
+    };
+
+    // Only the errors and virtual-user processors still build records in JS: they emit
+    // a handful of points per scenario. The requests and transactions processors write
+    // their millions of (bucket x panel) rows with INSERT ... SELECT and never return
+    // them — materialising those is what exhausted the heap.
+    const allMetrics: DsMetricsRecord[] = [];
+    const allCompareConfigs: DsCompareConfigRecord[] = [];
+    const stepTiming: Array<{ step: string; duration: number; count: number }> = [];
+
+    // Full collection replaces the run's perf-test metrics. The DELETE has to happen
+    // before the processors, not inside saveDsMetrics, because they now insert as they
+    // aggregate — a later DELETE would take their rows with it. It preserves every
+    // non-perf-test row: this stage now also runs after a gap-filled incremental
+    // collection (v0.2.95.22), where the Grafana/Dynatrace rows beside it are the only
+    // copy and nothing re-collects them.
+    if (!upsert) {
+      // A SUT import without the optional `raw` group ships the perf-test ds_metrics but
+      // nothing to rebuild them from. Deleting on the promise of a rebuild that finds no
+      // rows would silently strip the run of its metrics and ADAPT results. Same rule as
+      // every other delete-then-rewrite here: the probe stays strict because the statement
+      // deletes.
+      const raw: Array<{ has_rows: boolean }> = await this.db.dataSource.query(
+        `SELECT EXISTS (SELECT 1 FROM requests_raw WHERE test_run_id = $1)
+             OR EXISTS (SELECT 1 FROM transactions WHERE test_run_id = $1) AS has_rows`,
+        [testRunId]
+      );
+      // Postgres always answers one boolean row; only an explicit false means "nothing here".
+      if (raw[0]?.has_rows === false) {
+        this.logger.warn(
+          `⏭️ No requests_raw/transactions for ${testRunId} — keeping its existing perf-test ds_metrics`
+        );
+        return this.createSuccessResult(
+          { testRunId, metricsCreated: 0, compareConfigsCreated: 0, skipped: 'no-raw-data' },
+          Date.now() - startTime
+        );
+      }
+
+      // A rebuild is not atomic (DELETE, then one INSERT ... SELECT per processor). With
+      // the ticks' ranges still recorded, a rebuild that died between the two would be
+      // "tailed" on the next analyze — one minute aggregated, the transaction panels of
+      // the whole run gone, and the run then marked final. With them cleared it can only
+      // rebuild again, or tail from start_time, which is a full-range upsert.
+      if (ticked) {
+        await this.db.resetCollectionStatus(testRunId, 'performance_test', null);
+      }
+
+      const deleteStart = Date.now();
+      const { deleted, restored } = await this.db.deletePerfTestMetricsForRun(
+        testRunId,
+        await this.db.getRunMetricsSourceTypes(testRunId)
+      );
+      this.logger.info(
+        `🧹 Deleted ${deleted} perf-test ds_metrics for ${testRunId} (${restored} other-source rows preserved) in ${Date.now() - deleteStart}ms`
+      );
+    }
+
+    // Process requests_raw table
+    let stepStart = Date.now();
+    const requestsResult = await this.requestsProcessor.process(
+      testRunId,
+      testRun,
+      apdexThresholds,
+      bucketSizeSeconds,
+      upsert
+    );
+    for (let i = 0; i < requestsResult.compareConfigs.length; i++) {
+      allCompareConfigs.push(requestsResult.compareConfigs[i]);
+    }
+    breakdown.responseTimeMetrics += requestsResult.rowsInserted;
+    metricsCreated += requestsResult.rowsInserted;
+    stepTiming.push({
+      step: 'requests-processor',
+      duration: Date.now() - stepStart,
+      count: requestsResult.rowsInserted
+    });
+
+    // Process transactions table
+    stepStart = Date.now();
+    const transactionsResult = await this.transactionsProcessor.process(
+      testRunId,
+      testRun,
+      apdexThresholds,
+      bucketSizeSeconds,
+      upsert
+    );
+    for (let i = 0; i < transactionsResult.compareConfigs.length; i++) {
+      allCompareConfigs.push(transactionsResult.compareConfigs[i]);
+    }
+    breakdown.transactionMetrics += transactionsResult.rowsInserted;
+    metricsCreated += transactionsResult.rowsInserted;
+    stepTiming.push({
+      step: 'transactions-processor',
+      duration: Date.now() - stepStart,
+      count: transactionsResult.rowsInserted
+    });
+
+    // Process requests_error table
+    stepStart = Date.now();
+    const errorsResult = await this.errorsProcessor.process(
+      testRunId,
+      testRun
+    );
+    for (let i = 0; i < errorsResult.metrics.length; i++) {
+      allMetrics.push(errorsResult.metrics[i]);
+    }
+    for (let i = 0; i < errorsResult.compareConfigs.length; i++) {
+      allCompareConfigs.push(errorsResult.compareConfigs[i]);
+    }
+    breakdown.errorMetrics += errorsResult.metrics.length;
+    stepTiming.push({
+      step: 'errors-processor',
+      duration: Date.now() - stepStart,
+      count: errorsResult.metrics.length
+    });
+
+    // Process virtual_users table
+    stepStart = Date.now();
+    const vuResult = await this.virtualUsersProcessor.process(
+      testRunId,
+      testRun
+    );
+    for (let i = 0; i < vuResult.metrics.length; i++) {
+      allMetrics.push(vuResult.metrics[i]);
+    }
+    for (let i = 0; i < vuResult.compareConfigs.length; i++) {
+      allCompareConfigs.push(vuResult.compareConfigs[i]);
+    }
+    breakdown.virtualUserMetrics += vuResult.metrics.length;
+    stepTiming.push({
+      step: 'virtual-users-processor',
+      duration: Date.now() - stepStart,
+      count: vuResult.metrics.length
+    });
+
+    // Save the scenario-level metrics the two small processors built in JS.
+    if (allMetrics.length > 0) {
+      stepStart = Date.now();
+      await this.saveDsMetrics(allMetrics, testRunId, testRun, upsert);
+      metricsCreated += allMetrics.length;
+      stepTiming.push({
+        step: 'save-scenario-metrics',
+        duration: Date.now() - stepStart,
+        count: allMetrics.length
+      });
+    }
+
+    if (finalPass) {
+      // The ticks wrote the scenario-level points at start_time (the one timestamp known
+      // while the run is live); the pass above rewrote them at end_time. Drop the interim.
+      // withTickLock keeps a tick that started before completion from landing after this;
+      // only a Redis failure or a 3 min give-up (both logged as "proceeding without it")
+      // leaves that overlap open, and a second point at start_time is then its residue.
+      await this.db.dataSource.query(
+        `DELETE FROM ds_metrics
+         WHERE test_run_id = $1 AND time = $2 AND panel_id = ANY($3::int[])
+           AND metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')`,
+        [testRunId, testRun.start_time, SCENARIO_PANEL_IDS]
+      );
+    }
+
+    // Not on the tail pass: the ticks already ran both on every minute of the run, and
+    // the analyze that runs the tail is followed by statistics-calculation, which
+    // rewrites the same ds_metric_statistics rows. Re-reading the whole run for a
+    // percentile_agg here would be the dominant cost of the path this exists to shorten.
+    // The rebuild keeps both: a run with no ticks (SUT import) has had neither.
+    if (metricsCreated > 0 && !finalPass) {
+      // Statistics are recomputed from the rows just written rather than from a
+      // second and third copy of them in the heap. See upsertPerfTestStatistics.
+      stepStart = Date.now();
+      await upsertPerfTestStatistics(
+        this.db.dataSource,
+        testRunId,
+        this.dashboardManager.getResolvedDashboardIds(),
+        testRun,
+        this.logger
+      );
+      stepTiming.push({
+        step: 'statistics',
+        duration: Date.now() - stepStart,
+        count: metricsCreated
+      });
+      this.logger.info(`💾 Saved ${metricsCreated} ds_metrics records and computed statistics`);
+
+      // Update dashboard panels based on saved metrics
+      stepStart = Date.now();
+      await this.updateDashboardPanels(testRunId, testRun.start_time, testRun.end_time);
+      stepTiming.push({
+        step: 'update-panels',
+        duration: Date.now() - stepStart,
+        count: 0
+      });
+    }
+
+    // Save all compare configs to database
+    if (allCompareConfigs.length > 0) {
+      stepStart = Date.now();
+      compareConfigsCreated = await this.saveDsCompareConfigs(allCompareConfigs, testRun);
+      stepTiming.push({
+        step: 'save-compare-configs',
+        duration: Date.now() - stepStart,
+        count: compareConfigsCreated
+      });
+      this.logger.info(
+        `📊 Created/updated ${compareConfigsCreated} ds_compare_config records`
+      );
+    }
+
+    // Certify the rows as final so the next analyze skips this stage. `is_complete` is the
+    // marker, and only a full pass sets it — the ticks' recorded range is NOT proof: a
+    // stale-closed run's end_time is its last heartbeat and the scheduler ticks on for
+    // ~30 s after it, so the range routinely reaches past end_time on a run whose scenario
+    // points are still interim. Only on a run the ticks registered: creating the status
+    // row for one they did not (SUT import, legacy run) would make PipelineOrchestrator
+    // treat it as incrementally collected and skip its Grafana/Dynatrace stages next time.
+    // And only when something was written: a pass that produced nothing has nothing to
+    // certify, and certifying it would skip an empty run forever.
+    if (!isIncremental && ticked && metricsCreated > 0) {
+      await this.db.updateCollectedRanges(testRunId, 'performance_test', null, {
+        from: fromTime ?? testRun.start_time,
+        to: testRun.end_time!, // ticked implies planFullCollection saw completed && end_time
+      });
+      await this.db.markCollectionComplete(testRunId, 'performance_test', null);
+    }
+
+    const duration = Date.now() - startTime;
+    const output: PerformanceTestMetricsOutput = {
+      metricsCreated,
+      compareConfigsCreated,
+      breakdown,
+    };
+
+    // Log detailed timing breakdown
+    this.logger.info('⏱️  Performance Test Metrics Pipeline - Step Timing:');
+    stepTiming.forEach(({ step, duration: stepDuration, count }) => {
+      const percentage = ((stepDuration / duration) * 100).toFixed(1);
+      const bar = '█'.repeat(Math.round((stepDuration / duration) * 20));
+      this.logger.info(
+        `   ${step.padEnd(25)} ${stepDuration.toString().padStart(6)}ms ${percentage.padStart(5)}% ${bar} (${count} records)`
+      );
+    });
+
+    this.logger.info(
+      `✅ Performance test metrics collection completed in ${(duration / 1000).toFixed(2)}s`
+    );
+
+    return {
+      success: true,
+      data: output,
+      duration,
+    };
   }
 
   /**
@@ -433,9 +585,102 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       start_time: testRun.startTime,
       ramp_up_time: testRun.analysisStartOffset || 0,
       end_time: testRun.endTime || null,
+      completed: testRun.completed === true,
+      planned_duration: testRun.plannedDuration ?? null,
       organization_id: testRun.organizationId || null,
       team_id: testRun.teamId || null,
     };
+  }
+
+  /**
+   * What a full collection has to do for this run.
+   *
+   * - `skip`: a full pass already finalised the run (`is_complete` on the perf-test status
+   *   row — set here and by the force re-fetch; never by a tick, and no longer by the
+   *   orchestrator's gap check) and its rows sit on the grid its length calls for.
+   * - `tail`: the ticks wrote at that size but nothing finalised the run; aggregate from the
+   *   last tick on and move the scenario-level points to end_time.
+   * - `rebuild`: anything else — no ticks (SUT import, legacy run), the ticks sized from a
+   *   planned duration the run did not honour (aborted, no plan), or rows that are not on the
+   *   final grid. The delete-and-rebuild is what every baseline was produced by, so it is the
+   *   safe answer whenever the cheap checks cannot certify parity.
+   *
+   * The recorded range is deliberately NOT what decides `skip`: a stale-closed run's end_time
+   * is its last heartbeat and the scheduler keeps ticking for ~30 s past it, so the range
+   * reaching end_time says nothing about whether the scenario points were ever moved there.
+   *
+   * The grid probe is what makes the transition safe: ticks from before this rule wrote 1 s
+   * buckets, and a planned duration that changes mid-run changes the tick size with it. Both
+   * leave rows off the final grid. Its blind spot is a tick size that is a multiple of the
+   * final one (60 s ticks on a run that ends up needing 15 s) — the `tick === final` check
+   * catches that on every unfinalised run, and a finalised one was written at `final`.
+   */
+  private async planFullCollection(
+    run: TestRunMetadata,
+    tick: number,
+    final: number | null
+  ): Promise<
+    | { kind: 'skip'; ticked: true }
+    | { kind: 'tail'; ticked: true; from: Date }
+    | { kind: 'rebuild'; ticked: boolean; reason: string }
+  > {
+    if (!run.completed || !run.end_time) {
+      return { kind: 'rebuild', ticked: false, reason: 'run not completed' };
+    }
+    if (final === null) {
+      // Used to throw from calculateBucketSize; silently rebuilding would delete the run's
+      // rows and write nothing back.
+      throw new Error(`Test run ${run.test_run_id} ends at or before it starts`);
+    }
+    const status = await this.db.getCollectionStatus(run.test_run_id, 'performance_test', null);
+    if (!status) {
+      return { kind: 'rebuild', ticked: false, reason: 'no incremental collection' };
+    }
+    if (!status.is_complete && tick !== final) {
+      return { kind: 'rebuild', ticked: true, reason: `ticks wrote ${tick}s buckets, run needs ${final}s` };
+    }
+    if (!(await this.perfTestRowsOnGrid(run, final))) {
+      return { kind: 'rebuild', ticked: true, reason: `rows are not on the ${final}s grid` };
+    }
+    if (status.is_complete) {
+      return { kind: 'skip', ticked: true };
+    }
+    const lastTo = (status.collected_ranges ?? []).reduce<Date | null>((max, r) => {
+      const to = new Date(r.to);
+      return !max || to > max ? to : max;
+    }, null);
+    // A range past end_time (the stale-close case) still leaves the scenario points to move.
+    const from = lastTo ? new Date(Math.min(lastTo.getTime(), run.end_time.getTime())) : run.start_time;
+    return { kind: 'tail', ticked: true, from };
+  }
+
+  /**
+   * Whether the run HAS perf-test bucket rows and every one sits on `start_time + k * bucket`.
+   * Zero rows fail it on purpose — a run the ticks never wrote must rebuild, whatever its
+   * status row says. The scenario-level panels are exempt: their single point sits at
+   * start_time or end_time.
+   * A miss is cheap (first off-grid row); a pass scans the run's perf-test rows, a few
+   * hundred thousand on a large run. The arithmetic is timestamptz-only on purpose — the
+   * writers' `$5::timestamp` origin drops the session zone (see TODOS.md), and any
+   * disagreement here falls to the rebuild, never to a wrong skip.
+   */
+  private async perfTestRowsOnGrid(run: TestRunMetadata, bucketSizeSeconds: number): Promise<boolean> {
+    const rows: Array<{ on_grid: boolean }> = await this.db.dataSource.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM ds_metrics m
+         WHERE m.test_run_id = $1
+           AND m.metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')
+           AND m.panel_id <> ALL($3::int[])
+       ) AND NOT EXISTS (
+         SELECT 1 FROM ds_metrics m
+         WHERE m.test_run_id = $1
+           AND m.metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')
+           AND m.panel_id <> ALL($3::int[])
+           AND EXTRACT(EPOCH FROM (m.time - $2::timestamptz))::bigint % $4 <> 0
+       ) AS on_grid`,
+      [run.test_run_id, run.start_time, SCENARIO_PANEL_IDS, bucketSizeSeconds]
+    );
+    return rows[0]?.on_grid === true;
   }
 
   /**
@@ -543,17 +788,18 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
    * Save ds_metrics records to database using parallel batch inserts.
    *
    * Two modes:
-   * - **Full collection** (isIncremental=false): plain INSERT with large batch sizes — the
-   *   run-wide DELETE happens in `execute()`, before the requests/transactions processors insert. This is 2-3x faster because
-   *   PostgreSQL skips unique-index conflict checking and lock contention is eliminated.
-   * - **Incremental collection** (isIncremental=true): Use INSERT...ON CONFLICT (UPSERT)
-   *   with smaller batch sizes to handle overlapping time ranges safely.
+   * - **Rebuild** (upsert=false): plain INSERT with large batch sizes — the run-wide DELETE
+   *   happens in `execute()`, before the requests/transactions processors insert. This is
+   *   2-3x faster because PostgreSQL skips unique-index conflict checking and lock
+   *   contention is eliminated.
+   * - **Upsert** (upsert=true): INSERT...ON CONFLICT with smaller batch sizes, whenever the
+   *   run already holds rows for the window — a tick, a force re-fetch, the final tail pass.
    */
   private async saveDsMetrics(
     metrics: DsMetricsRecord[],
     testRunId: string,
     testRunMetadata?: TestRunMetadata,
-    isIncremental: boolean = true
+    upsert: boolean = true
   ): Promise<void> {
     if (metrics.length === 0) {
       return;
@@ -562,13 +808,13 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
     // The run-wide DELETE for full collection happens in execute(), before the
     // requests/transactions processors insert.
 
-    // Full collection: plain INSERT (no conflict check), larger batches
-    // Incremental: INSERT...ON CONFLICT (upsert), smaller batches for lock safety
+    // Rebuild: plain INSERT (no conflict check), larger batches
+    // Upsert: INSERT...ON CONFLICT, smaller batches for lock safety
     // PostgreSQL max params: 65535; each record uses 20 params
     // Plain INSERT: 3000 rows × 20 = 60000 params (under limit, no lock contention)
     // ON CONFLICT: 1000 rows × 20 = 20000 params (smaller to reduce lock contention)
-    const batchSize = isIncremental ? 1000 : 3000;
-    const maxConcurrentBatches = isIncremental ? 4 : 6;
+    const batchSize = upsert ? 1000 : 3000;
+    const maxConcurrentBatches = upsert ? 4 : 6;
 
     // Create all batch insert operations
     const batchOperations: Array<() => Promise<void>> = [];
@@ -612,7 +858,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         });
 
         let query: string;
-        if (isIncremental) {
+        if (upsert) {
           query = `
             INSERT INTO ds_metrics (
               test_run_id, application_dashboard_id, metrics_source_id, dashboard_uid, panel_id, time,

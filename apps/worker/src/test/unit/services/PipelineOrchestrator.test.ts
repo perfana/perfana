@@ -1047,8 +1047,8 @@ describe('PipelineOrchestrator', () => {
 
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
         {
-          source_type: 'performance_test',
-          source_id: '', // NOT NULL sentinel since #146 — what the DB actually holds
+          source_type: 'grafana',
+          source_id: 'g1',
           is_complete: false, // not yet marked complete
           collected_ranges: [],
           failed_ranges: [],
@@ -1060,7 +1060,9 @@ describe('PipelineOrchestrator', () => {
         workload: 'load',
         annotations: [],
       });
-      mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([]);
+      mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([
+        { grafanaInstanceId: 'g1' },
+      ]);
 
       // isCollectionComplete: false then true after marking
       mockGapService.isCollectionComplete
@@ -1078,11 +1080,7 @@ describe('PipelineOrchestrator', () => {
       });
 
       // Assert — source with no gaps is marked complete
-      expect(mockGapService.markSourceComplete).toHaveBeenCalledWith(
-        testRunId,
-        'performance_test',
-        ''
-      );
+      expect(mockGapService.markSourceComplete).toHaveBeenCalledWith(testRunId, 'grafana', 'g1');
       expect(result.success).toBe(true);
     });
 
@@ -1100,9 +1098,16 @@ describe('PipelineOrchestrator', () => {
           failed_ranges: [],
         },
         {
+          source_type: 'grafana',
+          source_id: 'g2',
+          is_complete: false,
+          collected_ranges: [],
+          failed_ranges: [],
+        },
+        {
           source_type: 'performance_test',
           source_id: '', // NOT NULL sentinel since #146 — what the DB actually holds
-          is_complete: false,
+          is_complete: false, // never marked here: the perf-test stage finalises it itself
           collected_ranges: [],
           failed_ranges: [],
         },
@@ -1115,9 +1120,10 @@ describe('PipelineOrchestrator', () => {
       });
       mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([
         { grafanaInstanceId: 'g1' },
+        { grafanaInstanceId: 'g2' },
       ]);
 
-      // isCollectionComplete: false then true after marking performance_test complete
+      // isCollectionComplete: false then true after marking g2 complete
       mockGapService.isCollectionComplete
         .mockResolvedValueOnce(false)
         .mockResolvedValueOnce(true);
@@ -1129,13 +1135,10 @@ describe('PipelineOrchestrator', () => {
       // Act
       const result = await orchestrator.executeSequentialPipeline(testRunId, { stages });
 
-      // Assert — only performance_test marked complete (grafana was already complete)
+      // Assert — only g2 marked complete: g1 already was, and the perf-test row is the
+      // perf-test stage's own finalisation marker, never certified here.
       expect(mockGapService.markSourceComplete).toHaveBeenCalledTimes(1);
-      expect(mockGapService.markSourceComplete).toHaveBeenCalledWith(
-        testRunId,
-        'performance_test',
-        ''
-      );
+      expect(mockGapService.markSourceComplete).toHaveBeenCalledWith(testRunId, 'grafana', 'g2');
       expect(result.success).toBe(true);
     });
 
@@ -1146,8 +1149,8 @@ describe('PipelineOrchestrator', () => {
 
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
         {
-          source_type: 'performance_test',
-          source_id: '', // NOT NULL sentinel since #146 — what the DB actually holds
+          source_type: 'grafana',
+          source_id: 'g1',
           is_complete: false,
           collected_ranges: [],
           failed_ranges: [],
@@ -1159,7 +1162,7 @@ describe('PipelineOrchestrator', () => {
         workload: 'load',
         annotations: [],
       });
-      mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([]);
+      mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([{ grafanaInstanceId: 'g1' }]);
 
       // detectGaps returns empty — performance_test has no gaps, should be marked complete
       // but markSourceComplete throws
@@ -1182,7 +1185,7 @@ describe('PipelineOrchestrator', () => {
 
       // Assert — error logged, pipeline continues
       expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to mark performance_test/ as complete')
+        expect.stringContaining('Failed to mark grafana/g1 as complete')
       );
       expect(result.success).toBe(true);
     });
@@ -1592,9 +1595,10 @@ describe('PipelineOrchestrator', () => {
       expect(mockPipelines.metrics.execute).not.toHaveBeenCalled();
     });
 
-    it('marks an incomplete perf-test row complete without collecting it — the rebuild covers it', async () => {
-      // detectGaps never reports performance_test (its ticks are live-view data, not
-      // collection), so the row lands in the "no gaps" branch and is marked complete there.
+    it('leaves an incomplete perf-test row alone — the perf-test stage finalises it itself', async () => {
+      // detectGaps never reports performance_test, so the row would land in the "no gaps"
+      // branch; certifying it there, before the perf-test stage reads is_complete as its
+      // finalisation marker, made every ticked run skip its own finalisation.
       const testRunId = 'test-perf-gap';
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
         { source_type: 'performance_test', source_id: '', is_complete: false, collected_ranges: [], failed_ranges: [] },
@@ -1613,7 +1617,7 @@ describe('PipelineOrchestrator', () => {
         errorHandling: 'continue',
       });
 
-      expect(mockGapService.markSourceComplete).toHaveBeenCalledWith(testRunId, 'performance_test', '');
+      expect(mockGapService.markSourceComplete).not.toHaveBeenCalled();
       expect(mockPipelines.incrementalMetrics.execute).not.toHaveBeenCalled();
       expect(mockPipelines.performanceTestMetrics.execute).toHaveBeenCalledWith({ testRunId });
     });

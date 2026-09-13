@@ -169,6 +169,13 @@ export class PipelineOrchestrator {
         if (status.is_complete) {
           continue; // Already complete
         }
+        // detectGaps never reports the perf-test row, so "no gaps" says nothing about it.
+        // Its is_complete is the perf-test stage's finalisation marker (see
+        // PerformanceTestMetricsPipeline.planFullCollection): certifying it here, before that
+        // stage runs, made every ticked run skip its own finalisation.
+        if (status.source_type === 'performance_test') {
+          continue;
+        }
 
         const sourceKey = collectionSourceKey(status.source_type, status.source_id);
         if (!sourcesWithGaps.has(sourceKey)) {
@@ -498,11 +505,13 @@ export class PipelineOrchestrator {
         'performance-test-metrics',
         'metrics-collection'
       ];
-      // performance-test-metrics is NOT skippable. The ticks write 1 s buckets and one
-      // scenario-level point per minute; the analyze-time rebuild writes run-sized buckets
-      // and one run-total point, which is what every baseline holds. Skipping it made ADAPT
-      // compare per-minute error counts against run totals. The rebuild reads requests_raw
-      // in this database and preserves the other sources' rows, so it is always safe to run.
+      // performance-test-metrics is NOT skipped here: the pipeline decides for itself
+      // (PerformanceTestMetricsPipeline.planFullCollection). When the ticks wrote the run
+      // at the bucket size its length calls for it only aggregates the tail after the last
+      // tick; when they did not — no ticks, an aborted run, rows off the grid — it deletes
+      // and rebuilds, which reads requests_raw in this database and preserves the other
+      // sources' rows. Skipping it blindly made ADAPT compare per-minute error counts
+      // against run totals (v0.2.95.22).
       const skippableCollectionStages = metricCollectionStages.filter(
         (stage) => stage !== 'performance-test-metrics'
       );
@@ -528,9 +537,9 @@ export class PipelineOrchestrator {
           // which reads as a stage stuck at "Metric collection" for ten minutes and then
           // `tuple decompression limit exceeded`. Decompress the run's span first, the way
           // the force re-fetch does; on a fresh run every chunk is row store and this is a
-          // no-op. The chunks go back in analyze.ts's finally. The perf-test rebuild on the
-          // skipped path does not need it: its DELETE drops the run's compressed segments
-          // outright, so the plain INSERTs that follow have no batch to decompress.
+          // no-op. The chunks go back in analyze.ts's finally. The perf-test stage on the
+          // skipped path looks after itself: its rebuild's DELETE drops whole compressed
+          // segments and needs nothing, and its tail pass decompresses its own span.
           await this.decompressRunSpanForCollection(testRunId);
         }
       }

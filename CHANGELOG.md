@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.23] - 2026-09-13
+
+### Changed
+- **A finished JMeter or Gatling run no longer rebuilds its performance-test metrics from scratch at analysis time.** The per-minute ticks that store metrics while a test is running now write exactly what the analysis rebuild used to write, so the rebuild has become a fallback. Buckets are sized from the planned duration the test posts at start (60 s when it posts none) instead of from the ~60 s tick window, which had produced 1-second buckets; each tick re-aggregates a trailing minute aligned to the bucket grid, so the bucket straddling a tick edge and a request row that arrives up to a minute late are both computed from all their samples; and the scenario-level error and thread counts are counted over the whole run so far on every tick rather than over that minute. At analysis, the stage finishes the ticks' work — aggregates the tail after the last tick and moves the scenario-level points to the run's end — instead of deleting and rebuilding 100 s (BMS) to 7 min (SONAR) of metrics, and on a later re-analysis it skips entirely. It still rebuilds when the ticks could not have produced the final shape: a run that stopped short of its plan or posted none, a run whose rows predate this release (they sit off the final grid and are detected as such), or a run that was never ticked at all (SUT import, legacy run).
+- **Finalisation is recorded on the perf-test collection status row and set only by the analysis stage and a force re-fetch.** The gap check that runs before every analysis no longer marks the perf-test row complete (it never has gaps by construction, so it was being certified before the stage that finalises it had run), and a run's collection is considered complete without that row, the same way coverage already ignored it. The stage also holds the live tick's lock while it runs, so a tick that started just before the run completed cannot land after it, and it resets the ticks' recorded ranges before a full rebuild so a rebuild that dies half-way is rebuilt again next time rather than "finished" from its last minute.
+
+### Fixed
+- **A run whose end time was not after its start now fails the perf-test stage with a clear error instead of silently deleting its metrics and writing nothing back.**
+
 ## [0.2.95.22] - 2026-09-13
 
 ### Fixed

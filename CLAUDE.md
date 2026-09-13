@@ -827,8 +827,62 @@ Three things to hold on to:
    already `completed` exits without collecting, so the one queued just before completion
    cannot race the rebuild. The rebuild also refuses to delete when the run has no
    `requests_raw`/`transactions` to rebuild from — a SUT import without the `raw` group — and
-   keeps the imported rows instead. Making the ticks produce the rebuild's shape, so the
-   rebuild can be skipped when the bucket size would not change, is the open item in TODOS.md.
+   keeps the imported rows instead.
+
+   **Since v0.2.95.23 the ticks write the rebuild's shape, and the stage rebuilds only when
+   they did not.** One bucket rule, `perfTestBucketSizes` in `apps/worker/src/utils/time-bucketing.ts`:
+   a live tick sizes from `planned_duration` (60 s when the test posted none), a completed run
+   from its actual length — keyed on `completed`, never on `end_time`, which the keep-alive
+   update moves to "now" on every post. Every tick re-aggregates `PERF_TEST_OVERLAP_SECONDS`
+   (60 s) of the previous window aligned down to a bucket boundary, so the bucket straddling
+   the tick edge and a `requests_raw` row that lands late are recomputed from all their
+   samples. The scenario-level `Error Count` / `Active Threads` points are counted from
+   `start_time` on every tick and written at `start_time` (the one timestamp a live run knows;
+   `scenarioMetricTime`), and moved to `end_time` by the full pass. At analyze,
+   `PerformanceTestMetricsPipeline.planFullCollection` picks one of three: **skip** (the
+   perf-test status row is `is_complete` and the rows sit on the final grid), **tail** (same
+   size, not finalised: decompress the tail's span — a no-op on a fresh run, and what saves a
+   late first analysis on a compressed chunk from the DML limit — aggregate from the last
+   tick, drop the interim points; it does NOT re-run `upsertPerfTestStatistics` or the panel
+   update, since the ticks did both every minute and `statistics-calculation` follows in the
+   same analyze), or **rebuild** (no status row, `tick !== final` — an aborted run or no plan
+   — or rows off the grid). Six things about it hold the design together:
+
+   - **`is_complete` is the finalisation marker and only a full pass sets it** (this stage
+     after writing anything, and the force re-fetch). `PipelineOrchestrator.checkAndFillMetricGaps`
+     used to be a third writer — it marks every source `detectGaps` does not report, and
+     `detectGaps` never reports the perf-test row — so it now skips that row, and
+     `isCollectionComplete` ignores it the way `calculateCoverage` already did. The grid probe
+     also refuses a run with zero perf-test rows, so a stray `is_complete` cannot certify an
+     empty run. The ticks' recorded range is NOT proof:
+     a stale-closed run's `end_time` is its last heartbeat and the scheduler ticks on for
+     ~30 s past it, so the range routinely reaches past `end_time` on a run whose scenario
+     points are still interim at `start_time` — where `ramp_up` hides them from statistics
+     and ADAPT sees the metric as absent. Deciding `skip` from the range shipped that bug to
+     review and was caught there.
+   - **The grid probe is what makes the transition safe**: pre-v0.2.95.23 ticks wrote 1 s
+     buckets, which fail it and rebuild as before. It is an `EXISTS` over the run's perf-test
+     rows (~8 ms on a miss, 0.5–1.1 s on a 1.9 M-row pass — the planner scans the run's rows
+     in its chunk whichever perf-test predicate is used; scoping by `application_dashboard_id`
+     was measured and changes nothing). Its blind spot is a tick size that is a multiple of
+     the final one; `tick !== final` covers it on every unfinalised run, and a finalised run
+     was written at `final`. A `planned_duration` that changes mid-run to a multiple of the
+     old size is the one way through — see TODOS.md.
+   - **The full pass holds the tick's key lock** (`perfTestTickLockKey`, up to 3 min). The
+     worker stops ticks that *start* after completion; one that started before can land after
+     the pass, overwrite a finished bucket with its partial one and put the interim point
+     back — permanently, now that the pass marks the run final. The lock is best-effort: a
+     Redis error or a holder past 3 min is logged as `proceeding without it` and the pass
+     runs unlocked, so a second scenario point at `start_time` after such a warning is the
+     expected residue, not a lock bug.
+   - **A rebuild on a ticked run resets the status row before its DELETE.** The rebuild is
+     not atomic; with the ticks' ranges still recorded, one that died between DELETE and the
+     transactions INSERT would be *tailed* from the last tick next time and then certified.
+   - **Nothing is certified when nothing was written**, or an empty run skips forever.
+   - The range is recorded only when a status row already exists (creating one for a SUT
+     import would make the orchestrator skip its Grafana/Dynatrace stages next time), and
+     `PipelineOrchestrator` never skips this stage itself — the decision lives in the pipeline
+     so the force re-fetch, the ticks and the analyze all share it.
 4. **A tick fails only when its collector throws; a panel or query that answers with an error
    does not fail it.** Both collectors save the data of the panels/queries that succeeded and record
    the range as collected. Grafana carries the per-panel errors in the tick result's `errors[]`
@@ -896,7 +950,7 @@ Four rules for anything in this path:
 4. **"Complete" is sticky and suppresses re-collection — never set it on a maybe.** Only a
    force-refetch reevaluate clears `is_complete`, and `PipelineOrchestrator` skips
    `dynatrace-collection`, `panels-processing` and `metrics-collection` whenever the run had an
-   incremental collection at all (`performance-test-metrics` always runs, v0.2.95.22). `metricsDocuments.length === 0` is the SAME signal for "ran
+   incremental collection at all (`performance-test-metrics` always runs and decides for itself whether to rebuild, v0.2.95.22/23). `metricsDocuments.length === 0` is the SAME signal for "ran
    fine, no data" and "every query failed" — `executeBatchQueries` catches per query and returns
    `{ result: null, error }`, and `DataProcessor` only builds a document when `!result.error` — so
    completing there would make an expired token permanent. A Dynatrace config is marked complete only

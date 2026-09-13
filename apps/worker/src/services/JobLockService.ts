@@ -43,6 +43,14 @@ interface LockMetadata {
  * This prevents race conditions and ensures only one analysis job
  * runs per scope at a time.
  */
+/**
+ * Key lock a live perf-test tick holds for its duration (`incremental-metrics.ts`), and
+ * that the analyze-time full pass takes so a tick that started before completion cannot
+ * land after it and overwrite a finished bucket with a partial one.
+ */
+export const perfTestTickLockKey = (testRunId: string): string => `job:lock:perf-test-metrics:${testRunId}`;
+export const PERF_TEST_TICK_LOCK_TTL_SECONDS = 15 * 60;
+
 export class JobLockService {
   constructor(private readonly redis: Redis) {
     logger.info('🔒 JobLockService initialized');

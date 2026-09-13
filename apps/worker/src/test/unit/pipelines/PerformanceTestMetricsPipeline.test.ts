@@ -34,6 +34,15 @@ vi.mock('../../../pipelines/helpers/dashboard-manager.js');
 vi.mock('../../../pipelines/helpers/requests-processor.js');
 vi.mock('../../../pipelines/helpers/transactions-processor.js');
 vi.mock('../../../pipelines/helpers/scenario-processors.js');
+const mockLock = { acquireKeyLock: vi.fn(async () => true), releaseKeyLock: vi.fn(async () => true) };
+vi.mock('../../../config/redis-pool.js', () => ({
+  acquireRedisConnection: vi.fn(async () => ({})),
+  releaseRedisConnection: vi.fn(),
+}));
+vi.mock('../../../services/JobLockService.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../services/JobLockService.js')>()),
+  JobLockService: vi.fn(() => mockLock),
+}));
 
 import { DashboardManager } from '../../../pipelines/helpers/dashboard-manager.js';
 import { RequestsProcessor } from '../../../pipelines/helpers/requests-processor.js';
@@ -166,6 +175,11 @@ describe('PerformanceTestMetricsPipeline', () => {
       query: vi.fn().mockResolvedValue([]),
       getRunMetricsSourceTypes: vi.fn().mockResolvedValue(['performance_test']),
       deletePerfTestMetricsForRun: vi.fn().mockResolvedValue({ deleted: 0, restored: 0 }),
+      getCollectionStatus: vi.fn().mockResolvedValue(null),
+      updateCollectedRanges: vi.fn().mockResolvedValue(undefined),
+      decompressChunksForRange: vi.fn().mockResolvedValue(undefined),
+      resetCollectionStatus: vi.fn().mockResolvedValue(undefined),
+      markCollectionComplete: vi.fn().mockResolvedValue(undefined),
     };
 
     // Ensure getDatabaseService returns our mock
@@ -553,27 +567,33 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(incrementalLogCalls.length).toBe(0);
     });
 
-    it('should use 1s buckets for a live incremental tick', async () => {
+    it('sizes a live tick from the planned duration, not from the tick window', async () => {
+      // A 3 h plan calls for 60 s buckets; the ~60 s tick window used to resolve to 1 s.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ plannedDuration: 10800, completed: false })
+      );
+
       await pipeline.execute({
         testRunId: 'tr-001',
         fromTime: new Date('2024-01-01T00:10:00Z'),
         toTime: new Date('2024-01-01T00:11:00Z'),
       });
 
-      // The "1s buckets" log message should appear
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('1s buckets')
-      );
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('60s buckets'));
+      expect(mockLogger.info).not.toHaveBeenCalledWith(expect.stringContaining('1s buckets'));
     });
 
     it('should not use 1s buckets when the "increment" spans the whole run', async () => {
       // A force-refetch reevaluate calls the incremental path with the run's full
       // range (simple-orchestrate-reevaluate-batch.ts). 1s buckets over 3h produced
       // ~30x the rows of the full path and OOM'd the worker.
+      // A completed run sizes from its actual length (3 h → 60 s), whatever it planned.
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
         createMockTestRun({
           startTime: new Date('2024-01-01T00:00:00Z'),
           endTime: new Date('2024-01-01T03:00:00Z'),
+          completed: true,
+          plannedDuration: 600, // would be 5 s ticks
         })
       );
 
@@ -587,7 +607,7 @@ describe('PerformanceTestMetricsPipeline', () => {
         expect.stringContaining('60s buckets for a 10800s window')
       );
       expect(mockLogger.info).not.toHaveBeenCalledWith(
-        expect.stringContaining('1s buckets')
+        expect.stringContaining('5s buckets')
       );
     });
   });
@@ -1147,11 +1167,12 @@ describe('PerformanceTestMetricsPipeline', () => {
   // -------------------------------------------------------------------------
 
   describe('Bucket Size Calculation', () => {
-    it('should log bucket size based on elapsed time for full collection', async () => {
-      // 1-hour test run → elapsed = 3600s
+    it('sizes a rebuild from the completed run\'s actual length', async () => {
+      // 1-hour test run → 3600 s / 250 points → 15 s buckets
       const run = createMockTestRun({
         startTime: new Date('2024-01-01T00:00:00Z'),
         endTime: new Date('2024-01-01T01:00:00Z'),
+        completed: true,
       });
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(run);
       mockDataSource.query.mockResolvedValue([]);
@@ -1159,24 +1180,15 @@ describe('PerformanceTestMetricsPipeline', () => {
       await pipeline.execute({ testRunId: 'tr-001' });
 
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringMatching(/\d+s buckets for a 3600s window/)
+        expect.stringMatching(/15s buckets for a 3600s window/)
       );
     });
 
-    it('should default to 3600s elapsed time when test run has no endTime', async () => {
-      const run = createMockTestRun({ endTime: null });
-      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(run);
-      mockDataSource.query.mockResolvedValue([]);
-
-      await pipeline.execute({ testRunId: 'tr-001' });
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringMatching(/3600s window/)
+    it('falls back to 60 s buckets on a live tick when the test posted no planned duration', async () => {
+      // end_time is set on a live run too (the keep-alive moves it), so it must not be used.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ completed: false, plannedDuration: undefined })
       );
-    });
-
-    it('should report 1s buckets for a live incremental tick', async () => {
-      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
       mockDataSource.query.mockResolvedValue([]);
 
       await pipeline.execute({
@@ -1185,9 +1197,405 @@ describe('PerformanceTestMetricsPipeline', () => {
         toTime: new Date('2024-01-01T00:11:00Z'),
       });
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('1s buckets')
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('60s buckets'));
+    });
+
+    it('re-aggregates a trailing window aligned to the bucket grid on a tick', async () => {
+      // 3 h plan → 60 s buckets. Tick from 00:10:30 minus 60 s overlap = 00:09:30, aligned
+      // down to 00:09:00: the straddling bucket and the one before it are recomputed.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ plannedDuration: 10800, completed: false })
       );
+      mockDataSource.query.mockResolvedValue([]);
+
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:10:30Z'),
+        toTime: new Date('2024-01-01T00:11:30Z'),
+      });
+
+      const testRunArg = mockRequestsProcessorInstance.process.mock.calls[0][1];
+      expect(testRunArg.filter_from_time).toEqual(new Date('2024-01-01T00:09:00Z'));
+      expect(testRunArg.filter_to_time).toEqual(new Date('2024-01-01T00:11:30Z'));
+      expect(mockRequestsProcessorInstance.process.mock.calls[0][4]).toBe(true); // upsert
+    });
+
+    it('does not widen below start_time on a full-range force re-fetch', async () => {
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ plannedDuration: 3600, completed: true })
+      );
+      mockDataSource.query.mockResolvedValue([]);
+
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:00:00Z'),
+        toTime: new Date('2024-01-01T01:00:00Z'),
+      });
+
+      const testRunArg = mockRequestsProcessorInstance.process.mock.calls[0][1];
+      expect(testRunArg.filter_from_time).toEqual(new Date('2024-01-01T00:00:00Z'));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 12b. Full collection on a run the ticks already wrote
+  // -------------------------------------------------------------------------
+
+  describe('Full collection after live ticks', () => {
+    // 1 h run with a 1 h plan: tick and final both resolve to 15 s.
+    const tickedRun = () =>
+      createMockTestRun({
+        startTime: new Date('2024-01-01T00:00:00Z'),
+        endTime: new Date('2024-01-01T01:00:00Z'),
+        plannedDuration: 3600,
+        completed: true,
+      });
+    const status = (lastTo: string, is_complete = false) => ({
+      collected_ranges: [{ from: '2024-01-01T00:00:00Z', to: lastTo }],
+      is_complete,
+    });
+    // Answer the grid probe; everything else (thresholds, deletes) gets an empty result.
+    const onGrid = (value: boolean) =>
+      mockDataSource.query.mockImplementation(async (sql: string) =>
+        sql.includes('AS on_grid') ? [{ on_grid: value }] : []
+      );
+
+    beforeEach(() => {
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(tickedRun());
+    });
+
+    it('aggregates only the tail after the last tick and finalises the rows', async () => {
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T00:58:40Z'));
+      onGrid(true);
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(result.success).toBe(true);
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
+      // Tail from 00:58:40 - 60 s overlap, aligned down to the 15 s grid → 00:57:30, to end_time.
+      const testRunArg = mockRequestsProcessorInstance.process.mock.calls[0][1];
+      expect(testRunArg.filter_from_time).toEqual(new Date('2024-01-01T00:57:30Z'));
+      expect(testRunArg.filter_to_time).toEqual(new Date('2024-01-01T01:00:00Z'));
+      expect(mockRequestsProcessorInstance.process.mock.calls[0][4]).toBe(true); // upsert
+      // The tail's upserts and delete carry non-segmentby predicates: a late first analysis
+      // on a compressed chunk would hit the DML decompression limit without this.
+      expect(mockDatabaseService.decompressChunksForRange).toHaveBeenCalledWith(
+        'ds_metrics', new Date('2024-01-01T00:57:30Z'), new Date('2024-01-01T01:00:00Z')
+      );
+      // The ticks' interim scenario-level points at start_time are dropped — after the
+      // end_time points were saved, so a failed save leaves the interim point, not none.
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM ds_metrics'),
+        ['tr-001', new Date('2024-01-01T00:00:00Z'), [301, 302, 303]]
+      );
+      const deleteCall = mockDataSource.query.mock.calls.findIndex((c: unknown[]) => String(c[0]).includes('DELETE FROM ds_metrics'));
+      const deleteOrder = mockDataSource.query.mock.invocationCallOrder[deleteCall];
+      const saveOrder = mockWriteDataSource.query.mock.invocationCallOrder[0];
+      expect(deleteOrder).toBeGreaterThan(saveOrder);
+      // The ticks ran statistics and the panel update every minute, and statistics-calculation
+      // follows in the same analyze: the tail does not re-read the whole run for either.
+      expect(mockDataSource.query).not.toHaveBeenCalledWith(expect.stringContaining('ds_metric_statistics'), expect.anything());
+      // The range is recorded to end_time and the run marked final so the next analyze skips.
+      expect(mockDatabaseService.updateCollectedRanges).toHaveBeenCalledWith(
+        'tr-001', 'performance_test', null,
+        { from: new Date('2024-01-01T00:57:30Z'), to: new Date('2024-01-01T01:00:00Z') }
+      );
+      expect(mockDatabaseService.markCollectionComplete).toHaveBeenCalledWith('tr-001', 'performance_test', null);
+      // Held the tick's key lock for the pass, so an in-flight tick cannot land after it.
+      expect(mockLock.acquireKeyLock).toHaveBeenCalledWith('job:lock:perf-test-metrics:tr-001', expect.any(String), 900);
+      expect(mockLock.releaseKeyLock).toHaveBeenCalled();
+    });
+
+    it('tails, not skips, when the ticks ran past end_time but nothing finalised the run', async () => {
+      // A stale-closed run's end_time is its last heartbeat; the scheduler ticks on for ~30 s.
+      // The recorded range therefore reaches past end_time while the scenario points are
+      // still interim at start_time. Only is_complete says a full pass moved them.
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T01:00:25Z'));
+      onGrid(true);
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(result.data).not.toMatchObject({ skipped: 'ticks-final' });
+      // Tail from end_time (clamped) minus the overlap, aligned: 00:59:00.
+      const testRunArg = mockRequestsProcessorInstance.process.mock.calls[0][1];
+      expect(testRunArg.filter_from_time).toEqual(new Date('2024-01-01T00:59:00Z'));
+      expect(mockDataSource.query).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM ds_metrics'), expect.anything());
+      expect(mockDatabaseService.markCollectionComplete).toHaveBeenCalled();
+    });
+
+    it('does not certify a pass that wrote nothing', async () => {
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T00:58:40Z'));
+      onGrid(true);
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(mockDatabaseService.updateCollectedRanges).not.toHaveBeenCalled();
+      expect(mockDatabaseService.markCollectionComplete).not.toHaveBeenCalled();
+    });
+
+    it('fails rather than emptying a run whose end_time is not after its start', async () => {
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ ...tickedRun(), endTime: new Date('2024-01-01T00:00:00Z') })
+      );
+
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(result.success).toBe(false);
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
+    });
+
+    it('skips entirely when a full pass already finalised the run', async () => {
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T01:00:00Z', true));
+      onGrid(true);
+
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(result.success).toBe(true);
+      expect(result.data).toMatchObject({ skipped: 'ticks-final' });
+      expect(mockRequestsProcessorInstance.process).not.toHaveBeenCalled();
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
+    });
+
+    it('rebuilds when the ticks sized from a planned duration the run did not honour', async () => {
+      // Planned 3 h (60 s ticks), aborted after 1 h (15 s final).
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ ...tickedRun(), plannedDuration: 10800 })
+      );
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T00:58:40Z'));
+      onGrid(true);
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('ticks wrote 60s buckets, run needs 15s'));
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).toHaveBeenCalled();
+      // The rebuild's DELETE drops whole segments; nothing to decompress.
+      expect(mockDatabaseService.decompressChunksForRange).not.toHaveBeenCalled();
+      // The ticks' ranges are cleared before the DELETE, so a rebuild that dies half-way is
+      // rebuilt (or tailed from start_time) next time, never tailed from the last tick.
+      expect(mockDatabaseService.resetCollectionStatus).toHaveBeenCalledWith('tr-001', 'performance_test', null);
+      const resetOrder = mockDatabaseService.resetCollectionStatus.mock.invocationCallOrder[0];
+      const deleteOrder = mockDatabaseService.deletePerfTestMetricsForRun.mock.invocationCallOrder[0];
+      expect(resetOrder).toBeLessThan(deleteOrder);
+      expect(mockRequestsProcessorInstance.process.mock.calls[0][4]).toBe(false); // plain insert
+      // A rebuild on a ticked run records its range too, so a re-analyse can skip.
+      expect(mockDatabaseService.updateCollectedRanges).toHaveBeenCalledWith(
+        'tr-001', 'performance_test', null,
+        { from: new Date('2024-01-01T00:00:00Z'), to: new Date('2024-01-01T01:00:00Z') }
+      );
+    });
+
+    it('rebuilds when the existing rows are off the final grid (ticks from before this rule)', async () => {
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T00:58:40Z'));
+      onGrid(false);
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('not on the 15s grid'));
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).toHaveBeenCalled();
+    });
+
+    it('rebuilds, and records nothing, when the run was never ticked', async () => {
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(null);
+      mockDataSource.query.mockResolvedValue([]);
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).toHaveBeenCalled();
+      // Creating the status row would make the orchestrator skip Grafana/Dynatrace next time.
+      expect(mockDatabaseService.updateCollectedRanges).not.toHaveBeenCalled();
+    });
+
+    it('tails from start_time when the status row holds no ranges yet', async () => {
+      // Registered by the scheduler but never ticked to completion: nothing to skip past,
+      // so the whole run is aggregated as an upsert and recorded from its start.
+      mockDatabaseService.getCollectionStatus.mockResolvedValue({ collected_ranges: [] });
+      onGrid(true);
+
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(result.success).toBe(true);
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
+      const testRunArg = mockRequestsProcessorInstance.process.mock.calls[0][1];
+      expect(testRunArg.filter_from_time).toEqual(new Date('2024-01-01T00:00:00Z'));
+      expect(testRunArg.filter_to_time).toEqual(new Date('2024-01-01T01:00:00Z'));
+      expect(mockRequestsProcessorInstance.process.mock.calls[0][4]).toBe(true);
+      expect(mockDatabaseService.updateCollectedRanges).toHaveBeenCalledWith(
+        'tr-001', 'performance_test', null,
+        { from: new Date('2024-01-01T00:00:00Z'), to: new Date('2024-01-01T01:00:00Z') }
+      );
+    });
+
+    it('skips a re-analyse of an aborted run once its rebuild recorded the range', async () => {
+      // Planned 3 h (60 s ticks), ran 1 h (15 s final): the first analyze rebuilt and
+      // marked the run final. The tick/final mismatch must not force a second rebuild —
+      // the rows are on the 15 s grid, so is_complete is what decides.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ ...tickedRun(), plannedDuration: 10800 })
+      );
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T01:00:00Z', true));
+      onGrid(true);
+
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(result.data).toMatchObject({ skipped: 'ticks-final' });
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
+      expect(mockRequestsProcessorInstance.process).not.toHaveBeenCalled();
+    });
+
+    it('probes the grid with the run start, the scenario panels and the final bucket size', async () => {
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T00:58:40Z'));
+      onGrid(true);
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      const probe = mockDataSource.query.mock.calls.find((c: any[]) => String(c[0]).includes('AS on_grid'));
+      expect(probe).toBeDefined();
+      // Filters on the loaded run's canonical test_run_id (the interim DELETE and the
+      // collected-range write use the job's input id; callers pass the canonical id).
+      expect(probe![1]).toEqual(['test-run-uuid-001', new Date('2024-01-01T00:00:00Z'), [301, 302, 303], 15]);
+      // The scenario-level panels are exempt: their single point is not on the grid by design.
+      expect(String(probe![0])).toContain('m.panel_id <> ALL($3::int[])');
+    });
+
+    it('falls to a rebuild when the grid probe answers nothing (fails closed)', async () => {
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T00:58:40Z'));
+      mockDataSource.query.mockResolvedValue([]);
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('not on the 15s grid'));
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).toHaveBeenCalled();
+      expect(mockRequestsProcessorInstance.process.mock.calls[0][4]).toBe(false);
+    });
+
+    it('rebuilds without consulting the status row when the run is not completed', async () => {
+      // An analyze on a run that was never marked completed (aborted, stale-closed) has no
+      // final bucket size, so the ticks cannot be certified; the status row is not even read.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ ...tickedRun(), completed: false })
+      );
+      mockDatabaseService.getCollectionStatus.mockResolvedValue(status('2024-01-01T00:58:40Z'));
+      mockDataSource.query.mockResolvedValue([]);
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('run not completed'));
+      expect(mockDatabaseService.getCollectionStatus).not.toHaveBeenCalled();
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).toHaveBeenCalled();
+      expect(mockRequestsProcessorInstance.process.mock.calls[0][4]).toBe(false);
+      // Nothing is certified: the next analyze has to decide again.
+      expect(mockDatabaseService.updateCollectedRanges).not.toHaveBeenCalled();
+    });
+
+    it('sizes an uncompleted run without an end_time from the tick rule', async () => {
+      // No planned duration and no end_time: 60 s fallback, window measured to now.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ endTime: null, completed: false, plannedDuration: null })
+      );
+      mockDataSource.query.mockResolvedValue([]);
+
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('run not completed'));
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('60s buckets'));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 12c. Incremental tick and force re-fetch contracts
+  // -------------------------------------------------------------------------
+
+  describe('Incremental tick and force re-fetch', () => {
+    beforeEach(() => {
+      mockDataSource.query.mockResolvedValue([]);
+      mockWriteDataSource.query.mockResolvedValue([]);
+    });
+
+    it('does not read or record the collection status on a live tick', async () => {
+      // The scheduler records the tick's range itself; recording it here too would
+      // certify the run as final before its end_time is known.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ plannedDuration: 3600, completed: false })
+      );
+      mockDatabaseService.getCollectionStatus.mockResolvedValue({
+        collected_ranges: [{ from: '2024-01-01T00:00:00Z', to: '2024-01-01T00:10:00Z' }],
+      });
+
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:10:00Z'),
+        toTime: new Date('2024-01-01T00:11:00Z'),
+      });
+
+      expect(mockDatabaseService.getCollectionStatus).not.toHaveBeenCalled();
+      expect(mockDatabaseService.updateCollectedRanges).not.toHaveBeenCalled();
+    });
+
+    it('does not drop the interim scenario points on a tick', async () => {
+      // Only the final pass moves them to end_time; a tick upserts over the same
+      // start_time row and must leave it in place.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ plannedDuration: 3600, completed: false })
+      );
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:10:00Z'),
+        toTime: new Date('2024-01-01T00:11:00Z'),
+      });
+
+      expect(
+        mockDataSource.query.mock.calls.some((c: any[]) => String(c[0]).includes('DELETE FROM ds_metrics'))
+      ).toBe(false);
+    });
+
+    it('hands the scenario processors a completed run on a force re-fetch, so they write at end_time', async () => {
+      // A force re-fetch is an "incremental" call over the whole run. The processors are
+      // mocked here; what matters is that `completed` reaches them, since that is what
+      // scenarioMetricTime keys on, and that the window is the whole run.
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ plannedDuration: 3600, completed: true })
+      );
+
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:00:00Z'),
+        toTime: new Date('2024-01-01T01:00:00Z'),
+      });
+
+      for (const instance of [mockErrorsProcessorInstance, mockVirtualUsersProcessorInstance]) {
+        const testRunArg = instance.process.mock.calls[0][1];
+        expect(testRunArg.completed).toBe(true);
+        expect(testRunArg.end_time).toEqual(new Date('2024-01-01T01:00:00Z'));
+        expect(testRunArg.filter_from_time).toEqual(new Date('2024-01-01T00:00:00Z'));
+        expect(testRunArg.filter_to_time).toEqual(new Date('2024-01-01T01:00:00Z'));
+      }
+      // Rows for the window already exist, so this is an upsert, never a delete.
+      expect(mockDatabaseService.deletePerfTestMetricsForRun).not.toHaveBeenCalled();
+      expect(mockRequestsProcessorInstance.process.mock.calls[0][4]).toBe(true);
+      expect(mockDatabaseService.updateCollectedRanges).not.toHaveBeenCalled();
+    });
+
+    it('hands the scenario processors a live run on a tick, so they write at start_time', async () => {
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(
+        createMockTestRun({ plannedDuration: 3600, completed: false })
+      );
+
+      await pipeline.execute({
+        testRunId: 'tr-001',
+        fromTime: new Date('2024-01-01T00:10:00Z'),
+        toTime: new Date('2024-01-01T00:11:00Z'),
+      });
+
+      const testRunArg = mockVirtualUsersProcessorInstance.process.mock.calls[0][1];
+      expect(testRunArg.completed).toBe(false);
+      expect(testRunArg.start_time).toEqual(new Date('2024-01-01T00:00:00Z'));
     });
   });
 
