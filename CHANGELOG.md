@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.24] - 2026-09-13
+
+### Changed
+- **Worker docs: how to tell which path the perf-test stage took, and how to force a rebuild.** `apps/worker/README.md` now lists the log line for each of skip / tail / rebuild (with every rebuild reason), the two tick-lock warnings and what their residue looks like, and how to force a rebuild without deleting the collection-status row — deleting it puts the run on the full-collection path for Grafana and Dynatrace too. The scheduler README no longer calls the performance-test source "(future)" with a NULL `source_id`; the job is `incremental-collection` and keys come from `collectionSourceKey()`. Written for v0.2.95.23 and pushed after #596 had already merged.
+
 ## [0.2.95.23] - 2026-09-13
 
 ### Changed
