@@ -21,6 +21,17 @@ export const HEAVY_STAGES: ReadonlySet<string> = new Set([
   JOB_NAMES.STATISTICS_PIPELINE,
   JOB_NAMES.CONTROL_GROUP_STATISTICS,
   JOB_NAMES.ADAPT_PIPELINE,
+  // Rebuilds a run's ds_metrics from requests_raw (PERCENTILE_CONT grouping sets) and then
+  // percentile_agg's the whole run for ds_metric_statistics — the same shape as
+  // statistics-calculation. Unguarded, two of these beside a heavy stage pushed one past the
+  // 600 s wall clock and its job was recorded completed with the analysis dropped.
+  // Covers the analyze-time stage only: the live per-minute tick runs the same pipeline
+  // through incremental-metrics and must not queue behind a multi-minute stage.
+  // ponytail: this stage is several main-pool statements (600 s each) plus JS, not one
+  // statement_timeout-bounded transaction, so its worst-case hold is longer than the other
+  // three; waiters give up as RETRYABLE after HEAVY_STAGE_MAX_WAIT_MS. Give it a
+  // setAggregationBudget transaction if that ceiling is ever reached.
+  JOB_NAMES.PERFORMANCE_TEST_METRICS,
 ]);
 
 const LOCK_TTL_MS = 5 * 60_000;
