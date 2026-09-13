@@ -59,8 +59,9 @@ export class MetricsPipeline extends BasePipelineTypeORM {
         }, Date.now() - startTime);
       }
 
-      // Cleanup stale data before processing
-      await this.cleanupStaleApplicationDashboards(['ds_metrics']);
+      // No cleanupStaleApplicationDashboards(['ds_metrics']) here: with no test_run_id
+      // predicate it was a DML-decompressing DELETE over the whole hypertable on every
+      // analyze — ~3 min of I/O and then a swallowed failure (see BasePipelineTypeORM).
 
       // Load test run and panels using TypeORM
       const testRun = await this.db.getTestRunByTestRunId(testRunId);

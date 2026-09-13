@@ -203,6 +203,12 @@ export abstract class BasePipelineTypeORM implements Pipeline {
    * Clean up stale data with invalid application_dashboard_id references
    * This should be called at the start of pipelines that write to data science tables
    *
+   * Result tables only. There is no test_run_id predicate, so on `ds_metrics` this is a
+   * DML-decompressing DELETE across every chunk of the hypertable (measured ~180 s per
+   * analyze before it failed). Never pass a hypertable. The dynatrace_queries subquery
+   * must exclude NULLs: one NULL row makes `NOT IN` never true and the sweep deletes nothing
+   * while still paying for the scan.
+   *
    * @param tables - Array of table names to clean up
    * @returns Object with timing info and deleted row counts
    */
@@ -225,13 +231,14 @@ export abstract class BasePipelineTypeORM implements Pipeline {
           )
           AND application_dashboard_id NOT IN (
             SELECT DISTINCT application_dashboard_id FROM dynatrace_queries
+            WHERE application_dashboard_id IS NOT NULL
           )
         `);
         const deletedRows = result[1] || 0;
         deletedByTable[table] = deletedRows;
         totalDeleted += deletedRows;
       } catch (error) {
-        this.logger.warn(`Failed to clean up stale data in ${table}:`, error);
+        this.logger.warn({ err: error }, `Failed to clean up stale data in ${table}`);
         deletedByTable[table] = 0;
       }
     }
