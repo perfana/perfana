@@ -85,6 +85,17 @@ export function incrementalMetricsWorker() {
     try {
       let result: CollectionResult;
 
+      // A perf-test tick queued just before the run completed would race the analyze-time
+      // rebuild (which now runs on every analyze) and splice 1 s buckets into its output.
+      // The scheduler stops enqueuing at completion; this catches the one already queued.
+      if (sourceType === 'performance_test') {
+        const run = await db.getTestRunByTestRunId(testRunId);
+        if (run?.completed) {
+          logger.info({ testRunId }, 'Run already completed — leaving perf-test metrics to the analyze-time rebuild');
+          return { status: 'success', message: 'Run already completed — left to the analyze-time rebuild', data: { testRunId, skipped: 'run-completed' } };
+        }
+      }
+
       // Execute appropriate pipeline based on source type
       switch (sourceType) {
         case 'grafana':

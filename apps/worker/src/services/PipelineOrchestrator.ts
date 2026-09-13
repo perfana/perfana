@@ -21,7 +21,7 @@ import { WorkerDatabaseService } from '../common/database.service.js';
 import { ProgressReporter } from './ProgressReporter.js';
 import { HEAVY_STAGES, HeavyStageMutex } from './HeavyStageMutex.js';
 import type { DsMetricCollectionStatus } from '@perfana/shared/entities';
-import { getConfiguredSourceKeys } from './collectable-sources.js';
+import { collectionSourceKey, getConfiguredSourceKeys } from './collectable-sources.js';
 
 /**
  * Pipeline Orchestrator - Coordinates the execution of pipeline stages
@@ -162,7 +162,7 @@ export class PipelineOrchestrator {
       // Mark sources with no gaps as complete
       // Sources that already have 100% coverage won't be in the gaps list
       const sourcesWithGaps = new Set(
-        gaps.map((g) => `${g.sourceType}::${g.sourceId ?? 'null'}`)
+        gaps.map((g) => collectionSourceKey(g.sourceType, g.sourceId))
       );
 
       for (const status of statuses) {
@@ -170,7 +170,7 @@ export class PipelineOrchestrator {
           continue; // Already complete
         }
 
-        const sourceKey = `${status.source_type}::${status.source_id ?? 'null'}`;
+        const sourceKey = collectionSourceKey(status.source_type, status.source_id);
         if (!sourcesWithGaps.has(sourceKey)) {
           // This source has no gaps - mark it as complete
           try {
@@ -323,7 +323,7 @@ export class PipelineOrchestrator {
     // Remove statuses that reference sources no longer configured
     const remaining: DsMetricCollectionStatus[] = [];
     for (const status of statuses) {
-      const key = `${status.source_type}::${status.source_id ?? 'null'}`;
+      const key = collectionSourceKey(status.source_type, status.source_id);
       if (configuredSources.has(key)) {
         remaining.push(status);
       } else {
@@ -346,7 +346,7 @@ export class PipelineOrchestrator {
    *
    * @param testRunId - Test run ID
    * @param sourceType - Source type ('grafana', 'dynatrace', 'performance_test')
-   * @param sourceId - Source ID (null for performance_test)
+   * @param sourceId - Source ID ('' for performance_test — the row's NOT NULL sentinel; null is normalised to '')
    * @param fromTime - Start of time range
    * @param toTime - End of time range
    */
@@ -491,13 +491,21 @@ export class PipelineOrchestrator {
     let collectionWarnings: string[] = [];
 
     try {
-      // Define metric collection stages that can be skipped if incremental collection is complete
+      // Stages that gap-filling an incremental collection makes redundant.
       const metricCollectionStages = [
         'dynatrace-collection',
         'panels-processing',
         'performance-test-metrics',
         'metrics-collection'
       ];
+      // performance-test-metrics is NOT skippable. The ticks write 1 s buckets and one
+      // scenario-level point per minute; the analyze-time rebuild writes run-sized buckets
+      // and one run-total point, which is what every baseline holds. Skipping it made ADAPT
+      // compare per-minute error counts against run totals. The rebuild reads requests_raw
+      // in this database and preserves the other sources' rows, so it is always safe to run.
+      const skippableCollectionStages = metricCollectionStages.filter(
+        (stage) => stage !== 'performance-test-metrics'
+      );
 
       // Check if we should skip metric collection stages
       let skipMetricCollectionStages = false;
@@ -511,7 +519,7 @@ export class PipelineOrchestrator {
 
         if (skipCollection) {
           skipMetricCollectionStages = true;
-          this.logger.info(`⏭️ Skipping metric collection stages (incremental collection gap-filled)`);
+          this.logger.info(`⏭️ Skipping Grafana/Dynatrace collection stages (incremental collection gap-filled)`);
         } else {
           // A full collection on a run whose chunks are already compressed — a re-analysis
           // of a run older than compress_after (2 days since migration 1805, 7 before) whose
@@ -520,15 +528,17 @@ export class PipelineOrchestrator {
           // which reads as a stage stuck at "Metric collection" for ten minutes and then
           // `tuple decompression limit exceeded`. Decompress the run's span first, the way
           // the force re-fetch does; on a fresh run every chunk is row store and this is a
-          // no-op. The chunks go back in analyze.ts's finally.
+          // no-op. The chunks go back in analyze.ts's finally. The perf-test rebuild on the
+          // skipped path does not need it: its DELETE drops the run's compressed segments
+          // outright, so the plain INSERTs that follow have no batch to decompress.
           await this.decompressRunSpanForCollection(testRunId);
         }
       }
 
       // Execute stages sequentially
       for (const stageName of stages) {
-        // Skip metric collection stages if incremental collection is complete
-        if (skipMetricCollectionStages && metricCollectionStages.includes(stageName)) {
+        // Skip the external-source collection stages if incremental collection is complete
+        if (skipMetricCollectionStages && skippableCollectionStages.includes(stageName)) {
           this.logger.info(`⏭️ Skipping stage: ${stageName} (already collected via incremental collection)`);
           continue;
         }

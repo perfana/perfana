@@ -1068,6 +1068,29 @@ export class WorkerDatabaseService implements OnModuleInit {
     testRunId: string,
     presentSourceTypes: string[]
   ): Promise<{ deleted: number; restored: number }> {
+    // ponytail: the analyze-time rebuild can overlap a tick still in flight for the same run
+    // (both on perfana-analyze; the tick holds job:lock:perf-test-metrics:<id>, the rebuild
+    // takes nothing). Under REPEATABLE READ that lands as 40001 where the old READ COMMITTED
+    // DELETE simply waited. One retry after the tick's rows have landed covers it; take the
+    // tick's key lock around the rebuild if this ever shows up as a failed stage.
+    try {
+      return await this.deletePerfTestMetricsForRunOnce(testRunId, presentSourceTypes);
+    } catch (error) {
+      const code = (error as { code?: string; driverError?: { code?: string } })?.driverError?.code
+        ?? (error as { code?: string })?.code;
+      if (code !== '40001') {
+        throw error;
+      }
+      this.logger.warn(`deletePerfTestMetricsForRun(${testRunId}): serialization failure, retrying once`);
+      await new Promise((r) => setTimeout(r, 1000));
+      return await this.deletePerfTestMetricsForRunOnce(testRunId, presentSourceTypes);
+    }
+  }
+
+  private async deletePerfTestMetricsForRunOnce(
+    testRunId: string,
+    presentSourceTypes: string[]
+  ): Promise<{ deleted: number; restored: number }> {
     const hasRowsToPreserve = presentSourceTypes.some((t) => t !== 'performance_test');
 
     if (!hasRowsToPreserve) {

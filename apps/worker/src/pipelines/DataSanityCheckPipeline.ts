@@ -1,7 +1,7 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { MetricCollectionGapService } from '../services/MetricCollectionGapService.js';
-import { getConfiguredSourceKeys } from '../services/collectable-sources.js';
+import { collectionSourceKey, getConfiguredSourceKeys } from '../services/collectable-sources.js';
 
 interface DataSanityCheckInput {
   testRunId: string;
@@ -356,7 +356,7 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
 
     // Remove orphaned records
     for (const status of statuses) {
-      const key = `${status.source_type}::${status.source_id ?? 'null'}`;
+      const key = collectionSourceKey(status.source_type, status.source_id);
       if (!configured.has(key)) {
         this.logger.info(`Removing orphaned collection source: ${key}`);
         await this.db.removeCollectionStatus(testRunId, status.source_type, status.source_id ?? null);

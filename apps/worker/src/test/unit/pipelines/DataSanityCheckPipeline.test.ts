@@ -349,6 +349,29 @@ describe('DataSanityCheckPipeline', () => {
         .find((sql: string) => sql.includes('dynatrace_queries'));
       expect(dtQuery).toMatch(/AND\s+enabled/);
     });
+
+    // The perf-test row carries '' (NOT NULL sentinel since #146), never null. With the
+    // whitelist spelled 'performance_test::null' this sweep deleted it on every analyze.
+    it('keeps the performance_test status row, whose source_id is the empty string', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
+      mockDb.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'performance_test', source_id: '', is_complete: true, failed_ranges: [] },
+      ]);
+      mockDb.dataSource.query.mockResolvedValue([]);
+      mockDb.query.mockImplementation((sql: string) => {
+        if (sql.includes('ds_metrics') && sql.includes('EXISTS')) {
+          return Promise.resolve([{ has_metrics: 'true' }]);
+        }
+        if (sql.includes('ds_metric_statistics')) {
+          return Promise.resolve(sql.includes('GROUP BY') ? [] : [{ total: '100', all_missing: '0' }]);
+        }
+        return Promise.resolve([]);
+      });
+
+      await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(mockDb.removeCollectionStatus).not.toHaveBeenCalled();
+    });
   });
 
   describe('error handling', () => {

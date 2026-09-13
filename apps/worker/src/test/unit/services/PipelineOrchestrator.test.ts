@@ -536,6 +536,7 @@ describe('PipelineOrchestrator', () => {
     it('decompresses the run span before a full collection, and not when collection is skipped', async () => {
       // A re-analysis of a run older than compress_after re-collects into columnstore:
       // thousands of upserts decompressing batch by batch, stuck at "Metric collection".
+      // The perf-test rebuild on the skipped path drops its compressed segments outright.
       const bounds = { startTime: new Date('2026-09-01T10:00:00Z'), endTime: new Date('2026-09-01T11:00:00Z') };
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(bounds);
       mockPipelines.metrics.execute.mockResolvedValue({ success: true, duration: 1 });
@@ -715,7 +716,7 @@ describe('PipelineOrchestrator', () => {
   // ---------------------------------------------------------------------------
 
   describe('Incremental Collection — skip metric collection stages', () => {
-    it('should skip all metric collection stages when incremental collection is complete', async () => {
+    it('should skip the external collection stages, but not the perf-test rebuild, when incremental collection is complete', async () => {
       // Arrange
       const testRunId = 'test-incremental-complete';
       const stages = [
@@ -733,14 +734,16 @@ describe('PipelineOrchestrator', () => {
       mockGapService.isCollectionComplete.mockResolvedValue(true);
 
       mockPipelines.statistics.execute.mockResolvedValue({ success: true, duration: 1000 });
+      mockPipelines.performanceTestMetrics.execute.mockResolvedValue({ success: true, duration: 1000 });
 
       // Act
       const result = await orchestrator.executeSequentialPipeline(testRunId, { stages });
 
-      // Assert — metric collection stages skipped, post-collection stage runs
+      // Assert — external collection stages skipped; the perf-test rebuild always runs because
+      // the ticks' shape (1 s buckets, per-minute scenario points) is not what baselines hold
       expect(mockPipelines.dynatrace.execute).not.toHaveBeenCalled();
       expect(mockPipelines.panels.execute).not.toHaveBeenCalled();
-      expect(mockPipelines.performanceTestMetrics.execute).not.toHaveBeenCalled();
+      expect(mockPipelines.performanceTestMetrics.execute).toHaveBeenCalledWith({ testRunId });
       expect(mockPipelines.metrics.execute).not.toHaveBeenCalled();
       expect(mockPipelines.statistics.execute).toHaveBeenCalled();
       expect(result.success).toBe(true);
@@ -1045,7 +1048,7 @@ describe('PipelineOrchestrator', () => {
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
         {
           source_type: 'performance_test',
-          source_id: null,
+          source_id: '', // NOT NULL sentinel since #146 — what the DB actually holds
           is_complete: false, // not yet marked complete
           collected_ranges: [],
           failed_ranges: [],
@@ -1078,7 +1081,7 @@ describe('PipelineOrchestrator', () => {
       expect(mockGapService.markSourceComplete).toHaveBeenCalledWith(
         testRunId,
         'performance_test',
-        null
+        ''
       );
       expect(result.success).toBe(true);
     });
@@ -1098,7 +1101,7 @@ describe('PipelineOrchestrator', () => {
         },
         {
           source_type: 'performance_test',
-          source_id: null,
+          source_id: '', // NOT NULL sentinel since #146 — what the DB actually holds
           is_complete: false,
           collected_ranges: [],
           failed_ranges: [],
@@ -1131,7 +1134,7 @@ describe('PipelineOrchestrator', () => {
       expect(mockGapService.markSourceComplete).toHaveBeenCalledWith(
         testRunId,
         'performance_test',
-        null
+        ''
       );
       expect(result.success).toBe(true);
     });
@@ -1144,7 +1147,7 @@ describe('PipelineOrchestrator', () => {
       mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
         {
           source_type: 'performance_test',
-          source_id: null,
+          source_id: '', // NOT NULL sentinel since #146 — what the DB actually holds
           is_complete: false,
           collected_ranges: [],
           failed_ranges: [],
@@ -1179,7 +1182,7 @@ describe('PipelineOrchestrator', () => {
 
       // Assert — error logged, pipeline continues
       expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to mark performance_test/null as complete')
+        expect.stringContaining('Failed to mark performance_test/ as complete')
       );
       expect(result.success).toBe(true);
     });
@@ -1468,7 +1471,7 @@ describe('PipelineOrchestrator', () => {
         },
         {
           source_type: 'performance_test',
-          source_id: null,
+          source_id: '', // NOT NULL sentinel since #146 — what the DB actually holds
           is_complete: false,
           collected_ranges: [],
           failed_ranges: [],
@@ -1520,7 +1523,7 @@ describe('PipelineOrchestrator', () => {
       expect(mockDatabaseService.removeCollectionStatus).not.toHaveBeenCalledWith(
         testRunId,
         'performance_test',
-        null
+        ''
       );
     });
 
@@ -1556,6 +1559,63 @@ describe('PipelineOrchestrator', () => {
 
       // Assert — no removal because test run not found
       expect(mockDatabaseService.removeCollectionStatus).not.toHaveBeenCalled();
+    });
+
+    // The production case behind v0.2.95.22: a JMeter-only run has exactly one status row,
+    // performance_test with source_id ''. Sweeping it left zero rows and sent the run down
+    // the full delete-and-rebuild path on every analyze.
+    it('keeps the perf-test row of a JMeter-only run, skips external collection, still rebuilds perf-test', async () => {
+      const testRunId = 'test-jmeter-only';
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'performance_test', source_id: '', is_complete: true, collected_ranges: [], failed_ranges: [] },
+      ]);
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue({
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'prod',
+        workload: 'load',
+        annotations: [],
+      });
+      // No Grafana dashboards, no Dynatrace queries: perf-test is the only source.
+      mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([]);
+      mockDatabaseService.dataSource.query.mockResolvedValue([]);
+      mockGapService.isCollectionComplete.mockResolvedValue(true);
+      mockPipelines.performanceTestMetrics.execute.mockResolvedValue({ success: true, duration: 1 });
+      mockPipelines.metrics.execute.mockResolvedValue({ success: true, duration: 1 });
+
+      await orchestrator.executeSequentialPipeline(testRunId, {
+        stages: ['performance-test-metrics', 'metrics-collection'],
+        errorHandling: 'continue',
+      });
+
+      expect(mockDatabaseService.removeCollectionStatus).not.toHaveBeenCalled();
+      expect(mockPipelines.performanceTestMetrics.execute).toHaveBeenCalledWith({ testRunId });
+      expect(mockPipelines.metrics.execute).not.toHaveBeenCalled();
+    });
+
+    it('marks an incomplete perf-test row complete without collecting it — the rebuild covers it', async () => {
+      // detectGaps never reports performance_test (its ticks are live-view data, not
+      // collection), so the row lands in the "no gaps" branch and is marked complete there.
+      const testRunId = 'test-perf-gap';
+      mockDatabaseService.getAllCollectionStatuses.mockResolvedValue([
+        { source_type: 'performance_test', source_id: '', is_complete: false, collected_ranges: [], failed_ranges: [] },
+      ]);
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue({
+        systemUnderTestId: 'sut-1', testEnvironment: 'prod', workload: 'load', annotations: [],
+      });
+      mockDatabaseService.applicationDashboardRepo.find.mockResolvedValue([]);
+      mockDatabaseService.dataSource.query.mockResolvedValue([]);
+      mockGapService.isCollectionComplete.mockResolvedValueOnce(false).mockResolvedValue(true);
+      mockGapService.detectGaps.mockResolvedValue([]);
+      mockPipelines.performanceTestMetrics.execute.mockResolvedValue({ success: true, duration: 1 });
+
+      await orchestrator.executeSequentialPipeline(testRunId, {
+        stages: ['performance-test-metrics'],
+        errorHandling: 'continue',
+      });
+
+      expect(mockGapService.markSourceComplete).toHaveBeenCalledWith(testRunId, 'performance_test', '');
+      expect(mockPipelines.incrementalMetrics.execute).not.toHaveBeenCalled();
+      expect(mockPipelines.performanceTestMetrics.execute).toHaveBeenCalledWith({ testRunId });
     });
 
     it('should return empty list and skip metric stages when all statuses are orphaned', async () => {

@@ -138,16 +138,42 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       const allCompareConfigs: DsCompareConfigRecord[] = [];
       const stepTiming: Array<{ step: string; duration: number; count: number }> = [];
 
-      // Full collection replaces the run's metrics wholesale. The DELETE has to happen
+      // Full collection replaces the run's perf-test metrics. The DELETE has to happen
       // before the processors, not inside saveDsMetrics, because they now insert as they
-      // aggregate — a later DELETE would take their rows with it.
+      // aggregate — a later DELETE would take their rows with it. It preserves every
+      // non-perf-test row: this stage now also runs after a gap-filled incremental
+      // collection (v0.2.95.22), where the Grafana/Dynatrace rows beside it are the only
+      // copy and nothing re-collects them.
       if (!isIncremental) {
-        const deleteStart = Date.now();
-        await this.db.dataSource.query(
-          `DELETE FROM ds_metrics WHERE test_run_id = $1`,
+        // A SUT import without the optional `raw` group ships the perf-test ds_metrics but
+        // nothing to rebuild them from. Deleting on the promise of a rebuild that finds no
+        // rows would silently strip the run of its metrics and ADAPT results. Same rule as
+        // every other delete-then-rewrite here: the probe stays strict because the statement
+        // deletes.
+        const raw: Array<{ has_rows: boolean }> = await this.db.dataSource.query(
+          `SELECT EXISTS (SELECT 1 FROM requests_raw WHERE test_run_id = $1)
+               OR EXISTS (SELECT 1 FROM transactions WHERE test_run_id = $1) AS has_rows`,
           [testRunId]
         );
-        this.logger.info(`🧹 Deleted existing ds_metrics for ${testRunId} in ${Date.now() - deleteStart}ms`);
+        // Postgres always answers one boolean row; only an explicit false means "nothing here".
+        if (raw[0]?.has_rows === false) {
+          this.logger.warn(
+            `⏭️ No requests_raw/transactions for ${testRunId} — keeping its existing perf-test ds_metrics`
+          );
+          return this.createSuccessResult(
+            { testRunId, metricsCreated: 0, compareConfigsCreated: 0, skipped: 'no-raw-data' },
+            Date.now() - startTime
+          );
+        }
+
+        const deleteStart = Date.now();
+        const { deleted, restored } = await this.db.deletePerfTestMetricsForRun(
+          testRunId,
+          await this.db.getRunMetricsSourceTypes(testRunId)
+        );
+        this.logger.info(
+          `🧹 Deleted ${deleted} perf-test ds_metrics for ${testRunId} (${restored} other-source rows preserved) in ${Date.now() - deleteStart}ms`
+        );
       }
 
       // Process requests_raw table

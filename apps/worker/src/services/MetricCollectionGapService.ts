@@ -88,6 +88,14 @@ export class MetricCollectionGapService {
     const gaps: CollectionGap[] = [];
 
     for (const status of statuses) {
+      // performance_test is rebuilt from requests_raw by the performance-test-metrics stage
+      // on every analyze; its ticks are live-view data, not collection. Reporting its tail as
+      // a gap made callers tick over it — 1 s buckets spliced into run-sized ones, and the
+      // scenario-level run-total point at end_time replaced by the last minute's count.
+      if (status.source_type === 'performance_test') {
+        continue;
+      }
+
       // Find missing time ranges by comparing collected_ranges to [startTime, endTime]
       const missingRanges = this.findMissingRanges(
         testRun.startTime,
@@ -182,7 +190,7 @@ export class MetricCollectionGapService {
    *
    * @param testRunId - The test run ID
    * @param sourceType - Type of source ('grafana', 'dynatrace', 'performance_test')
-   * @param sourceId - Source identifier (or null for performance_test)
+   * @param sourceId - Source identifier ('' for performance_test — the row's NOT NULL sentinel; null is normalised to '')
    */
   async markSourceComplete(
     testRunId: string,
@@ -352,9 +360,20 @@ export class MetricCollectionGapService {
       return 0;
     }
 
-    const statuses = await this.databaseService.getAllCollectionStatuses(testRunId);
-    if (statuses.length === 0) {
+    // performance_test is rebuilt from requests_raw at analyze time, so its ranges say
+    // nothing about what was collected; averaging its ~100% in would let a Grafana source
+    // at 65% pass the 80% gate. (It was excluded by accident before v0.2.95.22: the orphan
+    // sweep deleted the row before this ran.)
+    const allStatuses = await this.databaseService.getAllCollectionStatuses(testRunId);
+    if (allStatuses.length === 0) {
       return 0;
+    }
+    const statuses = allStatuses.filter((s) => s.source_type !== 'performance_test');
+    // Only perf-test registered (a JMeter-only run): nothing external could have been
+    // missed. The sanity check gates on totalSources > 0, which counts the kept perf-test
+    // row, so 0 here would fail every JMeter-only run for coverage.
+    if (statuses.length === 0) {
+      return 100;
     }
 
     const expectedDuration =

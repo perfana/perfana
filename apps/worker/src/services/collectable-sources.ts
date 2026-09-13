@@ -117,8 +117,17 @@ export async function filterCollectableGrafanaDashboards(
 }
 
 /**
+ * The one spelling of a collection-source key. `ds_metric_collection_status.source_id` is
+ * NOT NULL with '' for performance_test, so null is normalised to '' — never to 'null'.
+ * Every sweep and whitelist must build keys through this or they drift apart silently.
+ */
+export function collectionSourceKey(sourceType: string, sourceId: string | null | undefined): string {
+  return `${sourceType}::${sourceId ?? ''}`;
+}
+
+/**
  * The `ds_metric_collection_status` keys a run legitimately has, in the
- * `${source_type}::${source_id}` form both orphan sweeps compare against.
+ * `collectionSourceKey` form both orphan sweeps compare against.
  *
  * Both sweeps must use this. They ran the same query with different predicates before —
  * the orchestrator's copy (which runs FIRST, before any stage) had neither filter — so a
@@ -129,7 +138,11 @@ export async function getConfiguredSourceKeys(
   db: WorkerDatabaseService,
   testRun: { systemUnderTestId: string; testEnvironment: string; workload: string }
 ): Promise<Set<string>> {
-  const configured = new Set<string>(['performance_test::null']);
+  // performance_test has no natural id; its row carries the '' sentinel (NOT NULL since #146).
+  // Spelled through collectionSourceKey on purpose: a hand-written 'performance_test::null'
+  // here never matched the sweeps' key, so every analyze swept the perf-test row and sent a
+  // JMeter-only run down the full delete-and-rebuild path.
+  const configured = new Set<string>([collectionSourceKey('performance_test', '')]);
 
   const appDashboards = await db.applicationDashboardRepo.find({
     where: {
@@ -140,7 +153,7 @@ export async function getConfiguredSourceKeys(
 
   for (const dashboard of await filterCollectableGrafanaDashboards(db, appDashboards)) {
     if (dashboard.grafanaInstanceId) {
-      configured.add(`grafana::${dashboard.grafanaInstanceId}`);
+      configured.add(collectionSourceKey('grafana', dashboard.grafanaInstanceId));
     }
   }
 
@@ -152,7 +165,7 @@ export async function getConfiguredSourceKeys(
     [testRun.systemUnderTestId, testRun.testEnvironment, testRun.workload]
   );
   for (const row of dtConfigs) {
-    configured.add(`dynatrace::${row.dynatrace_config_id}`);
+    configured.add(collectionSourceKey('dynatrace', row.dynatrace_config_id));
   }
 
   return configured;
