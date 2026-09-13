@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.25] - 2026-09-13
+
+### Fixed
+- **Re-evaluating a run with a workload-level Apdex SLO no longer takes 45 s when its transaction rollup is missing.** The Apdex check reads `test_run_transaction_stats` on a per-transaction fast path; a run whose analyze died before the `transaction-stats-rollup` stage has no rows there, and a re-evaluate has no rollup stage, so every one of its transactions fell back to a raw `transactions` scan (317 scans plus a `DISTINCT` over the run on WERKNL-00002). A re-evaluate's checks stage now writes the rollup first when the run has `transactions` rows but no rollup, which also puts Performance Analysis on the rollup read for that run. Bounded on purpose: only on the re-evaluate path (the analyze path ran the same rollup three stages earlier), at most one run per checks job (the stage is not chunked and the orchestrator waits 30 min on it), and never for a run with no `transactions` rows (the rollup deletes all three tables before rebuilding, and such a run's sampler half must not be wiped on every pass). A rollup the pipeline skipped (`not-completed`, missing start or end time) is now logged at warn instead of being reported as done.
+- **`ROLLUP_STATEMENT_TIMEOUT_MS` defaults to 540 s instead of 600 s, and a non-numeric value falls back instead of aborting.** The pool's client-side `query_timeout` is 600 s; at equal deadlines node-postgres tore the socket instead of letting Postgres cancel the statement, `Connection terminated` counts as transient, and `db.transaction`'s retry re-ran the whole DELETE+INSERT rollup up to three times while the orphaned statement kept running server-side. Same rule `AGGREGATION_STATEMENT_TIMEOUT_MS` already follows. The value is now bound through `set_config` rather than interpolated.
+
+### Changed
+- **The `checks-evaluation` job accepts a `repairRollup` flag** (set by the re-evaluate orchestrator) so the inline rollup repair is opt-in per enqueue rather than a property of the pipeline.
+
 ## [0.2.95.24] - 2026-09-13
 
 ### Changed

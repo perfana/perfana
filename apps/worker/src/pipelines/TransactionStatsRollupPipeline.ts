@@ -139,13 +139,21 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
       // default 120s analytics budget is LESS than the live query this rollup
       // replaces (measured 135–213s for 11M-row `stream_download_segment`),
       // so the rollup would time out before it finishes on the exact runs
-      // that most need it. Give it 10 minutes — it's a background job.
-      const rollupTimeoutMs = parseInt(
-        process.env.ROLLUP_STATEMENT_TIMEOUT_MS || '600000', 10,
-      );
+      // that most need it. Give it 9 minutes — it's a background job.
+      //
+      // 540s, not 600s: the pool's client-side query_timeout is 600000
+      // (config/typeorm.config.ts). At equal deadlines node-postgres tears the
+      // socket down instead of letting Postgres cancel, and `Connection
+      // terminated` is in TRANSIENT_ERRORS, so `db.transaction`'s withRetry
+      // re-ran the whole DELETE+INSERT rollup up to 3x while the orphaned
+      // server-side statement was still running. Same rule as
+      // AGGREGATION_STATEMENT_TIMEOUT_MS in BasePipelineTypeORM.
+      const parsedTimeoutMs = parseInt(process.env.ROLLUP_STATEMENT_TIMEOUT_MS || '540000', 10);
+      // A typo in the env used to bind 'NaN' and abort every rollup transaction.
+      const rollupTimeoutMs = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 540000;
 
       const result = await this.db.transaction(async (manager) => {
-        await manager.query(`SET LOCAL statement_timeout = '${rollupTimeoutMs}'`);
+        await manager.query('SELECT set_config($1, $2, true)', ['statement_timeout', String(rollupTimeoutMs)]);
         // work_mem boost matches the current online query (see
         // TestRunsPerformanceQueryService). Needed for the tdigest
         // aggregation over millions of rows per test run.

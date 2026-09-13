@@ -232,14 +232,14 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(groupSql).toMatch(/FILTER \(WHERE started_at >= \$2 AND started_at < \$3\)/);
     });
 
-    it('sets a 10-minute statement_timeout (longer than the live query it replaces)', async () => {
+    it('sets a 540 s statement_timeout (longer than the live query it replaces, below the pool query_timeout)', async () => {
       mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
       wireTransaction({ tx: 1, sampler: 1 });
 
       await pipeline.execute({ testRunId: 'run-001' });
 
-      const sqlCalls = mockManagerQuery.mock.calls.map(([sql]) => sql as string);
-      expect(sqlCalls.some(s => /SET LOCAL statement_timeout\s*=\s*'600000'/i.test(s))).toBe(true);
+      const timeoutCall = mockManagerQuery.mock.calls.find(([sql]) => /set_config/i.test(sql as string));
+      expect(timeoutCall?.[1]).toEqual(['statement_timeout', '540000']);
     });
 
     it('DELETEs stale rows before INSERTing so ramp-up edits cannot leave stale data', async () => {

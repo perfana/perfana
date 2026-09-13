@@ -68,6 +68,15 @@ vi.mock('../../../pipelines/checks/RequirementChecker.js', () => ({
   })),
 }));
 
+const mockRollupExecute = vi.fn();
+// A plain class, not vi.fn().mockImplementation: the afterEach restoreAllMocks
+// would strip the implementation after the first test.
+vi.mock('../../../pipelines/TransactionStatsRollupPipeline.js', () => ({
+  TransactionStatsRollupPipeline: class {
+    execute = mockRollupExecute;
+  },
+}));
+
 describe('ChecksPipeline', () => {
   let pipeline: ChecksPipeline;
 
@@ -1067,6 +1076,142 @@ describe('ChecksPipeline', () => {
         evaluatingChecks: 'ERROR',
         lastUpdate: expect.any(String),
       });
+    });
+  });
+
+  describe('ensureTransactionRollup', () => {
+    const needsRollup = { has_rollup: false, has_transactions: true };
+
+    it('rolls up when the run has transactions but no test_run_transaction_stats rows', async () => {
+      mockDb.query.mockResolvedValue([needsRollup]);
+      mockRollupExecute.mockResolvedValue({ success: true, data: {} });
+
+      await (pipeline as any).ensureTransactionRollup('test-run-1');
+
+      expect(mockDb.query).toHaveBeenCalledWith(
+        expect.stringContaining('FROM test_run_transaction_stats'),
+        ['test-run-1'],
+      );
+      expect(mockRollupExecute).toHaveBeenCalledWith({ testRunId: 'test-run-1' });
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it('leaves a populated rollup alone', async () => {
+      mockDb.query.mockResolvedValue([{ has_rollup: true, has_transactions: true }]);
+
+      await (pipeline as any).ensureTransactionRollup('test-run-1');
+
+      expect(mockRollupExecute).not.toHaveBeenCalled();
+    });
+
+    it('does not roll up a run with no transactions rows (it would wipe the sampler half for nothing)', async () => {
+      mockDb.query.mockResolvedValue([{ has_rollup: false, has_transactions: false }]);
+
+      await (pipeline as any).ensureTransactionRollup('test-run-1');
+
+      expect(mockRollupExecute).not.toHaveBeenCalled();
+    });
+
+    it('warns when the rollup pipeline skipped the run without writing', async () => {
+      mockDb.query.mockResolvedValue([needsRollup]);
+      mockRollupExecute.mockResolvedValue({ success: true, data: { testRunId: 'test-run-1', skipped: 'not-completed' } });
+
+      await (pipeline as any).ensureTransactionRollup('test-run-1');
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('skipped (not-completed)'));
+    });
+
+    it('is best-effort: a rollup failure only warns', async () => {
+      mockDb.query.mockResolvedValue([needsRollup]);
+      mockRollupExecute.mockRejectedValue(new Error('boom'));
+
+      await expect((pipeline as any).ensureTransactionRollup('test-run-1')).resolves.toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('boom'));
+    });
+
+    it('warns and continues when the rollup reports failure instead of throwing', async () => {
+      mockDb.query.mockResolvedValue([needsRollup]);
+      mockRollupExecute.mockResolvedValueOnce({
+        success: false,
+        error: { message: 'rollup broke', code: 'TRANSACTION_STATS_ROLLUP_FAILED' },
+      });
+
+      await expect((pipeline as any).ensureTransactionRollup('test-run-1')).resolves.toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Transaction rollup for test-run-1 failed; Apdex falls back to raw scans: rollup broke'),
+      );
+
+      // A failure result with no error object still warns, with the placeholder message.
+      mockLogger.warn.mockClear();
+      mockRollupExecute.mockResolvedValueOnce({ success: false });
+
+      await expect((pipeline as any).ensureTransactionRollup('test-run-1')).resolves.toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('unknown error'));
+    });
+
+    it('warns and skips the rollup when the probe query itself throws', async () => {
+      mockDb.query.mockRejectedValue(new Error('db down'));
+
+      await expect((pipeline as any).ensureTransactionRollup('test-run-1')).resolves.toBe(true);
+
+      expect(mockRollupExecute).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Transaction rollup probe for test-run-1 failed; Apdex falls back to raw scans: db down'),
+      );
+    });
+
+    it('returns false when nothing was attempted so the caller does not spend its budget', async () => {
+      mockDb.query.mockResolvedValue([{ has_rollup: true, has_transactions: true }]);
+
+      await expect((pipeline as any).ensureTransactionRollup('test-run-1')).resolves.toBe(false);
+    });
+
+    it('is never attempted on the analyze path (repairRollup unset)', async () => {
+      const rollupSpy = vi.spyOn(pipeline as any, 'ensureTransactionRollup').mockResolvedValue(true);
+      vi.spyOn(pipeline as any, 'loadTestRunForChecks').mockResolvedValue({ test_run_id: 'test-run-1' });
+      vi.spyOn(pipeline as any, 'deleteExistingCheckResults').mockResolvedValue(undefined);
+      vi.spyOn(pipeline as any, 'updateTestRunStatus').mockResolvedValue(undefined);
+      vi.spyOn(pipeline as any, 'publishRealtimeUpdate').mockResolvedValue(undefined);
+      vi.spyOn(pipeline as any, 'processSingleTestRun').mockResolvedValue({ processed_benchmarks: 0, created_check_results: 0, failed_benchmarks: [] });
+
+      await (pipeline as any).runCheckPipeline(['test-run-1', 'test-run-2'], false);
+
+      expect(rollupSpy).not.toHaveBeenCalled();
+    });
+
+    it('attempts at most one rollup per job on the re-evaluate path, after the IN_PROGRESS publish and before the check work', async () => {
+      vi.spyOn(pipeline as any, 'loadTestRunForChecks').mockResolvedValue({
+        test_run_id: 'test-run-1',
+        system_under_test_id: 'sut-1',
+        test_environment: 'production',
+        workload: 'load-test',
+      });
+      vi.spyOn(pipeline as any, 'deleteExistingCheckResults').mockResolvedValue(undefined);
+      vi.spyOn(pipeline as any, 'updateTestRunStatus').mockResolvedValue(undefined);
+      const publishSpy = vi.spyOn(pipeline as any, 'publishRealtimeUpdate').mockResolvedValue(undefined);
+      const processSpy = vi.spyOn(pipeline as any, 'processSingleTestRun').mockResolvedValue({
+        processed_benchmarks: 1,
+        created_check_results: 1,
+        failed_benchmarks: [],
+      });
+      // First run: populated (nothing attempted, budget kept). Second: attempted. Third: budget gone.
+      const rollupSpy = vi.spyOn(pipeline as any, 'ensureTransactionRollup')
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+
+      const result = await (pipeline as any).runCheckPipeline(['test-run-1', 'test-run-2', 'test-run-3'], false, undefined, undefined, undefined, true);
+
+      expect(result.processed_test_runs).toBe(3);
+      expect(rollupSpy).toHaveBeenCalledTimes(2);
+      expect(rollupSpy).toHaveBeenNthCalledWith(1, 'test-run-1');
+      expect(rollupSpy).toHaveBeenNthCalledWith(2, 'test-run-2');
+
+      // Ordering for the first run: IN_PROGRESS publish -> rollup -> check work.
+      const firstPublish = publishSpy.mock.invocationCallOrder[0];
+      const firstRollup = rollupSpy.mock.invocationCallOrder[0];
+      const firstProcess = processSpy.mock.invocationCallOrder[0];
+      expect(firstPublish).toBeLessThan(firstRollup);
+      expect(firstRollup).toBeLessThan(firstProcess);
     });
   });
 

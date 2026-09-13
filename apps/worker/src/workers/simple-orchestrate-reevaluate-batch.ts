@@ -1004,7 +1004,8 @@ export function simpleOrchestrateReevaluateBatchWorker() {
             batchId,
             applicationDashboardId,
             panelId,
-            metricName
+            metricName,
+            repairRollup: true
           },
           getJobOptions(JOB_NAMES.CHECKS_EVALUATION)
         );

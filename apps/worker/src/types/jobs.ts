@@ -62,6 +62,10 @@ export const ChecksJobSchema = z.object({
   applicationDashboardId: z.string().uuid().optional(),
   panelId: z.number().int().positive().optional(),
   metricName: z.string().optional(),
+  // Re-evaluate only: write a missing test_run_transaction_stats before the checks
+  // (at most one run per job). The analyze path never sets it — its own
+  // transaction-stats-rollup stage ran three positions earlier.
+  repairRollup: z.boolean().optional(),
 });
 
 // Batch processing schemas

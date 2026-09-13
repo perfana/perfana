@@ -9,6 +9,7 @@ import { ApdexCalculator, ApdexCheckResult } from './checks/ApdexCalculator.js';
 import { AggregatedBenchmarkEvaluator, AggregatedCheckResult } from './checks/AggregatedBenchmarkEvaluator.js';
 import { CheckPipelineError, BenchmarkNotFoundError } from './checks/BaseCheckService.js';
 import { getRealtimePublisher } from '../common/realtime-accessor.js';
+import { TransactionStatsRollupPipeline } from './TransactionStatsRollupPipeline.js';
 
 interface ChecksInput {
   testRunIds: string[];
@@ -20,6 +21,8 @@ interface ChecksInput {
   applicationDashboardId?: string;
   panelId?: number;
   metricName?: string;
+  // Write a missing transaction rollup before the checks (re-evaluate path only)
+  repairRollup?: boolean;
 }
 
 export interface ChecksPipelineResult {
@@ -54,7 +57,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       }
       const validatedInput = input as ChecksInput;
 
-      const { testRunIds, forceReprocess = false, snapshotId, grafanaInfo, metricsSourceId, applicationDashboardId, panelId, metricName } = validatedInput;
+      const { testRunIds, forceReprocess = false, snapshotId, grafanaInfo, metricsSourceId, applicationDashboardId, panelId, metricName, repairRollup = false } = validatedInput;
 
       if (metricsSourceId || applicationDashboardId || panelId || metricName) {
         this.logger.info(`Starting check pipeline for ${testRunIds.length} test runs with metric filter: metricsSource=${metricsSourceId}, dashboard=${applicationDashboardId}, panel=${panelId}, metric=${metricName}`);
@@ -65,7 +68,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       // Cleanup stale data before processing
       await this.cleanupStaleApplicationDashboards(['check_results']);
 
-      const result = await this.runCheckPipeline(testRunIds, forceReprocess, snapshotId, grafanaInfo, { metricsSourceId, applicationDashboardId, panelId, metricName });
+      const result = await this.runCheckPipeline(testRunIds, forceReprocess, snapshotId, grafanaInfo, { metricsSourceId, applicationDashboardId, panelId, metricName }, repairRollup);
 
       const duration = Date.now() - startTime;
 
@@ -102,9 +105,14 @@ export class ChecksPipeline extends BasePipelineTypeORM {
       applicationDashboardId?: string;
       panelId?: number;
       metricName?: string;
-    }
+    },
+    repairRollup = false
   ): Promise<ChecksPipelineResult> {
     const startTime = Date.now();
+    // ponytail: one inline rollup per job. checks-evaluation is not chunked (up to
+    // 100 ids) and the re-evaluate orchestrator waits 30 min on it; N rollups of
+    // up to 540 s each would blow that. The rest of the batch takes the raw path.
+    let rollupBudget = repairRollup ? 1 : 0;
 
     const results: ChecksPipelineResult = {
       processed_test_runs: 0,
@@ -136,6 +144,12 @@ export class ChecksPipeline extends BasePipelineTypeORM {
           });
           // Publish after commit so the API reads the committed IN_PROGRESS state
           await this.publishRealtimeUpdate(testRunId);
+
+          // Outside the main transaction: the rollup commits on its own connection
+          // and the READ COMMITTED reads below then see it.
+          if (rollupBudget > 0 && await this.ensureTransactionRollup(testRunId)) {
+            rollupBudget--;
+          }
 
           // Main transaction for processing the work
           await this.withTransaction(async (manager: EntityManager) => {
@@ -206,6 +220,60 @@ export class ChecksPipeline extends BasePipelineTypeORM {
     } catch (error) {
       results.execution_time_seconds = (Date.now() - startTime) / 1000;
       throw new CheckPipelineError(`Check pipeline failed: ${error}`);
+    }
+  }
+
+  /**
+   * Write `test_run_transaction_stats` for the run if it has none.
+   *
+   * The Apdex fast path reads that rollup; without it every transaction of a
+   * workload-level SLO falls back to a raw `transactions` scan (317 scans plus
+   * a DISTINCT over the run: 45 s on WERKNL-00002). The rollup is written by
+   * the `transaction-stats-rollup` analyze stage, which runs after
+   * `performance-test-metrics` — an analyze that died there never wrote it, and
+   * a re-evaluate has no rollup stage, so nothing else ever repaired it.
+   *
+   * Only an EMPTY transaction half triggers this: the rollup pipeline deletes
+   * all three rollup tables before it rebuilds, so a populated one is left
+   * alone. A run with no `transactions` rows can never gain that half, and
+   * its sampler half (from `requests_raw`) must not be wiped for it, so it is
+   * skipped too. `completed` / `start_time` / `end_time` are the rollup
+   * pipeline's own early returns. Best-effort — on any failure the raw-scan
+   * fallback still runs, as before.
+   *
+   * ponytail: the rollup runs on its own 540 s statement_timeout and outside
+   * HeavyStageMutex, exactly like the analyze stage that normally writes it. A
+   * run whose rollup times out pays that on every re-evaluate; route it
+   * through the enqueued job (BullMQ failed set) if that ever shows up.
+   *
+   * Returns true when a rollup was attempted OR the probe itself failed —
+   * either spends the caller's budget, so a flapping DB is not re-probed
+   * for every run in the batch.
+   */
+  private async ensureTransactionRollup(testRunId: string): Promise<boolean> {
+    try {
+      const [probe] = await this.query<{ has_rollup: boolean; has_transactions: boolean }>(
+        `SELECT
+           EXISTS (SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1) AS has_rollup,
+           EXISTS (SELECT 1 FROM transactions WHERE test_run_id = $1) AS has_transactions`,
+        [testRunId],
+      );
+      if (!probe || probe.has_rollup || !probe.has_transactions) {return false;}
+
+      this.logger.info(`No transaction rollup for ${testRunId}; rolling up before checks so Apdex takes the fast path`);
+      const result = await new TransactionStatsRollupPipeline(this.logger).execute({ testRunId });
+      const skipped = (result.data as { skipped?: string } | undefined)?.skipped;
+      if (!result.success) {
+        this.logger.warn(`Transaction rollup for ${testRunId} failed; Apdex falls back to raw scans: ${result.error?.message ?? 'unknown error'}`);
+      } else if (skipped) {
+        // success:true with nothing written (not completed / no start or end time)
+        this.logger.warn(`Transaction rollup for ${testRunId} skipped (${skipped}); Apdex falls back to raw scans`);
+      }
+      return true;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Transaction rollup probe for ${testRunId} failed; Apdex falls back to raw scans: ${msg}`);
+      return true;
     }
   }
 
