@@ -49,6 +49,17 @@ missing **either** half (a transaction-only predicate skipped exactly the affect
 when a poll returns no ids it has not already served this invocation, since an unrepairable run
 stays a candidate forever.
 
+A third writer runs it **inline** (v0.2.95.25): a re-evaluate's `checks-evaluation` job is enqueued
+with `repairRollup: true`, and `ChecksPipeline.ensureTransactionRollup` executes
+`TransactionStatsRollupPipeline` before the checks transaction when `test_run_transaction_stats` has
+zero rows for the run and `transactions` has at least one. Without it the Apdex check's per-transaction
+fast path misses on every transaction and falls back to raw `transactions` scans (45 s on a run with a
+workload-level SLO). It is bounded to the re-evaluate path (the analyze path ran the rollup stage
+three positions earlier), at most one rollup per checks job (the stage is not chunked and the
+orchestrator waits 30 min on it), and never on a run with no `transactions` rows, because the
+rollup's unconditional delete would wipe that run's sampler half on every pass. Best-effort: a failed
+or skipped rollup is logged at warn and the raw path runs as before.
+
 ### The perf-test pipeline writes an extra "all aggregated" dashboard
 
 `PerformanceTestMetricsPipeline` writes one dashboard per scenario, plus — since v0.2.95.4 — one
@@ -208,7 +219,10 @@ Three rules if you touch this:
 Read from `process.env` rather than `getConfig()`, mirrored in `src/config/environment.ts` so a bad
 value is rejected at boot — same reason `TransactionStatsRollupPipeline` reads
 `ROLLUP_STATEMENT_TIMEOUT_MS` directly: the full schema needs secrets a unit test has no reason to
-provide.
+provide. That one follows the same below-`600000` rule: its default is `540000` since v0.2.95.25
+(it was `600000`, and the torn socket made `db.transaction`'s retry re-run the whole DELETE+INSERT
+rollup up to 3x while the orphaned statement kept running), it is bound via `set_config` rather than
+interpolated, and a non-numeric value falls back to the default instead of aborting every rollup.
 
 ### Updating `ramp_up` on compressed `ds_metrics`
 

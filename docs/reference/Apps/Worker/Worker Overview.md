@@ -160,14 +160,21 @@ new data. Since v0.2.95.0 it splits its three heaviest stages — `statistics-re
 `REEVALUATE_CHUNK_SIZE` runs (default 5). Each of those pipelines does its work in one transaction
 over every id it is handed, against a ceiling that scales with the batch: ADAPT's 120s statement
 timeout, the per-transaction decompression budget shared by the `ramp_up` updates, and the 540s
-aggregation budget inside a 600s wait for the child job. Since v0.2.95.17 that wait charges only
+aggregation budget inside a 30 min wait for the child job (600s before v0.2.95.19, when the child
+started decompressing for real before it aggregates). Since v0.2.95.17 that wait charges only
 the child's *running* time: time it spends in BullMQ's waiting list or parked behind the
 `HeavyStageMutex` goes to a separate 1 h ceiling, so a busy database no longer fails a re-evaluate.
 
 The chunking has to happen **inside** the one job rather than by enqueuing several batch jobs,
 because `JobLockService` keys its lock on `{systemUnderTestId}:{testEnvironment}:{workload}` — a
 second job for the same workload is refused, not queued. `checks-evaluation` and
-`control-groups-creation` still receive the whole list.
+`control-groups-creation` still receive the whole list. Since v0.2.95.25 the orchestrator enqueues
+`checks-evaluation` with `repairRollup: true`: a run in the batch whose `test_run_transaction_stats`
+is empty while `transactions` is not gets its `transaction-stats-rollup` written inline before its
+checks, so the Apdex SLO check takes the rollup fast path instead of a raw scan per transaction. At
+most one such rollup per checks job, since the stage is not chunked and the orchestrator waits 30
+min on it; the rest of the batch takes the raw path until `scripts/backfill-test-run-stats-rollup.ts`
+catches up.
 
 Two consequences for anyone reading its logs:
 
