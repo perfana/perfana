@@ -330,6 +330,29 @@ perf-test row complete: only the stage's full pass and a force re-fetch set `is_
 and nothing is certified when nothing was written. The full pass also holds the live tick's key
 lock (`perfTestTickLockKey` in `src/services/JobLockService.ts`, up to 3 min, best-effort) so a
 tick that started before completion cannot land after it.
+
+**Telling which path a run took, and forcing a rebuild.** The stage logs one of three lines
+right after `🎯 Starting performance test metrics collection`:
+
+| Log line | Path | What it means |
+|---|---|---|
+| `⏭️ Perf-test metrics for <id> are already final` | skip | a full pass already ran; nothing written |
+| `🧵 Finishing the ticks' perf-test metrics for <id>: tail from <ts>` | tail | the ticks' rows are kept; only the tail after `<ts>` is aggregated |
+| `🔁 Rebuilding perf-test metrics for <id>: <reason>` | rebuild | delete-and-rebuild; `<reason>` is one of `no incremental collection`, `run not completed`, `ticks wrote Ns buckets, run needs Ms`, `rows are not on the Ms grid` |
+
+Two warnings can precede a tail: `Could not take the perf-test tick lock … proceeding without it`
+(Redis error) and `still held after 180s — proceeding without it` (a dead tick's lock; its TTL is
+15 min). After either, a second scenario-level point at `start_time` is the expected residue.
+
+To force a rebuild of one run, use a **force re-fetch** re-evaluate (it deletes the run's
+perf-test rows, re-collects the whole range at the final bucket size and marks the row complete
+— the next analyze then skips). To force it at the next plain analyze instead, clear the marker:
+`UPDATE ds_metric_collection_status SET is_complete = false, collected_ranges = '[]' WHERE
+test_run_id = '<id>' AND source_type = 'performance_test'` — with the ranges empty the stage tails
+from `start_time`, which is a full-range upsert, and rebuilds only if the rows are off the grid
+or the tick size differs from the final one.
+Deleting the status row is not equivalent: a run with no status rows takes the orchestrator's
+full-collection path for every source, Grafana and Dynatrace included.
 `metricsDocuments.length === 0` is the same signal for "ran fine, no data" and "every query failed"
 (`executeBatchQueries` catches per query and returns `{ result: null, error }`), so a Dynatrace
 config is completed only when its batch ran and every query succeeded. `MetricsPipeline` does not
