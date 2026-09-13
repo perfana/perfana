@@ -895,8 +895,8 @@ Four rules for anything in this path:
    resolver can share it without pulling in the panel builder's module-level logger.
 4. **"Complete" is sticky and suppresses re-collection — never set it on a maybe.** Only a
    force-refetch reevaluate clears `is_complete`, and `PipelineOrchestrator` skips
-   `dynatrace-collection`, `panels-processing`, `performance-test-metrics` and `metrics-collection`
-   once every status row is complete. `metricsDocuments.length === 0` is the SAME signal for "ran
+   `dynatrace-collection`, `panels-processing` and `metrics-collection` whenever the run had an
+   incremental collection at all (`performance-test-metrics` always runs, v0.2.95.22). `metricsDocuments.length === 0` is the SAME signal for "ran
    fine, no data" and "every query failed" — `executeBatchQueries` catches per query and returns
    `{ result: null, error }`, and `DataProcessor` only builds a document when `!result.error` — so
    completing there would make an expired token permanent. A Dynatrace config is marked complete only
