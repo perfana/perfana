@@ -188,8 +188,8 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query (fast-path eligible — no missing pct_agg)
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
-      // Mock insert query with rowCount
-      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
+      // INSERT ... RETURNING 1 returns one row per inserted/updated row
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 50 }, () => ({ '?column?': 1 })));
 
       const result = await pipeline.execute(input);
 
@@ -224,7 +224,7 @@ describe('ControlGroupStatisticsPipeline', () => {
         }])
         .mockResolvedValueOnce([{ count: '50' }])
         .mockResolvedValueOnce([{ missing_sketches: 0 }])
-        .mockResolvedValueOnce({ rowCount: 25 })
+        .mockResolvedValueOnce(Array.from({ length: 25 }, () => ({ '?column?': 1 })))
         .mockResolvedValueOnce([{
           control_group_id: 'test-run-2',
           system_under_test_id: 'system-1',
@@ -235,7 +235,7 @@ describe('ControlGroupStatisticsPipeline', () => {
         }])
         .mockResolvedValueOnce([{ count: '75' }])
         .mockResolvedValueOnce([{ missing_sketches: 0 }])
-        .mockResolvedValueOnce({ rowCount: 30 });
+        .mockResolvedValueOnce(Array.from({ length: 30 }, () => ({ '?column?': 1 })));
 
       const result = await pipeline.execute(input);
 
@@ -273,7 +273,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
       // Mock insert query
-      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 5 });
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 5 }, () => ({ '?column?': 1 })));
 
       await pipeline.execute(input);
 
@@ -439,7 +439,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       // Mock sketch availability query (fast-path eligible)
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
-      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 0 });
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 0 }, () => ({ '?column?': 1 })));
 
       const result = await pipeline.execute(input);
 
@@ -482,7 +482,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
       // Mock insert query with partial inserts (60 new, 40 updated)
-      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 60 });
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 60 }, () => ({ '?column?': 1 })));
 
       const result = await pipeline.execute(input);
 
@@ -639,7 +639,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
       // Mock insert query
-      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 5 });
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 5 }, () => ({ '?column?': 1 })));
 
       await pipeline.execute(input);
 
@@ -665,7 +665,7 @@ describe('ControlGroupStatisticsPipeline', () => {
           }])
           .mockResolvedValueOnce([{ count: '100' }])
           .mockResolvedValueOnce([{ missing_sketches: 0 }])
-          .mockResolvedValueOnce({ rowCount: 50 });
+          .mockResolvedValueOnce(Array.from({ length: 50 }, () => ({ '?column?': 1 })));
       }
 
       await pipeline.execute({ controlGroupIds: ['control-group-1', 'control-group-2'] });
@@ -708,7 +708,7 @@ describe('ControlGroupStatisticsPipeline', () => {
           }])
           .mockResolvedValueOnce([{ count: `${i * 10}` }])
           .mockResolvedValueOnce([{ missing_sketches: 0 }])
-          .mockResolvedValueOnce({ rowCount: i * 5 });
+          .mockResolvedValueOnce(Array.from({ length: i * 5 }, () => ({ '?column?': 1 })));
       }
 
       const result = await pipeline.execute(input);
@@ -743,7 +743,7 @@ describe('ControlGroupStatisticsPipeline', () => {
         }])
         .mockResolvedValueOnce([{ count: '10' }])
         .mockResolvedValueOnce([{ missing_sketches: 0 }])
-        .mockResolvedValueOnce({ rowCount: 5 })
+        .mockResolvedValueOnce(Array.from({ length: 5 }, () => ({ '?column?': 1 })))
         // Mock missing-group (empty result)
         .mockResolvedValueOnce([])
         // Mock control-group-3
@@ -757,7 +757,7 @@ describe('ControlGroupStatisticsPipeline', () => {
         }])
         .mockResolvedValueOnce([{ count: '15' }])
         .mockResolvedValueOnce([{ missing_sketches: 0 }])
-        .mockResolvedValueOnce({ rowCount: 7 });
+        .mockResolvedValueOnce(Array.from({ length: 7 }, () => ({ '?column?': 1 })));
 
       const result = await pipeline.execute(input);
 
@@ -797,7 +797,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
 
       // Mock insert query
-      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 50 }, () => ({ '?column?': 1 })));
 
       await pipeline.execute(input);
 
@@ -839,7 +839,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 7 }]);
 
       // Mock insert query
-      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 50 }, () => ({ '?column?': 1 })));
 
       await pipeline.execute(input);
 
@@ -874,7 +874,7 @@ describe('ControlGroupStatisticsPipeline', () => {
       ]);
       (mockEntityManager.query as any).mockResolvedValueOnce([{ count: '100' }]);
       (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: missingSketches }]);
-      (mockEntityManager.query as any).mockResolvedValueOnce({ rowCount: 50 });
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 50 }, () => ({ '?column?': 1 })));
 
       await pipeline.execute({ controlGroupIds: ['control-group-1'] });
 
@@ -884,6 +884,51 @@ describe('ControlGroupStatisticsPipeline', () => {
       // No per-row correlation with the joined test_runs row.
       expect(sql).not.toContain('organization_id = tr.organization_id');
       expect(sql).not.toMatch(/INNER JOIN test_runs tr/);
+    });
+  });
+
+  describe('Row count after the INSERT', () => {
+    const seedOneGroup = () => {
+      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([
+        {
+          control_group_id: 'control-group-1',
+          system_under_test_id: 'system-1',
+          workload: 'load-test',
+          test_environment: 'production',
+          test_runs: ['test-run-1', 'test-run-2'],
+          n_test_runs: 2
+        }
+      ]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ count: '100' }]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
+    };
+
+    // TypeORM's manager.query returns pg `rows` for an INSERT, so `.rowCount` was
+    // always undefined and every aggregation logged "0 row(s)" + the "No metrics
+    // were available" warning while writing tens of thousands of rows. The upsert
+    // now ends in RETURNING 1 and the returned rows are the count.
+    test('counts the rows the upsert RETURNs, exact for inserted + updated', async () => {
+      seedOneGroup();
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 42 }, () => ({ '?column?': 1 })));
+
+      const result = await pipeline.execute({ controlGroupIds: ['control-group-1'] });
+
+      expect(result.data).toEqual({ statisticsCreated: 42, controlGroups: 1 });
+      const insert = (mockEntityManager.query as any).mock.calls.find((c: any[]) => String(c[0]).includes('INSERT INTO ds_control_group_statistics'));
+      expect(insert![0].trimEnd()).toMatch(/RETURNING 1$/);
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('No metrics were available'));
+    });
+
+    test('treats a non-array driver result as zero and flags the empty result', async () => {
+      seedOneGroup();
+      (mockEntityManager.query as any).mockResolvedValueOnce(undefined);
+
+      const result = await pipeline.execute({ controlGroupIds: ['control-group-1'] });
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ statisticsCreated: 0, controlGroups: 1 });
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('No metrics were available to aggregate'));
     });
   });
 });

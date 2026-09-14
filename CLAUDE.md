@@ -760,7 +760,7 @@ it, and neither the conclusion SQL nor the read path consults it.
 
 `ResultsProcessor.deleteOrphanedResults()` runs from `AdaptPipeline` immediately after the upsert,
 as its own `delete-orphaned-results` substage, scoped to the same `metricFilter` (a single-metric
-re-analysis must not delete every other metric's results). Two things about it are load-bearing:
+re-analysis must not delete every other metric's results). Three things about it are load-bearing:
 
 1. **The `EXISTS` guard is not defensive padding — remove it and a read-shaped edge case destroys
    unrebuildable history.** It refuses to act on a run with **zero** `ds_metric_statistics` rows,
@@ -779,6 +779,29 @@ re-analysis must not delete every other metric's results). Two things about it a
    `DELETE` deliberately ignores `control_group_id` — it matches on the metric identity, not the
    baseline. A metric that keeps its statistics but loses its control-group row therefore keeps its
    stale verdict. That is the known baseline-timeout case above, unchanged.
+3. **The `EXISTS` guard is keyed on the unnested run list, never correlated on the row being
+   deleted (v0.2.95.26).** The upsert inserts the run's `ds_adapt_results` rows in the same
+   transaction, so on a **first** analysis the planner's statistics still say the table holds ~1
+   row for the run. With the guard written `EXISTS (… WHERE ms_any.test_run_id = ar.test_run_id)`
+   it nested that whole-run probe inside the per-row loop and re-ran it for every row: metrics x
+   metrics. Measured across the four first analyses of 2026-09-14: 4.4k metrics 5 s, 12k 25 s,
+   21k 115 s (90 % of ADAPT), 26.5k past the 120 s cap `AdaptPipeline` runs under — and every
+   re-evaluate of that run then failed identically, because the rolled-back rows never land and
+   the estimate never changes. A re-evaluate of an already-analysed run was fine all along
+   (163 ms, merge anti-join), which is why it took a fresh large run to surface. Local repro on
+   15,195 rows inserted in-transaction: 9,473 ms against 87 ms with the guard as
+   `ar.test_run_id IN (SELECT r.test_run_id FROM unnest($1::text[]) r WHERE EXISTS (…r…))` —
+   nothing in it references `ar`, so the planner evaluates it once and materialises it whichever
+   join order it picks. Two things about the shape are deliberate: it stays in the **same
+   statement** as the anti-join (a probe in its own statement leaves a snapshot window in which
+   a concurrent empty statistics rewrite lands between probe and DELETE — the one outcome the
+   guard exists to prevent), and the anti-join stays correlated on all four columns of
+   `uniq_ds_metric_statistics`, which makes it a per-row index probe however `ar` is estimated.
+
+   Same trap in a different disguise as the planner items under "ADAPT's baseline depends on
+   the `pct_agg` sketch": a whole-run predicate the planner is allowed to push inside a per-row
+   loop. When a statement reads rows the same transaction wrote, assume the planner has no idea
+   how many there are — and write every run-level predicate against the run list, not the row.
 
 ### Gap-filling a completed run must never fall back to a full re-collection
 
@@ -1234,6 +1257,7 @@ container mounts in tests at all.
 26. **Every analyze logs `🗑️ Removing orphaned collection status for performance_test::`, and a JMeter-only run then takes the full delete-and-rebuild path while a run with a Grafana or Dynatrace source skips collection** → the orphan sweep's whitelist said `performance_test::null` and the row says `''`. Fixed in v0.2.95.22, which also stopped skipping the perf-test rebuild on the gap-filled path: the ticks' 1 s buckets and per-minute scenario points are not what the baselines hold, so a mixed-source run analysed between v0.2.95.20 and this fix has tick-shaped perf-test panels and needs a re-analyse. See item 3 of "Gap-filling a completed run must never fall back to a full re-collection" above.
 27. **A `metrics-collection` stage with no panel documents takes ~3 minutes and logs `Failed to clean up stale data in ds_metrics:` with nothing after the colon** → the whole-hypertable stale-dashboard DELETE. Fixed in v0.2.95.22. See "`cleanupStaleApplicationDashboards` must never be pointed at a hypertable" above.
 28. **The `checks-evaluation` stage of a re-evaluate takes ~45 s on a run with a workload-level Apdex SLO, and the per-transaction worker log lines read `Apdex for <name>` rather than `Apdex (rollup) for <name>`** (the `fast path miss` line is debug-level) → the run has no `test_run_transaction_stats` at all (its analyze never reached `transaction-stats-rollup`, and a re-evaluate has no rollup stage), so each transaction is a raw `transactions` scan. Fixed in v0.2.95.25 (a re-evaluate rolls the run up first when the table is empty); on an older deploy, run `apps/worker/scripts/backfill-test-run-stats-rollup.ts` or re-analyse the run. See "The transaction rollup is written in two halves" above.
+29. **`adapt-analysis` fails with `canceling statement due to statement timeout` in `ResultsProcessor.deleteOrphanedResults` on the first analysis of a large run, and every re-evaluate of that run fails the same way while other runs' `delete-orphaned-results` substage reads seconds and growing** → the orphan `DELETE`'s whole-run `EXISTS` guard was planned inside a per-row nested loop because the upsert's rows are invisible to the planner's statistics (metrics x metrics; ~25k metrics crosses the 120 s cap). Fixed in v0.2.95.26 (the guard is keyed on the unnested run list, uncorrelated to the row). On an older deploy the only workaround is a one-off raise of `ANALYTICS_STATEMENT_TIMEOUT_MS` for that worker; nothing in the data is wrong. The `⚠️ No metrics were available to aggregate` / `0 row(s) inserted` lines from `control-group-statistics` in the same log are unrelated and were a logging bug until the same version — TypeORM returns `[]` for an INSERT, so `.rowCount` was always undefined. See item 3 of "`ds_adapt_results` is written by an upsert, so it also needs a delete" above.
 
 ## How-To Tutorials
 

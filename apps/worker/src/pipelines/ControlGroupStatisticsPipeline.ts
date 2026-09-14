@@ -705,11 +705,18 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
     // log "will process N unique metrics" and compare it with the row count below.
     // It ran on BOTH paths — so the #289 fast path still paid the full raw scan it
     // exists to avoid, and on a 20M-row control run that scan alone can outlast the
-    // statement timeout. The INSERT's own rowCount says everything the log needs.
-    const result = await manager.query(statisticsQuery, [controlGroupId, controlGroup.test_runs, controlGroup.organization_id || null, controlGroup.team_id || null]);
-
-    // For INSERT with ON CONFLICT, TypeORM returns the pg driver result with rowCount
-    const rowCount = (result).rowCount || 0;
+    // statement timeout. The row count logged below says everything the log needs.
+    // TypeORM's manager.query returns the pg `rows` for an INSERT, not the driver
+    // result, so `.rowCount` was always undefined here and every aggregation logged
+    // "0 row(s)" + "No metrics were available" while writing tens of thousands of rows
+    // (every run in the 2026-09-14 deploy log). `RETURNING 1` makes the rows the
+    // count: exact for inserted + updated, one statement, and unlike a COUNT over the
+    // group it does not include rows an earlier aggregation left behind.
+    const written = await manager.query<unknown[]>(
+      statisticsQuery + '\n    RETURNING 1',
+      [controlGroupId, controlGroup.test_runs, controlGroup.organization_id || null, controlGroup.team_id || null]
+    );
+    const rowCount = Array.isArray(written) ? written.length : 0;
 
     this.logger.info(
       `✅ Control group statistics aggregation completed: ${rowCount} row(s) inserted or updated, from ${totalMetricStats} metric statistics across ${controlGroup.n_test_runs} control runs`

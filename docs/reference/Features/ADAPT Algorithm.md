@@ -121,6 +121,18 @@ cannot disturb any other.
 > ds_metric_statistics` and groups by `test_run_id`, so a run with no rows forms no group and is
 > never reported as empty.
 
+The guard's *shape* matters as much as its presence (v0.2.95.26). The upsert inserts the run's
+`ds_adapt_results` rows in the same transaction, so on a **first** analysis the planner's
+statistics still say the table holds about one row for the run. With the guard correlated on the
+row being deleted (`WHERE ms_any.test_run_id = ar.test_run_id`), the planner nested that
+whole-run probe inside the per-row loop and re-ran it once per row: cost grew with the square of
+the run's metric count, and a 26.5k-metric run crossed the 120 s `ANALYTICS_STATEMENT_TIMEOUT_MS`
+budget ADAPT runs under. Every re-evaluate of that run then failed the same way, because the
+rolled-back rows never landed and the estimate never changed — while re-evaluating an
+already-analysed run was fine all along. The guard is now keyed on the unnested run list and
+references nothing from the row, so it is evaluated once whichever join order the planner picks;
+it stays in the same statement as the anti-join so both read one snapshot.
+
 This covers **one** class of stale result. The unique constraint above includes `control_group_id`,
 and the delete deliberately ignores it — it matches on the metric's identity, not on which baseline
 produced the verdict. A metric that keeps its statistics but loses its control-group row therefore

@@ -130,7 +130,7 @@ read path reads it.
 
 `ResultsProcessor.deleteOrphanedResults()` now runs right after the upsert as the
 `delete-orphaned-results` substage, scoped to the same `metricFilter` so a single-metric
-re-analysis cannot delete anything else. Two rules if you touch it:
+re-analysis cannot delete anything else. Three rules if you touch it:
 
 - **Keep the `EXISTS` guard.** It refuses to run against a test run with zero
   `ds_metric_statistics` rows. "Every metric is orphaned" is never real — it means the statistics
@@ -147,6 +147,20 @@ re-analysis cannot delete anything else. Two rules if you touch it:
   ignores it on purpose and matches on metric identity. A metric that keeps its statistics but
   loses its control-group row keeps its stale verdict — that is the `pct_agg` baseline case below,
   and it is unchanged.
+- **Key the `EXISTS` guard on the unnested run list, never on the row being deleted
+  (v0.2.95.26).** The upsert inserts the run's `ds_adapt_results` rows in the same transaction,
+  so on a first analysis the planner still estimates ~1 row for the run. Written as
+  `EXISTS (… WHERE ms_any.test_run_id = ar.test_run_id)` the whole-run probe was nested inside
+  the per-row loop and re-run once per row — metrics x metrics, 26.5k metrics past the 120 s
+  `ANALYTICS_STATEMENT_TIMEOUT_MS` that `AdaptPipeline` runs under, and every re-evaluate of
+  that run failed the same way because the rolled-back rows never landed. It is now
+  `ar.test_run_id IN (SELECT r.test_run_id FROM unnest($1::text[]) r WHERE EXISTS (… r …))`,
+  which references nothing from `ar` and is evaluated once. Keep it in the **same statement** as
+  the anti-join (a probe in its own statement opens a snapshot window for a concurrent empty
+  statistics rewrite to land between probe and DELETE), and keep the anti-join correlated on
+  all four columns of `uniq_ds_metric_statistics` so it stays a per-row index probe. A
+  re-evaluate of an already-analysed run never showed this (163 ms, merge anti-join); the
+  measurements are in CLAUDE.md, item 3 of "`ds_adapt_results` is written by an upsert".
 
 ### The control-group fast path needs `pct_agg`
 
