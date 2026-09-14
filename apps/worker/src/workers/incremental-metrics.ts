@@ -151,7 +151,9 @@ export function incrementalMetricsWorker() {
           // so if we add 1 minute, we skip the data point at the boundary.
           // By using maxDataTimestamp directly, the next query will start from this time,
           // and UPSERT will handle any duplicate data points.
-          effectiveToTime = new Date(result.maxDataTimestamp.getTime());
+          // Never below fromTime: the Dynatrace lookback can return only rows older than
+          // the cursor, and an inverted range would subtract from calculateCoverage.
+          effectiveToTime = new Date(Math.max(result.maxDataTimestamp.getTime(), new Date(fromTime).getTime()));
           logger.info({
             testRunId,
             sourceType,
