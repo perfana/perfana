@@ -928,6 +928,22 @@ Three things to hold on to:
    Dynatrace token reads as "no data", not as a failure — CLAUDE.md #22 — and a run whose only
    incomplete source is one that threw at every tick was already carrying the real error in
    `failed_ranges` before this change.
+5. **A live Dynatrace tick queries two minutes further back than its window; the completed-run
+   paths must not (v0.2.95.27).** Some hosts' minute buckets reach the Dynatrace API more than a
+   minute after the minute closes. A tick that queried exactly `[last tick, now]` saw nothing for
+   them, and because the *other* hosts answered, the range was recorded as collected and never
+   asked for again — the zero-width-range retry (`incremental-metrics.ts`, `dataPoints === 0`)
+   fires only when the whole tick returned nothing. `DynatraceCollector` therefore queries from
+   `DYNATRACE_INGEST_LOOKBACK_MS` (2 min, clamped at `start_time`) before the window while the
+   run is not `completed`; the `ds_metrics` upsert overwrites the overlap, which also replaces a
+   partial current-minute bucket with the full one. Off on a completed run on purpose:
+   `checkAndFillMetricGaps` and the re-evaluate missing-data branch decompress exactly
+   `[from, to]` before they query, so rows outside that span would be DML on a compressed chunk,
+   and the echoed rows would count as "new data" for a gap that is actually empty. The recorded
+   range is unchanged except that `incremental-metrics.ts` clamps `maxDataTimestamp` to
+   `fromTime` — with the lookback, Dynatrace can return only rows older than the cursor, and an
+   inverted range subtracts from `calculateCoverage`. Residue: a slow host still loses its last
+   one or two minutes, and every live Dynatrace row is written up to three times (TODOS.md).
 
 ### `cleanupStaleApplicationDashboards` must never be pointed at a hypertable
 
@@ -1258,6 +1274,7 @@ container mounts in tests at all.
 27. **A `metrics-collection` stage with no panel documents takes ~3 minutes and logs `Failed to clean up stale data in ds_metrics:` with nothing after the colon** → the whole-hypertable stale-dashboard DELETE. Fixed in v0.2.95.22. See "`cleanupStaleApplicationDashboards` must never be pointed at a hypertable" above.
 28. **The `checks-evaluation` stage of a re-evaluate takes ~45 s on a run with a workload-level Apdex SLO, and the per-transaction worker log lines read `Apdex for <name>` rather than `Apdex (rollup) for <name>`** (the `fast path miss` line is debug-level) → the run has no `test_run_transaction_stats` at all (its analyze never reached `transaction-stats-rollup`, and a re-evaluate has no rollup stage), so each transaction is a raw `transactions` scan. Fixed in v0.2.95.25 (a re-evaluate rolls the run up first when the table is empty); on an older deploy, run `apps/worker/scripts/backfill-test-run-stats-rollup.ts` or re-analyse the run. See "The transaction rollup is written in two halves" above.
 29. **`adapt-analysis` fails with `canceling statement due to statement timeout` in `ResultsProcessor.deleteOrphanedResults` on the first analysis of a large run, and every re-evaluate of that run fails the same way while other runs' `delete-orphaned-results` substage reads seconds and growing** → the orphan `DELETE`'s whole-run `EXISTS` guard was planned inside a per-row nested loop because the upsert's rows are invisible to the planner's statistics (metrics x metrics; ~25k metrics crosses the 120 s cap). Fixed in v0.2.95.26 (the guard is keyed on the unnested run list, uncorrelated to the row). On an older deploy the only workaround is a one-off raise of `ANALYTICS_STATEMENT_TIMEOUT_MS` for that worker; nothing in the data is wrong. The `⚠️ No metrics were available to aggregate` / `0 row(s) inserted` lines from `control-group-statistics` in the same log are unrelated and were a logging bug until the same version — TypeORM returns `[]` for an INSERT, so `.rowCount` was always undefined. See item 3 of "`ds_adapt_results` is written by an upsert, so it also needs a delete" above.
+30. **Some Dynatrace hosts have almost no points on a live run, the sanity check reports them as `1 points across a <N>s run`, and the collection status says the range was collected** → those hosts publish their minute buckets more than a minute late, and a tick that queried exactly `[last tick, now]` recorded the minute as collected because the other hosts answered. Fixed in v0.2.95.27 (every live tick re-queries the previous 2 minutes, `DYNATRACE_INGEST_LOOKBACK_MS`). On an older deploy, a force-refetch re-evaluate after the run completes recovers them from Dynatrace as long as the tenant still holds the window. The last one or two minutes of such a host can still be missing after the fix — that is the open TODOS.md item, not a regression. See item 5 of "Gap-filling a completed run must never fall back to a full re-collection" above.
 
 ## How-To Tutorials
 
