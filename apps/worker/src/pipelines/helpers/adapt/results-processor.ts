@@ -192,8 +192,33 @@ export class ResultsProcessor {
     testRunIds: string[],
     metricFilter?: MetricFilter
   ): Promise<number> {
-    const params: unknown[] = [...testRunIds];
-    const placeholders = testRunIds.map((_: unknown, i: number) => `$${i + 1}`).join(', ');
+    // Refuse to act on a run with NO statistics at all. "Every metric is orphaned"
+    // is never a real state; it means the statistics computation produced nothing,
+    // and deleting on that reading destroys history that cannot be rebuilt once
+    // ds_metrics has aged out. StatisticsPipeline reaches exactly that state while
+    // returning success: it warns "Metrics exist ... but no statistics were written"
+    // when org-scoping drops every dashboard (and, before filterRunsWithMetrics went
+    // per-run in v0.2.95.0, its batch-wide probe let one live run authorise deleting
+    // the statistics of every aged-out run beside it). AdaptValidator cannot screen
+    // those out either: checkEmptyControlGroups selects FROM ds_metric_statistics and
+    // GROUP BY test_run_id, so a run with no rows forms no group and is never
+    // reported as empty. Same rule, same reason as repairEmptySamplerRollup: the
+    // probe stays strict because the statement deletes.
+    //
+    // The guard is keyed on `r`, the unnested run list, and references NOTHING from
+    // `ar`. It used to be `EXISTS (... WHERE ms_any.test_run_id = ar.test_run_id)`:
+    // correlated on the row being deleted, so on a first analysis — where the upsert
+    // just inserted the run's rows in this same transaction and the planner's
+    // statistics still say ~1 row — the planner nested it inside the per-row loop and
+    // re-ran the whole-run probe once per row: metrics x metrics. Measured 2026-09-14
+    // across four first analyses: 4.4k metrics 5 s, 12k 25 s, 21k 115 s, 26.5k past
+    // the 120 s ADAPT cap, and every re-evaluate of that run failed identically since
+    // the rolled-back rows never land. An uncorrelated subquery is evaluated once
+    // and materialised whichever join order the planner picks. It stays in this ONE
+    // statement rather than a separate probe so guard and anti-join read the same
+    // snapshot: a probe in its own statement leaves a window in which a concurrent
+    // empty statistics rewrite lands between probe and DELETE.
+    const params: unknown[] = [testRunIds];
 
     // Written against the `ar` alias rather than reusing buildMetricFilterSQL, which
     // emits `ms.`-qualified conditions for the statistics side of the upsert.
@@ -211,28 +236,19 @@ export class ResultsProcessor {
       filterConditions.push(`AND ar.metric_name = $${params.length}`);
     }
 
+    // The anti-join is correlated on all four columns of uniq_ds_metric_statistics,
+    // so it is a per-row index probe however `ar` is estimated.
     const result = await manager.query(
       `
       DELETE FROM ds_adapt_results ar
-      WHERE ar.test_run_id IN (${placeholders})
-        ${filterConditions.join('\n        ')}
-        -- Refuse to act on a run with NO statistics at all. "Every metric is orphaned"
-        -- is never a real state; it means the statistics computation produced nothing,
-        -- and deleting on that reading destroys history that cannot be rebuilt once
-        -- ds_metrics has aged out. StatisticsPipeline reaches exactly that state while
-        -- returning success: it warns "Metrics exist ... but no statistics were written"
-        -- when org-scoping drops every dashboard, and its batch-wide EXISTS probe lets
-        -- one live run authorise deleting statistics for every aged-out run beside it.
-        -- AdaptValidator cannot screen those out either: checkEmptyControlGroups selects
-        -- FROM ds_metric_statistics and GROUP BY test_run_id, so a run with no rows forms
-        -- no group and is never reported as empty.
-        -- Same rule, same reason as repairEmptySamplerRollup: the probe stays strict
-        -- because the statement deletes.
-        AND EXISTS (
-          SELECT 1
-          FROM ds_metric_statistics ms_any
-          WHERE ms_any.test_run_id = ar.test_run_id
+      WHERE ar.test_run_id IN (
+          SELECT r.test_run_id
+          FROM unnest($1::text[]) AS r(test_run_id)
+          WHERE EXISTS (
+            SELECT 1 FROM ds_metric_statistics ms_any WHERE ms_any.test_run_id = r.test_run_id
+          )
         )
+        ${filterConditions.join('\n        ')}
         AND NOT EXISTS (
           SELECT 1
           FROM ds_metric_statistics ms

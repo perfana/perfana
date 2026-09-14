@@ -33,7 +33,7 @@ describe('ResultsProcessor.deleteOrphanedResults', () => {
   const sqlOf = () => manager.query.mock.calls[0]![0] as string;
   const paramsOf = () => manager.query.mock.calls[0]![1] as unknown[];
 
-  it('deletes results whose metric has no ds_metric_statistics row', async () => {
+  it('deletes results whose metric has no ds_metric_statistics row, in ONE statement', async () => {
     manager.query.mockResolvedValue([[], 4]);
 
     const deleted = await processor.deleteOrphanedResults(
@@ -42,10 +42,13 @@ describe('ResultsProcessor.deleteOrphanedResults', () => {
     );
 
     expect(deleted).toBe(4);
+    expect(manager.query).toHaveBeenCalledTimes(1);
     expect(sqlOf()).toContain('DELETE FROM ds_adapt_results');
     expect(sqlOf()).toContain('NOT EXISTS');
     expect(sqlOf()).toContain('ds_metric_statistics');
-    expect(paramsOf()).toEqual(['run-1', 'run-2']);
+    // The run list is one array parameter, unnested inside the statement.
+    expect(sqlOf()).toContain('unnest($1::text[])');
+    expect(paramsOf()).toEqual([['run-1', 'run-2']]);
   });
 
   it('matches on the full group key, so a metric present under another panel is not deleted', async () => {
@@ -66,42 +69,55 @@ describe('ResultsProcessor.deleteOrphanedResults', () => {
     });
 
     const sql = sqlOf();
+    // $1 is the run array, so the filter placeholders start at $2 however many runs there are.
     expect(sql).toContain('ar.application_dashboard_id = $2');
     expect(sql).toContain('ar.panel_id = $3');
     expect(sql).toContain('ar.metric_name = $4');
-    expect(paramsOf()).toEqual(['run-1', 'dash-uuid', 42, 'checkout.duration']);
+    expect(paramsOf()).toEqual([['run-1'], 'dash-uuid', 42, 'checkout.duration']);
   });
 
   it('adds no filter conditions when no metric filter is given', async () => {
     await processor.deleteOrphanedResults(manager as unknown as EntityManager, ['run-1']);
 
     expect(sqlOf()).not.toContain('ar.metric_name =');
-    expect(paramsOf()).toEqual(['run-1']);
+    expect(paramsOf()).toEqual([['run-1']]);
   });
 
   it('refuses to delete anything for a run that has no statistics at all', async () => {
     // "Every metric is orphaned" is not a real state — it means the statistics
     // computation produced nothing. StatisticsPipeline reaches it while returning
-    // success (org-scoping drops every dashboard), its batch-wide EXISTS probe lets one
-    // live run authorise deleting statistics for aged-out runs beside it, and
-    // checkEmptyControlGroups cannot screen those runs out because it groups over the
-    // very table that is empty. Without this guard the run loses its whole ADAPT
-    // history, unrebuildable once ds_metrics has aged out.
+    // success (org-scoping drops every dashboard), and checkEmptyControlGroups cannot
+    // screen those runs out because it groups over the very table that is empty.
+    // Without this guard the run loses its whole ADAPT history, unrebuildable once
+    // ds_metrics has aged out.
     await processor.deleteOrphanedResults(manager as unknown as EntityManager, ['run-1']);
 
     const sql = sqlOf();
-    const guard = sql.indexOf('AND EXISTS');
+    const guard = sql.indexOf('ms_any');
     const orphanTest = sql.indexOf('AND NOT EXISTS');
     expect(guard).toBeGreaterThan(-1);
-    // The guard must be a separate whole-run probe, not the anti-join itself.
+    // The guard is a separate whole-run probe that precedes the anti-join...
     expect(guard).toBeLessThan(orphanTest);
-    expect(sql).toContain('ms_any.test_run_id = ar.test_run_id');
-    // ...and it must be keyed on the run alone — adding any group-key column back would
-    // collapse it into the anti-join and reopen the hole.
+    // ...keyed on the run alone — adding any group-key column back would collapse
+    // it into the anti-join and reopen the hole.
     const guardClause = sql.slice(guard, orphanTest);
     expect(guardClause).not.toContain('application_dashboard_id');
     expect(guardClause).not.toContain('panel_id');
     expect(guardClause).not.toContain('metric_name');
+  });
+
+  it('keeps the whole-run guard uncorrelated to the row being deleted', async () => {
+    // Correlated on `ar`, the planner nested the guard inside the per-row loop on a
+    // first analysis (the upsert's rows are invisible to its statistics): metrics x
+    // metrics, past the 120 s cap at ~25k metrics (2026-09-14, WERKNL-00003). Keyed
+    // on the unnested run list it is evaluated once whichever join order is chosen,
+    // and staying in the same statement keeps guard and anti-join on one snapshot.
+    await processor.deleteOrphanedResults(manager as unknown as EntityManager, ['run-1']);
+
+    const sql = sqlOf();
+    expect(sql).toContain('ms_any.test_run_id = r.test_run_id');
+    expect(sql).not.toContain('ms_any.test_run_id = ar.test_run_id');
+    expect(sql).toMatch(/ar\.test_run_id IN \(\s*SELECT r\.test_run_id\s+FROM unnest/);
   });
 
   it('reports zero rather than throwing when the driver returns no row count', async () => {
