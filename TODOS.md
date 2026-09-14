@@ -653,6 +653,32 @@ against a real Managed cluster rather than guessing), then move this link into
 `dynatrace-formatters.ts` so it shares the `isSaaS` branch and the test suite instead of
 carrying its own copy.
 
+### A late-publishing Dynatrace host still loses its last one or two minutes of a run
+
+**Priority:** P3
+**Origin:** Adversarial review during /ship on `fix/dynatrace-incremental-ingest-lag`
+(2026-09-14).
+**Why:** v0.2.95.27 re-queries the previous two minutes on every live tick, which is what
+recovers the minute buckets some hosts publish more than a minute late. The lookback is
+deliberately off once the run is `completed` (the gap-fill paths decompress exactly
+`[from, to]` and count what comes back as new data), and the collected range is recorded
+from the *maximum* timestamp any host returned — so a run whose fast hosts answered for
+the final minute marks it collected while a slow host's last one or two buckets are still
+in flight, and the analyze-time gap fill never asks for them. Two costs come with the fix
+as well: every live Dynatrace row is now written up to three times (the upsert has no
+`IS DISTINCT FROM` guard, so each pass is a new heap tuple on the hot chunk), and a DQL
+config scans three minutes per query instead of one, which Grail bills by bytes scanned.
+**Why it is P3:** before the fix those hosts lost almost every minute; two at the tail is
+the residue. The write amplification is a few thousand rows a minute on the tenant this
+was measured on.
+**What to do:** either have the analyze-time gap fill re-query the last
+`DYNATRACE_INGEST_LOOKBACK_MS` of a run that completed within the last few minutes (its
+chunk is still row store, so the decompression concern does not apply), or record the
+Dynatrace range per host rather than per config. Add `WHERE ds_metrics.value IS DISTINCT
+FROM EXCLUDED.value OR ds_metrics.ramp_up IS DISTINCT FROM EXCLUDED.ramp_up` to the
+incremental upsert only for the live path — on a compressed chunk that guard is the
+expensive part (CLAUDE.md, "ADAPT's baseline depends on the `pct_agg` sketch", item 6).
+
 ## Test run detail tables
 
 ### Redo the long-table virtualisation that was reverted in v0.2.86.0
