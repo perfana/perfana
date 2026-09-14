@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.26] - 2026-09-14
+
+### Fixed
+- **The first analysis of a large run no longer fails ADAPT with `canceling statement due to statement timeout`, and re-evaluating such a run works again.** The orphan clean-up that runs right after the ADAPT upsert carried a whole-run "does this run have statistics at all" guard written against the row being deleted. On a first analysis the upsert has just inserted the run's rows in the same transaction, so the planner — whose statistics still say ~1 row — nested that guard inside the per-row loop and re-ran it once per row: cost grew with the square of the run's metric count. Across the four runs that finished together on 2026-09-14 it took 5 s, 25 s, 115 s and then, on WERKNL (26.5k metrics), more than the 120 s ADAPT budget; every re-evaluate of that run then failed the same way, because the rolled-back rows never landed and the estimate never changed. The guard is now keyed on the run list itself (`unnest`) and references nothing from the row, so it is evaluated once whichever join order the planner picks — 9.5 s → 87 ms on a 15k-row reproduction, and the same first-analysis shape that timed out in the real pipeline now completes in under 100 ms. It stays in the same statement as the anti-join so both read one snapshot.
+- **`control-group-statistics` no longer logs `0 row(s) inserted or updated` and `No metrics were available to aggregate` on every run.** TypeORM returns the pg rows (`[]`) for an INSERT, so the row count read from `.rowCount` was always undefined while tens of thousands of baseline rows were being written. The upsert now ends in `RETURNING 1` and reports what it actually inserted or updated — exact, unlike a count of the group's rows, which would include rows an earlier aggregation left behind.
+
 ## [0.2.95.25] - 2026-09-13
 
 ### Fixed
