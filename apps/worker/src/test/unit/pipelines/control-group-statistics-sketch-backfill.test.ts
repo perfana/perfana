@@ -88,8 +88,7 @@ describe('ControlGroupStatisticsPipeline sketch backfill (#552)', () => {
     ]);
     q.mockResolvedValueOnce([{ count: '12370' }]);
     q.mockResolvedValueOnce([{ missing_sketches: missingSketches }]);
-    q.mockResolvedValueOnce([{ expected_rows: 677 }]);
-    q.mockResolvedValueOnce({ rowCount: 677 });
+    q.mockResolvedValueOnce(Array.from({ length: 677 }, () => ({ '?column?': 1 }))); // INSERT ... RETURNING 1
   };
 
   test('recomputes statistics for control runs whose pct_agg is NULL, then takes the fast path', async () => {
@@ -106,7 +105,7 @@ describe('ControlGroupStatisticsPipeline sketch backfill (#552)', () => {
     expect(result.success).toBe(true);
 
     // Fast path, not the raw scan over ds_metrics that used to time out.
-    const aggregationSql = (mockEntityManager.query as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string;
+    const aggregationSql = (mockEntityManager.query as ReturnType<typeof vi.fn>).mock.calls.find((c) => String(c[0]).includes('INSERT INTO ds_control_group_statistics'))?.[0] as string
     expect(aggregationSql).toContain('rollup(ms.pct_agg)');
     expect(aggregationSql).not.toContain('percentile_agg(m.value)');
   });
@@ -126,7 +125,7 @@ describe('ControlGroupStatisticsPipeline sketch backfill (#552)', () => {
     expect(result.success).toBe(true);
     expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('Sketch backfill failed'));
 
-    const aggregationSql = (mockEntityManager.query as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string;
+    const aggregationSql = (mockEntityManager.query as ReturnType<typeof vi.fn>).mock.calls.find((c) => String(c[0]).includes('INSERT INTO ds_control_group_statistics'))?.[0] as string
     expect(aggregationSql).toContain('percentile_agg(m.value)');
   });
 
