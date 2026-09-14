@@ -19,6 +19,9 @@ import type { CollectionResult } from './types.js';
 import type { BatchProcessor } from './batch-processor.js';
 import type { MetricProcessor, TestRunContext } from './metric-processor.js';
 
+// ponytail: fixed 2 min; make it an env var if a tenant turns out to lag longer.
+export const DYNATRACE_INGEST_LOOKBACK_MS = 2 * 60 * 1000;
+
 /**
  * Test run data with fields needed for Dynatrace collection
  */
@@ -29,6 +32,7 @@ interface TestRunData {
   testEnvironment: string;
   startTime?: Date;
   endTime?: Date;
+  completed?: boolean;
   analysisStartOffset?: number;
   analysisEndOffset?: number;
   organizationId?: string | null;
@@ -291,8 +295,22 @@ export class DynatraceCollector {
         }, proxyOpts);
 
         try {
-          // Execute queries with time range override
-          const queryResults = await apiClient.executeBatchQueries(queries, fromTime, toTime);
+          // Some hosts' minute buckets land in Dynatrace more than a minute after the
+          // minute closes, so a live tick querying exactly [last tick, now] sees nothing
+          // for them, records the range as collected, and never comes back (measured on
+          // 2026-09-14: 73% empty across 109 hosts; only ticks that happened to be
+          // 2 min wide returned data). Re-query the previous two minutes on every live
+          // tick; the ds_metrics upsert overwrites the overlap, so a partial current-minute
+          // bucket is replaced by the full one two ticks later. The recorded range is
+          // untouched. Live ticks ONLY: the gap-fill callers (PipelineOrchestrator, the
+          // re-evaluate missing-data branch) query windows whose data landed long ago and
+          // decompress exactly [from, to] first — writing outside that span would be DML
+          // on a compressed chunk, and the echoed rows would count as "new data".
+          const lookback = testRun.completed ? 0 : DYNATRACE_INGEST_LOOKBACK_MS;
+          const lookbackFrom = new Date(
+            Math.max(fromTime.getTime() - lookback, testRun.startTime?.getTime() ?? 0)
+          );
+          const queryResults = await apiClient.executeBatchQueries(queries, lookbackFrom, toTime);
 
           // Process results
           const { metricsDocuments } = await this.dataProcessor.processDynatraceResults(

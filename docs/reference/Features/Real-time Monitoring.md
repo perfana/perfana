@@ -105,8 +105,9 @@ canonical id-to-display-name list, and the third place the analyze stages are en
 
 During test execution, metrics are collected in real-time:
 
-- **IncrementalCollectionScheduler** runs every 2 minutes
+- **IncrementalCollectionScheduler** runs every minute (`@Cron(EVERY_MINUTE)`)
 - Collects latest metrics from Grafana/Dynatrace
+- Dynatrace ticks also re-query the previous 2 minutes (`DYNATRACE_INGEST_LOOKBACK_MS`, v0.2.95.27): some hosts publish a minute bucket more than a minute late, and the upsert overwrites the overlap. Off once the run is `completed`, so the analyze-time gap fill queries exactly the window it decompressed
 - Stores directly in `ds_metrics` hypertable
 - Frontend displays live metric graphs
 

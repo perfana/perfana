@@ -319,6 +319,15 @@ The incremental ticks cannot save it: `incremental-metrics.ts` writes a **zero-w
 `dataPoints === 0`, deliberately, so the window is retried instead of skipped. The full-span range
 written at analyze time is the only thing that ever makes coverage read 100%.
 
+That retry is all-or-nothing per tick, which is why a Dynatrace host whose minute buckets publish
+late used to lose them for good: the other hosts answered, the range was recorded, and nobody asked
+again. Since v0.2.95.27 `DynatraceCollector` queries `DYNATRACE_INGEST_LOOKBACK_MS` (2 min, a
+constant in `helpers/incremental/dynatrace-collector.ts`, not an env var) before every live tick's
+window and lets the upsert overwrite the overlap. It is off once the run is `completed` — the
+gap-fill paths decompress exactly the window they query — and the range bookkeeping clamps
+`maxDataTimestamp` to `fromTime` so a lookback that returns only old rows cannot record an inverted
+range. Details in CLAUDE.md, "Gap-filling a completed run", item 5.
+
 Two switches mean "off", and registration used to read neither (v0.2.95.12):
 
 | Switch | Honoured in |

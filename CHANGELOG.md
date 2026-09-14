@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.27] - 2026-09-14
+
+### Fixed
+- **Dynatrace host metrics that Dynatrace publishes a minute late are no longer missing from a live test run.** Some hosts' minute buckets only appear in the Dynatrace API more than a minute after the minute closes, so the once-a-minute incremental tick — which queried exactly `[last tick, now]` — found nothing for them, recorded the minute as collected because the other hosts had answered, and never asked again. On the deploy where this was found, 109 of 145 hosts across two runs were empty on 73% of ticks, and the only points they ever got came from ticks that happened to be two minutes wide; the sanity check then reported them as `1 points across a 1191s run`. Every live tick now re-queries the previous two minutes as well (clamped at the run's start), so a late bucket is picked up one or two ticks later; the `ds_metrics` upsert overwrites the overlap, which also replaces a partial current-minute bucket with the complete one. The lookback applies only while the run is live: the analyze-time gap fill and a re-evaluate's missing-data retry query windows whose data landed long ago, decompress exactly that window first, and count what comes back as new data — a lookback there would write outside the decompressed span and make an empty gap look like fresh data. The collected-range bookkeeping also refuses to record a range that ends before it starts, which the lookback could otherwise produce when Dynatrace returns only rows older than the cursor.
+
 ## [0.2.95.26] - 2026-09-14
 
 ### Fixed

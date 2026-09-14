@@ -147,3 +147,26 @@ describe('incrementalMetricsWorker — performance_test concurrency guard (issue
     expect(mockUpdateCollectedRanges).not.toHaveBeenCalled();
   });
 });
+
+describe('incrementalMetricsWorker — dynatrace collected-range bookkeeping', () => {
+  let worker: ReturnType<typeof incrementalMetricsWorker>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    worker = incrementalMetricsWorker();
+  });
+
+  it('never records a range whose `to` is before `from` (lookback can return only older rows)', async () => {
+    mockPipelineExecute.mockResolvedValue({
+      success: true,
+      data: { dynatrace: { dataPoints: 3, maxDataTimestamp: '2026-04-19T10:59:00.000Z' } },
+    });
+
+    await worker(makePerfTestJob({ sourceType: 'dynatrace', sourceId: 'cfg-1' }));
+
+    expect(mockUpdateCollectedRanges).toHaveBeenCalledWith('tr-001', 'dynatrace', 'cfg-1', {
+      from: new Date('2026-04-19T11:00:00Z'),
+      to: new Date('2026-04-19T11:00:00Z'),
+    });
+  });
+});

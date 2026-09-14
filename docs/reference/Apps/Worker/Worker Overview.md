@@ -201,7 +201,7 @@ enableReadyCheck: false
 
 | Task | Interval | Purpose |
 |---|---|---|
-| `IncrementalCollectionScheduler` | Every 2 min | Collect metrics for running tests |
+| `IncrementalCollectionScheduler` | Every minute | Collect metrics for running tests |
 | `StuckJobScanner` | Every 2 min | Detect and recover stuck jobs |
 | `QueuedJobAnnouncer` | Every 30 s | Publish a `waiting` progress record for every `analyze-test` job still in BullMQ's waiting list, so the UI shows **Queued** before a worker picks it up |
 | `AuditRetentionManager` | On boot + 03:00 UTC daily | Delete `audit_logs` rows past `AUDIT_RETENTION_MONTHS` (default 24), 10k at a time. The boot pass is not awaited, so it never delays BullMQ worker registration. |
