@@ -82,6 +82,13 @@ interface ThresholdConfig {
    * Aggregation method used (e.g., 'mean', 'p90', 'p95', 'p99')
    */
   aggregation: string;
+
+  /**
+   * Fewest data points (test run and control group each) before the metric is
+   * compared at all; below it the result is `incomparable`. Falls back to
+   * ADAPT_MIN_SAMPLE_COUNT when absent.
+   */
+  minSampleCount?: number;
 }
 
 /**

@@ -17,7 +17,56 @@
  *
  * Extracts common SQL fragments to reduce complexity in main SQL builder.
  */
+import { DEFAULT_ADAPT_MIN_SAMPLE_COUNT } from '../../../../constants/adapt.js';
+
+/**
+ * Deployment-wide floor for `thresholds.minSampleCount`, mirrored in
+ * config/environment.ts (ADAPT_MIN_SAMPLE_COUNT) so a bad value is rejected at boot.
+ * Read from process.env for the same reason BasePipelineTypeORM reads its budget that
+ * way: the full config schema needs secrets a unit test has no reason to provide.
+ */
+export function adaptMinSampleCount(): number {
+  // Number(undefined) is NaN and Number('') is 0; both fail the guard and take the default.
+  const n = Number(process.env.ADAPT_MIN_SAMPLE_COUNT);
+  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_ADAPT_MIN_SAMPLE_COUNT;
+}
+
 export class AdaptSQLFragments {
+  /**
+   * `control_exists` column for the with_dynamic_statistics CTE.
+   *
+   * Every threshold check and the conclusion label key on `control_exists`, so this is
+   * the one place the sample floor is applied: a metric with fewer than
+   * `minSampleCount` points on the test run, or fewer on average per control run
+   * (`ds_control_group_statistics.count` is `AVG(ms.count)`, not the pooled sum — five
+   * one-sample baseline runs still read as 1), is `incomparable` rather than judged on a
+   * handful of samples. Per-run density is the right floor: it is what a series that
+   * exists only as an artefact violates in every run. The floor has to be
+   * resolved here, after with_compare_config, because the config can override it;
+   * with_control only knows whether a control row exists (`control_row_exists`).
+   *
+   * A one-bucket series is the case this exists for: a JMeter sampler whose parent
+   * chain broke in the last seconds of a run lands as a separate metric with one
+   * sample, and 1-vs-1 was reported as a full regression.
+   *
+   * The config value is untrusted (`config_data` is stored from the API body under a bare
+   * `@IsObject()`): a non-number is ignored rather than aborting the whole batch with a
+   * cast error, a fraction is floored, and `GREATEST(1, …)` keeps a zero or negative
+   * override from switching the floor off. The comparison stays numeric: an `::int` on
+   * the configured value raised `integer out of range` on 1e30. Both `count` columns are nullable in the
+   * entities, and a NULL here must read as "no samples", not as a NULL `control_exists`
+   * that would skip the `incomparable` branch and fall through to `no difference`.
+   */
+  buildControlExistsColumn(): string {
+    const configured = "wcc.compare_config->'thresholds'->'minSampleCount'";
+    const floor =
+      `GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(${configured}) = 'number' ` +
+      `THEN floor((${configured})::text::numeric) END, ${adaptMinSampleCount()}))`;
+    return `wcc.control_row_exists
+                AND COALESCE(wcc.test_n, 0) >= ${floor}
+                AND COALESCE(wcc.control_n, 0) >= ${floor} as control_exists`;
+  }
+
   /**
    * Build threshold calculations CTE fragment
    */

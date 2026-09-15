@@ -19,6 +19,11 @@ import { AdaptResultsSQLBuilder } from '../../pipelines/helpers/adapt/results/sq
 import { TrackedResultsSQLBuilder } from '../../pipelines/helpers/adapt/results/tracked-results-sql-builder.js';
 import fixtures from './adapt-fixtures.json';
 
+// The snapshots bake the env default into the SQL; a shell that exports the knob must
+// not turn a code-unrelated diff into a snapshot failure. Module level, not beforeAll:
+// the describe bodies below build their SQL at collection time, before any hook runs.
+delete process.env.ADAPT_MIN_SAMPLE_COUNT;
+
 describe('ADAPT SQL Builder Golden-File Tests', () => {
   const testRunIds = fixtures.testRunIds;
 

@@ -56,7 +56,9 @@
  *        ▼
  *   with_compare_config           Same 4-level config hierarchy as main ADAPT.
  *        ▼
- *   with_dynamic_statistics       Select configured aggregation statistic.
+ *   with_dynamic_statistics       Select configured aggregation statistic; derive
+ *        │                        control_exists with the sample floor (see
+ *        │                        AdaptSQLFragments.buildControlExistsColumn).
  *        ▼
  *   with_threshold_calculations   Same threshold logic as main ADAPT pipeline.
  *        ▼
@@ -65,6 +67,7 @@
  *   INSERT INTO ds_adapt_tracked_results  (UPSERT on conflict)
  */
 
+import { AdaptSQLFragments } from './sql-fragments.js';
 /**
  * SQL Builder for tracked results re-evaluation
  *
@@ -215,7 +218,7 @@ export class TrackedResultsSQLBuilder {
               cgs.count as control_n,
               cgs.is_constant as control_is_constant,
               cgs.all_missing as control_all_missing,
-              CASE WHEN cgs.control_group_id IS NOT NULL THEN true ELSE false END as control_exists
+              cgs.control_group_id IS NOT NULL as control_row_exists
           FROM current_metrics cm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = cm.control_group_id
@@ -273,6 +276,7 @@ export class TrackedResultsSQLBuilder {
       with_dynamic_statistics AS (
           SELECT
               wcc.*,
+              ${new AdaptSQLFragments().buildControlExistsColumn()},
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median

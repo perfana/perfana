@@ -65,51 +65,6 @@ export class ControlGroupProcessor {
   }
 
   /**
-   * Build SQL fragment for joining with control group statistics
-   *
-   * Creates a CTE that joins test metrics with their corresponding
-   * control group statistics, including all statistical measures.
-   *
-   * @param testMetricsCte - Name of the CTE containing test metrics
-   * @returns SQL fragment for the with_control CTE
-   */
-  buildControlGroupJoinSQL(testMetricsCte: string): string {
-    return `
-      with_control AS (
-          SELECT
-              tm.*,
-              cgs.mean as control_mean,
-              cgs.median as control_median,
-              cgs.min_value as control_min,
-              cgs.max_value as control_max,
-              cgs.std_dev as control_std,
-              cgs.last_value as control_last,
-              cgs.q10 as control_q10,
-              cgs.q25 as control_q25,
-              cgs.q75 as control_q75,
-              cgs.q90 as control_q90,
-              cgs.q95 as control_q95,
-              cgs.q99 as control_q99,
-              cgs.iqr as control_iqr,
-              cgs.count as control_n,
-              cgs.is_constant as control_is_constant,
-              cgs.all_missing as control_all_missing,
-              CASE
-                  WHEN cgs.control_group_id IS NOT NULL THEN true
-                  ELSE false
-              END as control_exists
-          FROM ${testMetricsCte} tm
-          LEFT JOIN ds_control_group_statistics cgs ON (
-              cgs.control_group_id = tm.control_group_id
-              AND cgs.metrics_source_id = tm.metrics_source_id
-              AND cgs.panel_id::text = tm.panel_id
-              AND cgs.metric_name = tm.metric_name
-          )
-      )
-    `;
-  }
-
-  /**
    * Build SQL fragment for joining compare config from temp cache
    *
    * Creates a CTE that looks up compare config from the temp cache table
@@ -130,19 +85,6 @@ export class ControlGroupProcessor {
       tempTableName,
       defaultConfigParamIndex
     );
-  }
-
-  /**
-   * Build SQL fragment for dynamic statistics selection based on aggregation config
-   *
-   * Creates a CTE that selects the appropriate test and control statistics
-   * based on the configured aggregation type (mean, median, percentiles, etc.)
-   *
-   * @param compareConfigCte - Name of the CTE containing compare config
-   * @returns SQL fragment for the with_dynamic_statistics CTE
-   */
-  buildDynamicStatisticsSQL(compareConfigCte: string): string {
-    return this.compareConfigCache.buildDynamicStatisticsSQL(compareConfigCte);
   }
 
   /**

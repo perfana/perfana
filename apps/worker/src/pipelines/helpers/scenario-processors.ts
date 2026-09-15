@@ -34,6 +34,13 @@ export interface ScenarioProcessorResult {
 }
 
 /**
+ * Scenario-level panels (Error Count, Avg/Max Active Threads) hold ONE point per run by
+ * construction, so the deployment-wide ADAPT_MIN_SAMPLE_COUNT floor would make them
+ * permanently incomparable. Their compare configs opt out.
+ */
+const SCENARIO_PANEL_MIN_SAMPLE_COUNT = 1;
+
+/**
  * Where a run's single scenario-level point is written. A completed run puts it at end_time,
  * which is what every baseline holds. A live run does not know its end_time yet (the
  * keep-alive update moves it to "now" on every post), so the ticks upsert the cumulative
@@ -144,7 +151,8 @@ export class ErrorsProcessor {
               dashboard,
               panel,
               METRIC_TYPE_PANEL_ADAPT_AGGREGATION[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
-              METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT]
+              METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
+              SCENARIO_PANEL_MIN_SAMPLE_COUNT
             )
           );
         }
@@ -205,7 +213,8 @@ export class ErrorsProcessor {
             dashboard,
             panel,
             METRIC_TYPE_PANEL_ADAPT_AGGREGATION[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
-            METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT]
+            METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
+            SCENARIO_PANEL_MIN_SAMPLE_COUNT
           )
         );
         panelConfigsCreated.add(panelKey);
@@ -367,7 +376,8 @@ export class VirtualUsersProcessor {
                 dashboard,
                 avgPanel,
                 METRIC_TYPE_PANEL_ADAPT_AGGREGATION[METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS],
-                METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS]
+                METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS],
+                SCENARIO_PANEL_MIN_SAMPLE_COUNT
               )
             );
             panelConfigsCreated.add(avgKey);
@@ -401,7 +411,8 @@ export class VirtualUsersProcessor {
                 dashboard,
                 maxPanel,
                 METRIC_TYPE_PANEL_ADAPT_AGGREGATION[METRIC_TYPE_PANEL_IDS.SCENARIO_MAX_THREADS],
-                METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_MAX_THREADS]
+                METRIC_TYPE_PANEL_CLASSIFICATIONS[METRIC_TYPE_PANEL_IDS.SCENARIO_MAX_THREADS],
+                SCENARIO_PANEL_MIN_SAMPLE_COUNT
               )
             );
             panelConfigsCreated.add(maxKey);
