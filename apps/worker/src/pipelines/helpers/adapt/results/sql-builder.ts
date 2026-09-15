@@ -14,7 +14,7 @@
  *        ▼
  *   with_control                    LEFT JOIN ds_control_group_statistics to pair
  *        │                          each test metric with its baseline. Sets
- *        │                          control_exists = true/false.
+ *        │                          control_row_exists (raw join outcome only).
  *        ▼
  *   with_compare_config             Resolve the comparison configuration with a
  *        │                          4-level hierarchical fallback:
@@ -28,6 +28,9 @@
  *   with_dynamic_statistics         Pick the configured aggregation statistic
  *        │                          (mean, median, p95, etc.) for both test and
  *        │                          control → test_stat_value, control_stat_value.
+ *        │                          Derives control_exists = control_row_exists AND
+ *        │                          test_n / control_n >= minSampleCount (the sample
+ *        │                          floor; config override, env default).
  *        ▼
  *   with_threshold_calculations     Compute upper/lower bounds and threshold checks:
  *        │                            - pct:  control +/- percentageThreshold * control

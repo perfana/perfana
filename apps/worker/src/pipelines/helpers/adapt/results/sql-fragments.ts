@@ -17,6 +17,8 @@
  *
  * Extracts common SQL fragments to reduce complexity in main SQL builder.
  */
+import { DEFAULT_ADAPT_MIN_SAMPLE_COUNT } from '../../../../constants/adapt.js';
+
 /**
  * Deployment-wide floor for `thresholds.minSampleCount`, mirrored in
  * config/environment.ts (ADAPT_MIN_SAMPLE_COUNT) so a bad value is rejected at boot.
@@ -24,9 +26,9 @@
  * way: the full config schema needs secrets a unit test has no reason to provide.
  */
 export function adaptMinSampleCount(): number {
-  const raw = process.env.ADAPT_MIN_SAMPLE_COUNT;
-  const n = raw === undefined || raw === '' ? 2 : Number(raw);
-  return Number.isInteger(n) && n >= 1 ? n : 2;
+  // Number(undefined) is NaN and Number('') is 0; both fail the guard and take the default.
+  const n = Number(process.env.ADAPT_MIN_SAMPLE_COUNT);
+  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_ADAPT_MIN_SAMPLE_COUNT;
 }
 
 export class AdaptSQLFragments {
@@ -43,11 +45,21 @@ export class AdaptSQLFragments {
    * A one-bucket series is the case this exists for: a JMeter sampler whose parent
    * chain broke in the last seconds of a run lands as a separate metric with one
    * sample, and 1-vs-1 was reported as a full regression.
+   *
+   * The config value is untrusted (`config_data` is stored from the API body under a bare
+   * `@IsObject()`): a non-number is ignored rather than aborting the whole batch with a
+   * cast error, a fraction is floored, and `GREATEST(1, …)` keeps a zero or negative
+   * override from switching the floor off. Both `count` columns are nullable in the
+   * entities, and a NULL here must read as "no samples", not as a NULL `control_exists`
+   * that would skip the `incomparable` branch and fall through to `no difference`.
    */
   buildControlExistsColumn(): string {
-    const floor = `COALESCE((wcc.compare_config->'thresholds'->>'minSampleCount')::int, ${adaptMinSampleCount()})`;
+    const configured = "wcc.compare_config->'thresholds'->'minSampleCount'";
+    const floor =
+      `GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(${configured}) = 'number' ` +
+      `THEN floor((${configured})::text::numeric)::int END, ${adaptMinSampleCount()}))`;
     return `wcc.control_row_exists
-                AND wcc.test_n >= ${floor}
+                AND COALESCE(wcc.test_n, 0) >= ${floor}
                 AND COALESCE(wcc.control_n, 0) >= ${floor} as control_exists`;
   }
 

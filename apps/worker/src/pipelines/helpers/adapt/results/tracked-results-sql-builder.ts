@@ -56,7 +56,9 @@
  *        ▼
  *   with_compare_config           Same 4-level config hierarchy as main ADAPT.
  *        ▼
- *   with_dynamic_statistics       Select configured aggregation statistic.
+ *   with_dynamic_statistics       Select configured aggregation statistic; derive
+ *        │                        control_exists with the sample floor (see
+ *        │                        AdaptSQLFragments.buildControlExistsColumn).
  *        ▼
  *   with_threshold_calculations   Same threshold logic as main ADAPT pipeline.
  *        ▼

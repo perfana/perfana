@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_ADAPT_MIN_SAMPLE_COUNT } from '../constants/adapt.js';
 import dotenv from 'dotenv';
 
 // Load .env file if it exists
@@ -62,7 +63,7 @@ const envSchema = z.object({
   // thresholds.minSampleCount (the perf-test scenario panels set 1: they hold one
   // point by construction). Read by the SQL builders through process.env, like
   // AGGREGATION_STATEMENT_TIMEOUT_MS, so unit tests need no full config.
-  ADAPT_MIN_SAMPLE_COUNT: z.coerce.number().int().min(1).default(2),
+  ADAPT_MIN_SAMPLE_COUNT: z.coerce.number().int().min(1).default(DEFAULT_ADAPT_MIN_SAMPLE_COUNT),
 
   // Budget for the heavy aggregation transactions (StatisticsPipeline,
   // ControlGroupStatisticsPipeline). Separate from ANALYTICS_STATEMENT_TIMEOUT_MS

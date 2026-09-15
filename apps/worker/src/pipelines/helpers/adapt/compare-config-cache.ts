@@ -183,67 +183,6 @@ export class CompareConfigCache {
   }
 
   /**
-   * Build SQL fragment for dynamic statistics selection based on aggregation config
-   *
-   * Creates a CTE that selects the appropriate test and control statistics
-   * based on the configured aggregation type (mean, median, percentiles, etc.)
-   *
-   * @param compareConfigCte - Name of the CTE containing compare config
-   * @returns SQL fragment for the with_dynamic_statistics CTE
-   */
-  buildDynamicStatisticsSQL(compareConfigCte: string): string {
-    return `
-      with_dynamic_statistics AS (
-          SELECT
-              wcc.*,
-              -- Dynamically select test and control values based on configured statistic
-              CASE (wcc.compare_config->'thresholds'->>'aggregation')
-                  WHEN 'mean' THEN wcc.test_mean
-                  WHEN 'median' THEN wcc.test_median
-                  WHEN 'min' THEN wcc.test_min
-                  WHEN 'max' THEN wcc.test_max
-                  WHEN 'last' THEN wcc.test_last
-                  WHEN 'q10' THEN wcc.test_q10
-                  WHEN 'p10' THEN wcc.test_q10  -- Support both notations
-                  WHEN 'q25' THEN wcc.test_q25
-                  WHEN 'p25' THEN wcc.test_q25
-                  WHEN 'q75' THEN wcc.test_q75
-                  WHEN 'p75' THEN wcc.test_q75
-                  WHEN 'q90' THEN wcc.test_q90
-                  WHEN 'p90' THEN wcc.test_q90
-                  WHEN 'q95' THEN wcc.test_q95
-                  WHEN 'p95' THEN wcc.test_q95
-                  WHEN 'q99' THEN wcc.test_q99
-                  WHEN 'p99' THEN wcc.test_q99
-                  ELSE wcc.test_median  -- Default to median
-              END as test_stat_value,
-
-              CASE (wcc.compare_config->'thresholds'->>'aggregation')
-                  WHEN 'mean' THEN wcc.control_mean
-                  WHEN 'median' THEN wcc.control_median
-                  WHEN 'min' THEN wcc.control_min
-                  WHEN 'max' THEN wcc.control_max
-                  WHEN 'last' THEN wcc.control_last
-                  WHEN 'q10' THEN wcc.control_q10
-                  WHEN 'p10' THEN wcc.control_q10
-                  WHEN 'q25' THEN wcc.control_q25
-                  WHEN 'p25' THEN wcc.control_q25
-                  WHEN 'q75' THEN wcc.control_q75
-                  WHEN 'p75' THEN wcc.control_q75
-                  WHEN 'q90' THEN wcc.control_q90
-                  WHEN 'p90' THEN wcc.control_q90
-                  WHEN 'q95' THEN wcc.control_q95
-                  WHEN 'p95' THEN wcc.control_q95
-                  WHEN 'q99' THEN wcc.control_q99
-                  WHEN 'p99' THEN wcc.control_q99
-                  ELSE wcc.control_median  -- Default to median
-              END as control_stat_value
-          FROM ${compareConfigCte} wcc
-      )
-    `;
-  }
-
-  /**
    * Fetch all compare configs and create a hierarchical lookup map
    *
    * This eliminates the need for 6 correlated subqueries per metric by

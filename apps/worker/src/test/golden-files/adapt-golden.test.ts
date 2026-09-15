@@ -14,7 +14,14 @@
  * - Conclusion SQL builder
  */
 
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
+
+// The snapshots bake the env default into the SQL; a shell that exports the knob must
+// not turn a code-unrelated diff into a snapshot failure.
+beforeAll(() => {
+  delete process.env.ADAPT_MIN_SAMPLE_COUNT;
+});
+ 'vitest';
 import { AdaptResultsSQLBuilder } from '../../pipelines/helpers/adapt/results/sql-builder.js';
 import { TrackedResultsSQLBuilder } from '../../pipelines/helpers/adapt/results/tracked-results-sql-builder.js';
 import fixtures from './adapt-fixtures.json';

@@ -34,6 +34,13 @@ export interface ScenarioProcessorResult {
 }
 
 /**
+ * Scenario-level panels (Error Count, Avg/Max Active Threads) hold ONE point per run by
+ * construction, so the deployment-wide ADAPT_MIN_SAMPLE_COUNT floor would make them
+ * permanently incomparable. Their compare configs opt out.
+ */
+const SCENARIO_PANEL_MIN_SAMPLE_COUNT = 1;
+
+/**
  * Where a run's single scenario-level point is written. A completed run puts it at end_time,
  * which is what every baseline holds. A live run does not know its end_time yet (the
  * keep-alive update moves it to "now" on every post), so the ticks upsert the cumulative
@@ -42,13 +49,6 @@ export interface ScenarioProcessorResult {
  * The interim point is flagged ramp_up when the run has an analysis start offset, so the
  * live statistics leave it out; the final one is not.
  */
-/**
- * Scenario-level panels (Error Count, Avg/Max Active Threads) hold ONE point per run by
- * construction, so the deployment-wide ADAPT_MIN_SAMPLE_COUNT floor would make them
- * permanently incomparable. Their compare configs opt out.
- */
-const SCENARIO_PANEL_MIN_SAMPLE_COUNT = 1;
-
 export function scenarioMetricTime(testRun: TestRunMetadata): Date {
   return testRun.completed && testRun.end_time ? testRun.end_time : testRun.start_time;
 }
