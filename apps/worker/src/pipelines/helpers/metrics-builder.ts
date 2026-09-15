@@ -101,7 +101,8 @@ export function createDsCompareConfigRecordPanelLevel(
   dashboard: DashboardMetadata,
   panel: PanelMetadata,
   aggregation: string = 'mean',
-  classificationOverride?: MetricClassification
+  classificationOverride?: MetricClassification,
+  minSampleCount?: number
 ): DsCompareConfigRecord {
   const classification = classificationOverride ?? {
     classification: 'none',
@@ -125,6 +126,7 @@ export function createDsCompareConfigRecordPanelLevel(
         percentageThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.percentageThreshold,
         iqrThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.iqrThreshold,
         absoluteThreshold: DEFAULT_PERFORMANCE_THRESHOLDS.absoluteThreshold,
+        ...(minSampleCount !== undefined ? { minSampleCount } : {}),
       },
       defaultValueIfControlGroupMissing: DEFAULT_VALUE_IF_CONTROL_GROUP_MISSING,
     },

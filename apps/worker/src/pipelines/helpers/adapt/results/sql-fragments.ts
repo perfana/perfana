@@ -17,7 +17,40 @@
  *
  * Extracts common SQL fragments to reduce complexity in main SQL builder.
  */
+/**
+ * Deployment-wide floor for `thresholds.minSampleCount`, mirrored in
+ * config/environment.ts (ADAPT_MIN_SAMPLE_COUNT) so a bad value is rejected at boot.
+ * Read from process.env for the same reason BasePipelineTypeORM reads its budget that
+ * way: the full config schema needs secrets a unit test has no reason to provide.
+ */
+export function adaptMinSampleCount(): number {
+  const raw = process.env.ADAPT_MIN_SAMPLE_COUNT;
+  const n = raw === undefined || raw === '' ? 2 : Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : 2;
+}
+
 export class AdaptSQLFragments {
+  /**
+   * `control_exists` column for the with_dynamic_statistics CTE.
+   *
+   * Every threshold check and the conclusion label key on `control_exists`, so this is
+   * the one place the sample floor is applied: a metric with fewer than
+   * `minSampleCount` points on the test run, or fewer pooled over the control group,
+   * is `incomparable` rather than judged on a handful of samples. The floor has to be
+   * resolved here, after with_compare_config, because the config can override it;
+   * with_control only knows whether a control row exists (`control_row_exists`).
+   *
+   * A one-bucket series is the case this exists for: a JMeter sampler whose parent
+   * chain broke in the last seconds of a run lands as a separate metric with one
+   * sample, and 1-vs-1 was reported as a full regression.
+   */
+  buildControlExistsColumn(): string {
+    const floor = `COALESCE((wcc.compare_config->'thresholds'->>'minSampleCount')::int, ${adaptMinSampleCount()})`;
+    return `wcc.control_row_exists
+                AND wcc.test_n >= ${floor}
+                AND COALESCE(wcc.control_n, 0) >= ${floor} as control_exists`;
+  }
+
   /**
    * Build threshold calculations CTE fragment
    */

@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.28] - 2026-09-15
+
+### Fixed
+- **ADAPT no longer passes a verdict on a metric with a single sample.** A metric needs at least `ADAPT_MIN_SAMPLE_COUNT` data points (default 2) on the test run and pooled over its control group, or it is labelled `incomparable`; a compare config can override the floor per dashboard, panel or metric via `thresholds.minSampleCount`, and the perf-test scenario panels (which hold one point per run by construction) write `1`. Found on a JMeter run where a sampler whose Transaction Controller parent chain broke in the last seconds of the test landed in `requests_raw` as a bare-named series with one bucket — 759 ms against a control group holding one sample of 436 ms — and was reported as a full `regression` beside the healthy `transaction.sampler` series it duplicated. Replayed on that run the label is now `incomparable` and 270 other one-sample results in the same run go the same way; every real series is unchanged. The listener side of the same defect (writing the detached row at all) is fixed separately in perfana-jmeter-timescaledb.
+
 ## [0.2.95.27] - 2026-09-14
 
 ### Fixed

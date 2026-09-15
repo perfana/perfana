@@ -193,10 +193,9 @@ export class AdaptResultsSQLBuilder {
               cgs.count as control_n,
               cgs.is_constant as control_is_constant,
               cgs.all_missing as control_all_missing,
-              CASE
-                  WHEN cgs.control_group_id IS NOT NULL THEN true
-                  ELSE false
-              END as control_exists
+              -- Raw join outcome only; control_exists (which also applies the sample
+              -- floor) is derived in with_dynamic_statistics once the config is known.
+              cgs.control_group_id IS NOT NULL as control_row_exists
           FROM test_metrics tm
           LEFT JOIN ds_control_group_statistics cgs ON (
               cgs.control_group_id = tm.control_group_id
@@ -250,6 +249,7 @@ export class AdaptResultsSQLBuilder {
           -- pair regardless of which statistic was chosen.
           SELECT
               wcc.*,
+              ${this.fragments.buildControlExistsColumn()},
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
