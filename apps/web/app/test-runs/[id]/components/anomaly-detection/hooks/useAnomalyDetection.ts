@@ -718,13 +718,17 @@ export function useAnomalyDetection({
   }, []);
 
   // Effects
+  // Also refetch when the worker's ADAPT status moves (IN_PROGRESS -> COMPLETED arrives via
+  // the realtime test-run update), so the collapsed card follows a re-evaluate like the SLO card does.
+  const adaptStatus = testRun?.status?.evaluatingAdapt;
+  const statusLastUpdate = testRun?.status?.lastUpdate;
   useEffect(() => {
     if (testRunId) {
       fetchAnomalyData();
       fetchTrackedRegressionsCount();
       fetchDsAdaptConclusion();
     }
-  }, [testRunId, fetchAnomalyData, fetchTrackedRegressionsCount, fetchDsAdaptConclusion]);
+  }, [testRunId, adaptStatus, statusLastUpdate, fetchAnomalyData, fetchTrackedRegressionsCount, fetchDsAdaptConclusion]);
 
   useEffect(() => {
     if (anomalyExpanded && testRunId && anomalyData.length === 0) {

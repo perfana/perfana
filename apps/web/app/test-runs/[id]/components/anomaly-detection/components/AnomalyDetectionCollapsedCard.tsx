@@ -122,6 +122,9 @@ export default function AnomalyDetectionCollapsedCard({
     return theme.palette.primary.main;
   };
 
+  // ADAPT only runs once the test has finished; until then "0 regressions" would read as a verdict.
+  const isRunning = !!testRun && !testRun.completed;
+
   // Check if card should be expandable
   const isExpandable = testRun?.status?.evaluatingAdapt !== 'NO_BASELINES_FOUND';
 
@@ -234,7 +237,7 @@ export default function AnomalyDetectionCollapsedCard({
 
         {/* SECTION 2: Primary KPI - Large numbers for visual hierarchy */}
         <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-          {testRun?.status?.evaluatingAdapt === 'NO_BASELINES_FOUND' ? (
+          {isRunning || testRun?.status?.evaluatingAdapt === 'NO_BASELINES_FOUND' ? (
             <Box sx={{ py: 2, textAlign: 'center' }}>
               <Typography
                 sx={{
@@ -245,7 +248,9 @@ export default function AnomalyDetectionCollapsedCard({
                   lineHeight: 1.5,
                 }}
               >
-                {dsAdaptConclusion?.details?.message ?? 'No previous results to compare with'}
+                {isRunning
+                  ? 'Anomaly detection results will be available after the test run has finished'
+                  : dsAdaptConclusion?.details?.message ?? 'No previous results to compare with'}
               </Typography>
             </Box>
           ) : (
@@ -282,7 +287,7 @@ export default function AnomalyDetectionCollapsedCard({
                   }}
                 />
               );
-            }) : !hasAnyData && testRun?.status?.evaluatingAdapt !== 'NO_BASELINES_FOUND' ? (
+            }) : !hasAnyData && !isRunning && testRun?.status?.evaluatingAdapt !== 'NO_BASELINES_FOUND' ? (
               <>
                 <SoftBadge label="Statistical Analysis" color="blue" />
                 <SoftBadge label="Control Group Comparison" color="purple" />
