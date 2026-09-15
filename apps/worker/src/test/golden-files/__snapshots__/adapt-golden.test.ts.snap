@@ -118,8 +118,8 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
           SELECT
               wcc.*,
               wcc.control_row_exists
-                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric)::int END, 2))
-                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric)::int END, 2)) as control_exists,
+                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2))
+                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)) as control_exists,
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -750,8 +750,8 @@ exports[`ADAPT SQL Builder Golden-File Tests > AdaptResultsSQLBuilder > buildAda
           SELECT
               wcc.*,
               wcc.control_row_exists
-                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric)::int END, 2))
-                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric)::int END, 2)) as control_exists,
+                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2))
+                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)) as control_exists,
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median
@@ -1527,8 +1527,8 @@ exports[`ADAPT SQL Builder Golden-File Tests > TrackedResultsSQLBuilder > buildT
           SELECT
               wcc.*,
               wcc.control_row_exists
-                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric)::int END, 2))
-                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric)::int END, 2)) as control_exists,
+                AND COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2))
+                AND COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 2)) as control_exists,
               CASE (wcc.compare_config->'thresholds'->>'aggregation')
                   WHEN 'mean' THEN wcc.test_mean
                   WHEN 'median' THEN wcc.test_median

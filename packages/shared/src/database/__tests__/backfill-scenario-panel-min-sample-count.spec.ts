@@ -15,7 +15,7 @@ describe('migration 1806 backfill of thresholds.minSampleCount on scenario panel
   it('is idempotent and never overwrites a user override', () => {
     // The only write is gated on the key being absent; the second run updates 0 rows
     // (verified on the dev DB: UPDATE 210, then UPDATE 0).
-    expect(sql).toContain("c.config_data->'thresholds'->'minSampleCount' IS NULL");
+    expect(sql).toContain("jsonb_typeof(c.config_data->'thresholds'->'minSampleCount') IS DISTINCT FROM 'number'");
     expect(sql).toContain('\'{"minSampleCount": 1}\'::jsonb');
   });
 
@@ -25,11 +25,14 @@ describe('migration 1806 backfill of thresholds.minSampleCount on scenario panel
     expect(sql).toContain('LEFT JOIN metrics_sources ms');
   });
 
-  it('runs the statement once and has a no-op down', async () => {
+  it('holds off the stale-marking trigger around the one UPDATE and has a no-op down', async () => {
     const query = jest.fn().mockResolvedValue(undefined);
     await new M().up({ query } as never);
-    expect(query).toHaveBeenCalledTimes(1);
-    expect(query).toHaveBeenCalledWith(M.SQL);
+    expect(query.mock.calls.map((c) => c[0])).toEqual([
+      'ALTER TABLE ds_compare_config DISABLE TRIGGER trigger_mark_stale_on_config_update',
+      M.SQL,
+      'ALTER TABLE ds_compare_config ENABLE TRIGGER trigger_mark_stale_on_config_update',
+    ]);
     await expect(new M().down()).resolves.toBeUndefined();
   });
 });

@@ -10,6 +10,10 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+// environment.ts calls dotenv.config() at module level; every re-import below would
+// otherwise re-read apps/worker/.env and put back keys this file just deleted.
+vi.mock('dotenv', () => ({ default: { config: () => ({}) } }));
+
 const REQUIRED = {
   // setup.ts sets LOG_LEVEL=silent, which the enum refuses; the rest are the schema's
   // only required fields.

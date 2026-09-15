@@ -12,8 +12,11 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * `insertCompareConfigBatch`), so a config row that already existed before this version
  * never gains the key and falls back to the deployment default — every existing
  * workload's scenario panels would turn `incomparable` for good on upgrade. This
- * backfill adds the key to those rows exactly once; a row that already carries a
- * `minSampleCount` (a user override) is left alone.
+ * backfill adds the key to those rows exactly once; a row that already carries a numeric
+ * `minSampleCount` (a user override) is left alone, while a JSON `null` — reachable through
+ * the API body — counts as absent. Metric-level overrides on these panels
+ * (`metric_name IS NOT NULL`) are not touched: a whole-object COALESCE resolves the config,
+ * so such an override must carry its own `minSampleCount`. None exist on the dev database.
  *
  * A perf-test dashboard is recognised through its metrics source, or by the
  * `performance-test-metrics-` uid prefix where the source is missing: application
@@ -34,7 +37,7 @@ export class BackfillScenarioPanelMinSampleCount1806000000000 implements Migrati
         )
     WHERE c.panel_id IN (${BackfillScenarioPanelMinSampleCount1806000000000.SCENARIO_PANEL_IDS.join(', ')})
       AND c.metric_name IS NULL
-      AND c.config_data->'thresholds'->'minSampleCount' IS NULL
+      AND jsonb_typeof(c.config_data->'thresholds'->'minSampleCount') IS DISTINCT FROM 'number'
       AND EXISTS (
         SELECT 1
         FROM application_dashboards ad
@@ -45,7 +48,13 @@ export class BackfillScenarioPanelMinSampleCount1806000000000 implements Migrati
   `;
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // trigger_mark_stale_on_config_update flags every ds_adapt_results row of a changed
+    // config as stale ("Configuration updated"). This backfill only preserves pre-floor
+    // behaviour, so the results are not stale; the trigger is held off for the one
+    // statement. Transactional DDL: a failed UPDATE rolls the disable back with it.
+    await queryRunner.query('ALTER TABLE ds_compare_config DISABLE TRIGGER trigger_mark_stale_on_config_update');
     await queryRunner.query(BackfillScenarioPanelMinSampleCount1806000000000.SQL);
+    await queryRunner.query('ALTER TABLE ds_compare_config ENABLE TRIGGER trigger_mark_stale_on_config_update');
   }
 
   public async down(): Promise<void> {

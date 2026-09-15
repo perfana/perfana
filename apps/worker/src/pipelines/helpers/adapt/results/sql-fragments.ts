@@ -49,7 +49,8 @@ export class AdaptSQLFragments {
    * The config value is untrusted (`config_data` is stored from the API body under a bare
    * `@IsObject()`): a non-number is ignored rather than aborting the whole batch with a
    * cast error, a fraction is floored, and `GREATEST(1, …)` keeps a zero or negative
-   * override from switching the floor off. Both `count` columns are nullable in the
+   * override from switching the floor off. The comparison stays numeric: an `::int` on
+   * the configured value raised `integer out of range` on 1e30. Both `count` columns are nullable in the
    * entities, and a NULL here must read as "no samples", not as a NULL `control_exists`
    * that would skip the `incomparable` branch and fall through to `no difference`.
    */
@@ -57,7 +58,7 @@ export class AdaptSQLFragments {
     const configured = "wcc.compare_config->'thresholds'->'minSampleCount'";
     const floor =
       `GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(${configured}) = 'number' ` +
-      `THEN floor((${configured})::text::numeric)::int END, ${adaptMinSampleCount()}))`;
+      `THEN floor((${configured})::text::numeric) END, ${adaptMinSampleCount()}))`;
     return `wcc.control_row_exists
                 AND COALESCE(wcc.test_n, 0) >= ${floor}
                 AND COALESCE(wcc.control_n, 0) >= ${floor} as control_exists`;

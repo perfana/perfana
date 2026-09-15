@@ -58,8 +58,8 @@ describe('control_exists carries the sample floor', () => {
     // Both counts are nullable in the entities and must read as 0, never as a NULL that
     // skips the incomparable branch; the config value is untrusted, so a non-number is
     // ignored, a fraction floored, and a zero/negative override clamped to 1.
-    expect(col).toContain("COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric)::int END, 3))");
-    expect(col).toContain("COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric)::int END, 3))");
+    expect(col).toContain("COALESCE(wcc.test_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 3))");
+    expect(col).toContain("COALESCE(wcc.control_n, 0) >= GREATEST(1, COALESCE(CASE WHEN jsonb_typeof(wcc.compare_config->'thresholds'->'minSampleCount') = 'number' THEN floor((wcc.compare_config->'thresholds'->'minSampleCount')::text::numeric) END, 3))");
     expect(col.trim().endsWith('as control_exists')).toBe(true);
   });
 
@@ -118,7 +118,9 @@ describe('createDsCompareConfigRecordPanelLevel', () => {
   });
 
   test('a floor of 0 is written as 0, not dropped as falsy', () => {
-    // The guard is `!== undefined` on purpose: 0 means "never gate on sample count".
+    // The guard is `!== undefined` on purpose: 0 is written verbatim, not dropped as falsy.
+    // (The SQL then clamps it to 1 with GREATEST, so 0 and 1 behave alike; the point here
+    // is that the record builder does not silently lose a configured value.)
     const zero = createDsCompareConfigRecordPanelLevel(testRun, dashboard, panel, 'mean', undefined, 0);
     expect(zero.config_data.thresholds).toMatchObject({ minSampleCount: 0 });
   });
