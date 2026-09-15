@@ -57,8 +57,8 @@ const envSchema = z.object({
   // Prevents queries from holding connections indefinitely under load.
   ANALYTICS_STATEMENT_TIMEOUT_MS: z.coerce.number().default(120000),
 
-  // Fewest data points a metric needs, on the test run AND pooled over the control
-  // group, before ADAPT compares it; below that it is labelled `incomparable`.
+  // Fewest data points a metric needs, on the test run AND on average per control
+  // run, before ADAPT compares it; below that it is labelled `incomparable`.
   // A compare config can override it per dashboard/panel/metric via
   // thresholds.minSampleCount (the perf-test scenario panels set 1: they hold one
   // point by construction). Read by the SQL builders through process.env, like

@@ -37,6 +37,8 @@ export class BackfillScenarioPanelMinSampleCount1806000000000 implements Migrati
         )
     WHERE c.panel_id IN (${BackfillScenarioPanelMinSampleCount1806000000000.SCENARIO_PANEL_IDS.join(', ')})
       AND c.metric_name IS NULL
+      -- || on a scalar or array thresholds would turn it into an array; leave such rows alone
+      AND jsonb_typeof(COALESCE(c.config_data->'thresholds', '{}'::jsonb)) = 'object'
       AND jsonb_typeof(c.config_data->'thresholds'->'minSampleCount') IS DISTINCT FROM 'number'
       AND EXISTS (
         SELECT 1

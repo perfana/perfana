@@ -17,6 +17,8 @@ describe('migration 1806 backfill of thresholds.minSampleCount on scenario panel
     // (verified on the dev DB: UPDATE 210, then UPDATE 0).
     expect(sql).toContain("jsonb_typeof(c.config_data->'thresholds'->'minSampleCount') IS DISTINCT FROM 'number'");
     expect(sql).toContain('\'{"minSampleCount": 1}\'::jsonb');
+    // || on a non-object thresholds would produce an array; those rows are skipped
+    expect(sql).toContain("jsonb_typeof(COALESCE(c.config_data->'thresholds', '{}'::jsonb)) = 'object'");
   });
 
   it('recognises a perf-test dashboard by source type OR uid prefix (imported rows have no source)', () => {

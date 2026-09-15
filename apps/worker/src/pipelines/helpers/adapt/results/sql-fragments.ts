@@ -37,8 +37,11 @@ export class AdaptSQLFragments {
    *
    * Every threshold check and the conclusion label key on `control_exists`, so this is
    * the one place the sample floor is applied: a metric with fewer than
-   * `minSampleCount` points on the test run, or fewer pooled over the control group,
-   * is `incomparable` rather than judged on a handful of samples. The floor has to be
+   * `minSampleCount` points on the test run, or fewer on average per control run
+   * (`ds_control_group_statistics.count` is `AVG(ms.count)`, not the pooled sum — five
+   * one-sample baseline runs still read as 1), is `incomparable` rather than judged on a
+   * handful of samples. Per-run density is the right floor: it is what a series that
+   * exists only as an artefact violates in every run. The floor has to be
    * resolved here, after with_compare_config, because the config can override it;
    * with_control only knows whether a control row exists (`control_row_exists`).
    *
