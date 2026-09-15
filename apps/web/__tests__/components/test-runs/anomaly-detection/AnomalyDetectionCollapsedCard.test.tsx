@@ -698,6 +698,24 @@ describe('AnomalyDetectionCollapsedCard', () => {
     });
   });
 
+  describe('Running State', () => {
+    it('shows the pending message instead of a regression count while the run is live', () => {
+      render(
+        <AnomalyDetectionCollapsedCard
+          {...defaultProps}
+          data={[]}
+          testRun={{ ...mockTestRun, completed: false, consolidated_result: {} }}
+        />
+      );
+
+      expect(
+        screen.getByText('Anomaly detection results will be available after the test run has finished')
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Regressions Detected')).not.toBeInTheDocument();
+      expect(screen.queryByText('Statistical Analysis')).not.toBeInTheDocument();
+    });
+  });
+
   describe('Edge Cases', () => {
     it('should handle null test run', () => {
       render(<AnomalyDetectionCollapsedCard {...defaultProps} testRun={null} />);

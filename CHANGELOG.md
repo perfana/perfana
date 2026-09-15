@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.29] - 2026-09-15
+
+### Fixed
+- **The collapsed Anomaly Detection card now follows a re-evaluate.** It fetched its results once on mount, so an ADAPT run that finished while the test run details page was open left the card on the old count until a reload — while the SLO card beside it already refreshed on the same realtime status update. The anomaly hook now refetches whenever `status.evaluatingAdapt` (or `status.lastUpdate`) changes, the same trigger `useSLOSection` uses.
+- **The collapsed card no longer reads "0 regressions detected" on a running test.** ADAPT only runs after the test finishes, so that number was a verdict on an analysis that had not happened. While the run is live the card says the results will be available after the run has finished, in place of the count and the placeholder badges.
+
 ## [0.2.95.28] - 2026-09-15
 
 ### Fixed
