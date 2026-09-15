@@ -50,6 +50,8 @@ export default function AnomalyDetectionSection({
   const {
     // Data state
     anomalyData,
+    summary,
+    summaryLoading,
     loading,
     error,
     dsAdaptConclusion,
@@ -133,8 +135,8 @@ export default function AnomalyDetectionSection({
   if (!anomalyExpanded) {
     return (
       <AnomalyDetectionCollapsedCard
-        data={anomalyData}
-        loading={loading}
+        summary={summary}
+        loading={summaryLoading}
         conclusionFilter={conclusionFilter}
         setConclusionFilter={handleConclusionFilterChange}
         onExpand={handleExpand}

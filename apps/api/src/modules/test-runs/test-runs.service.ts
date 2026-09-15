@@ -445,6 +445,10 @@ export class TestRunsService {
     return this.anomalyService.getTestRunCheckResults(testRunId, system, environment, workload);
   }
 
+  async getAnomalyDetectionSummary(testRunId: string) {
+    return this.anomalyService.getAnomalyDetectionSummary(testRunId);
+  }
+
   async getAnomalyDetectionResults(testRunId: string, system?: string, environment?: string, workload?: string) {
     return this.anomalyService.getAnomalyDetectionResults(testRunId, system, environment, workload);
   }

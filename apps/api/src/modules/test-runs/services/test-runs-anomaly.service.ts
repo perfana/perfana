@@ -34,6 +34,13 @@ interface ParsedCheckResult {
   [key: string]: unknown;
 }
 
+/** Collapsed-card counts; `by_conclusion` is keyed on the conclusion label ('regression', ...). */
+export interface AnomalyDetectionSummary {
+  total: number;
+  stale_count: number;
+  by_conclusion: Record<string, number>;
+}
+
 /** Fields used when matching adapt results to compare-config entries */
 interface AdaptResultKey {
   application_dashboard_id: string;
@@ -98,6 +105,30 @@ export class TestRunsAnomalyService {
   }
 
   /**
+   * Counts for the collapsed anomaly card: one GROUP BY instead of the full result list,
+   * which the card only ever reduced to these numbers.
+   */
+  async getAnomalyDetectionSummary(testRunId: string): Promise<AnomalyDetectionSummary> {
+    const rows: Array<{ label: string; count: string; stale: string }> = await this.dsAdaptResultsRepo
+      .createQueryBuilder('ar')
+      .select("COALESCE(ar.conclusion->>'label', 'unknown')", 'label')
+      .addSelect('COUNT(*)', 'count')
+      .addSelect('COUNT(*) FILTER (WHERE ar.is_stale)', 'stale')
+      .where('ar.test_run_id = :testRunId', { testRunId })
+      .groupBy("COALESCE(ar.conclusion->>'label', 'unknown')")
+      .getRawMany();
+
+    const summary: AnomalyDetectionSummary = { total: 0, stale_count: 0, by_conclusion: {} };
+    for (const row of rows) {
+      const count = Number(row.count);
+      summary.total += count;
+      summary.stale_count += Number(row.stale);
+      summary.by_conclusion[row.label] = count;
+    }
+    return summary;
+  }
+
+  /**
    * Get anomaly detection results for a test run.
    * Authorization is enforced at the controller level via verifyTestRunAccess.
    */
@@ -159,6 +190,30 @@ export class TestRunsAnomalyService {
         select: ['application_dashboard_id', 'panel_id', 'metric_name', 'config_data']
       });
 
+      // Config lookup by (dashboard, panel, metric); each level of the inheritance hierarchy is
+      // one Map probe. The 4 linear `find`s per row this replaces were O(rows x configs) on the
+      // API event loop — a 26k-metric run against a few hundred configs blocked every other
+      // request for seconds.
+      const configKey = (dashboardId?: string | null, panelId?: number | null, metricName?: string | null) =>
+        `${dashboardId ?? ''}|${panelId ?? ''}|${metricName ?? ''}`;
+      const configByKey = new Map<string, Record<string, unknown> | undefined>();
+      for (const config of configEntries ?? []) {
+        const key = configKey(config.application_dashboard_id, config.panel_id, config.metric_name);
+        // First row wins, as the `find` did: the unique indexes treat NULL panel/dashboard as
+        // distinct, so the dashboard- and environment-level rows can legitimately repeat.
+        if (!configByKey.has(key)) {
+          configByKey.set(key, config.config_data as Record<string, unknown> | undefined);
+        }
+      }
+
+      // Most specific first: metric -> panel -> dashboard -> environment level.
+      const configLevels = (r: AdaptResultKey): Array<Record<string, unknown> | undefined> => [
+        configByKey.get(configKey(r.application_dashboard_id, r.panel_id, r.metric_name)),
+        configByKey.get(configKey(r.application_dashboard_id, r.panel_id, null)),
+        configByKey.get(configKey(r.application_dashboard_id, null, null)),
+        configByKey.get(configKey(null, null, null)),
+      ];
+
       // Helper to extract classification string from config_data JSONB
       const extractClassification = (configData: Record<string, unknown> | undefined): string | undefined => {
         if (!configData) return undefined;
@@ -170,99 +225,18 @@ export class TestRunsAnomalyService {
         return undefined;
       };
 
-      // Helper function to extract classification using inheritance hierarchy
+      // Classification inherits down the hierarchy: the first level that carries one wins.
       const getClassification = (adaptResult: AdaptResultKey): string => {
-        // 1. Most specific: exact match (application_dashboard_id + panel_id + metric_name)
-        let match = configEntries?.find((config) =>
-          config.application_dashboard_id === adaptResult.application_dashboard_id &&
-          config.panel_id === adaptResult.panel_id &&
-          config.metric_name === adaptResult.metric_name
-        );
-
-        const c1 = extractClassification(match?.config_data);
-        if (c1) return c1;
-
-        // 2. Panel-level: application_dashboard_id + panel_id, metric_name = null
-        match = configEntries?.find((config) =>
-          config.application_dashboard_id === adaptResult.application_dashboard_id &&
-          config.panel_id === adaptResult.panel_id &&
-          config.metric_name === null
-        );
-
-        const c2 = extractClassification(match?.config_data);
-        if (c2) return c2;
-
-        // 3. Dashboard-level: application_dashboard_id only, panel_id = null, metric_name = null
-        match = configEntries?.find((config) =>
-          config.application_dashboard_id === adaptResult.application_dashboard_id &&
-          config.panel_id === null &&
-          config.metric_name === null
-        );
-
-        const c3 = extractClassification(match?.config_data);
-        if (c3) return c3;
-
-        // 4. Environment-level
-        match = configEntries?.find((config) =>
-          config.application_dashboard_id === null &&
-          config.panel_id === null &&
-          config.metric_name === null
-        );
-
-        const c4 = extractClassification(match?.config_data);
-        if (c4) return c4;
-
+        for (const level of configLevels(adaptResult)) {
+          const c = extractClassification(level);
+          if (c) return c;
+        }
         return 'unclassified';
       };
 
-      // Helper function to get the complete compare_config
-      const getCompareConfig = (adaptResult: AdaptResultKey): Record<string, unknown> | null => {
-        // 1. Most specific: exact match
-        let match = configEntries?.find((config) =>
-          config.application_dashboard_id === adaptResult.application_dashboard_id &&
-          config.panel_id === adaptResult.panel_id &&
-          config.metric_name === adaptResult.metric_name
-        );
-
-        if (match?.config_data) {
-          return match.config_data as Record<string, unknown>;
-        }
-
-        // 2. Panel-level
-        match = configEntries?.find((config) =>
-          config.application_dashboard_id === adaptResult.application_dashboard_id &&
-          config.panel_id === adaptResult.panel_id &&
-          config.metric_name === null
-        );
-
-        if (match?.config_data) {
-          return match.config_data as Record<string, unknown>;
-        }
-
-        // 3. Dashboard-level
-        match = configEntries?.find((config) =>
-          config.application_dashboard_id === adaptResult.application_dashboard_id &&
-          config.panel_id === null &&
-          config.metric_name === null
-        );
-
-        if (match?.config_data) {
-          return match.config_data as Record<string, unknown>;
-        }
-
-        // 4. Environment-level
-        match = configEntries?.find((config) =>
-          config.application_dashboard_id === null &&
-          config.panel_id === null &&
-          config.metric_name === null
-        );
-
-        if (match?.config_data) {
-          return match.config_data as Record<string, unknown>;
-        }
-
-        return null;
-      };
+      // The complete compare_config: first level that has any config_data.
+      const getCompareConfig = (adaptResult: AdaptResultKey): Record<string, unknown> | null =>
+        configLevels(adaptResult).find((level) => !!level) ?? null;
 
       const results = adaptResults.map((row) => {
         const conclusion = row.conclusion as Record<string, unknown> | null;
@@ -282,7 +256,9 @@ export class TestRunsAnomalyService {
           application_dashboard_id: row.application_dashboard_id,
           metrics_source_id: row.metrics_source_id || null,
           panel_id: row.panel_id,
-          compare_config: getCompareConfig(row),
+          // Only the stale tooltip reads a row's config (StaleTooltipContent); on the other
+          // rows it was the largest field of a payload that runs to 26k rows on a big run.
+          compare_config: row.is_stale ? getCompareConfig(row) : null,
           is_stale: row.is_stale || false,
           stale_reason: row.stale_reason || null,
           stale_at: row.stale_at || null,

@@ -252,6 +252,18 @@ export class TestRunsAnalysisController {
 
   // ==================== Anomaly Detection Endpoints ====================
 
+  @Get(':testRunId/anomaly-detection/summary')
+  @ApiOperation({ summary: 'Counts of anomaly detection results per conclusion (collapsed card)' })
+  @ApiResponse({ status: 200, description: 'Anomaly detection summary retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Test run not found' })
+  async getAnomalyDetectionSummary(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+  ) {
+    await this.testRunsService.verifyTestRunAccess(testRunId, ctx.userId, ctx.roles);
+    return this.testRunsService.getAnomalyDetectionSummary(testRunId);
+  }
+
   @Get(':testRunId/anomaly-detection')
   @ApiOperation({ summary: 'Get anomaly detection results for a test run' })
   @ApiResponse({ status: 200, description: 'Anomaly detection results retrieved successfully' })

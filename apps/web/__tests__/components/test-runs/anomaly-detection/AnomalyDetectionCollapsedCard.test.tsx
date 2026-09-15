@@ -18,7 +18,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import AnomalyDetectionCollapsedCard from '@/app/test-runs/[id]/components/anomaly-detection/components/AnomalyDetectionCollapsedCard';
-import { AnomalyData } from '@/app/test-runs/[id]/components/anomaly-detection/types';
+import { AnomalySummary } from '@/app/test-runs/[id]/components/anomaly-detection/types';
 
 // Mock the scroll methods
 Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -26,36 +26,11 @@ Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
   value: jest.fn(),
 });
 
-const mockAnomalyData: AnomalyData[] = [
-  {
-    dashboard_label: 'Test Dashboard',
-    panel_title: 'Test Panel',
-    metric_name: 'response_time',
-    unit: 'ms',
-    classification: 'red_duration',
-    conclusion_label: 'regression',
-    test_value: '100',
-    control_group_value: '50',
-    difference: '100%',
-    application_dashboard_id: 'app-1',
-    panel_id: '1',
-    is_stale: false
-  },
-  {
-    dashboard_label: 'Test Dashboard 2',
-    panel_title: 'Test Panel 2',
-    metric_name: 'error_rate',
-    unit: '%',
-    classification: 'red_errors',
-    conclusion_label: 'improvement',
-    test_value: '1',
-    control_group_value: '5',
-    difference: '-80%',
-    application_dashboard_id: 'app-2',
-    panel_id: '2',
-    is_stale: true
-  }
-];
+const mockSummary: AnomalySummary = {
+  total: 2,
+  stale_count: 1,
+  by_conclusion: { regression: 1, improvement: 1 },
+};
 
 const mockTestRun = {
   id: 'test-run-1',
@@ -75,7 +50,7 @@ const mockTestRun = {
 
 describe('AnomalyDetectionCollapsedCard', () => {
   const defaultProps = {
-    data: mockAnomalyData,
+    summary: mockSummary,
     loading: false,
     conclusionFilter: 'all',
     setConclusionFilter: jest.fn(),
@@ -109,7 +84,7 @@ describe('AnomalyDetectionCollapsedCard', () => {
     });
 
     it('should show loading state', () => {
-      render(<AnomalyDetectionCollapsedCard {...defaultProps} loading={true} data={[]} />);
+      render(<AnomalyDetectionCollapsedCard {...defaultProps} loading={true} summary={null} />);
 
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
     });
@@ -231,26 +206,13 @@ describe('AnomalyDetectionCollapsedCard', () => {
     });
 
     it('should filter out partial/incomparable/no difference conclusions', () => {
-      const dataWithExcludedConclusions: AnomalyData[] = [
-        ...mockAnomalyData,
-        {
-          ...mockAnomalyData[0],
-          conclusion_label: 'partial data',
-          metric_name: 'partial_metric'
-        },
-        {
-          ...mockAnomalyData[0],
-          conclusion_label: 'incomparable',
-          metric_name: 'incomparable_metric'
-        },
-        {
-          ...mockAnomalyData[0],
-          conclusion_label: 'no difference',
-          metric_name: 'no_diff_metric'
-        }
-      ];
+      const summaryWithExcludedConclusions: AnomalySummary = {
+        total: 5,
+        stale_count: 1,
+        by_conclusion: { ...mockSummary.by_conclusion, 'partial data': 1, incomparable: 1, 'no difference': 1 },
+      };
 
-      render(<AnomalyDetectionCollapsedCard {...defaultProps} data={dataWithExcludedConclusions} />);
+      render(<AnomalyDetectionCollapsedCard {...defaultProps} summary={summaryWithExcludedConclusions} />);
 
       // Should only show regression and improvement chips
       expect(screen.getByText('regression')).toBeInTheDocument();
@@ -261,7 +223,7 @@ describe('AnomalyDetectionCollapsedCard', () => {
     });
 
     it('should show placeholder chips when no data', () => {
-      render(<AnomalyDetectionCollapsedCard {...defaultProps} data={[]} loading={false} />);
+      render(<AnomalyDetectionCollapsedCard {...defaultProps} summary={{ total: 0, stale_count: 0, by_conclusion: {} }} loading={false} />);
 
       expect(screen.getByText('Statistical Analysis')).toBeInTheDocument();
       expect(screen.getByText('Control Group Comparison')).toBeInTheDocument();
@@ -277,7 +239,7 @@ describe('AnomalyDetectionCollapsedCard', () => {
         <AnomalyDetectionCollapsedCard
           {...defaultProps}
           testRun={testRunNoBaselines}
-          data={[]}
+          summary={{ total: 0, stale_count: 0, by_conclusion: {} }}
         />
       );
 
@@ -394,23 +356,13 @@ describe('AnomalyDetectionCollapsedCard', () => {
     });
 
     it('should not display stale badge when no stale data', () => {
-      const freshData: AnomalyData[] = mockAnomalyData.map(item => ({
-        ...item,
-        is_stale: false
-      }));
-
-      render(<AnomalyDetectionCollapsedCard {...defaultProps} data={freshData} />);
+      render(<AnomalyDetectionCollapsedCard {...defaultProps} summary={{ ...mockSummary, stale_count: 0 }} />);
 
       expect(screen.queryByText('outdated')).not.toBeInTheDocument();
     });
 
     it('should display correct stale count', () => {
-      const staleData: AnomalyData[] = mockAnomalyData.map(item => ({
-        ...item,
-        is_stale: true
-      }));
-
-      render(<AnomalyDetectionCollapsedCard {...defaultProps} data={staleData} />);
+      render(<AnomalyDetectionCollapsedCard {...defaultProps} summary={{ ...mockSummary, stale_count: 2 }} />);
 
       // Both items are stale - SoftBadge shows count separately
       expect(screen.getByText('outdated')).toBeInTheDocument();
@@ -703,7 +655,7 @@ describe('AnomalyDetectionCollapsedCard', () => {
       render(
         <AnomalyDetectionCollapsedCard
           {...defaultProps}
-          data={[]}
+          summary={{ total: 0, stale_count: 0, by_conclusion: {} }}
           testRun={{ ...mockTestRun, completed: false, consolidated_result: {} }}
         />
       );
@@ -723,30 +675,23 @@ describe('AnomalyDetectionCollapsedCard', () => {
       expect(screen.getByTestId('anomaly-detection-section-collapsed')).toBeInTheDocument();
     });
 
-    it('should handle empty data array', () => {
-      render(<AnomalyDetectionCollapsedCard {...defaultProps} data={[]} />);
+    it('should handle an empty summary', () => {
+      render(<AnomalyDetectionCollapsedCard {...defaultProps} summary={{ total: 0, stale_count: 0, by_conclusion: {} }} />);
 
       expect(screen.getByText('Statistical Analysis')).toBeInTheDocument();
     });
 
     it('should handle missing conclusion labels', () => {
-      const dataWithoutConclusions: AnomalyData[] = [{
-        ...mockAnomalyData[0],
-        conclusion_label: '' as any
-      }];
-
-      render(<AnomalyDetectionCollapsedCard {...defaultProps} data={dataWithoutConclusions} />);
+      render(<AnomalyDetectionCollapsedCard {...defaultProps} summary={{ total: 1, stale_count: 0, by_conclusion: { '': 1 } }} />);
 
       expect(screen.getByTestId('anomaly-detection-section-collapsed')).toBeInTheDocument();
     });
 
-    it('should handle very large datasets', () => {
-      const largeData: AnomalyData[] = Array(100).fill(mockAnomalyData[0]);
-      render(<AnomalyDetectionCollapsedCard {...defaultProps} data={largeData} />);
+    it('should show the regression count from the summary', () => {
+      render(<AnomalyDetectionCollapsedCard {...defaultProps} summary={{ total: 100, stale_count: 0, by_conclusion: { regression: 100 } }} />);
 
-      // KPIDisplay shows the regression count as the value
-      // All 100 items have conclusion_label 'regression', so value is 100
       expect(screen.getByText('Regressions Detected')).toBeInTheDocument();
+      expect(screen.getAllByText('100').length).toBeGreaterThan(0); // KPI value and the regression badge
     });
   });
 });

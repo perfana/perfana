@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.30] - 2026-09-15
+
+### Fixed
+- **Opening a test run no longer downloads every ADAPT result just to draw the collapsed Anomaly Detection card.** The card only ever showed counts, yet `useAnomalyDetection` fetched the whole `/anomaly-detection` list on mount and again on every `evaluatingAdapt` status change — 21,231 rows (~19 MB) on `SONAR-acceptatie-loadtest_perfana-00014`, 26,223 on WERKNL-00004, parsed and reduced in the browser while the page was loading. Found while investigating the 2026-09-15 08:00–08:15 UI stall: neither the worker log nor the API log showed a server-side stall, and the one thing that scaled with the runs being looked at was this payload. The collapsed card now reads a new `GET /test-runs/:id/anomaly-detection/summary` (`{ total, stale_count, by_conclusion }`, one `GROUP BY`, 148 ms on that run); the row list is fetched only while the card is expanded, and refetched on a status change only if it is open.
+- **The expanded list is a third smaller.** `compare_config` was embedded on every row and read by exactly one consumer — the stale-result tooltip — so it is now returned only for stale rows (~4.8 MB of the 19 MB above). The API also builds its classification and config lookups as a `Map` keyed on (dashboard, panel, metric) instead of up to eight linear `find`s per row over the workload's compare configs (475 on that run): that was O(rows × configs) on the API event loop, in the same request every other browser tab was waiting behind.
+
 ## [0.2.95.29] - 2026-09-15
 
 ### Fixed

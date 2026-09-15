@@ -229,6 +229,35 @@ describe('TestRunsAnomalyService', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('getAnomalyDetectionSummary', () => {
+    it('folds the per-label GROUP BY rows into totals', async () => {
+      const qb = createMockQueryBuilder<DsAdaptResults>();
+      qb.getRawMany.mockResolvedValue([
+        { label: 'regression', count: '3', stale: '1' },
+        { label: 'improvement', count: '2', stale: '0' },
+        { label: 'no difference', count: '40', stale: '2' },
+      ]);
+      dsAdaptResultsRepo.createQueryBuilder.mockReturnValue(qb as unknown as ReturnType<MockRepository<DsAdaptResults>['createQueryBuilder']>);
+
+      const summary = await service.getAnomalyDetectionSummary(TEST_RUN_ID);
+
+      expect(summary).toEqual({
+        total: 45,
+        stale_count: 3,
+        by_conclusion: { regression: 3, improvement: 2, 'no difference': 40 },
+      });
+      expect(qb.where).toHaveBeenCalledWith('ar.test_run_id = :testRunId', { testRunId: TEST_RUN_ID });
+    });
+
+    it('returns zeros for a run with no results', async () => {
+      const qb = createMockQueryBuilder<DsAdaptResults>();
+      qb.getRawMany.mockResolvedValue([]);
+      dsAdaptResultsRepo.createQueryBuilder.mockReturnValue(qb as unknown as ReturnType<MockRepository<DsAdaptResults>['createQueryBuilder']>);
+
+      expect(await service.getAnomalyDetectionSummary(TEST_RUN_ID)).toEqual({ total: 0, stale_count: 0, by_conclusion: {} });
+    });
+  });
+
   // getAnomalyDetectionResults
   // -------------------------------------------------------------------------
   describe('getAnomalyDetectionResults', () => {
@@ -269,13 +298,13 @@ describe('TestRunsAnomalyService', () => {
         expect(results).toEqual([]);
       });
 
-      it('should include compare_config when exact match is found', async () => {
+      it('should include compare_config on a stale row when exact match is found', async () => {
         const configData = {
           metricClassification: { classification: 'RED_duration', higherIsBetter: false },
           thresholds: { percentageThreshold: 0.15 },
         };
         testRunRepo.findOne.mockResolvedValue(makeTestRun());
-        dsAdaptResultsRepo.find.mockResolvedValue([makeAdaptResult()]);
+        dsAdaptResultsRepo.find.mockResolvedValue([makeAdaptResult({ is_stale: true })]);
         dsCompareConfigRepo.find.mockResolvedValue([
           makeCompareConfig({ config_data: configData }),
         ]);
@@ -285,9 +314,23 @@ describe('TestRunsAnomalyService', () => {
         expect(results[0].compare_config).toEqual(configData);
       });
 
+      // Only the stale tooltip reads it; on 20k+ fresh rows it was most of the payload.
+      it('should omit compare_config on a fresh row even when a config matches', async () => {
+        testRunRepo.findOne.mockResolvedValue(makeTestRun());
+        dsAdaptResultsRepo.find.mockResolvedValue([makeAdaptResult({ is_stale: false })]);
+        dsCompareConfigRepo.find.mockResolvedValue([
+          makeCompareConfig({ config_data: { thresholds: { percentageThreshold: 0.15 } } }),
+        ]);
+
+        const results = await service.getAnomalyDetectionResults(TEST_RUN_ID);
+
+        expect(results[0].compare_config).toBeNull();
+        expect(results[0].classification).toBe('unclassified');
+      });
+
       it('should return null compare_config when no config entry matches', async () => {
         testRunRepo.findOne.mockResolvedValue(makeTestRun());
-        dsAdaptResultsRepo.find.mockResolvedValue([makeAdaptResult()]);
+        dsAdaptResultsRepo.find.mockResolvedValue([makeAdaptResult({ is_stale: true })]);
         dsCompareConfigRepo.find.mockResolvedValue([]); // no config entries
 
         const results = await service.getAnomalyDetectionResults(TEST_RUN_ID);

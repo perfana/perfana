@@ -681,6 +681,26 @@ expensive part (CLAUDE.md, "ADAPT's baseline depends on the `pct_agg` sketch", i
 
 ## Test run detail tables
 
+### Page, filter and sort the Anomaly Detection table server-side
+
+**Priority:** P2
+**Origin:** investigation of the 2026-09-15 08:00–08:15 UI stall (v0.2.95.30 closed the collapsed-card half).
+**Why:** `GET /test-runs/:id/anomaly-detection` still returns every `ds_adapt_results` row when
+the card is expanded — 21,231 rows / ~14 MB on `SONAR-acceptatie-loadtest_perfana-00014`,
+26,223 on WERKNL-00004 — and `useAnomalyDetection` filters, sorts, facets and pages that array in
+the browser. v0.2.95.30 stopped the collapsed card from pulling it at all (a one-row
+`/anomaly-detection/summary` instead) and dropped `compare_config` from non-stale rows (~5 MB of
+it), but opening the card on a large run is still a full download and a full client-side pass on
+every `evaluatingAdapt` status change.
+**How:** move `page`/`rowsPerPage`/`sortBy`/`sortDirection` and the five filters into the query
+string; return `{ rows, total }`. The four faceted dropdowns
+(`dashboardsForDropdown` … `classificationsForDropdown`) need their own aggregate endpoint or a
+`facets` block in the same response, since each is "distinct values given all OTHER filters".
+`classification` is derived in JS from the compare-config hierarchy, so filtering on it
+server-side means either materialising it onto `ds_adapt_results` at write time or reproducing
+the four-level fallback in SQL. `DeleteAnomalyDialog`, `feedback-utils` and the tracked-regressions
+tab read `anomalyData` too — check each before shrinking it.
+
 ### Redo the long-table virtualisation that was reverted in v0.2.86.0
 
 **Priority:** P2
