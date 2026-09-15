@@ -14,12 +14,12 @@ import {
   Delete,
   Error as _ErrorIcon,
 } from '@mui/icons-material';
-import { AnomalyData, AdaptConclusion } from '../types';
+import { AnomalySummary, AdaptConclusion } from '../types';
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
 
 interface AnomalyDetectionCollapsedCardProps {
-  data: AnomalyData[];
+  summary: AnomalySummary | null;
   loading: boolean;
   conclusionFilter: string;
   setConclusionFilter: (value: string) => void;
@@ -30,7 +30,7 @@ interface AnomalyDetectionCollapsedCardProps {
 }
 
 export default function AnomalyDetectionCollapsedCard({
-  data: anomalyData,
+  summary,
   loading,
   conclusionFilter: _conclusionFilter,
   setConclusionFilter,
@@ -60,10 +60,12 @@ export default function AnomalyDetectionCollapsedCard({
   };
 
 
-  const hasAnyData = !loading && anomalyData.length > 0;
-  const hasRegressions = hasAnyData && anomalyData.some(item => item.conclusion_label === 'regression');
-  const hasStaleResults = hasAnyData && anomalyData.some(item => item.is_stale === true);
-  const staleCount = hasAnyData ? anomalyData.filter(item => item.is_stale === true).length : 0;
+  const byConclusion = summary?.by_conclusion ?? {};
+  const regressionCount = byConclusion['regression'] ?? 0;
+  const hasAnyData = !loading && (summary?.total ?? 0) > 0;
+  const hasRegressions = hasAnyData && regressionCount > 0;
+  const staleCount = hasAnyData ? summary?.stale_count ?? 0 : 0;
+  const hasStaleResults = staleCount > 0;
 
   // Check for unresolved tracked regressions
   const hasTrackedRegressions = (dsAdaptConclusion?.tracked_regressions?.length ?? 0) > 0;
@@ -71,12 +73,11 @@ export default function AnomalyDetectionCollapsedCard({
 
   // Get unique conclusions that have data (exclude partial, incomparable, and no difference)
   const collapsedConclusions = hasAnyData
-    ? [...new Set(anomalyData
-        .map(item => item.conclusion_label)
+    ? Object.keys(byConclusion)
         .filter(label => label &&
           !label.toLowerCase().startsWith('partial') &&
           label.toLowerCase() !== 'incomparable' &&
-          label.toLowerCase() !== 'no difference'))]
+          label.toLowerCase() !== 'no difference')
     : [];
 
   // Get feedback state (supports both object and string formats)
@@ -256,7 +257,7 @@ export default function AnomalyDetectionCollapsedCard({
           ) : (
             <Box sx={{ py: 1 }}>
               <KPIDisplay
-                value={loading ? '—' : anomalyData.filter(item => item.conclusion_label === 'regression').length}
+                value={loading ? '—' : regressionCount}
                 label="Regressions Detected"
                 color={hasRegressions ? 'error' : 'success'}
                 loading={loading}
@@ -272,7 +273,7 @@ export default function AnomalyDetectionCollapsedCard({
             justifyContent: 'center'
           }}>
             {hasAnyData && collapsedConclusions.length > 0 ? collapsedConclusions.map((conclusion) => {
-              const conclusionCount = anomalyData.filter(item => item.conclusion_label === conclusion).length;
+              const conclusionCount = byConclusion[conclusion] ?? 0;
               const badgeColor = conclusion === 'regression' ? 'red' : conclusion === 'improvement' ? 'green' : 'blue';
 
               return (

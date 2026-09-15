@@ -1,5 +1,12 @@
 import { TestRun } from '@/types/test-runs';
 
+/** Counts from `/anomaly-detection/summary`; what the collapsed card shows without the rows. */
+export interface AnomalySummary {
+  total: number;
+  stale_count: number;
+  by_conclusion: Record<string, number>;
+}
+
 export interface AnomalyData {
   dashboard_label: string;
   dashboard_uid?: string | null;

@@ -102,6 +102,16 @@ const mockTestRun = {
   updated_at: new Date().toISOString(),
 } as any;
 
+// What /anomaly-detection/summary answers for mockAnomalyData; the collapsed card reads only this.
+const mockSummary = {
+  total: mockAnomalyData.length,
+  stale_count: mockAnomalyData.filter((r) => r.is_stale).length,
+  by_conclusion: mockAnomalyData.reduce<Record<string, number>>((acc, r) => {
+    acc[r.conclusion_label] = (acc[r.conclusion_label] ?? 0) + 1;
+    return acc;
+  }, {}),
+};
+
 describe('AnomalyDetectionSection', () => {
   const defaultProps = {
     testRun: mockTestRun,
@@ -117,6 +127,13 @@ describe('AnomalyDetectionSection', () => {
     jest.clearAllMocks();
     (useRouter as jest.Mock).mockReturnValue(mockRouter);
     (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
+      if (url.includes('/anomaly-detection/summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockSummary,
+          text: async () => JSON.stringify(mockSummary),
+        });
+      }
       if (url.includes('/anomaly-detection')) {
         return Promise.resolve({
           ok: true,
@@ -153,12 +170,13 @@ describe('AnomalyDetectionSection', () => {
       expect(screen.getByTestId('anomaly-detection-section-collapsed')).toBeInTheDocument();
     });
 
-    it('should fetch anomaly data on mount', async () => {
+    it('should fetch the summary on mount, not the rows', async () => {
       render(<AnomalyDetectionSection {...defaultProps} />);
 
       await waitFor(() => {
-        expect(authenticatedFetch).toHaveBeenCalledWith('/test-runs/test-run-1/anomaly-detection');
+        expect(authenticatedFetch).toHaveBeenCalledWith('/test-runs/test-run-1/anomaly-detection/summary');
       });
+      expect(authenticatedFetch).not.toHaveBeenCalledWith('/test-runs/test-run-1/anomaly-detection');
     });
 
     it('should fetch tracked regressions count on mount', async () => {
@@ -213,10 +231,10 @@ describe('AnomalyDetectionSection', () => {
 
     it('should handle error when fetching anomaly data', async () => {
       const showToast = jest.fn();
-      (authenticatedFetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-      });
+      const base = (authenticatedFetch as jest.Mock).getMockImplementation()!;
+      (authenticatedFetch as jest.Mock).mockImplementation((url: string) =>
+        url.endsWith('/anomaly-detection') ? Promise.resolve({ ok: false, status: 500 }) : base(url),
+      );
 
       render(<AnomalyDetectionSection {...defaultProps} showToast={showToast} anomalyExpanded={true} />);
 
@@ -227,7 +245,10 @@ describe('AnomalyDetectionSection', () => {
 
     it('should handle network error', async () => {
       const showToast = jest.fn();
-      (authenticatedFetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
+      const base = (authenticatedFetch as jest.Mock).getMockImplementation()!;
+      (authenticatedFetch as jest.Mock).mockImplementation((url: string) =>
+        url.endsWith('/anomaly-detection') ? Promise.reject(new Error('Network error')) : base(url),
+      );
 
       render(<AnomalyDetectionSection {...defaultProps} showToast={showToast} anomalyExpanded={true} />);
 
@@ -238,6 +259,9 @@ describe('AnomalyDetectionSection', () => {
 
     it('should display empty state when no data', async () => {
       (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
+        if (url.includes('/anomaly-detection/summary')) {
+          return Promise.resolve({ ok: true, json: async () => ({ total: 0, stale_count: 0, by_conclusion: {} }) });
+        }
         if (url.includes('/anomaly-detection')) {
           return Promise.resolve({
             ok: true,
@@ -284,18 +308,18 @@ describe('AnomalyDetectionSection', () => {
         <AnomalyDetectionSection {...defaultProps} onAnomalyExpand={onAnomalyExpand} anomalyExpanded={false} />
       );
 
-      // Initially collapsed, should have fetched data
+      // Collapsed: only the summary is fetched — the rows can be 20k+ entries on a large run
+      await waitFor(() => {
+        expect(authenticatedFetch).toHaveBeenCalledWith('/test-runs/test-run-1/anomaly-detection/summary');
+      });
+      expect(authenticatedFetch).not.toHaveBeenCalledWith('/test-runs/test-run-1/anomaly-detection');
+
+      // Simulate expansion: now the rows are fetched
+      rerender(<AnomalyDetectionSection {...defaultProps} onAnomalyExpand={onAnomalyExpand} anomalyExpanded={true} />);
+
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith('/test-runs/test-run-1/anomaly-detection');
       });
-
-      jest.clearAllMocks();
-
-      // Simulate expansion
-      rerender(<AnomalyDetectionSection {...defaultProps} onAnomalyExpand={onAnomalyExpand} anomalyExpanded={true} />);
-
-      // Should not fetch again if data exists
-      expect(authenticatedFetch).not.toHaveBeenCalledWith('/test-runs/test-run-1/anomaly-detection');
     });
 
     it('should auto-focus card when expanding', async () => {

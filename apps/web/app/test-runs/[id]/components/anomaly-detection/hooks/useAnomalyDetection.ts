@@ -6,7 +6,7 @@ import { TestRun } from '@/types/test-runs';
 import { authenticatedFetch } from '@/lib/api';
 import { generateConfigHash } from '@/lib/config-hash';
 import { deleteAnomalyData, DeleteAnomalyRequest } from '@/lib/anomaly-api';
-import { AnomalyData, MetricTrendData, ConfigFormData, AdaptConclusion, DrawerData } from '../types';
+import { AnomalyData, AnomalySummary, MetricTrendData, ConfigFormData, AdaptConclusion, DrawerData } from '../types';
 import { useUpdateAdaptConfig } from './useUpdateAdaptConfig';
 
 // Known classification values - anything not in this list shows as "Unclassified"
@@ -96,6 +96,8 @@ interface UseAnomalyDetectionProps {
 interface UseAnomalyDetectionReturn {
   // Data state
   anomalyData: AnomalyData[];
+  summary: AnomalySummary | null;
+  summaryLoading: boolean;
   loading: boolean;
   error: string | undefined;
   dsAdaptConclusion: AdaptConclusion | null;
@@ -202,6 +204,8 @@ export function useAnomalyDetection({
 
   // Main data state
   const [anomalyData, setAnomalyData] = useState<AnomalyData[]>([]);
+  const [summary, setSummary] = useState<AnomalySummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [dsAdaptConclusion, setDsAdaptConclusion] = useState<AdaptConclusion | null>(null);
@@ -262,6 +266,20 @@ export function useAnomalyDetection({
       setLoading(false);
     }
   }, [testRunId, showToast]);
+
+  // The collapsed card needs counts only. The full row list is 20k+ rows with configs on a
+  // large run, so it is fetched on expand, never on page load.
+  const fetchSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const response = await authenticatedFetch(`/test-runs/${testRunId}/anomaly-detection/summary`);
+      setSummary(response.ok ? await response.json() : null);
+    } catch (err) {
+      setSummary(null);
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [testRunId]);
 
   const fetchTrackedRegressionsCount = useCallback(async () => {
     try {
@@ -722,13 +740,18 @@ export function useAnomalyDetection({
   // the realtime test-run update), so the collapsed card follows a re-evaluate like the SLO card does.
   const adaptStatus = testRun?.status?.evaluatingAdapt;
   const statusLastUpdate = testRun?.status?.lastUpdate;
+  // Read through a ref so an expand/collapse does not re-run this effect; the rows are
+  // refetched here only when the card is already open and the status moved.
+  const expandedRef = useRef(anomalyExpanded);
+  expandedRef.current = anomalyExpanded;
   useEffect(() => {
     if (testRunId) {
-      fetchAnomalyData();
+      fetchSummary();
       fetchTrackedRegressionsCount();
       fetchDsAdaptConclusion();
+      if (expandedRef.current) fetchAnomalyData();
     }
-  }, [testRunId, adaptStatus, statusLastUpdate, fetchAnomalyData, fetchTrackedRegressionsCount, fetchDsAdaptConclusion]);
+  }, [testRunId, adaptStatus, statusLastUpdate, fetchSummary, fetchAnomalyData, fetchTrackedRegressionsCount, fetchDsAdaptConclusion]);
 
   useEffect(() => {
     if (anomalyExpanded && testRunId && anomalyData.length === 0) {
@@ -739,6 +762,8 @@ export function useAnomalyDetection({
   return {
     // Data state
     anomalyData,
+    summary,
+    summaryLoading,
     loading,
     error,
     dsAdaptConclusion,
