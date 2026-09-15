@@ -39,7 +39,7 @@ Each metric gets classified:
 | **No Change** | Within normal variance |
 | **Improvement** | Statistically better than baseline |
 | **Regression** | Statistically worse than baseline |
-| **Inconclusive** | Not enough data for confidence |
+| **Incomparable** | No baseline row for the metric, or fewer than `ADAPT_MIN_SAMPLE_COUNT` samples on either side (v0.2.95.28) — stored as `incomparable`, see [Too few samples to compare](#too-few-samples-to-compare) |
 
 ### 4. Overall Conclusion
 
@@ -200,11 +200,38 @@ The same repair is available on demand, for a baseline the automatic pass could 
 
 It recomputes from measurements already stored and fetches nothing from Grafana or Dynatrace, so it works on old runs whose dashboards no longer cover the time window.
 
+## Too few samples to compare
+
+Since v0.2.95.28 a metric is only compared when it has at least `ADAPT_MIN_SAMPLE_COUNT` data
+points (default 2) on the test run **and** on average per control run; otherwise its result is
+`incomparable`, the same label a metric gets when it has no baseline row at all. The control side
+is `ds_control_group_statistics.count`, which is an average across the baseline runs rather than a
+pooled sum — five one-sample baseline runs still read as 1. That is the intended reading: a series
+that exists only as an artefact violates per-run density in every run.
+
+The case it exists for is a JMeter sampler whose parent chain broke in the last seconds of a run.
+It lands in `requests_raw` as a separate bare-named series with one bucket, and before this version
+one sample against a control group holding one sample was reported as a full `regression` beside
+the healthy series it duplicated.
+
+The floor is applied inside the `control_exists` flag in `with_dynamic_statistics` (see
+`AdaptSQLFragments.buildControlExistsColumn`), after the compare config has been resolved, so every
+threshold check and the conclusion label inherit it. A compare config can override it per
+dashboard, panel or metric via `thresholds.minSampleCount`. The value is treated as untrusted: a
+non-number is ignored, a fraction is floored, and anything below 1 is clamped to 1. The perf-test
+scenario panels — Error Count, Avg Active Threads, Max Active Threads — hold one point per run by
+construction and write `1`; migration 1806 backfills that key onto configs from before this
+version, because the pipeline inserts them with `ON CONFLICT DO NOTHING` and would never add it.
+A **metric-level** config on one of those panels shadows the panel row wholesale and must carry
+its own `minSampleCount`. See [[Environment Variables]] and [[Migrations]].
+
 ## Configuration
 
 ADAPT behavior can be configured per test run via the API:
 - `POST /api/test-runs/:id/adapt-config` — Update ADAPT configuration
 - `GET /api/test-runs/adapt-results` — Retrieve analysis results
+
+A compare config's `thresholds` object also accepts `minSampleCount`, the per-dashboard/panel/metric override of the sample floor described above.
 
 ## Change Point Detection
 
