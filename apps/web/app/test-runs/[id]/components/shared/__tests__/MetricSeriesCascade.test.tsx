@@ -41,7 +41,7 @@ const heapPanel = panelOf(jvm, 5, 'Heap');
 function setup(props: Partial<React.ComponentProps<typeof MetricSeriesCascade>> = {}) {
   const onAddSeries = jest.fn();
   const onPrimaryChange = jest.fn();
-  render(
+  const view = render(
     <MetricSeriesCascade
       allDashboards={[perf, jvm]}
       dashboardsLoading={false}
@@ -53,7 +53,7 @@ function setup(props: Partial<React.ComponentProps<typeof MetricSeriesCascade>> 
       {...props}
     />,
   );
-  return { onAddSeries, onPrimaryChange };
+  return { onAddSeries, onPrimaryChange, view };
 }
 
 /** The Select all / Clear button beside a level's input: they share one flex Box. */
@@ -149,4 +149,40 @@ it('ignores a panel load that finishes after the dashboard was cleared', async (
 
   await waitFor(() => expect(screen.getByText('Select a dashboard to see its panels')).toBeInTheDocument());
   expect(screen.queryByText('2 available across 2 dashboards')).not.toBeInTheDocument();
+});
+
+it('does not reload the pickers when the page hands it a fresh run object of the same run', async () => {
+  // The page replaces the run object on every refresh (a tag edit, a job completing); keyed on
+  // the object, every picker reloaded and briefly emptied mid-selection.
+  const { view } = setup();
+  selectAll('Dashboards');
+  await screen.findByText('2 available across 2 dashboards');
+  expect(fetchPanelsForDashboards).toHaveBeenCalledTimes(1);
+
+  view.rerender(
+    <MetricSeriesCascade
+      allDashboards={[perf, jvm]} dashboardsLoading={false} testRun={{ ...(testRun as object) } as never}
+      addedSeries={[]} onAddSeries={jest.fn()} panelListOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
+    />,
+  );
+
+  expect(fetchPanelsForDashboards).toHaveBeenCalledTimes(1);
+});
+
+it('greys out the synthetic "All aggregated" option once it is on the chart under its composed name', async () => {
+  (fetchSeriesForPanels as jest.Mock).mockImplementation(async (panels: PanelOption[]) =>
+    panels.map((p) => seriesOf(p, 'All aggregated', 'T01')));
+  setup({
+    allDashboards: [perf],
+    addedSeries: [{ dashboardId: 'dash-1', panelId: 101, metricName: 'All aggregated — Transaction RT Avg' }],
+  });
+  selectAll('Dashboards');
+  await screen.findByText('1 available across 1 dashboard');
+  selectAll('Panels');
+  await screen.findByText('2 available from 1 panel');
+
+  fireEvent.mouseDown(screen.getByLabelText('Series'));
+  const option = await screen.findByText('All aggregated');
+  expect(option.textContent).toContain('(already added)');
+  expect(screen.getByText('T01').textContent).not.toContain('(already added)');
 });

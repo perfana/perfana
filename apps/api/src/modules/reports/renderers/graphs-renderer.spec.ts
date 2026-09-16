@@ -682,6 +682,33 @@ describe('GraphsRenderer', () => {
       expect(html).toContain('1 panel, 1 trend preset');
     });
 
+    it('computes a run-wide aggregate once for every preset that asks for it', async () => {
+      const agg = { dashboardLabel: 'Perf', panelTitle: 'Transaction RT P95', metricName: 'All aggregated — Transaction RT P95', metric: 'transaction_response_time' as const, stat: 'p95' as const, unit: 'ms' };
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({
+        presets: [
+          { id: 't1', name: 'One', stat: 'avg', selections: [], aggregates: [agg] },
+          { id: 't2', name: 'Two', stat: 'avg', selections: [], aggregates: [agg] },
+        ],
+        foundIds: ['t1', 't2'],
+      });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([run('run-001', 10), run('run-002', 12)]);
+      dataFetcher.getAggregatedTrendValues.mockResolvedValue({ 'run-001': 400, 'run-002': 420 });
+
+      const html = await renderer.renderGraphsSection(makeSection({ config: { trendsPresetIds: ['t1', 't2'] } }), makeTestRun());
+
+      expect(dataFetcher.getAggregatedTrendValues).toHaveBeenCalledTimes(1);
+      expect((html.match(/<svg /g) ?? []).length).toBe(2);
+    });
+
+    it('warns, and discovers nothing, when every trends preset of a trends-only section is gone', async () => {
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [], foundIds: [] });
+
+      const html = await renderer.renderGraphsSection(makeSection({ config: { trendsPresetIds: ['gone'] } }), makeTestRun());
+
+      expect(html).toContain('no longer exist');
+      expect(dataFetcher.getAvailableMetricsPanels).not.toHaveBeenCalled();
+    });
+
     it('draws no trend and asks for no statistics when the run has no trend window', async () => {
       // The window is empty when the run is unknown or has no history to trend.
       dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [preset('t1', 'Nightly RT')], foundIds: ['t1'] });

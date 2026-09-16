@@ -231,7 +231,7 @@ export default function TrendsCard({
             id: first.panelId, title: first.panelTitle, type: 'graph', applicationDashboardId: first.dashboardId,
           } : null),
           evaluateType: trendsData.evaluateType,
-          source: trendsData.selectedSource
+          source: trendsData.selectedDashboard ? trendsData.selectedSource : (first?.source ?? trendsData.selectedSource)
         }}
       />
     </Box>

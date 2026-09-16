@@ -2612,7 +2612,12 @@ export class ReportDataFetcherService {
     return out;
   }
 
-  /** Run-wide aggregate history for a panel whose series list carries the sentinel. */
+  /**
+   * Run-wide aggregate history for a panel whose series list carries the sentinel. Read
+   * through `getAggregatedTrendValues`, so the Trends section and a Custom Graphs trend
+   * preset show the same number for the same series (same rollup tables, same window rule
+   * as the card's endpoint).
+   */
   private async getAggregatedTrends(
     testRunIds: string[],
     selections: BaselineComparisonSelection[],
@@ -2621,36 +2626,10 @@ export class ReportDataFetcherService {
     const wanted = selections.filter(isSyntheticAllAggregated);
     if (wanted.length === 0) return [];
 
-    const pct = stat === 'p99' ? 0.99 : 0.95;
-    const byKind = new Map<string, Map<string, number | null>>();
+    const byKind = new Map<string, Record<string, number | null>>();
     for (const kind of new Set(wanted.map((s) => aggregatedKindFor(s.panelId)!))) {
-      const rows: Array<Record<string, string | null>> = kind === 'transaction'
-        ? await withRequestEm(this.testRunRepo).query(
-            `SELECT t.test_run_id,
-                    ROUND(AVG(t.response_time)::numeric, 2) AS avg,
-                    ROUND(PERCENTILE_CONT($2) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS pct
-             FROM transactions t
-             WHERE t.test_run_id = ANY($1::text[])
-             GROUP BY t.test_run_id`,
-            [testRunIds, pct])
-        : await withRequestEm(this.testRunRepo).query(
-            `WITH agg AS (
-               SELECT s.test_run_id, rollup(s.pct_agg) AS pct_agg,
-                      SUM(s.avg_response_time * s.total_count) / NULLIF(SUM(s.total_count), 0) AS avg
-               FROM test_run_sampler_stats s
-               WHERE s.test_run_id = ANY($1::text[]) AND s.ramp_up_excluded = true AND s.total_count > 0
-               GROUP BY s.test_run_id
-             )
-             SELECT a.test_run_id, ROUND(a.avg::numeric, 2) AS avg,
-                    ROUND(approx_percentile($2, a.pct_agg)::numeric, 2) AS pct
-             FROM agg a`,
-            [testRunIds, pct]);
-      const values = new Map<string, number | null>();
-      for (const r of rows) {
-        const v = stat === 'avg' ? r.avg : r.pct;
-        values.set(r.test_run_id as string, v == null ? null : Number(v));
-      }
-      byKind.set(kind, values);
+      const metric = kind === 'transaction' ? 'transaction_response_time' : 'request_response_time';
+      byKind.set(kind, await this.getAggregatedTrendValues(testRunIds, metric, stat));
     }
 
     return wanted.map((sel) => ({
@@ -2658,7 +2637,7 @@ export class ReportDataFetcherService {
       panelTitle: perfPanelTitle(sel.panelId ?? null, ''),
       metricName: ALL_AGGREGATED_SERIES,
       unit: 'ms',
-      valuesByRun: Object.fromEntries(byKind.get(aggregatedKindFor(sel.panelId)!) ?? []),
+      valuesByRun: byKind.get(aggregatedKindFor(sel.panelId)!) ?? {},
     }));
   }
 

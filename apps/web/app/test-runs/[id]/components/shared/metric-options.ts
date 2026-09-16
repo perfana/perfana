@@ -315,8 +315,9 @@ export const fetchPanelsForDashboards = async (
   options?: PanelListOptions,
 ): Promise<PanelOption[][]> => {
   // One run-wide request serves every performance-test dashboard in the batch.
+  // A failed run-wide fetch hands nothing down, so each dashboard retries on its own.
   const rows = testRun && dashboards.some((d) => sourceOf(d) === 'performance-metrics')
-    ? await fetchAvailablePanelRows(testRun).catch(() => [] as AvailablePanelRow[])
+    ? await fetchAvailablePanelRows(testRun).catch(() => undefined)
     : undefined;
   return mapLimit(dashboards, OPTION_FETCH_CONCURRENCY, (d) => fetchPanelsForDashboard(d, testRun, options, rows));
 };

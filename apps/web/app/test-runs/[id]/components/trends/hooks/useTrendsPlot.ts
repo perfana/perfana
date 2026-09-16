@@ -174,7 +174,7 @@ export function useTrendsPlot({
     // One series is titled by its own label; several by the panel picked first.
     const graphTitle = allSeriesKeys.length === 1
       ? `${labelOf(allSeriesKeys[0]!)} Trends (${evaluateType})`
-      : `${selectedMetric?.title || 'Metrics'} Trends${allSeriesKeys.length > 1 ? ` - ${allSeriesKeys.length} series` : ''} (${evaluateType})`;
+      : `${selectedMetric?.title || 'Metrics'} Trends (${evaluateType})`;
 
     const layout = {
       title: {

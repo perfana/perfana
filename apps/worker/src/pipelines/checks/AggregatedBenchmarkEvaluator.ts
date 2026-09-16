@@ -36,7 +36,8 @@ const STAT_SQL: Record<string, string> = {
  *
  * Aggregated benchmarks compute statistics across all requests in a test run
  * (e.g. p95 transaction response time, overall error percentage) and compare
- * against a requirement threshold using an operator (<=, <, >=, >).
+ * against a requirement threshold using any operator the SLO dialog offers
+ * (`lt lte gt gte eq ne`, or their symbols) — see requirement-operator.ts.
  */
 export class AggregatedBenchmarkEvaluator extends BaseCheckService {
   constructor(
@@ -131,8 +132,9 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
     // at or below its threshold.
     const met = evaluateRequirement(actual, operator, threshold);
     if (met === null) {
+      // Same policy as RequirementChecker: an operator nobody defined passes, with a warning.
       this.logger.warn(`Unknown requirement operator: ${operator}`);
-      return actual <= threshold;
+      return true;
     }
     return met;
   }

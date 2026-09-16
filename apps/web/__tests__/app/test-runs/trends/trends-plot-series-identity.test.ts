@@ -59,6 +59,20 @@ it('titles a single series by its label and several by the panel picked first', 
   expect(layout.title.text).toBe('All aggregated — Transaction Error Rate Trends (q95)');
 });
 
+it('titles several series by the panel picked first, without a series count', () => {
+  const props = {
+    metricsData: [row(rt, '10', 280), row(err, '10', 0)],
+    selectedMetric: { id: 101, title: 'Transaction RT Avg', type: 'timeseries' },
+    evaluateType: 'avg',
+    trendsExpanded: true,
+    addedSeries: [rt, err],
+    showToast: jest.fn(),
+  };
+  const { result } = renderHook(() => useTrendsPlot(props));
+  const layout = result.current.plotLayout as { title: { text: string } };
+  expect(layout.title.text).toBe('Transaction RT Avg Trends (avg)');
+});
+
 it('clears the plot when the card is collapsed or has no data', () => {
   const props = {
     metricsData: [row(rt, '10', 280)],

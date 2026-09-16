@@ -7,7 +7,7 @@
  * was the one a search landed on, and its panels were fetched by Grafana uid — which a
  * placeholder has none of — so the Metric dropdown stayed empty.
  */
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { useAddSLOForm } from '../useAddSLOForm';
 
 jest.mock('@/lib/api', () => ({ authenticatedFetch: jest.fn() }));
@@ -33,4 +33,22 @@ it('keeps performance-test placeholders out of the Grafana list', async () => {
 
   await waitFor(() => expect(result.current.availableOptions.availablePerfMetricsDashboards).toHaveLength(1));
   expect(result.current.availableOptions.availableDashboards.map((d) => d.id)).toEqual(['jvm']);
+});
+
+it('keeps every source group after a pick and clears only the panel lists', async () => {
+  // handleSourceChange used to wipe the other two dashboard lists, so after the first pick the
+  // dropdown held one group and switching source meant reopening the dialog.
+  (authenticatedFetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => dashboards });
+  const { result } = renderHook(() => useAddSLOForm({
+    open: true, systemId: 'sut-1', systemName: 'SONAR', environment: 'acc', workload: 'load',
+  }));
+  await waitFor(() => expect(result.current.availableOptions.availableDashboards).toHaveLength(1));
+
+  act(() => result.current.handleSourceChange('performance-metrics'));
+
+  expect(result.current.sloFormData.source).toBe('performance-metrics');
+  expect(result.current.availableOptions.availableDashboards.map((d) => d.id)).toEqual(['jvm']);
+  expect(result.current.availableOptions.availablePerfMetricsDashboards).toHaveLength(1);
+  expect(result.current.availableOptions.availablePanels).toEqual([]);
+  expect(result.current.availableOptions.availablePerfMetricsPanels).toEqual([]);
 });

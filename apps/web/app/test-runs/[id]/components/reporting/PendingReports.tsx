@@ -40,6 +40,7 @@ function usePendingReport(
   useEffect(() => {
     let cancelled = false;
     let polls = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     onProgress({ percent: 0, label: 'Starting…' });
 
     const settle = (message?: string) => {
@@ -70,13 +71,13 @@ function usePendingReport(
         console.error('Failed to poll report:', error);
       }
       if (++polls < MAX_POLLS) {
-        setTimeout(poll, POLL_MS);
+        timer = setTimeout(poll, POLL_MS);
       } else {
         settle('Report generation is taking longer than expected');
       }
     };
     void poll();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(timer); };
     // Callbacks are stable page handlers; the poll belongs to the id.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);

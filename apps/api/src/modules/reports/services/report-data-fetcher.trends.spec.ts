@@ -98,10 +98,10 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
           { test_run_id: 'r1', normalized_url: '/checkout', avg_response_time: '120', p95: '200', p99: '300', avg_latency: '10', avg_connect_time: '5', error_percentage: '1', throughput: '9' },
           { test_run_id: 'r2', normalized_url: '/checkout', avg_response_time: '150', p95: '250', p99: '350', avg_latency: '12', avg_connect_time: '6', error_percentage: '2', throughput: '8' },
         ])
-        // run-wide transaction aggregate per run
+        // run-wide transaction aggregate per run, from the rollup tables
         .mockResolvedValueOnce([
-          { test_run_id: 'r1', avg: '100', pct: '200' },
-          { test_run_id: 'r2', avg: '130', pct: '260' },
+          { test_run_id: 'r1', value: '100' },
+          { test_run_id: 'r2', value: '130' },
         ]),
     } as any;
     const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
@@ -171,7 +171,7 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
     ];
     const dataSource = { query: jest.fn().mockResolvedValue(rows) };
     const repo = {
-      query: jest.fn().mockResolvedValue([{ test_run_id: 'r1', avg: '100', pct: '200' }]),
+      query: jest.fn().mockResolvedValue([{ test_run_id: 'r1', value: '100' }]),
     } as any;
     const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
 
@@ -187,11 +187,10 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
     expect((await byName('q50')).used).toBe(4);
     expect((await byName('q90')).used).toBe(6);
     expect((await byName('min')).used).toBe(0);
-    // The aggregate answered from its `avg` column, never `pct`, for every one of them
+    // The aggregate rolled up as avg for every one of them: the rollup query asked for the mean
     expect((await byName('max'))['All aggregated']).toBe(100);
-    // Every non-percentile stat sent the aggregate query with the avg percentile (0.95)
     expect(repo.query).toHaveBeenCalledTimes(6);
-    for (const [, params] of repo.query.mock.calls) expect(params[1]).toBe(0.95);
+    for (const [sql] of repo.query.mock.calls) expect(sql).toContain('mean(pct_agg)');
     expect(dataSource.query).toHaveBeenCalledTimes(6);
     expect(String(dataSource.query.mock.calls[0]![0])).toContain('s.max_value, s.min_value, s.last_value, s.median, s.q90');
   });
@@ -229,5 +228,34 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
     expect(windowedSql).not.toContain('LIMIT 51');
     // ...and the floor is still applied.
     expect(windowedSql).toContain('tr.start_time >=');
+  });
+});
+describe('ReportDataFetcherService.getTrendRunWindow', () => {
+  it('returns the window oldest-first and puts the floor after the org ids', async () => {
+    // The renderer draws x = run index, so the order IS the chart; and the floor placeholder
+    // must land past the org filter's parameters or it binds to the wrong value.
+    const repo = { query: jest.fn()
+      // resolveTrendWindowStart's pinned-run lookup
+      .mockResolvedValueOnce([{ start_time: '2026-09-01T00:00:00Z' }])
+      // the window, newest first as the query orders it
+      .mockResolvedValueOnce([
+        { test_run_id: 'r3', start_time: '2026-09-14T05:00:00Z' },
+        { test_run_id: 'r1', start_time: '2026-09-10T05:00:00Z' },
+      ]) } as any;
+    const authz = { getAccessibleOrganizations: jest.fn().mockResolvedValue(['org-1']) } as any;
+    const svc = new ReportDataFetcherService(repo, authz, { query: jest.fn() } as any);
+
+    const runs = await svc.getTrendRunWindow(
+      { systemUnderTestId: 'sut', testEnvironment: 'acc', workload: 'load', startTime: new Date('2026-09-14T05:00:00Z') } as any,
+      10, 'user-1', ['user'], 'r0',
+    );
+
+    expect(runs.map((r) => r.testRunId)).toEqual(['r1', 'r3']);
+    const [sql, params] = repo.query.mock.calls[1];
+    expect(sql).not.toContain('PERCENTILE_CONT');
+    expect(params.slice(0, 4)).toEqual(['sut', 'acc', 'load', new Date('2026-09-14T05:00:00Z')]);
+    // org ids at $5.., the floor last
+    expect(params[params.length - 1]).toEqual(new Date('2026-09-01T00:00:00Z'));
+    expect(sql).toContain(`$${params.length}`);
   });
 });
