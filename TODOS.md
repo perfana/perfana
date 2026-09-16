@@ -814,7 +814,7 @@ system with tens of dashboards it can reach several thousand options. MUI's `Aut
 every option matching the current filter with no virtualisation, so the popup gets slow to open and
 to type in. Nothing breaks; it degrades, and only for a selection the user opted into. The request
 fan-out behind those levels is already bounded (`OPTION_FETCH_CONCURRENCY` in
-`apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts`) — this is rendering, not
+`apps/web/app/test-runs/[id]/components/shared/metric-options.ts`) — this is rendering, not
 fetching.
 **What:** Either a `ListboxComponent` backed by a virtualiser (the pattern MUI documents for large
 option sets), or a cheaper cap: stop rendering past N options and tell the user to type to narrow.
@@ -1038,18 +1038,6 @@ clause now lives in two files with two independently-worded comments. Functional
 it is where a future change to the rule will be missed.
 **What to do:** give the cascade its own named predicate next to `shouldOfferAllAggregated` in
 `apps/web/lib/aggregated-perf-series.ts` so both are visible in one file.
-
-### `metric-options.ts` contains literal NUL bytes, so git treats it as binary
-
-**Priority:** P2
-**Origin:** security review during /ship on `feat/all-aggregated-perf-dashboard` (2026-09-08).
-**Why:** `apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts` uses a real 0x00
-byte as a key separator (`panelKey`/`seriesKey`), so `file` reports `data` and every diff of it
-renders as `Bin 7776 -> 7783 bytes` in `git diff` and in GitHub PR review. Any future edit to this
-file passes code review showing nothing at all. Pre-existing; surfaced because v0.2.95.4 touched it.
-**What to do:** replace `\0` with a separator that cannot appear in a dashboard label or metric name
-but is not a NUL — `\u001f` (unit separator) keeps the same collision-avoidance property and leaves
-the file textual. Verify with `git diff --stat` showing line counts rather than bytes.
 
 ### The VU roll-up's max is an upper bound, and its average is sample-count weighted
 
@@ -1785,3 +1773,16 @@ arbitrarily large aggregate.
 **Where:** `apps/api/src/modules/test-runs/controllers/test-runs-aggregated-timeseries.controller.ts`
 — alongside the existing metric/stat validation (~line 124).
 **Completed:** v0.2.63.4 (2026-08-18)
+
+### `metric-options.ts` contains literal NUL bytes, so git treats it as binary
+
+**Priority:** P2
+**Origin:** security review during /ship on `feat/all-aggregated-perf-dashboard` (2026-09-08).
+**Why:** `apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts` uses a real 0x00
+byte as a key separator (`panelKey`/`seriesKey`), so `file` reports `data` and every diff of it
+renders as `Bin 7776 -> 7783 bytes` in `git diff` and in GitHub PR review. Any future edit to this
+file passes code review showing nothing at all. Pre-existing; surfaced because v0.2.95.4 touched it.
+**What to do:** replace `\0` with a separator that cannot appear in a dashboard label or metric name
+but is not a NUL — `\u001f` (unit separator) keeps the same collision-avoidance property and leaves
+the file textual. Verify with `git diff --stat` showing line counts rather than bytes.
+**Completed:** v0.2.95.31 (2026-09-16) — the option loaders moved to `shared/metric-options.ts` with a plain-text key separator; `compare/utils/metric-options.ts` is a re-export shim.
