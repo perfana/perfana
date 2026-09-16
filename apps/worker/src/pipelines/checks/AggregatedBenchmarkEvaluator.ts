@@ -2,6 +2,7 @@ import { EntityManager } from 'typeorm';
 import type { Logger } from 'pino';
 import { BaseCheckService } from './BaseCheckService.js';
 import type { TestRun } from './BenchmarkMatcher.js';
+import { evaluateRequirement } from './requirement-operator.js';
 
 export interface AggregatedBenchmark {
   id: string;
@@ -125,12 +126,14 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
   }
 
   private applyOperator(actual: number, operator: string, threshold: number): boolean {
-    switch (operator) {
-      case '<=': return actual <= threshold;
-      case '<':  return actual <  threshold;
-      case '>=': return actual >= threshold;
-      case '>':  return actual >  threshold;
-      default:   return actual <= threshold;
+    // The SLO dialog stores codes (`lt`, `gte`, …), not symbols; before v0.2.95.31 every
+    // code fell through to `<=` here, so a "greater than" aggregate SLO passed on any value
+    // at or below its threshold.
+    const met = evaluateRequirement(actual, operator, threshold);
+    if (met === null) {
+      this.logger.warn(`Unknown requirement operator: ${operator}`);
+      return actual <= threshold;
     }
+    return met;
   }
 }

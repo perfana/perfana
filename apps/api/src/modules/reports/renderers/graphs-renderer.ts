@@ -64,6 +64,12 @@ interface ChartStyle {
   xLabelOf?: (dp: MetricsDataPoint) => string;
   /** Draw a marker on every point of every series (a trend has one point per run). */
   markers?: boolean;
+  /**
+   * Categorical x-axis: one label per point, and the domain padded by half a step so the
+   * first and last markers are not cut by the plot edge. The subtitle then counts
+   * `pointNoun` (runs) rather than data points.
+   */
+  categorical?: { pointNoun: string };
 }
 
 /** Trend presets follow the Trends section's window: since the last change point, at most this many runs. */
@@ -141,20 +147,28 @@ export class GraphsRenderer {
     const presetIds = idsOf('graphPresetIds');
     const trendsPresetIds = idsOf('trendsPresetIds');
 
-    if (presetIds.length > 0 || trendsPresetIds.length > 0) {
-      // Presets are the section's primary selection: the same presets the Graphs and
-      // Trends cards save, re-applied to whichever run is being reported on.
+    // Trends presets are drawn after whatever the graph side produces: beside graph presets
+    // when there are any, beside the auto-discovered (or listed) panels otherwise — a
+    // template that had auto-discovery and gains a trends preset keeps its charts.
+    const trends = await this.dataFetcher.getTrendsPresetSeries(trendsPresetIds, userId, roles);
+    const trendsMissing = trendsPresetIds.length - trends.foundIds.length;
+    if (trendsMissing > 0) {
+      this.logger.warn(`Graphs section: ${trendsMissing} of ${trendsPresetIds.length} trends presets no longer exist`);
+    }
+
+    if (presetIds.length > 0) {
+      // Graph presets are the section's primary selection: the same presets the
+      // Graphs card saves, re-applied to whichever run is being reported on.
       const { presets, foundIds } = await this.dataFetcher.getGraphPresetPanels(presetIds, userId, roles);
-      const trends = await this.dataFetcher.getTrendsPresetSeries(trendsPresetIds, userId, roles);
       const wanted = presetIds.length + trendsPresetIds.length;
-      const missing = wanted - foundIds.length - trends.foundIds.length;
+      const missing = presetIds.length - foundIds.length;
       if (foundIds.length === 0 && trends.foundIds.length === 0) {
         // Deliberately NOT falling through to auto-discovery: a template that
         // asked for two presets must not silently render every panel in the run.
         return this.renderMissingPresetsSection(title, text, wanted);
       }
       if (missing > 0) {
-        this.logger.warn(`Graphs section: ${missing} of ${wanted} presets no longer exist`);
+        this.logger.warn(`Graphs section: ${missing} of ${presetIds.length} graph presets no longer exist`);
       }
       const graphCharts = await this.renderPresetCharts(presets, testRun, excludeRampUp, chartWidth, chartHeight, window, showLegend, userId, roles);
       const trendCharts = await this.renderTrendPresetCharts(trends.presets, presets.length, testRun, chartWidth, chartHeight, showLegend, userId, roles);
@@ -171,6 +185,8 @@ export class GraphsRenderer {
           ${[...graphCharts.charts, ...trendCharts.charts].join('\n')}
         </section>
       `;
+    } else if (trendsPresetIds.length > 0 && trends.foundIds.length === 0) {
+      return this.renderMissingPresetsSection(title, text, trendsPresetIds.length);
     } else if (Array.isArray(config.panels) && config.panels.length > 0) {
       panels = (config.panels as Array<Record<string, string>>).map((p) => ({
         dashboardLabel: p.dashboardLabel || p.dashboard_label,
@@ -196,7 +212,7 @@ export class GraphsRenderer {
       ];
     }
 
-    if (timeSeriesData.length === 0) {
+    if (timeSeriesData.length === 0 && trends.presets.length === 0) {
       if (includeAggregated) {
         return this.renderNoDataSection(title, text, 'No aggregated performance-test data found for this test run.');
       }
@@ -209,16 +225,21 @@ export class GraphsRenderer {
     const hostLabels = await this.dataFetcher.getDynatraceHostLabels(testRun);
     const charts = timeSeriesData
       .map((panel, idx) =>
-        this.renderPanelChart(panel, idx, chartWidth, chartHeight, window, showLegend, hostLabels))
-      .join('\n');
+        this.renderPanelChart(panel, idx, chartWidth, chartHeight, window, showLegend, hostLabels));
+    const trendCharts = await this.renderTrendPresetCharts(trends.presets, timeSeriesData.length, testRun, chartWidth, chartHeight, showLegend, userId, roles);
+    const kicker = [
+      timeSeriesData.length > 0 || trends.presets.length === 0
+        ? `${formatInt(timeSeriesData.length)} panel${timeSeriesData.length !== 1 ? 's' : ''}` : '',
+      trends.presets.length > 0 ? `${formatInt(trends.presets.length)} trend preset${trends.presets.length !== 1 ? 's' : ''}` : '',
+    ].filter(Boolean).join(', ');
 
     return `
       <section class="graphs-section">
-        ${sectionHeader(title, { kicker: `${formatInt(timeSeriesData.length)} panel${timeSeriesData.length !== 1 ? 's' : ''}` })}
+        ${sectionHeader(title, { kicker })}
 
         ${sectionText(text)}
 
-        ${charts}
+        ${[...charts, ...trendCharts.charts].join('\n')}
       </section>
     `;
   }
@@ -343,9 +364,7 @@ export class GraphsRenderer {
     let seriesCount = 0;
     if (presets.length === 0) return { charts, seriesCount };
 
-    const trendsData = await this.dataFetcher.getTrendsData(testRun, TREND_PRESET_MAX_RUNS, userId, roles, CHANGE_POINT_WINDOW);
-    // Oldest first, the current run last — the reading order of a trend.
-    const runs = trendsData ? [...trendsData.previousRuns].reverse().concat(trendsData.currentRun) : [];
+    const runs = await this.dataFetcher.getTrendRunWindow(testRun, TREND_PRESET_MAX_RUNS, userId, roles, CHANGE_POINT_WINDOW);
     const runIds = runs.map((r) => r.testRunId);
     // ponytail: x is the run's index, so `time` is a synthetic epoch; the label closes over
     // the run list to render its start time. Real timestamps would cluster ad-hoc runs.
@@ -353,19 +372,49 @@ export class GraphsRenderer {
       const run = runs[dp.time.getTime()];
       return run ? run.startTime.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
     };
+    const toPoints = (valuesByRun: Record<string, number | null>) =>
+      runIds.map((id, i) => ({ time: new Date(i), value: valuesByRun[id] ?? null }));
+    // The run-wide aggregates are per (metric, stat), not per preset: two presets asking for
+    // the same one share one query.
+    const aggregateCache = new Map<string, Promise<Record<string, number | null>>>();
+    const aggregateValues = (metric: TrendsPresetSeries['aggregates'][number]['metric'], stat: TrendsPresetSeries['aggregates'][number]['stat']) => {
+      const key = `${metric}|${stat}`;
+      let p = aggregateCache.get(key);
+      if (!p) {
+        p = runIds.length > 0 ? this.dataFetcher.getAggregatedTrendValues(runIds, metric, stat) : Promise.resolve({});
+        aggregateCache.set(key, p);
+      }
+      return p;
+    };
 
     for (const [idx, preset] of presets.entries()) {
       const title = `${preset.name} (${preset.stat})`;
-      const trends = runIds.length > 0
+      const trends = runIds.length > 0 && preset.selections.length > 0
         ? await this.dataFetcher.getMetricTrends(runIds, preset.selections, preset.stat)
         : [];
-      const series: MetricsTimeSeriesPanel[] = trends.map((t) => ({
-        panelTitle: t.panelTitle,
-        dashboardLabel: t.dashboardLabel,
-        metricName: t.metricName,
-        unit: t.unit ?? '',
-        dataPoints: runIds.map((id, i) => ({ time: new Date(i), value: t.valuesByRun[id] ?? null })),
-      }));
+      const aggregated: MetricsTimeSeriesPanel[] = [];
+      for (const agg of preset.aggregates) {
+        aggregated.push({
+          panelTitle: agg.panelTitle,
+          dashboardLabel: agg.dashboardLabel,
+          metricName: agg.metricName,
+          unit: agg.unit,
+          dataPoints: toPoints(await aggregateValues(agg.metric, agg.stat)),
+        });
+      }
+      const series: MetricsTimeSeriesPanel[] = [
+        ...trends.map((t) => ({
+          panelTitle: t.panelTitle,
+          dashboardLabel: t.dashboardLabel,
+          metricName: t.metricName,
+          unit: t.unit ?? '',
+          dataPoints: toPoints(t.valuesByRun),
+        })),
+        ...aggregated,
+      ]
+        // A series with no value in any run is no series: it would otherwise count as data
+        // and draw an empty chart wrapper instead of the preset's own empty state.
+        .filter((s) => s.dataPoints.some((dp) => dp.value !== null));
       if (series.length === 0) {
         charts.push(`
           <div style="margin: 16px 0;">
@@ -376,7 +425,9 @@ export class GraphsRenderer {
         continue;
       }
       seriesCount += series.length;
-      charts.push(this.renderChart(title, series, colorOffset + idx, width, height, NO_WINDOW, showLegend, { xLabelOf: labelOf, markers: true }));
+      charts.push(this.renderChart(title, series, colorOffset + idx, width, height, NO_WINDOW, showLegend, {
+        xLabelOf: labelOf, markers: true, categorical: { pointNoun: 'runs' },
+      }));
     }
 
     return { charts, seriesCount };
@@ -545,6 +596,12 @@ export class GraphsRenderer {
     const dataMax = Math.max(...times);
     let tMin = dataMin;
     let tMax = dataMax;
+    if (style.categorical) {
+      // Points sit at integer positions; half a step of margin keeps the first and last
+      // markers inside the plot instead of half under its border.
+      tMin = dataMin - 0.5;
+      tMax = dataMax + 0.5;
+    }
     if (analysisOnly) {
       // A null bound means that end is not trimmed, so it stays at the data edge.
       const wFrom = window.from ?? dataMin;
@@ -642,7 +699,8 @@ export class GraphsRenderer {
       ? (dataPoints.filter((dp) => inWindow(dp.time.getTime())) ?? dataPoints)
       : dataPoints;
     const labelSource = labelPoints.length > 0 ? labelPoints : dataPoints;
-    const xLabelCount = Math.min(6, labelSource.length);
+    // A categorical axis labels every point — "which run is this" is the whole chart.
+    const xLabelCount = style.categorical ? labelSource.length : Math.min(6, labelSource.length);
     const xLabels: string[] = [];
     for (let i = 0; i < xLabelCount; i++) {
       const idx = xLabelCount === 1 ? 0 : Math.round((i / (xLabelCount - 1)) * (labelSource.length - 1));
@@ -668,9 +726,12 @@ export class GraphsRenderer {
     // One series names itself in the subtitle; several are counted there and
     // named in the legend — a subtitle listing five metric names is unreadable.
     // The legend follows the toggle, single series included.
+    const pointCount = style.categorical
+      ? `${formatInt(dataPoints.length)} ${this.utils.escapeHtml(style.categorical.pointNoun)}`
+      : `${formatInt(allPoints.length)} data points`;
     const subtitle = drawn.length === 1
-      ? `${this.utils.escapeHtml(drawn[0]!.metricName)}${unitLabel} &middot; ${formatInt(allPoints.length)} data points`
-      : `${formatInt(drawn.length)} series${unitLabel} &middot; ${formatInt(allPoints.length)} data points`;
+      ? `${this.utils.escapeHtml(drawn[0]!.metricName)}${unitLabel} &middot; ${pointCount}`
+      : `${formatInt(drawn.length)} series${unitLabel} &middot; ${pointCount}`;
     const legend = !showLegend ? '' : `
       <div style="display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 12px;">
         ${lines.map(({ series: s, color }) => `
@@ -720,7 +781,7 @@ export class GraphsRenderer {
             <!-- Data points: only worth drawing on a sparse single-series chart, or when asked -->
             ${style.markers
               ? lines.map(({ series: s, color, axis }) => s.dataPoints.map((dp) =>
-                  `<circle cx="${scaleX(dp.time.getTime())}" cy="${scaleYOn(axis, dp.value!)}" r="3" fill="${color}"/>`).join('')).join('')
+                  `<circle cx="${scaleX(dp.time.getTime())}" cy="${scaleYOn(axis, dp.value!)}" r="2.5" fill="${color}"/>`).join('')).join('')
               : drawn.length === 1 && dataPoints.length <= 50 ? dataPoints.map((dp) => {
               const cx = scaleX(dp.time.getTime());
               const cy = scaleY(dp.value!);
@@ -771,18 +832,18 @@ export class GraphsRenderer {
   }
 
   /**
-   * Every graph preset this section names is gone. A warning, not the neutral
+   * Every preset (graph or trends) this section names is gone. A warning, not the neutral
    * empty state: the report is read long after generation, and "the presets
    * this section was built on no longer exist" must not look like "this run had
    * no metrics".
    */
   private renderMissingPresetsSection(title: string, text: string | undefined, count: number): string {
-    this.logger.warn(`Graphs section: all ${count} configured graph presets are missing`);
+    this.logger.warn(`Graphs section: all ${count} configured presets are missing`);
     return `
       <section class="graphs-section">
         ${sectionHeader(title)}
         ${sectionText(text)}
-        ${warningState(`The ${count === 1 ? 'graph preset' : `${count} graph presets`} this section selects no longer exist. Re-select presets in the section configuration.`)}
+        ${warningState(`The ${count === 1 ? 'preset' : `${count} presets`} this section selects no longer exist. Re-select presets in the section configuration.`)}
       </section>
     `;
   }

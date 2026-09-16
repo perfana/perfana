@@ -7,10 +7,8 @@ import {
   ApplicationDashboard,
   SeriesConfig,
   MetricDataPoint,
-  DataSource,
 } from '../types';
 import { generateChartName } from '../utils';
-import { computeAvailableSources } from '../utils';
 import {
   ALL_AGGREGATED_OPTION,
   isAllAggregatedDashboard,
@@ -23,7 +21,7 @@ import {
 } from '../utils/aggregated-series';
 import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 import { TestRun } from '@/types/test-runs';
-import type { SeriesPick } from '../../shared/metric-options';
+import { mapLimit, OPTION_FETCH_CONCURRENCY, type SeriesPick } from '../../shared/metric-options';
 
 interface UseGraphsDataProps {
   testRun: TestRun | null;
@@ -32,10 +30,6 @@ interface UseGraphsDataProps {
 }
 
 export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
-  // Source selection state
-  const [selectedSource, setSelectedSource] = useState<DataSource>('grafana');
-  const [availableSources, setAvailableSources] = useState<DataSource[]>([]);
-
   // Dashboard state — the cascade (MetricSeriesCascade) holds the panel/series selection.
   const [dashboards, setDashboards] = useState<ApplicationDashboard[]>([]);
   const [dashboardsLoading, setDashboardsLoading] = useState(false);
@@ -199,22 +193,17 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
       return 0;
     }
 
-    setSelectedSource(filteredNewSeries[0]!.source);
     setAddedSeries(prev => [...prev, ...filteredNewSeries]);
 
-    // Fetch data for new series
+    // Fetch data for new series. Bounded: a select-all across dashboards is hundreds of
+    // series, one ds_metrics query each. Merged functionally so a second add landing
+    // while this one is in flight cannot overwrite it from a stale copy of the map.
     setChartDataLoading(true);
     try {
-      const newSeriesData = new Map(seriesData);
-
-      await Promise.all(
-        filteredNewSeries.map(async (series) => {
-          const data = await fetchSeriesData(series);
-          newSeriesData.set(series.id, data);
-        })
+      const fetched = await mapLimit(filteredNewSeries, OPTION_FETCH_CONCURRENCY, async (series) =>
+        [series.id, await fetchSeriesData(series)] as const,
       );
-
-      setSeriesData(newSeriesData);
+      setSeriesData(prev => new Map([...prev, ...fetched]));
       showToast(`Added ${filteredNewSeries.length} metric(s) with data`);
       return filteredNewSeries.length;
     } catch (error) {
@@ -224,7 +213,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     } finally {
       setChartDataLoading(false);
     }
-  }, [addedSeries, seriesData, fetchSeriesData]);
+  }, [addedSeries, fetchSeriesData]);
 
   /**
    * Remove a series from the list
@@ -268,19 +257,6 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   }, [testRun, dashboards.length, dynatraceDashboards.length, fetchApplicationDashboards, fetchDynatraceDashboardsList]);
 
   /**
-   * Compute available sources based on loaded dashboards
-   */
-  useEffect(() => {
-    const sources = computeAvailableSources(dashboards, dynatraceDashboards);
-    setAvailableSources(sources);
-
-    // Auto-select first available source if current selection is not available
-    if (sources.length > 0 && !sources.includes(selectedSource)) {
-      setSelectedSource(sources[0]);
-    }
-  }, [dashboards, dynatraceDashboards, selectedSource]);
-
-  /**
    * Update chart name whenever series are added/removed
    */
   useEffect(() => {
@@ -310,8 +286,6 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
 
   return {
     // State
-    selectedSource,
-    availableSources,
     dashboards,
     dashboardsLoading,
     dynatraceDashboards,
@@ -322,7 +296,6 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     chartDataLoading,
 
     // State setters
-    setSelectedSource,
     setAddedSeries,
     setSeriesData,
     setChartName,

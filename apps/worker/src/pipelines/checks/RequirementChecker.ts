@@ -4,6 +4,7 @@ import { validateRegexPattern } from '@perfana/shared/utils';
 import { BaseCheckService, RequirementCheckError } from './BaseCheckService.js';
 import { TestRun, Benchmark } from './BenchmarkMatcher.js';
 import { AggregationResult, MetricTarget } from './DataAggregator.js';
+import { evaluateRequirement } from './requirement-operator.js';
 
 export interface CheckResultTarget {
   target: string;
@@ -322,16 +323,14 @@ export class RequirementChecker extends BaseCheckService {
       return true;
     }
 
-    const operatorStr = operator.toLowerCase();
-
-    if (operatorStr === 'lt') {
-      return value < thresholdFloat;
-    } else if (operatorStr === 'gt') {
-      return value > thresholdFloat;
-    } else {
-      this.logger.warn(`Unknown requirement operator: ${operatorStr}`);
+    const met = evaluateRequirement(value, operator, thresholdFloat);
+    if (met === null) {
+      // ponytail: an operator nobody defined still passes, as it always has — the
+      // SLO row is what is wrong, not the run. Fail it instead if that ever matters.
+      this.logger.warn(`Unknown requirement operator: ${operator}`);
       return true;
     }
+    return met;
   }
 
   /**

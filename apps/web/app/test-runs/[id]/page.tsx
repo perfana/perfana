@@ -2,9 +2,8 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab, LinearProgress, Typography, Paper } from '@mui/material';
+import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
-import { getReport } from '@/lib/api/reports';
 
 // Hooks
 import {
@@ -38,6 +37,7 @@ import EventsCard from './components/events/EventsCard';
 import GraphsCard from './components/graphs/GraphsCard';
 import AwrReportCard from './components/awr/AwrReportCard';
 import ReportCard from './components/reporting/ReportCard';
+import PendingReports from './components/reporting/PendingReports';
 import { JobProgressIndicator } from '@/components/job-progress/JobProgressIndicator';
 import { GenerateReportDialog } from '@/components/reports/report-generation/GenerateReportDialog';
 import { HtmlReportViewerModal } from '@/components/reports/HtmlReportViewerModal';
@@ -60,8 +60,7 @@ export default function TestRunDetailsPage() {
   // Report viewer state (for viewing generated reports)
   const [reportViewerOpen, setReportViewerOpen] = useState(false);
   const [reportViewerReportId, setReportViewerReportId] = useState<string | undefined>(undefined);
-  const [pendingReportId, setPendingReportId] = useState<string | undefined>(undefined);
-  const [reportProgress, setReportProgress] = useState<{ percent: number; label: string } | null>(null);
+  const [pendingReportIds, setPendingReportIds] = useState<string[]>([]);
 
   // Custom hooks
   const { configurationStatus, setHasDistributedTracing, setHasDynatrace, checkConfigurationStatus } =
@@ -125,74 +124,14 @@ export default function TestRunDetailsPage() {
 
   const handleCloseSnackbar = useCallback(() => setSnackbarOpen(false), []);
 
-  // Poll for report completion after generation
-  useEffect(() => {
-    if (!pendingReportId) return;
-
-    let isCancelled = false;
-    let pollCount = 0;
-    // A large report (many graph/trend presets, several runs of history) takes minutes,
-    // not the 60 s this used to allow before giving up on the viewer.
-    const maxPolls = 600;
-    setReportProgress({ percent: 0, label: 'Starting…' });
-
-    const pollReport = async () => {
-      try {
-        const report = await getReport(pendingReportId);
-
-        if (isCancelled) return;
-
-        // Check if HTML is ready
-        if (report.status === 'html_complete' || report.status === 'pdf_complete') {
-          setPendingReportId(undefined);
-          setReportViewerReportId(report.id);
-          setReportViewerOpen(true);
-          setReportRefreshTrigger(prev => prev + 1);
-          showToast('Report ready');
-        } else if (report.status === 'failed') {
-          setPendingReportId(undefined);
-          showToast('Report generation failed');
-          setReportRefreshTrigger(prev => prev + 1);
-        } else {
-          // Still processing, poll again
-          const p = report.progress;
-          if (p?.total) {
-            setReportProgress({ percent: p.percent, label: `Rendering section ${(p.done ?? 0) + 1} of ${p.total}: ${p.section ?? ''}` });
-          } else if (report.status === 'pending') {
-            setReportProgress({ percent: 0, label: 'Waiting for a worker…' });
-          }
-          pollCount++;
-          if (pollCount < maxPolls) {
-            setTimeout(() => pollReport(), 1000);
-          } else {
-            // Timeout
-            setPendingReportId(undefined);
-            showToast('Report generation is taking longer than expected');
-            setReportRefreshTrigger(prev => prev + 1);
-          }
-        }
-      } catch (error) {
-        if (!isCancelled) {
-          console.error('Failed to poll report:', error);
-          // Retry after delay
-          pollCount++;
-          if (pollCount < maxPolls) {
-            setTimeout(() => pollReport(), 1000);
-          } else {
-            setPendingReportId(undefined);
-            showToast('Failed to check report status');
-          }
-        }
-      }
-    };
-
-    pollReport();
-
-    return () => {
-      isCancelled = true;
-      setReportProgress(null);
-    };
-  }, [pendingReportId, showToast]);
+  const handleReportReady = useCallback((reportId: string) => {
+    setReportViewerReportId(reportId);
+    setReportViewerOpen(true);
+  }, []);
+  const handleReportSettled = useCallback((reportId: string) => {
+    setPendingReportIds(prev => prev.filter(id => id !== reportId));
+    setReportRefreshTrigger(prev => prev + 1);
+  }, []);
 
   // Drill-down handlers with scroll behavior
   const onDrillDownToDistributedTracing = useCallback(
@@ -416,19 +355,8 @@ export default function TestRunDetailsPage() {
         </Box>
       </Box>
 
-      {/* Report generation progress — stays up until the report is ready or fails */}
-      <Snackbar open={!!pendingReportId && !!reportProgress} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
-        <Paper elevation={6} sx={{ p: 2, minWidth: 320 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>Generating report…</Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            {reportProgress?.label}
-          </Typography>
-          <LinearProgress
-            variant={reportProgress && reportProgress.percent > 0 ? 'determinate' : 'indeterminate'}
-            value={reportProgress?.percent ?? 0}
-          />
-        </Paper>
-      </Snackbar>
+      {/* Report generation progress — stays up until every pending report is ready or has failed */}
+      <PendingReports ids={pendingReportIds} onReady={handleReportReady} onSettled={handleReportSettled} showToast={showToast} />
 
       {/* Snackbar */}
       <Snackbar open={snackbarOpen} autoHideDuration={4000} onClose={handleCloseSnackbar} message={snackbarMessage} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
@@ -451,7 +379,7 @@ export default function TestRunDetailsPage() {
           onSuccess={(reportId, _jobId) => {
             setGenerateReportDialogOpen(false);
             // Start polling for report completion; the progress panel takes it from here
-            setPendingReportId(reportId);
+            setPendingReportIds(prev => prev.includes(reportId) ? prev : [...prev, reportId]);
           }}
           onError={(error) => {
             showToast(`Failed to generate report: ${error}`);

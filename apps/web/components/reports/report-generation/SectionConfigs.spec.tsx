@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { GraphPresetsAPI } from '@/lib/graph-presets';
+import { TrendsPresetsAPI } from '@/lib/trends-presets';
 import {
   HeaderConfigForm,
   IndexConfigForm,
@@ -478,6 +479,41 @@ describe('GraphsConfigForm', () => {
     fireEvent.click(await screen.findByText('Nightly RT trend'));
 
     expect(onChange).toHaveBeenCalledWith({ trendsPresetIds: ['trend-1'] });
+  });
+
+  it('still offers the graph presets when the trends preset lookup fails, and says none were found', async () => {
+    // The two lists load together; one endpoint failing must not blank the other picker.
+    (TrendsPresetsAPI.getAll as jest.Mock).mockRejectedValueOnce(new Error('503'));
+    render(
+      <GraphsConfigForm
+        config={{}}
+        onChange={jest.fn()}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    expect(await screen.findByText('No trends presets found. Save one from the Trends card on a test run first.')).toBeInTheDocument();
+    const graphsPicker = screen.getByText('Auto-discover panels');
+    fireEvent.mouseDown(graphsPicker);
+    expect(await screen.findByText('JVM overview')).toBeInTheDocument();
+    // The empty trends picker stays disabled rather than opening on nothing
+    expect(screen.getByText('No trend charts').closest('[role="combobox"]')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('shows the id of a trends preset that no longer exists rather than dropping it from the selection', async () => {
+    // A template saved with a preset that was deleted since still names it, so the user
+    // can see what to remove.
+    render(
+      <GraphsConfigForm
+        config={{ trendsPresetIds: ['trend-1', 'deleted-id'] }}
+        onChange={jest.fn()}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    expect(await screen.findByText('Nightly RT trend, deleted-id')).toBeInTheDocument();
   });
 });
 

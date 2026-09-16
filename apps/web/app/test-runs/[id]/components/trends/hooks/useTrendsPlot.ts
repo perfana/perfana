@@ -17,7 +17,6 @@ import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 interface UseTrendsPlotProps {
   metricsData: MetricStatistic[];
-  selectedSeriesIds: Set<string>;
   selectedMetric: Panel | null;
   evaluateType: string;
   trendsExpanded: boolean;
@@ -40,7 +39,6 @@ interface PlotDataPoint {
 
 export function useTrendsPlot({
   metricsData,
-  selectedSeriesIds,
   selectedMetric,
   evaluateType,
   trendsExpanded,
@@ -63,11 +61,10 @@ export function useTrendsPlot({
 
     // Group data by series (not metric_name — two panels can share one) and sort by created_at
     const seriesData = metricsData.reduce((acc, item) => {
-      const key = item.series_id ?? item.metric_name;
-      if (!acc[key]) {
-        acc[key] = [];
+      if (!acc[item.series_id]) {
+        acc[item.series_id] = [];
       }
-      acc[key].push({
+      acc[item.series_id].push({
         x: item.test_run_id,
         y: item.value,
         created_at: item.created_at,
@@ -100,7 +97,6 @@ export function useTrendsPlot({
     // Annotated so the changepoint legend trace below (mode 'lines', a dashed
     // coloured line) fits alongside the data traces rather than being narrowed out.
     const traces: TrendsTrace[] = Object.entries(seriesData)
-      .filter(([seriesKey]) => selectedSeriesIds.has(seriesKey))
       .map(([seriesKey, data]) => ({
         x: data.map((_, index) => index),
         y: data.map(point => point.y),
@@ -160,9 +156,7 @@ export function useTrendsPlot({
       });
     });
 
-    // Get all available series
     const allSeriesKeys = Object.keys(seriesData);
-    const allSeriesSelected = selectedSeriesIds.size === allSeriesKeys.length;
 
     // Identify changepoint positions from the first series
     const changepointPositions = firstSeries
@@ -177,15 +171,10 @@ export function useTrendsPlot({
     const plotBgColor = isDark ? '#1e1e1e' : theme.palette.grey[50];
     const gridColor = isDark ? 'rgba(255, 255, 255, 0.12)' : '#e0e0e0';
 
-    // Determine graph title based on selection
-    let graphTitle = '';
-    if (selectedSeriesIds.size === 0 || allSeriesSelected) {
-      graphTitle = `${selectedMetric?.title || 'Metrics'} Trends (${evaluateType})`;
-    } else if (selectedSeriesIds.size === 1) {
-      graphTitle = `${labelOf(Array.from(selectedSeriesIds)[0]!)} Trends (${evaluateType})`;
-    } else {
-      graphTitle = `${selectedMetric?.title || 'Metrics'} Trends - ${selectedSeriesIds.size} series (${evaluateType})`;
-    }
+    // One series is titled by its own label; several by the panel picked first.
+    const graphTitle = allSeriesKeys.length === 1
+      ? `${labelOf(allSeriesKeys[0]!)} Trends (${evaluateType})`
+      : `${selectedMetric?.title || 'Metrics'} Trends${allSeriesKeys.length > 1 ? ` - ${allSeriesKeys.length} series` : ''} (${evaluateType})`;
 
     const layout = {
       title: {
@@ -400,7 +389,7 @@ export function useTrendsPlot({
     setPlotData(traces);
     setPlotLayout(layout);
     setPlotConfig(config);
-  }, [metricsData, selectedSeriesIds, selectedMetric, evaluateType, theme, trendsExpanded, showToast, addedSeries]);
+  }, [metricsData, selectedMetric, evaluateType, theme, trendsExpanded, showToast, addedSeries]);
 
   return {
     plotData,

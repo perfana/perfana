@@ -285,24 +285,14 @@ export function useAddSLOForm({
         selectedPanel: null,
       }));
 
-      // Clear previous data
-      setAvailableDashboards([]);
+      // Only the panel/metric lists belong to the previous pick. The dashboard lists are
+      // all loaded up front for the grouped dropdown and must survive a pick, or every
+      // other group vanishes from the dropdown until the dialog is reopened.
       setAvailablePanels([]);
-      setAvailableDynatraceDashboards([]);
       setAvailableDynatraceMetrics([]);
-      setAvailablePerfMetricsDashboards([]);
       setAvailablePerfMetricsPanels([]);
-
-      // Fetch appropriate data based on source
-      if (sourceValue === 'grafana') {
-        fetchSloApplicationDashboards();
-      } else if (sourceValue === 'dynatrace') {
-        fetchDynatraceDashboardsForSlo();
-      } else if (sourceValue === 'performance-metrics') {
-        fetchPerfMetricsDashboardsForSlo();
-      }
     },
-    [fetchSloApplicationDashboards, fetchDynatraceDashboardsForSlo, fetchPerfMetricsDashboardsForSlo]
+    []
   );
 
   // Reset form when dialog opens and determine available sources

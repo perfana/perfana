@@ -306,18 +306,27 @@ export class ReportSummaryDto {
   total_share_views!: number;
 }
 
-/**
- * Response DTO for full report details
- */
 /** Per-section progress the HTML generation job records on itself. */
-export interface ReportGenerationProgress {
-  stage: string;
-  percent: number;
+export class ReportGenerationProgress {
+  @ApiProperty({ description: 'Job stage', example: 'rendering' })
+  stage!: string;
+
+  @ApiProperty({ description: 'Sections rendered so far, as a percentage of the template', example: 37 })
+  percent!: number;
+
+  @ApiPropertyOptional({ description: 'Sections rendered so far', example: 3 })
   done?: number;
+
+  @ApiPropertyOptional({ description: 'Sections in the template', example: 8 })
   total?: number;
+
+  @ApiPropertyOptional({ description: 'Title of the section being rendered', example: 'Custom Graphs' })
   section?: string;
 }
 
+/**
+ * Response DTO for full report details
+ */
 export class ReportDetailDto {
   @ApiProperty({
     description: 'Report UUID',
@@ -430,7 +439,7 @@ export class ReportDetailDto {
 
   @ApiPropertyOptional({
     description: 'Where HTML generation is, while the report is processing: sections rendered so far and the one being rendered',
-    example: { stage: 'rendering', percent: 37, done: 3, total: 8, section: 'Custom Graphs' },
+    type: ReportGenerationProgress,
   })
   progress?: ReportGenerationProgress;
 

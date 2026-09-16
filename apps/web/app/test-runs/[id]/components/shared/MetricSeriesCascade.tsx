@@ -22,6 +22,7 @@ import {
 } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
 import { getSourceDisplayInfo } from '@/lib/metrics-source-utils';
+import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName, isAllAggregatedDashboard } from '@/lib/aggregated-perf-series';
 import HostLabelChips from '@/components/HostLabelChips';
 import {
   ApplicationDashboard,
@@ -54,7 +55,8 @@ interface MetricSeriesCascadeProps {
    * application_dashboard_id/panel_id and names itself after them.
    */
   onPrimaryChange?: (dashboard: ApplicationDashboard | null, panel: PanelOption | null) => void;
-  panelOptions?: PanelListOptions;
+  /** Which per-card extras the panel list gets; see PanelListOptions. */
+  panelListOptions?: PanelListOptions;
 }
 
 // Trends/Graphs use default-size inputs with 56px buttons; 92 stops "Select all" from
@@ -68,7 +70,7 @@ export function MetricSeriesCascade({
   addedSeries,
   onAddSeries,
   onPrimaryChange,
-  panelOptions: panelListOptions,
+  panelListOptions,
 }: MetricSeriesCascadeProps) {
   const [selectedDashboards, setSelectedDashboards] = useState<ApplicationDashboard[]>([]);
   const [panelOptions, setPanelOptions] = useState<PanelOption[]>([]);
@@ -78,9 +80,12 @@ export function MetricSeriesCascade({
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState<SeriesOption[]>([]);
 
-  // Effects key off the selection contents, not the array identity React keeps recreating.
+  // Effects key off the selection contents, not the array identity React keeps recreating —
+  // and off the run's identity, not the run object, which the page replaces on every
+  // refresh (a tag edit, a job completing) and would otherwise reload every picker.
   const dashboardsKey = selectedDashboards.map((d) => d.id).join('|');
   const panelsKey = selectedPanels.map(panelKey).join('|');
+  const runKey = testRun ? `${testRun.test_run_id}|${testRun.system_under_test_id}|${testRun.test_environment}|${testRun.workload}` : '';
 
   // Load the panels of every selected dashboard.
   useEffect(() => {
@@ -95,9 +100,9 @@ export function MetricSeriesCascade({
       .then((lists) => { if (!cancelled) setPanelOptions(lists.flat()); })
       .finally(() => { if (!cancelled) setPanelsLoading(false); });
     return () => { cancelled = true; };
-    // selectedDashboards is read through dashboardsKey.
+    // selectedDashboards is read through dashboardsKey, testRun through runKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardsKey, testRun]);
+  }, [dashboardsKey, runKey]);
 
   // Load the series of every selected panel.
   useEffect(() => {
@@ -112,9 +117,9 @@ export function MetricSeriesCascade({
       .then((lists) => { if (!cancelled) setSeriesOptions(lists.flat()); })
       .finally(() => { if (!cancelled) setSeriesLoading(false); });
     return () => { cancelled = true; };
-    // selectedPanels is read through panelsKey.
+    // selectedPanels is read through panelsKey, testRun through runKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelsKey, testRun]);
+  }, [panelsKey, runKey]);
 
   // Dropping a dashboard drops the panels and series that hung off it, or a series would be
   // added for a dashboard the form no longer shows.
@@ -134,10 +139,16 @@ export function MetricSeriesCascade({
     onPrimaryChange?.(selectedDashboards[0] ?? null, panels[0] ?? null);
   };
 
+  // The cards store the synthetic run-wide aggregate under its composed name; compare
+  // against that, or the option never greys out once added.
+  const storedName = (s: SeriesOption) =>
+    s.metricName === ALL_AGGREGATED_OPTION && !isAllAggregatedDashboard(s.panel.dashboardLabel)
+      ? buildAggregatedMetricName(s.panel.title)
+      : s.metricName;
   const isAdded = (s: SeriesOption) => addedSeries.some((a) =>
     a.dashboardId === (s.panel.applicationDashboardId || s.panel.dashboard.id)
     && a.panelId === s.panel.id
-    && a.metricName === s.metricName);
+    && a.metricName === storedName(s));
 
   const addPicked = () => {
     onAddSeries(selectedSeries.map((s) => ({

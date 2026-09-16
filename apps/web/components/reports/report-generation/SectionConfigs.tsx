@@ -15,8 +15,6 @@ import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
 import type { ReportSectionType, ReportSectionConfig } from '@/lib/api/reports';
 import { REPORT_LIMITS } from '@/lib/api/reports';
-import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
-import { isGrafana } from '@/lib/metrics-source-utils';
 import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
 import { TrendsPresetsAPI, type TrendsPreset } from '@/lib/trends-presets';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';

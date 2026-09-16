@@ -52,13 +52,14 @@ export default function TrendsCard({
   // Plot hook
   const trendsPlot = useTrendsPlot({
     metricsData: trendsData.metricsData,
-    selectedSeriesIds: trendsData.selectedSeriesIds,
     selectedMetric: trendsData.selectedMetric,
     evaluateType: trendsData.evaluateType,
     trendsExpanded,
     addedSeries: trendsData.addedSeries,
     showToast,
   });
+
+  const first = trendsData.addedSeries[0];
 
   // Handle expand/collapse
   const handleTrendsExpand = () => {
@@ -221,8 +222,14 @@ export default function TrendsCard({
         loading={trendsPresets.presetsSaving}
         currentTestRunId={testRun?.test_run_id || testRunId}
         currentFilters={{
-          selectedDashboard: trendsData.selectedDashboard,
-          selectedMetric: trendsData.selectedMetric,
+          // The cascade's first pick, or — once the pickers have been cleared — the first
+          // series on the chart, so a chart with series can always be saved.
+          selectedDashboard: trendsData.selectedDashboard ?? (first ? {
+            id: first.dashboardId, dashboard_label: first.dashboardLabel, dashboard_name: first.dashboardLabel, dashboard_uid: '',
+          } : null),
+          selectedMetric: trendsData.selectedMetric ?? (first ? {
+            id: first.panelId, title: first.panelTitle, type: 'graph', applicationDashboardId: first.dashboardId,
+          } : null),
           evaluateType: trendsData.evaluateType,
           source: trendsData.selectedSource
         }}

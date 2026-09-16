@@ -37,7 +37,7 @@ import {
   ReportListResponseDto,
   ReportSummaryDto,
   ReportDetailDto,
-  type ReportGenerationProgress,
+  ReportGenerationProgress,
   type ReportStatus,
   type ReportSectionType,
 } from '../dto';

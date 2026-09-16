@@ -111,8 +111,10 @@ export function formatRequirement(requirement: CheckResultRequirement | undefine
   const operatorMap: Record<string, string> = {
     'lt': 'should be less than',
     'le': 'should be less than or equal to',
+    'lte': 'should be less than or equal to',
     'gt': 'should be greater than',
     'ge': 'should be greater than or equal to',
+    'gte': 'should be greater than or equal to',
     'eq': 'should equal',
     'ne': 'should not equal'
   };

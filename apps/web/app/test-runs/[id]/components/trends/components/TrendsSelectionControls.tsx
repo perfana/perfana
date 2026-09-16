@@ -74,7 +74,7 @@ export function TrendsSelectionControls({
         onPrimaryChange={onPrimaryChange}
         // Every percentile panel is its own trend here, and the URL panels have no
         // per-run statistics to trend.
-        panelOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
+        panelListOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
       />
 
       {/* Time Range and Evaluate Type Row */}
@@ -135,7 +135,7 @@ export function TrendsSelectionControls({
               size="medium"
               startIcon={<BookmarkBorder />}
               onClick={onSavePresetClick}
-              disabled={!selectedDashboard || !selectedMetric}
+              disabled={addedSeries.length === 0 && (!selectedDashboard || !selectedMetric)}
               sx={{
                 height: '56px',
                 borderColor: 'primary.main',

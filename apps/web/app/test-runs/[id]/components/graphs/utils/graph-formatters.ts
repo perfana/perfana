@@ -1,7 +1,7 @@
 import { SeriesConfig } from '../types';
 import { SeriesConfig as APISeriesConfig } from '@/lib/graph-presets';
 
-export { PERFORMANCE_METRICS_PANEL_UNITS, extractYAxisFormat } from '../../shared/metric-options';
+export { extractYAxisFormat } from '../../shared/metric-options';
 
 /**
  * Generate chart name based on added series

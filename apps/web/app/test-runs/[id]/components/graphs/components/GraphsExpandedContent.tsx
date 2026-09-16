@@ -82,7 +82,7 @@ export function GraphsExpandedContent({
         onAddSeries={onAddSeries}
         // Every percentile panel is its own graph here, and the URL panels have no
         // time series to draw.
-        panelOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
+        panelListOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
       />
 
       {/* Chart title + save, then the chart itself — the result stays in view */}

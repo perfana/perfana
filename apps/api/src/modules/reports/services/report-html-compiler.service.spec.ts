@@ -480,6 +480,35 @@ describe('ReportHtmlCompilerService', () => {
         );
       });
 
+      it('reports each section before rendering it, in render order, with its title', async () => {
+        const onProgress = jest.fn();
+        const sections: ReportSectionConfig[] = [
+          makeSection('slo', 2, { title: 'Service levels' }),
+          makeSection('header', 0),
+          makeSection('text_block', 1),
+        ];
+
+        await service.renderSections(sections, null, null, '', [], onProgress);
+
+        // (done, total, title): sorted by order; an untitled section falls back to the type's name
+        expect(onProgress.mock.calls).toEqual([
+          [0, 3, utils.getSectionTitle('header')],
+          [1, 3, utils.getSectionTitle('text_block')],
+          [2, 3, 'Service levels'],
+        ]);
+      });
+
+      it('still reports progress for a section whose renderer fails', async () => {
+        const onProgress = jest.fn();
+        sloRenderer.renderSloSection.mockRejectedValue(new Error('boom'));
+        const sections = [makeSection('slo', 0), makeSection('header', 1)];
+
+        await service.renderSections(sections, null, null, '', [], onProgress);
+
+        expect(onProgress).toHaveBeenCalledTimes(2);
+        expect(onProgress).toHaveBeenLastCalledWith(1, 2, utils.getSectionTitle('header'));
+      });
+
       it('should handle a large number of sections sequentially', async () => {
         const sectionTypes: ReportSectionConfig['type'][] = [
           'header', 'text_block', 'slo', 'regressions', 'awr', 'trends', 'comparisons', 'graphs',

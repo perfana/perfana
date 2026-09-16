@@ -394,7 +394,29 @@ export interface TrendsPresetSeries {
   id: string;
   name: string;
   stat: TrendStat;
+  /** Stored ds_metric_statistics series, read at `stat`. */
   selections: BaselineComparisonSelection[];
+  /**
+   * The synthetic run-wide "All aggregated" series, computed per run from the rollup
+   * tables at the PANEL's own statistic — the way the Trends card does, regardless of the
+   * preset's evaluate type.
+   */
+  aggregates: TrendsPresetAggregate[];
+}
+
+export interface TrendsPresetAggregate {
+  dashboardLabel: string;
+  panelTitle: string;
+  metricName: string;
+  metric: 'transaction_response_time' | 'request_response_time' | 'error_percentage';
+  stat: 'avg' | 'p50' | 'p90' | 'p95' | 'p99' | 'max';
+  unit: string;
+}
+
+/** One run of a trend window, oldest first. */
+export interface TrendRun {
+  testRunId: string;
+  startTime: Date;
 }
 
 export interface MetricsTimeSeriesPanel {

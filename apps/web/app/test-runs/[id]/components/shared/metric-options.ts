@@ -156,7 +156,7 @@ export function extractYAxisFormat(panel: {
  * Promise.all fires all of them at once and buries the API behind the browser's
  * connection queue.
  */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -171,11 +171,29 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 /** Requests in flight while a multi-select loads its children. */
 export const OPTION_FETCH_CONCURRENCY = 6;
 
+/** One row of `/metrics/ds-metrics/available/:testRunId`: a panel the run recorded. */
+interface AvailablePanelRow { dashboard_label: string; panel_title: string; panel_id: number; unit?: string }
+
+/**
+ * The run's recorded panels, for every performance-test dashboard at once. The endpoint
+ * answers for the whole run (~1 s on a large one), so a select-all over K scenario
+ * dashboards must ask once and partition, not K times.
+ */
+async function fetchAvailablePanelRows(testRun: TestRun): Promise<AvailablePanelRow[]> {
+  const res = await authenticatedFetch(
+    `/metrics/ds-metrics/available/${encodeURIComponent(testRun.test_run_id)}`,
+    { headers: { 'Content-Type': 'application/json' } },
+  );
+  return res.ok ? res.json() : [];
+}
+
 /** The panels of one dashboard, asked of whichever backend that dashboard's source uses. */
 export async function fetchPanelsForDashboard(
   dashboard: ApplicationDashboard,
   testRun: TestRun | null,
   { collapseRtPanels = true, includeUrlPanels = true }: PanelListOptions = {},
+  /** Pre-fetched `/ds-metrics/available` rows, when the caller already holds them. */
+  availableRows?: AvailablePanelRow[],
 ): Promise<PanelOption[]> {
   const source = sourceOf(dashboard);
   const wrap = (panels: Panel[]): PanelOption[] =>
@@ -206,12 +224,7 @@ export async function fetchPanelsForDashboard(
     if (source === 'performance-metrics') {
       // Performance-test panels are whatever the run actually recorded, not dashboard JSON.
       if (!testRun) return [];
-      const res = await authenticatedFetch(
-        `/metrics/ds-metrics/available/${testRun.test_run_id}`,
-        { headers: { 'Content-Type': 'application/json' } },
-      );
-      if (!res.ok) return [];
-      const rows: Array<{ dashboard_label: string; panel_title: string; panel_id: number; unit?: string }> = await res.json();
+      const rows = availableRows ?? await fetchAvailablePanelRows(testRun);
       const seen = new Set<number>();
       const panels: Panel[] = [];
       for (const row of rows) {
@@ -231,7 +244,7 @@ export async function fetchPanelsForDashboard(
 
     if (!dashboard.dashboard_uid) return [];
     const res = await authenticatedFetch(
-      `/grafana/dashboards?uid=${dashboard.dashboard_uid}`,
+      `/grafana/dashboards?uid=${encodeURIComponent(dashboard.dashboard_uid)}`,
       { headers: { 'Content-Type': 'application/json' } },
     );
     if (!res.ok) return [];
@@ -296,12 +309,17 @@ export const panelKey = (p: { id: number; dashboardLabel: string }) => `${p.dash
 export const seriesKey = (s: SeriesOption) => `${panelKey(s.panel)} ${s.metricName}`;
 
 /** Panels for many dashboards, bounded so a select-all does not fan out unbounded. */
-export const fetchPanelsForDashboards = (
+export const fetchPanelsForDashboards = async (
   dashboards: ApplicationDashboard[],
   testRun: TestRun | null,
   options?: PanelListOptions,
-): Promise<PanelOption[][]> =>
-  mapLimit(dashboards, OPTION_FETCH_CONCURRENCY, (d) => fetchPanelsForDashboard(d, testRun, options));
+): Promise<PanelOption[][]> => {
+  // One run-wide request serves every performance-test dashboard in the batch.
+  const rows = testRun && dashboards.some((d) => sourceOf(d) === 'performance-metrics')
+    ? await fetchAvailablePanelRows(testRun).catch(() => [] as AvailablePanelRow[])
+    : undefined;
+  return mapLimit(dashboards, OPTION_FETCH_CONCURRENCY, (d) => fetchPanelsForDashboard(d, testRun, options, rows));
+};
 
 /** Series for many panels, same bound. */
 export const fetchSeriesForPanels = (

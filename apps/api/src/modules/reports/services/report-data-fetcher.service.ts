@@ -47,11 +47,16 @@ import {
   TrendRunSummary,
   TrendsData,
   TrendsPresetSeries,
+  TrendsPresetAggregate,
+  TrendRun,
   TrendStat,
   VirtualUserScenarioRow,
   VirtualUserStats,
 } from './report-data.types';
 export * from './report-data.types';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (id: string) => UUID_RE.test(id);
 
 /** Derive Top10Row metrics from raw stat rows (formulas match prepareTop10Data). */
 export function mapRawToTop10Rows(raw: RawTop10Row[], testDuration: number): Top10Row[] {
@@ -2738,7 +2743,11 @@ export class ReportDataFetcherService {
         const panelTitle = r.source_type === 'performance_test'
           ? perfPanelTitle(r.panel_id, r.panel_title)
           : (r.panel_title ?? '');
-        const key = `${r.dashboard_label}||${panelTitle}||${r.metric_name}`;
+        // Keyed on panel_id, not the display title: perfPanelTitle folds the four RT
+        // percentile panels into one title, and a trends preset keeps them apart (RT Avg
+        // and RT P95 of one transaction are two lines). Keyed on the title they merged into
+        // one series whose per-run value was whichever panel's row came last.
+        const key = `${r.dashboard_label}||${r.panel_id}||${r.metric_name}`;
         let series = byIdentity.get(key);
         if (!series) {
           series = {
@@ -3215,6 +3224,7 @@ export class ReportDataFetcherService {
     if (presetIds.length === 0) return { presets: [], foundIds: [] };
     try {
       const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'gp');
+      presetIds = presetIds.filter(isUuid);
       const rows: Array<{ id: string; name: string; series_config: SeriesConfig[] | null }> =
         await withRequestEm(this.testRunRepo).query(
           `SELECT gp.id, gp.name, gp.series_config
@@ -3272,12 +3282,15 @@ export class ReportDataFetcherService {
     if (presetIds.length === 0) return { presets: [], foundIds: [] };
     try {
       const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tp');
+      // A non-uuid id in a template makes the `::uuid[]` cast throw for the whole batch,
+      // reporting every valid preset beside it as gone; look up only the well-formed ones.
+      presetIds = presetIds.filter(isUuid);
       const rows: Array<{
         id: string;
         name: string;
         evaluate_type: string | null;
         series_config: Array<{
-          dashboardLabel?: string; panelId?: number; metricName?: string; isAggregated?: boolean;
+          dashboardLabel?: string; panelId?: number; panelTitle?: string; metricName?: string;
         }> | null;
       }> = await withRequestEm(this.testRunRepo).query(
         `SELECT tp.id, tp.name, tp.evaluate_type, tp.series_config
@@ -3296,19 +3309,134 @@ export class ReportDataFetcherService {
         const row = byId.get(id);
         if (!row) continue;
         const selections: BaselineComparisonSelection[] = [];
+        const aggregates: TrendsPresetAggregate[] = [];
         for (const series of row.series_config ?? []) {
           if (!series.dashboardLabel || series.panelId == null || !series.metricName) continue;
-          // The card stores the synthetic run-wide aggregate as "All aggregated — <panel>";
-          // the fetcher recognises it by the bare sentinel.
-          const metricName = series.isAggregated ? ALL_AGGREGATED_SERIES : series.metricName;
-          selections.push({ dashboardLabel: series.dashboardLabel, panelId: series.panelId, metricNames: [metricName] });
+          // The card stores the synthetic run-wide aggregate as "All aggregated — <panel>"
+          // and computes it at the panel's own statistic; it has no ds_metric_statistics row.
+          const spec = presetAggregateSpec(series);
+          if (spec) {
+            aggregates.push({
+              dashboardLabel: series.dashboardLabel,
+              panelTitle: series.panelTitle ?? '',
+              metricName: series.metricName,
+              ...spec,
+            });
+            continue;
+          }
+          selections.push({ dashboardLabel: series.dashboardLabel, panelId: series.panelId, metricNames: [series.metricName] });
         }
-        presets.push({ id, name: row.name, stat: stats[row.evaluate_type ?? 'avg'] ?? 'avg', selections });
+        presets.push({ id, name: row.name, stat: stats[row.evaluate_type ?? 'avg'] ?? 'avg', selections, aggregates });
       }
       return { presets, foundIds: presets.map((p) => p.id) };
     } catch (error) {
       this.logger.error(`Failed to fetch trends presets ${presetIds.join(', ')}:`, error);
       return { presets: [], foundIds: [] };
+    }
+  }
+
+  /**
+   * The runs of a trend window, oldest first: the same window `getTrendsData` builds
+   * (same system/environment/workload, completed, not stale, change-point floor, run cap)
+   * without its per-run percentile LATERAL over raw transactions — a caller that only needs
+   * the run ids and start times must not pay for that.
+   */
+  async getTrendRunWindow(
+    testRun: TestRun,
+    maxRuns: number,
+    userId: string = '',
+    roles: string[] = [],
+    oldestTestRunId?: string,
+  ): Promise<TrendRun[]> {
+    try {
+      const safeMaxRuns = Math.max(1, Math.min(Math.floor(maxRuns), 50));
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 5, 'tr');
+      const floorTime = await this.resolveTrendWindowStart(testRun, oldestTestRunId);
+      const floorParamIndex = 5 + orgFilter.params.length;
+      const rows: Array<{ test_run_id: string; start_time: string }> = await withRequestEm(this.testRunRepo).query(
+        `SELECT tr.test_run_id, tr.start_time
+         FROM test_runs tr
+         WHERE tr.system_under_test_id = $1
+           AND tr.test_environment = $2
+           AND tr.workload = $3
+           AND tr.completed = true
+           AND tr.is_stale = false
+           AND tr.start_time <= $4
+           ${floorTime ? `AND tr.start_time >= $${floorParamIndex}` : ''}
+           ${orgFilter.clause}
+         ORDER BY tr.start_time DESC
+         LIMIT ${safeMaxRuns + 1}`,
+        [
+          testRun.systemUnderTestId,
+          testRun.testEnvironment,
+          testRun.workload,
+          testRun.startTime || new Date(),
+          ...orgFilter.params,
+          ...(floorTime ? [floorTime] : []),
+        ],
+      );
+      return rows.reverse().map((r) => ({ testRunId: r.test_run_id, startTime: new Date(r.start_time) }));
+    } catch (error) {
+      this.logger.error('Failed to fetch trend run window:', error);
+      return [];
+    }
+  }
+
+  /**
+   * The run-wide aggregate of one perf-test metric, one value per run — what the Trends
+   * card's "All aggregated" series shows, from the same rollup tables and estimator as
+   * `/test-runs/:id/aggregated-metric-statistic` (`getAggregatedMetricStatistics`): the
+   * analysis-window rows when the run has them, else the full run; percentiles from the
+   * merged tdigest. Keep the two in step — a plausible line that is not the card's line is
+   * the failure this exists to prevent.
+   *
+   * No org clause: the run ids arrive from an org-filtered trend window.
+   */
+  async getAggregatedTrendValues(
+    testRunIds: string[],
+    metric: TrendsPresetAggregate['metric'],
+    stat: TrendsPresetAggregate['stat'],
+  ): Promise<Record<string, number | null>> {
+    if (testRunIds.length === 0) return {};
+    try {
+      const table = metric === 'transaction_response_time' ? 'test_run_transaction_stats' : 'test_run_sampler_stats';
+      const scoped = `
+        scoped AS (
+          SELECT s.* FROM ${table} s WHERE s.test_run_id = ANY($1::text[])
+        ),
+        win AS (
+          SELECT test_run_id, bool_or(ramp_up_excluded) AS use_excluded FROM scoped GROUP BY test_run_id
+        )`;
+      const query = metric === 'error_percentage'
+        ? `WITH ${scoped}
+           SELECT s.test_run_id,
+                  ROUND(SUM(s.failed_count)::numeric / NULLIF(SUM(s.total_count), 0) * 100, 2) AS value
+           FROM scoped s JOIN win w ON w.test_run_id = s.test_run_id
+           WHERE s.ramp_up_excluded = w.use_excluded
+           GROUP BY s.test_run_id`
+        : `WITH ${scoped},
+           agg AS (
+             SELECT s.test_run_id, rollup(s.pct_agg) AS pct_agg
+             FROM scoped s JOIN win w ON w.test_run_id = s.test_run_id
+             WHERE s.ramp_up_excluded = w.use_excluded
+             GROUP BY s.test_run_id
+           )
+           SELECT test_run_id,
+                  ROUND(${({
+                    avg: 'mean(pct_agg)',
+                    p50: 'approx_percentile(0.50, pct_agg)',
+                    p90: 'approx_percentile(0.90, pct_agg)',
+                    p95: 'approx_percentile(0.95, pct_agg)',
+                    p99: 'approx_percentile(0.99, pct_agg)',
+                    max: 'max_val(pct_agg)',
+                  } as const)[stat]}::numeric, 2) AS value
+           FROM agg`;
+      const rows: Array<{ test_run_id: string; value: string | null }> =
+        await withRequestEm(this.testRunRepo).query(query, [testRunIds]);
+      return Object.fromEntries(rows.map((r) => [r.test_run_id, r.value == null ? null : Number(r.value)]));
+    } catch (error) {
+      this.logger.warn(`Failed to get aggregated trend values (${metric}/${stat}): ${(error as Error).message}`);
+      return {};
     }
   }
 

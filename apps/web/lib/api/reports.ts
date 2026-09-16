@@ -63,11 +63,6 @@ export const REPORT_STATUS_VALUES = [
 export type ReportStatus = (typeof REPORT_STATUS_VALUES)[number];
 
 /**
- * Job progress stages
- */
-export type JobStage = 'initializing' | 'fetching_data' | 'rendering_html' | 'saving' | 'complete';
-
-/**
  * Paper format for PDF generation
  */
 export type PaperFormat = 'a4' | 'letter' | 'legal' | 'a3';
@@ -244,17 +239,6 @@ export interface ReportDetail {
   updated_at: string;
   started_at?: string;
   completed_at?: string;
-}
-
-/**
- * Job progress information
- */
-export interface JobProgress {
-  job_id: string;
-  report_id: string;
-  stage: JobStage;
-  progress: number;
-  message: string;
 }
 
 // ==================== Template Types ====================
@@ -588,19 +572,6 @@ export async function retryReport(reportId: string): Promise<GenerateReportRespo
       ? (error as { message: string }).message
       : 'Failed to retry report generation';
     throw new Error(errorMessage);
-  }
-
-  return response.json();
-}
-
-/**
- * Get job progress for a report
- */
-export async function getJobProgress(reportId: string): Promise<JobProgress> {
-  const response = await authenticatedFetch(`reports/${reportId}/progress`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch job progress: ${response.statusText}`);
   }
 
   return response.json();

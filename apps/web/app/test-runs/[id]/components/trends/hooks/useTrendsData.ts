@@ -22,7 +22,7 @@ import {
   fetchAggregatedStatistics,
 } from '@/lib/aggregated-perf-series';
 import { buildAggregatedTrendsStatistics } from '../utils/trends-utils';
-import type { SeriesPick } from '../../shared/metric-options';
+import { mapLimit, OPTION_FETCH_CONCURRENCY, type SeriesPick } from '../../shared/metric-options';
 
 interface UseTrendsDataProps {
   testRun: TestRun | null;
@@ -35,7 +35,6 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   // and panel picked in the cascade — a preset stores one of each and names itself after
   // them; the cascade holds the actual multi-selection.
   const [selectedSource, setSelectedSource] = useState<DataSource>('grafana');
-  const [availableSources, setAvailableSources] = useState<DataSource[]>([]);
   const [selectedDashboard, setSelectedDashboard] = useState<ApplicationDashboard | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<Panel | null>(null);
 
@@ -59,55 +58,6 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   const [addedSeries, setAddedSeries] = useState<TrendsSeries[]>([]);
   const [metricsData, setMetricsData] = useState<MetricStatistic[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(false);
-  const [selectedSeriesIds, setSelectedSeriesIds] = useState<Set<string>>(new Set());
-
-  // Oldest test run date state
-  const [oldestTestRunDate, setOldestTestRunDate] = useState<string | null>(null);
-  const [oldestTestRunLoading, setOldestTestRunLoading] = useState(false);
-
-  // Load oldest test run date from related test runs
-  const fetchOldestTestRunDate = useCallback(async () => {
-    if (!testRun) return;
-
-    try {
-      setOldestTestRunLoading(true);
-
-      const system = testRun.systems_under_test?.name;
-      const environment = testRun.test_environment;
-      const workload = testRun.workload;
-
-      let url = `/test-runs/${testRunId}/related`;
-      if (system && environment && workload) {
-        const queryParams = new URLSearchParams({ system, environment, workload });
-        url += `?${queryParams.toString()}`;
-      }
-
-      const response = await authenticatedFetch(url, {
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (response.ok) {
-        const relatedTestRuns = await response.json();
-        if (relatedTestRuns.length > 0) {
-          const allTestRuns = [testRun, ...relatedTestRuns];
-          const oldestTestRun = allTestRuns.reduce((oldest, current) => {
-            return new Date(current.created_at) < new Date(oldest.created_at) ? current : oldest;
-          });
-          setOldestTestRunDate(oldestTestRun.created_at);
-        } else {
-          setOldestTestRunDate(testRun.created_at);
-        }
-      } else {
-        console.warn('Failed to fetch related test runs:', response.statusText);
-        setOldestTestRunDate(testRun.created_at);
-      }
-    } catch (error) {
-      console.error('Error fetching related test runs:', error);
-      setOldestTestRunDate(testRun.created_at);
-    } finally {
-      setOldestTestRunLoading(false);
-    }
-  }, [testRun, testRunId]);
 
   // Load Grafana dashboards
   const fetchApplicationDashboards = useCallback(async (): Promise<ApplicationDashboard[]> => {
@@ -214,14 +164,17 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         return acc;
       }, {} as Record<string, { dashboardId: string; panelId: number; metricsSourceId?: string; seriesByMetricName: Map<string, TrendsSeries> }>);
 
-      // Fetch data for each dashboard/panel combination
+      // One request per dashboard/panel group, a bounded number in flight: a select-all
+      // adds tens of panels at once, and serially that was tens of round trips.
       const allData: MetricStatistic[] = [];
-
-      for (const { dashboardId, panelId, metricsSourceId, seriesByMetricName } of Object.values(seriesByDashboardPanel)) {
+      const groups = Object.values(seriesByDashboardPanel).filter(({ dashboardId, panelId }) => {
         if (panelId == null || dashboardId == null) {
           console.warn('Skipping series group with missing dashboardId or panelId:', { dashboardId, panelId });
-          continue;
+          return false;
         }
+        return true;
+      });
+      const perGroup = await mapLimit(groups, OPTION_FETCH_CONCURRENCY, async ({ dashboardId, panelId, metricsSourceId, seriesByMetricName }) => {
         const queryParams = new URLSearchParams({
           applicationDashboardId: dashboardId,
           panelId: panelId.toString(),
@@ -229,37 +182,28 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
           from: fromDate.toISOString(),
           to: toDate.toISOString()
         });
-
-        // Send metricsSourceId if available
-        if (metricsSourceId) {
-          queryParams.set('metricsSourceId', metricsSourceId);
-        }
-
-        if (testRun?.systems_under_test?.name) {
-          queryParams.set('system', testRun.systems_under_test.name);
-        }
-        if (testRun?.test_environment) {
-          queryParams.set('environment', testRun.test_environment);
-        }
-        if (testRun?.workload) {
-          queryParams.set('workload', testRun.workload);
-        }
+        if (metricsSourceId) queryParams.set('metricsSourceId', metricsSourceId);
+        if (testRun?.systems_under_test?.name) queryParams.set('system', testRun.systems_under_test.name);
+        if (testRun?.test_environment) queryParams.set('environment', testRun.test_environment);
+        if (testRun?.workload) queryParams.set('workload', testRun.workload);
 
         const response = await authenticatedFetch(
           `/metrics/ds-metric-statistics?${queryParams.toString()}`,
           { headers: { 'Content-Type': 'application/json' } }
         );
-
-        if (response.ok) {
-          const data: MetricStatistic[] = await response.json();
-          for (const item of data) {
-            const series = seriesByMetricName.get(item.metric_name);
-            if (series) allData.push({ ...item, series_id: series.id });
-          }
-        } else {
+        if (!response.ok) {
           console.warn('Failed to fetch metrics data for panel:', panelId, response.statusText);
+          return [] as MetricStatistic[];
         }
-      }
+        const data: MetricStatistic[] = await response.json();
+        const tagged: MetricStatistic[] = [];
+        for (const item of data) {
+          const series = seriesByMetricName.get(item.metric_name);
+          if (series) tagged.push({ ...item, series_id: series.id });
+        }
+        return tagged;
+      });
+      allData.push(...perGroup.flat());
 
       // Aggregated series: one batch call each across all related runs in range.
       if (aggregatedSeries.length > 0 && testRun) {
@@ -317,45 +261,14 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
       }
 
       setMetricsData(allData);
-      setSelectedSeriesIds(new Set(addedSeries.map(s => s.id)));
 
     } catch (error) {
       console.error('Error fetching metrics data:', error);
       setMetricsData([]);
-      setSelectedSeriesIds(new Set());
     } finally {
       setMetricsLoading(false);
     }
   }, [addedSeries, evaluateType, timeRange, customTimeRange, testRun, testRunId]);
-
-  // Compute available sources based on loaded dashboards
-  useEffect(() => {
-    const sources: DataSource[] = [];
-
-    // Check for real Grafana dashboards (not artificial)
-    const grafanaDashboards = dashboards.filter(d => isGrafana(d));
-    if (grafanaDashboards.length > 0) {
-      sources.push('grafana');
-    }
-
-    // Check for Dynatrace dashboards
-    if (dynatraceDashboards.length > 0) {
-      sources.push('dynatrace');
-    }
-
-    // Check for performance-test-metrics dashboards
-    const perfMetricsDashboards = dashboards.filter(d => isPerformanceTest(d));
-    if (perfMetricsDashboards.length > 0) {
-      sources.push('performance-metrics');
-    }
-
-    setAvailableSources(sources);
-
-    // Auto-select first available source if current selection is not available
-    if (sources.length > 0 && !sources.includes(selectedSource)) {
-      setSelectedSource(sources[0]);
-    }
-  }, [dashboards, dynatraceDashboards, selectedSource]);
 
   // Load dashboards when expanded and no data is available
   useEffect(() => {
@@ -375,13 +288,6 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
       fetchMetricsData();
     }
   }, [addedSeries, evaluateType, timeRange, customTimeRange, fetchMetricsData]);
-
-  // Load oldest test run date when component mounts
-  useEffect(() => {
-    if (testRun && !oldestTestRunDate && !oldestTestRunLoading) {
-      fetchOldestTestRunDate();
-    }
-  }, [testRun, oldestTestRunDate, oldestTestRunLoading, fetchOldestTestRunDate]);
 
   // Get all dashboards merged for the grouped dropdown
   const getAllDashboardsMerged = useCallback((): ApplicationDashboard[] => {
@@ -481,7 +387,6 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   return {
     // State
     selectedSource,
-    availableSources,
     selectedDashboard,
     selectedMetric,
     timeRange,
@@ -494,9 +399,6 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     addedSeries,
     metricsData,
     metricsLoading,
-    selectedSeriesIds,
-    oldestTestRunDate,
-    oldestTestRunLoading,
 
     // State setters (for preset application)
     setSelectedSource,

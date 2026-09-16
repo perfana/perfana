@@ -25,11 +25,6 @@ export const GRAFANA_UNITS = [
 
 export type GrafanaUnit = typeof GRAFANA_UNITS[number];
 
-/**
- * Supported panel types for graphs
- */
-export const SUPPORTED_PANEL_TYPES = ['graph', 'timeseries', 'stat', 'singlestat'] as const;
-
 export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics';
 
 export interface GraphsCardProps {
@@ -51,15 +46,6 @@ export interface ApplicationDashboard {
   grafanaInstance?: {
     label: string;
   };
-}
-
-export interface Panel {
-  id: number;
-  title: string;
-  type: string;
-  yAxesFormat?: string;
-  applicationDashboardId?: string;
-  metricsSourceId?: string;
 }
 
 export interface SeriesConfig {
