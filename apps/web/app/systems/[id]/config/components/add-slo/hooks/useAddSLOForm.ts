@@ -13,7 +13,7 @@ import {
   initialSLOFormData,
 } from '../types';
 import { SUPPORTED_PANEL_TYPES } from '../utils/slo-validators';
-import { isPerformanceTest } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 
 export function useAddSLOForm({
   open,
@@ -60,8 +60,11 @@ export function useAddSLOForm({
       );
 
       if (response.ok) {
-        const dashboardsData = await response.json();
-        setAvailableDashboards(dashboardsData);
+        const dashboardsData: ApplicationDashboard[] = await response.json();
+        // Real Grafana dashboards only. The endpoint also returns the artificial
+        // performance-test placeholders, which listed them under "Grafana Dashboards" too
+        // — and picking that copy fetched panels by Grafana uid, which they have none of.
+        setAvailableDashboards(dashboardsData.filter((d) => isGrafana(d)));
       } else {
         console.warn('Failed to fetch SLO application dashboards:', response.statusText);
         setAvailableDashboards([]);

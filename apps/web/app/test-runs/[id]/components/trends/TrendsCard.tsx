@@ -15,6 +15,7 @@ import TrendsPresetsTable from './TrendsPresetsTable';
 import SaveTrendsPresetModal from './SaveTrendsPresetModal';
 import ExpandableCardHeader, { kickPlotlyResize } from '../shared/ExpandableCardHeader';
 import PresetsAccordion from '../shared/PresetsAccordion';
+import type { SeriesPick } from '../shared/metric-options';
 
 export default function TrendsCard({
   testRun,
@@ -41,21 +42,17 @@ export default function TrendsCard({
     addedSeries: trendsData.addedSeries,
     dashboards: trendsData.dashboards,
     fetchApplicationDashboards: trendsData.fetchApplicationDashboards,
-    fetchDashboardPanels: trendsData.fetchDashboardPanels,
-    fetchPanelMetrics: trendsData.fetchPanelMetrics,
-    fetchDynatraceMetricsList: trendsData.fetchDynatraceMetricsList,
     setSelectedSource: trendsData.setSelectedSource,
     setSelectedDashboard: trendsData.setSelectedDashboard,
     setSelectedMetric: trendsData.setSelectedMetric,
     setEvaluateType: trendsData.setEvaluateType,
     setAddedSeries: trendsData.setAddedSeries,
-    setDynatraceMetrics: trendsData.setDynatraceMetrics,
   });
 
   // Plot hook
   const trendsPlot = useTrendsPlot({
     metricsData: trendsData.metricsData,
-    selectedSeriesNames: trendsData.selectedSeriesNames,
+    selectedSeriesIds: trendsData.selectedSeriesIds,
     selectedMetric: trendsData.selectedMetric,
     evaluateType: trendsData.evaluateType,
     trendsExpanded,
@@ -79,11 +76,11 @@ export default function TrendsCard({
   };
 
   // Handle adding series with toast notification
-  const handleAddSeries = () => {
-    const count = trendsData.handleAddSeries();
-    if (count && count > 0) {
+  const handleAddSeries = (picks: SeriesPick[]) => {
+    const count = trendsData.handleAddSeries(picks);
+    if (count > 0) {
       showToast(`Added ${count} series to chart`);
-    } else if (count === 0) {
+    } else {
       showToast('Series already added to chart');
     }
   };
@@ -147,24 +144,14 @@ export default function TrendsCard({
             <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
               {/* Builder row, then the view controls that sit right above the chart */}
               <TrendsSelectionControls
-                selectedDashboard={trendsData.selectedDashboard}
                 allDashboards={trendsData.getAllDashboardsMerged()}
-                dashboardsLoading={trendsData.dashboardsLoading}
-                dynatraceDashboardsLoading={trendsData.dynatraceDashboardsLoading}
-                onDashboardSelect={trendsData.handleDashboardSelect}
-                selectedSource={trendsData.selectedSource}
-                selectedMetric={trendsData.selectedMetric}
-                panels={trendsData.panels}
-                panelsLoading={trendsData.panelsLoading}
-                dynatraceMetrics={trendsData.dynatraceMetrics}
-                dynatraceMetricsLoading={trendsData.dynatraceMetricsLoading}
-                onMetricSelect={trendsData.handleMetricSelect}
-                availableMetrics={trendsData.availableMetrics}
-                availableMetricsLoading={trendsData.availableMetricsLoading}
-                selectedMetricNames={trendsData.selectedMetricNames}
-                setSelectedMetricNames={trendsData.setSelectedMetricNames}
+                dashboardsLoading={trendsData.dashboardsLoading || trendsData.dynatraceDashboardsLoading}
+                testRun={testRun}
                 addedSeries={trendsData.addedSeries}
                 onAddSeries={handleAddSeries}
+                selectedDashboard={trendsData.selectedDashboard}
+                selectedMetric={trendsData.selectedMetric}
+                onPrimaryChange={trendsData.handlePrimaryChange}
                 timeRange={trendsData.timeRange}
                 onTimeRangeChange={trendsData.handleTimeRangeChange}
                 customTimeRange={trendsData.customTimeRange}
@@ -183,7 +170,7 @@ export default function TrendsCard({
                   textAlign: 'center',
                 }}>
                   <Typography variant="body2" color="text.secondary">
-                    Pick a dashboard, panel and series above, then add them to plot a trend.
+                    Pick dashboards, panels and series above, then add them to plot a trend.
                   </Typography>
                 </Box>
               )}

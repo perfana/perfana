@@ -8,40 +8,15 @@ import { SeriesConfig, MetricDataPoint } from '../types';
 import { convertToSeriesConfigDto, convertFromAPISeriesConfig, extractYAxisFormat } from '../utils';
 import { TestRun } from '@/types/test-runs';
 
-interface ApplicationDashboard {
-  id: string;
-  dashboard_label: string;
-  dashboard_name: string;
-  dashboard_uid: string;
-  grafanaInstance?: { label: string };
-}
-
-interface Panel {
-  id: number;
-  title: string;
-  type: string;
-  yAxesFormat?: string;
-  applicationDashboardId?: string;
-}
-
-type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics';
-
 interface UseGraphsPresetsProps {
   testRun: TestRun | null;
   testRunId: string;
   showToast: (message: string) => void;
   addedSeries: SeriesConfig[];
-  dashboards: ApplicationDashboard[];
   setAddedSeries: (series: SeriesConfig[] | ((prev: SeriesConfig[]) => SeriesConfig[])) => void;
   setSeriesData: (data: Map<string, MetricDataPoint[]> | ((prev: Map<string, MetricDataPoint[]>) => Map<string, MetricDataPoint[]>)) => void;
   setChartDataLoading: (loading: boolean) => void;
   fetchSeriesData: (series: SeriesConfig) => Promise<MetricDataPoint[]>;
-  fetchApplicationDashboards: () => Promise<ApplicationDashboard[]>;
-  fetchDashboardPanels: (uid: string, dashboard?: ApplicationDashboard) => Promise<Panel[]>;
-  fetchPanelMetrics: (dashboardId: string, panelId: number) => Promise<void>;
-  setSelectedSource: (source: DataSource) => void;
-  setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
-  setSelectedPanel: (panel: Panel | null) => void;
 }
 
 export function useGraphsPresets({
@@ -49,17 +24,10 @@ export function useGraphsPresets({
   testRunId,
   showToast,
   addedSeries,
-  dashboards,
   setAddedSeries,
   setSeriesData,
   setChartDataLoading,
   fetchSeriesData,
-  fetchApplicationDashboards,
-  fetchDashboardPanels,
-  fetchPanelMetrics,
-  setSelectedSource,
-  setSelectedDashboard,
-  setSelectedPanel,
 }: UseGraphsPresetsProps) {
   const [presets, setPresets] = useState<GraphPreset[]>([]);
   const [presetsLoading, setPresetsLoading] = useState(false);
@@ -160,37 +128,6 @@ export function useGraphsPresets({
       // Set the series
       setAddedSeries(enrichedSeries);
 
-      // Restore dropdown selections from the first series
-      if (enrichedSeries.length > 0) {
-        const firstSeries = enrichedSeries[0];
-
-        // Set source dropdown
-        setSelectedSource(firstSeries.source);
-
-        // Find and set dashboard dropdown
-        let currentDashboards = dashboards;
-        if (currentDashboards.length === 0) {
-          currentDashboards = await fetchApplicationDashboards();
-        }
-
-        const dashboard = currentDashboards.find(d => d.id === firstSeries.dashboardId)
-          || currentDashboards.find(d => d.dashboard_label === firstSeries.dashboardLabel);
-
-        if (dashboard) {
-          setSelectedDashboard(dashboard);
-
-          // Load panels and set panel dropdown
-          const panelsData = await fetchDashboardPanels(dashboard.dashboard_uid, dashboard);
-          const panel = panelsData.find(p => p.id === firstSeries.panelId);
-          if (panel) {
-            setSelectedPanel(panel);
-            // Populate the metrics dropdown
-            const appDashboardId = panel.applicationDashboardId || dashboard.id;
-            fetchPanelMetrics(appDashboardId, panel.id);
-          }
-        }
-      }
-
       // Fetch data for all series
       setChartDataLoading(true);
       const newSeriesData = new Map<string, MetricDataPoint[]>();
@@ -210,7 +147,7 @@ export function useGraphsPresets({
     } finally {
       setChartDataLoading(false);
     }
-  }, [enrichSeriesWithFormat, setAddedSeries, setChartDataLoading, fetchSeriesData, setSeriesData, showToast, dashboards, fetchApplicationDashboards, fetchDashboardPanels, fetchPanelMetrics, setSelectedSource, setSelectedDashboard, setSelectedPanel]);
+  }, [enrichSeriesWithFormat, setAddedSeries, setChartDataLoading, fetchSeriesData, setSeriesData, showToast]);
 
   /**
    * Handle saving a preset (with upsert logic)

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.31] - 2026-09-16
+
+### Fixed
+- **Two trend series with the same name no longer collapse into one zigzag line.** The Trends chart grouped its points by `metric_name`, so adding Transaction RT Avg and Transaction Error Rate from the *all aggregated* dashboard — every panel of which carries one series called `All aggregated` — drew one trace alternating between the two values, on one axis, and the unit picked for the second series never got its right-hand axis. Points are now keyed on the series they were added as (`series_id`), each series is a trace on its own unit's axis, and the legend disambiguates a repeated name with its panel title.
+- **Adding a Service Level Objective on a system with no Grafana dashboard listed the performance-test dashboards under "Grafana Dashboards", and picking one there left the Metric dropdown empty.** `/grafana/application-dashboards` also returns the artificial perf-test rows, and the dialog put every row in the Grafana group besides the perf-test one — the Grafana copy fetched its panels by Grafana uid, which a placeholder does not have. The Grafana group now holds real Grafana dashboards only (SONAR, WERKNL).
+
+### Changed
+- **The Trends and Graphs cards pick series the way the Compare card does**: dashboards → panels → series, every level multi-select with a select-all, so several panels across several dashboards can be added in one click. The three cards share one `MetricSeriesCascade`; Trends and Graphs keep every RT percentile panel and skip the URL panels, which have no per-run statistics or time series behind them. A series added this way also carries its panel's unit, so a mixed-unit trend gets its second axis without setting units by hand.
+- **The Custom Graphs report section can also draw Trends-card presets.** Each selected trends preset becomes one chart of its series' statistic (the preset's aggregation) per run, over the same window the Trend Charts section uses (since the last ADAPT change point, at most 10 runs), beside the graph presets.
+- **Generating a report shows where it is.** The HTML generation job records which section it is rendering, `GET /reports/:id` carries it while the report is processing, and the test run page shows a progress panel ("Rendering section 3 of 8: Custom Graphs") until the report is ready — and waits up to 10 minutes rather than giving up on the viewer after 60 s.
+
 ## [0.2.95.30] - 2026-09-15
 
 ### Fixed

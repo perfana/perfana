@@ -13,6 +13,7 @@ import { useGraphsData, useGraphsPresets } from './hooks';
 import { GraphsCollapsedView, GraphsExpandedContent } from './components';
 import SaveGraphPresetModal from './SaveGraphPresetModal';
 import ExpandableCardHeader, { kickPlotlyResize } from '../shared/ExpandableCardHeader';
+import type { SeriesPick } from '../shared/metric-options';
 
 export default function GraphsCard({
   testRun,
@@ -37,17 +38,10 @@ export default function GraphsCard({
     testRunId,
     showToast,
     addedSeries: graphsData.addedSeries,
-    dashboards: graphsData.dashboards,
     setAddedSeries: graphsData.setAddedSeries,
     setSeriesData: graphsData.setSeriesData,
     setChartDataLoading: graphsData.setChartDataLoading,
     fetchSeriesData: graphsData.fetchSeriesData,
-    fetchApplicationDashboards: graphsData.fetchApplicationDashboards,
-    fetchDashboardPanels: graphsData.fetchDashboardPanels,
-    fetchPanelMetrics: graphsData.fetchPanelMetrics,
-    setSelectedSource: graphsData.setSelectedSource,
-    setSelectedDashboard: graphsData.setSelectedDashboard,
-    setSelectedPanel: graphsData.setSelectedPanel,
   });
 
   // Handle expand/collapse with auto-focus
@@ -67,8 +61,8 @@ export default function GraphsCard({
   };
 
   // Handle adding series with toast notification
-  const handleAddSeries = () => {
-    graphsData.handleAddSeries(showToast);
+  const handleAddSeries = (picks: SeriesPick[]) => {
+    graphsData.handleAddSeries(picks, showToast);
   };
 
   // Handle removing series with toast notification
@@ -150,19 +144,8 @@ export default function GraphsCard({
               onDeletePreset={graphsPresets.handleDeletePreset}
               onDeleteAllPresets={graphsPresets.handleDeleteAllPresets}
               onOpenSavePresetModal={() => graphsPresets.setSavePresetModalOpen(true)}
-              selectedDashboard={graphsData.selectedDashboard}
               allDashboards={graphsData.getAllDashboardsMerged()}
-              dashboardsLoading={graphsData.dashboardsLoading}
-              dynatraceDashboardsLoading={graphsData.dynatraceDashboardsLoading}
-              onDashboardSelect={graphsData.handleDashboardSelect}
-              selectedPanel={graphsData.selectedPanel}
-              panels={graphsData.panels}
-              panelsLoading={graphsData.panelsLoading}
-              onPanelSelect={graphsData.handlePanelSelect}
-              metrics={graphsData.metrics}
-              metricsLoading={graphsData.metricsLoading}
-              selectedMetrics={graphsData.selectedMetrics}
-              setSelectedMetrics={graphsData.setSelectedMetrics}
+              dashboardsLoading={graphsData.dashboardsLoading || graphsData.dynatraceDashboardsLoading}
               onAddSeries={handleAddSeries}
               chartName={graphsData.chartName}
               setChartName={graphsData.setChartName}

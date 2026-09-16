@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab } from '@mui/material';
+import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab, LinearProgress, Typography, Paper } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
 import { getReport } from '@/lib/api/reports';
 
@@ -61,6 +61,7 @@ export default function TestRunDetailsPage() {
   const [reportViewerOpen, setReportViewerOpen] = useState(false);
   const [reportViewerReportId, setReportViewerReportId] = useState<string | undefined>(undefined);
   const [pendingReportId, setPendingReportId] = useState<string | undefined>(undefined);
+  const [reportProgress, setReportProgress] = useState<{ percent: number; label: string } | null>(null);
 
   // Custom hooks
   const { configurationStatus, setHasDistributedTracing, setHasDynatrace, checkConfigurationStatus } =
@@ -130,7 +131,10 @@ export default function TestRunDetailsPage() {
 
     let isCancelled = false;
     let pollCount = 0;
-    const maxPolls = 60; // 60 seconds max
+    // A large report (many graph/trend presets, several runs of history) takes minutes,
+    // not the 60 s this used to allow before giving up on the viewer.
+    const maxPolls = 600;
+    setReportProgress({ percent: 0, label: 'Starting…' });
 
     const pollReport = async () => {
       try {
@@ -151,6 +155,12 @@ export default function TestRunDetailsPage() {
           setReportRefreshTrigger(prev => prev + 1);
         } else {
           // Still processing, poll again
+          const p = report.progress;
+          if (p?.total) {
+            setReportProgress({ percent: p.percent, label: `Rendering section ${(p.done ?? 0) + 1} of ${p.total}: ${p.section ?? ''}` });
+          } else if (report.status === 'pending') {
+            setReportProgress({ percent: 0, label: 'Waiting for a worker…' });
+          }
           pollCount++;
           if (pollCount < maxPolls) {
             setTimeout(() => pollReport(), 1000);
@@ -180,6 +190,7 @@ export default function TestRunDetailsPage() {
 
     return () => {
       isCancelled = true;
+      setReportProgress(null);
     };
   }, [pendingReportId, showToast]);
 
@@ -405,6 +416,20 @@ export default function TestRunDetailsPage() {
         </Box>
       </Box>
 
+      {/* Report generation progress — stays up until the report is ready or fails */}
+      <Snackbar open={!!pendingReportId && !!reportProgress} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}>
+        <Paper elevation={6} sx={{ p: 2, minWidth: 320 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>Generating report…</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            {reportProgress?.label}
+          </Typography>
+          <LinearProgress
+            variant={reportProgress && reportProgress.percent > 0 ? 'determinate' : 'indeterminate'}
+            value={reportProgress?.percent ?? 0}
+          />
+        </Paper>
+      </Snackbar>
+
       {/* Snackbar */}
       <Snackbar open={snackbarOpen} autoHideDuration={4000} onClose={handleCloseSnackbar} message={snackbarMessage} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
 
@@ -425,8 +450,7 @@ export default function TestRunDetailsPage() {
           }}
           onSuccess={(reportId, _jobId) => {
             setGenerateReportDialogOpen(false);
-            showToast('Generating report...');
-            // Start polling for report completion
+            // Start polling for report completion; the progress panel takes it from here
             setPendingReportId(reportId);
           }}
           onError={(error) => {

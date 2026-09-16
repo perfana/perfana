@@ -28,6 +28,13 @@ jest.mock('@/lib/api', () => ({
 
 // Capture the props the generic HTML preview receives when the modal opens
 const mockHtmlPreviewProps: Array<Record<string, unknown>> = [];
+jest.mock('@/lib/trends-presets', () => ({
+  TrendsPresetsAPI: {
+    getAll: jest.fn().mockResolvedValue([
+      { id: 'trend-1', name: 'Nightly RT trend', series_config: [{}], evaluate_type: 'q95', is_global: false },
+    ]),
+  },
+}));
 jest.mock('@/lib/graph-presets', () => ({
   GraphPresetsAPI: {
     getAll: jest.fn().mockResolvedValue([
@@ -442,7 +449,7 @@ describe('GraphsConfigForm', () => {
   it('shows the selected preset names rather than their ids', async () => {
     render(
       <GraphsConfigForm
-        config={{ graphPresetIds: ['preset-2'] }}
+        config={{ graphPresetIds: ['preset-2'], trendsPresetIds: ['trend-1'] }}
         onChange={jest.fn()}
         onTextChange={jest.fn()}
         testRunId="MyApp-acc-loadTest-00001"
@@ -450,6 +457,27 @@ describe('GraphsConfigForm', () => {
     );
 
     expect(await screen.findByText('Docker CPU')).toBeInTheDocument();
+    expect(await screen.findByText('Nightly RT trend')).toBeInTheDocument();
+  });
+
+  it('offers the run\'s trends presets and stores the chosen ids', async () => {
+    const onChange = jest.fn();
+    render(
+      <GraphsConfigForm
+        config={{}}
+        onChange={onChange}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    const picker = await screen.findByText('No trend charts');
+    // Disabled until both preset lists have loaded
+    await waitFor(() => expect(picker).not.toHaveAttribute('aria-disabled', 'true'));
+    fireEvent.mouseDown(picker);
+    fireEvent.click(await screen.findByText('Nightly RT trend'));
+
+    expect(onChange).toHaveBeenCalledWith({ trendsPresetIds: ['trend-1'] });
   });
 });
 

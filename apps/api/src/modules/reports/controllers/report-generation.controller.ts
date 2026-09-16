@@ -37,6 +37,7 @@ import {
   ReportListResponseDto,
   ReportSummaryDto,
   ReportDetailDto,
+  type ReportGenerationProgress,
   type ReportStatus,
   type ReportSectionType,
 } from '../dto';
@@ -462,6 +463,24 @@ export class ReportGenerationController {
 
   // ==================== Report CRUD ====================
 
+  /**
+   * The HTML job's own progress record, only while the report is being generated. Best
+   * effort: a missing job or an unavailable queue is "no progress to show", not an error.
+   */
+  private async generationProgress(
+    status: string,
+    jobId: string | undefined,
+  ): Promise<ReportGenerationProgress | undefined> {
+    if (status !== 'processing' || !jobId || !this.htmlGenerationProcessor.isAvailable()) return undefined;
+    try {
+      const job = await this.htmlGenerationProcessor.getJobStatus(jobId);
+      const p = job?.progress;
+      return p && typeof p === 'object' && 'stage' in p ? (p as ReportGenerationProgress) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   @Get(':reportId')
   @ApiOperation({ summary: 'Get a single report by ID' })
   @ApiResponse({ status: 200, description: 'Return the report', type: ReportDetailDto })
@@ -481,6 +500,7 @@ export class ReportGenerationController {
         name: report.name,
         generated_by: report.generated_by,
         html_content: report.html_content,
+        progress: await this.generationProgress(report.status, report.job_id),
         html_generated_at: report.html_generated_at,
         share_id: report.share_id,
         share_enabled: report.share_enabled,

@@ -70,6 +70,9 @@ describe('GraphsRenderer', () => {
             ] as MetricsPanelSelector[]),
             getAggregatedSeries: jest.fn().mockResolvedValue([]),
             getGraphPresetPanels: jest.fn().mockResolvedValue({ presets: [], foundIds: [] }),
+            getTrendsPresetSeries: jest.fn().mockResolvedValue({ presets: [], foundIds: [] }),
+            getTrendsData: jest.fn().mockResolvedValue(null),
+            getMetricTrends: jest.fn().mockResolvedValue([]),
           },
         },
       ],
@@ -574,6 +577,53 @@ describe('GraphsRenderer', () => {
 
       expect(dataFetcher.getGraphPresetPanels).not.toHaveBeenCalled();
       expect(dataFetcher.getAvailableMetricsPanels).toHaveBeenCalled();
+    });
+  });
+
+  describe('trends presets', () => {
+    const run = (id: string, day: number) => ({
+      testRunId: id, startTime: new Date(`2026-09-${day}T05:00:00Z`), applicationRelease: null,
+      duration: 3600, avgMs: 0, p95Ms: 0, p99Ms: 0, errorRate: 0, totalTransactions: 0,
+      consolidatedResult: null, annotations: [],
+    });
+
+    it('draws one value-per-run chart per trends preset, beside the graph presets', async () => {
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({
+        presets: [{
+          id: 't1', name: 'Nightly RT', stat: 'p95',
+          selections: [{ dashboardLabel: 'Perf', panelId: 101, metricNames: ['All aggregated'] }],
+        }],
+        foundIds: ['t1'],
+      });
+      dataFetcher.getTrendsData.mockResolvedValue({
+        currentRun: run('run-003', 14), previousRuns: [run('run-002', 12), run('run-001', 10)],
+      });
+      dataFetcher.getMetricTrends.mockResolvedValue([{
+        dashboardLabel: 'Perf', panelTitle: 'Transaction RT', metricName: 'All aggregated', unit: 'ms',
+        valuesByRun: { 'run-001': 280, 'run-002': 300, 'run-003': 260 },
+      }]);
+      const section = makeSection({ config: { trendsPresetIds: ['t1'] } });
+
+      const html = await renderer.renderGraphsSection(section, makeTestRun(), 'user-1', ['user']);
+
+      expect(dataFetcher.getTrendsPresetSeries).toHaveBeenCalledWith(['t1'], 'user-1', ['user']);
+      // Oldest run first, the preset's own statistic
+      expect(dataFetcher.getMetricTrends).toHaveBeenCalledWith(
+        ['run-001', 'run-002', 'run-003'], expect.anything(), 'p95',
+      );
+      expect(html).toContain('Nightly RT (p95)');
+      // One marker per run, labelled by the run's start time rather than a time of day
+      expect((html.match(/<circle /g) ?? []).length).toBe(3);
+      expect(html).toContain('Sep 10');
+      expect(html).toContain('1 preset');
+      expect(dataFetcher.getAvailableMetricsPanels).not.toHaveBeenCalled();
+    });
+
+    it('warns when every configured preset of either kind is gone', async () => {
+      const section = makeSection({ config: { graphPresetIds: ['gone'], trendsPresetIds: ['gone-too'] } });
+      const html = await renderer.renderGraphsSection(section, makeTestRun());
+      expect(html).toContain('2 graph presets');
+      expect(html).toContain('no longer exist');
     });
   });
 

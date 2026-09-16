@@ -7,7 +7,9 @@ import {
   MetricsDataPoint,
   MetricsPanelSelector,
   MetricsTimeSeriesPanel,
+  TrendsPresetSeries,
 } from '../services/report-data-fetcher.service';
+import { CHANGE_POINT_WINDOW } from '../services/trend-window';
 import {
   REPORT_COLORS,
   sectionHeader,
@@ -52,6 +54,20 @@ const ANALYSIS_ONLY_MARGIN = 0.025;
 
 /** Matches the amber dashed boundary the Graphs card draws. */
 const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
+
+/** A chart with no analysis window to mark — trend charts, whose x-axis is runs, not time. */
+const NO_WINDOW: ChartWindow = { from: null, to: null, only: false };
+
+/** How a chart labels and marks its x-axis; the default is the time-series reading. */
+interface ChartStyle {
+  /** Label for an x tick; defaults to the point's time of day. */
+  xLabelOf?: (dp: MetricsDataPoint) => string;
+  /** Draw a marker on every point of every series (a trend has one point per run). */
+  markers?: boolean;
+}
+
+/** Trend presets follow the Trends section's window: since the last change point, at most this many runs. */
+const TREND_PRESET_MAX_RUNS = 10;
 
 /**
  * Renderer for Graphs section
@@ -119,24 +135,42 @@ export class GraphsRenderer {
     const includeAggregated = config.includeAggregated === true;
     let panels: MetricsPanelSelector[] = [];
 
-    const presetIds = Array.isArray(config.graphPresetIds)
-      ? (config.graphPresetIds as unknown[]).filter((id): id is string => typeof id === 'string' && id !== '')
+    const idsOf = (key: string) => Array.isArray(config[key])
+      ? (config[key] as unknown[]).filter((id): id is string => typeof id === 'string' && id !== '')
       : [];
+    const presetIds = idsOf('graphPresetIds');
+    const trendsPresetIds = idsOf('trendsPresetIds');
 
-    if (presetIds.length > 0) {
-      // Graph presets are the section's primary selection: the same presets the
-      // Graphs card saves, re-applied to whichever run is being reported on.
+    if (presetIds.length > 0 || trendsPresetIds.length > 0) {
+      // Presets are the section's primary selection: the same presets the Graphs and
+      // Trends cards save, re-applied to whichever run is being reported on.
       const { presets, foundIds } = await this.dataFetcher.getGraphPresetPanels(presetIds, userId, roles);
-      const missing = presetIds.length - foundIds.length;
-      if (foundIds.length === 0) {
+      const trends = await this.dataFetcher.getTrendsPresetSeries(trendsPresetIds, userId, roles);
+      const wanted = presetIds.length + trendsPresetIds.length;
+      const missing = wanted - foundIds.length - trends.foundIds.length;
+      if (foundIds.length === 0 && trends.foundIds.length === 0) {
         // Deliberately NOT falling through to auto-discovery: a template that
         // asked for two presets must not silently render every panel in the run.
-        return this.renderMissingPresetsSection(title, text, presetIds.length);
+        return this.renderMissingPresetsSection(title, text, wanted);
       }
       if (missing > 0) {
-        this.logger.warn(`Graphs section: ${missing} of ${presetIds.length} graph presets no longer exist`);
+        this.logger.warn(`Graphs section: ${missing} of ${wanted} presets no longer exist`);
       }
-      return this.renderPresetCharts(presets, title, text, testRun, excludeRampUp, chartWidth, chartHeight, window, showLegend, userId, roles);
+      const graphCharts = await this.renderPresetCharts(presets, testRun, excludeRampUp, chartWidth, chartHeight, window, showLegend, userId, roles);
+      const trendCharts = await this.renderTrendPresetCharts(trends.presets, presets.length, testRun, chartWidth, chartHeight, showLegend, userId, roles);
+      if (graphCharts.seriesCount + trendCharts.seriesCount === 0) {
+        return this.renderNoDataSection(title, text, 'No metrics data found for the selected presets.');
+      }
+      const count = presets.length + trends.presets.length;
+      return `
+        <section class="graphs-section">
+          ${sectionHeader(title, { kicker: `${formatInt(count)} preset${count !== 1 ? 's' : ''}` })}
+
+          ${sectionText(text)}
+
+          ${[...graphCharts.charts, ...trendCharts.charts].join('\n')}
+        </section>
+      `;
     } else if (Array.isArray(config.panels) && config.panels.length > 0) {
       panels = (config.panels as Array<Record<string, string>>).map((p) => ({
         dashboardLabel: p.dashboardLabel || p.dashboard_label,
@@ -250,8 +284,6 @@ export class GraphsRenderer {
    */
   private async renderPresetCharts(
     presets: GraphPresetPanels[],
-    title: string,
-    text: string | undefined,
     testRun: TestRun,
     excludeRampUp: boolean,
     width: number,
@@ -260,7 +292,7 @@ export class GraphsRenderer {
     showLegend: boolean,
     userId: string,
     roles: string[],
-  ): Promise<string> {
+  ): Promise<{ charts: string[]; seriesCount: number }> {
     const charts: string[] = [];
     let seriesCount = 0;
 
@@ -288,19 +320,66 @@ export class GraphsRenderer {
       charts.push(this.renderChart(preset.name, series, idx, width, height, window, showLegend));
     }
 
-    if (seriesCount === 0) {
-      return this.renderNoDataSection(title, text, 'No metrics data found for the selected graph presets.');
+    return { charts, seriesCount };
+  }
+
+  /**
+   * One chart per Trends-card preset: each series' statistic per run, over the same run
+   * window the Trends section uses (since ADAPT's last change point, at most
+   * TREND_PRESET_MAX_RUNS). Runs are spaced evenly, as the card draws them, and labelled
+   * by start time.
+   */
+  private async renderTrendPresetCharts(
+    presets: TrendsPresetSeries[],
+    colorOffset: number,
+    testRun: TestRun,
+    width: number,
+    height: number,
+    showLegend: boolean,
+    userId: string,
+    roles: string[],
+  ): Promise<{ charts: string[]; seriesCount: number }> {
+    const charts: string[] = [];
+    let seriesCount = 0;
+    if (presets.length === 0) return { charts, seriesCount };
+
+    const trendsData = await this.dataFetcher.getTrendsData(testRun, TREND_PRESET_MAX_RUNS, userId, roles, CHANGE_POINT_WINDOW);
+    // Oldest first, the current run last — the reading order of a trend.
+    const runs = trendsData ? [...trendsData.previousRuns].reverse().concat(trendsData.currentRun) : [];
+    const runIds = runs.map((r) => r.testRunId);
+    // ponytail: x is the run's index, so `time` is a synthetic epoch; the label closes over
+    // the run list to render its start time. Real timestamps would cluster ad-hoc runs.
+    const labelOf = (dp: MetricsDataPoint) => {
+      const run = runs[dp.time.getTime()];
+      return run ? run.startTime.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    };
+
+    for (const [idx, preset] of presets.entries()) {
+      const title = `${preset.name} (${preset.stat})`;
+      const trends = runIds.length > 0
+        ? await this.dataFetcher.getMetricTrends(runIds, preset.selections, preset.stat)
+        : [];
+      const series: MetricsTimeSeriesPanel[] = trends.map((t) => ({
+        panelTitle: t.panelTitle,
+        dashboardLabel: t.dashboardLabel,
+        metricName: t.metricName,
+        unit: t.unit ?? '',
+        dataPoints: runIds.map((id, i) => ({ time: new Date(i), value: t.valuesByRun[id] ?? null })),
+      }));
+      if (series.length === 0) {
+        charts.push(`
+          <div style="margin: 16px 0;">
+            ${groupHeader(title)}
+            ${emptyState('No trend data found for this preset in the run window.')}
+          </div>
+        `);
+        continue;
+      }
+      seriesCount += series.length;
+      charts.push(this.renderChart(title, series, colorOffset + idx, width, height, NO_WINDOW, showLegend, { xLabelOf: labelOf, markers: true }));
     }
 
-    return `
-      <section class="graphs-section">
-        ${sectionHeader(title, { kicker: `${formatInt(presets.length)} preset${presets.length !== 1 ? 's' : ''}` })}
-
-        ${sectionText(text)}
-
-        ${charts.join('\n')}
-      </section>
-    `;
+    return { charts, seriesCount };
   }
 
   private renderPanelChart(
@@ -373,6 +452,7 @@ export class GraphsRenderer {
     height: number,
     window: ChartWindow,
     showLegend: boolean = true,
+    style: ChartStyle = {},
   ): string {
     const drawn = series
       .map((s) => ({ ...s, dataPoints: s.dataPoints.filter((dp) => dp.value !== null) }))
@@ -569,12 +649,14 @@ export class GraphsRenderer {
       const dp = labelSource[idx]!;
       const x = scaleX(dp.time.getTime());
       const yPos = padding.top + chartHeight + 10;
-      const timeLabel = dp.time.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      });
+      const timeLabel = style.xLabelOf
+        ? this.utils.escapeHtml(style.xLabelOf(dp))
+        : dp.time.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+          });
       xLabels.push(`
         <text x="${x}" y="${yPos}"
               text-anchor="end" font-size="9" fill="#666"
@@ -635,8 +717,11 @@ export class GraphsRenderer {
             <g clip-path="url(#${clipId})">
             ${lines.map(({ color, path }) => `<path d="${path}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}
 
-            <!-- Data points: only worth drawing on a sparse single-series chart -->
-            ${drawn.length === 1 && dataPoints.length <= 50 ? dataPoints.map((dp) => {
+            <!-- Data points: only worth drawing on a sparse single-series chart, or when asked -->
+            ${style.markers
+              ? lines.map(({ series: s, color, axis }) => s.dataPoints.map((dp) =>
+                  `<circle cx="${scaleX(dp.time.getTime())}" cy="${scaleYOn(axis, dp.value!)}" r="3" fill="${color}"/>`).join('')).join('')
+              : drawn.length === 1 && dataPoints.length <= 50 ? dataPoints.map((dp) => {
               const cx = scaleX(dp.time.getTime());
               const cy = scaleY(dp.value!);
               return `<circle cx="${cx}" cy="${cy}" r="2.5" fill="${lines[0]!.color}"/>`;

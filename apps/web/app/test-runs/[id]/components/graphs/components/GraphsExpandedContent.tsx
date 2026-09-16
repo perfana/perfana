@@ -10,12 +10,13 @@ import {
 } from '@mui/material';
 import { BookmarkBorder } from '@mui/icons-material';
 
-import { SeriesConfig, ApplicationDashboard, Panel, MetricDataPoint, DataSource } from '../types';
+import { SeriesConfig, ApplicationDashboard, MetricDataPoint } from '../types';
 import type { TestRun } from '@/types/test-runs';
 import type { PerfanaEvent } from '@/lib/events';
 import type { GraphPreset } from '@/lib/graph-presets';
 import { GraphsSeriesList } from './GraphsSeriesList';
-import { GraphsSelectionControls } from './GraphsSelectionControls';
+import MetricSeriesCascade from '../../shared/MetricSeriesCascade';
+import type { SeriesPick } from '../../shared/metric-options';
 import GraphsChart from '../GraphsChart';
 import GraphPresetsTable from '../GraphPresetsTable';
 import PresetsAccordion from '../../shared/PresetsAccordion';
@@ -30,21 +31,10 @@ interface GraphsExpandedContentProps {
   onDeletePreset: (presetId: string) => void;
   onDeleteAllPresets: () => void;
   onOpenSavePresetModal: () => void;
-  // Selection controls
-  selectedDashboard: ApplicationDashboard | null;
+  // Dashboards → panels → series cascade
   allDashboards: ApplicationDashboard[];
   dashboardsLoading: boolean;
-  dynatraceDashboardsLoading: boolean;
-  onDashboardSelect: (dashboard: ApplicationDashboard | null, source?: DataSource) => void;
-  selectedPanel: Panel | null;
-  panels: Panel[];
-  panelsLoading: boolean;
-  onPanelSelect: (panel: Panel | null) => void;
-  metrics: string[];
-  metricsLoading: boolean;
-  selectedMetrics: string[];
-  setSelectedMetrics: (metrics: string[]) => void;
-  onAddSeries: () => void;
+  onAddSeries: (picks: SeriesPick[]) => void;
   // Chart
   chartName: string;
   setChartName: (name: string) => void;
@@ -66,19 +56,8 @@ export function GraphsExpandedContent({
   onDeletePreset,
   onDeleteAllPresets,
   onOpenSavePresetModal,
-  selectedDashboard,
   allDashboards,
   dashboardsLoading,
-  dynatraceDashboardsLoading,
-  onDashboardSelect,
-  selectedPanel,
-  panels,
-  panelsLoading,
-  onPanelSelect,
-  metrics,
-  metricsLoading,
-  selectedMetrics,
-  setSelectedMetrics,
   onAddSeries,
   chartName,
   setChartName,
@@ -95,21 +74,15 @@ export function GraphsExpandedContent({
   return (
     <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Builder row — pick what to plot */}
-      <GraphsSelectionControls
-        selectedDashboard={selectedDashboard}
+      <MetricSeriesCascade
         allDashboards={allDashboards}
         dashboardsLoading={dashboardsLoading}
-        dynatraceDashboardsLoading={dynatraceDashboardsLoading}
-        onDashboardSelect={onDashboardSelect}
-        selectedPanel={selectedPanel}
-        panels={panels}
-        panelsLoading={panelsLoading}
-        onPanelSelect={onPanelSelect}
-        metrics={metrics}
-        metricsLoading={metricsLoading}
-        selectedMetrics={selectedMetrics}
-        setSelectedMetrics={setSelectedMetrics}
+        testRun={testRun}
+        addedSeries={addedSeries}
         onAddSeries={onAddSeries}
+        // Every percentile panel is its own graph here, and the URL panels have no
+        // time series to draw.
+        panelOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
       />
 
       {/* Chart title + save, then the chart itself — the result stays in view */}

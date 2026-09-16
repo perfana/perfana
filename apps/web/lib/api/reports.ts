@@ -233,6 +233,8 @@ export interface ReportDetail {
   error_code?: string;
   error_message?: string;
   job_id?: string;
+  /** Present while the report is processing: sections rendered so far and the one in progress. */
+  progress?: { stage: string; percent: number; done?: number; total?: number; section?: string };
   retry_count: number;
   max_retries: number;
   download_count: number;

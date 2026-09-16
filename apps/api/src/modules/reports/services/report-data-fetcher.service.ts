@@ -46,6 +46,8 @@ import {
   TransactionRow,
   TrendRunSummary,
   TrendsData,
+  TrendsPresetSeries,
+  TrendStat,
   VirtualUserScenarioRow,
   VirtualUserStats,
 } from './report-data.types';
@@ -2684,7 +2686,7 @@ export class ReportDataFetcherService {
   async getMetricTrends(
     testRunIds: string[],
     selections: BaselineComparisonSelection[],
-    stat: 'avg' | 'p95' | 'p99' = 'avg',
+    stat: TrendStat = 'avg',
   ): Promise<MetricTrendSeries[]> {
     if (testRunIds.length === 0 || selections.length === 0) return [];
     try {
@@ -2700,16 +2702,26 @@ export class ReportDataFetcherService {
         mean: number | null;
         q95: number | null;
         q99: number | null;
+        max_value: number | null;
+        min_value: number | null;
+        last_value: number | null;
+        median: number | null;
+        q90: number | null;
       }> = await this.dataSource.query(
         `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name, s.unit,
-                ms.source_type, s.mean, s.q95, s.q99
+                ms.source_type, s.mean, s.q95, s.q99, s.max_value, s.min_value, s.last_value, s.median, s.q90
          FROM ds_metric_statistics s
          LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
          WHERE s.test_run_id = ANY($1) AND s.dashboard_label = ANY($2)`,
         [testRunIds, labels],
       );
 
-      const field = stat === 'p95' ? 'q95' : stat === 'p99' ? 'q99' : 'mean';
+      const field = ({
+        avg: 'mean', p95: 'q95', p99: 'q99', max: 'max_value', min: 'min_value',
+        last: 'last_value', q50: 'median', q90: 'q90',
+      } as const)[stat];
+      // The URL and run-wide aggregate paths only know avg/p95/p99.
+      const rollupStat = stat === 'p95' || stat === 'p99' ? stat : 'avg';
       const selected = (r: typeof rows[number]) =>
         selections.some(
           (sel) =>
@@ -2742,8 +2754,8 @@ export class ReportDataFetcherService {
       }
 
       for (const extra of [
-        ...(await this.getUrlTrends(testRunIds, selections, stat)),
-        ...(await this.getAggregatedTrends(testRunIds, selections, stat)),
+        ...(await this.getUrlTrends(testRunIds, selections, rollupStat)),
+        ...(await this.getAggregatedTrends(testRunIds, selections, rollupStat)),
       ]) {
         byIdentity.set(`${extra.dashboardLabel}||${extra.panelTitle}||${extra.metricName}`, extra);
       }
@@ -3243,6 +3255,59 @@ export class ReportDataFetcherService {
       return { presets, foundIds: presets.map((p) => p.id) };
     } catch (error) {
       this.logger.error(`Failed to fetch graph presets ${presetIds.join(', ')}:`, error);
+      return { presets: [], foundIds: [] };
+    }
+  }
+
+  /**
+   * The Trends card's presets, each resolved to the per-series selections `getMetricTrends`
+   * scopes on. Same shape and org filter as `getGraphPresetPanels`; the Custom Graphs section
+   * draws both kinds side by side.
+   */
+  async getTrendsPresetSeries(
+    presetIds: string[],
+    userId: string = '',
+    roles: string[] = [],
+  ): Promise<{ presets: TrendsPresetSeries[]; foundIds: string[] }> {
+    if (presetIds.length === 0) return { presets: [], foundIds: [] };
+    try {
+      const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tp');
+      const rows: Array<{
+        id: string;
+        name: string;
+        evaluate_type: string | null;
+        series_config: Array<{
+          dashboardLabel?: string; panelId?: number; metricName?: string; isAggregated?: boolean;
+        }> | null;
+      }> = await withRequestEm(this.testRunRepo).query(
+        `SELECT tp.id, tp.name, tp.evaluate_type, tp.series_config
+         FROM trends_filter_presets tp
+         WHERE tp.id = ANY($1::uuid[])
+           ${orgFilter.clause}`,
+        [presetIds, ...orgFilter.params],
+      );
+
+      const stats: Record<string, TrendStat> = {
+        avg: 'avg', q95: 'p95', q99: 'p99', max: 'max', min: 'min', last: 'last', q50: 'q50', q90: 'q90',
+      };
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const presets: TrendsPresetSeries[] = [];
+      for (const id of presetIds) {
+        const row = byId.get(id);
+        if (!row) continue;
+        const selections: BaselineComparisonSelection[] = [];
+        for (const series of row.series_config ?? []) {
+          if (!series.dashboardLabel || series.panelId == null || !series.metricName) continue;
+          // The card stores the synthetic run-wide aggregate as "All aggregated — <panel>";
+          // the fetcher recognises it by the bare sentinel.
+          const metricName = series.isAggregated ? ALL_AGGREGATED_SERIES : series.metricName;
+          selections.push({ dashboardLabel: series.dashboardLabel, panelId: series.panelId, metricNames: [metricName] });
+        }
+        presets.push({ id, name: row.name, stat: stats[row.evaluate_type ?? 'avg'] ?? 'avg', selections });
+      }
+      return { presets, foundIds: presets.map((p) => p.id) };
+    } catch (error) {
+      this.logger.error(`Failed to fetch trends presets ${presetIds.join(', ')}:`, error);
       return { presets: [], foundIds: [] };
     }
   }

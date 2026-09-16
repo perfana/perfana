@@ -53,6 +53,7 @@ export {
   ReportListResponseDto,
   ReportSummaryDto,
   ReportDetailDto,
+  type ReportGenerationProgress,
   // Template responses
   TemplateListResponseDto,
   TemplateDetailDto,

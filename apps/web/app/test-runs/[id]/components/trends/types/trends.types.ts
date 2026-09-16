@@ -101,6 +101,12 @@ export interface MetricStatistic {
   test_run_id: string;
   panel_title: string;
   metric_name: string;
+  /**
+   * The TrendsSeries this row belongs to. Rows are grouped into traces by this, not by
+   * metric_name: two panels of one dashboard can both carry a series named
+   * "All aggregated", and keyed on the name they collapsed into one zigzag line.
+   */
+  series_id?: string;
   value: number;
   created_at: string;
   version?: string | null;

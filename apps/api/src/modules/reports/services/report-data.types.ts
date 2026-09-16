@@ -386,6 +386,17 @@ export interface GraphPresetPanels {
   panels: MetricsPanelSelector[];
 }
 
+/** The statistic a trend plots per run. `avg`/`p95`/`p99` are what the URL and aggregate paths can answer. */
+export type TrendStat = 'avg' | 'p95' | 'p99' | 'max' | 'min' | 'last' | 'q50' | 'q90';
+
+/** A trends preset (Trends card) resolved to the selections its series stand for. */
+export interface TrendsPresetSeries {
+  id: string;
+  name: string;
+  stat: TrendStat;
+  selections: BaselineComparisonSelection[];
+}
+
 export interface MetricsTimeSeriesPanel {
   panelTitle: string;
   dashboardLabel: string;

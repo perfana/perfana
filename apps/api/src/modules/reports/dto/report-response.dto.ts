@@ -309,6 +309,15 @@ export class ReportSummaryDto {
 /**
  * Response DTO for full report details
  */
+/** Per-section progress the HTML generation job records on itself. */
+export interface ReportGenerationProgress {
+  stage: string;
+  percent: number;
+  done?: number;
+  total?: number;
+  section?: string;
+}
+
 export class ReportDetailDto {
   @ApiProperty({
     description: 'Report UUID',
@@ -418,6 +427,12 @@ export class ReportDetailDto {
     example: 'html-generation-123',
   })
   job_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'Where HTML generation is, while the report is processing: sections rendered so far and the one being rendered',
+    example: { stage: 'rendering', percent: 37, done: 3, total: 8, section: 'Custom Graphs' },
+  })
+  progress?: ReportGenerationProgress;
 
   @ApiProperty({
     description: 'Number of retry attempts',

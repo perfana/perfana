@@ -125,3 +125,34 @@ describe('ReportDataFetcherService getGraphPresetPanels', () => {
     ]);
   });
 });
+
+describe('ReportDataFetcherService getTrendsPresetSeries', () => {
+  it('maps a trends preset to per-series selections and its statistic', async () => {
+    const testRunRepo = {
+      query: jest.fn().mockResolvedValue([{
+        id: 't1',
+        name: 'Nightly RT',
+        evaluate_type: 'q95',
+        series_config: [
+          // The card stores the synthetic aggregate under its composed name; the fetcher
+          // matches it on the bare sentinel.
+          { dashboardLabel: 'Perf', panelId: 101, metricName: 'All aggregated — Transaction RT Avg', isAggregated: true },
+          { dashboardLabel: 'JVM', panelId: 7, metricName: 'heap_used' },
+          { dashboardLabel: 'JVM', metricName: 'no-panel-id' },
+        ],
+      }]),
+    } as any;
+    const svc = new ReportDataFetcherService(testRunRepo, {} as any, {} as any);
+
+    const { presets, foundIds } = await svc.getTrendsPresetSeries(['t1', 'gone'], '', []);
+
+    expect(foundIds).toEqual(['t1']);
+    expect(presets).toEqual([{
+      id: 't1', name: 'Nightly RT', stat: 'p95',
+      selections: [
+        { dashboardLabel: 'Perf', panelId: 101, metricNames: ['All aggregated'] },
+        { dashboardLabel: 'JVM', panelId: 7, metricNames: ['heap_used'] },
+      ],
+    }]);
+  });
+});

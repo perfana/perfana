@@ -87,6 +87,8 @@ export class ReportHtmlCompilerService {
     report: GeneratedReport | null,
     userId: string = '',
     roles: string[] = [],
+    /** Called before each section renders, so a long report can report where it is. */
+    onProgress?: (done: number, total: number, sectionTitle: string) => void,
   ): Promise<string> {
     const sortedSections = [...sections].sort((a, b) => a.order - b.order);
 
@@ -135,6 +137,7 @@ export class ReportHtmlCompilerService {
     for (let i = 0; i < sortedSections.length; i++) {
       const authored = sortedSections[i]!;
       const section = resolvedSections[i]!;
+      onProgress?.(i, sortedSections.length, authored.title || this.utils.getSectionTitle(authored.type));
       try {
         const sectionHtml = await this.renderSection(
           section,

@@ -12,12 +12,12 @@ import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
 import { useState, useEffect} from 'react';
 import { useTheme } from '@mui/material';
 import { MetricStatistic, TrendsSeries, Panel } from '../types';
-import { getYAxisConfigs } from '../utils';
+import { getYAxisConfigs, trendsSeriesLabel } from '../utils';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 interface UseTrendsPlotProps {
   metricsData: MetricStatistic[];
-  selectedSeriesNames: Set<string>;
+  selectedSeriesIds: Set<string>;
   selectedMetric: Panel | null;
   evaluateType: string;
   trendsExpanded: boolean;
@@ -40,7 +40,7 @@ interface PlotDataPoint {
 
 export function useTrendsPlot({
   metricsData,
-  selectedSeriesNames,
+  selectedSeriesIds,
   selectedMetric,
   evaluateType,
   trendsExpanded,
@@ -61,12 +61,13 @@ export function useTrendsPlot({
       return;
     }
 
-    // Group data by metric_name and sort by created_at
+    // Group data by series (not metric_name — two panels can share one) and sort by created_at
     const seriesData = metricsData.reduce((acc, item) => {
-      if (!acc[item.metric_name]) {
-        acc[item.metric_name] = [];
+      const key = item.series_id ?? item.metric_name;
+      if (!acc[key]) {
+        acc[key] = [];
       }
-      acc[item.metric_name].push({
+      acc[key].push({
         x: item.test_run_id,
         y: item.value,
         created_at: item.created_at,
@@ -79,8 +80,8 @@ export function useTrendsPlot({
     }, {} as Record<string, PlotDataPoint[]>);
 
     // Sort each series by created_at and create sequential x-axis positions
-    Object.keys(seriesData).forEach(seriesName => {
-      seriesData[seriesName].sort((a, b) =>
+    Object.keys(seriesData).forEach(seriesKey => {
+      seriesData[seriesKey].sort((a, b) =>
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       );
     });
@@ -90,18 +91,22 @@ export function useTrendsPlot({
     // Series whose unit differs from the first one get their own right-hand axis,
     // otherwise they would be drawn under the first series' label and tick suffix.
     const yAxes = getYAxisConfigs(addedSeries);
+    const labelOf = (seriesKey: string) => {
+      const series = addedSeries.find(s => s.id === seriesKey);
+      return series ? trendsSeriesLabel(series, addedSeries) : seriesKey;
+    };
 
     // Create traces for each series with datetime x-axis but equal spacing
     // Annotated so the changepoint legend trace below (mode 'lines', a dashed
     // coloured line) fits alongside the data traces rather than being narrowed out.
     const traces: TrendsTrace[] = Object.entries(seriesData)
-      .filter(([seriesName]) => selectedSeriesNames.has(seriesName))
-      .map(([seriesName, data]) => ({
+      .filter(([seriesKey]) => selectedSeriesIds.has(seriesKey))
+      .map(([seriesKey, data]) => ({
         x: data.map((_, index) => index),
         y: data.map(point => point.y),
         type: 'scatter' as const,
         mode: 'lines+markers' as const,
-        name: seriesName,
+        name: labelOf(seriesKey),
         customdata: data.map(point => {
           const formattedDate = new Date(point.created_at).toLocaleString('en-US', {
             month: 'short',
@@ -122,7 +127,7 @@ export function useTrendsPlot({
           };
         }),
         hovertemplate:
-          `<b>${seriesName}</b><br>` +
+          `<b>${labelOf(seriesKey)}</b><br>` +
           'Test Run: %{customdata.testRunId}<br>' +
           'Time: %{customdata.datetime}<br>' +
           'Value: %{y}<br>' +
@@ -139,7 +144,7 @@ export function useTrendsPlot({
           }
         },
         line: { width: 2 },
-        yaxis: yAxes.rightMetrics.has(seriesName) ? 'y2' : 'y',
+        yaxis: yAxes.rightSeriesIds.has(seriesKey) ? 'y2' : 'y',
         showlegend: true
       }));
 
@@ -156,8 +161,8 @@ export function useTrendsPlot({
     });
 
     // Get all available series
-    const allSeriesNames = Object.keys(seriesData);
-    const allSeriesSelected = selectedSeriesNames.size === allSeriesNames.length;
+    const allSeriesKeys = Object.keys(seriesData);
+    const allSeriesSelected = selectedSeriesIds.size === allSeriesKeys.length;
 
     // Identify changepoint positions from the first series
     const changepointPositions = firstSeries
@@ -174,13 +179,12 @@ export function useTrendsPlot({
 
     // Determine graph title based on selection
     let graphTitle = '';
-    if (selectedSeriesNames.size === 0 || allSeriesSelected) {
+    if (selectedSeriesIds.size === 0 || allSeriesSelected) {
       graphTitle = `${selectedMetric?.title || 'Metrics'} Trends (${evaluateType})`;
-    } else if (selectedSeriesNames.size === 1) {
-      const singleSeriesName = Array.from(selectedSeriesNames)[0];
-      graphTitle = `${singleSeriesName} Trends (${evaluateType})`;
+    } else if (selectedSeriesIds.size === 1) {
+      graphTitle = `${labelOf(Array.from(selectedSeriesIds)[0]!)} Trends (${evaluateType})`;
     } else {
-      graphTitle = `${selectedMetric?.title || 'Metrics'} Trends - ${selectedSeriesNames.size} series (${evaluateType})`;
+      graphTitle = `${selectedMetric?.title || 'Metrics'} Trends - ${selectedSeriesIds.size} series (${evaluateType})`;
     }
 
     const layout = {
@@ -396,7 +400,7 @@ export function useTrendsPlot({
     setPlotData(traces);
     setPlotLayout(layout);
     setPlotConfig(config);
-  }, [metricsData, selectedSeriesNames, selectedMetric, evaluateType, theme, trendsExpanded, showToast, addedSeries]);
+  }, [metricsData, selectedSeriesIds, selectedMetric, evaluateType, theme, trendsExpanded, showToast, addedSeries]);
 
   return {
     plotData,
