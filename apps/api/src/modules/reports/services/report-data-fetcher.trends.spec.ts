@@ -242,7 +242,7 @@ describe('ReportDataFetcherService.getTrendRunWindow', () => {
         { test_run_id: 'r3', start_time: '2026-09-14T05:00:00Z' },
         { test_run_id: 'r1', start_time: '2026-09-10T05:00:00Z' },
       ]) } as any;
-    const authz = { getAccessibleOrganizations: jest.fn().mockResolvedValue(['org-1']) } as any;
+    const authz = { isGlobalAdmin: () => false, getAccessibleOrganizations: jest.fn().mockResolvedValue(['org-1']) } as any;
     const svc = new ReportDataFetcherService(repo, authz, { query: jest.fn() } as any);
 
     const runs = await svc.getTrendRunWindow(

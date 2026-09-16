@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
