@@ -859,6 +859,41 @@ an author actually wants when writing a sentence about a comparison.
 (`lookupVariableValues`), `packages/shared/src/utils/report-variables.ts` (the Comparison group
 hints), `apps/api/src/modules/reports/renderers/comparisons-renderer.ts` (`resolveBaseline`).
 
+### Report preset lookups run in the system context, so a template can name any organization's preset
+
+**Priority:** P2
+**Origin:** adversarial review during /ship on `fix/trends-series-identity-and-report-graphs`
+(2026-09-16). The reviewer proposed gating the lookups on owner/global in the system context; the
+decision at the time was to ship without it and track it here.
+**Why:** `getGraphPresetPanels` and `getTrendsPresetSeries` in
+`apps/api/src/modules/reports/services/report-data-fetcher.service.ts` resolve preset ids from
+`graph_presets` / `trends_presets` by id. Report HTML generation runs with an empty `userId`
+(the system-call convention, see `project_report_renderers_system_context`), so the org filter
+is empty and any uuid a template's section config names is looked up. A section config is
+caller-supplied JSON on the template, so a member of org A who guesses a preset uuid from org B
+gets that preset's dashboard labels, panel titles and metric names rendered into their report —
+the series *values* still come from A's own run, so it is metadata disclosure, not data. The uuid
+guard added in this release only stops non-uuid ids from reaching the query.
+**What:** at template save / section preview time, where a real `userId` exists, refuse preset
+ids the caller cannot read (`AuthorizedBaseService`-style check); in the generation path, join the
+preset to the template's organization rather than trusting the id. Both graph and trends presets.
+**Where:** `report-data-fetcher.service.ts` (`getGraphPresetPanels`, `getTrendsPresetSeries`),
+`report-templates` save/preview handlers.
+
+### The trend-preset chart encodes the run index as a Date
+
+**Priority:** P4
+**Origin:** adversarial review during /ship on `fix/trends-series-identity-and-report-graphs`
+(2026-09-16).
+**Why:** `renderTrendPresetCharts` in `apps/api/src/modules/reports/renderers/graphs-renderer.ts`
+reuses the time-series chart for a categorical axis by writing `new Date(i)` for run `i` and
+reading the run back with `runs[dp.time.getTime()]`. It works and is pinned by the renderer spec,
+but it couples the chart's x values to the run window's array order, and a future `ChartStyle`
+that sorts or dedupes points by time would silently relabel runs.
+**What:** give `ChartStyle.categorical` its own `{ label, value }[]` input and let `renderChart`
+lay out categories without going through `Date`.
+**Where:** `graphs-renderer.ts` (`renderTrendPresetCharts`, `renderChart`).
+
 ### A Comparisons section reads another organization's run through the statistics path
 
 **Priority:** P1
