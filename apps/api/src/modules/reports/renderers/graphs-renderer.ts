@@ -72,7 +72,7 @@ interface ChartStyle {
   categorical?: { pointNoun: string };
 }
 
-/** Trend presets follow the Trends section's window: since the last change point, at most this many runs. */
+/** Trend presets follow the Trends section's window: since the last change point, the current run and at most this many before it. */
 const TREND_PRESET_MAX_RUNS = 10;
 
 /**
@@ -185,14 +185,16 @@ export class GraphsRenderer {
           ${[...graphCharts.charts, ...trendCharts.charts].join('\n')}
         </section>
       `;
-    } else if (trendsPresetIds.length > 0 && trends.foundIds.length === 0) {
-      return this.renderMissingPresetsSection(title, text, trendsPresetIds.length);
     } else if (Array.isArray(config.panels) && config.panels.length > 0) {
       panels = (config.panels as Array<Record<string, string>>).map((p) => ({
         dashboardLabel: p.dashboardLabel || p.dashboard_label,
         panelTitle: p.panelTitle || p.panel_title,
         metricName: p.metricName || p.metric_name,
       }));
+    } else if (trendsPresetIds.length > 0 && trends.foundIds.length === 0) {
+      // A trends-only template whose presets are gone: same rule as graph presets, never
+      // a silent fall-through to every panel in the run.
+      return this.renderMissingPresetsSection(title, text, trendsPresetIds.length);
     } else {
       // Auto-discover available panels. Aggregated series (if enabled) are appended
       // on top of these — not a substitute for them.
@@ -227,6 +229,11 @@ export class GraphsRenderer {
       .map((panel, idx) =>
         this.renderPanelChart(panel, idx, chartWidth, chartHeight, window, showLegend, hostLabels));
     const trendCharts = await this.renderTrendPresetCharts(trends.presets, timeSeriesData.length, testRun, chartWidth, chartHeight, showLegend, userId, roles);
+    // Trends presets that no longer exist are named beside the listed panels rather than
+    // replacing them: on this path the panels are the section's primary content.
+    const missingTrends = trendsPresetIds.length > 0 && trends.foundIds.length === 0
+      ? warningState(`The ${trendsPresetIds.length === 1 ? 'trends preset' : `${trendsPresetIds.length} trends presets`} this section selects no longer exist. Re-select presets in the section configuration.`)
+      : '';
     const kicker = [
       timeSeriesData.length > 0 || trends.presets.length === 0
         ? `${formatInt(timeSeriesData.length)} panel${timeSeriesData.length !== 1 ? 's' : ''}` : '',
@@ -239,6 +246,7 @@ export class GraphsRenderer {
 
         ${sectionText(text)}
 
+        ${missingTrends}
         ${[...charts, ...trendCharts.charts].join('\n')}
       </section>
     `;
@@ -698,7 +706,10 @@ export class GraphsRenderer {
     const labelPoints = analysisOnly
       ? (dataPoints.filter((dp) => inWindow(dp.time.getTime())) ?? dataPoints)
       : dataPoints;
-    const labelSource = labelPoints.length > 0 ? labelPoints : dataPoints;
+    // A categorical axis labels every run any series has a value in, not the first series' runs.
+    const labelSource = style.categorical
+      ? [...new Map(allPoints.map((dp) => [dp.time.getTime(), dp])).values()].sort((a, b) => a.time.getTime() - b.time.getTime())
+      : labelPoints.length > 0 ? labelPoints : dataPoints;
     // A categorical axis labels every point — "which run is this" is the whole chart.
     const xLabelCount = style.categorical ? labelSource.length : Math.min(6, labelSource.length);
     const xLabels: string[] = [];
@@ -727,7 +738,7 @@ export class GraphsRenderer {
     // named in the legend — a subtitle listing five metric names is unreadable.
     // The legend follows the toggle, single series included.
     const pointCount = style.categorical
-      ? `${formatInt(dataPoints.length)} ${this.utils.escapeHtml(style.categorical.pointNoun)}`
+      ? `${formatInt(labelSource.length)} ${this.utils.escapeHtml(style.categorical.pointNoun)}`
       : `${formatInt(allPoints.length)} data points`;
     const subtitle = drawn.length === 1
       ? `${this.utils.escapeHtml(drawn[0]!.metricName)}${unitLabel} &middot; ${pointCount}`

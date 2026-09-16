@@ -700,6 +700,19 @@ describe('GraphsRenderer', () => {
       expect((html.match(/<svg /g) ?? []).length).toBe(2);
     });
 
+    it('keeps the listed panels, with an inline warning, when the only trends preset is gone', async () => {
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [], foundIds: [] });
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([makePanel({ dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: 'used' })]);
+
+      const html = await renderer.renderGraphsSection(makeSection({
+        config: { trendsPresetIds: ['gone'], panels: [{ dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: 'used' }] },
+      }), makeTestRun());
+
+      expect(dataFetcher.getMetricsTimeSeries).toHaveBeenCalled();
+      expect(html).toContain('<svg ');
+      expect(html).toContain('no longer exist');
+    });
+
     it('warns, and discovers nothing, when every trends preset of a trends-only section is gone', async () => {
       dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [], foundIds: [] });
 

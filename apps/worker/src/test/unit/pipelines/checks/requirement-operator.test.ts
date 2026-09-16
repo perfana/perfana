@@ -20,6 +20,13 @@ describe('evaluateRequirement', () => {
     expect(evaluateRequirement(5, ' GE ', 5)).toBe(true);
   });
 
+  it('compares a NUMERIC threshold that arrived as a string the way the driver hands it over', () => {
+    expect(evaluateRequirement(26.25, 'ne', '26.25' as never)).toBe(false);
+    expect(evaluateRequirement(26.25, 'eq', '26.25' as never)).toBe(true);
+    expect(evaluateRequirement('26.25' as never, 'lt', '30' as never)).toBe(true);
+    expect(evaluateRequirement(1, 'eq', 'abc' as never)).toBeNull();
+  });
+
   it('leaves an operator nobody defined to the caller', () => {
     expect(evaluateRequirement(1, 'between', 2)).toBeNull();
   });

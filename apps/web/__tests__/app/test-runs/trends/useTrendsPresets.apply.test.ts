@@ -74,7 +74,8 @@ it('restores the valid series and the evaluate type, and points the save context
 });
 
 it('still plots a preset whose dashboard is no longer in the list, with a placeholder as save context', async () => {
-  // Regression: this used to toast "Dashboard ... not found" and restore nothing.
+  // Regression: this used to toast "Dashboard ... not found" and restore nothing. The toast
+  // stays — the user should know the save context is a stand-in — but the series come back.
   const s = setup([], jest.fn().mockResolvedValue([]));
 
   await act(async () => { await s.result.current.applyPreset(preset({})); });
@@ -85,7 +86,7 @@ it('still plots a preset whose dashboard is no longer in the list, with a placeh
   });
   expect(s.setAddedSeries).toHaveBeenCalledTimes(1);
   expect(s.showToast).toHaveBeenCalledWith('Applied preset: Heap trend');
-  expect(s.showToast).not.toHaveBeenCalledWith(expect.stringContaining('not found'));
+  expect(s.showToast).toHaveBeenCalledWith(expect.stringContaining('"JVM" not found'));
 });
 
 it('finds the dashboard by label when the preset carries a stale id', async () => {

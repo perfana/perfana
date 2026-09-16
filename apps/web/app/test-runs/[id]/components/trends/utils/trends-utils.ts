@@ -88,8 +88,12 @@ export function getYAxisConfigs(addedSeries: TrendsSeries[]): {
  * "All aggregated"), in which case the panel title is appended.
  */
 export function trendsSeriesLabel(series: TrendsSeries, all: TrendsSeries[]): string {
-  const clash = all.some(s => s.id !== series.id && s.metricName === series.metricName);
-  return clash ? `${series.metricName} — ${series.panelTitle}` : series.metricName;
+  const others = all.filter(s => s.id !== series.id && s.metricName === series.metricName);
+  if (others.length === 0) return series.metricName;
+  // Two dashboards (two hosts, two scenarios) can share a panel title too.
+  return others.some(s => s.panelTitle === series.panelTitle)
+    ? `${series.metricName} — ${series.dashboardLabel} / ${series.panelTitle}`
+    : `${series.metricName} — ${series.panelTitle}`;
 }
 
 /**

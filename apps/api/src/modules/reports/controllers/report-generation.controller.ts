@@ -42,6 +42,9 @@ import {
   type ReportSectionType,
 } from '../dto';
 
+/** How long GET /reports/:id waits on Redis for the job's progress before answering without it. */
+const PROGRESS_LOOKUP_TIMEOUT_MS = 300;
+
 /**
  * Controller for report generation and management operations.
  *
@@ -473,7 +476,12 @@ export class ReportGenerationController {
   ): Promise<ReportGenerationProgress | undefined> {
     if (status !== 'processing' || !jobId || !this.htmlGenerationProcessor.isAvailable()) return undefined;
     try {
-      const job = await this.htmlGenerationProcessor.getJobStatus(jobId);
+      // This runs inside the request's RLS transaction, and the BullMQ client has no command
+      // timeout: a stalled Redis must not pin a pooled Postgres connection for the stall.
+      const job = await Promise.race([
+        this.htmlGenerationProcessor.getJobStatus(jobId),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), PROGRESS_LOOKUP_TIMEOUT_MS).unref?.()),
+      ]);
       const p = job?.progress;
       return p && typeof p === 'object' && 'stage' in p ? (p as ReportGenerationProgress) : undefined;
     } catch {

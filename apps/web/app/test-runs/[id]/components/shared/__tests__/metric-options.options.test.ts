@@ -60,6 +60,17 @@ it('threads the options through the bounded multi-dashboard loader', async () =>
   expect(panels!.map((p) => p.id)).toEqual([201, 202, 205]);
 });
 
+it('retries the perf-test rows per dashboard when the shared prefetch fails', async () => {
+  // A non-OK prefetch used to resolve to [] and every perf-test dashboard came back empty.
+  (authenticatedFetch as jest.Mock)
+    .mockResolvedValueOnce({ ok: false, status: 503 })
+    .mockResolvedValue({ ok: true, json: async () => perfRows });
+
+  const [panels] = await fetchPanelsForDashboards([perfDashboard], testRun, { collapseRtPanels: false, includeUrlPanels: false });
+
+  expect(panels!.map((p) => p.id)).toEqual([201, 202, 205]);
+});
+
 it('can decline only one of the extras', async () => {
   (authenticatedFetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => perfRows });
 

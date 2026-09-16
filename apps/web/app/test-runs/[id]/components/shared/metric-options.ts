@@ -184,7 +184,8 @@ async function fetchAvailablePanelRows(testRun: TestRun): Promise<AvailablePanel
     `/metrics/ds-metrics/available/${encodeURIComponent(testRun.test_run_id)}`,
     { headers: { 'Content-Type': 'application/json' } },
   );
-  return res.ok ? res.json() : [];
+  if (!res.ok) throw new Error(`available panels: ${res.status}`);
+  return res.json();
 }
 
 /** The panels of one dashboard, asked of whichever backend that dashboard's source uses. */
@@ -224,7 +225,7 @@ export async function fetchPanelsForDashboard(
     if (source === 'performance-metrics') {
       // Performance-test panels are whatever the run actually recorded, not dashboard JSON.
       if (!testRun) return [];
-      const rows = availableRows ?? await fetchAvailablePanelRows(testRun);
+      const rows = availableRows ?? await fetchAvailablePanelRows(testRun).catch(() => [] as AvailablePanelRow[]);
       const seen = new Set<number>();
       const panels: Panel[] = [];
       for (const row of rows) {

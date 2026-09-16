@@ -104,6 +104,9 @@ export function useTrendsPresets({
           ?? (preset.dashboard_label
             ? currentDashboards.find(d => d.dashboard_label === preset.dashboard_label)
             : undefined);
+        if (!dashboard) {
+          showToast(`Dashboard "${preset.dashboard_label || preset.application_dashboard_id}" not found — it may have been deleted; the series are restored as saved.`);
+        }
         setSelectedDashboard(dashboard ?? {
           id: preset.application_dashboard_id,
           dashboard_label: preset.dashboard_label || '',

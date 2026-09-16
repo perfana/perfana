@@ -10,14 +10,22 @@
  * Returns null for an operator nobody defined, so the caller decides what an
  * unknown operator means rather than inheriting a silent pass.
  */
-export function evaluateRequirement(value: number, operator: string, threshold: number): boolean | null {
+export function evaluateRequirement(value: number | string, operator: string, threshold: number | string): boolean | null {
+  // `benchmarks.requirement_value` is NUMERIC, which node-postgres hands over as a STRING
+  // and nothing in the worker registers a parser for. `<` coerces; `===` does not, so
+  // without this an "= 26.25" SLO could never pass and a "≠ 26.25" one could never fail.
+  const v = Number(value);
+  const t = Number(threshold);
+  if (!Number.isFinite(v) || !Number.isFinite(t)) {
+    return null;
+  }
   switch (operator.trim().toLowerCase()) {
-    case 'lt': case '<': return value < threshold;
-    case 'lte': case 'le': case '<=': return value <= threshold;
-    case 'gt': case '>': return value > threshold;
-    case 'gte': case 'ge': case '>=': return value >= threshold;
-    case 'eq': case '=': case '==': return value === threshold;
-    case 'ne': case '!=': case '<>': return value !== threshold;
+    case 'lt': case '<': return v < t;
+    case 'lte': case 'le': case '<=': return v <= t;
+    case 'gt': case '>': return v > t;
+    case 'gte': case 'ge': case '>=': return v >= t;
+    case 'eq': case '=': case '==': return v === t;
+    case 'ne': case '!=': case '<>': return v !== t;
     default: return null;
   }
 }

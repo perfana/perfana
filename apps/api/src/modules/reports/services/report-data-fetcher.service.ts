@@ -2735,6 +2735,7 @@ export class ReportDataFetcherService {
             metricName: r.metric_name ?? '',
             unit: r.unit,
             valuesByRun: {},
+            ...(r.panel_title && r.panel_title !== panelTitle ? { storedPanelTitle: r.panel_title } : {}),
           };
           byIdentity.set(key, series);
         }

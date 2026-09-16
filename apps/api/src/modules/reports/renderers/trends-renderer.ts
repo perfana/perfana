@@ -128,6 +128,17 @@ export class TrendsRenderer {
     // panels heads its own table. Two dashboards with a "CPU" panel stay apart, and a panel's
     // name is not repeated down a column.
     const byDashboard = new Map<string, Map<string, MetricTrendSeries[]>>();
+    // Several stored panels can fold into one display title (the perf-test RT percentiles);
+    // a series whose name repeats inside its group is labelled with its stored panel too.
+    const nameCount = new Map<string, number>();
+    for (const s of series) {
+      const k = `${s.dashboardLabel}||${s.panelTitle}||${s.metricName}`;
+      nameCount.set(k, (nameCount.get(k) ?? 0) + 1);
+    }
+    const rowLabel = (s: MetricTrendSeries) =>
+      s.storedPanelTitle && (nameCount.get(`${s.dashboardLabel}||${s.panelTitle}||${s.metricName}`) ?? 0) > 1
+        ? `${s.metricName} · ${s.storedPanelTitle}`
+        : s.metricName;
     for (const s of series) {
       const panels = byDashboard.get(s.dashboardLabel) ?? new Map<string, MetricTrendSeries[]>();
       const arr = panels.get(s.panelTitle || 'Other') ?? [];
@@ -185,7 +196,7 @@ export class TrendsRenderer {
             return `<td${title} style="padding:8px 10px; text-align:right; font-size:11px; font-variant-numeric:tabular-nums; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${arrow}${value}</td>`;
           }).join('');
           return `<tr style="background:${idx % 2 === 1 ? '#fbfcfd' : '#ffffff'};">
-            <td style="padding:8px 10px; font-size:11.5px; color:${REPORT_COLORS.ink}; font-weight:600; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(s.metricName)}</td>
+            <td style="padding:8px 10px; font-size:11.5px; color:${REPORT_COLORS.ink}; font-weight:600; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(rowLabel(s))}</td>
             ${cells}
           </tr>`;
         }).join('');

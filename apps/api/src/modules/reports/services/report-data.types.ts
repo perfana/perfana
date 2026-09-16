@@ -358,6 +358,12 @@ export interface MetricTrendSeries {
   metricName: string;
   unit: string | null;
   valuesByRun: Record<string, number | null>;
+  /**
+   * The panel's stored title when it differs from `panelTitle` — the perf-test RT
+   * percentile panels fold into one display title, and a trend table that lists several
+   * of them under it needs the stored one ("Transaction RT P95") to tell the rows apart.
+   */
+  storedPanelTitle?: string;
 }
 
 /** Panel selector for metrics time-series queries */
