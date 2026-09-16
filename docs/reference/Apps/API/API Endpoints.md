@@ -186,7 +186,7 @@ Generation is queued on a worker; poll the download endpoint. Full pipeline reci
 | `POST` | `/api/reports/generate` | Generate from a template (`template_id`, `template_name`, or the scope default) |
 | `POST` | `/api/reports/generate/ad-hoc` | Generate from inline sections (max 20, `name` required) |
 | `POST` | `/api/reports/preview-section` | Render one section for the builder preview |
-| `GET` | `/api/reports/:reportId` | Report metadata and status |
+| `GET` | `/api/reports/:reportId` | Report metadata and status; while `processing`, a `progress` object (`stage`, `percent`, `done`, `total`, `section`) from the HTML generation job, v0.2.95.31 |
 | `DELETE` | `/api/reports/:reportId` | Delete report |
 | `POST` | `/api/reports/:reportId/pdf` | Queue PDF rendering |
 | `GET` | `/api/reports/:reportId/html/download` | Download HTML (202 while generating) |

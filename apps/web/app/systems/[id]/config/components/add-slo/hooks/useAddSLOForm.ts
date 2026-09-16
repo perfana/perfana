@@ -13,7 +13,7 @@ import {
   initialSLOFormData,
 } from '../types';
 import { SUPPORTED_PANEL_TYPES } from '../utils/slo-validators';
-import { isPerformanceTest } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 
 export function useAddSLOForm({
   open,
@@ -60,8 +60,11 @@ export function useAddSLOForm({
       );
 
       if (response.ok) {
-        const dashboardsData = await response.json();
-        setAvailableDashboards(dashboardsData);
+        const dashboardsData: ApplicationDashboard[] = await response.json();
+        // Real Grafana dashboards only. The endpoint also returns the artificial
+        // performance-test placeholders, which listed them under "Grafana Dashboards" too
+        // — and picking that copy fetched panels by Grafana uid, which they have none of.
+        setAvailableDashboards(dashboardsData.filter((d) => isGrafana(d)));
       } else {
         console.warn('Failed to fetch SLO application dashboards:', response.statusText);
         setAvailableDashboards([]);
@@ -282,24 +285,14 @@ export function useAddSLOForm({
         selectedPanel: null,
       }));
 
-      // Clear previous data
-      setAvailableDashboards([]);
+      // Only the panel/metric lists belong to the previous pick. The dashboard lists are
+      // all loaded up front for the grouped dropdown and must survive a pick, or every
+      // other group vanishes from the dropdown until the dialog is reopened.
       setAvailablePanels([]);
-      setAvailableDynatraceDashboards([]);
       setAvailableDynatraceMetrics([]);
-      setAvailablePerfMetricsDashboards([]);
       setAvailablePerfMetricsPanels([]);
-
-      // Fetch appropriate data based on source
-      if (sourceValue === 'grafana') {
-        fetchSloApplicationDashboards();
-      } else if (sourceValue === 'dynatrace') {
-        fetchDynatraceDashboardsForSlo();
-      } else if (sourceValue === 'performance-metrics') {
-        fetchPerfMetricsDashboardsForSlo();
-      }
     },
-    [fetchSloApplicationDashboards, fetchDynatraceDashboardsForSlo, fetchPerfMetricsDashboardsForSlo]
+    []
   );
 
   // Reset form when dialog opens and determine available sources

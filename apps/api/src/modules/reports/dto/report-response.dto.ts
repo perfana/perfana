@@ -306,6 +306,24 @@ export class ReportSummaryDto {
   total_share_views!: number;
 }
 
+/** Per-section progress the HTML generation job records on itself. */
+export class ReportGenerationProgress {
+  @ApiProperty({ description: 'Job stage', example: 'rendering' })
+  stage!: string;
+
+  @ApiProperty({ description: 'Sections rendered so far, as a percentage of the template', example: 37 })
+  percent!: number;
+
+  @ApiPropertyOptional({ description: 'Sections rendered so far', example: 3 })
+  done?: number;
+
+  @ApiPropertyOptional({ description: 'Sections in the template', example: 8 })
+  total?: number;
+
+  @ApiPropertyOptional({ description: 'Title of the section being rendered', example: 'Custom Graphs' })
+  section?: string;
+}
+
 /**
  * Response DTO for full report details
  */
@@ -418,6 +436,12 @@ export class ReportDetailDto {
     example: 'html-generation-123',
   })
   job_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'Where HTML generation is, while the report is processing: sections rendered so far and the one being rendered',
+    type: ReportGenerationProgress,
+  })
+  progress?: ReportGenerationProgress;
 
   @ApiProperty({
     description: 'Number of retry attempts',

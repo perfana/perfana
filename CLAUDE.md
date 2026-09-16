@@ -649,7 +649,12 @@ Seven things a future reader will otherwise "fix":
      offer it", i.e. fail-open, and the dropdown lists the entry twice.
    - `isAllAggregatedDashboard(labelOrUid)` at the three web add-series sites (`useTrendsData`,
      `useGraphsData`, `useCompareHandlers`). On this dashboard the name must not be routed to
-     `/aggregated-metric-*`, whose spec covers ten panels and returns nothing for the rest.
+     `/aggregated-metric-*`, whose spec covers ten panels and returns nothing for the rest. Since
+     v0.2.95.31 the three cards pick series through one shared
+     `apps/web/app/test-runs/[id]/components/shared/MetricSeriesCascade.tsx` (option loaders in
+     `shared/metric-options.ts`; `compare/utils/metric-options.ts` is a re-export shim), and its
+     `storedName` is a fourth site: it composes the stored name only off this dashboard, so an
+     already-added aggregate greys out in the picker.
    - `isSyntheticAllAggregated()` in `apps/api/src/modules/reports/services/url-perf-panels.ts`,
      folded into the three interception sites in `report-data-fetcher.service.ts`. That one was a
      real bug, not a precaution: a report selection on the new dashboard was intercepted, so on
@@ -657,10 +662,12 @@ Seven things a future reader will otherwise "fix":
      (a raw `PERCENTILE_CONT` over the run against the pipeline's per-bucket roll-up), and on every
      other panel `aggregatedKindFor` is null, so the name was stripped from the selection with
      nothing substituted and the section rendered blank.
-   - `presetAggregateSpec()` in the same file (v0.2.95.5), read by `getGraphPresetPanels`. A saved
-     **graph preset** stores the composed name `All aggregated — <panel title>` rather than the bare
-     option, so this one matches on the PREFIX; drop its `ALL_AGGREGATED_DASHBOARD_LABEL` check and a
-     preset on the real dashboard is answered from the raw tables instead of its own stored row.
+   - `presetAggregateSpec()` in the same file (v0.2.95.5), read by `getGraphPresetPanels` and, since
+     v0.2.95.31, by `getTrendsPresetSeries` (a Custom Graphs section can also select **trends
+     presets**, `trendsPresetIds`). A saved **graph preset** or **trends preset** stores the composed
+     name `All aggregated — <panel title>` rather than the bare option, so this one matches on the
+     PREFIX; drop its `ALL_AGGREGATED_DASHBOARD_LABEL` check and a preset on the real dashboard is
+     answered from the raw tables instead of its own stored row.
      Its panel table `AGGREGATED_PERF_SPECS` is a hand copy of `AGGREGATABLE_PERF_PANELS`, pinned
      against drift by `url-perf-panels.spec.ts`. It does **not** check `series.source`, matching
      `useGraphsData`'s restore path, which does not either — a Grafana panel in the 101-105/201-205
@@ -685,6 +692,16 @@ Seven things a future reader will otherwise "fix":
    `ds_metrics.ramp_up` is baked to exclude the ramp-DOWN band too, so a stored series and an
    aggregate on one preset chart ended at different x positions. `getAnalysisWindowBounds` now
    returns both cutoffs and `getRampUpCutoffTime` delegates to it.
+
+   The per-run twin is `getAggregatedTrendValues` (v0.2.95.31), which must stay value-identical to
+   `/test-runs/:id/aggregated-metric-statistic` (`getAggregatedMetricStatistics`): same rollup
+   tables (`test_run_transaction_stats` / `test_run_sampler_stats`), same
+   `bool_or(ramp_up_excluded)` window rule, same tdigest estimators. Both the Trend Charts section's
+   `getAggregatedTrends` and a Custom Graphs trends preset read through it — the former used a raw
+   `PERCENTILE_CONT` over `transactions` until then, so the report's aggregated trend line was not the
+   Trends card's line. Trends presets take their runs from `getTrendRunWindow`, the Trend Charts
+   window (same workload, completed, not stale, since the last ADAPT change point, at most 10 runs)
+   without `getTrendsData`'s per-run percentile LATERAL.
 6. **A real scenario literally named `all aggregated` has its own row dropped in favour of the
    roll-up.** Both datasets land on the same dashboard and the two rows share
    `(dashboard, panel, metric_name, time)` in one statement, which Postgres rejects outright and

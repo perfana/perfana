@@ -70,6 +70,10 @@ describe('GraphsRenderer', () => {
             ] as MetricsPanelSelector[]),
             getAggregatedSeries: jest.fn().mockResolvedValue([]),
             getGraphPresetPanels: jest.fn().mockResolvedValue({ presets: [], foundIds: [] }),
+            getTrendsPresetSeries: jest.fn().mockResolvedValue({ presets: [], foundIds: [] }),
+            getTrendRunWindow: jest.fn().mockResolvedValue([]),
+            getAggregatedTrendValues: jest.fn().mockResolvedValue({}),
+            getMetricTrends: jest.fn().mockResolvedValue([]),
           },
         },
       ],
@@ -550,7 +554,7 @@ describe('GraphsRenderer', () => {
       const html = await renderer.renderGraphsSection(section, makeTestRun());
 
       expect(html).toContain('Section incomplete.');
-      expect(html).toContain('2 graph presets');
+      expect(html).toContain('2 presets');
       // The dangerous fallback: rendering every panel in the run instead
       expect(dataFetcher.getAvailableMetricsPanels).not.toHaveBeenCalled();
       expect(dataFetcher.getMetricsTimeSeries).not.toHaveBeenCalled();
@@ -574,6 +578,229 @@ describe('GraphsRenderer', () => {
 
       expect(dataFetcher.getGraphPresetPanels).not.toHaveBeenCalled();
       expect(dataFetcher.getAvailableMetricsPanels).toHaveBeenCalled();
+    });
+  });
+
+  describe('trends presets', () => {
+    const run = (id: string, day: number) => ({ testRunId: id, startTime: new Date(`2026-09-${day}T05:00:00Z`) });
+
+    // A section with only trends presets keeps auto-discovery; these tests are about the
+    // trend charts, so the run has nothing to discover unless a test says otherwise.
+    beforeEach(() => {
+      dataFetcher.getAvailableMetricsPanels.mockResolvedValue([]);
+    });
+
+    it('draws one value-per-run chart per trends preset, beside the graph presets', async () => {
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({
+        presets: [{
+          id: 't1', name: 'Nightly RT', stat: 'p95',
+          selections: [{ dashboardLabel: 'Perf', panelId: 101, metricNames: ['T01'] }],
+          aggregates: [],
+        }],
+        foundIds: ['t1'],
+      });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([run('run-001', 10), run('run-002', 12), run('run-003', 14)]);
+      dataFetcher.getMetricTrends.mockResolvedValue([{
+        dashboardLabel: 'Perf', panelTitle: 'Transaction RT', metricName: 'All aggregated', unit: 'ms',
+        valuesByRun: { 'run-001': 280, 'run-002': 300, 'run-003': 260 },
+      }]);
+      const section = makeSection({ config: { trendsPresetIds: ['t1'] } });
+
+      const html = await renderer.renderGraphsSection(section, makeTestRun(), 'user-1', ['user']);
+
+      expect(dataFetcher.getTrendsPresetSeries).toHaveBeenCalledWith(['t1'], 'user-1', ['user']);
+      // Oldest run first, the preset's own statistic
+      expect(dataFetcher.getMetricTrends).toHaveBeenCalledWith(
+        ['run-001', 'run-002', 'run-003'], expect.anything(), 'p95',
+      );
+      expect(html).toContain('Nightly RT (p95)');
+      // One marker per run, every run labelled by its start time (local zone, like every
+      // other chart label) rather than a time of day
+      expect((html.match(/<circle /g) ?? []).length).toBe(3);
+      const label = (day: number) => run('x', day).startTime.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      expect(html).toContain(label(10));
+      expect(html).toContain(label(12));
+      expect(html).toContain(label(14));
+      expect(html).toContain('3 runs');
+      expect(html).toContain('1 trend preset');
+    });
+
+    const preset = (id: string, name: string) => ({
+      id, name, stat: 'avg' as const,
+      selections: [{ dashboardLabel: 'Perf', panelId: 101, metricNames: ['T01'] }],
+      aggregates: [],
+    });
+
+    it('draws the synthetic "All aggregated" series from the rollups at the panel\'s own statistic, error rate included', async () => {
+      // The Trends card computes this series via /aggregated-metric-statistic with the stat
+      // the PANEL stands for (103 = p95, 105 = error %), whatever the preset's evaluate type.
+      // Folding it to the preset's stat over raw transactions drew a different line.
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({
+        presets: [{
+          id: 't1', name: 'Run-wide', stat: 'avg', selections: [],
+          aggregates: [
+            { dashboardLabel: 'Perf', panelTitle: 'Transaction RT P95', metricName: 'All aggregated — Transaction RT P95', metric: 'transaction_response_time', stat: 'p95', unit: 'ms' },
+            { dashboardLabel: 'Perf', panelTitle: 'Transaction Error Rate', metricName: 'All aggregated — Transaction Error Rate', metric: 'error_percentage', stat: 'avg', unit: 'percent' },
+          ],
+        }],
+        foundIds: ['t1'],
+      });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([run('run-001', 10), run('run-002', 12)]);
+      dataFetcher.getAggregatedTrendValues
+        .mockResolvedValueOnce({ 'run-001': 400, 'run-002': 420 })
+        .mockResolvedValueOnce({ 'run-001': 1.5, 'run-002': 0.5 });
+
+      const html = await renderer.renderGraphsSection(makeSection({ config: { trendsPresetIds: ['t1'] } }), makeTestRun());
+
+      expect(dataFetcher.getAggregatedTrendValues).toHaveBeenCalledWith(['run-001', 'run-002'], 'transaction_response_time', 'p95');
+      expect(dataFetcher.getAggregatedTrendValues).toHaveBeenCalledWith(['run-001', 'run-002'], 'error_percentage', 'avg');
+      expect(dataFetcher.getMetricTrends).not.toHaveBeenCalled();
+      // Two series, two units, one chart
+      expect(html).toContain('2 series');
+      expect((html.match(/<path d=/g) ?? []).length).toBe(2);
+      expect(html).toContain('All aggregated — Transaction Error Rate');
+    });
+
+    it('keeps the auto-discovered panels when a template selects only trends presets', async () => {
+      // A template that auto-discovered its panels and then gained a trends preset must not
+      // lose every chart it used to render.
+      dataFetcher.getAvailableMetricsPanels.mockResolvedValue([
+        { dashboardLabel: 'System Metrics', panelTitle: 'CPU Usage', metricName: 'cpu_usage_percent' },
+      ]);
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [preset('t1', 'Nightly RT')], foundIds: ['t1'] });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([run('run-001', 10), run('run-002', 12)]);
+      dataFetcher.getMetricTrends.mockResolvedValue([{
+        dashboardLabel: 'Perf', panelTitle: 'Transaction RT', metricName: 'T01', unit: 'ms',
+        valuesByRun: { 'run-001': 280, 'run-002': 300 },
+      }]);
+
+      const html = await renderer.renderGraphsSection(makeSection({ config: { trendsPresetIds: ['t1'] } }), makeTestRun());
+
+      expect(dataFetcher.getAvailableMetricsPanels).toHaveBeenCalled();
+      expect(html).toContain('CPU Usage');
+      expect(html).toContain('Nightly RT (avg)');
+      expect(html).toContain('1 panel, 1 trend preset');
+    });
+
+    it('computes a run-wide aggregate once for every preset that asks for it', async () => {
+      const agg = { dashboardLabel: 'Perf', panelTitle: 'Transaction RT P95', metricName: 'All aggregated — Transaction RT P95', metric: 'transaction_response_time' as const, stat: 'p95' as const, unit: 'ms' };
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({
+        presets: [
+          { id: 't1', name: 'One', stat: 'avg', selections: [], aggregates: [agg] },
+          { id: 't2', name: 'Two', stat: 'avg', selections: [], aggregates: [agg] },
+        ],
+        foundIds: ['t1', 't2'],
+      });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([run('run-001', 10), run('run-002', 12)]);
+      dataFetcher.getAggregatedTrendValues.mockResolvedValue({ 'run-001': 400, 'run-002': 420 });
+
+      const html = await renderer.renderGraphsSection(makeSection({ config: { trendsPresetIds: ['t1', 't2'] } }), makeTestRun());
+
+      expect(dataFetcher.getAggregatedTrendValues).toHaveBeenCalledTimes(1);
+      expect((html.match(/<svg /g) ?? []).length).toBe(2);
+    });
+
+    it('keeps the listed panels, with an inline warning, when the only trends preset is gone', async () => {
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [], foundIds: [] });
+      dataFetcher.getMetricsTimeSeries.mockResolvedValue([makePanel({ dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: 'used' })]);
+
+      const html = await renderer.renderGraphsSection(makeSection({
+        config: { trendsPresetIds: ['gone'], panels: [{ dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: 'used' }] },
+      }), makeTestRun());
+
+      expect(dataFetcher.getMetricsTimeSeries).toHaveBeenCalled();
+      expect(html).toContain('<svg ');
+      expect(html).toContain('no longer exist');
+    });
+
+    it('warns, and discovers nothing, when every trends preset of a trends-only section is gone', async () => {
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [], foundIds: [] });
+
+      const html = await renderer.renderGraphsSection(makeSection({ config: { trendsPresetIds: ['gone'] } }), makeTestRun());
+
+      expect(html).toContain('no longer exist');
+      expect(dataFetcher.getAvailableMetricsPanels).not.toHaveBeenCalled();
+    });
+
+    it('draws no trend and asks for no statistics when the run has no trend window', async () => {
+      // The window is empty when the run is unknown or has no history to trend.
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [preset('t1', 'Nightly RT')], foundIds: ['t1'] });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([]);
+      const section = makeSection({ config: { trendsPresetIds: ['t1'] } });
+
+      const html = await renderer.renderGraphsSection(section, makeTestRun(), 'user-1', ['user']);
+
+      expect(dataFetcher.getMetricTrends).not.toHaveBeenCalled();
+      // The only preset produced nothing, so it says so instead of drawing an empty chart
+      expect(html).toContain('No trend data found for this preset in the run window.');
+      expect(html).not.toContain('<circle ');
+    });
+
+    it('keeps a preset with no data in the window as an empty chart beside one with data', async () => {
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({
+        presets: [preset('t1', 'Has data'), preset('t2', 'Nothing here')], foundIds: ['t1', 't2'],
+      });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([run('run-001', 10), run('run-002', 12)]);
+      dataFetcher.getMetricTrends
+        .mockResolvedValueOnce([{
+          dashboardLabel: 'Perf', panelTitle: 'Transaction RT', metricName: 'All aggregated', unit: 'ms',
+          valuesByRun: { 'run-001': 280, 'run-002': 300 },
+        }])
+        .mockResolvedValueOnce([]);
+      const section = makeSection({ config: { trendsPresetIds: ['t1', 't2'] } });
+
+      const html = await renderer.renderGraphsSection(section, makeTestRun(), 'user-1', ['user']);
+
+      expect(html).toContain('Has data (avg)');
+      expect(html).toContain('Nothing here (avg)');
+      expect(html).toContain('No trend data found for this preset in the run window.');
+      expect((html.match(/<circle /g) ?? []).length).toBe(2);
+      expect(html).toContain('2 trend presets');
+    });
+
+    it('treats a series whose every run is null as no data, not as an empty chart', async () => {
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [preset('t1', 'All null')], foundIds: ['t1'] });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([run('run-001', 10), run('run-002', 12)]);
+      dataFetcher.getMetricTrends.mockResolvedValue([{
+        dashboardLabel: 'Perf', panelTitle: 'Transaction RT', metricName: 'All aggregated', unit: 'ms',
+        valuesByRun: {}, // neither run recorded the metric
+      }]);
+      const section = makeSection({ config: { trendsPresetIds: ['t1'] } });
+
+      const html = await renderer.renderGraphsSection(section, makeTestRun(), 'user-1', ['user']);
+
+      // The preset's empty state, not a chart wrapper around "No data points available."
+      expect(html).toContain('No trend data found for this preset in the run window.');
+      expect(html).not.toContain('<svg ');
+    });
+
+    it('draws graph presets and trend presets in one section and counts only the found ones', async () => {
+      dataFetcher.getGraphPresetPanels.mockResolvedValue({
+        presets: [{ id: 'g1', name: 'CPU', panels: [{ dashboardLabel: 'System Metrics', panelTitle: 'CPU Usage', metricName: 'cpu_usage_percent' }] }],
+        foundIds: ['g1'],
+      });
+      dataFetcher.getTrendsPresetSeries.mockResolvedValue({ presets: [preset('t1', 'Nightly RT')], foundIds: ['t1'] });
+      dataFetcher.getTrendRunWindow.mockResolvedValue([run('run-001', 10), run('run-002', 12)]);
+      dataFetcher.getMetricTrends.mockResolvedValue([{
+        dashboardLabel: 'Perf', panelTitle: 'Transaction RT', metricName: 'All aggregated', unit: 'ms',
+        valuesByRun: { 'run-001': 280, 'run-002': 300 },
+      }]);
+      const section = makeSection({ config: { graphPresetIds: ['g1', 'gone'], trendsPresetIds: ['t1'] } });
+
+      const html = await renderer.renderGraphsSection(section, makeTestRun(), 'user-1', ['user']);
+
+      expect(html).toContain('CPU');
+      expect(html).toContain('Nightly RT (avg)');
+      // Two found presets; the missing graph preset is logged, not counted or fatal
+      expect(html).toContain('2 presets');
+      expect(html).not.toContain('no longer exist');
+    });
+
+    it('warns when every configured preset of either kind is gone', async () => {
+      const section = makeSection({ config: { graphPresetIds: ['gone'], trendsPresetIds: ['gone-too'] } });
+      const html = await renderer.renderGraphsSection(section, makeTestRun());
+      expect(html).toContain('2 presets');
+      expect(html).toContain('no longer exist');
     });
   });
 

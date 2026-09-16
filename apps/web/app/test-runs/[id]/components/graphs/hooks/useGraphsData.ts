@@ -5,14 +5,10 @@ import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceDashboards, DynatraceDashboard } from '@/lib/dynatrace';
 import {
   ApplicationDashboard,
-  Panel,
   SeriesConfig,
   MetricDataPoint,
-  DataSource,
-  SUPPORTED_PANEL_TYPES,
 } from '../types';
-import { extractYAxisFormat, generateChartName, PERFORMANCE_METRICS_PANEL_UNITS } from '../utils';
-import { getFilteredDashboards, computeAvailableSources, determineSource } from '../utils';
+import { generateChartName } from '../utils';
 import {
   ALL_AGGREGATED_OPTION,
   isAllAggregatedDashboard,
@@ -20,12 +16,12 @@ import {
   buildAggregatedMetricName,
 } from '@/lib/aggregated-perf-series';
 import {
-  offerAggregatedOption,
   aggregatedYAxisFormat,
   fetchAggregatedSeriesData,
 } from '../utils/aggregated-series';
-import { isDynatrace, isGrafana, isPerformanceTest, getSourceType } from '@/lib/metrics-source-utils';
+import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 import { TestRun } from '@/types/test-runs';
+import { mapLimit, OPTION_FETCH_CONCURRENCY, type SeriesPick } from '../../shared/metric-options';
 
 interface UseGraphsDataProps {
   testRun: TestRun | null;
@@ -34,24 +30,11 @@ interface UseGraphsDataProps {
 }
 
 export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
-  // Source selection state
-  const [selectedSource, setSelectedSource] = useState<DataSource>('grafana');
-  const [availableSources, setAvailableSources] = useState<DataSource[]>([]);
-
-  // Dashboard and panel state
+  // Dashboard state — the cascade (MetricSeriesCascade) holds the panel/series selection.
   const [dashboards, setDashboards] = useState<ApplicationDashboard[]>([]);
   const [dashboardsLoading, setDashboardsLoading] = useState(false);
   const [dynatraceDashboards, setDynatraceDashboards] = useState<DynatraceDashboard[]>([]);
   const [dynatraceDashboardsLoading, setDynatraceDashboardsLoading] = useState(false);
-  const [selectedDashboard, setSelectedDashboard] = useState<ApplicationDashboard | null>(null);
-  const [panels, setPanels] = useState<Panel[]>([]);
-  const [panelsLoading, setPanelsLoading] = useState(false);
-  const [selectedPanel, setSelectedPanel] = useState<Panel | null>(null);
-
-  // Metrics state
-  const [metrics, setMetrics] = useState<string[]>([]);
-  const [metricsLoading, setMetricsLoading] = useState(false);
-  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
 
   // Added series state
   const [addedSeries, setAddedSeries] = useState<SeriesConfig[]>([]);
@@ -132,261 +115,6 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   }, [testRun]);
 
   /**
-   * Handle source selection (Grafana/Dynatrace/Performance Metrics)
-   */
-  const handleSourceSelect = useCallback((source: DataSource) => {
-    setSelectedSource(source);
-    setSelectedDashboard(null);
-    setSelectedPanel(null);
-    setPanels([]);
-    setMetrics([]);
-    setSelectedMetrics([]);
-  }, []);
-
-  /**
-   * Fetch panels for a selected dashboard
-   */
-  const fetchDashboardPanels = useCallback(async (dashboardUid: string, dashboard?: ApplicationDashboard): Promise<Panel[]> => {
-    if (!dashboardUid) return [];
-
-    try {
-      setPanelsLoading(true);
-
-      // Check if this is a Dynatrace artificial dashboard
-      const dashboardToUse = dashboard || selectedDashboard;
-      if (isDynatrace({ dashboard_uid: dashboardUid, source_type: dashboardToUse?.source_type }) && testRun && dashboardToUse) {
-        const systemId = testRun.system_under_test_id;
-        const environment = testRun.test_environment;
-        const workload = testRun.workload;
-        const dashboardLabel = dashboardToUse.dashboard_label;
-
-        const params = new URLSearchParams({
-          systemId,
-          environment,
-          workload,
-          dashboardLabel
-        });
-
-        const response = await authenticatedFetch(
-          `/dynatrace/queries/metrics?${params.toString()}`,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          }
-        );
-
-        if (response.ok) {
-          const dynatracePanels = await response.json();
-
-          // Transform Dynatrace panels to match the Panel interface
-          const transformedPanels = dynatracePanels.map((panel: { panelId: number; panelTitle: string; metricUnit?: string; applicationDashboardId?: string; metricsSourceId?: string }) => ({
-            id: panel.panelId,
-            title: panel.panelTitle,
-            type: 'dynatrace',
-            yAxesFormat: panel.metricUnit,
-            applicationDashboardId: panel.applicationDashboardId,
-            metricsSourceId: panel.metricsSourceId
-          }));
-
-          setPanels(transformedPanels);
-          return transformedPanels;
-        } else {
-          console.warn('Failed to fetch Dynatrace panels:', response.statusText);
-          setPanels([]);
-          return [];
-        }
-      }
-
-      // Standard Grafana dashboard panel fetching
-      const response = await authenticatedFetch(
-        `/grafana/dashboards?uid=${dashboardUid}`,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (response.ok) {
-        const dashboardData = await response.json();
-        const dashboardJson = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
-
-        // Filter panels by supported types
-        const rawPanels = dashboardJson?.panels?.filter((panel: { type: string }) =>
-          SUPPORTED_PANEL_TYPES.includes(panel.type as typeof SUPPORTED_PANEL_TYPES[number])
-        ) || [];
-
-        // Transform panels to extract yAxesFormat
-        const transformedPanels = rawPanels.map((panel: {
-          id: number;
-          title: string;
-          type: string;
-          fieldConfig?: { defaults?: { unit?: string } };
-          yaxes?: Array<{ format?: string }>;
-        }) => {
-          const format = extractYAxisFormat(panel);
-          return {
-            ...panel,
-            // Use extracted format, or fall back to known units for performance-metrics panels
-            yAxesFormat: format || (isPerformanceTest({ dashboard_uid: dashboardUid, source_type: selectedDashboard?.source_type }) ? PERFORMANCE_METRICS_PANEL_UNITS[panel.id] : undefined)
-          };
-        });
-
-        setPanels(transformedPanels);
-        return transformedPanels;
-      } else {
-        console.warn('Failed to fetch dashboard panels:', response.statusText);
-        setPanels([]);
-        return [];
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard panels:', error);
-      setPanels([]);
-      return [];
-    } finally {
-      setPanelsLoading(false);
-    }
-  }, [selectedDashboard, testRun]);
-
-  /**
-   * Fetch panels for performance-test dashboards from ds_metrics
-   */
-  const fetchPerformanceTestPanels = useCallback(async (dashboard: ApplicationDashboard): Promise<Panel[]> => {
-    if (!testRun) return [];
-
-    try {
-      setPanelsLoading(true);
-      const response = await authenticatedFetch(
-        `/metrics/ds-metrics/available/${testRun.test_run_id}`,
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      if (response.ok) {
-        const rows: Array<{ dashboard_label: string; panel_title: string; panel_id: number; unit?: string }> = await response.json();
-        const dashboardLabel = dashboard.dashboard_label;
-        const seen = new Set<number>();
-        const panels: Panel[] = [];
-        for (const row of rows) {
-          if (row.dashboard_label === dashboardLabel && !seen.has(row.panel_id)) {
-            seen.add(row.panel_id);
-            panels.push({
-              id: row.panel_id,
-              title: row.panel_title,
-              type: 'timeseries',
-              yAxesFormat: row.unit || PERFORMANCE_METRICS_PANEL_UNITS[row.panel_id] || undefined,
-              applicationDashboardId: dashboard.id,
-              metricsSourceId: dashboard.metrics_source_id,
-            });
-          }
-        }
-        setPanels(panels);
-        return panels;
-      } else {
-        setPanels([]);
-        return [];
-      }
-    } catch (error) {
-      console.error('Error fetching performance test panels:', error);
-      setPanels([]);
-      return [];
-    } finally {
-      setPanelsLoading(false);
-    }
-  }, [testRun]);
-
-  /**
-   * Fetch available metrics for a selected panel from ds_metrics table
-   */
-  const fetchPanelMetrics = useCallback(async (dashboardId: string, panelId: number, metricsSourceId?: string) => {
-    if (!testRun || !dashboardId || !panelId) return;
-
-    try {
-      setMetricsLoading(true);
-      const params = new URLSearchParams({
-        applicationDashboardId: dashboardId,
-        panelId: panelId.toString(),
-        // Only this run's series can be plotted for this run.
-        testRunId: testRun.test_run_id,
-      });
-      if (metricsSourceId) {
-        params.set('metricsSourceId', metricsSourceId);
-      }
-
-      const response = await authenticatedFetch(
-        `/metrics/ds-metrics/distinct-names?${params.toString()}`,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (response.ok) {
-        const metricNames = await response.json();
-        setMetrics(offerAggregatedOption(selectedSource, panelId, metricNames as string[]));
-      } else {
-        console.warn('Failed to fetch metrics:', response.statusText);
-        setMetrics([]);
-      }
-    } catch (error) {
-      console.error('Error fetching metrics:', error);
-      setMetrics([]);
-    } finally {
-      setMetricsLoading(false);
-    }
-  }, [testRun, selectedSource]);
-
-  /**
-   * Handle dashboard selection
-   */
-  const handleDashboardSelect = useCallback((
-    dashboard: ApplicationDashboard | null,
-    source?: DataSource
-  ) => {
-    setSelectedDashboard(dashboard);
-    setSelectedPanel(null);
-    setSelectedMetrics([]);
-    setPanels([]);
-    setMetrics([]);
-
-    if (!dashboard) return;
-
-    // Auto-determine source from the dashboard itself
-    const detectedSourceType = getSourceType(dashboard);
-    const sourceToUse = source || (
-      detectedSourceType === 'dynatrace' ? 'dynatrace' as DataSource :
-      detectedSourceType === 'performance_test' ? 'performance-metrics' as DataSource :
-      'grafana' as DataSource
-    );
-    setSelectedSource(sourceToUse);
-
-    if (sourceToUse === 'dynatrace') {
-      const dynatraceUid = dashboard.dashboard_uid || `dynatrace-${dashboard.dashboard_label}`;
-      fetchDashboardPanels(dynatraceUid, dashboard);
-    } else if (sourceToUse === 'performance-metrics') {
-      fetchPerformanceTestPanels(dashboard);
-    } else if (dashboard.dashboard_uid) {
-      fetchDashboardPanels(dashboard.dashboard_uid, dashboard);
-    }
-  }, [fetchDashboardPanels, fetchPerformanceTestPanels]);
-
-  /**
-   * Handle panel selection
-   */
-  const handlePanelSelect = useCallback((panel: Panel | null) => {
-    setSelectedPanel(panel);
-    setSelectedMetrics([]);
-    setMetrics([]);
-
-    if (panel && selectedDashboard) {
-      const applicationDashboardId = panel.applicationDashboardId || selectedDashboard.id;
-      const metricsSourceId = panel.metricsSourceId || selectedDashboard.metrics_source_id;
-      fetchPanelMetrics(applicationDashboardId, panel.id, metricsSourceId);
-    }
-  }, [selectedDashboard, fetchPanelMetrics]);
-
-  /**
    * Fetch metric data for a series from the backend
    */
   const fetchSeriesData = useCallback(async (series: SeriesConfig): Promise<MetricDataPoint[]> => {
@@ -430,32 +158,24 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   }, [testRun, testRunId]);
 
   /**
-   * Add selected metrics to the series list
+   * Add the picked series and fetch their data. Each pick carries its own dashboard and
+   * panel, so one click can add series from several panels across several dashboards.
    */
-  const handleAddSeries = useCallback(async (showToast: (message: string) => void) => {
-    if (!selectedDashboard || !selectedPanel || selectedMetrics.length === 0) {
-      showToast('Please select a dashboard, panel, and at least one metric');
-      return 0;
-    }
-
-    const applicationDashboardId = selectedPanel.applicationDashboardId || selectedDashboard.id;
-    const metricsSourceId = selectedPanel.metricsSourceId || selectedDashboard.metrics_source_id;
-    const source = determineSource(selectedPanel.type, selectedDashboard.dashboard_uid);
-
-    const newSeriesList: SeriesConfig[] = selectedMetrics.map(metricName => {
+  const handleAddSeries = useCallback(async (picks: SeriesPick[], showToast: (message: string) => void) => {
+    const newSeriesList: SeriesConfig[] = picks.map(({ dashboard, panel, metricName }) => {
       const isAggregated = metricName === ALL_AGGREGATED_OPTION
-        && !isAllAggregatedDashboard(selectedDashboard.dashboard_label);
-      const spec = isAggregated ? getAggregateSpec(selectedPanel.id) : null;
+        && !isAllAggregatedDashboard(dashboard.dashboard_label);
+      const spec = isAggregated ? getAggregateSpec(panel.id) : null;
       return {
-        id: `${applicationDashboardId}-${selectedPanel.id}-${isAggregated ? 'aggregated' : metricName}-${Date.now()}-${Math.random()}`,
-        dashboardId: applicationDashboardId,
-        dashboardLabel: selectedDashboard.dashboard_label,
-        panelId: selectedPanel.id,
-        panelTitle: selectedPanel.title,
-        metricName: isAggregated ? buildAggregatedMetricName(selectedPanel.title) : metricName,
-        source: source,
-        yAxisFormat: isAggregated && spec ? aggregatedYAxisFormat(spec.metric) : selectedPanel.yAxesFormat,
-        metricsSourceId: metricsSourceId
+        id: `${dashboard.id}-${panel.id}-${isAggregated ? 'aggregated' : metricName}-${Date.now()}-${Math.random()}`,
+        dashboardId: panel.applicationDashboardId || dashboard.id,
+        dashboardLabel: dashboard.dashboard_label,
+        panelId: panel.id,
+        panelTitle: panel.title,
+        metricName: isAggregated ? buildAggregatedMetricName(panel.title) : metricName,
+        source: panel.source,
+        yAxisFormat: isAggregated && spec ? aggregatedYAxisFormat(spec.metric) : panel.yAxesFormat,
+        metricsSourceId: panel.metricsSourceId || dashboard.metrics_source_id,
       };
     });
 
@@ -473,23 +193,17 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
       return 0;
     }
 
-    // Add series to the list
     setAddedSeries(prev => [...prev, ...filteredNewSeries]);
-    setSelectedMetrics([]);
 
-    // Fetch data for new series
+    // Fetch data for new series. Bounded: a select-all across dashboards is hundreds of
+    // series, one ds_metrics query each. Merged functionally so a second add landing
+    // while this one is in flight cannot overwrite it from a stale copy of the map.
     setChartDataLoading(true);
     try {
-      const newSeriesData = new Map(seriesData);
-
-      await Promise.all(
-        filteredNewSeries.map(async (series) => {
-          const data = await fetchSeriesData(series);
-          newSeriesData.set(series.id, data);
-        })
+      const fetched = await mapLimit(filteredNewSeries, OPTION_FETCH_CONCURRENCY, async (series) =>
+        [series.id, await fetchSeriesData(series)] as const,
       );
-
-      setSeriesData(newSeriesData);
+      setSeriesData(prev => new Map([...prev, ...fetched]));
       showToast(`Added ${filteredNewSeries.length} metric(s) with data`);
       return filteredNewSeries.length;
     } catch (error) {
@@ -499,7 +213,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     } finally {
       setChartDataLoading(false);
     }
-  }, [selectedDashboard, selectedPanel, selectedMetrics, addedSeries, seriesData, fetchSeriesData]);
+  }, [addedSeries, fetchSeriesData]);
 
   /**
    * Remove a series from the list
@@ -543,19 +257,6 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   }, [testRun, dashboards.length, dynatraceDashboards.length, fetchApplicationDashboards, fetchDynatraceDashboardsList]);
 
   /**
-   * Compute available sources based on loaded dashboards
-   */
-  useEffect(() => {
-    const sources = computeAvailableSources(dashboards, dynatraceDashboards);
-    setAvailableSources(sources);
-
-    // Auto-select first available source if current selection is not available
-    if (sources.length > 0 && !sources.includes(selectedSource)) {
-      setSelectedSource(sources[0]);
-    }
-  }, [dashboards, dynatraceDashboards, selectedSource]);
-
-  /**
    * Update chart name whenever series are added/removed
    */
   useEffect(() => {
@@ -583,38 +284,18 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     return [...grafanaOnly, ...perfTestOnly, ...dynatraceAsDashboards];
   }, [dashboards, dynatraceDashboards]);
 
-  /**
-   * Get filtered dashboards based on selected source (kept for backward compatibility)
-   */
-  const getFilteredDashboardsList = useCallback(() => {
-    return getFilteredDashboards(selectedSource, dashboards, dynatraceDashboards);
-  }, [selectedSource, dashboards, dynatraceDashboards]);
-
   return {
     // State
-    selectedSource,
-    availableSources,
-    selectedDashboard,
-    selectedPanel,
     dashboards,
     dashboardsLoading,
     dynatraceDashboards,
     dynatraceDashboardsLoading,
-    panels,
-    panelsLoading,
-    metrics,
-    metricsLoading,
-    selectedMetrics,
     addedSeries,
     chartName,
     seriesData,
     chartDataLoading,
 
     // State setters
-    setSelectedSource,
-    setSelectedDashboard,
-    setSelectedPanel,
-    setSelectedMetrics,
     setAddedSeries,
     setSeriesData,
     setChartName,
@@ -622,16 +303,10 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
 
     // Fetch functions
     fetchApplicationDashboards,
-    fetchDashboardPanels,
-    fetchPanelMetrics,
     fetchSeriesData,
 
     // Handlers
     getAllDashboardsMerged,
-    getFilteredDashboards: getFilteredDashboardsList,
-    handleSourceSelect,
-    handleDashboardSelect,
-    handlePanelSelect,
     handleAddSeries,
     handleRemoveSeries,
     handleUpdateSeriesUnit,

@@ -1,9 +1,5 @@
 import { authenticatedFetch } from '@/lib/api';
-import {
-  ALL_AGGREGATED_OPTION,
-  shouldOfferAllAggregated,
-  getAggregateSpec,
-} from '@/lib/aggregated-perf-series';
+import { getAggregateSpec } from '@/lib/aggregated-perf-series';
 import { MetricDataPoint, SeriesConfig } from '../types';
 
 /** One point of the /aggregated-metric-timeseries response `buckets` array. */
@@ -28,17 +24,6 @@ export function bucketsToDataPoints(
 /** Default Y-axis unit for an aggregated perf metric. */
 export function aggregatedYAxisFormat(metric: string): string {
   return metric === 'error_percentage' ? 'percent' : 'ms';
-}
-
-/** Prepend the "All aggregated" dropdown entry for aggregatable perf panels. */
-export function offerAggregatedOption(
-  source: string,
-  panelId: number,
-  metricNames: string[],
-): string[] {
-  return shouldOfferAllAggregated(source, panelId, metricNames)
-    ? [ALL_AGGREGATED_OPTION, ...metricNames]
-    : metricNames;
 }
 
 /**

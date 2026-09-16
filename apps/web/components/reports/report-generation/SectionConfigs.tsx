@@ -15,9 +15,8 @@ import dynamic from 'next/dynamic';
 import { authenticatedFetch } from '@/lib/api';
 import type { ReportSectionType, ReportSectionConfig } from '@/lib/api/reports';
 import { REPORT_LIMITS } from '@/lib/api/reports';
-import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
-import { isGrafana } from '@/lib/metrics-source-utils';
 import { GraphPresetsAPI, type GraphPreset } from '@/lib/graph-presets';
+import { TrendsPresetsAPI, type TrendsPreset } from '@/lib/trends-presets';
 import { BaselineRunSelect, useBaselineCandidates } from './BaselineRunSelect';
 import { MetricSelectionCascade, useSourceDashboards } from './MetricSelectionCascade';
 import { TEXT_BLOCK_MARKDOWN_DEFAULT } from '@perfana/shared/utils';
@@ -1119,6 +1118,8 @@ export function RegressionsConfigForm({ config, onChange, text, onTextChange, te
 export interface GraphsConfig {
   /** Graph presets saved from the Graphs card; empty = auto-discover panels. */
   graphPresetIds?: string[];
+  /** Trends presets saved from the Trends card, drawn as one value-per-run chart each. */
+  trendsPresetIds?: string[];
   panels?: string[];
   quality?: 'low' | 'standard' | 'high';
   showLegends?: boolean;
@@ -1146,19 +1147,24 @@ interface GraphsConfigFormProps {
 
 export function GraphsConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: GraphsConfigFormProps) {
   const [presets, setPresets] = useState<GraphPreset[]>([]);
+  const [trendsPresets, setTrendsPresets] = useState<TrendsPreset[]>([]);
   const [loadingPresets, setLoadingPresets] = useState(false);
 
-  // The same list the Graphs card shows for this run: its own presets plus the
-  // global ones.
+  // The same lists the Graphs and Trends cards show for this run: their own presets
+  // plus the global ones.
   useEffect(() => {
     let cancelled = false;
     const fetchPresets = async () => {
       setLoadingPresets(true);
       try {
-        const all = await GraphPresetsAPI.getAll(testRunId);
-        if (!cancelled) setPresets(all);
-      } catch {
-        if (!cancelled) setPresets([]);
+        const [graphs, trends] = await Promise.all([
+          GraphPresetsAPI.getAll(testRunId).catch(() => [] as GraphPreset[]),
+          TrendsPresetsAPI.getAll(testRunId ?? '').catch(() => [] as TrendsPreset[]),
+        ]);
+        if (!cancelled) {
+          setPresets(graphs);
+          setTrendsPresets(trends);
+        }
       } finally {
         if (!cancelled) setLoadingPresets(false);
       }
@@ -1168,7 +1174,9 @@ export function GraphsConfigForm({ config, onChange, text, onTextChange, testRun
   }, [testRunId]);
 
   const selectedPresetIds = config.graphPresetIds ?? [];
+  const selectedTrendsPresetIds = config.trendsPresetIds ?? [];
   const nameOf = (id: string) => presets.find((p) => p.id === id)?.name ?? id;
+  const trendsNameOf = (id: string) => trendsPresets.find((p) => p.id === id)?.name ?? id;
 
   return (
     <SectionConfigShell
@@ -1215,6 +1223,43 @@ export function GraphsConfigForm({ config, onChange, text, onTextChange, testRun
       {presets.length === 0 && !loadingPresets && (
         <Typography variant="caption" color="text.secondary">
           No graph presets found. Save one from the Graphs card on a test run first.
+        </Typography>
+      )}
+
+      {/* Trends presets — each becomes a chart of the series' statistic per run, over
+          the same run window as the Trend Charts section. */}
+      <Typography variant="caption" color="text.secondary">
+        Trends presets (one value-per-run chart each)
+      </Typography>
+      <Select
+        multiple
+        value={selectedTrendsPresetIds}
+        onChange={(e) => {
+          const value = e.target.value as string[];
+          onChange({ ...config, trendsPresetIds: typeof value === 'string' ? [value] : value });
+        }}
+        input={<OutlinedInput />}
+        renderValue={(selected) =>
+          (selected as string[]).map(trendsNameOf).join(', ') || 'No trend charts'
+        }
+        fullWidth
+        size="small"
+        displayEmpty
+        disabled={loadingPresets || trendsPresets.length === 0}
+      >
+        {trendsPresets.map((preset) => (
+          <MenuItem key={preset.id} value={preset.id}>
+            <Checkbox checked={selectedTrendsPresetIds.includes(preset.id)} />
+            <ListItemText
+              primary={preset.name}
+              secondary={`${preset.series_config?.length ?? 0} series · ${preset.evaluate_type ?? 'avg'}${preset.is_global ? ' · global' : ''}`}
+            />
+          </MenuItem>
+        ))}
+      </Select>
+      {trendsPresets.length === 0 && !loadingPresets && (
+        <Typography variant="caption" color="text.secondary">
+          No trends presets found. Save one from the Trends card on a test run first.
         </Typography>
       )}
 

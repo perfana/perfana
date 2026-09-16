@@ -91,11 +91,26 @@ describe('AggregatedBenchmarkEvaluator', () => {
     expect(result.meets_requirement).toBe(true);  // 2001 > 2000
   });
 
-  it('falls back to <= for unknown operator', async () => {
-    const manager = makeManager([{ result: '1000' }]);
+  it('evaluates the operator codes the SLO dialog stores, not only symbols', async () => {
+    // The bug this guards: every code fell through to `<=`, so a "greater than" aggregate
+    // SLO passed on any value at or below its threshold.
+    const cases: Array<[string, string, boolean]> = [
+      ['gt', '1999', false], ['gt', '2001', true],
+      ['ne', '2000', false], ['ne', '1999', true],
+      ['lte', '2000', true], ['gte', '1999', false],
+    ];
+    for (const [operator, value, expected] of cases) {
+      const evaluator = new AggregatedBenchmarkEvaluator(logger, makeManager([{ result: value }]));
+      const result = await evaluator.evaluate(testRun, { ...baseBenchmark, requirement_operator: operator, requirement_value: 2000 });
+      expect(result.meets_requirement, `${value} ${operator} 2000`).toBe(expected);
+    }
+  });
+
+  it('passes on an operator nobody defined — the same policy as RequirementChecker', async () => {
+    const manager = makeManager([{ result: '3000' }]);
     const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
     const result = await evaluator.evaluate(testRun, { ...baseBenchmark, requirement_operator: 'invalid', requirement_value: 2000 });
-    expect(result.meets_requirement).toBe(true);  // 1000 <= 2000 via default
+    expect(result.meets_requirement).toBe(true);
   });
 
   it('evaluates request_response_time metric from requests_raw table', async () => {

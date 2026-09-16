@@ -814,7 +814,7 @@ system with tens of dashboards it can reach several thousand options. MUI's `Aut
 every option matching the current filter with no virtualisation, so the popup gets slow to open and
 to type in. Nothing breaks; it degrades, and only for a selection the user opted into. The request
 fan-out behind those levels is already bounded (`OPTION_FETCH_CONCURRENCY` in
-`apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts`) — this is rendering, not
+`apps/web/app/test-runs/[id]/components/shared/metric-options.ts`) — this is rendering, not
 fetching.
 **What:** Either a `ListboxComponent` backed by a virtualiser (the pattern MUI documents for large
 option sets), or a cheaper cap: stop rendering past N options and tell the user to type to narrow.
@@ -858,6 +858,41 @@ an author actually wants when writing a sentence about a comparison.
 **Where:** `apps/api/src/modules/reports/services/report-html-compiler.service.ts`
 (`lookupVariableValues`), `packages/shared/src/utils/report-variables.ts` (the Comparison group
 hints), `apps/api/src/modules/reports/renderers/comparisons-renderer.ts` (`resolveBaseline`).
+
+### Report preset lookups run in the system context, so a template can name any organization's preset
+
+**Priority:** P2
+**Origin:** adversarial review during /ship on `fix/trends-series-identity-and-report-graphs`
+(2026-09-16). The reviewer proposed gating the lookups on owner/global in the system context; the
+decision at the time was to ship without it and track it here.
+**Why:** `getGraphPresetPanels` and `getTrendsPresetSeries` in
+`apps/api/src/modules/reports/services/report-data-fetcher.service.ts` resolve preset ids from
+`graph_presets` / `trends_presets` by id. Report HTML generation runs with an empty `userId`
+(the system-call convention, see `project_report_renderers_system_context`), so the org filter
+is empty and any uuid a template's section config names is looked up. A section config is
+caller-supplied JSON on the template, so a member of org A who guesses a preset uuid from org B
+gets that preset's dashboard labels, panel titles and metric names rendered into their report —
+the series *values* still come from A's own run, so it is metadata disclosure, not data. The uuid
+guard added in this release only stops non-uuid ids from reaching the query.
+**What:** at template save / section preview time, where a real `userId` exists, refuse preset
+ids the caller cannot read (`AuthorizedBaseService`-style check); in the generation path, join the
+preset to the template's organization rather than trusting the id. Both graph and trends presets.
+**Where:** `report-data-fetcher.service.ts` (`getGraphPresetPanels`, `getTrendsPresetSeries`),
+`report-templates` save/preview handlers.
+
+### The trend-preset chart encodes the run index as a Date
+
+**Priority:** P4
+**Origin:** adversarial review during /ship on `fix/trends-series-identity-and-report-graphs`
+(2026-09-16).
+**Why:** `renderTrendPresetCharts` in `apps/api/src/modules/reports/renderers/graphs-renderer.ts`
+reuses the time-series chart for a categorical axis by writing `new Date(i)` for run `i` and
+reading the run back with `runs[dp.time.getTime()]`. It works and is pinned by the renderer spec,
+but it couples the chart's x values to the run window's array order, and a future `ChartStyle`
+that sorts or dedupes points by time would silently relabel runs.
+**What:** give `ChartStyle.categorical` its own `{ label, value }[]` input and let `renderChart`
+lay out categories without going through `Date`.
+**Where:** `graphs-renderer.ts` (`renderTrendPresetCharts`, `renderChart`).
 
 ### A Comparisons section reads another organization's run through the statistics path
 
@@ -1003,18 +1038,6 @@ clause now lives in two files with two independently-worded comments. Functional
 it is where a future change to the rule will be missed.
 **What to do:** give the cascade its own named predicate next to `shouldOfferAllAggregated` in
 `apps/web/lib/aggregated-perf-series.ts` so both are visible in one file.
-
-### `metric-options.ts` contains literal NUL bytes, so git treats it as binary
-
-**Priority:** P2
-**Origin:** security review during /ship on `feat/all-aggregated-perf-dashboard` (2026-09-08).
-**Why:** `apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts` uses a real 0x00
-byte as a key separator (`panelKey`/`seriesKey`), so `file` reports `data` and every diff of it
-renders as `Bin 7776 -> 7783 bytes` in `git diff` and in GitHub PR review. Any future edit to this
-file passes code review showing nothing at all. Pre-existing; surfaced because v0.2.95.4 touched it.
-**What to do:** replace `\0` with a separator that cannot appear in a dashboard label or metric name
-but is not a NUL — `\u001f` (unit separator) keeps the same collision-avoidance property and leaves
-the file textual. Verify with `git diff --stat` showing line counts rather than bytes.
 
 ### The VU roll-up's max is an upper bound, and its average is sample-count weighted
 
@@ -1750,3 +1773,16 @@ arbitrarily large aggregate.
 **Where:** `apps/api/src/modules/test-runs/controllers/test-runs-aggregated-timeseries.controller.ts`
 — alongside the existing metric/stat validation (~line 124).
 **Completed:** v0.2.63.4 (2026-08-18)
+
+### `metric-options.ts` contains literal NUL bytes, so git treats it as binary
+
+**Priority:** P2
+**Origin:** security review during /ship on `feat/all-aggregated-perf-dashboard` (2026-09-08).
+**Why:** `apps/web/app/test-runs/[id]/components/compare/utils/metric-options.ts` uses a real 0x00
+byte as a key separator (`panelKey`/`seriesKey`), so `file` reports `data` and every diff of it
+renders as `Bin 7776 -> 7783 bytes` in `git diff` and in GitHub PR review. Any future edit to this
+file passes code review showing nothing at all. Pre-existing; surfaced because v0.2.95.4 touched it.
+**What to do:** replace `\0` with a separator that cannot appear in a dashboard label or metric name
+but is not a NUL — `\u001f` (unit separator) keeps the same collision-avoidance property and leaves
+the file textual. Verify with `git diff --stat` showing line counts rather than bytes.
+**Completed:** v0.2.95.31 (2026-09-16) — the option loaders moved to `shared/metric-options.ts` with a plain-text key separator; `compare/utils/metric-options.ts` is a re-export shim.

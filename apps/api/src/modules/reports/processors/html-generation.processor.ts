@@ -228,8 +228,13 @@ export class HtmlGenerationProcessor implements OnModuleInit, OnModuleDestroy {
       // Update progress - starting
       await job.updateProgress({ stage: 'starting', percent: 0 });
 
-      // Generate HTML using the report generation service
-      const result = await this.reportGenerationService.generateHtml(reportId);
+      // Generate HTML using the report generation service. Per-section progress lands
+      // on the job so GET /reports/:id can show a large report moving.
+      const result = await this.reportGenerationService.generateHtml(reportId, '', [], (done, total, section) => {
+        void job.updateProgress({
+          stage: 'rendering', percent: total ? Math.round((done / total) * 100) : 0, done, total, section,
+        }).catch(() => undefined);
+      });
 
       // Update progress - complete
       await job.updateProgress({ stage: 'complete', percent: 100 });

@@ -1034,6 +1034,7 @@ export class ReportGenerationService {
     reportId: string,
     userId: string = '',
     roles: string[] = [],
+    onProgress?: (done: number, total: number, sectionTitle: string) => void,
   ): Promise<HtmlGenerationResult> {
     const startTime = Date.now();
 
@@ -1067,7 +1068,7 @@ export class ReportGenerationService {
       const sections = report.template.sections || [];
       const styling = report.template.styling || this.utils.getDefaultStyling();
 
-      const sectionsHtml = await this.htmlCompiler.renderSections(sections, testRun, report, userId, roles);
+      const sectionsHtml = await this.htmlCompiler.renderSections(sections, testRun, report, userId, roles, onProgress);
 
       this.validator.warnOnAnchorProblems(
         sectionsHtml,

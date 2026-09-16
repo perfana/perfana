@@ -6,52 +6,31 @@ import {
   Typography,
   Autocomplete,
   TextField,
-  CircularProgress,
   Button,
-  ListSubheader,
 } from '@mui/material';
 import { BookmarkBorder } from '@mui/icons-material';
 import {
   ApplicationDashboard,
   Panel,
   TrendsSeries,
-  DataSource,
   TIME_RANGE_OPTIONS,
   EVALUATE_TYPE_OPTIONS,
 } from '../types';
-import { DynatraceMetric } from '@/lib/dynatrace';
-import { getSourceDisplayInfo, getSourceType } from '@/lib/metrics-source-utils';
+import { TestRun } from '@/types/test-runs';
+import MetricSeriesCascade from '../../shared/MetricSeriesCascade';
+import type { SeriesPick } from '../../shared/metric-options';
 
 interface TrendsSelectionControlsProps {
-  // Dashboard selection
-  selectedDashboard: ApplicationDashboard | null;
+  // Dashboards → panels → series cascade
   allDashboards: ApplicationDashboard[];
   dashboardsLoading: boolean;
-  dynatraceDashboardsLoading: boolean;
-  onDashboardSelect: (
-    dashboard: ApplicationDashboard | null,
-    dynatraceDashboardLabel?: string,
-    source?: DataSource
-  ) => void;
-
-  // Panel selection
-  selectedMetric: Panel | null;
-  panels: Panel[];
-  panelsLoading: boolean;
-  dynatraceMetrics: DynatraceMetric[];
-  dynatraceMetricsLoading: boolean;
-  onMetricSelect: (metric: Panel | null) => void;
-
-  // Determined source (auto-detected from selected dashboard)
-  selectedSource: DataSource;
-
-  // Series selection
-  availableMetrics: string[];
-  availableMetricsLoading: boolean;
-  selectedMetricNames: string[];
-  setSelectedMetricNames: (names: string[]) => void;
+  testRun: TestRun | null;
   addedSeries: TrendsSeries[];
-  onAddSeries: () => void;
+  onAddSeries: (picks: SeriesPick[]) => void;
+  /** First picked dashboard/panel, kept for preset saving. */
+  selectedDashboard: ApplicationDashboard | null;
+  selectedMetric: Panel | null;
+  onPrimaryChange: (dashboard: ApplicationDashboard | null, panel: Panel | null) => void;
 
   // Time range
   timeRange: (typeof TIME_RANGE_OPTIONS)[number];
@@ -68,24 +47,14 @@ interface TrendsSelectionControlsProps {
 }
 
 export function TrendsSelectionControls({
-  selectedDashboard,
   allDashboards,
   dashboardsLoading,
-  dynatraceDashboardsLoading,
-  onDashboardSelect,
-  selectedMetric,
-  panels,
-  panelsLoading,
-  dynatraceMetrics,
-  dynatraceMetricsLoading,
-  onMetricSelect,
-  selectedSource,
-  availableMetrics,
-  availableMetricsLoading,
-  selectedMetricNames,
-  setSelectedMetricNames,
+  testRun,
   addedSeries,
   onAddSeries,
+  selectedDashboard,
+  selectedMetric,
+  onPrimaryChange,
   timeRange,
   onTimeRangeChange,
   customTimeRange,
@@ -94,226 +63,19 @@ export function TrendsSelectionControls({
   onEvaluateTypeChange,
   onSavePresetClick,
 }: TrendsSelectionControlsProps) {
-  const isLoading = dashboardsLoading || dynatraceDashboardsLoading;
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 1.5 }}>
-      {/* Dashboard Selection - Grouped by source type */}
-      <Autocomplete
-        sx={{ flex: '2 1 220px' }}
-        options={allDashboards}
-        getOptionLabel={(option) => option.dashboard_label || ''}
-        isOptionEqualToValue={(option, value) => option.id === value.id}
-        value={selectedDashboard}
-        onChange={(_, newValue) => {
-          if (newValue) {
-            const srcType = getSourceType(newValue);
-            const isDynatrace = srcType === 'dynatrace';
-            onDashboardSelect(
-              newValue,
-              isDynatrace ? newValue.dashboard_label : undefined,
-              undefined
-            );
-          } else {
-            onDashboardSelect(null);
-          }
-        }}
-        loading={isLoading}
-        groupBy={(option) => getSourceDisplayInfo(option).groupLabel}
-        renderGroup={(params) => {
-          const dashboardInGroup = allDashboards.find(
-            d => getSourceDisplayInfo(d).groupLabel === params.group
-          );
-          const color = dashboardInGroup
-            ? getSourceDisplayInfo(dashboardInGroup).color
-            : '#9E9E9E';
-          return (
-            <li key={params.key}>
-              <ListSubheader
-                component="div"
-                sx={{
-                  fontWeight: 700,
-                  color,
-                  backgroundColor: 'background.paper',
-                  lineHeight: '36px',
-                }}
-              >
-                {params.group}
-              </ListSubheader>
-              <ul style={{ padding: 0 }}>{params.children}</ul>
-            </li>
-          );
-        }}
-        renderInput={(params) => (
-          <TextField
-            {...params}
-            label="Dashboard"
-            variant="outlined"
-            fullWidth
-            helperText={isLoading ? 'Loading…' : `${allDashboards.length} available`}
-            InputProps={{
-              ...params.InputProps,
-              endAdornment: (
-                <>
-                  {isLoading ? <CircularProgress size={20} /> : null}
-                  {params.InputProps.endAdornment}
-                </>
-              ),
-            }}
-          />
-        )}
-        renderOption={(props, option) => {
-          const { key: _key, ...otherProps } = props;
-          const { color } = getSourceDisplayInfo(option);
-          return (
-            <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Box aria-hidden="true" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
-              <Typography variant="body2">{option.dashboard_label}</Typography>
-            </Box>
-          );
-        }}
+      <MetricSeriesCascade
+        allDashboards={allDashboards}
+        dashboardsLoading={dashboardsLoading}
+        testRun={testRun}
+        addedSeries={addedSeries}
+        onAddSeries={onAddSeries}
+        onPrimaryChange={onPrimaryChange}
+        // Every percentile panel is its own trend here, and the URL panels have no
+        // per-run statistics to trend.
+        panelListOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
       />
-
-      {/* Panel Selection */}
-      <Autocomplete
-          sx={{ flex: '2 1 200px' }}
-          disabled={!selectedDashboard}
-          options={selectedSource === 'dynatrace'
-            ? dynatraceMetrics.map(m => ({
-                id: m.panelId,
-                title: m.panelTitle,
-                type: 'dynatrace',
-                applicationDashboardId: m.applicationDashboardId
-              } as Panel))
-            : panels
-          }
-          getOptionLabel={(option) => option.title}
-          isOptionEqualToValue={(option, value) => option.id === value.id}
-          value={selectedMetric}
-          onChange={(_, newValue) => onMetricSelect(newValue)}
-          loading={selectedSource === 'dynatrace' ? dynatraceMetricsLoading : panelsLoading}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Panel"
-              variant="outlined"
-              fullWidth
-              helperText={
-                !selectedDashboard
-                  ? 'Pick a dashboard first'
-                  : (selectedSource === 'dynatrace' ? dynatraceMetricsLoading : panelsLoading)
-                    ? 'Loading…'
-                    : `${selectedSource === 'dynatrace' ? dynatraceMetrics.length : panels.length} available`
-              }
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {(selectedSource === 'dynatrace' ? dynatraceMetricsLoading : panelsLoading) ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key: _key, ...otherProps } = props;
-            return (
-              <Box component="li" key={option.id} {...otherProps}>
-                <Typography variant="body1">{option.title}</Typography>
-              </Box>
-            );
-          }}
-        />
-
-      {/* Series Selection and Add Button */}
-      <Autocomplete
-            disabled={!selectedMetric}
-            multiple
-            options={availableMetrics}
-            getOptionLabel={(option) => option}
-            value={selectedMetricNames}
-            onChange={(_, newValue) => setSelectedMetricNames(newValue)}
-            loading={availableMetricsLoading}
-            sx={{ flex: '3 1 260px' }}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Series"
-                variant="outlined"
-                fullWidth
-                helperText={
-                  !selectedMetric
-                    ? 'Pick a panel first'
-                    : availableMetricsLoading
-                      ? 'Loading…'
-                      : selectedMetricNames.length > 0
-                        ? `${selectedMetricNames.length} of ${availableMetrics.length} selected`
-                        : `${availableMetrics.length} available`
-                }
-                InputProps={{
-                  ...params.InputProps,
-                  endAdornment: (
-                    <>
-                      {availableMetricsLoading ? <CircularProgress size={20} /> : null}
-                      {params.InputProps.endAdornment}
-                    </>
-                  ),
-                }}
-              />
-            )}
-            renderOption={(props, option) => {
-              const { key, ...otherProps } = props;
-              const isAlreadyAdded = addedSeries.some(
-                s => s.dashboardId === (selectedMetric?.applicationDashboardId || selectedDashboard?.id) &&
-                     s.panelId === selectedMetric?.id &&
-                     s.metricName === option
-              );
-              return (
-                <Box
-                  component="li"
-                  key={key}
-                  {...otherProps}
-                  sx={{
-                    opacity: isAlreadyAdded ? 0.5 : 1,
-                    '&::after': isAlreadyAdded ? {
-                      content: '"(added)"',
-                      marginLeft: 1,
-                      fontSize: '0.75rem',
-                      color: 'text.secondary'
-                    } : undefined
-                  }}
-                >
-                  <Typography variant="body1">{option}</Typography>
-                </Box>
-              );
-            }}
-          />
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              if (selectedMetricNames.length === availableMetrics.length) {
-                setSelectedMetricNames([]);
-              } else {
-                setSelectedMetricNames([...availableMetrics]);
-              }
-            }}
-            disabled={!selectedMetric || availableMetrics.length === 0}
-            sx={{ height: '56px', minWidth: '92px', flexShrink: 0 }}
-          >
-            {selectedMetricNames.length === availableMetrics.length && availableMetrics.length > 0 ? 'Clear all' : 'Select all'}
-          </Button>
-          <Button
-            variant="contained"
-            onClick={onAddSeries}
-            disabled={selectedMetricNames.length === 0}
-            sx={{ height: '56px', px: 3, whiteSpace: 'nowrap', flexShrink: 0 }}
-          >
-            Add {selectedMetricNames.length > 0 ? `(${selectedMetricNames.length})` : 'series'}
-          </Button>
-      </Box>
 
       {/* Time Range and Evaluate Type Row */}
       {addedSeries.length > 0 && (
@@ -373,7 +135,7 @@ export function TrendsSelectionControls({
               size="medium"
               startIcon={<BookmarkBorder />}
               onClick={onSavePresetClick}
-              disabled={!selectedDashboard || !selectedMetric}
+              disabled={addedSeries.length === 0 && (!selectedDashboard || !selectedMetric)}
               sx={{
                 height: '56px',
                 borderColor: 'primary.main',

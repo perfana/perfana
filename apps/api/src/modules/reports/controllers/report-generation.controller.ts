@@ -37,9 +37,13 @@ import {
   ReportListResponseDto,
   ReportSummaryDto,
   ReportDetailDto,
+  ReportGenerationProgress,
   type ReportStatus,
   type ReportSectionType,
 } from '../dto';
+
+/** How long GET /reports/:id waits on Redis for the job's progress before answering without it. */
+const PROGRESS_LOOKUP_TIMEOUT_MS = 300;
 
 /**
  * Controller for report generation and management operations.
@@ -462,6 +466,29 @@ export class ReportGenerationController {
 
   // ==================== Report CRUD ====================
 
+  /**
+   * The HTML job's own progress record, only while the report is being generated. Best
+   * effort: a missing job or an unavailable queue is "no progress to show", not an error.
+   */
+  private async generationProgress(
+    status: string,
+    jobId: string | undefined,
+  ): Promise<ReportGenerationProgress | undefined> {
+    if (status !== 'processing' || !jobId || !this.htmlGenerationProcessor.isAvailable()) return undefined;
+    try {
+      // This runs inside the request's RLS transaction, and the BullMQ client has no command
+      // timeout: a stalled Redis must not pin a pooled Postgres connection for the stall.
+      const job = await Promise.race([
+        this.htmlGenerationProcessor.getJobStatus(jobId),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), PROGRESS_LOOKUP_TIMEOUT_MS).unref?.()),
+      ]);
+      const p = job?.progress;
+      return p && typeof p === 'object' && 'stage' in p ? (p as ReportGenerationProgress) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   @Get(':reportId')
   @ApiOperation({ summary: 'Get a single report by ID' })
   @ApiResponse({ status: 200, description: 'Return the report', type: ReportDetailDto })
@@ -481,6 +508,7 @@ export class ReportGenerationController {
         name: report.name,
         generated_by: report.generated_by,
         html_content: report.html_content,
+        progress: await this.generationProgress(report.status, report.job_id),
         html_generated_at: report.html_generated_at,
         share_id: report.share_id,
         share_enabled: report.share_enabled,

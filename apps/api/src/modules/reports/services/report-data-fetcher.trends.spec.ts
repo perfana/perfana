@@ -98,10 +98,10 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
           { test_run_id: 'r1', normalized_url: '/checkout', avg_response_time: '120', p95: '200', p99: '300', avg_latency: '10', avg_connect_time: '5', error_percentage: '1', throughput: '9' },
           { test_run_id: 'r2', normalized_url: '/checkout', avg_response_time: '150', p95: '250', p99: '350', avg_latency: '12', avg_connect_time: '6', error_percentage: '2', throughput: '8' },
         ])
-        // run-wide transaction aggregate per run
+        // run-wide transaction aggregate per run, from the rollup tables
         .mockResolvedValueOnce([
-          { test_run_id: 'r1', avg: '100', pct: '200' },
-          { test_run_id: 'r2', avg: '130', pct: '260' },
+          { test_run_id: 'r1', value: '100' },
+          { test_run_id: 'r2', value: '130' },
         ]),
     } as any;
     const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
@@ -122,6 +122,25 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
     expect(byName['All aggregated']!.valuesByRun).toEqual({ r1: 100, r2: 130 });
   });
 
+  it('keeps the RT percentile panels of one transaction apart — a trends preset draws them as separate lines', async () => {
+    // The bug this guards: rows were keyed on the DISPLAY title, and perfPanelTitle folds
+    // panels 101-104 into one, so RT Avg and RT P95 of the same transaction merged into one
+    // series whose per-run value was whichever row came last.
+    const dataSource = { query: jest.fn().mockResolvedValue([
+      { test_run_id: 'r1', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T01', unit: 'ms', source_type: 'performance_test', mean: 100 },
+      { test_run_id: 'r1', dashboard_label: 'Perf', panel_title: 'Transaction RT P95', panel_id: 103, metric_name: 'T01', unit: 'ms', source_type: 'performance_test', mean: 400 },
+    ]) };
+    const repo = { query: jest.fn().mockResolvedValue([]) } as any;
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    const series = await svc.getMetricTrends(['r1'], [
+      { dashboardLabel: 'Perf', panelId: 101, metricNames: ['T01'] },
+      { dashboardLabel: 'Perf', panelId: 103, metricNames: ['T01'] },
+    ]);
+
+    expect(series.map((s) => s.valuesByRun.r1).sort()).toEqual([100, 400]);
+  });
+
   it('renames response-time panels for performance metrics only — panel ids collide across sources', async () => {
     const rows = [
       // Same panel id, different sources: only the perf-test one is renamed
@@ -138,6 +157,42 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
     const titles = Object.fromEntries(series.map((s) => [s.dashboardLabel, s.panelTitle]));
     expect(titles['Perf']).toBe('Transaction Response Times');
     expect(titles['JVM']).toBe('Heap used');
+  });
+
+  it('plots the Trends card\'s other statistics from their own columns, and rolls the aggregate up as avg', async () => {
+    // A trends preset can ask for max/min/last/q50/q90, which only ds_metric_statistics
+    // holds. The run-wide aggregate path knows avg/p95/p99 only, so it falls back to avg
+    // rather than answering a "max" preset with a p95.
+    const rows = [
+      { test_run_id: 'r1', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 7, metric_name: 'used', unit: 'bytes', source_type: 'grafana',
+        mean: 1, q95: 2, q99: 3, max_value: 9, min_value: 0, last_value: 5, median: 4, q90: 6 },
+      { test_run_id: 'r1', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T01', unit: 'ms', source_type: 'performance_test',
+        mean: 100, q95: 200, q99: 300, max_value: 900, min_value: 10, last_value: 150, median: 120, q90: 180 },
+    ];
+    const dataSource = { query: jest.fn().mockResolvedValue(rows) };
+    const repo = {
+      query: jest.fn().mockResolvedValue([{ test_run_id: 'r1', value: '100' }]),
+    } as any;
+    const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
+
+    const selections = [
+      { dashboardLabel: 'JVM', panelId: 7, metricNames: ['used'] },
+      { dashboardLabel: 'Perf', panelId: 101, metricNames: ['All aggregated'] },
+    ];
+    const byName = async (stat: Parameters<typeof svc.getMetricTrends>[2]) =>
+      Object.fromEntries((await svc.getMetricTrends(['r1'], selections, stat)).map((s) => [s.metricName, s.valuesByRun.r1]));
+
+    expect((await byName('max')).used).toBe(9);
+    expect((await byName('last')).used).toBe(5);
+    expect((await byName('q50')).used).toBe(4);
+    expect((await byName('q90')).used).toBe(6);
+    expect((await byName('min')).used).toBe(0);
+    // The aggregate rolled up as avg for every one of them: the rollup query asked for the mean
+    expect((await byName('max'))['All aggregated']).toBe(100);
+    expect(repo.query).toHaveBeenCalledTimes(6);
+    for (const [sql] of repo.query.mock.calls) expect(sql).toContain('mean(pct_agg)');
+    expect(dataSource.query).toHaveBeenCalledTimes(6);
+    expect(String(dataSource.query.mock.calls[0]![0])).toContain('s.max_value, s.min_value, s.last_value, s.median, s.q90');
   });
 
   it('returns nothing when the section selected nothing', async () => {
@@ -173,5 +228,34 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
     expect(windowedSql).not.toContain('LIMIT 51');
     // ...and the floor is still applied.
     expect(windowedSql).toContain('tr.start_time >=');
+  });
+});
+describe('ReportDataFetcherService.getTrendRunWindow', () => {
+  it('returns the window oldest-first and puts the floor after the org ids', async () => {
+    // The renderer draws x = run index, so the order IS the chart; and the floor placeholder
+    // must land past the org filter's parameters or it binds to the wrong value.
+    const repo = { query: jest.fn()
+      // resolveTrendWindowStart's pinned-run lookup
+      .mockResolvedValueOnce([{ start_time: '2026-09-01T00:00:00Z' }])
+      // the window, newest first as the query orders it
+      .mockResolvedValueOnce([
+        { test_run_id: 'r3', start_time: '2026-09-14T05:00:00Z' },
+        { test_run_id: 'r1', start_time: '2026-09-10T05:00:00Z' },
+      ]) } as any;
+    const authz = { isGlobalAdmin: () => false, getAccessibleOrganizations: jest.fn().mockResolvedValue(['org-1']) } as any;
+    const svc = new ReportDataFetcherService(repo, authz, { query: jest.fn() } as any);
+
+    const runs = await svc.getTrendRunWindow(
+      { systemUnderTestId: 'sut', testEnvironment: 'acc', workload: 'load', startTime: new Date('2026-09-14T05:00:00Z') } as any,
+      10, 'user-1', ['user'], 'r0',
+    );
+
+    expect(runs.map((r) => r.testRunId)).toEqual(['r1', 'r3']);
+    const [sql, params] = repo.query.mock.calls[1];
+    expect(sql).not.toContain('PERCENTILE_CONT');
+    expect(params.slice(0, 4)).toEqual(['sut', 'acc', 'load', new Date('2026-09-14T05:00:00Z')]);
+    // org ids at $5.., the floor last
+    expect(params[params.length - 1]).toEqual(new Date('2026-09-01T00:00:00Z'));
+    expect(sql).toContain(`$${params.length}`);
   });
 });

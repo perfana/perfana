@@ -20,7 +20,7 @@ describe('buildAggregatedTrendsStatistics', () => {
     const result = buildAggregatedTrendsStatistics(series, values, runs);
     expect(result).toEqual([
       {
-        test_run_id: 'a', panel_title: 'Request RT P90',
+        test_run_id: 'a', series_id: 's1', panel_title: 'Request RT P90',
         metric_name: 'All aggregated — Request RT P90', value: 1800,
         created_at: '2026-07-01T00:00:00Z', version: 'v1',
       },

@@ -33,7 +33,7 @@ export function GraphsSeriesList({
         textAlign: 'center',
       }}>
         <Typography variant="body2" color="text.secondary">
-          Pick a dashboard, panel and metrics above, then add them to plot a graph.
+          Pick dashboards, panels and series above, then add them to plot a graph.
         </Typography>
       </Box>
     );

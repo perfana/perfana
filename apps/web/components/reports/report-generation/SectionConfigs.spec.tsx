@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { GraphPresetsAPI } from '@/lib/graph-presets';
+import { TrendsPresetsAPI } from '@/lib/trends-presets';
 import {
   HeaderConfigForm,
   IndexConfigForm,
@@ -28,6 +29,13 @@ jest.mock('@/lib/api', () => ({
 
 // Capture the props the generic HTML preview receives when the modal opens
 const mockHtmlPreviewProps: Array<Record<string, unknown>> = [];
+jest.mock('@/lib/trends-presets', () => ({
+  TrendsPresetsAPI: {
+    getAll: jest.fn().mockResolvedValue([
+      { id: 'trend-1', name: 'Nightly RT trend', series_config: [{}], evaluate_type: 'q95', is_global: false },
+    ]),
+  },
+}));
 jest.mock('@/lib/graph-presets', () => ({
   GraphPresetsAPI: {
     getAll: jest.fn().mockResolvedValue([
@@ -442,7 +450,7 @@ describe('GraphsConfigForm', () => {
   it('shows the selected preset names rather than their ids', async () => {
     render(
       <GraphsConfigForm
-        config={{ graphPresetIds: ['preset-2'] }}
+        config={{ graphPresetIds: ['preset-2'], trendsPresetIds: ['trend-1'] }}
         onChange={jest.fn()}
         onTextChange={jest.fn()}
         testRunId="MyApp-acc-loadTest-00001"
@@ -450,6 +458,62 @@ describe('GraphsConfigForm', () => {
     );
 
     expect(await screen.findByText('Docker CPU')).toBeInTheDocument();
+    expect(await screen.findByText('Nightly RT trend')).toBeInTheDocument();
+  });
+
+  it('offers the run\'s trends presets and stores the chosen ids', async () => {
+    const onChange = jest.fn();
+    render(
+      <GraphsConfigForm
+        config={{}}
+        onChange={onChange}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    const picker = await screen.findByText('No trend charts');
+    // Disabled until both preset lists have loaded
+    await waitFor(() => expect(picker).not.toHaveAttribute('aria-disabled', 'true'));
+    fireEvent.mouseDown(picker);
+    fireEvent.click(await screen.findByText('Nightly RT trend'));
+
+    expect(onChange).toHaveBeenCalledWith({ trendsPresetIds: ['trend-1'] });
+  });
+
+  it('still offers the graph presets when the trends preset lookup fails, and says none were found', async () => {
+    // The two lists load together; one endpoint failing must not blank the other picker.
+    (TrendsPresetsAPI.getAll as jest.Mock).mockRejectedValueOnce(new Error('503'));
+    render(
+      <GraphsConfigForm
+        config={{}}
+        onChange={jest.fn()}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    expect(await screen.findByText('No trends presets found. Save one from the Trends card on a test run first.')).toBeInTheDocument();
+    const graphsPicker = screen.getByText('Auto-discover panels');
+    fireEvent.mouseDown(graphsPicker);
+    expect(await screen.findByText('JVM overview')).toBeInTheDocument();
+    // The empty trends picker stays disabled rather than opening on nothing
+    expect(screen.getByText('No trend charts').closest('[role="combobox"]')).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('shows the id of a trends preset that no longer exists rather than dropping it from the selection', async () => {
+    // A template saved with a preset that was deleted since still names it, so the user
+    // can see what to remove.
+    render(
+      <GraphsConfigForm
+        config={{ trendsPresetIds: ['trend-1', 'deleted-id'] }}
+        onChange={jest.fn()}
+        onTextChange={jest.fn()}
+        testRunId="MyApp-acc-loadTest-00001"
+      />
+    );
+
+    expect(await screen.findByText('Nightly RT trend, deleted-id')).toBeInTheDocument();
   });
 });
 

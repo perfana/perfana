@@ -2,6 +2,7 @@ import { EntityManager } from 'typeorm';
 import type { Logger } from 'pino';
 import { BaseCheckService } from './BaseCheckService.js';
 import type { TestRun } from './BenchmarkMatcher.js';
+import { evaluateRequirement } from './requirement-operator.js';
 
 export interface AggregatedBenchmark {
   id: string;
@@ -35,7 +36,8 @@ const STAT_SQL: Record<string, string> = {
  *
  * Aggregated benchmarks compute statistics across all requests in a test run
  * (e.g. p95 transaction response time, overall error percentage) and compare
- * against a requirement threshold using an operator (<=, <, >=, >).
+ * against a requirement threshold using any operator the SLO dialog offers
+ * (`lt lte gt gte eq ne`, or their symbols) — see requirement-operator.ts.
  */
 export class AggregatedBenchmarkEvaluator extends BaseCheckService {
   constructor(
@@ -125,12 +127,15 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
   }
 
   private applyOperator(actual: number, operator: string, threshold: number): boolean {
-    switch (operator) {
-      case '<=': return actual <= threshold;
-      case '<':  return actual <  threshold;
-      case '>=': return actual >= threshold;
-      case '>':  return actual >  threshold;
-      default:   return actual <= threshold;
+    // The SLO dialog stores codes (`lt`, `gte`, …), not symbols; before v0.2.95.31 every
+    // code fell through to `<=` here, so a "greater than" aggregate SLO passed on any value
+    // at or below its threshold.
+    const met = evaluateRequirement(actual, operator, threshold);
+    if (met === null) {
+      // Same policy as RequirementChecker: an operator nobody defined passes, with a warning.
+      this.logger.warn(`Unknown requirement operator: ${operator}`);
+      return true;
     }
+    return met;
   }
 }

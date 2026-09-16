@@ -536,17 +536,22 @@ describe('RequirementChecker', () => {
   // ─── checkRequirement — unknown operator ─────────────────────────────────────
 
   describe('unknown operator', () => {
-    it('should return true (pass) and log a warning for an unknown operator', async () => {
-      // Arrange
-      const benchmark = createMockBenchmark({ requirement_operator: 'eq', requirement_value: 100 });
-      const aggregation = createMockAggregationResult([{ target: 't', value: 100 }]);
-
-      // Act
-      const result = await checker.createCheckResult(createMockTestRun(), benchmark, aggregation);
-
-      // Assert — unknown operator defaults to pass
-      expect(result!.targets[0].meets_requirement).toBe(true);
-      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Unknown requirement operator'));
+    it('evaluates every operator the SLO dialog offers, not only lt and gt', async () => {
+      // The bug this guards: `eq`/`ne`/`lte`/`gte` were "unknown" and passed unconditionally,
+      // so an SLO "≠ 26.25" on a target measuring 26.25 was reported as met.
+      const cases: Array<[string, number, boolean]> = [
+        ['eq', 100, true], ['eq', 99, false],
+        ['ne', 100, false], ['ne', 99, true],
+        ['lte', 100, true], ['lte', 101, false],
+        ['gte', 100, true], ['gte', 99, false],
+      ];
+      for (const [operator, value, expected] of cases) {
+        const benchmark = createMockBenchmark({ requirement_operator: operator, requirement_value: 100 });
+        const aggregation = createMockAggregationResult([{ target: 't', value }]);
+        const result = await checker.createCheckResult(createMockTestRun(), benchmark, aggregation);
+        expect(result!.targets[0].meets_requirement, `${value} ${operator} 100`).toBe(expected);
+      }
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('Unknown requirement operator'));
     });
 
     it('should return true for completely nonsense operator', async () => {

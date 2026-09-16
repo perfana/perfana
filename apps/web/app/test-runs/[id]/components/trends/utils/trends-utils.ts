@@ -49,8 +49,8 @@ function axisConfigForUnit(unit: string | undefined): AxisConfig {
  * right one. Without this a percent series and a req/s series land on one axis and
  * the second one is drawn under the first one's label and tick suffix.
  *
- * `rightMetrics` holds the metric names that belong on the right axis, which is what
- * the traces are keyed by.
+ * `rightSeriesIds` holds the ids of the series that belong on the right axis, which is
+ * what the traces are keyed by — not metric names, which repeat across panels.
  *
  * ponytail: three or more distinct units still share a single right axis, labelled
  * for the first of them. Give each unit its own axis if that combination shows up.
@@ -58,28 +58,42 @@ function axisConfigForUnit(unit: string | undefined): AxisConfig {
 export function getYAxisConfigs(addedSeries: TrendsSeries[]): {
   left: AxisConfig;
   right: AxisConfig | null;
-  rightMetrics: Set<string>;
+  rightSeriesIds: Set<string>;
 } {
   const groups = new Map<string, string[]>();
   for (const series of addedSeries) {
     const key = series.yAxisFormat || '';
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(series.metricName);
+    groups.get(key)!.push(series.id);
   }
 
   const entries = Array.from(groups.entries());
   const left = axisConfigForUnit(entries[0]?.[0] || undefined);
 
   if (entries.length < 2) {
-    return { left, right: null, rightMetrics: new Set() };
+    return { left, right: null, rightSeriesIds: new Set() };
   }
 
   const rightEntries = entries.slice(1);
   return {
     left,
     right: axisConfigForUnit(rightEntries[0]![0] || undefined),
-    rightMetrics: new Set(rightEntries.flatMap(([, names]) => names))
+    rightSeriesIds: new Set(rightEntries.flatMap(([, ids]) => ids))
   };
+}
+
+/**
+ * Legend/hover name for a series. The metric name alone, unless another added series
+ * shares it (every panel of the "all aggregated" dashboard has a series called
+ * "All aggregated"), in which case the panel title is appended.
+ */
+export function trendsSeriesLabel(series: TrendsSeries, all: TrendsSeries[]): string {
+  const others = all.filter(s => s.id !== series.id && s.metricName === series.metricName);
+  if (others.length === 0) return series.metricName;
+  // Two dashboards (two hosts, two scenarios) can share a panel title too.
+  return others.some(s => s.panelTitle === series.panelTitle)
+    ? `${series.metricName} — ${series.dashboardLabel} / ${series.panelTitle}`
+    : `${series.metricName} — ${series.panelTitle}`;
 }
 
 /**
@@ -100,6 +114,7 @@ export function buildAggregatedTrendsStatistics(
     if (value == null || !run) continue;
     out.push({
       test_run_id: testRunId,
+      series_id: series.id,
       panel_title: series.panelTitle,
       metric_name: series.metricName,
       value,

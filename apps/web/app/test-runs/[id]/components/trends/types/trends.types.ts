@@ -56,11 +56,6 @@ export const EVALUATE_TYPE_OPTIONS = [
 
 export type EvaluateTypeOption = typeof EVALUATE_TYPE_OPTIONS[number];
 
-/**
- * Supported panel types for trends
- */
-export const SUPPORTED_PANEL_TYPES = ['graph', 'timeseries', 'stat', 'singlestat', 'flamegraph'] as const;
-
 export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics';
 
 export interface TrendsCardProps {
@@ -101,6 +96,13 @@ export interface MetricStatistic {
   test_run_id: string;
   panel_title: string;
   metric_name: string;
+  /**
+   * The TrendsSeries this row belongs to. Rows are grouped into traces by this, not by
+   * metric_name: two panels of one dashboard can both carry a series named
+   * "All aggregated", and keyed on the name they collapsed into one zigzag line.
+   * Required so a producer that forgets it fails to compile rather than reviving that.
+   */
+  series_id: string;
   value: number;
   created_at: string;
   version?: string | null;

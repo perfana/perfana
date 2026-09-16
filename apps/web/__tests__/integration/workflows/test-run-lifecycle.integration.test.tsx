@@ -604,10 +604,11 @@ describe('Test Run Lifecycle Workflow Integration', () => {
         fireEvent.click(trendsCard);
       });
 
-      // TrendsCard fetches /related and /grafana/application-dashboards
+      // TrendsCard loads the dashboards for its picker (the /related prefetch it used to
+      // make was read by nobody and is gone)
       await waitFor(() => {
         expect(authenticatedFetch).toHaveBeenCalledWith(
-          expect.stringContaining('/related'),
+          expect.stringContaining('/grafana/application-dashboards'),
           expect.anything()
         );
       });

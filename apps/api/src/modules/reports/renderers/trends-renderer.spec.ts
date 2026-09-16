@@ -336,6 +336,28 @@ describe('TrendsRenderer', () => {
       expect(html).toContain('—');
     });
 
+    it('tells apart rows of the RT percentile panels that fold into one display title', async () => {
+      // A dashboard-level selection brings all four stored RT panels, each with the same metric
+      // names; without the stored title the table would show four identical rows.
+      const row = (stored: string, v: number) => ({
+        dashboardLabel: 'Perf', panelTitle: 'Transaction Response Time', metricName: 'T01', unit: 'ms',
+        storedPanelTitle: stored, valuesByRun: { 'run-001': v },
+      });
+      dataFetcher.getMetricTrends.mockResolvedValue([
+        row('Transaction RT Avg', 10), row('Transaction RT P95', 40),
+        { dashboardLabel: 'Perf', panelTitle: 'Transaction Error Rate', metricName: 'T01', unit: 'percent', valuesByRun: { 'run-001': 1 } },
+      ]);
+
+      const html = await renderer.renderTrendsSection(
+        makeSection({ config: { dashboardLabels: ['Perf'] } }), makeTestRun(),
+      );
+
+      expect(html).toContain('T01 · Transaction RT Avg');
+      expect(html).toContain('T01 · Transaction RT P95');
+      // A metric that is alone under its panel keeps its bare name
+      expect(html).toContain('>T01</td>');
+    });
+
     it('reads the run count the config form writes', async () => {
       await renderer.renderTrendsSection(
         makeSection({ config: { timeRange: { runCount: 7 } } }),

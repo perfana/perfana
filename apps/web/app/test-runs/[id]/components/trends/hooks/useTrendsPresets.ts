@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { authenticatedFetch } from '@/lib/api';
 import { TrendsPresetsAPI, PresetType, TrendsSeriesConfig } from '@/lib/trends-presets';
-import { fetchDynatraceDashboards, DynatraceMetric } from '@/lib/dynatrace';
 import { TrendsPreset } from '../TrendsPresetsTable';
 import { PresetFormData } from '../SaveTrendsPresetModal';
 import {
@@ -24,15 +23,11 @@ interface UseTrendsPresetsProps {
   addedSeries: TrendsSeries[];
   dashboards: ApplicationDashboard[];
   fetchApplicationDashboards: () => Promise<ApplicationDashboard[]>;
-  fetchDashboardPanels: (uid: string) => Promise<Panel[]>;
-  fetchPanelMetrics: (applicationDashboardId: string, panelId: number, metricsSourceId?: string) => Promise<void>;
-  fetchDynatraceMetricsList: (label: string) => Promise<void>;
   setSelectedSource: (source: DataSource) => void;
   setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
   setSelectedMetric: (metric: Panel | null) => void;
   setEvaluateType: (type: string) => void;
   setAddedSeries: (series: TrendsSeries[] | ((prev: TrendsSeries[]) => TrendsSeries[])) => void;
-  setDynatraceMetrics: React.Dispatch<React.SetStateAction<DynatraceMetric[]>>;
 }
 
 export function useTrendsPresets({
@@ -43,15 +38,11 @@ export function useTrendsPresets({
   addedSeries,
   dashboards,
   fetchApplicationDashboards,
-  fetchDashboardPanels,
-  fetchPanelMetrics,
-  fetchDynatraceMetricsList,
   setSelectedSource,
   setSelectedDashboard,
   setSelectedMetric,
   setEvaluateType,
   setAddedSeries,
-  setDynatraceMetrics,
 }: UseTrendsPresetsProps) {
   const { user } = useAuth();
   const currentUserId = user?.id;
@@ -105,99 +96,30 @@ export function useTrendsPresets({
       const presetSource = (preset.source as DataSource) || 'grafana';
       setSelectedSource(presetSource);
 
+      // Dashboard/panel are context for the next preset save only — the cascade holds
+      // its own selection, and the series below are restored from series_config.
       if (preset.application_dashboard_id) {
-        if (presetSource === 'grafana' || presetSource === 'performance-metrics') {
-          // Eagerly load dashboards if not already loaded
-          let currentDashboards = dashboards;
-
-          if (currentDashboards.length === 0) {
-            currentDashboards = await fetchApplicationDashboards();
-          }
-
-          // Find the dashboard in the loaded Grafana dashboards
-          let dashboard = currentDashboards.find(d => d.id === preset.application_dashboard_id);
-
-          // Fallback 1: Try matching by dashboard_label if ID not found
-          if (!dashboard && preset.dashboard_label) {
-            dashboard = currentDashboards.find(d => d.dashboard_label === preset.dashboard_label);
-          }
-
-          // Fallback 2: Try matching by partial label match
-          if (!dashboard && preset.dashboard_label) {
-            dashboard = currentDashboards.find(d =>
-              d.dashboard_label?.toLowerCase().includes(preset.dashboard_label!.toLowerCase()) ||
-              preset.dashboard_label?.toLowerCase().includes(d.dashboard_label?.toLowerCase() || '')
-            );
-          }
-
-          if (!dashboard) {
-            showToast(`Dashboard "${preset.dashboard_label || preset.application_dashboard_id}" not found. It may have been deleted or is unavailable for this test run.`);
-            return;
-          }
-
-          setSelectedDashboard(dashboard);
-
-          // If preset has panel info, load panels and try to select the metric
-          if (preset.panel_id && preset.panel_title) {
-            const panelsData = await fetchDashboardPanels(dashboard.dashboard_uid);
-
-            const panel = panelsData.find(p => p.id === preset.panel_id);
-            if (panel) {
-              setSelectedMetric(panel);
-              // Populate the available metrics dropdown
-              const appDashboardId = panel.applicationDashboardId || dashboard.id;
-              const metricsSourceId = panel.metricsSourceId || dashboard.metrics_source_id;
-              fetchPanelMetrics(appDashboardId, panel.id, metricsSourceId);
-            } else {
-              showToast('Metric not found in dashboard');
-            }
-          }
-        } else if (presetSource === 'dynatrace') {
-          if (preset.panel_title && testRun) {
-            const systemId = testRun.system_under_test_id;
-            const environment = testRun.test_environment;
-            const workload = testRun.workload;
-
-            if (systemId && environment && workload) {
-              const dynatraceQueriesData = await fetchDynatraceDashboards(systemId, environment, workload);
-
-              if (dynatraceQueriesData.length > 0) {
-                const dashboardLabel = dynatraceQueriesData[0].dashboardLabel;
-
-                setSelectedDashboard({
-                  id: preset.application_dashboard_id,
-                  dashboard_label: dashboardLabel,
-                  dashboard_name: dashboardLabel,
-                  dashboard_uid: ''
-                } as ApplicationDashboard);
-
-                await fetchDynatraceMetricsList(dashboardLabel);
-
-                setTimeout(() => {
-                  setDynatraceMetrics(currentMetrics => {
-                    const metric = currentMetrics.find((m) => m.panelTitle === preset.panel_title);
-                    if (metric) {
-                      setSelectedMetric({
-                        id: metric.panelId,
-                        title: metric.panelTitle,
-                        type: 'dynatrace',
-                        applicationDashboardId: metric.applicationDashboardId
-                      } as Panel);
-                    } else {
-                      showToast('Metric not found in Dynatrace dashboard');
-                    }
-                    return currentMetrics;
-                  });
-                }, 100);
-              } else {
-                showToast('No Dynatrace dashboards available');
-              }
-            } else {
-              showToast('Test run configuration incomplete for Dynatrace');
-            }
-          } else {
-            showToast('Invalid Dynatrace preset configuration');
-          }
+        const currentDashboards = dashboards.length > 0 ? dashboards : await fetchApplicationDashboards();
+        const dashboard = currentDashboards.find(d => d.id === preset.application_dashboard_id)
+          ?? (preset.dashboard_label
+            ? currentDashboards.find(d => d.dashboard_label === preset.dashboard_label)
+            : undefined);
+        if (!dashboard) {
+          showToast(`Dashboard "${preset.dashboard_label || preset.application_dashboard_id}" not found — it may have been deleted; the series are restored as saved.`);
+        }
+        setSelectedDashboard(dashboard ?? {
+          id: preset.application_dashboard_id,
+          dashboard_label: preset.dashboard_label || '',
+          dashboard_name: preset.dashboard_label || '',
+          dashboard_uid: '',
+        } as ApplicationDashboard);
+        if (preset.panel_id != null && preset.panel_title) {
+          setSelectedMetric({
+            id: preset.panel_id,
+            title: preset.panel_title,
+            type: presetSource === 'dynatrace' ? 'dynatrace' : 'graph',
+            applicationDashboardId: preset.application_dashboard_id,
+          } as Panel);
         }
       }
 
@@ -238,18 +160,13 @@ export function useTrendsPresets({
     }
   }, [
     dashboards,
-    testRun,
     showToast,
     fetchApplicationDashboards,
-    fetchDashboardPanels,
-    fetchPanelMetrics,
-    fetchDynatraceMetricsList,
     setSelectedSource,
     setSelectedDashboard,
     setSelectedMetric,
     setEvaluateType,
     setAddedSeries,
-    setDynatraceMetrics,
   ]);
 
   // Save preset

@@ -60,6 +60,17 @@ orchestrator waits 30 min on it), and never on a run with no `transactions` rows
 rollup's unconditional delete would wipe that run's sampler half on every pass. Best-effort: a failed
 or skipped rollup is logged at warn and the raw path runs as before.
 
+`checks-evaluation` evaluates every SLO operator in one place, `src/pipelines/checks/requirement-operator.ts`
+(v0.2.95.31), shared by `RequirementChecker` and `AggregatedBenchmarkEvaluator`: `lt lte gt gte eq ne`
+and their symbols (`< <= > >= = !=`). Until then `RequirementChecker` knew only `lt`/`gt` and answered
+every other operator with an "Unknown requirement operator" warning and a pass, so an SLO "≠ 26.25"
+on a target measuring 26.25 was reported as met. Two things about it are load-bearing: it coerces
+both sides with `Number()` first, because `benchmarks.requirement_value` is NUMERIC and node-postgres
+hands it over as a string (`<` coerces, `===` does not, so `eq`/`ne` could never match without it);
+and it returns `null` for an operator nobody defined, leaving the caller to decide — `RequirementChecker`
+still logs the warning and passes, deliberately, since the SLO row is what is wrong, not the run.
+Existing `check_results` are not rewritten; re-evaluate a run to get the corrected verdict.
+
 ### The perf-test pipeline writes an extra "all aggregated" dashboard
 
 `PerformanceTestMetricsPipeline` writes one dashboard per scenario, plus — since v0.2.95.4 — one

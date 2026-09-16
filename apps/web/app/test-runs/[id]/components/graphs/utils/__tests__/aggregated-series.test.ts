@@ -1,7 +1,6 @@
 import {
   bucketsToDataPoints,
   aggregatedYAxisFormat,
-  offerAggregatedOption,
   fetchAggregatedSeriesData,
 } from '../aggregated-series';
 import { authenticatedFetch } from '@/lib/api';
@@ -36,27 +35,6 @@ describe('aggregatedYAxisFormat', () => {
     expect(aggregatedYAxisFormat('error_percentage')).toBe('percent');
     expect(aggregatedYAxisFormat('request_response_time')).toBe('ms');
     expect(aggregatedYAxisFormat('transaction_response_time')).toBe('ms');
-  });
-});
-
-describe('offerAggregatedOption', () => {
-  it('prepends the option for an aggregatable perf panel', () => {
-    expect(offerAggregatedOption('performance-metrics', 202, ['T01.a', 'T02.b']))
-      .toEqual(['All aggregated', 'T01.a', 'T02.b']);
-  });
-  it('leaves the list untouched for a non-perf source', () => {
-    expect(offerAggregatedOption('grafana', 202, ['cpu'])).toEqual(['cpu']);
-  });
-  it('leaves the list untouched for a non-aggregatable perf panel', () => {
-    expect(offerAggregatedOption('performance-metrics', 999, ['x'])).toEqual(['x']);
-  });
-  it('does not offer the synthetic option on the all-aggregated dashboard', () => {
-    // That dashboard's panels already carry a REAL series named "All aggregated";
-    // prepending the synthetic one lists it twice, and the second copy routes to
-    // /aggregated-metric-* which has a spec for ten panels only.
-    const names = offerAggregatedOption('performance-metrics', 202, ['All aggregated']);
-    expect(names).toEqual(['All aggregated']);
-    expect(names.filter(n => n === 'All aggregated')).toHaveLength(1);
   });
 });
 
