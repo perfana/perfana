@@ -212,25 +212,24 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
 
         if (totalStats === 0) {
           // 7. Statistics existence — metrics exist but no statistics
-          // Check if the issue is that all metrics fall within the ramp-up period
-          const rampUpCheckResult = await this.query<{ total: string; ramp_up_only: string }>(
-            `SELECT
-              COUNT(*)::text AS total,
-              COUNT(*) FILTER (WHERE ramp_up = true)::text AS ramp_up_only
-             FROM ds_metrics
-             WHERE test_run_id = $1`,
+          // Check if the issue is that all metrics fall within the ramp-up period.
+          // hasMetrics already proved rows exist, so the only question is whether any
+          // of them is outside the window: an EXISTS that stops at the first such row,
+          // not a COUNT(*) over every data point of the run (CLAUDE.md, item 7).
+          const steadyState = await this.query<{ has_steady_state: boolean }>(
+            `SELECT EXISTS (
+               SELECT 1 FROM ds_metrics WHERE test_run_id = $1 AND ramp_up = false
+             ) AS has_steady_state`,
             [testRunId]
           );
-          const totalDataPoints = parseInt(rampUpCheckResult[0]?.total ?? '0', 10);
-          const rampUpOnlyPoints = parseInt(rampUpCheckResult[0]?.ramp_up_only ?? '0', 10);
 
-          if (totalDataPoints > 0 && totalDataPoints === rampUpOnlyPoints) {
+          if (steadyState[0]?.has_steady_state === false) {
             const rampUpSec = testRun.analysisStartOffset ?? 0;
             const durationSec = testRun.startTime && testRun.endTime
               ? Math.round((new Date(testRun.endTime).getTime() - new Date(testRun.startTime).getTime()) / 1000)
               : 0;
             reasons.push(
-              `No steady-state data: all ${totalDataPoints.toLocaleString()} data points fall within the configured ramp-up period ` +
+              `No steady-state data: every data point falls within the configured ramp-up period ` +
               `(${rampUpSec}s ramp-up, ${durationSec}s actual duration). ` +
               `Reduce the ramp-up value to include data for analysis.`
             );
