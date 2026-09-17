@@ -630,6 +630,46 @@ finds an existing failed job, so the state is visible instead of silent.
 (`repairEmptySamplerRollup`) and `apps/api/src/modules/data-science/services/bullmq-client.service.ts`
 (`enqueueTransactionStatsRollup`).
 
+### Workload-level Apdex counts a multi-scenario transaction once per scenario
+
+**Priority:** P2
+**Origin:** /ship adversarial + red-team lanes on `perf/pipeline-quick-wins` (v0.2.95.32, 2026-09-17);
+pre-existing behaviour, deliberately left unchanged in a perf PR.
+**Why:** `evaluateWorkloadLevelApdex` iterates `getTransactionsWithScenarios`, which is DISTINCT
+`(transaction_name, scenario_name)`, but both the old per-transaction rollup query and the new bulk
+one (`calculateApdexFromRollupBulk`) answer per **name** — the join has no scenario predicate. A
+transaction that runs in two scenarios therefore contributes the same name-wide counts twice to
+`totalSatisfied/Tolerating/Frustrated/Count`, the overall workload score and `failedTransactions`,
+and each per-scenario `transaction_results` row claims a scenario-specific Apdex that is really the
+name-wide figure. `test_run_transaction_stats` is keyed by `(test_run_id, transaction_name,
+scenario_name, ramp_up_excluded)`, so the per-scenario rows already exist. Verdicts are unchanged
+from what production reports today; the dev database has no multi-scenario name to show the size
+of the error.
+**What to do:** unnest `(transaction_name, scenario_name, threshold_ms)` triples, join on
+`s.scenario_name` (the rollup stores `''` for NULL; `getTransactionsWithScenarios` maps that to
+`'default'`), `GROUP BY` both, key `rollupHits` by name+scenario, and give the raw-scan fallback the
+same scenario predicate. Prove it on a multi-scenario run before and after, since it moves SLO
+verdicts.
+**Where:** `apps/worker/src/pipelines/checks/ApdexCalculator.ts` (`evaluateWorkloadLevelApdex`,
+`calculateApdexFromRollupBulk`, `calculateApdexRaw`).
+
+### The full Dynatrace collection materialises every point of the run before its first INSERT
+
+**Priority:** P3
+**Origin:** /ship performance lane on `perf/pipeline-quick-wins` (v0.2.95.32, 2026-09-17).
+**Why:** `DynatracePipeline.storeMetricsDocuments` now reshapes every `PanelMetricsDocument` point
+into a 19-field `FlattenedMetricRecord` and hands the whole array to
+`MetricProcessor.upsertMetricsToDatabase`, which dedupes and batches it. The documents stay alive
+beside the flat copy, so a large full collection (50 queries x 30 entities x 180 min ~ 270 k points)
+holds ~80-100 MB more heap than the per-row loop it replaced, on a worker with a 2 GB heap. The
+batching itself (200 rows per statement, one transaction) is the win and stays.
+**What to do:** let `upsertMetricsToDatabase` take an iterable and flatten per document inside the
+batch loop, or add an overload that takes the documents and flattens ~200 records at a time inside
+the existing transaction. Keep the conflict-key dedupe: it has to see the whole set (or at least a
+document's worth) to stay last-wins.
+**Where:** `apps/worker/src/pipelines/DynatracePipeline.ts`,
+`apps/worker/src/pipelines/helpers/incremental/metric-processor.ts`.
+
 ## Dynatrace
 
 ### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster
