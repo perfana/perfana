@@ -147,6 +147,13 @@ The `@perfana/shared` package is the central repository for domain models, types
 
 `config/typeorm.config.ts` — PostgreSQL connection setup, entity registration, migration configuration, connection pooling, logging.
 
+Since v0.2.95.33 it also sets TypeORM's `maxQueryExecutionTime` from `DatabaseConfig.slowQueryMs`
+(default `DEFAULT_SLOW_QUERY_MS` = 1000; `0` and negatives fall back to it rather than switching the
+check off) and keeps the logger on `['error', 'warn']` in every environment, so a statement over the
+threshold is logged as `slow query (Nms): <sql>` at WARN on every pool built through it. The API
+reads its threshold from `SLOW_QUERY_MS` (see [[Environment Variables]]); the worker pins both its
+pools to 5000 in code.
+
 ## Related
 
 - [[Schema Overview]] — Entity relationships

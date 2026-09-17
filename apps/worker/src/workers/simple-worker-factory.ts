@@ -59,6 +59,18 @@ export function createSimpleQueue(queueName: SimpleQueueName): Queue {
   return queue;
 }
 
+/** `RUN-1 in 1234ms (queued 56ms)` — scope, run time incl. the backpressure wait, time spent waiting to be picked up. */
+function jobTiming(job: Job | undefined): string {
+  if (!job) {
+    return '';
+  }
+  const data = job.data as { testRunId?: string; testRunIds?: unknown[] } | undefined;
+  const scope = data?.testRunId ?? (Array.isArray(data?.testRunIds) ? `${data.testRunIds.length} runs` : '-');
+  const ran = job.processedOn ? `${(job.finishedOn ?? Date.now()) - job.processedOn}ms` : '?ms';
+  const queued = job.processedOn ? `${job.processedOn - job.timestamp}ms` : '?ms';
+  return `${scope} in ${ran} (queued ${queued})`;
+}
+
 /**
  * Create a simple Worker instance with blocking connection
  * This matches the test-blocking.cjs pattern that achieved 8ms pickup
@@ -134,12 +146,21 @@ export function createSimpleWorker(
     logger.error(`Worker ${queueName} error:`, error);
   });
 
+  // One line per job exit with its wall-clock cost, so an API slow-request
+  // warning (which names the active jobs) can be matched against what the
+  // worker was doing and for how long. BullMQ stamps finishedOn before
+  // 'completed' and a TERMINAL 'failed' (an attempt that will be retried has
+  // none, so jobTiming falls back to now), and deliberately emits neither for a
+  // DelayedError re-park, so a parked analyze does not read as a failure.
   worker.on('failed', (job, err) => {
-    logger.error(`Job ${job?.id} failed in ${queueName}:`, err);
+    logger.error(`Job failed: ${job?.name} (ID: ${job?.id}) ${jobTiming(job)} in ${queueName}:`, err);
   });
 
-  worker.on('completed', (job: Job) => {
-    logger.info(`Job ${job.id} completed in ${queueName}`);
+  worker.on('completed', (job: Job, result: unknown) => {
+    // softFail pipelines report failure by RETURNING { status: 'failed' } (see
+    // CLAUDE.md); the one-line summary must not call that "done".
+    const status = (result as { status?: string } | undefined)?.status === 'failed' ? 'Job soft-failed' : 'Job done';
+    logger.info(`${status}: ${job.name} (ID: ${job.id}) ${jobTiming(job)} in ${queueName}`);
   });
 
   worker.on('stalled', (jobId: string) => {

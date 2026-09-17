@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
@@ -48,6 +48,7 @@ import { RolesGuard } from './guards/roles.guard';
 import { EnhancedThrottlerGuard } from './guards/enhanced-throttler.guard';
 import { ThrottlerStorageRedisService } from './guards/throttler-storage-redis.service';
 import { AuditContextInterceptor } from './common/interceptors/audit-context.interceptor';
+import { SlowRequestMiddleware } from './common/middleware/slow-request.middleware';
 import { RlsTransactionInterceptor } from './common/interceptors/rls-transaction.interceptor';
 import { RequestContextModule } from './common/context/request-context.module';
 import { CommonModule } from './common/common.module';
@@ -158,4 +159,10 @@ import IORedis from 'ioredis';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Before the guards, so pool waits inside auth and 401/403/429 responses are timed too.
+    // Express 5 wildcard; a bare '*' works but makes LegacyRouteConverter warn on every boot.
+    consumer.apply(SlowRequestMiddleware).forRoutes('{*splat}');
+  }
+}

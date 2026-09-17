@@ -399,6 +399,40 @@ export class BullMQClientService implements OnModuleDestroy {
     }
   }
 
+  private activeJobsSnapshot: { at: number; promise: Promise<string> } | null = null;
+
+  /**
+   * One-line summary of the jobs currently active on both queues, for log
+   * correlation (SlowRequestMiddleware). Never throws: a Redis hiccup must not
+   * turn a slow-request warning into an error.
+   *
+   * Single-flight with a 2 s TTL: `getActive` is one LRANGE plus one HGETALL per
+   * job, and the caller fires on every slow response — which under the incident
+   * this exists to diagnose is every response at once, and on a @Public route is
+   * whatever a slow reader wants it to be. A burst shares one snapshot.
+   */
+  describeActiveJobs(): Promise<string> {
+    const now = Date.now();
+    if (this.activeJobsSnapshot && now - this.activeJobsSnapshot.at < 2000) {
+      return this.activeJobsSnapshot.promise;
+    }
+    this.activeJobsSnapshot = { at: now, promise: this.fetchActiveJobs() };
+    return this.activeJobsSnapshot.promise;
+  }
+
+  private async fetchActiveJobs(): Promise<string> {
+    if (!this.analysisQueue && !this.batchQueue) return 'redis-unavailable';
+    try {
+      const jobs = await Promise.all(
+        [this.analysisQueue, this.batchQueue].map((q) => (q ? q.getActive(0, 19) : [])),
+      );
+      const items = jobs.flat().map((j) => `${j.name}#${j.id}(${j.data?.testRunId ?? j.data?.testRunIds?.length ?? '-'})`);
+      return items.length ? items.join(',') : 'none';
+    } catch (e) {
+      return `unavailable(${e instanceof Error ? e.message : e})`;
+    }
+  }
+
   /**
    * Get job status from any queue
    */

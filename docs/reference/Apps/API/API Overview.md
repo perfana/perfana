@@ -87,10 +87,8 @@ The API contains **32 feature modules**. Key modules:
 Request ──▶ Global Prefix (/api)
   │
   ▼
-DatabaseSessionMiddleware
-  ├── Sets PostgreSQL session variables for RLS
-  ├── Validates organization membership
-  └── Sets X-Organization-Id context
+SlowRequestMiddleware (v0.2.95.33)
+  └── Starts the clock; on the response's `close` logs anything over SLOW_REQUEST_MS
   │
   ▼
 KeycloakEnhancedAuthGuard (Authentication)
@@ -106,17 +104,31 @@ EnhancedThrottlerGuard (Rate Limiting)
   └── Redis-backed per-user/IP throttling
   │
   ▼
+AuditContextInterceptor (populates the CLS request context)
+  │
+  ▼
+RlsTransactionInterceptor (per-request transaction, SET LOCAL ROLE perfana_app + app.current_* GUCs)
+  │
+  ▼
 Controller ──▶ Service ──▶ TypeORM ──▶ PostgreSQL
-  │
-  ▼
-AuditInterceptor (fire-and-forget logging)
-  │
-  ▼
-SnakeCaseInterceptor (response transformation)
   │
   ▼
 Response
 ```
+
+The first thing on that path is `SlowRequestMiddleware`
+(`apps/api/src/common/middleware/slow-request.middleware.ts`), applied to every route from
+`AppModule.configure`. It is a middleware rather than an interceptor so its clock starts before the
+guards: the API-key lookup in `KeycloakEnhancedAuthGuard` waits on the same pg pool, and a
+401/403/429 never reaches an interceptor at all. It times the response's `close` event and logs
+`METHOD url status ms pool=total/idle/waiting jobs=<active worker jobs>` at WARN for anything over
+`SLOW_REQUEST_MS` (default 1000; see [[Environment Variables]]). Read the suffixes before the
+number: `waiting > 0` is pool exhaustion, not a slow query, and `jobs=` names the BullMQ jobs active
+at that instant, so a burst of slow requests that lines up with a heavy worker stage is the
+aggregation evicting the buffer cache, where no single query looks slow. The pool is sampled
+synchronously at `close`; the job list is one shared 2 s snapshot (`describeActiveJobs` is
+single-flight), so a burst costs Redis one `getActive` pair per 2 s rather than a pair per response.
+The TypeORM pool logs its own `slow query (Nms)` lines above `SLOW_QUERY_MS`.
 
 ## Key Design Patterns
 

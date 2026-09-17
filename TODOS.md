@@ -1361,6 +1361,25 @@ consumed only by feature code. Suggested order: land the config change with the 
 captured in a baseline/ignore list, then burn the list down by directory so each PR stays
 reviewable.
 
+## Slow-request logging
+
+### Two residues from the v0.2.95.33 slow-request line
+
+**Priority:** P3
+**Origin:** pre-landing review of v0.2.95.33 (2026-09-17).
+**What:** `SlowRequestMiddleware` logs `req.originalUrl` verbatim. On the `@Public()` share
+routes (`/reports/share/:shareId`, `/:shareId/pdf`) the path segment IS the anonymous
+capability token, and PDF rendering routinely crosses the 1 s default, so every slow share
+hit writes a live share UUID into the WARN stream (server log, admin-only log viewer — the
+same place the share controller already logs it on denials, so an extension of an existing
+pattern, not a new exposure). Mask it: `url.replace(/(\/reports\/share\/)[^/?]+/, '$1<redacted>')`.
+Separately, `forRoutes('{*splat}')` under `setGlobalPrefix('api')` derives `['/api$',
+'/api/{*splat}']`, and `$` is a literal under path-to-regexp 8, so a request to the bare
+`/api` is never timed. No controller is mounted there today; if one is, add
+`forRoutes({ path: '', method: RequestMethod.ALL })` beside the wildcard.
+
+---
+
 ## Completed
 
 ### Make the perf-test ticks write the rebuild's shape, so the rebuild can be skipped

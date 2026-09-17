@@ -2,6 +2,8 @@ import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import * as migrations from '../database';
 import { TruncatedQueryLogger } from './typeorm-logger';
 
+export const DEFAULT_SLOW_QUERY_MS = 1000;
+
 /**
  * Configuration options for creating TypeORM connection
  */
@@ -36,6 +38,12 @@ export interface DatabaseConfig {
   connectionTimeoutMillis?: number;
   statementTimeout?: number;
   queryTimeout?: number;
+
+  /**
+   * Queries slower than this are logged as `slow query (Nms)`. Unset, 0 or negative
+   * fall back to DEFAULT_SLOW_QUERY_MS: TypeORM treats 0 as "off", and nobody wants off.
+   */
+  slowQueryMs?: number;
 }
 
 /**
@@ -66,10 +74,12 @@ export const createTypeOrmConfig = (config: DatabaseConfig): TypeOrmModuleOption
 
     // Custom logger that truncates SQL queries in error output
     // Prevents massive INSERT statements from flooding logs
+    // 'warn' in every environment: that is the level logQuerySlow emits on.
     logger: new TruncatedQueryLogger({
-      logging: config.nodeEnv === 'development' ? ['error', 'warn'] : ['error'],
+      logging: ['error', 'warn'],
       maxQueryLength: 200,
     }),
+    maxQueryExecutionTime: config.slowQueryMs && config.slowQueryMs > 0 ? config.slowQueryMs : DEFAULT_SLOW_QUERY_MS,
 
     // SSL configuration
     ssl: sslConfig,
