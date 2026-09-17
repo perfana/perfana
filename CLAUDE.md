@@ -772,31 +772,54 @@ Seven things a future reader will otherwise "fix":
 The roll-up is written at ingestion, so it appears on runs analysed from v0.2.95.4 onwards;
 re-analysing an older run produces it.
 
-**Transaction Impact (108) / Request Impact (219) are the Top 10 ranking figure inside ADAPT
-(v0.2.95.38).** Each is `SUM(response_time) / bucket_seconds` — `avg_rt x throughput`, so
-`SUM(value x bucket)` over the analysis window approximates `test_run_transaction_stats.impact_score`
-(exact except for NULL response times, which the rollup's `AVG x COUNT(*)` counts and `SUM` skips,
-and for a window edge inside a bucket). `response_time` is integer, so the `::double precision`
-cast before `/ $4` is load-bearing — `$4` is only float there because of the `INTERVAL` above.
-The division is load-bearing: bucket size is a step function of run length (15 s → 30 s at
-~62 min), so a per-bucket sum doubles when a run overruns a boundary and ADAPT flags every
-series. Both are classified `RED_duration`, lower is better, `mean`. Four more things. They add
-nothing to a run whose throughput is flat — the percentage change is then identical to RT Avg's —
-and because ADAPT's pct check is mandatory for a full `regression` (an `absoluteThreshold` alone
-yields `partial regression`, a difference not a regression), the sub-15% case they exist for is
-caught only by lowering `percentageThreshold` on the Impact panel's own compare config — and the
-IQR check, when valid, must agree too, or the label stays `partial regression`. A run
-finalised before the deploy never gains the panel from a plain re-analyse: the perf-test stage
-`skip`s a finalised run, so only a **force re-fetch** writes it (a live run straddling the deploy
-likewise gets a series that starts at the deploy, via the `tail` plan) — but not on a SUT-imported
-run without `requests_raw`/`transactions`: the force path deletes the perf-test rows first and
-cannot rebuild them (TODOS.md, Worker pipeline). Against a baseline with no
-control row the result is `incomparable`, but `ControlGroupStatisticsPipeline` pools whichever
-control runs have the row, so the first runs after the deploy are judged against a 1-, 2-, 3-run
-baseline on this panel only — expect noisier Impact verdicts until the group fills. And the request
-id is 219, not 210, because 210-218 are the web's **virtual URL panels**
-(`isUrlPanel` in both `url-perf-panels.ts` files) and a stored 210 would be routed through the
-sampler-URL rollup — `isRequestPanel` lists the stored ids (201-209, 219) for the same reason.
+**Transaction Concurrency (108) / Request Concurrency (219) are the Top 10 ranking figure inside
+ADAPT (v0.2.95.38 as "Impact" in ms/s; renamed and made unitless in v0.2.95.41).** Each is
+`SUM(response_time) / 1000 / bucket_seconds` — `throughput x avg_rt`, i.e. the average number of
+requests of that transaction in flight (Little's law: 4.8 means ~4.8 always being served; the sum
+over all transactions is the run's total concurrency, ≈ thread count in a closed model with no
+think time). `SUM(value x 1000 x bucket)` over the analysis window approximates
+`test_run_transaction_stats.impact_score` (exact except for NULL response times, which the rollup's
+`AVG x COUNT(*)` counts and `SUM` skips, and for a window edge inside a bucket). `response_time` is
+integer, so the `::double precision` cast before `/ 1000 / $4` is load-bearing — `$4` is only float
+there because of the `INTERVAL` above. The division by `$4` is load-bearing too: bucket size is a
+step function of run length (15 s → 30 s at ~62 min), so a per-bucket sum doubles when a run
+overruns a boundary and ADAPT flags every series. Both are classified `RED_duration`, lower is
+better, `mean`, unit `''`. Five more things. **Runs analysed on v0.2.95.38–40 hold the panel in
+ms/s under the old title** — same `panel_id`, so they pool into the baseline 1000x too large until
+force re-fetched. The tell is NOT in the new run's ADAPT table — `ds_adapt_results.panel_title`
+comes from the test run, so it reads `Transaction Concurrency` throughout — it is
+`ds_control_group_statistics.unit = 'ms/s'` on panel 108/219, or a control value ≈ 1000x the
+test value. Two runs need the same force re-fetch and are not caught by "analysed on .38–40": a
+run that was **live** across the deploy (the `tail` plan keeps its pre-deploy buckets in ms/s and
+certifies the run final, and the statistics row's `MIN(unit)` hides the mix), and any regression
+**tracked** on the panel in that window (the historical control group is frozen and title/unit
+agnostic, so the tracked result re-judges as a ~99.9 % `improvement` until every run of that
+group is re-fetched). The incremental upsert also updates `panel_title`/`dashboard_label` from
+this version, so the 60 s tick overlap no longer leaves the new value under the old title.
+Two more things saved in that window key on the old shape and are not touched by a re-fetch: a
+graph/trends/report preset stores the literal `panelTitle`, so one saved as `Transaction Impact`
+matches zero rows on a newer run and the series silently vanishes (re-save it); and an
+`absoluteThreshold` on the 108/219 compare config was entered in ms/s and is now 1000x too lax
+(divide it by 1000 or clear it — the pipeline's `ON CONFLICT DO NOTHING` never rewrites it).
+What the number is sensitive to depends on the load model: with a fixed arrival rate (open model)
+its percentage change is identical to RT Avg's, and with fixed threads and no think time it is
+pinned at the thread count and an RT regression surfaces on the Throughput panel instead — its
+own signal is the *absolute* cost a shift adds to the run, and because ADAPT's pct check is
+mandatory for a full `regression` (an `absoluteThreshold` alone yields `partial regression`, a
+difference not a regression), the sub-15% case it exists for is caught only by lowering
+`percentageThreshold` on this panel's own compare config — and the IQR check, when valid, must
+agree too, or the label stays `partial regression`. A run finalised before the deploy never gains
+the panel from a plain re-analyse: the perf-test stage `skip`s a finalised run, so only a **force
+re-fetch** writes it (a live run straddling the deploy likewise gets a series that starts at the
+deploy, via the `tail` plan) — but not on a SUT-imported run without `requests_raw`/`transactions`:
+the force path deletes the perf-test rows first and cannot rebuild them (TODOS.md, Worker
+pipeline). Against a baseline with no control row the result is `incomparable`, but
+`ControlGroupStatisticsPipeline` pools whichever control runs have the row, so the first runs after
+the deploy are judged against a 1-, 2-, 3-run baseline on this panel only — expect noisier
+verdicts until the group fills. And the request id is 219, not 210, because 210-218 are the web's
+**virtual URL panels** (`isUrlPanel` in both `url-perf-panels.ts` files) and a stored 210 would be
+routed through the sampler-URL rollup — `isRequestPanel` lists the stored ids (201-209, 219) for
+the same reason.
 
 ### ADAPT runs with JIT off, on purpose
 

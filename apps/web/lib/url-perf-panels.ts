@@ -78,7 +78,7 @@ export async function fetchSamplerUrlMap(
 
 /**
  * The per-request panels: response time (201-204), error rate, throughput, apdex,
- * latency and connect time (205-209) and impact (219). They all name their series
+ * latency and connect time (205-209) and concurrency (219). They all name their series
  * `transaction_name.sampler_name`, so the sampler URL map keys them all — attaching the
  * URL to only the response-time panel left every other request row without one.
  */

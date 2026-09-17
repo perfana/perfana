@@ -1,5 +1,5 @@
 /**
- * The Request Impact panel is a REAL perf-test panel with ds_metrics rows, so its series
+ * The Request Concurrency panel is a REAL perf-test panel with ds_metrics rows, so its series
  * must come from the statistics endpoint, not from the run's normalized URLs.
  *
  * It was first shipped as 210, which is the virtual "URL RT" panel's id (URL_PANEL_ID_MIN):
@@ -33,10 +33,10 @@ const perfDashboard: ApplicationDashboard = {
 
 beforeEach(() => jest.clearAllMocks());
 
-it('reads the Request Impact series from the statistics, not from the run URLs', async () => {
+it('reads the Request Concurrency series from the statistics, not from the run URLs', async () => {
   (authenticatedFetch as jest.Mock).mockResolvedValue({ ok: true, json: async () => ['T01.GET /home'] });
   const panel = {
-    id: 219, title: 'Request Impact', type: 'timeseries', applicationDashboardId: 'dash-1',
+    id: 219, title: 'Request Concurrency', type: 'timeseries', applicationDashboardId: 'dash-1',
     dashboard: perfDashboard, dashboardLabel: 'Perf', source: 'performance-metrics',
   } as PanelOption;
 
@@ -46,10 +46,10 @@ it('reads the Request Impact series from the statistics, not from the run URLs',
   expect(series.map((s) => s.metricName)).toEqual(['T01.GET /home']);
 });
 
-it('offers the Request Impact panel and the URL RT panel as two distinct entries', async () => {
+it('offers the Request Concurrency panel and the URL RT panel as two distinct entries', async () => {
   (authenticatedFetch as jest.Mock).mockResolvedValue({
     ok: true,
-    json: async () => [{ dashboard_label: 'Perf', panel_title: 'Request Impact', panel_id: 219 }],
+    json: async () => [{ dashboard_label: 'Perf', panel_title: 'Request Concurrency', panel_id: 219 }],
   });
 
   const panels = await fetchPanelsForDashboard(perfDashboard, testRun);

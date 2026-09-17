@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.41] - 2026-09-17
+
+### Changed
+- **The Transaction/Request Impact panels are now Transaction/Request Concurrency, and the number is a plain count.** Panels 108/219 (v0.2.95.38) held `SUM(response_time) / bucket_seconds` in `ms/s`, a unit nobody could read at a glance. The same figure divided by 1000 is `throughput x avg_rt` — by Little's law the average number of requests of that transaction in flight, so `4.8` on a transaction means ~4.8 of its requests are always being served, and the sum over every transaction is the run's total concurrency (≈ the thread count in a closed-model test with no think time). The panels keep their ids, their `RED_duration` / lower-is-better / `mean` compare config and their place in every dropdown; only the title, the unit (now empty, like Apdex) and the stored value change. What the number is sensitive to depends on the load model: with a fixed arrival rate its percentage change is identical to RT Avg's, and with fixed threads and no think time it is pinned at the thread count and a regression surfaces on Throughput instead — its own signal is the absolute cost a shift adds to the run, which is why lowering `percentageThreshold` on this panel's compare config is still the way to catch a sub-15 % shift on a high-volume transaction.
+
+  Rollout notes, since the ids did not change: a run analysed on v0.2.95.38–40 holds the panel in `ms/s` under the old title and pools into ADAPT baselines 1000x too large until it is **force re-fetched** — the tell is `ds_control_group_statistics.unit = 'ms/s'` on panel 108/219 (the new run's own ADAPT table reads `Concurrency` throughout), and a run that was live across the deploy or a regression tracked on the panel in that window needs the same repair. A graph or report preset saved against the `Impact` title matches no rows on a newer run (re-save it), and an `absoluteThreshold` entered in ms/s on that compare config is now 1000x too lax (divide it by 1000 or clear it). The incremental perf-test upsert now also refreshes `panel_title` / `dashboard_label` on conflict, so a tick's 60 s overlap no longer rewrites a bucket's value and unit while leaving its old title in place.
+
 ## [0.2.95.40] - 2026-09-17
 
 ### Fixed

@@ -329,16 +329,17 @@ export const METRIC_TYPE_PANEL_IDS = {
   TXN_APDEX: 106,
   TXN_THROUGHPUT: 107,
   /**
-   * Impact = SUM(response_time) / bucket seconds, i.e. avg_rt x throughput — the Top 10
-   * "performance ranking" figure (avg_rt x count) per second of run, so it is comparable
-   * across runs whose bucket size differs. It is in ADAPT so a small response-time shift on a
-   * high-volume transaction shows up as the total time it costs the run, not just its
-   * percentage. ponytail: default 15%/IQR thresholds apply. ADAPT's pct check is mandatory
-   * for a full `regression` label, so an absoluteThreshold alone only yields `partial
-   * regression`; to catch sub-15% shifts lower percentageThreshold on THIS panel's compare
-   * config (optionally with an absoluteThreshold in ms/s).
+   * Concurrency = SUM(response_time) / 1000 / bucket seconds = throughput x avg_rt, i.e. the
+   * average number of requests of this transaction in flight (Little's law) — the Top 10
+   * "performance ranking" figure normalised per second of run so it is comparable across runs
+   * whose bucket size differs. Unitless: 4.8 means ~4.8 requests always being served. It is in
+   * ADAPT so a small response-time shift on a high-volume transaction shows up as an absolute
+   * change in requests in flight, not just as a percentage. ponytail: default 15%/IQR thresholds
+   * apply. ADAPT's pct check is mandatory for a full `regression` label, so an
+   * absoluteThreshold alone only yields `partial regression`; to catch sub-15% shifts lower
+   * percentageThreshold on THIS panel's compare config (optionally with an absoluteThreshold).
    */
-  TXN_IMPACT: 108,
+  TXN_CONCURRENCY: 108,
 
   // Request-level (201-209, 219)
   REQ_RT_AVG: 201,
@@ -353,7 +354,7 @@ export const METRIC_TYPE_PANEL_IDS = {
   // 219, not 210: 210-218 are the virtual URL panels the web synthesises on these
   // dashboards (apps/web/lib/url-perf-panels.ts), and isUrlPanel() would route a
   // stored 210 through the sampler-URL rollup instead of ds_metric_statistics.
-  REQ_IMPACT: 219,
+  REQ_CONCURRENCY: 219,
 
   // Scenario-level (301-303)
   SCENARIO_ERROR_COUNT: 301,
@@ -372,7 +373,7 @@ export const METRIC_TYPE_PANEL_NAMES: Record<number, string> = {
   [METRIC_TYPE_PANEL_IDS.TXN_ERROR_RATE]: 'Transaction Error Rate',
   [METRIC_TYPE_PANEL_IDS.TXN_APDEX]: 'Transaction Apdex',
   [METRIC_TYPE_PANEL_IDS.TXN_THROUGHPUT]: 'Transaction Throughput',
-  [METRIC_TYPE_PANEL_IDS.TXN_IMPACT]: 'Transaction Impact',
+  [METRIC_TYPE_PANEL_IDS.TXN_CONCURRENCY]: 'Transaction Concurrency',
 
   [METRIC_TYPE_PANEL_IDS.REQ_RT_AVG]: 'Request RT Avg',
   [METRIC_TYPE_PANEL_IDS.REQ_RT_P90]: 'Request RT P90',
@@ -383,7 +384,7 @@ export const METRIC_TYPE_PANEL_NAMES: Record<number, string> = {
   [METRIC_TYPE_PANEL_IDS.REQ_APDEX]: 'Request Apdex',
   [METRIC_TYPE_PANEL_IDS.REQ_LATENCY]: 'Request Latency',
   [METRIC_TYPE_PANEL_IDS.REQ_CONNECT_TIME]: 'Request Connect Time',
-  [METRIC_TYPE_PANEL_IDS.REQ_IMPACT]: 'Request Impact',
+  [METRIC_TYPE_PANEL_IDS.REQ_CONCURRENCY]: 'Request Concurrency',
 
   [METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT]: 'Error Count',
   [METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS]: 'Avg Active Threads',
@@ -401,7 +402,7 @@ export const METRIC_TYPE_PANEL_UNITS: Record<number, string> = {
   [METRIC_TYPE_PANEL_IDS.TXN_ERROR_RATE]: '%',
   [METRIC_TYPE_PANEL_IDS.TXN_APDEX]: '',
   [METRIC_TYPE_PANEL_IDS.TXN_THROUGHPUT]: 'txn/s',
-  [METRIC_TYPE_PANEL_IDS.TXN_IMPACT]: 'ms/s',
+  [METRIC_TYPE_PANEL_IDS.TXN_CONCURRENCY]: '',
 
   [METRIC_TYPE_PANEL_IDS.REQ_RT_AVG]: 'ms',
   [METRIC_TYPE_PANEL_IDS.REQ_RT_P90]: 'ms',
@@ -412,7 +413,7 @@ export const METRIC_TYPE_PANEL_UNITS: Record<number, string> = {
   [METRIC_TYPE_PANEL_IDS.REQ_APDEX]: '',
   [METRIC_TYPE_PANEL_IDS.REQ_LATENCY]: 'ms',
   [METRIC_TYPE_PANEL_IDS.REQ_CONNECT_TIME]: 'ms',
-  [METRIC_TYPE_PANEL_IDS.REQ_IMPACT]: 'ms/s',
+  [METRIC_TYPE_PANEL_IDS.REQ_CONCURRENCY]: '',
 
   [METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT]: 'count',
   [METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS]: 'threads',
@@ -430,7 +431,7 @@ export const METRIC_TYPE_PANEL_CLASSIFICATIONS: Record<number, MetricClassificat
   [METRIC_TYPE_PANEL_IDS.TXN_ERROR_RATE]: { classification: 'RED_errors', higherIsBetter: false },
   [METRIC_TYPE_PANEL_IDS.TXN_APDEX]: { classification: 'RED_duration', higherIsBetter: true },
   [METRIC_TYPE_PANEL_IDS.TXN_THROUGHPUT]: { classification: 'RED_rate', higherIsBetter: true },
-  [METRIC_TYPE_PANEL_IDS.TXN_IMPACT]: { classification: 'RED_duration', higherIsBetter: false },
+  [METRIC_TYPE_PANEL_IDS.TXN_CONCURRENCY]: { classification: 'RED_duration', higherIsBetter: false },
 
   [METRIC_TYPE_PANEL_IDS.REQ_RT_AVG]: { classification: 'RED_duration', higherIsBetter: false },
   [METRIC_TYPE_PANEL_IDS.REQ_RT_P90]: { classification: 'RED_duration', higherIsBetter: false },
@@ -441,7 +442,7 @@ export const METRIC_TYPE_PANEL_CLASSIFICATIONS: Record<number, MetricClassificat
   [METRIC_TYPE_PANEL_IDS.REQ_APDEX]: { classification: 'RED_duration', higherIsBetter: true },
   [METRIC_TYPE_PANEL_IDS.REQ_LATENCY]: { classification: 'RED_duration', higherIsBetter: false },
   [METRIC_TYPE_PANEL_IDS.REQ_CONNECT_TIME]: { classification: 'RED_duration', higherIsBetter: false },
-  [METRIC_TYPE_PANEL_IDS.REQ_IMPACT]: { classification: 'RED_duration', higherIsBetter: false },
+  [METRIC_TYPE_PANEL_IDS.REQ_CONCURRENCY]: { classification: 'RED_duration', higherIsBetter: false },
 
   [METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT]: { classification: 'RED_errors', higherIsBetter: false },
   [METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS]: { classification: 'load', higherIsBetter: null },
@@ -460,7 +461,7 @@ export const METRIC_TYPE_PANEL_ADAPT_AGGREGATION: Record<number, string> = {
   [METRIC_TYPE_PANEL_IDS.TXN_ERROR_RATE]: 'mean',
   [METRIC_TYPE_PANEL_IDS.TXN_APDEX]: 'mean',
   [METRIC_TYPE_PANEL_IDS.TXN_THROUGHPUT]: 'mean',
-  [METRIC_TYPE_PANEL_IDS.TXN_IMPACT]: 'mean',
+  [METRIC_TYPE_PANEL_IDS.TXN_CONCURRENCY]: 'mean',
 
   [METRIC_TYPE_PANEL_IDS.REQ_RT_AVG]: 'mean',
   [METRIC_TYPE_PANEL_IDS.REQ_RT_P90]: 'q90',
@@ -471,7 +472,7 @@ export const METRIC_TYPE_PANEL_ADAPT_AGGREGATION: Record<number, string> = {
   [METRIC_TYPE_PANEL_IDS.REQ_APDEX]: 'mean',
   [METRIC_TYPE_PANEL_IDS.REQ_LATENCY]: 'mean',
   [METRIC_TYPE_PANEL_IDS.REQ_CONNECT_TIME]: 'mean',
-  [METRIC_TYPE_PANEL_IDS.REQ_IMPACT]: 'mean',
+  [METRIC_TYPE_PANEL_IDS.REQ_CONCURRENCY]: 'mean',
 
   [METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT]: 'mean',
   [METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS]: 'mean',
