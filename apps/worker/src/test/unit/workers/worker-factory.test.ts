@@ -191,6 +191,8 @@ describe('Worker Factory', () => {
     });
 
     describe('job exit lines', () => {
+      afterEach(() => vi.restoreAllMocks());
+
       const handler = (event: string) =>
         (mockWorkerInstance.on.mock.calls.find(([e]: [string]) => e === event) as [string, (...a: unknown[]) => void])[1];
       const job = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
@@ -228,7 +230,6 @@ describe('Worker Factory', () => {
         handler('failed')(job({ testRunId: 'RUN-1' }, { finishedOn: undefined }), new Error('attempt 1'));
 
         expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('RUN-1 in 1000ms (queued 250ms)'), expect.any(Error));
-        vi.restoreAllMocks();
       });
 
       it('survives a failed event with no job (stalled / lock lost)', async () => {
