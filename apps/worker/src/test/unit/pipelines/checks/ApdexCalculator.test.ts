@@ -310,8 +310,8 @@ describe('ApdexCalculator', () => {
 
       // Assert
       const [query, params] = mockManager.query.mock.calls[0];
-      expect(query).toContain('transaction_name =');
-      expect(params).toContain('checkout');
+      expect(query).toContain('transaction_name = w.transaction_name');
+      expect(params[2]).toEqual(['checkout']);
     });
 
     it('should omit transaction_name filter when null', async () => {
@@ -800,13 +800,13 @@ describe('ApdexCalculator', () => {
       spMock.enqueue(
         // getTransactionsWithScenarios (rollup hit)
         [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'checkout', scenario_name: 'default' }],
-        // resolveThreshold for 'login' → TX-specific empty (benchmark threshold used)
+        // TX-specific thresholds for the whole workload, once → none (benchmark threshold used)
         [],
-        // calculateApdex for 'login' via raw scan → score = 1.0
+        // bulk rollup fast path → no rows, every transaction takes the raw scan
+        [],
+        // raw scan for 'login' → score = 1.0
         [makeApdexRow(100, 0, 0, 200)],
-        // resolveThreshold for 'checkout'
-        [],
-        // calculateApdex for 'checkout' via raw scan → score = (85+7.5)/100 = 0.925
+        // raw scan for 'checkout' → score = (85+7.5)/100 = 0.925
         [makeApdexRow(85, 15, 0, 350)],
       );
 
@@ -828,9 +828,9 @@ describe('ApdexCalculator', () => {
 
       spMock.enqueue(
         [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'slow-search', scenario_name: 'default' }],
-        [],                                       // TX threshold for login
+        [],                                       // TX thresholds (once)
+        [],                                       // bulk rollup miss
         [makeApdexRow(90, 5, 5, 200)],            // login → 0.925
-        [],                                       // TX threshold for slow-search
         [makeApdexRow(40, 30, 30, 900)],          // slow-search → (40+15)/100 = 0.55
       );
 
@@ -851,9 +851,9 @@ describe('ApdexCalculator', () => {
 
       spMock.enqueue(
         [{ transaction_name: 'tx-a', scenario_name: 'default' }, { transaction_name: 'tx-b', scenario_name: 'default' }],
-        [],                          // TX threshold for tx-a
+        [],                          // TX thresholds (once)
+        [],                          // bulk rollup miss
         [makeApdexRow(60, 20, 20)],  // tx-a
-        [],                          // TX threshold for tx-b
         [makeApdexRow(40, 10, 50)],  // tx-b
       );
 
@@ -877,9 +877,9 @@ describe('ApdexCalculator', () => {
 
       spMock.enqueue(
         [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'checkout', scenario_name: 'default' }],
-        [],                                   // TX threshold for login
-        new Error('DB error'),                // calculateApdex for login throws
-        [],                                   // TX threshold for checkout
+        [],                                   // TX thresholds (once)
+        [],                                   // bulk rollup miss
+        new Error('DB error'),                // raw scan for login throws
         [makeApdexRow(90, 5, 5, 200)],        // checkout succeeds
       );
 
@@ -899,7 +899,8 @@ describe('ApdexCalculator', () => {
 
       spMock.enqueue(
         [{ transaction_name: 'login', scenario_name: 'default' }],
-        [],
+        [],                               // TX thresholds
+        [],                               // bulk rollup miss
         [makeApdexRow(80, 10, 10, 300)],
       );
 
@@ -918,7 +919,8 @@ describe('ApdexCalculator', () => {
 
       spMock.enqueue(
         [{ transaction_name: 'ghost', scenario_name: 'default' }],
-        [],                       // TX threshold
+        [],                       // TX thresholds
+        [],                       // bulk rollup miss
         [makeApdexRow(0, 0, 0)],  // zero counts
       );
 
@@ -942,9 +944,9 @@ describe('ApdexCalculator', () => {
       }));
 
       spMock.enqueue(transactions); // getTransactionsWithScenarios
+      spMock.enqueue([], []);       // TX thresholds (once), bulk rollup miss
       for (let i = 0; i < 4; i++) {
         spMock.enqueue(
-          [],                          // TX threshold
           [makeApdexRow(0, 0, 100)],   // frustrated → score = 0
         );
       }
@@ -992,10 +994,10 @@ describe('ApdexCalculator', () => {
           { transaction_name: 'tx-bad', scenario_name: 'default' },
           { transaction_name: 'tx-good', scenario_name: 'default' },
         ],
-        [],                                             // TX threshold for tx-bad
+        [],                                             // TX thresholds (once)
+        [],                                             // bulk rollup miss
         new Error('bigint out of range'),               // tx-bad fails
-        [],                                             // TX threshold for tx-good (runs because SAVEPOINT was rolled back)
-        [makeApdexRow(80, 10, 10, 200)],               // tx-good succeeds
+        [makeApdexRow(80, 10, 10, 200)],               // tx-good succeeds (runs because SAVEPOINT was rolled back)
       );
 
       // Act
@@ -1019,7 +1021,8 @@ describe('ApdexCalculator', () => {
 
       spMock.enqueue(
         [{ transaction_name: 'login', scenario_name: 'default' }],
-        [],
+        [],                               // TX thresholds
+        [],                               // bulk rollup miss → raw scan under a savepoint
         [makeApdexRow(90, 5, 5, 200)],
       );
 
@@ -1028,6 +1031,79 @@ describe('ApdexCalculator', () => {
       const allCalls: string[] = spMock.querySpy.mock.calls.map((c: any[]) => c[0] as string);
       expect(allCalls.some(s => /^\s*SAVEPOINT\b/i.test(s))).toBe(true);
       expect(allCalls.some(s => /^\s*RELEASE\s+SAVEPOINT\b/i.test(s))).toBe(true);
+    });
+
+    // ── CHK-P1: thresholds once, rollup once ───────────────────────────────
+
+    it('answers every transaction from ONE rollup statement with per-transaction thresholds, no savepoints', async () => {
+      // 294 transactions used to cost ~1,470 round trips: per transaction two
+      // threshold lookups, one rollup probe and two SAVEPOINT statements.
+      const testRun = createTestRun({ organization_id: 'org-1' });
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75, apdex_threshold_ms: 500 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'checkout', scenario_name: 'default' }],
+        // TX-specific thresholds, one query for the whole workload: checkout overrides to 250
+        [{ transaction_name: 'checkout', apdex_threshold: 250 }],
+        // bulk rollup: both transactions answered
+        [
+          { transaction_name: 'login', threshold_ms: 500, ...makeApdexRow(90, 5, 5, 200) },
+          { transaction_name: 'checkout', threshold_ms: 250, ...makeApdexRow(60, 20, 20, 300) },
+        ],
+      );
+
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      const calls = spMock.querySpy.mock.calls;
+      const sqls: string[] = calls.map((c: any[]) => c[0] as string);
+      // Exactly three statements: transactions, thresholds, rollup. No raw scan, no savepoint.
+      expect(calls).toHaveLength(3);
+      expect(sqls.some(s => /FROM transactions\b/.test(s))).toBe(false);
+      expect(sqls.some(s => /SAVEPOINT/i.test(s))).toBe(false);
+
+      // Thresholds are loaded for all transactions at once, org-scoped.
+      const [thrSql, thrParams] = calls[1];
+      expect(thrSql).toContain('workload_transaction_apdex_thresholds');
+      expect(thrSql).toContain('transaction_name = ANY($4::text[])');
+      expect(thrParams[3]).toEqual(['login', 'checkout']);
+      expect(thrParams[4]).toBe('org-1');
+      // The benchmark carries a threshold, so the workload-level lookup is never issued.
+      expect(sqls.some(s => /workload_apdex_thresholds\b/.test(s))).toBe(false);
+
+      // The rollup receives names and thresholds as paired arrays, with the override applied.
+      const [rollupSql, rollupParams] = calls[2];
+      expect(rollupSql).toContain('unnest($3::text[], $5::double precision[])');
+      expect(rollupParams[2]).toEqual(['login', 'checkout']);
+      expect(rollupParams[4]).toEqual([500, 250]);
+
+      expect(result.status).toBe('COMPLETE');
+      expect(result.transaction_results.map(t => [t.transaction_name, t.threshold_ms, t.apdex_score])).toEqual([
+        ['login', 500, 0.925],
+        ['checkout', 250, 0.7],
+      ]);
+      expect(result.meets_requirement).toBe(false); // checkout 0.7 < 0.75
+    });
+
+    it('takes the raw scan only for transactions the rollup did not answer', async () => {
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.5 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [{ transaction_name: 'hit', scenario_name: 'default' }, { transaction_name: 'miss', scenario_name: 'default' }],
+        [],                                                                  // TX thresholds
+        [{ transaction_name: 'hit', threshold_ms: 500, ...makeApdexRow(90, 5, 5, 200) }], // rollup answers 'hit' only
+        [makeApdexRow(40, 10, 50)],                                          // raw scan for 'miss'
+      );
+
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      const rawScans = spMock.querySpy.mock.calls.filter((c: any[]) => /FROM transactions\b/.test(c[0] as string));
+      expect(rawScans).toHaveLength(1);
+      expect(rawScans[0][1]).toContain('miss');
+      expect(result.transaction_results.map(t => t.transaction_name)).toEqual(['hit', 'miss']);
+      expect(result.apdex_result.total_count).toBe(200);
     });
   });
 
@@ -1371,7 +1447,7 @@ describe('ApdexCalculator', () => {
       expect(sql).toMatch(/rollup\s*\(\s*CASE\s+WHEN\s+\$4::boolean\s+THEN\s+pct_agg\s+ELSE\s+pct_agg_passed\s+END\s*\)/i);
       expect(sql).toContain('approx_percentile_rank');
       // Param layout: [testRunId, excludeRampUp, transactionName, includeFailedRequests, thresholdMs]
-      expect(params).toEqual(['run-001', true, 'checkout', false, 500]);
+      expect(params).toEqual(['run-001', true, ['checkout'], false, [500]]);
       // Score: (900 + 25) / 1000 = 0.925
       expect(result.apdex_score).toBe(0.925);
       expect(result.satisfied_count).toBe(900);
@@ -1547,7 +1623,7 @@ describe('ApdexCalculator', () => {
 
       // Assert
       const [sql] = mockManager.query.mock.calls[0];
-      expect(sql).toMatch(/BOOL_AND\s*\(\s*pct_agg_passed\s+IS\s+NOT\s+NULL\s*\)/i);
+      expect(sql).toMatch(/BOOL_AND\s*\(\s*s\.pct_agg_passed\s+IS\s+NOT\s+NULL\s*\)/i);
     });
 
     it('should pass thresholdMs as the rank parameter (no separate 4x param)', async () => {
@@ -1566,9 +1642,11 @@ describe('ApdexCalculator', () => {
 
       // Assert
       const [sql, params] = mockManager.query.mock.calls[0];
-      expect(sql).toContain('approx_percentile_rank($5');
-      expect(sql).toContain('($5 * 4)');
-      expect(params[4]).toBe(750);
+      // Thresholds arrive as an array paired with the transaction names; the 4x
+      // tolerating bound is computed inline from the unnested threshold_ms.
+      expect(sql).toContain('approx_percentile_rank(threshold_ms,');
+      expect(sql).toContain('threshold_ms * 4');
+      expect(params[4]).toEqual([750]);
     });
 
     it('should round avg_response_time_ms to 2 decimal places', async () => {
@@ -1647,8 +1725,8 @@ describe('ApdexCalculator', () => {
 
       const [sql] = mockManager.query.mock.calls[0];
       // Both rank computations must be guarded
-      expect(sql).toMatch(/COALESCE\s*\(\s*NULLIF\s*\(\s*approx_percentile_rank\s*\(\s*\$5::double precision/i);
-      expect(sql).toMatch(/COALESCE\s*\(\s*NULLIF\s*\(\s*approx_percentile_rank\s*\(\s*\(\$5\s*\*\s*4\)/i);
+      expect(sql).toMatch(/COALESCE\s*\(\s*NULLIF\s*\(\s*approx_percentile_rank\s*\(\s*threshold_ms,/i);
+      expect(sql).toMatch(/COALESCE\s*\(\s*NULLIF\s*\(\s*approx_percentile_rank\s*\(\s*threshold_ms\s*\*\s*4,/i);
       expect(sql).toMatch(/'NaN'::double precision/i);
     });
 
