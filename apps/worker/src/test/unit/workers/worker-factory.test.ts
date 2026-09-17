@@ -14,14 +14,11 @@ vi.mock('../../../config/environment.js', () => ({
     REDIS_DB: 0,
   })),
 }));
+const { mockLogger } = vi.hoisted(() => ({
+  mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn() },
+}));
 vi.mock('../../../lib/utils/logger.js', () => ({
-  getLogger: vi.fn(() => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-    trace: vi.fn(),
-  })),
+  getLogger: vi.fn(() => mockLogger),
 }));
 vi.mock('../../../config/simple-queues.js', () => ({
   getWorkerConfig: vi.fn((queueName) => ({
@@ -191,6 +188,45 @@ describe('Worker Factory', () => {
       expect(mockWorkerInstance.on).toHaveBeenCalledWith('failed', expect.any(Function));
       expect(mockWorkerInstance.on).toHaveBeenCalledWith('completed', expect.any(Function));
       expect(mockWorkerInstance.on).toHaveBeenCalledWith('stalled', expect.any(Function));
+    });
+
+    describe('job exit lines', () => {
+      const handler = (event: string) =>
+        (mockWorkerInstance.on.mock.calls.find(([e]: [string]) => e === event) as [string, (...a: unknown[]) => void])[1];
+      const job = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+        ({ id: '7', name: 'analyze-test', data, timestamp: 1000, processedOn: 1250, finishedOn: 4250, ...extra });
+
+      it('logs run time, queue wait and the run scope on completion', async () => {
+        createSimpleWorker('analyze-test', mockProcessor);
+
+        handler('completed')(job({ testRunId: 'RUN-1' }), { status: 'success' });
+
+        expect(mockLogger.info).toHaveBeenCalledWith('Job done: analyze-test (ID: 7) RUN-1 in 3000ms (queued 250ms) in analyze-test');
+      });
+
+      it('names a batch by its run count and calls a softFail return what it is', async () => {
+        createSimpleWorker('analyze-test', mockProcessor);
+
+        handler('completed')(job({ testRunIds: ['a', 'b', 'c'] }), { status: 'failed' });
+
+        expect(mockLogger.info).toHaveBeenCalledWith('Job soft-failed: analyze-test (ID: 7) 3 runs in 3000ms (queued 250ms) in analyze-test');
+      });
+
+      it('logs a failure with its timing and the error', async () => {
+        createSimpleWorker('analyze-test', mockProcessor);
+        const err = new Error('boom');
+
+        handler('failed')(job({}), err);
+
+        expect(mockLogger.error).toHaveBeenCalledWith('Job failed: analyze-test (ID: 7) - in 3000ms (queued 250ms) in analyze-test:', err);
+      });
+
+      it('survives a failed event with no job (stalled / lock lost)', async () => {
+        createSimpleWorker('analyze-test', mockProcessor);
+
+        expect(() => handler('failed')(undefined, new Error('lock lost'))).not.toThrow();
+        expect(mockLogger.error).toHaveBeenCalled();
+      });
     });
 
     it('should use worker config from simple-queues', async () => {
