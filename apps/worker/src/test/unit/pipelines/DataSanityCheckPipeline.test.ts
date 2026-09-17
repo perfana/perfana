@@ -86,7 +86,7 @@ function setupQueryMock(responses: {
     }
     // Steady-state probe (ramp_up = false) must be matched before the generic
     // ds_metrics EXISTS below, which it otherwise also satisfies.
-    if (sql.includes('ramp_up = false')) {
+    if (sql.includes('ramp_up IS DISTINCT FROM true')) {
       return Promise.resolve([{ has_steady_state: responses.steadyState ?? true }]);
     }
     if (sql.includes('ds_metrics') && sql.includes('EXISTS')) {

@@ -163,6 +163,9 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
         // worker sorted ~200 MB on a 2.5 M-row run), times the analyze/batch
         // concurrency for the deploy-wide peak.
         await manager.query(`SET LOCAL work_mem = '512MB'`);
+        // Pin the multiplier so the ceiling above is the actual ceiling on a deploy
+        // whose server default is higher; 2 is what the measurements used.
+        await manager.query(`SET LOCAL max_parallel_workers_per_gather = 2`);
 
         // DELETE before INSERT: UPSERT alone can't evict groups that no
         // longer exist. Two scenarios where stale rows would otherwise

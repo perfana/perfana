@@ -255,11 +255,26 @@ export class MetricProcessor {
       return;
     }
 
+    // One row per conflict key, last wins. A multi-row INSERT ... ON CONFLICT DO UPDATE
+    // whose VALUES carry the same key twice is rejected outright by Postgres
+    // ("cannot affect row a second time", 21000) and would fail the whole
+    // collection. Two Dynatrace queries on one panel with the same metric name and no
+    // group-by produce exactly that; the per-row loop this replaced simply updated the
+    // row twice.
+    const byKey = new Map<string, FlattenedMetricRecord>();
+    for (const r of records) {
+      byKey.set(
+        `${r.test_run_id}|${r.application_dashboard_id}|${r.panel_id}|${r.metric_name}|${new Date(r.time).getTime()}`,
+        r
+      );
+    }
+    const unique = [...byKey.values()];
+
     await this.db.transaction(async (manager: EntityManager) => {
       const batchSize = 200; // Conservative batch size
 
-      for (let i = 0; i < records.length; i += batchSize) {
-        const batch = records.slice(i, i + batchSize);
+      for (let i = 0; i < unique.length; i += batchSize) {
+        const batch = unique.slice(i, i + batchSize);
         await this.upsertBatch(manager, batch);
       }
     });

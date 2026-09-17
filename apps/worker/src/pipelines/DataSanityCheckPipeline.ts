@@ -216,9 +216,11 @@ export class DataSanityCheckPipeline extends BasePipelineTypeORM {
           // hasMetrics already proved rows exist, so the only question is whether any
           // of them is outside the window: an EXISTS that stops at the first such row,
           // not a COUNT(*) over every data point of the run (CLAUDE.md, item 7).
+          // ramp_up is nullable; a NULL flag (never baked) is not "in the ramp-up
+          // period", so it counts as steady state here, as the old COUNT comparison did.
           const steadyState = await this.query<{ has_steady_state: boolean }>(
             `SELECT EXISTS (
-               SELECT 1 FROM ds_metrics WHERE test_run_id = $1 AND ramp_up = false
+               SELECT 1 FROM ds_metrics WHERE test_run_id = $1 AND ramp_up IS DISTINCT FROM true
              ) AS has_steady_state`,
             [testRunId]
           );
