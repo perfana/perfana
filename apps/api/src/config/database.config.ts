@@ -20,6 +20,7 @@ export const createDatabaseConfig = (configService: ConfigService): TypeOrmModul
     database: configService.get<string>('DB_NAME', 'perfana'),
     ssl: sslConfig,
     nodeEnv: configService.get<string>('NODE_ENV'),
+    slowQueryMs: Number(configService.get('SLOW_QUERY_MS')), // NaN/0 fall back to the shared default
     poolSize: configService.get<number>('DB_POOL_SIZE'),
   });
 };

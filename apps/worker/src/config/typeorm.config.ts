@@ -34,6 +34,7 @@ export const createWriteTypeOrmConfig = (): TypeOrmModuleOptions => {
       // WorkerDatabaseService.dataSource, the main pool, and reports `perfana-worker`.
       // Filtering on this name for that work finds nothing.
       applicationName: 'perfana-worker-write',
+      slowQueryMs: 5000, // a ds_metrics upsert batch routinely takes >1 s; 1 s would log every tick
     }),
     name: 'write', // Named connection for injection
   };
@@ -68,5 +69,6 @@ export const createTypeOrmConfig = (): TypeOrmModuleOptions => {
     statementTimeout: 600000, // 10 minute global timeout (analytics get shorter via SET LOCAL)
     queryTimeout: 600000, // 10 minute query timeout
     applicationName: 'perfana-worker',
+    slowQueryMs: 5000, // analytics routinely take seconds; 1 s would log every aggregation
   });
 };
