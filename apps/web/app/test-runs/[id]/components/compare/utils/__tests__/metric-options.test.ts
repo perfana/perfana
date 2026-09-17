@@ -100,7 +100,7 @@ it('reads a URL panel series list from the run URLs instead of the statistics', 
 });
 
 it('treats every per-request panel as URL-bearing, not just response time', () => {
-  // 205-209 (error rate, throughput, apdex, latency, connect time) and 219 (impact) name their series
+  // 205-209 (error rate, throughput, apdex, latency, connect time) and 219 (concurrency) name their series
   // `transaction.sampler` exactly like 201-204, so they carry a URL too.
   const { isRequestPanel } = jest.requireActual('@/lib/url-perf-panels');
   expect([201, 204, 205, 206, 207, 208, 209, 219].every(isRequestPanel)).toBe(true);

@@ -127,6 +127,8 @@ export async function insertDsMetricsFromAggregate(
        DO UPDATE SET
          value = EXCLUDED.value,
          unit = EXCLUDED.unit,
+         panel_title = EXCLUDED.panel_title,
+         dashboard_label = EXCLUDED.dashboard_label,
          metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_metrics.metrics_source_id),
          updated_at = CURRENT_TIMESTAMP,
          organization_id = EXCLUDED.organization_id,
