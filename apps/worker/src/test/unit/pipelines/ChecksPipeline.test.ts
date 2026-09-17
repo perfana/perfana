@@ -420,6 +420,68 @@ describe('ChecksPipeline', () => {
       expect(mockRequirementChecker.saveCheckResult).toHaveBeenCalledTimes(2);
     });
 
+    it('forwards apdex_min_samples from the matched benchmark to the Apdex calculator and stores its result', async () => {
+      // Arrange
+      const testRun = {
+        test_run_id: 'test-run-1',
+        system_under_test_id: 'sut-1',
+        test_environment: 'production',
+        workload: 'load-test',
+        organization_id: 'org-1',
+      };
+      mockBenchmarkMatcher.findMatchingBenchmarks.mockResolvedValue([
+        {
+          id: 'apdex-1',
+          benchmark_type: 'apdex',
+          system_under_test_id: 'sut-1',
+          test_environment: 'production',
+          workload: 'load-test',
+          transaction_name: null,
+          apdex_threshold_ms: 500,
+          min_apdex_score: 0.8,
+          include_failed_requests: false,
+          exclude_ramp_up_time: true,
+          apdex_min_samples: 25,
+        },
+      ]);
+      mockApdexCalculator.evaluateApdexBenchmark = vi.fn().mockResolvedValue({
+        benchmark_id: 'apdex-1',
+        test_run_id: 'test-run-1',
+        status: 'COMPLETE',
+        message: 'ok',
+        meets_requirement: true,
+        requirement: { min_score: 0.8, threshold_ms: 500 },
+        apdex_result: { apdex_score: 0.9, transaction_name: null, satisfied_count: 9, tolerating_count: 0, frustrated_count: 1, total_count: 10, avg_response_time_ms: null },
+        transaction_results: [],
+      });
+      const saveSpy = vi.spyOn(pipeline as any, 'saveApdexCheckResult').mockResolvedValue(undefined);
+
+      // Act
+      const result = await (pipeline as any).processSingleTestRun(
+        testRun,
+        mockBenchmarkMatcher,
+        mockDataAggregator,
+        mockRequirementChecker,
+        mockApdexCalculator,
+        mockAggregatedEvaluator,
+        mockManager
+      );
+
+      // Assert
+      expect(result.processed_benchmarks).toBe(1);
+      expect(result.created_check_results).toBe(1);
+      expect(mockApdexCalculator.evaluateApdexBenchmark).toHaveBeenCalledWith(
+        testRun,
+        expect.objectContaining({ id: 'apdex-1', apdex_min_samples: 25, min_apdex_score: 0.8 }),
+      );
+      expect(saveSpy).toHaveBeenCalledWith(
+        mockManager,
+        testRun,
+        expect.objectContaining({ id: 'apdex-1', apdex_min_samples: 25 }),
+        expect.objectContaining({ meets_requirement: true }),
+      );
+    });
+
     it('should update test run status to COMPLETE when no errors', async () => {
       // Arrange
       const testRun = {
@@ -1634,6 +1696,81 @@ describe('ChecksPipeline', () => {
       expect(mockManager.query).toHaveBeenCalledOnce();
       const [sql, params] = mockManager.query.mock.calls[0];
       expectOrgAndNoDrift(sql, params);
+    });
+
+    it('saveApdexCheckResult persists below_min_samples on the single target and min_samples in the requirement', async () => {
+      // Arrange — a transaction-level SLO whose transaction had fewer than apdex_min_samples samples
+      const benchmark = {
+        id: 'bench-1',
+        transaction_name: 'rare-tx',
+        exclude_ramp_up_time: true,
+        include_failed_requests: false,
+        apdex_min_samples: 50,
+      } as any;
+      const apdexResult = {
+        status: 'COMPLETE',
+        message: 'Apdex not evaluated for rare-tx: 2 samples, minimum 50',
+        meets_requirement: null,
+        below_min_samples: true,
+        requirement: { min_score: 0.9, threshold_ms: 500 },
+        apdex_result: {
+          apdex_score: 0,
+          transaction_name: 'rare-tx',
+          satisfied_count: 0,
+          tolerating_count: 0,
+          frustrated_count: 2,
+          total_count: 2,
+          avg_response_time_ms: 5000,
+        },
+      } as any;
+
+      // Act
+      await (pipeline as any).saveApdexCheckResult(mockManager, testRun, benchmark, apdexResult);
+
+      // Assert
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expectOrgAndNoDrift(sql, params);
+      const requirement = JSON.parse(params[21]);
+      expect(requirement).toEqual({ type: 'apdex', min_score: 0.9, threshold_ms: 500, include_failed_requests: false, min_samples: 50 });
+      expect(params[23]).toBeNull(); // meets_requirement column
+      const targets = JSON.parse(params[24]);
+      expect(targets).toHaveLength(1);
+      expect(targets[0]).toMatchObject({ target: 'rare-tx', meets_requirement: null, below_min_samples: true, total_count: 2 });
+    });
+
+    it('saveApdexCheckResult persists below_min_samples per transaction for a workload-level SLO', async () => {
+      // Arrange — one judged transaction, one below the floor
+      const benchmark = {
+        id: 'bench-wl',
+        transaction_name: null,
+        exclude_ramp_up_time: true,
+        include_failed_requests: false,
+        apdex_min_samples: 50,
+      } as any;
+      const apdexResult = {
+        status: 'COMPLETE',
+        message: 'ok',
+        meets_requirement: true,
+        requirement: { min_score: 0.8, threshold_ms: 500 },
+        apdex_result: { apdex_score: 0.9, transaction_name: null, satisfied_count: 90, tolerating_count: 5, frustrated_count: 7, total_count: 102, avg_response_time_ms: null },
+        transaction_results: [
+          { transaction_name: 'login', scenario_name: 'default', apdex_score: 0.925, threshold_ms: 500, meets_requirement: true, below_min_samples: false, satisfied_count: 90, tolerating_count: 5, frustrated_count: 5, total_count: 100, avg_response_time_ms: 200 },
+          { transaction_name: 'rare', scenario_name: 'default', apdex_score: 0, threshold_ms: 500, meets_requirement: null, below_min_samples: true, satisfied_count: 0, tolerating_count: 0, frustrated_count: 2, total_count: 2, avg_response_time_ms: 5000 },
+        ],
+      } as any;
+
+      // Act
+      await (pipeline as any).saveApdexCheckResult(mockManager, testRun, benchmark, apdexResult);
+
+      // Assert
+      const [sql, params] = mockManager.query.mock.calls[0];
+      expectOrgAndNoDrift(sql, params);
+      expect(JSON.parse(params[21]).min_samples).toBe(50);
+      const targets = JSON.parse(params[24]);
+      expect(targets.map((t: any) => [t.target, t.meets_requirement, t.below_min_samples])).toEqual([
+        ['login', true, false],
+        ['rare', null, true],
+      ]);
     });
 
     it('saveAggregatedCheckResult writes the test run organization_id', async () => {

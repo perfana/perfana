@@ -74,6 +74,7 @@ const createBenchmark = (overrides?: Partial<ApdexBenchmark>): ApdexBenchmark =>
   min_apdex_score: 0.75,
   include_failed_requests: false,
   exclude_ramp_up_time: true,
+  apdex_min_samples: 1,
   ...overrides,
 });
 
@@ -686,6 +687,72 @@ describe('ApdexCalculator', () => {
       expect(result.message).toContain('below minimum');
     });
 
+    it('should return meets_requirement=null with below_min_samples when the transaction has too few samples', async () => {
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: 'rare-tx', min_apdex_score: 0.75, apdex_threshold_ms: 500, apdex_min_samples: 50 });
+
+      mockManager.query
+        .mockResolvedValueOnce([])                         // TX-specific threshold lookup
+        .mockResolvedValueOnce([{ transaction_name: 'rare-tx', ...makeApdexRow(0, 0, 2, 5000) }]); // calculateApdex
+
+      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+
+      expect(result.status).toBe('COMPLETE');
+      expect(result.meets_requirement).toBeNull();
+      expect(result.below_min_samples).toBe(true);
+      expect(result.message).toBe('Apdex not evaluated for rare-tx: 2 samples, minimum 50');
+    });
+
+    it('evaluates (and fails) a transaction with exactly apdex_min_samples samples', async () => {
+      // Arrange — the floor is inclusive: 50 samples at min 50 is judged
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: 'edge-tx', min_apdex_score: 0.75, apdex_threshold_ms: 500, apdex_min_samples: 50 });
+
+      mockManager.query
+        .mockResolvedValueOnce([])                         // TX-specific threshold lookup
+        .mockResolvedValueOnce([{ transaction_name: 'edge-tx', ...makeApdexRow(0, 0, 50, 5000) }]); // calculateApdex
+
+      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+
+      expect(result.status).toBe('COMPLETE');
+      expect(result.meets_requirement).toBe(false);
+      expect(result.below_min_samples).toBeUndefined();
+      expect(result.message).toContain('is below minimum 0.75 for edge-tx');
+    });
+
+    it('does not report below_min_samples when the transaction has no data at all', async () => {
+      // Arrange — zero samples is NO_DATA (a fail), not "too few samples"
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: 'ghost-tx', min_apdex_score: 0.75, apdex_threshold_ms: 500, apdex_min_samples: 50 });
+
+      mockManager.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ transaction_name: 'ghost-tx', ...makeApdexRow(0, 0, 0, null) }]);
+
+      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+
+      expect(result.status).toBe('NO_DATA');
+      expect(result.meets_requirement).toBe(false);
+      expect(result.below_min_samples).toBeUndefined();
+    });
+
+    it('measures the floor on every execution, so a mostly-failing transaction is still evaluated', async () => {
+      // 40 successes scored, but 1000 executions observed: above the floor, judged on its 40 samples
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: 'flaky', min_apdex_score: 0.75, apdex_threshold_ms: 500, apdex_min_samples: 50 });
+
+      mockManager.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ transaction_name: 'flaky', ...makeApdexRow(0, 0, 40, 5000), observed_count: '1000' }]);
+
+      const result = await calculator.evaluateApdexBenchmark(testRun, benchmark);
+
+      expect(result.status).toBe('COMPLETE');
+      expect(result.below_min_samples).toBeUndefined();
+      expect(result.meets_requirement).toBe(false);
+      expect(result.apdex_result.observed_count).toBe(1000);
+    });
+
     it('should return NO_DATA with meets_requirement=false when no transactions found (validate_with_default_if_no_data=false)', async () => {
       // Arrange — DB returns zero-count row; validate_with_default_if_no_data is always false for Apdex
       const testRun = createTestRun();
@@ -816,8 +883,140 @@ describe('ApdexCalculator', () => {
       // Assert
       expect(result.status).toBe('COMPLETE');
       expect(result.meets_requirement).toBe(true);
-      expect(result.message).toContain('All 2 transactions meet minimum Apdex');
+      expect(result.message).toContain('All 2 evaluated transactions meet minimum Apdex');
       expect(result.transaction_results).toHaveLength(2);
+    });
+
+    it('should not fail on a transaction with fewer than apdex_min_samples samples, and flag it', async () => {
+      // Arrange — 'rare' has 2 samples, both frustrated; below the 50-sample floor it is reported, not judged
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.80, apdex_min_samples: 50 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'rare', scenario_name: 'default' }],
+        [],                                       // TX thresholds (once)
+        [],                                       // bulk rollup miss
+        [makeApdexRow(90, 5, 5, 200)],            // login → 0.925
+        [makeApdexRow(0, 0, 2, 5000)],            // rare → 0.0 on 2 samples
+      );
+
+      // Act
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      // Assert
+      expect(result.status).toBe('COMPLETE');
+      expect(result.meets_requirement).toBe(true);
+      expect(result.message).toContain('1 not evaluated: fewer than 50 samples');
+      const rare = result.transaction_results!.find((t) => t.transaction_name === 'rare')!;
+      expect(rare).toMatchObject({ meets_requirement: null, below_min_samples: true, apdex_score: 0, total_count: 2 });
+      const login = result.transaction_results!.find((t) => t.transaction_name === 'login')!;
+      expect(login).toMatchObject({ meets_requirement: true, below_min_samples: false });
+    });
+
+    it('evaluates a transaction with exactly apdex_min_samples samples (the floor is inclusive)', async () => {
+      // Arrange — 'edge' has exactly 50 samples and a failing score: it must be judged, and fail
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.80, apdex_min_samples: 50 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [{ transaction_name: 'edge', scenario_name: 'default' }, { transaction_name: 'thin', scenario_name: 'default' }],
+        [],                                       // TX thresholds (once)
+        [],                                       // bulk rollup miss
+        [makeApdexRow(0, 0, 50, 5000)],           // edge → 0.0 on exactly 50 samples
+        [makeApdexRow(0, 0, 49, 5000)],           // thin → 0.0 on 49 samples (one short)
+      );
+
+      // Act
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      // Assert
+      expect(result.status).toBe('COMPLETE');
+      expect(result.meets_requirement).toBe(false);
+      expect(result.message).toContain('1 of 2 transactions below minimum Apdex 0.8: edge');
+      expect(result.message).toContain('(1 not evaluated: fewer than 50 samples)');
+      const edge = result.transaction_results!.find((t) => t.transaction_name === 'edge')!;
+      expect(edge).toMatchObject({ meets_requirement: false, below_min_samples: false, total_count: 50 });
+      const thin = result.transaction_results!.find((t) => t.transaction_name === 'thin')!;
+      expect(thin).toMatchObject({ meets_requirement: null, below_min_samples: true, total_count: 49 });
+    });
+
+    it('returns meets_requirement=null (not a pass) when every transaction is below apdex_min_samples', async () => {
+      // Arrange — no transaction is evaluable; same contract as the transaction-level SLO
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.80, apdex_min_samples: 50 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [{ transaction_name: 'a', scenario_name: 'default' }, { transaction_name: 'b', scenario_name: 'default' }],
+        [],
+        [],
+        [makeApdexRow(0, 0, 3, 5000)],
+        [makeApdexRow(0, 0, 1, 5000)],
+      );
+
+      // Act
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      // Assert
+      expect(result.status).toBe('COMPLETE');
+      expect(result.meets_requirement).toBeNull();
+      expect(result.below_min_samples).toBe(true);
+      expect(result.message).toContain('No transactions evaluated: all 2 have fewer than 50 samples');
+      expect(result.transaction_results!.every((t) => t.below_min_samples && t.meets_requirement === null)).toBe(true);
+      // Counts still aggregate into the workload-level total
+      expect(result.apdex_result.total_count).toBe(4);
+    });
+
+    it('does not append the not-evaluated suffix to a NO_DATA or ERROR message', async () => {
+      // Arrange — one transaction errors, the other is below the floor
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75, apdex_min_samples: 50 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'rare', scenario_name: 'default' }],
+        [],
+        [],
+        new Error('DB error'),                    // login throws
+        [makeApdexRow(0, 0, 2, 5000)],            // rare → below floor
+      );
+
+      // Act
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      // Assert
+      expect(result.status).toBe('ERROR');
+      expect(result.message).toBe('Error calculating Apdex for some transactions');
+      const login = result.transaction_results!.find((t) => t.transaction_name === 'login')!;
+      expect(login).toMatchObject({ meets_requirement: null, below_min_samples: false, total_count: 0 });
+      const rare = result.transaction_results!.find((t) => t.transaction_name === 'rare')!;
+      expect(rare).toMatchObject({ meets_requirement: null, below_min_samples: true });
+    });
+
+    it('reports a zero-sample transaction as not evaluated but NOT below_min_samples', async () => {
+      // Arrange — total_count 0 is "no data", distinct from "too few samples"
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.75, apdex_min_samples: 50 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [{ transaction_name: 'login', scenario_name: 'default' }, { transaction_name: 'empty', scenario_name: 'default' }],
+        [],
+        [],
+        [makeApdexRow(100, 0, 0, 200)],
+        [makeApdexRow(0, 0, 0, null)],
+      );
+
+      // Act
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      // Assert
+      expect(result.meets_requirement).toBe(true);
+      expect(result.message).not.toContain('not evaluated');
+      const empty = result.transaction_results!.find((t) => t.transaction_name === 'empty')!;
+      expect(empty).toMatchObject({ meets_requirement: null, below_min_samples: false, total_count: 0 });
     });
 
     it('should return FAIL when at least one transaction is below the minimum score', async () => {
