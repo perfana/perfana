@@ -92,8 +92,7 @@ describe('ControlGroupStatisticsPipeline sketch backfill (#552)', () => {
   };
 
   test('recomputes statistics for control runs whose pct_agg is NULL, then takes the fast path', async () => {
-    // Cleanup query, then the backfill lookup finds the stale baseline.
-    mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
+    // The backfill lookup finds the stale baseline.
     mockDatabaseService.query.mockResolvedValueOnce([{ test_run_id: 'baseline-1' }]);
 
     // After the backfill the sketches exist, so the availability check reports none missing.
@@ -111,7 +110,6 @@ describe('ControlGroupStatisticsPipeline sketch backfill (#552)', () => {
   });
 
   test('falls back to the legacy raw-scan path when the backfill itself fails', async () => {
-    mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
     mockDatabaseService.query.mockResolvedValueOnce([{ test_run_id: 'baseline-1' }]);
 
     statisticsExecute.mockResolvedValue({ success: false, errors: [{ message: 'statement timeout' }] });
@@ -130,7 +128,6 @@ describe('ControlGroupStatisticsPipeline sketch backfill (#552)', () => {
   });
 
   test('skips the backfill when the lookup returns no rows at all', async () => {
-    mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
     // Some drivers hand back undefined rather than an empty array.
     mockDatabaseService.query.mockResolvedValueOnce(undefined);
 
@@ -143,7 +140,6 @@ describe('ControlGroupStatisticsPipeline sketch backfill (#552)', () => {
   });
 
   test('does not recompute statistics when every control run already has its sketch', async () => {
-    mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
     mockDatabaseService.query.mockResolvedValueOnce([]);
 
     mockControlGroupQueries(0);
