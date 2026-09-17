@@ -267,6 +267,7 @@ export class BenchmarksController {
     apdexThresholdMs?: number;
     includeFailedRequests?: boolean;
     excludeRampUpTime?: boolean;
+    apdexMinSamples?: number;
     description?: string;
     tags?: string[];
   }) {
@@ -301,6 +302,7 @@ export class BenchmarksController {
     apdexThresholdMs?: number | null;
     includeFailedRequests?: boolean;
     excludeRampUpTime?: boolean;
+    apdexMinSamples?: number | null;
     enabled?: boolean;
     description?: string;
     tags?: string[];

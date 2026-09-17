@@ -31,6 +31,8 @@ export interface SloCheckResult {
   requirement_value: number | null;
   panel_average: number | null;
   meets_requirement: boolean | null;
+  /** 'COMPLETE' | 'ERROR' | 'NO_DATA' — tells an errored check apart from one that was not evaluated. */
+  status: string | null;
   /** The whole requirement object — apdex and aggregated checks carry fields no operator/value pair can express. */
   requirement: Record<string, unknown> | null;
   /** Per-target outcomes: the transactions/series behind a single pass/fail verdict. */

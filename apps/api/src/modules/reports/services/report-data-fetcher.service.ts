@@ -2133,7 +2133,8 @@ export class ReportDataFetcherService {
           cr.targets,
           cr.message,
           cr.panel_average,
-          cr.meets_requirement
+          cr.meets_requirement,
+          cr.status
         FROM check_results cr
         LEFT JOIN benchmarks b ON b.id::text = cr.benchmark_id
         WHERE cr.test_run_id = $1
@@ -2166,10 +2167,12 @@ export class ReportDataFetcherService {
       let passed = 0;
       let failed = 0;
 
+      // NULL is "not evaluated" (too few samples, or an ERROR) — neither bucket, matching the
+      // worker's bool_and(COALESCE(meets_requirement, true)) verdict.
       for (const row of rows) {
         if (row.meets_requirement === true) {
           passed++;
-        } else {
+        } else if (row.meets_requirement === false) {
           failed++;
         }
       }
