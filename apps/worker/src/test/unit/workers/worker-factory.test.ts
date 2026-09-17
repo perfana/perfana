@@ -221,6 +221,16 @@ describe('Worker Factory', () => {
         expect(mockLogger.error).toHaveBeenCalledWith('Job failed: analyze-test (ID: 7) - in 3000ms (queued 250ms) in analyze-test:', err);
       });
 
+      it('times a retried attempt from now when BullMQ has not stamped finishedOn', async () => {
+        createSimpleWorker('analyze-test', mockProcessor);
+        vi.spyOn(Date, 'now').mockReturnValue(2250);
+
+        handler('failed')(job({ testRunId: 'RUN-1' }, { finishedOn: undefined }), new Error('attempt 1'));
+
+        expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('RUN-1 in 1000ms (queued 250ms)'), expect.any(Error));
+        vi.restoreAllMocks();
+      });
+
       it('survives a failed event with no job (stalled / lock lost)', async () => {
         createSimpleWorker('analyze-test', mockProcessor);
 

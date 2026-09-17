@@ -313,6 +313,8 @@ describe('BullMQClientService.reevaluateBatch — recalculateStatistics', () => 
  * warning must not turn a warning into an unhandled rejection.
  */
 describe('BullMQClientService.describeActiveJobs', () => {
+  afterEach(() => jest.restoreAllMocks());
+
   function makeDescribeService(queues: { analysisQueue?: unknown; batchQueue?: unknown }) {
     const service = Object.create(BullMQClientService.prototype) as BullMQClientService;
     const internals = service as unknown as Record<string, unknown>;
@@ -406,6 +408,5 @@ describe('BullMQClientService.describeActiveJobs', () => {
     now += 1;
     await expect(service.describeActiveJobs()).resolves.toBe('analyze-test#1(RUN-1)');
     expect(getActive).toHaveBeenCalledTimes(2);
-    jest.restoreAllMocks();
   });
 });

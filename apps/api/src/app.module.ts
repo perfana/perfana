@@ -162,6 +162,7 @@ import IORedis from 'ioredis';
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     // Before the guards, so pool waits inside auth and 401/403/429 responses are timed too.
-    consumer.apply(SlowRequestMiddleware).forRoutes('*');
+    // Express 5 wildcard; a bare '*' works but makes LegacyRouteConverter warn on every boot.
+    consumer.apply(SlowRequestMiddleware).forRoutes('{*splat}');
   }
 }

@@ -66,7 +66,7 @@ function jobTiming(job: Job | undefined): string {
   }
   const data = job.data as { testRunId?: string; testRunIds?: unknown[] } | undefined;
   const scope = data?.testRunId ?? (Array.isArray(data?.testRunIds) ? `${data.testRunIds.length} runs` : '-');
-  const ran = job.processedOn && job.finishedOn ? `${job.finishedOn - job.processedOn}ms` : '?ms';
+  const ran = job.processedOn ? `${(job.finishedOn ?? Date.now()) - job.processedOn}ms` : '?ms';
   const queued = job.processedOn ? `${job.processedOn - job.timestamp}ms` : '?ms';
   return `${scope} in ${ran} (queued ${queued})`;
 }
@@ -148,8 +148,9 @@ export function createSimpleWorker(
 
   // One line per job exit with its wall-clock cost, so an API slow-request
   // warning (which names the active jobs) can be matched against what the
-  // worker was doing and for how long. BullMQ stamps processedOn/finishedOn
-  // before emitting either event, and deliberately emits neither for a
+  // worker was doing and for how long. BullMQ stamps finishedOn before
+  // 'completed' and a TERMINAL 'failed' (an attempt that will be retried has
+  // none, so jobTiming falls back to now), and deliberately emits neither for a
   // DelayedError re-park, so a parked analyze does not read as a failure.
   worker.on('failed', (job, err) => {
     logger.error(`Job failed: ${job?.name} (ID: ${job?.id}) ${jobTiming(job)} in ${queueName}:`, err);
