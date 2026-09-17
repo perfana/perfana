@@ -1233,8 +1233,8 @@ describe('PerformanceTestMetricsPipeline', () => {
       const deleteOrder = mockDataSource.query.mock.invocationCallOrder[deleteCall];
       const saveOrder = mockWriteDataSource.query.mock.invocationCallOrder[0];
       expect(deleteOrder).toBeGreaterThan(saveOrder);
-      // The ticks ran statistics and the panel update every minute, and statistics-calculation
-      // follows in the same analyze: the tail does not re-read the whole run for either.
+      // The ticks ran statistics every minute, and statistics-calculation follows in the
+      // same analyze: the tail does not re-read the whole run for it.
       expect(mockDataSource.query).not.toHaveBeenCalledWith(expect.stringContaining('ds_metric_statistics'), expect.anything());
       // The range is recorded to end_time and the run marked final so the next analyze skips.
       expect(mockDatabaseService.updateCollectedRanges).toHaveBeenCalledWith(

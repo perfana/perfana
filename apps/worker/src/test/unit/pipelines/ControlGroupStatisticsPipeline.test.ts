@@ -588,7 +588,6 @@ describe('ControlGroupStatisticsPipeline', () => {
 
   describe('Aggregation budget', () => {
     test('raises the budget once for the whole batch, under the pool query_timeout', async () => {
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
       for (const i of [1, 2]) {
         (mockEntityManager.query as any)
           .mockResolvedValueOnce([{
@@ -789,7 +788,6 @@ describe('ControlGroupStatisticsPipeline', () => {
       ['fast path', 0],
       ['legacy path', 7],
     ])('should scope dashboards by org without correlating on test_runs (%s)', async (_label, missingSketches) => {
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
       (mockEntityManager.query as any).mockResolvedValueOnce([
         {
           control_group_id: 'control-group-1',
@@ -817,7 +815,6 @@ describe('ControlGroupStatisticsPipeline', () => {
 
   describe('Row count after the INSERT', () => {
     const seedOneGroup = () => {
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
       (mockEntityManager.query as any).mockResolvedValueOnce([
         {
           control_group_id: 'control-group-1',
