@@ -101,6 +101,15 @@ The shared package provides TypeORM configuration used by all services:
 
 Configuration location: `/packages/shared/src/config/typeorm.config.ts`
 
+`createTypeOrmConfig` also sets `maxQueryExecutionTime` from `DatabaseConfig.slowQueryMs`
+(v0.2.95.33), so every pool built through it logs `slow query (Nms): <sql, truncated to 200 chars>`
+at WARN for statements over the threshold. Unset, `0` or negative fall back to
+`DEFAULT_SLOW_QUERY_MS` (1000): TypeORM treats `0` as "off", and off is never what a caller wants.
+The `TruncatedQueryLogger` is on `['error', 'warn']` in every environment for the same reason —
+slow-query lines emit on `warn`, and production used to be `error` only, so they were measured and
+dropped. The API reads its value from `SLOW_QUERY_MS`; the worker pins both its pools to 5000 in
+`apps/worker/src/config/typeorm.config.ts`.
+
 ## Migration History
 
 See [Migration Consolidation Documentation](../../database/MIGRATION_CONSOLIDATION.md) for details on the schema consolidation performed on 2026-02-03.

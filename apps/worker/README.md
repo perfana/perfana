@@ -511,6 +511,12 @@ Worker-specific tuning (full schema and defaults in `src/config/environment.ts`)
 | `WORKER_ANALYZE_CONCURRENCY` / `WORKER_BATCH_CONCURRENCY` | `2` / `2` | Concurrent jobs per queue. Both multiply the `work_mem` peak above. Since v0.2.95.17 the heavy stages are serialised by `HeavyStageMutex`, so a second analyze job parks in its slot while the first aggregates; raise the analyze concurrency to 3 if incremental-collection ticks start missing coverage. |
 | `AUDIT_RETENTION_MONTHS` | `24` | `AuditRetentionManager` deletes `audit_logs` rows older than this on boot and daily at 03:00 UTC. |
 
+The slow-query threshold is deliberately **not** an env var here: `src/config/typeorm.config.ts`
+pins `slowQueryMs: 5000` on both pools (v0.2.95.33), because the aggregations and `ds_metrics`
+upsert batches routinely take seconds and the API's 1 s default would log every tick. Statements
+over it are logged as `slow query (Nms): <sql>` at WARN by the shared TypeORM logger. Setting
+`SLOW_QUERY_MS` on the worker does nothing.
+
 Two Postgres settings the worker depends on but cannot set (both in `docker-compose.infra.yml`; a
 deploy running its own Postgres has to set them too, restart required):
 
@@ -557,6 +563,15 @@ whether the work succeeded. Read the job's `returnvalue` — `simple-orchestrate
 exports `assertStageSucceeded(stage, returnValue)` for exactly this — or the orchestrator logs a
 green tick and the next stage runs on empty data. That is how a failed `control-group-statistics`
 used to reach ADAPT with no baseline and get the baseline blamed (#552).
+
+In the log, the factory's `completed` listener (`simple-worker-factory.ts`) tells the two apart
+since v0.2.95.33: every job exit is one line, `Job done|soft-failed|failed: <name> (ID: n) <run> in
+Nms (queued Nms) in <queue>`, and a `completed` event whose return value carries
+`status: 'failed'` is printed as `Job soft-failed`, never `Job done`. The timings are BullMQ's own
+`processedOn` / `finishedOn` stamps (`queued` is time spent waiting to be picked up; `run` includes
+the backpressure wait), so an API slow-request warning that names an active job can be matched
+against how long that job actually ran. A retried attempt has no `finishedOn` and is timed from
+now; a `DelayedError` re-park emits neither event, so a parked analyze never reads as a failure.
 
 ### Reporting failure by returning marks the job COMPLETED
 
