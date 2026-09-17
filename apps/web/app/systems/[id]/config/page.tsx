@@ -42,6 +42,7 @@ import ReportingTemplatesSection from './components/ReportingTemplatesSection';
 import AdaptSettingsSection from './components/AdaptSettingsSection';
 import ConfigDialogs from './components/ConfigDialogs';
 import AggregatedSloDialog, { ExistingAggregatedBenchmark } from '@/app/test-runs/[id]/components/performance-analysis/AggregatedSloDialog';
+import type { Benchmark } from './components/types';
 import TemplateManagementDialog from './components/TemplateManagementDialog';
 import DeleteSystemDialog from './components/DeleteSystemDialog';
 import ExportSystemDialog from './components/ExportSystemDialog';
@@ -130,6 +131,24 @@ export default function SystemConfigurationPage() {
   }
 
   const { system, systemId, selectedEnvironment, selectedWorkload, activeTab } = systemData;
+
+  // Aggregated SLOs have their own dialog; everything else goes to the edit-SLO dialog.
+  const openSloEditor = (benchmark: Benchmark) => {
+    if (benchmark.benchmark_type === 'aggregated') {
+      setSelectedAggregatedBenchmark({
+        id: benchmark.id,
+        aggregate_metric: benchmark.aggregate_metric as ExistingAggregatedBenchmark['aggregate_metric'],
+        aggregate_stat: benchmark.aggregate_stat as ExistingAggregatedBenchmark['aggregate_stat'],
+        requirement_operator: benchmark.requirement_operator ?? '<=',
+        requirement_value: benchmark.requirement_value ?? 0,
+        exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
+        enabled: benchmark.enabled,
+      });
+      setAggregatedSloDialogOpen(true);
+      return;
+    }
+    slo.handleEditSLO(benchmark);
+  };
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -245,21 +264,10 @@ export default function SystemConfigurationPage() {
                 setSelectedAggregatedBenchmark(null);
                 setAggregatedSloDialogOpen(true);
               }}
-              onEditSLO={(benchmark) => {
-                if (benchmark.benchmark_type === 'aggregated') {
-                  setSelectedAggregatedBenchmark({
-                    id: benchmark.id,
-                    aggregate_metric: benchmark.aggregate_metric as ExistingAggregatedBenchmark['aggregate_metric'],
-                    aggregate_stat: benchmark.aggregate_stat as ExistingAggregatedBenchmark['aggregate_stat'],
-                    requirement_operator: benchmark.requirement_operator ?? '<=',
-                    requirement_value: benchmark.requirement_value ?? 0,
-                    exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
-                    enabled: benchmark.enabled,
-                  });
-                  setAggregatedSloDialogOpen(true);
-                  return;
-                }
-                slo.handleEditSLO(benchmark);
+              onEditSLO={openSloEditor}
+              onDuplicateSLO={async (benchmark) => {
+                const clone = await slo.handleDuplicateSLO(benchmark, systemId, selectedEnvironment, selectedWorkload);
+                if (clone) openSloEditor(clone);
               }}
               onDeleteSLO={slo.handleDeleteSLO}
               onViewSLO={slo.handleViewSLO}

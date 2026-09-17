@@ -46,6 +46,7 @@ interface SLOSectionProps {
   onAddSLO: () => void;
   onAddAggregatedSLO: () => void;
   onEditSLO: (benchmark: Benchmark) => void;
+  onDuplicateSLO: (benchmark: Benchmark) => void;
   onDeleteSLO: (benchmark: Benchmark) => void;
   onViewSLO: (benchmark: Benchmark) => void;
   onBatchDelete: (ids: string[]) => Promise<void>;
@@ -66,6 +67,7 @@ export default function SLOSection({
   onAddSLO,
   onAddAggregatedSLO,
   onEditSLO,
+  onDuplicateSLO,
   onDeleteSLO,
   onViewSLO,
   onBatchDelete
@@ -317,6 +319,7 @@ export default function SLOSection({
           selectedTags={selectedTags}
           selectedSloIds={selectedSloIds}
           onEdit={onEditSLO}
+          onDuplicate={onDuplicateSLO}
           onDelete={onDeleteSLO}
           onView={onViewSLO}
           onClearSearch={() => onSearchChange('')}

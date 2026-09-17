@@ -67,6 +67,16 @@ export class BenchmarksController {
     }
   }
 
+  @Post(':id/duplicate')
+  @ApiOperation({ summary: 'Clone a benchmark into its own SUT / environment / workload' })
+  @ApiResponse({ status: 201, description: 'The new benchmark' })
+  @ApiResponse({ status: 404, description: 'Benchmark not found' })
+  async duplicateBenchmark(@UserCtx() ctx: UserContext, @Param('id') id: string) {
+    const result = await this.benchmarksService.duplicate(id, ctx.userId, ctx.roles);
+    if (!result) throw new HttpException('Benchmark not found', HttpStatus.NOT_FOUND);
+    return result;
+  }
+
   @Post('copy')
   @ApiOperation({ summary: 'Copy SLOs/benchmarks from one scope to another' })
   @ApiResponse({ status: 201, description: 'Benchmarks copied successfully' })
