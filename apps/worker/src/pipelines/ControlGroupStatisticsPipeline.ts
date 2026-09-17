@@ -143,9 +143,6 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
 
       this.logger.info(`Starting control group statistics calculation for ${groupIds.length} groups`);
 
-      // Cleanup stale data before processing
-      await this.cleanupStaleApplicationDashboards(['ds_control_group_statistics']);
-
       // Self-heal before aggregating (#552). See backfillMissingSketches.
       await this.backfillMissingSketches(groupIds);
 

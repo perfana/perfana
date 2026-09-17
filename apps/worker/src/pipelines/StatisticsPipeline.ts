@@ -122,9 +122,6 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     try {
       this.logger.info(`Starting statistics aggregation for test runs: ${testRunIds.join(', ')}`);
 
-      // Cleanup stale data before processing
-      await this.cleanupStaleApplicationDashboards(['ds_metric_statistics']);
-
       // Establish ONE set of runs for everything below. The flag refresh, the
       // decompression it needs, and the aggregation must all cover the same runs: a run
       // that gets new ds_metrics.ramp_up flags but keeps the previous window's

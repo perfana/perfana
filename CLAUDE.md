@@ -975,6 +975,14 @@ hypertable, i.e. DML decompression until the tuple limit — measured 175–187 
 documents took three minutes for this alone, and it ran beside the other runs' aggregations.
 Removed in v0.2.95.22; the helper's doc comment now says small tables only.
 
+**And on an FK-backed table it is dead work.** Every result table except `check_results` carries
+a validated foreign key on `application_dashboard_id`, so the `NOT IN (SELECT id FROM
+application_dashboards)` can never match — each call was a full sequential scan of the table
+per job (54 ms / 62 ms on dev at 210 k / 349 k rows, growing with the table) to delete nothing.
+v0.2.95.32 removed the calls in `PanelsPipeline`, `DynatracePipeline`, `StatisticsPipeline`,
+`ControlGroupStatisticsPipeline` and `AdaptPipeline`; the one in `ChecksPipeline` stays because
+`check_results` has no such FK. Before adding a call, check `pg_constraint` for the table.
+
 ### A source that is switched off must not be registered for collection
 
 `MetricCollectionGapService.calculateCoverage` sums the merged `collected_ranges` of **every** row

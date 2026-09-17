@@ -10,7 +10,6 @@
  * - Database operations (metrics storage)
  * - Error handling and recovery
  * - Multi-instance support
- * - Stale data cleanup
  *
  * Target Coverage: 90%+ for all metrics
  */
@@ -331,21 +330,6 @@ describe('DynatracePipeline', () => {
         totalPanels: 0,
         totalMetrics: 4, // 2 metrics × 2 test runs
       });
-    });
-
-    it('should cleanup stale data before processing', async () => {
-      // Arrange
-      const input = { testRunIds: ['test-run-123'] };
-      const cleanupSpy = vi.spyOn(pipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue(undefined);
-
-      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue([]);
-
-      // Act
-      await pipeline.execute(input);
-
-      // Assert
-      expect(cleanupSpy).toHaveBeenCalledWith(['ds_panels']);
     });
 
     it('should call storeMetricsDocuments with correct data', async () => {

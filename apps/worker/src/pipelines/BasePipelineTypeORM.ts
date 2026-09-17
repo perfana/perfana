@@ -180,8 +180,12 @@ export abstract class BasePipelineTypeORM implements Pipeline {
   }
 
   /**
-   * Clean up stale data with invalid application_dashboard_id references
-   * This should be called at the start of pipelines that write to data science tables
+   * Clean up stale data with invalid application_dashboard_id references.
+   *
+   * Only worth calling on a table WITHOUT a foreign key to application_dashboards —
+   * today that is `check_results` alone. On an FK-backed table the `NOT IN` can never
+   * match, so the call was a full sequential scan per job for nothing (54–62 ms on
+   * dev, growing with the table); those calls were removed in v0.2.95.32.
    *
    * Result tables only. There is no test_run_id predicate, so on `ds_metrics` this is a
    * DML-decompressing DELETE across every chunk of the hypertable (measured ~180 s per

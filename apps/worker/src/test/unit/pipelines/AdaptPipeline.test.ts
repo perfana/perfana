@@ -233,22 +233,6 @@ describe('AdaptPipeline', () => {
       expect(result.data.testRunIds).toBe(3);
     });
 
-    it('should cleanup stale data before processing', async () => {
-      // Arrange
-      const input = { testRunIds: ['test-run-1'] };
-      const cleanupSpy = vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards');
-
-      // Act
-      await adaptPipeline.execute(input);
-
-      // Assert
-      expect(cleanupSpy).toHaveBeenCalledWith([
-        'ds_adapt_results',
-        'ds_adapt_tracked_results',
-        'ds_compare_config',
-      ]);
-    });
-
     it('should update evaluation status to IN_PROGRESS', async () => {
       // Arrange
       const input = { testRunIds: ['test-run-1'] };

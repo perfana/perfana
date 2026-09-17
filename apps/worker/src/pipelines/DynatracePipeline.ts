@@ -69,9 +69,6 @@ export class DynatracePipeline extends BasePipelineTypeORM {
     try {
       this.logger.info(`Starting Dynatrace DQL metrics collection for test runs: ${testRunIds.join(', ')}`);
 
-      // Cleanup stale data before processing
-      await this.cleanupStaleApplicationDashboards(['ds_panels']);
-
       let totalPanels = 0;
       let totalMetrics = 0;
       let totalQueries = 0;

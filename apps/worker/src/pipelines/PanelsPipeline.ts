@@ -32,9 +32,6 @@ export class PanelsPipeline extends BasePipelineTypeORM {
         };
       }
 
-      // Cleanup stale data before processing
-      await this.cleanupStaleApplicationDashboards(['ds_panels']);
-
       // Step 1: Load all data using TypeORM
       let stepStart = Date.now();
       this.logger.info(`⏱️  [TIMING] Starting test run query at ${new Date().toISOString()}`);

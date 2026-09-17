@@ -112,8 +112,8 @@ describe('StatisticsPipeline', () => {
         });
         return fn(proxy);
       }),
-      // Pooled (non-transaction) queries: the cleanup query, the per-run metrics probe
-      // and the read-only ramp_up pre-check. Routed by SQL text, not by call order —
+      // Pooled (non-transaction) queries: the per-run metrics probe and the read-only
+      // ramp_up pre-check. Routed by SQL text, not by call order —
       // the probe is N calls rather than 1, so an ordered mock would encode the very
       // thing under test.
       //
@@ -240,24 +240,6 @@ describe('StatisticsPipeline', () => {
         processedRecords: 50,
         testRunIds: 3
       });
-    });
-
-    test('should call cleanup for stale application dashboards', async () => {
-      const testRunIds = ['test-run-001'];
-
-      // No blanket mockDb.query override here: the routed default already answers the
-      // cleanup query, and overriding it would swallow the per-run metrics probe, which
-      // shares that connection.
-      mockEntityManager.query
-        .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
-        .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
-        .mockResolvedValueOnce([{ count: 10 }]);          // Actual count verification
-
-      await pipeline.execute({ testRunIds });
-
-      expect(mockDb.query).toHaveBeenCalledWith(
-        expect.stringContaining('DELETE FROM ds_metric_statistics')
-      );
     });
 
     test('should execute aggregation query with parameterized test run IDs', async () => {
@@ -698,21 +680,6 @@ describe('StatisticsPipeline', () => {
 
       expect(result.success).toBe(false);
       expect(result.error?.message).toContain('Connection timeout');
-    });
-
-    test('should clean up stale data before processing', async () => {
-      const testRunIds = ['test-run-001'];
-
-      mockEntityManager.query
-        .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
-        .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
-        .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
-
-      await pipeline.execute({ testRunIds });
-
-      expect(mockDb.query).toHaveBeenCalledWith(
-        expect.stringContaining('DELETE FROM ds_metric_statistics')
-      );
     });
   });
 
