@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
 import { ProvisioningService } from './provisioning.service';
@@ -517,6 +517,41 @@ describe('ProvisioningService', () => {
           metric_classification: 'RED_rate',
           updated_by: 'system:provisioning',
         }),
+      );
+    });
+
+    it('persists a wildcard template (no dashboardUid) keyed on NULL uid + panel + regex', async () => {
+      templateRepo.findOne.mockResolvedValue(null);
+      templateRepo.insert.mockResolvedValue(undefined as any);
+
+      const result = await service.provisionMetricClassifications(
+        [{ panelId: 201, metricClassification: 'RED_rate', higherIsBetter: false }],
+        null,
+      );
+
+      expect(result).toEqual({ created: 1, updated: 0, skipped: 0, errors: 0 });
+      expect(templateRepo.findOne).toHaveBeenCalledWith({
+        where: { dashboard_uid: IsNull(), panel_id: 201, regex: false },
+      });
+      expect(templateRepo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ dashboard_uid: null, regex: false, panel_id: 201 }),
+      );
+    });
+
+    it('persists regex: true and keys the upsert on it', async () => {
+      templateRepo.findOne.mockResolvedValue(null);
+      templateRepo.insert.mockResolvedValue(undefined as any);
+
+      await service.provisionMetricClassifications(
+        [{ dashboardUid: '^performance-test-metrics-', regex: true, panelId: 201, metricClassification: 'RED_rate' }],
+        null,
+      );
+
+      expect(templateRepo.findOne).toHaveBeenCalledWith({
+        where: { dashboard_uid: '^performance-test-metrics-', panel_id: 201, regex: true },
+      });
+      expect(templateRepo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ dashboard_uid: '^performance-test-metrics-', regex: true }),
       );
     });
 

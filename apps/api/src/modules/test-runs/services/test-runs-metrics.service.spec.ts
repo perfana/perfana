@@ -233,12 +233,93 @@ describe('TestRunsMetricsService', () => {
 
       applicationDashboardRepo.find.mockResolvedValue([dashboard]);
       templateRepo.find.mockResolvedValue([template]);
-      compareConfigRepo.findOne.mockResolvedValue({ id: 'existing-cfg' } as any);
+      // One batched lookup of the run's existing configs replaces the per-template findOne
+      compareConfigRepo.find.mockResolvedValue([
+        { application_dashboard_id: 'dash-1', panel_id: 6, metric_name: null },
+      ] as any);
 
       const result = await service.applyGoldenPathClassifications(testRunInput);
 
       expect(result).toEqual({ compareConfigsCreated: 0 });
       expect(compareConfigRepo.create).not.toHaveBeenCalled();
+      expect(compareConfigRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    describe('generic templates (issue #607)', () => {
+      const dashboards = [
+        { id: 'dash-a', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production', dashboardUid: 'performance-test-metrics-a', organizationId: 'org-1' },
+        { id: 'dash-b', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production', dashboardUid: 'performance-test-metrics-b', organizationId: 'org-1' },
+        { id: 'dash-jvm', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production', dashboardUid: 'spring-boot-jvm', organizationId: 'org-1' },
+      ];
+      const tmpl = (over: Record<string, unknown>) => ({
+        id: 'tmpl', system_under_test_id: null, dashboard_uid: null, panel_id: 201,
+        metric_classification: 'RED_rate', higher_is_better: false, regex: false, config_overrides: null, ...over,
+      });
+      const created = () => compareConfigRepo.create.mock.calls.map(([d]) => d as any);
+
+      beforeEach(() => {
+        applicationDashboardRepo.find.mockResolvedValue(dashboards);
+        compareConfigRepo.create.mockImplementation((data) => data as any);
+        compareConfigRepo.save.mockImplementation((data) => Promise.resolve({ id: 'new-id', ...data } as any));
+      });
+
+      it('a NULL dashboard_uid template seeds every dashboard of the SUT', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ id: 'wild' })]);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 3 });
+        expect(created().map((c) => c.application_dashboard_id).sort()).toEqual(['dash-a', 'dash-b', 'dash-jvm']);
+        expect(created().every((c) => c.panel_id === 201)).toBe(true);
+      });
+
+      it('regex: true matches dashboard_uid as a regular expression', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ id: 'rx', dashboard_uid: '^performance-test-metrics-', regex: true })]);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 2 });
+        expect(created().map((c) => c.application_dashboard_id).sort()).toEqual(['dash-a', 'dash-b']);
+      });
+
+      it('an exact uid template wins over regex and wildcard for the same panel', async () => {
+        templateRepo.find.mockResolvedValue([
+          tmpl({ id: 'wild', metric_classification: 'wild-class' }),
+          tmpl({ id: 'rx', dashboard_uid: '^performance-test-metrics-', regex: true, metric_classification: 'rx-class' }),
+          tmpl({ id: 'exact', dashboard_uid: 'performance-test-metrics-a', metric_classification: 'exact-class' }),
+        ]);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 3 });
+        const byDash = Object.fromEntries(created().map((c) => [c.application_dashboard_id, c.config_data.metricClassification.classification]));
+        expect(byDash).toEqual({ 'dash-a': 'exact-class', 'dash-b': 'rx-class', 'dash-jvm': 'wild-class' });
+      });
+
+      it('an invalid regex is logged and skipped without aborting the run', async () => {
+        templateRepo.find.mockResolvedValue([
+          tmpl({ id: 'bad', dashboard_uid: '(unclosed', regex: true }),
+          tmpl({ id: 'wild', panel_id: 101 }),
+        ]);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 3 });
+        expect(created().every((c) => c.panel_id === 101)).toBe(true);
+      });
+
+      it('a wildcard does not recreate a config that already exists on that panel', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ id: 'wild' })]);
+        compareConfigRepo.find.mockResolvedValue([
+          { application_dashboard_id: 'dash-a', panel_id: 201, metric_name: 'some-metric' },
+        ] as any);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        // dash-a already has a config on panel 201 (metric-level counts for a panel-level template, as before)
+        expect(result).toEqual({ compareConfigsCreated: 2 });
+        expect(created().map((c) => c.application_dashboard_id).sort()).toEqual(['dash-b', 'dash-jvm']);
+      });
     });
 
     it('should skip dashboards without a dashboardUid', async () => {
