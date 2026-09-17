@@ -156,7 +156,12 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
         await manager.query('SELECT set_config($1, $2, true)', ['statement_timeout', String(rollupTimeoutMs)]);
         // work_mem boost matches the current online query (see
         // TestRunsPerformanceQueryService). Needed for the tdigest
-        // aggregation over millions of rows per test run.
+        // aggregation over millions of rows per test run. Postgres charges it
+        // per sort node AND per parallel worker: since the sampler aggregate
+        // became a parallel CTAS (v0.2.95.32) its ceiling is leader + workers,
+        // ~1.5 GB at the default max_parallel_workers_per_gather = 2 (each
+        // worker sorted ~200 MB on a 2.5 M-row run), times the analyze/batch
+        // concurrency for the deploy-wide peak.
         await manager.query(`SET LOCAL work_mem = '512MB'`);
 
         // DELETE before INSERT: UPSERT alone can't evict groups that no

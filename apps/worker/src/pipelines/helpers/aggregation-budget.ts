@@ -17,10 +17,10 @@
  * down instead of letting Postgres cancel the statement, so you lose the clean
  * rollback and get a torn socket instead of `canceling statement due to ...`.
  */
-import type { EntityManager } from 'typeorm';
+import type { DataSource, EntityManager } from 'typeorm';
 
-export const AGGREGATION_STATEMENT_TIMEOUT_DEFAULT_MS = 540000;
-export const AGGREGATION_WORK_MEM_DEFAULT = '128MB';
+const AGGREGATION_STATEMENT_TIMEOUT_DEFAULT_MS = 540000;
+const AGGREGATION_WORK_MEM_DEFAULT = '128MB';
 
 export async function applyAggregationBudget(manager: EntityManager): Promise<void> {
   const parsed = Number.parseInt(process.env.AGGREGATION_STATEMENT_TIMEOUT_MS ?? '', 10);
@@ -33,4 +33,15 @@ export async function applyAggregationBudget(manager: EntityManager): Promise<vo
   // Keeps ~20k percentile_agg sketches in a HashAggregate; spilling turns the
   // aggregation into a GroupAggregate that sorts every input row to disk.
   await manager.query('SELECT set_config($1, $2, true)', ['work_mem', workMem]);
+}
+
+/** One statement (or a few) in its own transaction under the aggregation budget. */
+export async function withAggregationBudget<T>(
+  dataSource: DataSource,
+  fn: (manager: EntityManager) => Promise<T>
+): Promise<T> {
+  return dataSource.transaction(async (em) => {
+    await applyAggregationBudget(em);
+    return fn(em);
+  });
 }

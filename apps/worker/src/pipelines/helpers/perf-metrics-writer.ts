@@ -21,7 +21,7 @@ import {
   METRIC_TYPE_PANEL_UNITS,
 } from '../../constants/performance-metrics.js';
 import type { TestRunMetadata } from '../../types/performance-metrics.js';
-import { applyAggregationBudget } from './aggregation-budget.js';
+import { withAggregationBudget } from './aggregation-budget.js';
 
 export interface InsertDsMetricsOptions {
   dataSource: DataSource;
@@ -188,10 +188,7 @@ export async function insertDsMetricsFromAggregate(
   // Both aggregates sort millions of requests_raw rows; at the pool default work_mem
   // (4MB) they spill (69 MB measured on 2.5 M rows) and run under a statement_timeout
   // equal to the client query_timeout. The budget is transaction-local, hence the wrap.
-  const result = await dataSource.transaction(async (em) => {
-    await applyAggregationBudget(em);
-    return em.query(sql, values);
-  });
+  const result = await withAggregationBudget(dataSource, (em) => em.query(sql, values));
   return readInsertedCount(result);
 }
 
@@ -343,16 +340,15 @@ export async function upsertPerfTestStatistics(
   `;
 
   const started = Date.now();
-  const result = await dataSource.transaction(async (em) => {
-    await applyAggregationBudget(em);
-    return em.query(sql, [
+  const result = await withAggregationBudget(dataSource, (em) =>
+    em.query(sql, [
       testRunId,
       dashboardIds,
       testRun.start_time,
       testRun.organization_id ?? null,
       testRun.team_id ?? null,
-    ]);
-  });
+    ])
+  );
   const rowCount = readInsertedCount(result);
 
   logger.info(

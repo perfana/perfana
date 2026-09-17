@@ -192,8 +192,6 @@ describe('DynatracePipeline', () => {
 
     pipeline = new DynatracePipeline(mockLogger);
 
-    // Mock base class methods
-    vi.spyOn(pipeline as any, 'cleanupStaleApplicationDashboards').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -355,6 +353,52 @@ describe('DynatracePipeline', () => {
 
       // Assert
       expect(storeSpy).toHaveBeenCalledWith([mockMetricsDoc], 'test-run-123', expect.anything());
+    });
+
+    it('upserts every point of every document in ONE batched statement, keeping the document\'s timestep/ramp_up (COL-P1)', async () => {
+      // Before: one INSERT ... ON CONFLICT per data point (~10^5 round trips per config
+      // on a 100-host tenant). Now: MetricProcessor.upsertMetricsToDatabase, 200 rows
+      // per statement. The document's own timestep/rampUp are written as-is; this path
+      // must NOT recompute them the way the incremental flatten does.
+      const managerQuery = vi.fn().mockResolvedValue([]);
+      mockDatabaseService.transaction.mockImplementation((fn: (em: unknown) => Promise<unknown>) => fn({ query: managerQuery }));
+      const docA = createMockMetricsDocument({
+        errors: [{ message: 'partial' }],
+        data: [
+          { metricName: 'm1', time: new Date('2024-01-01T00:00:00Z'), timestep: 0, rampUp: true, value: 1, unit: 'ms' },
+          { metricName: 'm1', time: new Date('2024-01-01T00:01:00Z'), timestep: 60, rampUp: false, value: 2, unit: '' },
+        ],
+      });
+      const docB = createMockMetricsDocument({ panelId: 2, metricsSourceId: '', data: [
+        { metricName: 'm2', time: new Date('2024-01-01T00:00:00Z'), timestep: 0, rampUp: false, value: 3, unit: null },
+      ] });
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValue({ ...createMockTestRun(), organizationId: 'org-1', teamId: null });
+      mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue([createMockQuery()]);
+      mockRepository.getDynatraceConfigById.mockResolvedValue(createMockDynatraceConfig());
+      mockAPIClient.executeBatchQueries.mockResolvedValue([
+        { tileId: 'tile-1', tileTitle: 'Panel', result: { records: [] }, error: null },
+      ]);
+      mockDataProcessor.processDynatraceResults.mockResolvedValue({ panelDocuments: [], metricsDocuments: [docA, docB] });
+
+      await pipeline.execute({ testRunIds: ['test-run-123'] });
+
+      const inserts = managerQuery.mock.calls.filter((c) => String(c[0]).includes('INSERT INTO ds_metrics'));
+      expect(inserts).toHaveLength(1);
+      const [sql, params] = inserts[0]!;
+      const columns = 19;
+      expect(params).toHaveLength(3 * columns);
+      expect(sql).toMatch(/VALUES \(\$1, .*\), \(\$20, .*\), \(\$39, /s);
+      expect(sql).toContain('ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name, time)');
+      // Row 1 of docA: errors JSON-stringified, ramp_up true from the document, org from the run
+      const row1 = params.slice(0, columns);
+      expect(row1[8]).toBe(JSON.stringify([{ message: 'partial' }]));
+      expect(row1[11]).toBe(0);      // timestep as given
+      expect(row1[12]).toBe(true);   // ramp_up as given
+      expect(row1[15]).toBe('org-1');
+      // Row 3 (docB): '' metricsSourceId → null, null unit → null
+      const row3 = params.slice(2 * columns, 3 * columns);
+      expect(row3[2]).toBeNull();
+      expect(row3[14]).toBeNull();
     });
   });
 
@@ -608,7 +652,6 @@ describe('DynatracePipeline', () => {
 
       // Create new pipeline instance with updated config
       const testPipeline = new DynatracePipeline(mockLogger);
-      vi.spyOn(testPipeline as any, 'cleanupStaleApplicationDashboards').mockResolvedValue(undefined);
 
       mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue(mockQueries);
       mockRepository.getDynatraceConfigById.mockResolvedValue(configWithoutApiToken);
@@ -648,7 +691,6 @@ describe('DynatracePipeline', () => {
 
       // Create new pipeline instance with updated config
       const testPipeline = new DynatracePipeline(mockLogger);
-      vi.spyOn(testPipeline as any, 'cleanupStaleApplicationDashboards').mockResolvedValue(undefined);
 
       mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue(mockQueries);
       mockRepository.getDynatraceConfigById.mockResolvedValue(saasConfigWithoutPlatformToken);
@@ -688,7 +730,6 @@ describe('DynatracePipeline', () => {
 
       // Create new pipeline instance with updated config
       const testPipeline = new DynatracePipeline(mockLogger);
-      vi.spyOn(testPipeline as any, 'cleanupStaleApplicationDashboards').mockResolvedValue(undefined);
 
       mockQueryConstructor.constructQueriesFromDatabase.mockResolvedValue(mockQueries);
       mockRepository.getDynatraceConfigById.mockResolvedValue(managedConfig);

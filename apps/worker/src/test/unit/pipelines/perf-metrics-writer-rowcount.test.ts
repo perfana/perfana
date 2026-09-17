@@ -81,6 +81,18 @@ describe('perf-metrics-writer row counts', () => {
     expect(sqls[2]).toContain('INSERT INTO ds_metrics');
   });
 
+  it('upsertPerfTestStatistics applies the budget inside the transaction before its INSERT too', async () => {
+    // This one runs on every incremental tick of a live run; the 143 MB spill was here.
+    const { ds, query } = fakeDataSource([{ n: 1 }]);
+    await upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger);
+    const sqls = query.mock.calls.map((c) => String(c[0]));
+    const params = query.mock.calls.map((c) => c[1] as unknown[]);
+    expect(params[0]?.[0]).toBe('statement_timeout');
+    expect(params[1]?.[0]).toBe('work_mem');
+    expect(sqls[2]).toContain('INSERT INTO ds_metric_statistics');
+    expect((ds as unknown as { transaction: ReturnType<typeof vi.fn> }).transaction).toHaveBeenCalledTimes(1);
+  });
+
   it('counts ds_metric_statistics rows the same way', async () => {
     const { ds, insertSql } = fakeDataSource([{ n: 21123 }]);
     await expect(upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger)).resolves.toBe(21123);

@@ -129,16 +129,19 @@ export class ApdexCalculator extends BaseCheckService {
     const { testRun, transactionName, thresholdMs, includeFailedRequests, excludeRampUp } = params;
 
     if (transactionName !== null) {
-      const fastPath = await this.calculateApdexFromRollup({
+      const hits = await this.calculateApdexFromRollupBulk({
         testRunId: testRun.test_run_id,
-        transactionName,
-        thresholdMs,
+        transactions: [{ transactionName, thresholdMs }],
         includeFailedRequests,
         excludeRampUp,
       });
+      const fastPath = hits.get(transactionName);
       if (fastPath) {
         return fastPath;
       }
+      this.logger.debug(
+        `Rollup Apdex fast path miss for ${testRun.test_run_id}/${transactionName} (no rollup rows, zero matching count, or pct_agg_passed not yet populated)`,
+      );
     }
 
     return this.calculateApdexRaw(params);
@@ -234,11 +237,19 @@ export class ApdexCalculator extends BaseCheckService {
   }
 
   /**
-   * Rollup-based Apdex fast path. Returns null when the rollup has no matching
-   * rows OR (when `includeFailedRequests=false`) any matching row's
-   * `pct_agg_passed` is NULL — i.e. the row predates #298 and has not been
-   * re-rolled-up yet. The caller falls back to the raw `transactions` scan in
-   * either case.
+   * Rollup-based Apdex fast path, for many transactions in ONE statement, each
+   * with its own threshold. A transaction is absent from the returned map (a
+   * miss) when the rollup has no matching rows OR (when
+   * `includeFailedRequests=false`) any matching row's `pct_agg_passed` is NULL —
+   * i.e. the row predates #298 and has not been re-rolled-up yet. The caller
+   * falls back to the raw `transactions` scan for every miss.
+   *
+   * The workload-level SLO used to issue this per transaction (plus two threshold
+   * lookups and two SAVEPOINT statements each): ~1,470 round trips on a
+   * 294-transaction run. `unnest($3::text[], $5::double precision[])` pairs each
+   * transaction with its threshold, the inner join drops transactions with no
+   * rollup row, and `GROUP BY` keeps one sketch roll-up per transaction. The
+   * single-transaction caller (`calculateApdex`) passes one-element arrays.
    *
    * Sketch selection (#298): `rollup(CASE WHEN $4::boolean THEN pct_agg ELSE
    * pct_agg_passed END)` picks the all-rows sketch when
@@ -257,40 +268,6 @@ export class ApdexCalculator extends BaseCheckService {
    *
    * Output column names mirror the raw query so the caller's parsing works
    * identically; the JS-side Apdex score formula is the same as the raw path.
-   */
-  private async calculateApdexFromRollup(params: {
-    testRunId: string;
-    transactionName: string;
-    thresholdMs: number;
-    includeFailedRequests: boolean;
-    excludeRampUp: boolean;
-  }): Promise<ApdexResult | null> {
-    const { testRunId, transactionName, thresholdMs, includeFailedRequests, excludeRampUp } = params;
-    const results = await this.calculateApdexFromRollupBulk({
-      testRunId,
-      transactions: [{ transactionName, thresholdMs }],
-      includeFailedRequests,
-      excludeRampUp,
-    });
-    const hit = results.get(transactionName) ?? null;
-    if (!hit) {
-      this.logger.debug(
-        `Rollup Apdex fast path miss for ${testRunId}/${transactionName} (no rollup rows, zero matching count, or pct_agg_passed not yet populated)`,
-      );
-    }
-    return hit;
-  }
-
-  /**
-   * Rollup fast path for many transactions in ONE statement, each with its own
-   * threshold. The workload-level SLO used to issue this per transaction (plus two
-   * threshold lookups and two SAVEPOINT statements each): ~1,470 round trips on a
-   * 294-transaction run. `unnest($3::text[], $5::double precision[])` pairs each
-   * transaction with its threshold, the inner join drops transactions with no
-   * rollup row, and `GROUP BY` keeps one sketch roll-up per transaction.
-   *
-   * Returns only the hits; a transaction absent from the map is a miss and the
-   * caller falls back to the raw scan for it.
    */
   private async calculateApdexFromRollupBulk(params: {
     testRunId: string;
@@ -384,14 +361,11 @@ export class ApdexCalculator extends BaseCheckService {
       `Trying rollup Apdex fast path for test run ${testRunId}, ${transactions.length} transaction(s)`,
     );
 
+    // threshold_ms comes back from the unnest as float8; echo the caller's number instead.
+    const thresholdByName = new Map(transactions.map((t) => [t.transactionName, t.thresholdMs]));
     const result = await this.manager.query(query, queryParams);
     for (const row of result) {
-      // A single-transaction caller does not need the row to echo the name back.
-      const transactionName: string | undefined =
-        row.transaction_name ?? (transactions.length === 1 ? transactions[0]!.transactionName : undefined);
-      if (transactionName === undefined) {
-        continue;
-      }
+      const transactionName: string = row.transaction_name;
       const satisfied = parseInt(row.satisfied_count) || 0;
       const tolerating = parseInt(row.tolerating_count) || 0;
       const frustrated = parseInt(row.frustrated_count) || 0;
@@ -402,9 +376,7 @@ export class ApdexCalculator extends BaseCheckService {
       const apdexScore = total > 0
         ? Math.round(((satisfied + tolerating * 0.5) / total) * 1000) / 1000
         : null;
-      // threshold_ms comes back from the unnest as float8; the caller's number is what we echo.
-      const thresholdMs = transactions.find((t) => t.transactionName === transactionName)?.thresholdMs
-        ?? Number(row.threshold_ms);
+      const thresholdMs = thresholdByName.get(transactionName) ?? Number(row.threshold_ms);
 
       this.logger.info(
         `Apdex (rollup) for ${transactionName}: ${apdexScore?.toFixed(3) || 'N/A'} ` +
@@ -487,10 +459,8 @@ export class ApdexCalculator extends BaseCheckService {
 
       const rows = await this.manager.query(txQuery, txParams);
       for (const row of rows) {
-        // A single-transaction caller does not need the row to echo the name back.
-        const name = row.transaction_name ?? (transactionNames.length === 1 ? transactionNames[0] : undefined);
-        if (name !== undefined && row.apdex_threshold) {
-          perTransaction.set(name, row.apdex_threshold);
+        if (row.apdex_threshold) {
+          perTransaction.set(row.transaction_name, row.apdex_threshold);
         }
       }
     }
@@ -620,15 +590,27 @@ export class ApdexCalculator extends BaseCheckService {
       transactionNames: transactionsWithScenarios.map((t) => t.transaction_name),
       organizationId: testRun.organization_id,
     });
-    const thresholds = new Map(
-      transactionsWithScenarios.map((t) => [t.transaction_name, resolveThreshold(t.transaction_name)] as const)
-    );
-    const rollupHits = await this.calculateApdexFromRollupBulk({
-      testRunId: testRun.test_run_id,
-      transactions: [...thresholds].map(([transactionName, thresholdMs]) => ({ transactionName, thresholdMs })),
-      includeFailedRequests: include_failed_requests,
-      excludeRampUp: exclude_ramp_up_time,
-    });
+    // The rollup statement used to run inside each transaction's savepoint; keep that
+    // isolation for the one bulk statement, or a fatal Postgres error in it (the #326
+    // bigint-overflow shape) would abort the benchmark instead of one transaction.
+    // On failure every transaction is a miss and takes the raw scan below.
+    let rollupHits = new Map<string, ApdexResult>();
+    await this.manager.query('SAVEPOINT sp_apdex_rollup');
+    try {
+      rollupHits = await this.calculateApdexFromRollupBulk({
+        testRunId: testRun.test_run_id,
+        transactions: transactionsWithScenarios.map((t) => ({
+          transactionName: t.transaction_name,
+          thresholdMs: resolveThreshold(t.transaction_name),
+        })),
+        includeFailedRequests: include_failed_requests,
+        excludeRampUp: exclude_ramp_up_time,
+      });
+      await this.manager.query('RELEASE SAVEPOINT sp_apdex_rollup');
+    } catch (error) {
+      try { await this.manager.query('ROLLBACK TO SAVEPOINT sp_apdex_rollup'); } catch { /* best-effort */ }
+      this.logger.warn(`Bulk rollup Apdex failed, falling back to per-transaction raw scans: ${error}`);
+    }
 
     // Evaluate each transaction
     const transactionResults: TransactionApdexResult[] = [];
@@ -678,7 +660,7 @@ export class ApdexCalculator extends BaseCheckService {
     // throws, which we catch and ignore so the loop continues without isolation).
     let savepointIdx = 0;
     for (const { transaction_name: transactionName, scenario_name: scenarioName } of transactionsWithScenarios) {
-      const resolvedThreshold = thresholds.get(transactionName) ?? 500;
+      const resolvedThreshold = resolveThreshold(transactionName);
       const hit = rollupHits.get(transactionName);
       if (hit) {
         record(transactionName, scenarioName, resolvedThreshold, hit);

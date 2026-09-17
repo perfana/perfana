@@ -1,5 +1,6 @@
 /**
- * Metric Processor for Incremental Metrics Pipeline
+ * Metric Processor for the Incremental Metrics Pipeline — and, since v0.2.95.32, the
+ * batched ds_metrics upsert for the full Dynatrace collection (DynatracePipeline)
  *
  * Handles metric processing operations including:
  * - Flattening Grafana metrics documents to ds_metrics records
