@@ -275,6 +275,21 @@ nothing currently asserts it.
 
 ## Worker pipeline
 
+### Force re-fetch deletes a run's perf-test ds_metrics even when there is nothing to rebuild from
+
+**Priority:** P2
+**Origin:** observed during /ship on `feat/adapt-impact-panels` (2026-09-17) while verifying on the dev DB.
+**Why:** the analyze-path rebuild refuses to delete when the run has no `requests_raw`/`transactions`
+(a SUT import without the `raw` group keeps its imported rows, v0.2.95.22), but the force-refetch
+stage in `simple-orchestrate-reevaluate-batch.ts` calls `deletePerfTestMetricsForRun` unconditionally
+and then finds `No requests_raw data found` / `No transactions data found`. On the dev DB that
+emptied `SONAR-acceptatie-loadtest_perfana-00014` (1,954,352 rows) with nothing to put back. A
+production SUT import re-evaluated with "force re-fetch" loses its only copy of the perf-test panels.
+**What:** gate the force-path delete on the same "rebuildable" probe the analyze path uses (rows in
+`requests_raw` or `transactions` for the run), and log a warn + skip otherwise.
+
+---
+
 ### Four reevaluate stages render as raw ids in the progress UI
 
 **Priority:** P3

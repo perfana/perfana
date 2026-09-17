@@ -92,3 +92,10 @@ describe.each([
     expect(compareConfigs.some((c) => c.panel_id === panelId && c.application_dashboard_id === 'dash-all aggregated')).toBe(false);
   });
 });
+
+it('keeps every worker panel id out of the web\'s virtual URL panel block 210-218', () => {
+  // apps/web/lib/url-perf-panels.ts synthesises 210-218 on the perf-test dashboards and
+  // isUrlPanel() routes any stored id in that block through the sampler-URL rollup.
+  expect(Object.values(METRIC_TYPE_PANEL_IDS).filter((id) => id >= 210 && id <= 218)).toEqual([]);
+});
+

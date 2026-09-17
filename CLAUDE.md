@@ -784,10 +784,13 @@ series. Both are classified `RED_duration`, lower is better, `mean`. Four more t
 nothing to a run whose throughput is flat — the percentage change is then identical to RT Avg's —
 and because ADAPT's pct check is mandatory for a full `regression` (an `absoluteThreshold` alone
 yields `partial regression`, a difference not a regression), the sub-15% case they exist for is
-caught only by lowering `percentageThreshold` on the Impact panel's own compare config. A run
+caught only by lowering `percentageThreshold` on the Impact panel's own compare config — and the
+IQR check, when valid, must agree too, or the label stays `partial regression`. A run
 finalised before the deploy never gains the panel from a plain re-analyse: the perf-test stage
 `skip`s a finalised run, so only a **force re-fetch** writes it (a live run straddling the deploy
-likewise gets a series that starts at the deploy, via the `tail` plan). Against a baseline with no
+likewise gets a series that starts at the deploy, via the `tail` plan) — but not on a SUT-imported
+run without `requests_raw`/`transactions`: the force path deletes the perf-test rows first and
+cannot rebuild them (TODOS.md, Worker pipeline). Against a baseline with no
 control row the result is `incomparable`, but `ControlGroupStatisticsPipeline` pools whichever
 control runs have the row, so the first runs after the deploy are judged against a 1-, 2-, 3-run
 baseline on this panel only — expect noisier Impact verdicts until the group fills. And the request
