@@ -34,6 +34,8 @@ interface UseSLOManagementReturn {
   handleConfirmDeleteSLO: (systemId: string, environment: string, workload: string) => Promise<{ error?: string }>;
   handleBatchDeleteSLOs: (ids: string[], systemId: string, environment: string, workload: string) => Promise<void>;
   handleViewSLO: (benchmark: Benchmark) => void;
+  /** Clones the SLO into the same scope and returns the clone, or null on failure. */
+  handleDuplicateSLO: (benchmark: Benchmark, systemId: string, environment: string, workload: string) => Promise<Benchmark | null>;
 
   // Filter actions
   setSloSearchText: (text: string) => void;
@@ -73,8 +75,15 @@ export function useSLOManagement(): UseSLOManagementReturn {
 
     try {
       setBenchmarksLoading(true);
+      // GET /benchmarks reads `systemUnderTestId`; `systemId` was silently ignored, so every
+      // SUT sharing this env/workload name leaked into the list.
+      const params = new URLSearchParams({
+        systemUnderTestId: systemId,
+        testEnvironment: environment,
+        workload,
+      });
       const response = await authenticatedFetch(
-        `/benchmarks?systemId=${systemId}&testEnvironment=${encodeURIComponent(environment)}&workload=${encodeURIComponent(workload)}`,
+        `/benchmarks?${params}`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
@@ -134,6 +143,24 @@ export function useSLOManagement(): UseSLOManagementReturn {
     setEditingSlo(benchmark);
     setEditSloOpen(true);
   }, []);
+
+  // Duplicate an SLO in place; the caller opens the edit dialog on the clone.
+  const handleDuplicateSLO = useCallback(async (
+    benchmark: Benchmark,
+    systemId: string,
+    environment: string,
+    workload: string
+  ): Promise<Benchmark | null> => {
+    try {
+      const response = await authenticatedFetch(`/benchmarks/${benchmark.id}/duplicate`, { method: 'POST' });
+      if (!response.ok) return null;
+      const clone: Benchmark = await response.json();
+      await fetchBenchmarks(systemId, environment, workload);
+      return clone;
+    } catch {
+      return null;
+    }
+  }, [fetchBenchmarks]);
 
   // Handle delete SLO
   const handleDeleteSLO = useCallback((benchmark: Benchmark) => {
@@ -271,6 +298,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
     handleConfirmDeleteSLO,
     handleBatchDeleteSLOs,
     handleViewSLO,
+    handleDuplicateSLO,
 
     // Filter actions
     setSloSearchText,

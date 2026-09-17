@@ -1,6 +1,6 @@
 import { Injectable, Logger, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 import { Benchmark as BenchmarkEntity, SystemUnderTest } from '../../../entities';
 import { withRequestEm } from '../../../common/db/request-em';
 import { BenchmarkQueryService } from './benchmark-query.service';
@@ -35,6 +35,72 @@ function assertApdexMinSamples(value: number | null | undefined): void {
   if (value === undefined || value === null) return;
   if (!Number.isInteger(value) || value < 1 || value > 2147483647) {
     throw new BadRequestException('apdexMinSamples must be an integer of at least 1');
+  }
+}
+
+/** Every column a copy carries. Scope, ownership, ids, timestamps and the baseline run stay behind. */
+function cloneColumns(b: BenchmarkEntity) {
+  return {
+    source: b.source,
+    grafana_instance: b.grafana_instance,
+    dashboard_label: b.dashboard_label,
+    dashboard_id: b.dashboard_id,
+    dashboard_uid: b.dashboard_uid,
+    application_dashboard_id: b.application_dashboard_id,
+    metrics_source_id: b.metrics_source_id,
+    generic_check_id: b.generic_check_id,
+    panel_title: b.panel_title,
+    config_title: b.config_title,
+    config_id: b.config_id,
+    config_type: b.config_type,
+    metric_unit: b.metric_unit,
+    evaluate_type: b.evaluate_type,
+    requirement_operator: b.requirement_operator,
+    requirement_value: b.requirement_value,
+    description: b.description,
+    tags: b.tags ?? [],
+    configuration: b.configuration,
+    benchmark_type: b.benchmark_type,
+    transaction_name: b.transaction_name,
+    apdex_threshold_ms: b.apdex_threshold_ms,
+    min_apdex_score: b.min_apdex_score,
+    include_failed_requests: b.include_failed_requests,
+    exclude_ramp_up_time: b.exclude_ramp_up_time,
+    apdex_min_samples: b.apdex_min_samples,
+    aggregate_metric: b.aggregate_metric,
+    aggregate_stat: b.aggregate_stat,
+    average_all: b.average_all,
+    match_pattern: b.match_pattern,
+    validate_with_default_if_no_data: b.validate_with_default_if_no_data,
+    validate_with_default_if_no_data_value: b.validate_with_default_if_no_data_value,
+    alert_on_breach: b.alert_on_breach,
+    alert_channels: b.alert_channels,
+    metadata: b.metadata ?? {},
+    enabled: b.enabled,
+    valid: b.valid,
+  };
+}
+
+/**
+ * The columns that identify "the same SLO" inside one scope, per type. An apdex or aggregated
+ * SLO has no dashboard, generic check or config title, so spreading those conditionally used to
+ * leave the probe with the scope alone — it then matched whatever SLO the target happened to
+ * hold first, skipping the copy or overwriting an unrelated row.
+ */
+function conflictKey(b: BenchmarkEntity): FindOptionsWhere<BenchmarkEntity> {
+  switch (b.benchmark_type) {
+    case 'apdex':
+      return { benchmark_type: 'apdex', transaction_name: b.transaction_name };
+    case 'aggregated':
+      return { benchmark_type: 'aggregated', aggregate_metric: b.aggregate_metric, aggregate_stat: b.aggregate_stat };
+    default:
+      return {
+        benchmark_type: b.benchmark_type,
+        ...(b.application_dashboard_id ? { application_dashboard_id: b.application_dashboard_id } : {}),
+        ...(b.generic_check_id ? { generic_check_id: b.generic_check_id } : {}),
+        ...(b.config_title ? { config_title: b.config_title } : {}),
+        ...(b.panel_title ? { panel_title: b.panel_title } : {}),
+      };
   }
 }
 
@@ -322,21 +388,13 @@ export class BenchmarkMutationService {
     let skipped = 0;
 
     for (const benchmark of sourceBenchmarks) {
-      // Check for existing benchmark in target scope using the same unique constraint fields
+      // Check for existing benchmark in target scope on the identity the type carries.
       const existing = await withRequestEm(this.benchmarkRepo).findOne({
         where: {
           system_under_test_id: dto.targetSystemUnderTestId,
           test_environment: dto.targetTestEnvironment,
           workload: dto.targetWorkload,
-          ...(benchmark.application_dashboard_id
-            ? { application_dashboard_id: benchmark.application_dashboard_id }
-            : {}),
-          ...(benchmark.generic_check_id
-            ? { generic_check_id: benchmark.generic_check_id }
-            : {}),
-          ...(benchmark.config_title
-            ? { config_title: benchmark.config_title }
-            : {}),
+          ...conflictKey(benchmark),
         },
       });
 
@@ -353,29 +411,7 @@ export class BenchmarkMutationService {
         const beforeOverwrite = Object.assign(new BenchmarkEntity(), existing);
 
         await withRequestEm(this.benchmarkRepo).update(existing.id, {
-          source: benchmark.source,
-          grafana_instance: benchmark.grafana_instance,
-          dashboard_label: benchmark.dashboard_label,
-          dashboard_id: benchmark.dashboard_id,
-          dashboard_uid: benchmark.dashboard_uid,
-          panel_title: benchmark.panel_title,
-          config_title: benchmark.config_title,
-          metric_unit: benchmark.metric_unit,
-          evaluate_type: benchmark.evaluate_type,
-          requirement_operator: benchmark.requirement_operator,
-          requirement_value: benchmark.requirement_value,
-          description: benchmark.description,
-          tags: benchmark.tags,
-          configuration: benchmark.configuration,
-          benchmark_type: benchmark.benchmark_type,
-          transaction_name: benchmark.transaction_name,
-          apdex_threshold_ms: benchmark.apdex_threshold_ms,
-          min_apdex_score: benchmark.min_apdex_score,
-          include_failed_requests: benchmark.include_failed_requests,
-          exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
-          apdex_min_samples: benchmark.apdex_min_samples,
-          enabled: benchmark.enabled,
-          valid: benchmark.valid,
+          ...cloneColumns(benchmark),
           updated_by: userId,
         } as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);
 
@@ -389,44 +425,17 @@ export class BenchmarkMutationService {
             { organizationIdOverride: beforeOverwrite.organizationId ?? afterOverwrite.organizationId },
           );
         }
+
         copied++;
         continue;
       }
 
       // Create new
       const newBenchmark = this.benchmarkRepo.create({
+        ...cloneColumns(benchmark),
         system_under_test_id: dto.targetSystemUnderTestId,
         test_environment: dto.targetTestEnvironment,
         workload: dto.targetWorkload,
-        source: benchmark.source,
-        grafana_instance: benchmark.grafana_instance,
-        dashboard_label: benchmark.dashboard_label,
-        dashboard_id: benchmark.dashboard_id,
-        dashboard_uid: benchmark.dashboard_uid,
-        application_dashboard_id: benchmark.application_dashboard_id,
-        metrics_source_id: benchmark.metrics_source_id,
-        generic_check_id: benchmark.generic_check_id,
-        panel_title: benchmark.panel_title,
-        config_title: benchmark.config_title,
-        metric_unit: benchmark.metric_unit,
-        evaluate_type: benchmark.evaluate_type,
-        requirement_operator: benchmark.requirement_operator,
-        requirement_value: benchmark.requirement_value,
-        description: benchmark.description,
-        tags: benchmark.tags ?? [],
-        configuration: benchmark.configuration,
-        benchmark_type: benchmark.benchmark_type,
-        transaction_name: benchmark.transaction_name,
-        apdex_threshold_ms: benchmark.apdex_threshold_ms,
-        min_apdex_score: benchmark.min_apdex_score,
-        include_failed_requests: benchmark.include_failed_requests,
-        exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
-        apdex_min_samples: benchmark.apdex_min_samples,
-        average_all: benchmark.average_all,
-        validate_with_default_if_no_data: benchmark.validate_with_default_if_no_data,
-        metadata: benchmark.metadata ?? {},
-        enabled: benchmark.enabled,
-        valid: benchmark.valid,
         // Inherit ownership from the target SUT — copies live under the target's
         // org, not the source's. organizationId is NOT NULL on Benchmark.
         organizationId: targetSystem.organization_id,
@@ -448,6 +457,37 @@ export class BenchmarkMutationService {
 
     this.logger.log(`Copied ${copied} benchmarks, skipped ${skipped} of ${total} total`);
     return { copied, skipped, total };
+  }
+
+  /**
+   * Clone a benchmark into its own scope so the user can edit the copy into a variant.
+   *
+   * `generic_check_id` is dropped: it is the golden-path auto-config key and part of
+   * `uq_benchmarks_unique`, so keeping it would both collide with the source and hand the
+   * clone to grafana-sync to manage. A UI-created SLO never has one anyway.
+   */
+  async duplicate(id: string, userId: string, roles: string[]): Promise<Benchmark | null> {
+    const source = await this.queryService.findOne(id, userId, roles);
+    if (!source) return null;
+    const system = await this.validateSystemAccess(source.system_under_test_id, userId, roles);
+
+    const clone = this.benchmarkRepo.create({
+      ...cloneColumns(source as unknown as BenchmarkEntity),
+      generic_check_id: undefined,
+      system_under_test_id: source.system_under_test_id,
+      test_environment: source.test_environment,
+      workload: source.workload,
+      organizationId: system.organization_id,
+      teamId: system.team_id,
+      created_by: userId,
+      updated_by: userId,
+    });
+    const saved = await withRequestEm(this.benchmarkRepo).save(clone);
+    this.auditService.logCreate(saved as unknown as OwnedResource, {
+      organizationIdOverride: saved.organizationId,
+    });
+    this.logger.log(`Duplicated benchmark ${id} as ${saved.id}`);
+    return BenchmarkMapper.mapEntityToBenchmark(saved);
   }
 
   /**

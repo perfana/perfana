@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.36] - 2026-09-17
+
+### Fixed
+- **The SUT config SLO list showed other systems' SLOs.** `useSLOManagement` queried `GET /benchmarks?systemId=…`, but the endpoint reads `systemUnderTestId`; the unknown parameter was ignored, so the list was filtered on environment and workload only and every system sharing those names (three systems on `acceptatie` / `loadtest_perfana` on the dev database) showed each other's SLOs. Selecting one of the foreign rows and copying it was then silently dropped by the API, which reads the source scope itself. The other three callers of the endpoint already used the right name.
+- **Copying an Apdex or aggregated SLO to another scope skipped it, or overwrote an unrelated row.** `copyToScope`'s conflict probe spread `application_dashboard_id`, `generic_check_id` and `config_title` conditionally, and an Apdex or aggregated SLO has none of them — the probe was then the target scope alone and matched whatever SLO the target held first: `skip` skipped the copy, `overwrite` rewrote a random SLO with Apdex fields. The probe is now keyed per type (`transaction_name` for Apdex, `aggregate_metric` + `aggregate_stat` for aggregated, dashboard/check/title/panel for metric). The copy also dropped `aggregate_metric` / `aggregate_stat`, `match_pattern`, `validate_with_default_if_no_data_value`, `alert_on_breach` and `alert_channels`, so an aggregated SLO arrived with nothing to evaluate; the column list is one `cloneColumns()` shared by copy, overwrite and duplicate.
+
+### Added
+- **Duplicate an SLO in place.** A Duplicate action on every row in the SUT config SLO table (`POST /benchmarks/:id/duplicate`) clones the SLO into the same system / environment / workload and opens the edit dialog on the clone, so a variant no longer has to be re-entered field by field. The clone drops `generic_check_id`: it is the golden-path auto-config key and part of `uq_benchmarks_unique`, so keeping it would collide with the source and hand the clone to grafana-sync to manage.
+
 ## [0.2.95.35] - 2026-09-17
 
 ### Added

@@ -62,6 +62,7 @@ describe('BenchmarkMutationService', () => {
           useValue: {
             create: jest.fn(),
             save: jest.fn(),
+            find: jest.fn(),
             findOne: jest.fn(),
             update: jest.fn(),
             delete: jest.fn(),
@@ -335,6 +336,82 @@ describe('BenchmarkMutationService', () => {
         expect(data).not.toHaveProperty('apdex_min_samples');
         expect(data.min_apdex_score).toBe(0.95);
       });
+    });
+  });
+
+  describe('copyToScope() conflict key', () => {
+    const copyDto = {
+      sourceSystemUnderTestId: 'sut-1',
+      sourceTestEnvironment: 'production',
+      sourceWorkload: 'loadTest',
+      targetSystemUnderTestId: 'sut-1',
+      targetTestEnvironment: 'production',
+      targetWorkload: 'stressTest',
+      conflictStrategy: 'skip' as const,
+    };
+
+    it('probes an apdex SLO by transaction, not by scope alone', async () => {
+      const apdex = buildEntity({ id: 'bm-apdex', benchmark_type: 'apdex', transaction_name: 'login', config_title: undefined });
+      (benchmarkRepo.find as jest.Mock).mockResolvedValue([apdex]);
+      benchmarkRepo.findOne.mockResolvedValue(null);
+      benchmarkRepo.create.mockImplementation((v) => v as BenchmarkEntity);
+      benchmarkRepo.save.mockImplementation(async (v) => ({ ...v, id: 'new' }) as BenchmarkEntity);
+
+      await service.copyToScope(userId, roles, copyDto);
+
+      const where = (benchmarkRepo.findOne as jest.Mock).mock.calls[0][0].where;
+      expect(where).toEqual(expect.objectContaining({ benchmark_type: 'apdex', transaction_name: 'login' }));
+    });
+
+    it('carries the aggregated SLO columns onto the copy', async () => {
+      const agg = buildEntity({ id: 'bm-agg', benchmark_type: 'aggregated', aggregate_metric: 'response_time', aggregate_stat: 'p95' });
+      (benchmarkRepo.find as jest.Mock).mockResolvedValue([agg]);
+      benchmarkRepo.findOne.mockResolvedValue(null);
+      benchmarkRepo.create.mockImplementation((v) => v as BenchmarkEntity);
+      benchmarkRepo.save.mockImplementation(async (v) => ({ ...v, id: 'new' }) as BenchmarkEntity);
+
+      const result = await service.copyToScope(userId, roles, copyDto);
+
+      expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
+      const payload = (benchmarkRepo.create as jest.Mock).mock.calls[0][0];
+      expect(payload).toEqual(expect.objectContaining({
+        aggregate_metric: 'response_time',
+        aggregate_stat: 'p95',
+        workload: 'stressTest',
+        organizationId: orgId,
+      }));
+    });
+  });
+
+  describe('duplicate()', () => {
+    it('clones into the same scope without the golden-path key and audits the create', async () => {
+      const source = buildEntity({ id: 'bm-1', generic_check_id: 'gc-1', application_dashboard_id: 'ad-1' });
+      queryService.findOne.mockResolvedValue(source as never);
+      benchmarkRepo.create.mockImplementation((v) => v as BenchmarkEntity);
+      benchmarkRepo.save.mockImplementation(async (v) => ({ ...v, id: 'bm-2', created_at: new Date(), updated_at: new Date() }) as BenchmarkEntity);
+
+      const result = await service.duplicate('bm-1', userId, roles);
+
+      const payload = (benchmarkRepo.create as jest.Mock).mock.calls[0][0];
+      expect(payload).toEqual(expect.objectContaining({
+        system_under_test_id: 'sut-1',
+        test_environment: 'production',
+        workload: 'loadTest',
+        application_dashboard_id: 'ad-1',
+        config_title: 'p95 < 500ms',
+        organizationId: orgId,
+        created_by: userId,
+      }));
+      expect(payload.generic_check_id).toBeUndefined();
+      expect(payload.id).toBeUndefined();
+      expect(result?.id).toBe('bm-2');
+      expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns null when the source is not visible', async () => {
+      queryService.findOne.mockResolvedValue(null);
+      expect(await service.duplicate('nope', userId, roles)).toBeNull();
+      expect(benchmarkRepo.save).not.toHaveBeenCalled();
     });
   });
 });

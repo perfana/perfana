@@ -119,6 +119,10 @@ export class BenchmarksService {
     return this.mutationService.copyToScope(userId, roles, dto);
   }
 
+  async duplicate(id: string, userId: string, roles: string[]): Promise<Benchmark | null> {
+    return this.mutationService.duplicate(id, userId, roles);
+  }
+
   async createApdexSlo(userId: string, roles: string[], createDto: CreateApdexSloDto): Promise<Benchmark> {
     return this.mutationService.createApdexSlo(userId, roles, createDto);
   }

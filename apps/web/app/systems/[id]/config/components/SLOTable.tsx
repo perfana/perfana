@@ -16,6 +16,7 @@ import {
 import {
   Edit as EditIcon,
   Delete as DeleteIcon,
+  ContentCopy as DuplicateIcon,
   Assessment as AssessmentIcon,
 } from '@mui/icons-material';
 import { Benchmark } from './types';
@@ -27,6 +28,7 @@ interface SLOTableProps {
   selectedTags: string[];
   selectedSloIds: Set<string>;
   onEdit: (benchmark: Benchmark) => void;
+  onDuplicate: (benchmark: Benchmark) => void;
   onDelete: (benchmark: Benchmark) => void;
   onView: (benchmark: Benchmark) => void;
   onClearSearch: () => void;
@@ -92,6 +94,7 @@ export default function SLOTable({
   selectedTags,
   selectedSloIds,
   onEdit,
+  onDuplicate,
   onDelete,
   onView,
   onClearSearch,
@@ -445,6 +448,15 @@ export default function SLOTable({
                         onClick={() => onEdit(benchmark)}
                       >
                         <EditIcon />
+                      </IconButton>
+                    </Tooltip>
+
+                    <Tooltip title="Duplicate SLO">
+                      <IconButton
+                        size="small"
+                        onClick={() => onDuplicate(benchmark)}
+                      >
+                        <DuplicateIcon />
                       </IconButton>
                     </Tooltip>
 
