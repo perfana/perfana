@@ -103,6 +103,26 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
     };
 
     if (benchmark.aggregate_metric === 'error_percentage') {
+      // Rollup first. The raw count below has no index it can use — `success` is not the
+      // segmentby key and the run is ~10 % of a 7-day chunk — so it reads the run's whole
+      // chunk (~10 GB, 3–136 s per run on WERKNL, 81 % of a batch re-evaluate). The sampler
+      // rollup holds the same two counts per (sampler, ramp_up_excluded), and on six
+      // production runs its ratio matched the stored raw value to 4 decimals. The rollup's
+      // window also trims ramp-down where the raw clause trims ramp-up only; that never
+      // moved a verdict and is the same residue ApdexCalculator carries.
+      const rollup = await this.manager.query(
+        `SELECT COUNT(*)::int AS rows,
+                SUM(failed_count)::float / NULLIF(SUM(total_count), 0) * 100 AS result
+           FROM test_run_sampler_stats
+          WHERE test_run_id = $1 AND ramp_up_excluded = $2`,
+        [testRun.test_run_id, benchmark.exclude_ramp_up_time === true],
+      ) as { rows: number; result: string | null }[];
+      if ((rollup[0]?.rows ?? 0) > 0) {
+        const val = rollup[0]?.result;
+        return val !== null && val !== undefined ? parseFloat(String(val)) : null;
+      }
+      // Raw scan only when the run has no rollup at all (analyze died before
+      // transaction-stats-rollup, or a re-evaluate that ChecksPipeline could not repair).
       const sql = `
         SELECT (COUNT(*) FILTER (WHERE success = false))::float / NULLIF(COUNT(*), 0) * 100 AS result
         FROM requests_raw

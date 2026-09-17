@@ -27,41 +27,7 @@ import { authenticatedFetch } from '@/lib/api';
 import { Top10Filter } from './components';
 import { ClippedUrl, URL_CELL_MAX_WIDTH_SX } from '@/components/ui/clipped-url';
 import { formatImpactShare, sumImpact } from '@perfana/shared/utils';
-
-interface TransactionStat {
-  transaction_name: string;
-  scenario_name?: string;
-  avg_response_time: number;
-  p95_response_time: number;
-  p99_response_time: number;
-  passed_count: number;
-  failed_count: number;
-  total_count: number;
-  ranking: number;
-  apdex_score: number;
-  active_threshold: number;
-}
-
-interface SamplerStat {
-  sampler_name: string;
-  scenario_name?: string;
-  avg_response_time: number;
-  min_response_time: number;
-  max_response_time: number;
-  p95_response_time: number;
-  p99_response_time: number;
-  passed_count: number;
-  failed_count: number;
-  total_count: number;
-  avg_latency: number;
-  avg_connect_time: number;
-  total_request_size: number;
-  total_response_size: number;
-  apdex_score: number;
-  active_threshold: number;
-  url_hash: string | null;
-  url_pattern: string | null;
-}
+import { fetchRunSamplers, RunSampler } from './utils/run-samplers';
 
 interface Top10Item {
   url: string;
@@ -85,7 +51,7 @@ interface Top10ListsUrlsProps {
 export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excludeRampUp = false }: Top10ListsUrlsProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [samplers, setSamplers] = useState<Array<SamplerStat & { transaction_name: string }>>([]);
+  const [samplers, setSamplers] = useState<RunSampler[]>([]);
   const [testDuration, setTestDuration] = useState<number>(1);
   const [sortFields, setSortFields] = useState<Record<number, SortField>>({});
   const [sortOrders, setSortOrders] = useState<Record<number, SortOrder>>({});
@@ -110,38 +76,7 @@ export default function Top10ListsUrls({ testRunId, selectedScenarios = [], excl
       const durationSeconds = testRunData.duration || 1;
       setTestDuration(durationSeconds);
 
-      // Fetch all transactions
-      const transactionsResponse = await authenticatedFetch(
-        `/test-runs/${testRunId}/transactions?excludeRampUp=${excludeRampUp}`
-      );
-      if (!transactionsResponse.ok) {
-        throw new Error('Failed to fetch transactions');
-      }
-      const transactionsData: TransactionStat[] = await transactionsResponse.json();
-
-      // Fetch samplers for each transaction
-      const allSamplers: Array<SamplerStat & { transaction_name: string }> = [];
-
-      for (const transaction of transactionsData) {
-        try {
-          const samplesResponse = await authenticatedFetch(
-            `/test-runs/${testRunId}/transactions/${encodeURIComponent(transaction.transaction_name)}/samples?excludeRampUp=${excludeRampUp}`
-          );
-          if (samplesResponse.ok) {
-            const samplesData: SamplerStat[] = await samplesResponse.json();
-            // Add transaction_name to each sampler
-            samplesData.forEach(sampler => {
-              allSamplers.push({
-                ...sampler,
-                transaction_name: transaction.transaction_name,
-                scenario_name: transaction.scenario_name,
-              });
-            });
-          }
-        } catch (err) {
-          console.warn(`Failed to fetch samples for transaction ${transaction.transaction_name}`, err);
-        }
-      }
+      const allSamplers = await fetchRunSamplers(testRunId, excludeRampUp);
 
       setSamplers(allSamplers);
     } catch (err) {

@@ -73,6 +73,28 @@ export class TestRunsMetricsTransactionController {
     return result;
   }
 
+  @Get(':testRunId/samplers')
+  @ApiOperation({ summary: 'Every sampler of a run from the sampler rollup, in one read (Top 10 tabs)' })
+  @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
+  @ApiQuery({ name: 'excludeRampUp', required: false, type: Boolean, example: false })
+  @ApiResponse({ status: 200, description: 'One row per (transaction, sampler, scenario); counts and average only' })
+  @ApiResponse({ status: 202, description: 'Rollup is being built by the analyze pipeline' })
+  @ApiResponse({ status: 404, description: 'The run has no sampler rollup; use the per-transaction samples route' })
+  async getRunSamplers(
+    @Param('testRunId') testRunId: string,
+    @Query('excludeRampUp', new DefaultValuePipe(false), ParseBoolPipe) excludeRampUp: boolean,
+    @UserCtx() ctx: UserContext,
+  ) {
+    const result = await this.testRunsService.getRunSamplers(testRunId, ctx.userId, ctx.roles, excludeRampUp);
+    if (isRollupPending(result)) {
+      throw new HttpException(result, HttpStatus.ACCEPTED);
+    }
+    if (result === null) {
+      throw new HttpException({ message: 'No sampler rollup for this test run' }, HttpStatus.NOT_FOUND);
+    }
+    return result;
+  }
+
   @Get(':testRunId/transactions/:transactionName/samples')
   @ApiOperation({ summary: 'Get aggregated sampler statistics for a specific transaction' })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })

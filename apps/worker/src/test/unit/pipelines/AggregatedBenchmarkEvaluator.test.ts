@@ -66,6 +66,40 @@ describe('AggregatedBenchmarkEvaluator', () => {
     expect(result.actual_value).toBe(0.5);
   });
 
+  it('reads error_percentage from the sampler rollup when the run has one', async () => {
+    const manager = makeManager([{ rows: 37, result: '0.0124' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const result = await evaluator.evaluate(testRun, {
+      ...baseBenchmark,
+      aggregate_metric: 'error_percentage',
+      aggregate_stat: undefined,
+      requirement_value: 1,
+    });
+    expect(result.actual_value).toBeCloseTo(0.0124);
+    expect(result.meets_requirement).toBe(true);
+    const query = (manager.query as ReturnType<typeof vi.fn>);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toContain('test_run_sampler_stats');
+    expect(query.mock.calls[0][1]).toEqual(['tr-1', true]);
+  });
+
+  it('falls back to the raw requests_raw count when the run has no rollup rows', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce([{ rows: 0, result: null }])
+      .mockResolvedValueOnce([{ result: '0.5' }]);
+    const manager = { query } as unknown as EntityManager;
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
+    const result = await evaluator.evaluate(testRun, {
+      ...baseBenchmark,
+      aggregate_metric: 'error_percentage',
+      aggregate_stat: undefined,
+      requirement_value: 1,
+    });
+    expect(result.actual_value).toBe(0.5);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1][0]).toContain('requests_raw');
+  });
+
   it('applies >= operator correctly', async () => {
     const manager = makeManager([{ result: '1800' }]);
     const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);

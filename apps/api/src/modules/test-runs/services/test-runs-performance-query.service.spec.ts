@@ -327,6 +327,36 @@ describe('TestRunsPerformanceQueryService', () => {
   // getTransactionStats
   // =========================================================================
 
+  describe('getRunSamplers', () => {
+    it('returns null when the run has no rollup, so the client falls back per transaction', async () => {
+      jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({ status: 'unavailable' } as never);
+      await expect(service.getRunSamplers(TEST_RUN_ID, true, IS_ADMIN, [])).resolves.toBeNull();
+      expect(testRunRepo.query).not.toHaveBeenCalledWith(expect.stringContaining('FROM test_run_sampler_stats'), expect.anything());
+    });
+
+    it('passes the pending marker through', async () => {
+      const pending = { status: 'rollup-pending', stage: 'transaction-stats-rollup', progress: { stageName: 'x', stageIndex: 1, totalStages: 2 } };
+      jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue(pending as never);
+      await expect(service.getRunSamplers(TEST_RUN_ID, true, IS_ADMIN, [])).resolves.toEqual(pending);
+    });
+
+    it('reads every sampler in one query, filtered on ramp_up_excluded, and maps the counts', async () => {
+      jest.spyOn(service as never, 'getRollupStatus').mockResolvedValue({ status: 'ready' } as never);
+      testRunRepo.query.mockResolvedValueOnce([
+        { transaction_name: 'T1', sampler_name: 'S1', scenario_name: '', url_pattern: '/api/x', avg_response_time: '12.5', passed_count: '9', failed_count: '1', total_count: '10' },
+      ]);
+      const out = await service.getRunSamplers(TEST_RUN_ID, true, false, ['org-1']);
+      expect(out).toEqual([
+        { transaction_name: 'T1', sampler_name: 'S1', scenario_name: undefined, url_pattern: '/api/x', avg_response_time: 12.5, passed_count: 9, failed_count: 1, total_count: 10 },
+      ]);
+      const [sql, params] = testRunRepo.query.mock.calls.at(-1) as [string, unknown[]];
+      expect(sql).toContain('FROM test_run_sampler_stats');
+      expect(sql).toContain('ramp_up_excluded = $2');
+      expect(sql).toContain('sut.organization_id = ANY($3::uuid[])');
+      expect(params).toEqual([TEST_RUN_ID, true, ['org-1']]);
+    });
+  });
+
   describe('getTransactionStats', () => {
     describe('authorization', () => {
       it('returns empty array for non-admin with no org memberships', async () => {

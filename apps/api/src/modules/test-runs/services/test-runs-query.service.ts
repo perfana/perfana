@@ -23,6 +23,7 @@ export {
   SystemSummary,
   TransactionStats,
   SamplerStats,
+  RunSamplerStats,
   ErrorStats,
   TimeSeriesDataPoint,
   TransactionTimeSeriesData,
@@ -40,6 +41,7 @@ import {
   SystemSummary,
   TransactionStats,
   SamplerStats,
+  RunSamplerStats,
   ErrorStats,
   TimeSeriesDataPoint,
   TransactionTimeSeriesData,
@@ -385,6 +387,16 @@ export class TestRunsQueryService {
   async getSamplerUrlMap(testRunId: string, userId: string, roles: string[]) {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
     return this.performanceService.getSamplerUrlMap(testRunId, isAdmin, orgIds);
+  }
+
+  async getRunSamplers(
+    testRunId: string,
+    userId: string,
+    roles: string[],
+    excludeRampUp: boolean,
+  ): Promise<RunSamplerStats[] | RollupPendingResult | null> {
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getRunSamplers(testRunId, excludeRampUp, isAdmin, orgIds);
   }
 
   async getTransactionSamples(

@@ -11,6 +11,7 @@ import { RollupPendingResult } from './test-runs-performance-query.types';
 import {
   TransactionStats,
   SamplerStats,
+  RunSamplerStats,
   ErrorStats,
   VirtualUserStats,
   ThroughputStats,
@@ -1338,6 +1339,71 @@ export class TestRunsPerformanceQueryService {
       this.logger.error(`Failed to get transaction stats for test run ${testRunId}:`, error);
       throw new DatabaseException('Failed to retrieve transaction statistics', error);
     }
+  }
+
+  /**
+   * Every sampler of a run in one read, straight off `test_run_sampler_stats`.
+   *
+   * Exists for the Top 10 requests/URLs tabs, which used to call
+   * `getTransactionSamples` once per transaction — 314 serial calls on WERKNL, each
+   * paying `attachParallelGroups`'s ~3 s raw walk for a chain the tab never reads
+   * (`docs/ops/2026-09-17-top10-requests-tab.md`). Only the columns those tabs
+   * consume are returned: no percentiles, no Apdex, no chain.
+   *
+   * `null` means the run has no rollup at all — the caller falls back to the
+   * per-transaction route, which still has the CAGG and raw paths. A pending
+   * rollup is reported as such so the controller can answer 202.
+   */
+  async getRunSamplers(
+    testRunId: string,
+    excludeRampUp: boolean,
+    isAdmin: boolean,
+    organizationIds: string[],
+  ): Promise<RunSamplerStats[] | RollupPendingResult | null> {
+    if (!isAdmin && organizationIds.length === 0) return [];
+    const resolvedTestRunId = await this.resolveTestRunId(testRunId);
+    const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
+    if (rollupStatus.status === 'rollup-pending') return rollupStatus;
+    if (rollupStatus.status === 'unavailable') return null;
+
+    const orgFilterClause = !isAdmin ? 'AND sut.organization_id = ANY($3::uuid[])' : '';
+    const params: unknown[] = !isAdmin
+      ? [resolvedTestRunId, excludeRampUp, organizationIds]
+      : [resolvedTestRunId, excludeRampUp];
+    const rows: Array<Record<string, unknown>> = await withRequestEm(this.testRunRepo).query(
+      `SELECT trss.transaction_name,
+              trss.sampler_name,
+              NULLIF(trss.scenario_name, '') AS scenario_name,
+              LOWER(up.normalized_url)       AS url_pattern,
+              trss.avg_response_time,
+              trss.passed_count,
+              trss.failed_count,
+              trss.total_count
+         FROM test_run_sampler_stats trss
+         JOIN test_runs tr             ON tr.test_run_id = trss.test_run_id
+         JOIN systems_under_test sut   ON sut.id = tr.system_under_test_id
+         LEFT JOIN url_patterns up
+           ON  up.url_hash          = trss.url_hash
+           AND up.system_under_test = trss.system_under_test
+           AND up.test_environment  = trss.test_environment
+        WHERE trss.test_run_id = $1
+          AND trss.ramp_up_excluded = $2
+          AND trss.total_count > 0
+          ${orgFilterClause}
+        ORDER BY trss.total_count DESC`,
+      params,
+    );
+    this.logger.log(`Retrieved ${rows.length} samplers (rollup) for test run: ${resolvedTestRunId} (excludeRampUp: ${excludeRampUp})`);
+    return rows.map((row) => ({
+      transaction_name: row.transaction_name as string,
+      sampler_name: row.sampler_name as string,
+      scenario_name: (row.scenario_name as string) || undefined,
+      url_pattern: (row.url_pattern as string | null) ?? null,
+      avg_response_time: this.mapper.parseFloat(row.avg_response_time),
+      passed_count: this.mapper.parseInt(row.passed_count),
+      failed_count: this.mapper.parseInt(row.failed_count),
+      total_count: this.mapper.parseInt(row.total_count),
+    }));
   }
 
   /**

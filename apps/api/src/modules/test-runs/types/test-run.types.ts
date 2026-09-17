@@ -184,6 +184,18 @@ export interface ParallelGroupStats {
   p99_elapsed: number;
 }
 
+/** One row of `test_run_sampler_stats`, as `GET /test-runs/:id/samplers` returns it. */
+export interface RunSamplerStats {
+  transaction_name: string;
+  sampler_name: string;
+  scenario_name?: string;
+  url_pattern: string | null;
+  avg_response_time: number;
+  passed_count: number;
+  failed_count: number;
+  total_count: number;
+}
+
 export interface SamplerStats {
   sampler_name: string;
   scenario_name?: string;
