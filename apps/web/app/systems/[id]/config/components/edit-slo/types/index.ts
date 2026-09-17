@@ -70,6 +70,8 @@ export const initialSLOFormData: SLOFormData = {
  */
 export interface EditSLODialogProps {
   open: boolean;
+  /** Unlock the dashboard/panel pickers (a fresh duplicate has no history to protect). */
+  allowMetricChange?: boolean;
   onClose: () => void;
   benchmark: Benchmark | null;
   systemId: string;
@@ -170,6 +172,7 @@ export interface UseEditSLOFormReturn {
   saveDialogOption: SaveDialogOption;
   setSaveDialogOption: React.Dispatch<React.SetStateAction<SaveDialogOption>>;
   fetchDashboardPanels: (dashboardUid: string) => Promise<void>;
+  fetchPerfMetricsPanels: (applicationDashboardId: string) => Promise<void>;
   fetchSloApplicationDashboards: () => Promise<void>;
   fetchDynatraceDashboardsForSlo: () => Promise<void>;
   fetchDynatraceMetricsForSlo: (dashboardLabel: string) => Promise<void>;

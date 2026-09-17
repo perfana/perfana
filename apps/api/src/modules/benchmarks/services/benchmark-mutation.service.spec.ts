@@ -88,6 +88,7 @@ describe('BenchmarkMutationService', () => {
           useValue: {
             inheritTagsFromDashboard: jest.fn().mockResolvedValue([]),
             getInheritedTagsForUpdate: jest.fn().mockResolvedValue([]),
+            metricsSourceIdOf: jest.fn().mockResolvedValue('ms-new'),
           },
         },
         {
@@ -120,6 +121,35 @@ describe('BenchmarkMutationService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  describe('update() re-pointing the dashboard', () => {
+    it('moves application_dashboard_id and metrics_source_id together', async () => {
+      const before = buildEntity({ id: 'bm-1', application_dashboard_id: 'ad-old', metrics_source_id: 'ms-old' });
+      queryService.findOne.mockResolvedValue(before as never);
+      benchmarkRepo.findOne.mockResolvedValue(before);
+      benchmarkRepo.update.mockResolvedValue({} as never);
+
+      await service.update('bm-1', userId, roles, { applicationDashboardId: 'ad-new' });
+
+      expect(benchmarkRepo.update).toHaveBeenCalledWith(
+        'bm-1',
+        expect.objectContaining({ application_dashboard_id: 'ad-new', metrics_source_id: 'ms-new' }),
+      );
+    });
+
+    it('leaves both untouched when the body names the current dashboard', async () => {
+      const before = buildEntity({ id: 'bm-1', application_dashboard_id: 'ad-old', metrics_source_id: 'ms-old' });
+      queryService.findOne.mockResolvedValue(before as never);
+      benchmarkRepo.findOne.mockResolvedValue(before);
+      benchmarkRepo.update.mockResolvedValue({} as never);
+
+      await service.update('bm-1', userId, roles, { applicationDashboardId: 'ad-old', requirementValue: 1 });
+
+      const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
+      expect(data).not.toHaveProperty('application_dashboard_id');
+      expect(data).not.toHaveProperty('metrics_source_id');
+    });
   });
 
   describe('audit logging (Phase 5a, PR13)', () => {

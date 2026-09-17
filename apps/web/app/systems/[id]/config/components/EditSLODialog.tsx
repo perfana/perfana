@@ -24,6 +24,7 @@ import { SLOFormFields, SLOThresholdConfig, SLOSaveDialog } from './edit-slo/com
 
 export default function EditSLODialog({
   open,
+  allowMetricChange = false,
   onClose,
   benchmark,
   systemId,
@@ -45,6 +46,7 @@ export default function EditSLODialog({
     saveDialogOption,
     setSaveDialogOption,
     fetchDashboardPanels,
+    fetchPerfMetricsPanels,
     fetchSloApplicationDashboards,
     fetchDynatraceDashboardsForSlo,
     fetchDynatraceMetricsForSlo,
@@ -98,6 +100,7 @@ export default function EditSLODialog({
           <Grid container spacing={3}>
             {/* Source, Dashboard, Panel Selection */}
             <SLOFormFields
+              allowMetricChange={allowMetricChange}
               sloFormData={sloFormData}
               setSloFormData={setSloFormData}
               validationErrors={validationErrors}
@@ -111,6 +114,7 @@ export default function EditSLODialog({
               fetchSloApplicationDashboards={fetchSloApplicationDashboards}
               fetchDynatraceDashboardsForSlo={fetchDynatraceDashboardsForSlo}
               fetchDashboardPanels={fetchDashboardPanels}
+              fetchPerfMetricsPanels={fetchPerfMetricsPanels}
               fetchDynatraceMetricsForSlo={fetchDynatraceMetricsForSlo}
             />
 

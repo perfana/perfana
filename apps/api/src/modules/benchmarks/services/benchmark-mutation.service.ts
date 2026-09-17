@@ -273,6 +273,14 @@ export class BenchmarkMutationService {
       // Track who updated the resource
       updateData.updated_by = userId;
 
+      // The edit dialog (and a duplicate being turned into a variant) may re-point the SLO
+      // at another dashboard. The checks pipeline matches on application_dashboard_id and
+      // the edit form re-matches on metrics_source_id, so both move together.
+      if (dto.applicationDashboardId && dto.applicationDashboardId !== existing.application_dashboard_id) {
+        updateData.application_dashboard_id = dto.applicationDashboardId;
+        updateData.metrics_source_id = await this.tagHelper.metricsSourceIdOf(dto.applicationDashboardId);
+      }
+
       await withRequestEm(this.benchmarkRepo).update(id, updateData as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);
 
       const result = await withRequestEm(this.benchmarkRepo).findOne({

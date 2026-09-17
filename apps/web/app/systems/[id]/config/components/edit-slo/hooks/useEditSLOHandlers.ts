@@ -120,9 +120,11 @@ export function useEditSLOHandlers({
             ? { dashboardId: sloFormData.selectedDashboard.dashboard_id }
             : {}),
           dashboardUid: sloFormData.selectedDashboard?.dashboard_uid || '',
+          // A Dynatrace metric carries its own dashboard id; the synthetic one the form
+          // starts from does not, so fall back to the benchmark's.
           applicationDashboardId:
             sloFormData.source === 'dynatrace'
-              ? benchmark.application_dashboard_id || ''
+              ? sloFormData.selectedPanel?.applicationDashboardId || benchmark.application_dashboard_id || ''
               : sloFormData.selectedDashboard?.id || '',
           configTitle:
             sloFormData.source === 'dynatrace'
@@ -143,7 +145,8 @@ export function useEditSLOHandlers({
             },
             evaluateType: sloFormData.evaluateType,
             dashboardUid: sloFormData.selectedDashboard?.dashboard_uid,
-            id: sloFormData.selectedPanel?.id,
+            // Grafana panels carry `id`, Dynatrace metrics `panelId` (see useAddSLOHandlers).
+            id: sloFormData.selectedPanel?.id ?? sloFormData.selectedPanel?.panelId,
             yAxesFormat: sloFormData.selectedPanel?.yAxesFormat || sloFormData.selectedPanel?.metricUnit || null,
             excludeRampUpTime: sloFormData.excludeRampUpTime,
             averageAll: sloFormData.averageAll,

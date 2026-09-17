@@ -203,6 +203,7 @@ export class BenchmarksController {
     dashboardLabel?: string;
     dashboardId?: number;
     dashboardUid?: string;
+    applicationDashboardId?: string;
     configTitle?: string;
     panelTitle?: string;
     evaluateType?: string;

@@ -133,7 +133,7 @@ export default function SystemConfigurationPage() {
   const { system, systemId, selectedEnvironment, selectedWorkload, activeTab } = systemData;
 
   // Aggregated SLOs have their own dialog; everything else goes to the edit-SLO dialog.
-  const openSloEditor = (benchmark: Benchmark) => {
+  const openSloEditor = (benchmark: Benchmark, opts?: { allowMetricChange?: boolean }) => {
     if (benchmark.benchmark_type === 'aggregated') {
       setSelectedAggregatedBenchmark({
         id: benchmark.id,
@@ -147,7 +147,7 @@ export default function SystemConfigurationPage() {
       setAggregatedSloDialogOpen(true);
       return;
     }
-    slo.handleEditSLO(benchmark);
+    slo.handleEditSLO(benchmark, opts);
   };
 
   return (
@@ -267,7 +267,8 @@ export default function SystemConfigurationPage() {
               onEditSLO={openSloEditor}
               onDuplicateSLO={async (benchmark) => {
                 const clone = await slo.handleDuplicateSLO(benchmark, systemId, selectedEnvironment, selectedWorkload);
-                if (clone) openSloEditor(clone);
+                // A clone has no history yet, so the dashboard/panel may be re-pointed.
+                if (clone) openSloEditor(clone, { allowMetricChange: true });
               }}
               onDeleteSLO={slo.handleDeleteSLO}
               onViewSLO={slo.handleViewSLO}
@@ -367,6 +368,7 @@ export default function SystemConfigurationPage() {
         slo={{
           addSloOpen: slo.addSloOpen,
           editSloOpen: slo.editSloOpen,
+          editSloAllowMetricChange: slo.editSloAllowMetricChange,
           deleteSloOpen: slo.deleteSloOpen,
           editingSlo: slo.editingSlo,
           deletingSlo: slo.deletingSlo,

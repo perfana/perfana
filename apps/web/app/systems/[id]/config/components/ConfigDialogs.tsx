@@ -33,6 +33,7 @@ interface DashboardDialogState {
 interface SLODialogState {
   addSloOpen: boolean;
   editSloOpen: boolean;
+  editSloAllowMetricChange: boolean;
   deleteSloOpen: boolean;
   editingSlo: Benchmark | null;
   deletingSlo: Benchmark | null;
@@ -161,6 +162,7 @@ export default function ConfigDialogs({
 
       <EditSLODialog
         open={slo.editSloOpen}
+        allowMetricChange={slo.editSloAllowMetricChange}
         onClose={onEditSloClose}
         benchmark={slo.editingSlo}
         systemId={systemId}
