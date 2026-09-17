@@ -1035,7 +1035,7 @@ describe('ApdexCalculator', () => {
 
     // ── CHK-P1: thresholds once, rollup once ───────────────────────────────
 
-    it('answers every transaction from ONE rollup statement with per-transaction thresholds, no savepoints', async () => {
+    it('answers every transaction from ONE rollup statement with per-transaction thresholds, one savepoint around the rollup and none per transaction', async () => {
       // 294 transactions used to cost ~1,470 round trips: per transaction two
       // threshold lookups, one rollup probe and two SAVEPOINT statements.
       const testRun = createTestRun({ organization_id: 'org-1' });
