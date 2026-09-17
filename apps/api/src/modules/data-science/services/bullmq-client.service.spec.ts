@@ -306,3 +306,106 @@ describe('BullMQClientService.reevaluateBatch — recalculateStatistics', () => 
     expect(batchAdd).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * `describeActiveJobs` feeds the SlowRequestMiddleware's warning line. Its one
+ * contract is that it never throws: a Redis hiccup while composing a slow-request
+ * warning must not turn a warning into an unhandled rejection.
+ */
+describe('BullMQClientService.describeActiveJobs', () => {
+  function makeDescribeService(queues: { analysisQueue?: unknown; batchQueue?: unknown }) {
+    const service = Object.create(BullMQClientService.prototype) as BullMQClientService;
+    const internals = service as unknown as Record<string, unknown>;
+    internals.analysisQueue = queues.analysisQueue ?? null;
+    internals.batchQueue = queues.batchQueue ?? null;
+    return service;
+  }
+
+  it('lists jobs from both queues with the run id, the run count, or a dash', async () => {
+    const service = makeDescribeService({
+      analysisQueue: {
+        getActive: jest.fn().mockResolvedValue([
+          { name: 'analyze-test', id: '1', data: { testRunId: 'RUN-1' } },
+          { name: 'statistics-calculation', id: '2', data: { testRunIds: ['a', 'b', 'c'] } },
+        ]),
+      },
+      batchQueue: {
+        getActive: jest.fn().mockResolvedValue([
+          { name: 'orchestrate-reevaluate-batch', id: '3', data: {} },
+          { name: 'no-data', id: '4' },
+        ]),
+      },
+    });
+
+    await expect(service.describeActiveJobs()).resolves.toBe(
+      'analyze-test#1(RUN-1),statistics-calculation#2(3),orchestrate-reevaluate-batch#3(-),no-data#4(-)',
+    );
+  });
+
+  it('asks each queue for the first 20 active jobs only', async () => {
+    const getActive = jest.fn().mockResolvedValue([]);
+    const service = makeDescribeService({ analysisQueue: { getActive }, batchQueue: { getActive } });
+
+    await service.describeActiveJobs();
+
+    expect(getActive).toHaveBeenCalledTimes(2);
+    expect(getActive).toHaveBeenCalledWith(0, 19);
+  });
+
+  it('returns "none" when nothing is active', async () => {
+    const service = makeDescribeService({
+      analysisQueue: { getActive: jest.fn().mockResolvedValue([]) },
+      batchQueue: { getActive: jest.fn().mockResolvedValue([]) },
+    });
+
+    await expect(service.describeActiveJobs()).resolves.toBe('none');
+  });
+
+  it('treats a missing queue as empty rather than throwing', async () => {
+    const service = makeDescribeService({
+      analysisQueue: { getActive: jest.fn().mockResolvedValue([{ name: 'analyze-test', id: '9', data: { testRunId: 'R' } }]) },
+      batchQueue: null,
+    });
+
+    await expect(service.describeActiveJobs()).resolves.toBe('analyze-test#9(R)');
+  });
+
+  it('reports "unavailable(<message>)" when Redis rejects, never throwing', async () => {
+    const service = makeDescribeService({
+      analysisQueue: { getActive: jest.fn().mockRejectedValue(new Error('ECONNREFUSED')) },
+      batchQueue: { getActive: jest.fn().mockResolvedValue([]) },
+    });
+
+    await expect(service.describeActiveJobs()).resolves.toBe('unavailable(ECONNREFUSED)');
+  });
+
+  it('stringifies a non-Error rejection', async () => {
+    const service = makeDescribeService({
+      analysisQueue: { getActive: jest.fn().mockRejectedValue('timeout') },
+      batchQueue: null,
+    });
+
+    await expect(service.describeActiveJobs()).resolves.toBe('unavailable(timeout)');
+  });
+
+  it('reports redis-unavailable when neither queue was constructed, without touching Redis', async () => {
+    await expect(makeDescribeService({}).describeActiveJobs()).resolves.toBe('redis-unavailable');
+  });
+
+  it('shares one Redis snapshot across a 2 s burst of callers', async () => {
+    const getActive = jest.fn().mockResolvedValue([{ name: 'analyze-test', id: '1', data: { testRunId: 'RUN-1' } }]);
+    const service = makeDescribeService({ analysisQueue: { getActive }, batchQueue: null });
+    let now = 5_000_000;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+
+    await Promise.all([service.describeActiveJobs(), service.describeActiveJobs(), service.describeActiveJobs()]);
+    now += 1999;
+    await service.describeActiveJobs();
+    expect(getActive).toHaveBeenCalledTimes(1);
+
+    now += 1;
+    await expect(service.describeActiveJobs()).resolves.toBe('analyze-test#1(RUN-1)');
+    expect(getActive).toHaveBeenCalledTimes(2);
+    jest.restoreAllMocks();
+  });
+});
