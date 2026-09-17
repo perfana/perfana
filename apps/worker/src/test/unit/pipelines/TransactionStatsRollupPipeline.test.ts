@@ -90,6 +90,12 @@ describe('TransactionStatsRollupPipeline', () => {
     });
   });
 
+  /** The two statements that aggregate raw rows: the transaction INSERT...SELECT and the sampler CTAS. */
+  const aggregateStatements = () =>
+    mockManagerQuery.mock.calls
+      .map(([sql]) => sql as string)
+      .filter(s => /INSERT INTO test_run_transaction_stats|CREATE TEMP TABLE sampler_rollup_base/i.test(s));
+
   describe('execute', () => {
     it('returns error when test run does not exist', async () => {
       mockDb.getTestRunByTestRunId.mockResolvedValue(null);
@@ -342,9 +348,7 @@ describe('TransactionStatsRollupPipeline', () => {
 
       await pipeline.execute({ testRunId: 'run-001' });
 
-      const inserts = mockManagerQuery.mock.calls
-        .map(([sql]) => sql as string)
-        .filter(s => /INSERT INTO test_run_(transaction|sampler)_stats/i.test(s));
+      const inserts = aggregateStatements();
       expect(inserts.length).toBe(2);
       for (const sql of inserts) {
         // Must be tdigest(size, value) — bucket count then column.
@@ -373,8 +377,10 @@ describe('TransactionStatsRollupPipeline', () => {
         // in the ON CONFLICT DO UPDATE branch.
         expect(sql).toMatch(/pct_agg_passed/);
         expect(sql).toMatch(/pct_agg_passed\s*=\s*EXCLUDED\.pct_agg_passed/);
-        // And there must be at least one tdigest(...) FILTER (WHERE ... success)
-        // in the CTE feeding the INSERT.
+      }
+      // And there must be at least one tdigest(...) FILTER (WHERE ... success)
+      // in each aggregate feeding those INSERTs.
+      for (const sql of aggregateStatements()) {
         expect(sql).toMatch(/tdigest\s*\([^)]*response_time[^)]*\)\s*FILTER\s*\(\s*WHERE[^)]*success/i);
       }
     });
@@ -399,11 +405,36 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(txInsert).toMatch(passedFullPattern);
       expect(txInsert).toMatch(passedExclPattern);
 
-      const samplerInsert = mockManagerQuery.mock.calls
+      const samplerBase = mockManagerQuery.mock.calls
         .map(([sql]) => sql as string)
-        .find(s => /INSERT INTO test_run_sampler_stats/i.test(s))!;
-      expect(samplerInsert).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s*\)/i);
-      expect(samplerInsert).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s+AND\s+r\.time\s*>=\s*\$2/i);
+        .find(s => /CREATE TEMP TABLE sampler_rollup_base/i.test(s))!;
+      expect(samplerBase).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s*\)/i);
+      expect(samplerBase).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s+AND\s+r\.time\s*>=\s*\$2/i);
+    });
+
+    it('aggregates the sampler rollup into an ON COMMIT DROP temp table and inserts from it (STAT-P1)', async () => {
+      // INSERT ... SELECT cannot use parallel workers; as one statement the sampler
+      // aggregate sorted every requests_raw row serially and spilled 488 MB at 512MB
+      // work_mem. The aggregate must run as CREATE TEMP TABLE ... AS (parallel-capable)
+      // inside the same transaction, before the INSERT that reads it.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const sqlCalls = mockManagerQuery.mock.calls.map(([sql]) => sql as string);
+      const ctasIdx = sqlCalls.findIndex(s => /CREATE TEMP TABLE sampler_rollup_base ON COMMIT DROP AS/i.test(s));
+      const insertIdx = sqlCalls.findIndex(s => /INSERT INTO test_run_sampler_stats/i.test(s));
+      expect(ctasIdx).toBeGreaterThan(-1);
+      expect(insertIdx).toBeGreaterThan(ctasIdx);
+      expect(sqlCalls[insertIdx]).toMatch(/FROM sampler_rollup_base/);
+      // The aggregate reads requests_raw with the run bound; the INSERT reads only the temp table.
+      expect(sqlCalls[ctasIdx]).toMatch(/FROM requests_raw r/);
+      expect(mockManagerQuery.mock.calls[ctasIdx]![1]).toHaveLength(3);
+      expect(sqlCalls[insertIdx]).not.toMatch(/requests_raw/);
+      // last(url_hash, time) replaces the ARRAY_AGG(... ORDER BY time DESC)[1] trick.
+      expect(sqlCalls[ctasIdx]).toMatch(/last\(r\.url_hash, r\.time\)/);
+      expect(sqlCalls[ctasIdx]).not.toMatch(/ARRAY_AGG/i);
     });
 
     it('computes endCutoff = end_time - analysisEndOffset seconds and passes it as $3', async () => {
