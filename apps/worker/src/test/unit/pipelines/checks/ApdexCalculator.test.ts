@@ -1160,6 +1160,39 @@ describe('ApdexCalculator', () => {
       expect(rollup[1][4]).toEqual([600, 600]);
       expect(result.transaction_results.map(t => t.threshold_ms)).toEqual([600, 600]);
     });
+
+    it('asks the rollup for each transaction NAME once even when it runs in several scenarios', async () => {
+      // A duplicate name in the unnest joins every rollup row twice and doubles the
+      // counts after the GROUP BY (reproduced on dev: eff=40 against a true 20).
+      const testRun = createTestRun();
+      const benchmark = createBenchmark({ transaction_name: null, min_apdex_score: 0.5 });
+      const calc = makeSPCalculator();
+
+      spMock.enqueue(
+        [
+          { transaction_name: 'login', scenario_name: 'web' },
+          { transaction_name: 'login', scenario_name: 'mobile' },
+          { transaction_name: 'checkout', scenario_name: 'web' },
+        ],
+        [],
+        [
+          { transaction_name: 'login', threshold_ms: 500, ...makeApdexRow(9, 1, 0, 200) },
+          { transaction_name: 'checkout', threshold_ms: 500, ...makeApdexRow(8, 1, 1, 300) },
+        ],
+      );
+
+      const result = await calc.evaluateApdexBenchmark(testRun, benchmark);
+
+      const rollup = spMock.querySpy.mock.calls.find((c: any[]) => /unnest\(\$3::text\[\]/.test(c[0] as string))!;
+      expect(rollup[1][2]).toEqual(['login', 'checkout']);
+      expect(rollup[1][4]).toEqual([500, 500]);
+      // One result row per (transaction, scenario) as before; each reuses the single hit.
+      expect(result.transaction_results.map(t => [t.transaction_name, t.scenario_name, t.total_count])).toEqual([
+        ['login', 'web', 10],
+        ['login', 'mobile', 10],
+        ['checkout', 'web', 10],
+      ]);
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════

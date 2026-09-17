@@ -597,11 +597,15 @@ export class ApdexCalculator extends BaseCheckService {
     let rollupHits = new Map<string, ApdexResult>();
     await this.manager.query('SAVEPOINT sp_apdex_rollup');
     try {
+      // One entry per NAME: a transaction that runs in two scenarios is two rows in
+      // transactionsWithScenarios, and a duplicate in the unnest would join every
+      // rollup row twice and double the counts after the GROUP BY.
+      const uniqueNames = [...new Set(transactionsWithScenarios.map((t) => t.transaction_name))];
       rollupHits = await this.calculateApdexFromRollupBulk({
         testRunId: testRun.test_run_id,
-        transactions: transactionsWithScenarios.map((t) => ({
-          transactionName: t.transaction_name,
-          thresholdMs: resolveThreshold(t.transaction_name),
+        transactions: uniqueNames.map((transactionName) => ({
+          transactionName,
+          thresholdMs: resolveThreshold(transactionName),
         })),
         includeFailedRequests: include_failed_requests,
         excludeRampUp: exclude_ramp_up_time,

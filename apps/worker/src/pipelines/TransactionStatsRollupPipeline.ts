@@ -352,11 +352,14 @@ const TRANSACTION_ROLLUP_SQL = `
  *
  * `INSERT ... SELECT` cannot use parallel workers, so as one statement the aggregate
  * sorted every requests_raw row of the run serially and spilled even at 512MB:
- * `Sort Method: external merge Disk: 487,896 kB`, 8.0 s on a 2.53 M-row run. The
- * same aggregate as `CREATE TEMP TABLE ... AS` plans with 2 workers and quicksorts
- * in memory (2.65 s), and the INSERT from the 2 k-row temp table is 0.11 s.
- * `ON COMMIT DROP` ties the table to this transaction; a retry of the whole
- * transaction starts clean.
+ * `Sort Method: external merge Disk: 487,896 kB`, 7.9-8.0 s on a 2.53 M-row run. The
+ * same aggregate as `CREATE TEMP TABLE ... AS` plans with 2 workers: 2.65-2.8 s
+ * when the parallel scan splits the run's rows evenly (three ~200 MB quicksorts),
+ * up to ~6 s when one participant happens to claim most of the run's blocks and
+ * sorts them on disk — the split is scheduling, not a property of the query, and
+ * `parallel_leader_participation = off` measured slower (4.25 s) on the even case,
+ * so it is not set. The INSERT from the 2 k-row temp table is 0.11 s. `ON COMMIT DROP` ties the table to this transaction; a retry of the
+ * whole transaction starts clean.
  *
  * `last(url_hash, time)` (core timescaledb) replaces `ARRAY_AGG(url_hash ORDER BY
  * time DESC)[1]`, which materialised every url_hash of the group to keep one. The
