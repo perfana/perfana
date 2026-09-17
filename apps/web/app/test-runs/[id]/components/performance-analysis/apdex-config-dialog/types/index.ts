@@ -14,6 +14,7 @@ export interface ExistingSlo {
   min_apdex_score: number;
   include_failed_requests: boolean;
   exclude_ramp_up_time: boolean;
+  apdex_min_samples: number;
   enabled: boolean;
 }
 
@@ -35,6 +36,7 @@ export interface ApdexConfigState {
   minApdexScore: number;
   includeFailedRequests: boolean;
   excludeRampUpTime: boolean;
+  apdexMinSamples: number;
   testRunDetails: TestRunDetails | null;
   loadingTestRun: boolean;
   existingSlo: ExistingSlo | null;
@@ -50,6 +52,7 @@ export interface ApdexConfigActions {
   setMinApdexScore: (value: number) => void;
   setIncludeFailedRequests: (value: boolean) => void;
   setExcludeRampUpTime: (value: boolean) => void;
+  setApdexMinSamples: (value: number) => void;
   handleSave: () => Promise<void>;
   handleDelete: () => Promise<void>;
   setSaveDialogOption: (option: ReEvaluateOption) => void;

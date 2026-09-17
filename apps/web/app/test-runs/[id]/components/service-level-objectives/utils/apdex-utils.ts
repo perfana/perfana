@@ -43,7 +43,7 @@ export const getApdexLabel = (apdex: number): string => {
 /**
  * Get status order for sorting (failed first, then passed, then unknown)
  */
-const getStatusOrder = (meetsRequirement: boolean | undefined): number => {
+const getStatusOrder = (meetsRequirement: boolean | null | undefined): number => {
   if (meetsRequirement === false) return 0;
   if (meetsRequirement === true) return 1;
   return 2;

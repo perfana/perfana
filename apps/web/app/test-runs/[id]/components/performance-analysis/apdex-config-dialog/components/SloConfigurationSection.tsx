@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import { TestRunDetails, ExistingSlo } from '../types';
 import { getApdexScoreLabel, getApdexScoreColor } from '../utils/apdex-utils';
+import { ApdexMinSamplesField } from '../../components/ApdexMinSamplesField';
 
 interface SloConfigurationSectionProps {
   enableSlo: boolean;
@@ -23,6 +24,8 @@ interface SloConfigurationSectionProps {
   setIncludeFailedRequests: (value: boolean) => void;
   excludeRampUpTime: boolean;
   setExcludeRampUpTime: (value: boolean) => void;
+  apdexMinSamples: number;
+  setApdexMinSamples: (value: number) => void;
   loading: boolean;
   loadingTestRun: boolean;
   loadingSlo: boolean;
@@ -39,6 +42,8 @@ export function SloConfigurationSection({
   setIncludeFailedRequests,
   excludeRampUpTime,
   setExcludeRampUpTime,
+  apdexMinSamples,
+  setApdexMinSamples,
   loading,
   loadingTestRun,
   loadingSlo,
@@ -154,6 +159,8 @@ export function SloConfigurationSection({
           <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4 }}>
             When enabled, requests issued during the ramp-up phase are ignored
           </Typography>
+
+          <ApdexMinSamplesField value={apdexMinSamples} onChange={setApdexMinSamples} disabled={loading} />
 
           <Alert severity="info" sx={{ mt: 2 }}>
             <Typography variant="caption">

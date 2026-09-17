@@ -11,9 +11,10 @@ export interface SLOStatusChipProps {
     benchmark_id?: string;
     panel_id?: number;
     status?: string;
-    meets_requirement?: boolean;
+    meets_requirement?: boolean | null;
     message?: string;
     created_at?: string;
+    targets?: Array<{ below_min_samples?: boolean }>;
   };
   benchmark?: {
     id?: string;
@@ -287,6 +288,28 @@ export default function SLOStatusChip({
         {chip}
       </Tooltip>
     ) : chip;
+  }
+
+  // Apdex SLO on a transaction with fewer samples than its floor: complete, but not judged.
+  if (result.status === 'COMPLETE' && result.meets_requirement == null && result.targets?.some((t) => t.below_min_samples)) {
+    return (
+      <Tooltip title={result.message || 'Too few samples to evaluate'}>
+        <Chip
+          label="Too few samples"
+          size="small"
+          tabIndex={0}
+          sx={{
+            height: '28px',
+            fontWeight: 700,
+            backgroundColor: alpha(theme.palette.warning.main, 0.1),
+            color: 'warning.dark',
+            border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
+            cursor: 'help',
+            '& .MuiChip-label': { px: 1.5, fontSize: '0.75rem' },
+          }}
+        />
+      </Tooltip>
+    );
   }
 
   // Unknown status

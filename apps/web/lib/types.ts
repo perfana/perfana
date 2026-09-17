@@ -92,7 +92,8 @@ export interface CheckResult {
   requirement?: CheckResultRequirement;
   benchmark?: Record<string, unknown>;
   panel_average?: number;
-  meets_requirement?: boolean;
+  /** null = not evaluated (ERROR, or an Apdex transaction below its sample floor). */
+  meets_requirement?: boolean | null;
   is_artificial?: boolean;
   targets?: CheckResultTarget[];
   validate_with_default_if_no_data?: boolean;
@@ -123,6 +124,7 @@ export interface CheckResultRequirement {
   /** Apdex SLOs: the minimum acceptable score and the satisfied threshold. */
   min_score?: number;
   threshold_ms?: number;
+  min_samples?: number;
   type?: string;
   aggregate_metric?: string;
   aggregate_stat?: string;
@@ -137,7 +139,7 @@ export interface CheckResultRequirement {
 export interface CheckResultTarget {
   target?: string;
   value?: number | string | null;
-  meets_requirement?: boolean;
+  meets_requirement?: boolean | null;
   status?: string;
   message?: string;
   // Apdex targets
@@ -150,6 +152,8 @@ export interface CheckResultTarget {
   tolerating_count?: number;
   frustrated_count?: number;
   total_count?: number;
+  /** Apdex: had data, but fewer than the SLO's minimum samples — not evaluated. */
+  below_min_samples?: boolean;
 }
 
 /**
@@ -224,6 +228,7 @@ export interface Benchmark {
   apdex_threshold_ms?: number;
   min_apdex_score?: number;
   include_failed_requests?: boolean;
+  apdex_min_samples?: number;
   metadata?: Record<string, unknown>;
   created_by?: string;
   updated_by?: string;

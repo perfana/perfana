@@ -8,6 +8,7 @@ import {
   Error as ErrorIcon,
   ExpandMore,
   ExpandLess,
+  HelpOutline,
   MoreVert,
 } from '@mui/icons-material';
 import { getApdexScoreColor, formatApdexScore } from '../../utils/slo-formatters';
@@ -19,6 +20,7 @@ export function ApdexTransactionRow({
   isLastRow,
   isEvenRow,
   defaultThreshold,
+  minSamples,
   onToggle,
   onOpenActionMenu,
 }: ApdexTransactionRowProps) {
@@ -102,7 +104,12 @@ export function ApdexTransactionRow({
 
       {/* Result */}
       <Box sx={{ display: 'flex', alignItems: 'center' }}>
-        <ResultChip meetsRequirement={target.meets_requirement} />
+        <ResultChip
+          meetsRequirement={target.meets_requirement}
+          belowMinSamples={target.below_min_samples}
+          sampleCount={target.total_count}
+          minSamples={minSamples}
+        />
       </Box>
 
       {/* Actions Menu Icon */}
@@ -136,8 +143,36 @@ export function ApdexTransactionRow({
 }
 
 // Result chip component
-function ResultChip({ meetsRequirement }: { meetsRequirement?: boolean }) {
+function ResultChip({
+  meetsRequirement,
+  belowMinSamples,
+  sampleCount,
+  minSamples,
+}: { meetsRequirement?: boolean | null; belowMinSamples?: boolean; sampleCount?: number; minSamples?: number }) {
   const theme = useTheme();
+
+  if (belowMinSamples) {
+    const n = sampleCount ?? 0;
+    const floor = minSamples !== undefined ? ` of ${minSamples}` : '';
+    return (
+      <Tooltip title={`Only ${n} ${n === 1 ? 'sample' : 'samples'} — below the SLO minimum${floor}, so not evaluated`}>
+        <Chip
+          label="Too few"
+          size="small"
+          tabIndex={0}
+          icon={<HelpOutline sx={{ fontSize: '12px !important' }} />}
+          sx={{
+            backgroundColor: alpha(theme.palette.warning.main, 0.1),
+            color: 'warning.main',
+            fontWeight: 600,
+            fontSize: '0.7rem',
+            height: '22px',
+            '& .MuiChip-icon': { color: theme.palette.warning.main }
+          }}
+        />
+      </Tooltip>
+    );
+  }
 
   if (meetsRequirement === true) {
     return (

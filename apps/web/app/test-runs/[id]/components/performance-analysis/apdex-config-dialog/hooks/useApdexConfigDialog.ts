@@ -6,6 +6,7 @@ import { Benchmark } from '@/lib/types';
 import { TestRunDetails, ExistingSlo, ApdexConfigState, ApdexConfigActions } from '../types';
 import { validateThreshold, validateApdexScore } from '../utils/apdex-utils';
 import { ReEvaluateOption, triggerSloReEvaluation } from '@/lib/slo-reevaluation';
+import { APDEX_MIN_SAMPLES_DEFAULT } from '../../components/ApdexMinSamplesField';
 
 interface UseApdexConfigDialogParams {
   open: boolean;
@@ -32,6 +33,7 @@ export function useApdexConfigDialog({
   const [minApdexScore, setMinApdexScore] = useState<number>(0.85);
   const [includeFailedRequests, setIncludeFailedRequests] = useState(false);
   const [excludeRampUpTime, setExcludeRampUpTime] = useState(true);
+  const [apdexMinSamples, setApdexMinSamples] = useState(APDEX_MIN_SAMPLES_DEFAULT);
   const [testRunDetails, setTestRunDetails] = useState<TestRunDetails | null>(null);
   const [loadingTestRun, setLoadingTestRun] = useState(false);
   const [existingSlo, setExistingSlo] = useState<ExistingSlo | null>(null);
@@ -100,12 +102,14 @@ export function useApdexConfigDialog({
           min_apdex_score: matchingSlo.min_apdex_score || 0.85,
           include_failed_requests: matchingSlo.include_failed_requests || false,
           exclude_ramp_up_time: matchingSlo.exclude_ramp_up_time !== false,
+          apdex_min_samples: matchingSlo.apdex_min_samples ?? APDEX_MIN_SAMPLES_DEFAULT,
           enabled: matchingSlo.enabled !== false,
         });
         setEnableSlo(matchingSlo.enabled !== false);
         setMinApdexScore(matchingSlo.min_apdex_score || 0.85);
         setIncludeFailedRequests(matchingSlo.include_failed_requests || false);
         setExcludeRampUpTime(matchingSlo.exclude_ramp_up_time !== false);
+        setApdexMinSamples(matchingSlo.apdex_min_samples ?? APDEX_MIN_SAMPLES_DEFAULT);
       }
     } catch (err) {
       setError(sloCheckErrorMessage);
@@ -124,6 +128,7 @@ export function useApdexConfigDialog({
       setMinApdexScore(0.85);
       setIncludeFailedRequests(false);
       setExcludeRampUpTime(true);
+      setApdexMinSamples(APDEX_MIN_SAMPLES_DEFAULT);
       setTestRunDetails(null);
       setExistingSlo(null);
       setSloCheckFailed(false);
@@ -216,7 +221,7 @@ export function useApdexConfigDialog({
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threshold, enableSlo, minApdexScore, includeFailedRequests, excludeRampUpTime, existingSlo, isTransactionLevel, sloCheckFailed, testRunId, transactionName, testRunDetails, onSuccess, onClose]);
+  }, [threshold, enableSlo, minApdexScore, includeFailedRequests, excludeRampUpTime, apdexMinSamples, existingSlo, isTransactionLevel, sloCheckFailed, testRunId, transactionName, testRunDetails, onSuccess, onClose]);
 
   const handleSloUpdate = async (thresholdValue: number) => {
     if (enableSlo) {
@@ -229,6 +234,7 @@ export function useApdexConfigDialog({
             apdexThresholdMs: thresholdValue,
             includeFailedRequests,
             excludeRampUpTime,
+            apdexMinSamples,
             enabled: true,
           }),
         });
@@ -248,6 +254,7 @@ export function useApdexConfigDialog({
             apdexThresholdMs: thresholdValue,
             includeFailedRequests,
             excludeRampUpTime,
+            apdexMinSamples,
           }),
         });
         if (!createResponse.ok) {
@@ -262,6 +269,7 @@ export function useApdexConfigDialog({
         body: JSON.stringify({
           enabled: false,
           excludeRampUpTime,
+          apdexMinSamples,
         }),
       });
       if (!disableResponse.ok) {
@@ -332,6 +340,7 @@ export function useApdexConfigDialog({
     minApdexScore,
     includeFailedRequests,
     excludeRampUpTime,
+    apdexMinSamples,
     testRunDetails,
     loadingTestRun,
     existingSlo,
@@ -342,6 +351,7 @@ export function useApdexConfigDialog({
     setMinApdexScore,
     setIncludeFailedRequests,
     setExcludeRampUpTime,
+    setApdexMinSamples,
     handleSave,
     handleDelete,
     saveDialogOpen,

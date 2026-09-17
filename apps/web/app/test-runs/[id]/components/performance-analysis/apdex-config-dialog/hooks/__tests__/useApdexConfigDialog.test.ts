@@ -346,6 +346,140 @@ describe('useApdexConfigDialog - excludeRampUpTime', () => {
   });
 });
 
+describe('useApdexConfigDialog - apdexMinSamples', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('defaults apdexMinSamples to 50 when there is no existing SLO', async () => {
+    routeFetch({ '/test-runs/': testRunDetails, '/benchmarks?': [] });
+
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+
+    await waitFor(() => expect(result.current.testRunDetails).not.toBeNull());
+    expect(result.current.apdexMinSamples).toBe(50);
+  });
+
+  it('resets apdexMinSamples to 50 when the dialog re-opens (no stale value from a cancelled edit)', async () => {
+    routeFetch({ '/test-runs/': testRunDetails, '/benchmarks?': [] });
+
+    const { result, rerender } = renderHook(
+      (props: typeof defaultProps) => useApdexConfigDialog(props),
+      { initialProps: defaultProps },
+    );
+    await waitFor(() => expect(result.current.testRunDetails).not.toBeNull());
+
+    act(() => {
+      result.current.setApdexMinSamples(5);
+    });
+    expect(result.current.apdexMinSamples).toBe(5);
+
+    rerender({ ...defaultProps, open: false });
+    rerender({ ...defaultProps, open: true });
+
+    await waitFor(() => {
+      expect(result.current.apdexMinSamples).toBe(50);
+    });
+  });
+
+  it('loads apdex_min_samples from an existing SLO', async () => {
+    routeFetch({
+      '/test-runs/': testRunDetails,
+      '/benchmarks?': [
+        { id: 'slo-1', min_apdex_score: 0.9, include_failed_requests: false, exclude_ramp_up_time: true, enabled: true, apdex_min_samples: 25 },
+      ],
+    });
+
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+
+    await waitFor(() => expect(result.current.existingSlo).not.toBeNull());
+    expect(result.current.apdexMinSamples).toBe(25);
+    expect(result.current.existingSlo?.apdex_min_samples).toBe(25);
+  });
+
+  it('treats a missing apdex_min_samples as 50 (SLO rows from an older API)', async () => {
+    routeFetch({
+      '/test-runs/': testRunDetails,
+      '/benchmarks?': [
+        { id: 'slo-1', min_apdex_score: 0.9, include_failed_requests: false, exclude_ramp_up_time: true, enabled: true },
+      ],
+    });
+
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+
+    await waitFor(() => expect(result.current.existingSlo).not.toBeNull());
+    expect(result.current.apdexMinSamples).toBe(50);
+    expect(result.current.existingSlo?.apdex_min_samples).toBe(50);
+  });
+
+  it('sends apdexMinSamples on POST when creating a new SLO', async () => {
+    routeFetch({ '/test-runs/': testRunDetails, '/benchmarks?': [] });
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+    await waitFor(() => expect(result.current.testRunDetails).not.toBeNull());
+
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    act(() => {
+      result.current.setEnableSlo(true);
+      result.current.setApdexMinSamples(10);
+    });
+    await act(async () => { await result.current.handleSave(); });
+    await act(async () => { await result.current.handleSaveDialogConfirm('none'); });
+
+    const createCall = mockFetch.mock.calls.find(
+      ([url, init]) => url === '/benchmarks/apdex' && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(createCall).toBeDefined();
+    const body = JSON.parse((createCall![1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body.apdexMinSamples).toBe(10);
+  });
+
+  it('sends apdexMinSamples on PUT when updating an existing SLO', async () => {
+    routeFetch({
+      '/test-runs/': testRunDetails,
+      '/benchmarks?': [
+        { id: 'slo-42', min_apdex_score: 0.85, include_failed_requests: false, exclude_ramp_up_time: true, enabled: true, apdex_min_samples: 50 },
+      ],
+    });
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+    await waitFor(() => expect(result.current.existingSlo).not.toBeNull());
+
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    act(() => {
+      result.current.setApdexMinSamples(100);
+    });
+    await act(async () => { await result.current.handleSave(); });
+    await act(async () => { await result.current.handleSaveDialogConfirm('none'); });
+
+    const updateCall = mockFetch.mock.calls.find(
+      ([url, init]) => url === '/benchmarks/apdex/slo-42' && (init as RequestInit | undefined)?.method === 'PUT',
+    );
+    expect(updateCall).toBeDefined();
+    const body = JSON.parse((updateCall![1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body.apdexMinSamples).toBe(100);
+    expect(body.enabled).toBe(true);
+  });
+
+  it('surfaces the API 400 message when apdexMinSamples is rejected server-side', async () => {
+    routeFetch({ '/test-runs/': testRunDetails, '/benchmarks?': [] });
+    const { result } = renderHook(() => useApdexConfigDialog(defaultProps));
+    await waitFor(() => expect(result.current.testRunDetails).not.toBeNull());
+
+    mockFetch.mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({ message: 'apdexMinSamples must be an integer of at least 1' }),
+    } as unknown as Response);
+    act(() => {
+      result.current.setEnableSlo(true);
+    });
+    await act(async () => { await result.current.handleSave(); });
+    await act(async () => { await result.current.handleSaveDialogConfirm('none'); });
+
+    await waitFor(() =>
+      expect(result.current.error).toBe('apdexMinSamples must be an integer of at least 1'),
+    );
+  });
+});
+
 describe('useApdexConfigDialog - testRunId change while open (issue #171 Bug A)', () => {
   beforeEach(() => {
     jest.clearAllMocks();

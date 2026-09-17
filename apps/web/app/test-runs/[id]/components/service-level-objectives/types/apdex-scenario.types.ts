@@ -80,6 +80,8 @@ export interface ApdexTransactionRowProps {
   isLastRow: boolean;
   isEvenRow: boolean;
   defaultThreshold: number;
+  /** The SLO's sample floor (requirement.min_samples), for the too-few-samples tooltip. */
+  minSamples?: number;
   scenario: string;
   onToggle: () => void;
   onOpenActionMenu: (e: React.MouseEvent<HTMLElement>) => void;

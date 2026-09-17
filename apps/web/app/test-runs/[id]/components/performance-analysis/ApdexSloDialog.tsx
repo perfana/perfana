@@ -17,6 +17,7 @@ import {
   TextField,
 } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
+import { ApdexMinSamplesField, APDEX_MIN_SAMPLES_DEFAULT } from './components/ApdexMinSamplesField';
 
 interface TestRunDetails {
   system_under_test_id: string;
@@ -30,6 +31,7 @@ interface ExistingSlo {
   min_apdex_score: number;
   include_failed_requests: boolean;
   exclude_ramp_up_time: boolean;
+  apdex_min_samples: number;
   enabled: boolean;
   apdex_threshold_ms?: number;
 }
@@ -62,6 +64,7 @@ export default function ApdexSloDialog({
   const [minApdexScore, setMinApdexScore] = useState<number>(0.85);
   const [includeFailedRequests, setIncludeFailedRequests] = useState(false);
   const [excludeRampUpTime, setExcludeRampUpTime] = useState(true);
+  const [apdexMinSamples, setApdexMinSamples] = useState(APDEX_MIN_SAMPLES_DEFAULT);
   const [testRunDetails, setTestRunDetails] = useState<TestRunDetails | null>(null);
   const [loadingTestRun, setLoadingTestRun] = useState(false);
   const [existingSlo, setExistingSlo] = useState<ExistingSlo | null>(null);
@@ -78,6 +81,7 @@ export default function ApdexSloDialog({
       setMinApdexScore(0.85);
       setIncludeFailedRequests(false);
       setExcludeRampUpTime(true);
+      setApdexMinSamples(APDEX_MIN_SAMPLES_DEFAULT);
       setTestRunDetails(null);
       setExistingSlo(null);
       setSloCheckFailed(false);
@@ -151,6 +155,7 @@ export default function ApdexSloDialog({
           min_apdex_score: matchingSlo.min_apdex_score || 0.85,
           include_failed_requests: matchingSlo.include_failed_requests || false,
           exclude_ramp_up_time: matchingSlo.exclude_ramp_up_time !== false,
+          apdex_min_samples: matchingSlo.apdex_min_samples ?? APDEX_MIN_SAMPLES_DEFAULT,
           enabled: matchingSlo.enabled !== false,
           apdex_threshold_ms: matchingSlo.apdex_threshold_ms,
         });
@@ -158,6 +163,7 @@ export default function ApdexSloDialog({
         setMinApdexScore(matchingSlo.min_apdex_score || 0.85);
         setIncludeFailedRequests(matchingSlo.include_failed_requests || false);
         setExcludeRampUpTime(matchingSlo.exclude_ramp_up_time !== false);
+        setApdexMinSamples(matchingSlo.apdex_min_samples ?? APDEX_MIN_SAMPLES_DEFAULT);
       }
     } catch (err) {
       console.error('Error checking existing SLO:', err);
@@ -206,6 +212,7 @@ export default function ApdexSloDialog({
               apdexThresholdMs: currentThreshold,
               includeFailedRequests: includeFailedRequests,
               excludeRampUpTime: excludeRampUpTime,
+              apdexMinSamples,
               enabled: true,
             }),
           });
@@ -229,6 +236,7 @@ export default function ApdexSloDialog({
               apdexThresholdMs: currentThreshold,
               includeFailedRequests: includeFailedRequests,
               excludeRampUpTime: excludeRampUpTime,
+              apdexMinSamples,
             }),
           });
 
@@ -248,6 +256,7 @@ export default function ApdexSloDialog({
           body: JSON.stringify({
             enabled: false,
             excludeRampUpTime,
+            apdexMinSamples,
           }),
         });
 
@@ -426,6 +435,8 @@ export default function ApdexSloDialog({
               <Typography variant="caption" color="text.secondary" display="block" sx={{ ml: 4, mb: 2 }}>
                 When enabled, requests issued during the ramp-up phase are ignored
               </Typography>
+
+              <ApdexMinSamplesField value={apdexMinSamples} onChange={setApdexMinSamples} disabled={loading} sx={{ mt: 0, mb: 2 }} />
 
               {/* Scope info */}
               <Alert severity="info" sx={{ mt: 2 }}>
