@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.40] - 2026-09-17
+
+### Fixed
+- **The Top 10 requests / URLs tabs took ~17 minutes to load on a 314-transaction run.** Both tabs looped every transaction and called `GET /transactions/:name/samples` one at a time; each call answered its sampler rows from the rollup in milliseconds and then spent ~3 s (29 s cold) in `attachParallelGroups`, whose `requests_raw` walk has no index leading with `(test_run_id, transaction_name)` and so reads ~1.5 M rows per transaction to collect 5,000 — for a controller chain neither tab displays. New `GET /test-runs/:id/samplers?excludeRampUp=` returns every sampler of the run from `test_run_sampler_stats` in one indexed read (1,936 rows in 165 ms on the same run); the tabs use it through `fetchRunSamplers` and fall back to the old per-transaction loop only when the route answers 404 (a run with no rollup) or 202 (rollup being built). The transaction row-expand still pays the 3 s chain walk — one transaction at a time, where it is tolerable; see `docs/ops/2026-09-17-top10-requests-tab.md` for why the index is not the next step.
+- **An aggregated `error_percentage` SLO was 81 % of a batch re-evaluate.** `AggregatedBenchmarkEvaluator` counted `success = false` over the run's `requests_raw`, a parallel seq scan of the whole 7-day chunk (~10 GB per run; 3–136 s each on six WERKNL runs, 377 s of a 465 s job). It now reads `SUM(failed_count) / SUM(total_count)` from `test_run_sampler_stats` for the SLO's `ramp_up_excluded` variant, which reproduced the stored value on all six runs to 4 decimals, and falls back to the raw count only when the run has no rollup rows. Known residue, unchanged from `ApdexCalculator`: the rollup window also trims ramp-down where the raw clause trims ramp-up only. The `transaction_response_time` / `request_response_time` aggregates are still raw scans. Evidence in `docs/ops/2026-09-17-reevaluate-checks-stage-investigation.md`.
+
 ## [0.2.95.39] - 2026-09-17
 
 ### Fixed

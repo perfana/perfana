@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { TransactionStat, SamplerStat, DrillDownFilters } from '../../types/performance-analysis.types';
+import type { RunSampler } from '../../utils/run-samplers';
 
 export type { TransactionStat, SamplerStat, DrillDownFilters };
 
@@ -42,6 +43,4 @@ export interface Top10ListsRequestsProps {
   onDrillDownToDynatrace?: (filters: DrillDownFilters) => void;
 }
 
-export interface SamplerWithTransaction extends SamplerStat {
-  transaction_name: string;
-}
+export type SamplerWithTransaction = RunSampler;

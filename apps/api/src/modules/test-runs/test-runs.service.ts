@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { TestRunsQueryService } from './services/test-runs-query.service';
 import { RollupPendingResult } from './services/test-runs-performance-query.types';
 import { SummaryTimeseriesResponse } from './services/test-runs-performance-query.service';
+import type { RunSamplerStats } from './types/test-run.types';
 import { TestRunsMutationService } from './services/test-runs-mutation.service';
 import { TestRunsConfigService } from './services/test-runs-config.service';
 import { TestRunsAnomalyService } from './services/test-runs-anomaly.service';
@@ -228,6 +229,10 @@ export class TestRunsService {
 
   async getSamplerUrlMap(testRunId: string, userId: string, roles: string[]) {
     return this.queryService.getSamplerUrlMap(testRunId, userId, roles);
+  }
+
+  async getRunSamplers(testRunId: string, userId: string, roles: string[], excludeRampUp: boolean = false): Promise<RunSamplerStats[] | RollupPendingResult | null> {
+    return this.queryService.getRunSamplers(testRunId, userId, roles, excludeRampUp);
   }
 
   async getTransactionSamples(testRunId: string, transactionName: string, userId: string, roles: string[], excludeRampUp: boolean = false, sinceMinutes?: number): Promise<Array<{

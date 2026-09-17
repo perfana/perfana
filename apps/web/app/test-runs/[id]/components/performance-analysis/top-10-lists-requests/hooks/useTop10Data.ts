@@ -7,10 +7,9 @@ import {
   Top10SortField,
   Top10SortOrder,
   Top10Dimension,
-  TransactionStat,
-  SamplerStat,
   SamplerWithTransaction,
 } from '../types';
+import { fetchRunSamplers } from '../../utils/run-samplers';
 import { prepareTop10Data, getTop10, sortData, formatNumber, formatPercentage } from '../utils';
 import {
   Speed as SpeedIcon,
@@ -82,38 +81,7 @@ export function useTop10Data({ testRunId, selectedScenarios = [], excludeRampUp 
       const durationSeconds = testRunData.duration || 1;
       setTestDuration(durationSeconds);
 
-      // Fetch all transactions
-      const transactionsResponse = await authenticatedFetch(
-        `/test-runs/${testRunId}/transactions?excludeRampUp=${excludeRampUp}`
-      );
-      if (!transactionsResponse.ok) {
-        throw new Error('Failed to fetch transactions');
-      }
-      const transactionsData: TransactionStat[] = await transactionsResponse.json();
-
-      // Fetch samplers for each transaction
-      const allSamplers: SamplerWithTransaction[] = [];
-
-      for (const transaction of transactionsData) {
-        try {
-          const samplesResponse = await authenticatedFetch(
-            `/test-runs/${testRunId}/transactions/${encodeURIComponent(transaction.transaction_name)}/samples?excludeRampUp=${excludeRampUp}`
-          );
-          if (samplesResponse.ok) {
-            const samplesData: SamplerStat[] = await samplesResponse.json();
-            // Add transaction_name to each sampler
-            samplesData.forEach(sampler => {
-              allSamplers.push({
-                ...sampler,
-                transaction_name: transaction.transaction_name,
-                scenario_name: transaction.scenario_name,
-              });
-            });
-          }
-        } catch {
-          // Skip failed sampler fetches silently
-        }
-      }
+      const allSamplers: SamplerWithTransaction[] = await fetchRunSamplers(testRunId, excludeRampUp);
 
       setSamplers(allSamplers);
     } catch (err) {
