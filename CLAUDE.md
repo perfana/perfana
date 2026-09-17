@@ -893,9 +893,9 @@ Three things to hold on to:
    perf-test status row is `is_complete` and the rows sit on the final grid), **tail** (same
    size, not finalised: decompress the tail's span — a no-op on a fresh run, and what saves a
    late first analysis on a compressed chunk from the DML limit — aggregate from the last
-   tick, drop the interim points; it does NOT re-run `upsertPerfTestStatistics` or the panel
-   update, since the ticks did both every minute and `statistics-calculation` follows in the
-   same analyze), or **rebuild** (no status row, `tick !== final` — an aborted run or no plan
+   tick, drop the interim points; it does NOT re-run `upsertPerfTestStatistics`, since the
+   ticks did that every minute and `statistics-calculation` follows in the same analyze), or
+   **rebuild** (no status row, `tick !== final` — an aborted run or no plan
    — or rows off the grid). Six things about it hold the design together:
 
    - **`is_complete` is the finalisation marker and only a full pass sets it** (this stage
