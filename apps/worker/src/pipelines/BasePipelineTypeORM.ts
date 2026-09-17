@@ -5,6 +5,7 @@ import { createPerformanceTimer, PerformanceTimer } from '../lib/utils/timing.js
 import { getDatabaseService } from '../common/database-accessor.js';
 import { WorkerDatabaseService } from '../common/database.service.js';
 import { EntityManager } from 'typeorm';
+import { applyAggregationBudget } from './helpers/aggregation-budget.js';
 
 /**
  * Base Pipeline Class (TypeORM Version)
@@ -16,20 +17,6 @@ import { EntityManager } from 'typeorm';
  * - Error handling
  * - Input validation
  */
-/**
- * Budget for a heavy background aggregation, mirrored in config/environment.ts
- * (AGGREGATION_STATEMENT_TIMEOUT_MS / AGGREGATION_WORK_MEM) so a bad value is
- * rejected at boot. Read from process.env rather than getConfig() because the
- * full schema requires secrets a unit test has no reason to provide — the same
- * reason TransactionStatsRollupPipeline reads ROLLUP_STATEMENT_TIMEOUT_MS directly.
- *
- * 540s, not 600s: the analytics pool sets a client-side query_timeout of 600000
- * (config/typeorm.config.ts). At equal deadlines node-postgres tears the connection
- * down instead of letting Postgres cancel the statement, so you lose the clean
- * rollback and get a torn socket instead of `canceling statement due to ...`.
- */
-const AGGREGATION_STATEMENT_TIMEOUT_DEFAULT_MS = 540000;
-const AGGREGATION_WORK_MEM_DEFAULT = '128MB';
 
 export abstract class BasePipelineTypeORM implements Pipeline {
   protected timer: PerformanceTimer;
@@ -107,14 +94,7 @@ export abstract class BasePipelineTypeORM implements Pipeline {
    * and a non-numeric timeout cannot abort the transaction as `'NaN'`.
    */
   protected async setAggregationBudget(manager: EntityManager): Promise<void> {
-    const parsed = Number.parseInt(process.env.AGGREGATION_STATEMENT_TIMEOUT_MS ?? '', 10);
-    const timeoutMs = Number.isFinite(parsed) ? parsed : AGGREGATION_STATEMENT_TIMEOUT_DEFAULT_MS;
-    const workMem = process.env.AGGREGATION_WORK_MEM || AGGREGATION_WORK_MEM_DEFAULT;
-
-    await manager.query('SELECT set_config($1, $2, true)', ['statement_timeout', String(timeoutMs)]);
-    // Keeps ~20k percentile_agg sketches in a HashAggregate; spilling turns the
-    // aggregation into a GroupAggregate that sorts every input row to disk.
-    await manager.query('SELECT set_config($1, $2, true)', ['work_mem', workMem]);
+    await applyAggregationBudget(manager);
   }
 
   /**

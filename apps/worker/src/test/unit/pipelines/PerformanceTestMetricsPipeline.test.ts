@@ -165,6 +165,9 @@ describe('PerformanceTestMetricsPipeline', () => {
     mockDataSource = {
       query: vi.fn().mockResolvedValue([]),
     };
+    // The perf-metrics writers run inside dataSource.transaction; route the
+    // transactional manager to the same query mock so the SQL assertions still see it.
+    mockDataSource.transaction = vi.fn((fn: (em: unknown) => Promise<unknown>) => fn(mockDataSource));
     mockWriteDataSource = {
       query: vi.fn().mockResolvedValue([]),
     };
