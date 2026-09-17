@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.35] - 2026-09-17
+
+### Added
+- **One golden-path template can classify a panel on every dashboard (#607).** `template_ds_compare_configs.yaml` entries were matched on exact `dashboardUid`, so a deployment with one dashboard per workload needed one stanza per workload for the same panel — 68 near-identical entries for "Request RT Avg", and every new workload silently unclassified until the file was regenerated. An entry may now omit `dashboardUid` (applies to every dashboard of the SUT that has the `panelId`) or set `regex: true` (`dashboardUid` is matched as a regular expression, e.g. `^performance-test-metrics-`). The entity already had both columns — `dashboard_uid` nullable, `regex` never read — so there is no migration. An exact-uid template still wins over a regex or wildcard one for the same panel and metric, so existing files behave as before; an invalid pattern is logged and skipped rather than aborting the run. The provisioning upsert keys on `(dashboard_uid | NULL, panel_id, regex)`, so wildcard rows on different panels and a pattern beside a literal of the same text do not collide. Seeding on test-run completion now loads the run's existing compare configs once and checks candidates in memory, instead of one `findOne` per template per dashboard — the wider matching would otherwise have multiplied that. Seeding stays create-only: existing `ds_compare_config` rows are untouched.
+
 ## [0.2.95.34] - 2026-09-17
 
 ### Added

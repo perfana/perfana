@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
@@ -69,7 +69,10 @@ interface BenchmarkYaml {
 }
 
 interface MetricClassificationYaml {
-  dashboardUid: string;
+  /** Omit to apply the template to every dashboard carrying `panelId`. */
+  dashboardUid?: string;
+  /** `true`: `dashboardUid` is a regular expression matched against each dashboard's uid. */
+  regex?: boolean;
   dashboardLabel?: string;
   panelId: number;
   panelTitle?: string;
@@ -453,11 +456,13 @@ export class ProvisioningService implements OnApplicationBootstrap {
 
     for (const item of items) {
       try {
-        // Find existing by dashboard_uid + panel_id
+        // Upsert key: dashboard_uid (NULL = wildcard) + panel_id + regex, so a pattern row and
+        // a literal row with the same text, or wildcard rows on different panels, never collide.
         const existing = await this.templateRepo.findOne({
           where: {
-            dashboard_uid: item.dashboardUid,
+            dashboard_uid: item.dashboardUid ?? IsNull(),
             panel_id: item.panelId,
+            regex: item.regex ?? false,
           },
         });
 
@@ -468,7 +473,8 @@ export class ProvisioningService implements OnApplicationBootstrap {
         if (item.ignoreMeanDiffSmallerThan !== undefined) configOverrides.ignoreMeanDiffSmallerThan = item.ignoreMeanDiffSmallerThan;
 
         const values = {
-          dashboard_uid: item.dashboardUid,
+          dashboard_uid: item.dashboardUid ?? null,
+          regex: item.regex ?? false,
           dashboard_label: item.dashboardLabel,
           panel_id: item.panelId,
           panel_title: item.panelTitle,
@@ -494,7 +500,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
         }
       } catch (error) {
         this.logger.error(
-          `Failed to provision metric classification for dashboard "${item.dashboardUid}" panel ${item.panelId}`,
+          `Failed to provision metric classification for dashboard "${item.dashboardUid ?? '*'}" panel ${item.panelId}`,
           error instanceof Error ? error.message : String(error),
         );
         result.errors++;

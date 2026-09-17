@@ -493,7 +493,8 @@ export class TestRunsMetricsService {
    *
    * Loads all ApplicationDashboard records for the test run's SUT + environment,
    * matches them against golden-path template records (ProvisionedTemplateDsCompareConfig with
-   * system_under_test_id IS NULL), and creates per-test-run DsCompareConfig records
+   * system_under_test_id IS NULL) — by exact `dashboard_uid`, by regex when `regex = true`, or
+   * every dashboard when `dashboard_uid IS NULL` — and creates per-test-run DsCompareConfig records
    * (if they don't already exist) with the classification and thresholds embedded
    * in config_data.
    *
@@ -528,38 +529,66 @@ export class TestRunsMetricsService {
       return { compareConfigsCreated };
     }
 
-    // Index templates by dashboard_uid for fast lookup
-    const templatesByUid = new Map<string, typeof goldenPathTemplates>();
+    // Three ways a template names its dashboards, in precedence order:
+    //   exact uid > regex uid (`regex = true`) > wildcard (`dashboard_uid IS NULL`).
+    // A dashboard takes at most one template per (panel_id, metric_name); the exact one wins.
+    const exactByUid = new Map<string, typeof goldenPathTemplates>();
+    const regexTemplates: Array<{ pattern: RegExp; template: (typeof goldenPathTemplates)[number] }> = [];
+    const wildcardTemplates: typeof goldenPathTemplates = [];
     for (const template of goldenPathTemplates) {
-      if (!template.dashboard_uid) continue;
-      const existing = templatesByUid.get(template.dashboard_uid) ?? [];
-      existing.push(template);
-      templatesByUid.set(template.dashboard_uid, existing);
+      if (!template.dashboard_uid) {
+        wildcardTemplates.push(template);
+      } else if (template.regex) {
+        try {
+          regexTemplates.push({ pattern: new RegExp(template.dashboard_uid), template });
+        } catch (err) {
+          // A bad pattern skips this template only; provisioning and completion carry on.
+          this.logger.warn(
+            `Skipping golden-path template ${template.id}: invalid dashboard_uid regex "${template.dashboard_uid}": ${(err as Error).message}`,
+          );
+        }
+      } else {
+        const existing = exactByUid.get(template.dashboard_uid) ?? [];
+        existing.push(template);
+        exactByUid.set(template.dashboard_uid, existing);
+      }
     }
 
-    // 3. For each dashboard, find matching templates and create DsCompareConfig records
+    // 3. One existence lookup for the whole run instead of one findOne per template per dashboard.
+    // A panel-level template (no metric_name) is satisfied by ANY existing config on that panel,
+    // a metric-level one only by a config with that metric_name — the same rule the per-row
+    // findOne applied.
+    const existingConfigs = await this.dsCompareConfigRepo.find({
+      where: { system_under_test_id: systemUnderTestId, test_environment: testEnvironment, workload },
+      select: ['application_dashboard_id', 'panel_id', 'metric_name'],
+    });
+    const existingPanels = new Set<string>();
+    const existingMetrics = new Set<string>();
+    for (const c of existingConfigs) {
+      existingPanels.add(`${c.application_dashboard_id}|${c.panel_id}`);
+      if (c.metric_name) existingMetrics.add(`${c.application_dashboard_id}|${c.panel_id}|${c.metric_name}`);
+    }
+
+    // 4. For each dashboard, resolve its templates and create the missing DsCompareConfig records
     for (const dashboard of dashboards) {
       if (!dashboard.dashboardUid) continue;
-      const matchingTemplates = templatesByUid.get(dashboard.dashboardUid);
-      if (!matchingTemplates) continue;
+      const matchingTemplates = new Map<string, (typeof goldenPathTemplates)[number]>();
+      const offer = (template: (typeof goldenPathTemplates)[number]) => {
+        const key = `${template.panel_id}|${template.metric_name ?? ''}`;
+        if (!matchingTemplates.has(key)) matchingTemplates.set(key, template);
+      };
+      for (const t of exactByUid.get(dashboard.dashboardUid) ?? []) offer(t);
+      for (const { pattern, template } of regexTemplates) if (pattern.test(dashboard.dashboardUid)) offer(template);
+      for (const t of wildcardTemplates) offer(t);
+      if (matchingTemplates.size === 0) continue;
 
-      for (const template of matchingTemplates) {
-        const compareConfigWhere: Record<string, string | number | undefined> = {
-          system_under_test_id: systemUnderTestId,
-          test_environment: testEnvironment,
-          workload,
-          application_dashboard_id: dashboard.id,
-          panel_id: template.panel_id,
-        };
-        if (template.metric_name) {
-          compareConfigWhere.metric_name = template.metric_name;
-        }
+      for (const template of matchingTemplates.values()) {
+        const panelKey = `${dashboard.id}|${template.panel_id}`;
+        const exists = template.metric_name
+          ? existingMetrics.has(`${panelKey}|${template.metric_name}`)
+          : existingPanels.has(panelKey);
 
-        const existingConfig = await this.dsCompareConfigRepo.findOne({
-          where: compareConfigWhere,
-        });
-
-        if (!existingConfig) {
+        if (!exists) {
           // Build config_data matching actual DB schema:
           // { thresholds, metricClassification, defaultValueIfControlGroupMissing }
           const overrides = template.config_overrides ?? {};
@@ -607,6 +636,10 @@ export class TestRunsMetricsService {
           // PR8 deferral notes.
           // eslint-disable-next-line audit-mutation-must-log
           await this.dsCompareConfigRepo.save(newConfig);
+          // The set only guards this loop; a wildcard and an exact template never share a key, so
+          // nothing else in this run can want the same row.
+          existingPanels.add(panelKey);
+          if (template.metric_name) existingMetrics.add(`${panelKey}|${template.metric_name}`);
           compareConfigsCreated++;
         }
       }
