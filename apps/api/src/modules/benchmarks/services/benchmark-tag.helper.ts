@@ -50,6 +50,15 @@ export class BenchmarkTagHelper {
     return inheritedTags;
   }
 
+  /** The metrics source an application dashboard hangs off, or undefined when the row is gone. */
+  async metricsSourceIdOf(applicationDashboardId: string): Promise<string | undefined> {
+    const dashboard = await withRequestEm(this.appDashboardRepo).findOne({
+      where: { id: applicationDashboardId },
+      select: ['id', 'metricsSourceId'],
+    });
+    return dashboard?.metricsSourceId ?? undefined;
+  }
+
   /**
    * Get inherited tags for update operation based on dashboard lookup
    */

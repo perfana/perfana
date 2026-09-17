@@ -36,6 +36,8 @@ export interface UpdateBenchmarkDto {
   dashboardLabel?: string;
   dashboardId?: number;
   dashboardUid?: string;
+  /** Re-points the SLO at another dashboard; `metrics_source_id` follows it. */
+  applicationDashboardId?: string;
   configTitle?: string;
   panelTitle?: string;
   evaluateType?: string;

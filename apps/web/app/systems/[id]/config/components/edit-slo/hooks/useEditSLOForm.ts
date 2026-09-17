@@ -249,7 +249,9 @@ export function useEditSLOForm({
 
       // Also fetch real dashboards in background — if a match is found, it will
       // replace the synthetic object with a richer one (more metadata for the save payload).
-      if (benchmark.source === 'grafana' && systemId && environment) {
+      // Every non-Dynatrace source (grafana, performance-metrics, custom) hangs off an
+      // application dashboard, and the list endpoint returns all of them.
+      if (benchmark.source !== 'dynatrace' && systemId && environment) {
         fetchSloApplicationDashboards();
       } else if (benchmark.source === 'dynatrace' && systemId && environment && workload) {
         fetchDynatraceDashboardsForSlo();
@@ -352,10 +354,9 @@ export function useEditSLOForm({
       }
 
       if (matchingMetric) {
-        setSloFormData((prev) => ({
-          ...prev,
-          selectedPanel: matchingMetric,
-        }));
+        // Only upgrade the synthetic panel. After the user re-points the dashboard the
+        // panel is null on purpose, and the benchmark's old title must not re-select one.
+        setSloFormData((prev) => (prev.selectedPanel ? { ...prev, selectedPanel: matchingMetric } : prev));
       }
     }
   }, [availableDynatraceMetrics, benchmark]);
@@ -408,10 +409,9 @@ export function useEditSLOForm({
       }
 
       if (matchingPanel) {
-        setSloFormData((prev) => ({
-          ...prev,
-          selectedPanel: matchingPanel,
-        }));
+        // Only upgrade the synthetic panel. After the user re-points the dashboard the
+        // panel is null on purpose, and the benchmark's old title must not re-select one.
+        setSloFormData((prev) => (prev.selectedPanel ? { ...prev, selectedPanel: matchingPanel } : prev));
       }
     }
   }, [availablePanels, benchmark]);
@@ -437,6 +437,7 @@ export function useEditSLOForm({
     saveDialogOption,
     setSaveDialogOption,
     fetchDashboardPanels,
+    fetchPerfMetricsPanels,
     fetchSloApplicationDashboards,
     fetchDynatraceDashboardsForSlo,
     fetchDynatraceMetricsForSlo,

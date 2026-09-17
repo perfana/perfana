@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.39] - 2026-09-17
+
+### Fixed
+- **A duplicated SLO can be re-pointed at another dashboard/panel.** The Duplicate action (#610) opened the edit dialog on the clone, but that dialog has always locked Source, Dashboard and Metric ("cannot be changed when editing existing SLO"), so a duplicate could only differ in its threshold — not the one thing a variant usually changes. The dialog now takes `allowMetricChange`, set only when it opens on a fresh duplicate; a plain Edit stays locked, and Source stays locked either way. Under the hood two gaps made the pickers dead even when enabled: `PUT /benchmarks/:id` ignored `applicationDashboardId` (the column `ChecksPipeline`/`BenchmarkMatcher` match on), and the update payload sent `configuration.id` from a Grafana `id` only, so a Dynatrace metric (which carries `panelId`) kept the old panel id. The update now persists `application_dashboard_id` and moves `metrics_source_id` with it (the edit form re-matches on that first), the Dynatrace payload uses the metric's `panelId` and `applicationDashboardId`, and a performance-test dashboard picked in the edit dialog loads its panels from `ds_metric_statistics` like the add dialog does (the edit form fetched dashboards for `source === 'grafana'` only, so a `performance-metrics` or `custom` SLO fell into a read-only text branch; that branch is gone). The synthetic-panel upgrade no longer re-selects a panel by the old benchmark's title after the user has re-pointed the dashboard.
+
 ## [0.2.95.38] - 2026-09-17
 
 ### Added

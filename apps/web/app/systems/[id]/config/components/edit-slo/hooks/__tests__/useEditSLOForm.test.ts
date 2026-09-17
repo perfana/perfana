@@ -740,3 +740,36 @@ describe('fetchDashboardPanels manual call', () => {
     unmount();
   });
 });
+
+// ===========================================================================
+// 16. Re-pointing (duplicate flow): a cleared panel stays cleared when the new
+//     dashboard's panels load, even if one carries the old benchmark's title.
+// ===========================================================================
+
+describe('Re-pointing the dashboard', () => {
+  it('does not re-select a panel by the old title once the user cleared it', async () => {
+    const samePanelName = [{ panels: [{ id: 99, title: 'Response Time', type: 'timeseries' }] }];
+    mockAuthFetch
+      .mockResolvedValueOnce(makeResponse([]))
+      .mockResolvedValueOnce(makeResponse(samePanelName));
+
+    const { result, unmount } = renderHook(() => useEditSLOForm(GRAFANA_PROPS));
+    await waitFor(() => expect(result.current.loadingStates.dashboardsLoading).toBe(false));
+
+    // What SLOFormFields does on a dashboard change.
+    act(() => {
+      result.current.setSloFormData((prev) => ({ ...prev, selectedDashboard: { id: 'other', dashboard_uid: 'uid-other', dashboard_label: 'Other' }, selectedPanel: null }));
+    });
+    await act(async () => { await result.current.fetchDashboardPanels('uid-other'); });
+    await waitFor(() => expect(result.current.availableOptions.availablePanels.length).toBe(1));
+
+    expect(result.current.sloFormData.selectedPanel).toBeNull();
+    unmount();
+  });
+
+  it('exposes fetchPerfMetricsPanels for performance-test dashboards', () => {
+    const { result, unmount } = renderHook(() => useEditSLOForm(GRAFANA_PROPS));
+    expect(typeof result.current.fetchPerfMetricsPanels).toBe('function');
+    unmount();
+  });
+});

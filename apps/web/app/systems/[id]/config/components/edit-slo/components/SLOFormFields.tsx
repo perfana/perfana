@@ -13,8 +13,11 @@ import {
 } from '@mui/material';
 import { SLOFormData, ValidationErrors, SloDashboard, SloPanel, isDynatraceDashboard, isDynatraceMetric } from '../types';
 import { SOURCE_OPTIONS, getSourceOption } from '../utils/slo-formatters';
+import { isPerformanceTest } from '@/lib/metrics-source-utils';
 
 interface SLOFormFieldsProps {
+  /** Unlocks the dashboard/panel pickers; the source stays fixed either way. */
+  allowMetricChange?: boolean;
   sloFormData: SLOFormData;
   setSloFormData: React.Dispatch<React.SetStateAction<SLOFormData>>;
   validationErrors: ValidationErrors;
@@ -28,10 +31,12 @@ interface SLOFormFieldsProps {
   fetchSloApplicationDashboards: () => Promise<void>;
   fetchDynatraceDashboardsForSlo: () => Promise<void>;
   fetchDashboardPanels: (dashboardUid: string) => Promise<void>;
+  fetchPerfMetricsPanels: (applicationDashboardId: string) => Promise<void>;
   fetchDynatraceMetricsForSlo: (dashboardLabel: string) => Promise<void>;
 }
 
 export function SLOFormFields({
+  allowMetricChange = false,
   sloFormData,
   setSloFormData,
   validationErrors,
@@ -45,8 +50,12 @@ export function SLOFormFields({
   fetchSloApplicationDashboards,
   fetchDynatraceDashboardsForSlo,
   fetchDashboardPanels,
+  fetchPerfMetricsPanels,
   fetchDynatraceMetricsForSlo,
 }: SLOFormFieldsProps) {
+  const locked = !allowMetricChange;
+  const lockedHelp = (what: string) =>
+    locked ? `${what} cannot be changed when editing existing SLO` : undefined;
   // The form holds whichever shape the chosen source produced. Narrow once here
   // so each source-specific picker below works with a concrete type.
   const sel = sloFormData.selectedDashboard;
@@ -117,8 +126,8 @@ export function SLOFormFields({
         />
       </Grid>
 
-      {/* Grafana Dashboard Selection */}
-      {sloFormData.source === 'grafana' && (
+      {/* Application dashboard selection — grafana, performance-metrics and custom all hang off one */}
+      {sloFormData.source !== 'dynatrace' && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availableDashboards.length > 0 ? (availableDashboards as SloDashboard[]) : (selectedAppDashboard ? [selectedAppDashboard] : [])}
@@ -128,16 +137,20 @@ export function SLOFormFields({
             onChange={(_, newValue) => {
               setSloFormData((prev) => ({
                 ...prev,
+                // Mirror useAddSLOForm: the source follows the dashboard's type.
+                source: newValue ? (isPerformanceTest(newValue) ? 'performance-metrics' : 'grafana') : prev.source,
                 selectedDashboard: newValue,
                 selectedPanel: null,
               }));
-              if (newValue?.dashboard_uid) {
+              if (newValue && isPerformanceTest(newValue) && newValue.id) {
+                fetchPerfMetricsPanels(String(newValue.id));
+              } else if (newValue?.dashboard_uid) {
                 fetchDashboardPanels(newValue.dashboard_uid);
               }
               clearValidationError('selectedDashboard');
             }}
             loading={dashboardsLoading}
-            disabled={true} // Always disabled in edit mode
+            disabled={locked}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -145,12 +158,9 @@ export function SLOFormFields({
                 variant="outlined"
                 fullWidth
                 required
-                disabled={true}
+                disabled={locked}
                 error={!!validationErrors.selectedDashboard}
-                helperText={
-                  validationErrors.selectedDashboard ||
-                  'Dashboard cannot be changed when editing existing SLO'
-                }
+                helperText={validationErrors.selectedDashboard || lockedHelp('Dashboard')}
                 InputProps={{
                   ...params.InputProps,
                   endAdornment: (
@@ -199,7 +209,7 @@ export function SLOFormFields({
               clearValidationError('selectedDashboard');
             }}
             loading={dashboardsLoading}
-            disabled={true} // Always disabled in edit mode
+            disabled={locked}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -207,12 +217,9 @@ export function SLOFormFields({
                 variant="outlined"
                 fullWidth
                 required
-                disabled={true}
+                disabled={locked}
                 error={!!validationErrors.selectedDashboard}
-                helperText={
-                  validationErrors.selectedDashboard ||
-                  'Dashboard cannot be changed when editing existing SLO'
-                }
+                helperText={validationErrors.selectedDashboard || lockedHelp('Dashboard')}
                 InputProps={{
                   ...params.InputProps,
                   endAdornment: (
@@ -257,7 +264,7 @@ export function SLOFormFields({
               clearValidationError('selectedPanel');
             }}
             loading={panelsLoading}
-            disabled={true} // Always disabled in edit mode
+            disabled={locked}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -265,11 +272,9 @@ export function SLOFormFields({
                 variant="outlined"
                 fullWidth
                 required
-                disabled={true}
+                disabled={locked}
                 error={!!validationErrors.selectedPanel}
-                helperText={
-                  validationErrors.selectedPanel || 'Metric cannot be changed when editing existing SLO'
-                }
+                helperText={validationErrors.selectedPanel || lockedHelp('Metric')}
                 InputProps={{
                   ...params.InputProps,
                   endAdornment: (
@@ -298,8 +303,8 @@ export function SLOFormFields({
         </Grid>
       )}
 
-      {/* Grafana Panel Selection */}
-      {sloFormData.source === 'grafana' && sloFormData.selectedDashboard && (
+      {/* Application dashboard panel selection */}
+      {sloFormData.source !== 'dynatrace' && sloFormData.selectedDashboard && (
         <Grid size={{ xs: 12 }}>
           <Autocomplete
             options={availablePanels.length > 0 ? (availablePanels as SloPanel[]) : (selectedGrafanaPanel ? [selectedGrafanaPanel] : [])}
@@ -314,7 +319,7 @@ export function SLOFormFields({
               clearValidationError('selectedPanel');
             }}
             loading={panelsLoading}
-            disabled={true} // Always disabled in edit mode
+            disabled={locked}
             renderInput={(params) => (
               <TextField
                 {...params}
@@ -322,11 +327,9 @@ export function SLOFormFields({
                 variant="outlined"
                 fullWidth
                 required
-                disabled={true}
+                disabled={locked}
                 error={!!validationErrors.selectedPanel}
-                helperText={
-                  validationErrors.selectedPanel || 'Metric cannot be changed when editing existing SLO'
-                }
+                helperText={validationErrors.selectedPanel || lockedHelp('Metric')}
                 InputProps={{
                   ...params.InputProps,
                   endAdornment: (
@@ -353,34 +356,6 @@ export function SLOFormFields({
             }}
           />
         </Grid>
-      )}
-
-      {/* Generic Dashboard/Metric display for non-grafana/dynatrace sources */}
-      {sloFormData.source !== 'grafana' && sloFormData.source !== 'dynatrace' && sloFormData.selectedDashboard && (
-        <>
-          <Grid size={{ xs: 12 }}>
-            <TextField
-              label="Dashboard"
-              value={selectedAppDashboard?.dashboard_label || selectedDynatraceDashboard?.dashboardLabel || ''}
-              variant="outlined"
-              fullWidth
-              disabled={true}
-              helperText="Dashboard cannot be changed when editing existing SLO"
-            />
-          </Grid>
-          {sloFormData.selectedPanel && (
-            <Grid size={{ xs: 12 }}>
-              <TextField
-                label="Metric"
-                value={sloFormData.selectedPanel?.title || sloFormData.selectedPanel?.panelTitle || ''}
-                variant="outlined"
-                fullWidth
-                disabled={true}
-                helperText="Metric cannot be changed when editing existing SLO"
-              />
-            </Grid>
-          )}
-        </>
       )}
     </>
   );

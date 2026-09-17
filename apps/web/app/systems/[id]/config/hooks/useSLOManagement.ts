@@ -16,6 +16,8 @@ interface UseSLOManagementReturn {
   // Dialog state
   addSloOpen: boolean;
   editSloOpen: boolean;
+  /** True when the dialog was opened on a fresh duplicate, so dashboard/panel may be re-pointed. */
+  editSloAllowMetricChange: boolean;
   deleteSloOpen: boolean;
   editingSlo: Benchmark | null;
   deletingSlo: Benchmark | null;
@@ -29,7 +31,7 @@ interface UseSLOManagementReturn {
   handleAddSLO: () => void;
   handleSLOCreated: (newSLO: Benchmark, systemId: string, environment: string, workload: string) => void;
   handleSLOUpdated: (updatedSLO: Benchmark, systemId: string, environment: string, workload: string) => void;
-  handleEditSLO: (benchmark: Benchmark) => void;
+  handleEditSLO: (benchmark: Benchmark, opts?: { allowMetricChange?: boolean }) => void;
   handleDeleteSLO: (benchmark: Benchmark) => void;
   handleConfirmDeleteSLO: (systemId: string, environment: string, workload: string) => Promise<{ error?: string }>;
   handleBatchDeleteSLOs: (ids: string[], systemId: string, environment: string, workload: string) => Promise<void>;
@@ -61,6 +63,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
   // Dialog state
   const [addSloOpen, setAddSloOpen] = useState(false);
   const [editSloOpen, setEditSloOpen] = useState(false);
+  const [editSloAllowMetricChange, setEditSloAllowMetricChange] = useState(false);
   const [editingSlo, setEditingSlo] = useState<Benchmark | null>(null);
   const [deleteSloOpen, setDeleteSloOpen] = useState(false);
   const [deletingSlo, setDeletingSlo] = useState<Benchmark | null>(null);
@@ -139,8 +142,9 @@ export function useSLOManagement(): UseSLOManagementReturn {
   }, [fetchBenchmarks]);
 
   // Handle edit SLO
-  const handleEditSLO = useCallback((benchmark: Benchmark) => {
+  const handleEditSLO = useCallback((benchmark: Benchmark, opts?: { allowMetricChange?: boolean }) => {
     setEditingSlo(benchmark);
+    setEditSloAllowMetricChange(opts?.allowMetricChange ?? false);
     setEditSloOpen(true);
   }, []);
 
@@ -260,6 +264,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
   // Close edit SLO dialog
   const closeEditSloDialog = useCallback(() => {
     setEditSloOpen(false);
+    setEditSloAllowMetricChange(false);
     setEditingSlo(null);
   }, []);
 
@@ -280,6 +285,7 @@ export function useSLOManagement(): UseSLOManagementReturn {
     // Dialog state
     addSloOpen,
     editSloOpen,
+    editSloAllowMetricChange,
     deleteSloOpen,
     editingSlo,
     deletingSlo,
