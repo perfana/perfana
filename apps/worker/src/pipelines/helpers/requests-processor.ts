@@ -50,6 +50,7 @@ const REQUEST_PANEL_VALUES: Array<{ panelId: number; column: string }> = [
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_APDEX, column: 'apdex_score' },
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_LATENCY, column: 'avg_latency' },
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_CONNECT_TIME, column: 'avg_connect_time' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_IMPACT, column: 'impact' },
 ];
 
 const REQUEST_PANEL_IDS = REQUEST_PANEL_VALUES.map((m) => m.panelId);
@@ -63,6 +64,7 @@ const CLASSIFIED_REQUEST_PANELS: Set<number> = new Set([
   METRIC_TYPE_PANEL_IDS.REQ_ERROR_RATE,
   METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT,
   METRIC_TYPE_PANEL_IDS.REQ_APDEX,
+  METRIC_TYPE_PANEL_IDS.REQ_IMPACT,
 ]);
 
 export class RequestsProcessor {
@@ -250,6 +252,13 @@ export class RequestsProcessor {
 
           -- Response time aggregations
           AVG(bd.response_time) FILTER (WHERE bd.response_time IS NOT NULL) as avg_response_time,
+          -- avg_rt x count, i.e. the Top 10 impact score, per SECOND of run (divided by the
+          -- bucket size like throughput is): bucket size is a step function of run length, so
+          -- a per-bucket sum would double when a run overruns a boundary and ADAPT would flag
+          -- every series. SUM(value x bucket) over the window ~= impact_score. The cast is
+          -- load-bearing: response_time is integer, so without it SUM is bigint and the
+          -- division is only float because $4 happens to be typed by the INTERVAL above.
+          SUM(bd.response_time)::double precision / $4 as impact,
           PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY bd.response_time)
             FILTER (WHERE bd.response_time IS NOT NULL) as p90_response_time,
           PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY bd.response_time)
@@ -307,6 +316,7 @@ export class RequestsProcessor {
           p99_response_time,
           avg_latency,
           avg_connect_time,
+          impact,
           ROUND((error_count::numeric / NULLIF(request_count, 0) * 100)::numeric, 2) as error_rate,
           ROUND((request_count::numeric / $4)::numeric, 2) as throughput,
           FLOOR(EXTRACT(EPOCH FROM (bucket_time - $5::timestamp)) / $4)::integer as timestep,

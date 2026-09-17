@@ -33,7 +33,7 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     [201, 'Request RT Avg'],
     [206, 'Request Throughput'],
   ])('attaches the normalized URL to request rows on panel %i', async (panelId, panelTitle) => {
-    // 205-209 name their series `transaction.sampler` exactly like the RT panels, so a
+    // 205-209 and 219 name their series `transaction.sampler` exactly like the RT panels, so a
     // throughput or error-rate comparison gets the URL too — it used to stop at 204.
     const rows = [
       { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: panelTitle, panel_id: panelId, metric_name: 'checkout.login', mean: 110, q95: 220, q99: 300, unit: 'ms' },
