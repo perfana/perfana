@@ -772,6 +772,17 @@ Seven things a future reader will otherwise "fix":
 The roll-up is written at ingestion, so it appears on runs analysed from v0.2.95.4 onwards;
 re-analysing an older run produces it.
 
+**Transaction Impact (108) / Request Impact (210) are the Top 10 ranking figure inside ADAPT
+(v0.2.95.38).** Each is `SUM(response_time)` per bucket — `avg_rt x count`, which summed over the
+analysis window equals `test_run_transaction_stats.impact_score`. Both are classified
+`RED_duration`, lower is better, `mean`. Three things: they add nothing to a run whose throughput
+is flat — the percentage change is then identical to RT Avg's — and the case they exist for is
+caught by an `absoluteThreshold` (ms per bucket) on the panel's compare config, since every valid
+ADAPT check must fire; against a baseline that predates the panel every result is `incomparable`
+(no control row), which clears as the baseline runs are re-analysed or roll off; and `isRequestPanel`
+in both `url-perf-panels.ts` files spans 201-210, so a new request-level panel goes inside that
+range or its rows get no URL.
+
 ### ADAPT runs with JIT off, on purpose
 
 `AdaptPipeline` sets `jit = off` for its own transaction (`set_config('jit','off',true)`, first

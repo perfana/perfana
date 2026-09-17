@@ -103,6 +103,7 @@ export const PERFORMANCE_METRICS_PANEL_UNITS: Record<number, string> = {
   105: 'percent',  // TXN_ERROR_RATE
   106: 'short',    // TXN_APDEX (0-1 score)
   107: 'reqps',    // TXN_THROUGHPUT
+  108: 'ms',       // TXN_IMPACT (sum of response time per bucket)
 
   // Request-level (v2 architecture)
   201: 'ms',       // REQ_RT_AVG
@@ -114,6 +115,7 @@ export const PERFORMANCE_METRICS_PANEL_UNITS: Record<number, string> = {
   207: 'short',    // REQ_APDEX
   208: 'ms',       // REQ_LATENCY
   209: 'ms',       // REQ_CONNECT_TIME
+  210: 'ms',       // REQ_IMPACT
 
   // Scenario-level (v2 architecture)
   301: 'short',    // SCENARIO_ERROR_COUNT

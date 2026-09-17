@@ -60,7 +60,7 @@ const PERF_RT_PANEL_TITLES: Record<number, string> = {
  * so all of them can be given the request's URL.
  */
 export function isRequestPanel(panelId: number | null | undefined): boolean {
-  return panelId != null && panelId >= 201 && panelId <= 209;
+  return panelId != null && panelId >= 201 && panelId <= 210;
 }
 
 export function perfPanelTitle(panelId: number | null, storedTitle: string | null): string {

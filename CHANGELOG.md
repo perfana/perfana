@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.38] - 2026-09-17
+
+### Added
+- **The Top 10 performance-ranking figure is an ADAPT metric.** The perf-test pipeline writes two new panels on every scenario dashboard — **Transaction Impact** (108) and **Request Impact** (210) — holding `SUM(response_time)` per bucket, i.e. `avg_rt x count`, the `impact_score` the Top 10 lists rank on (summed over the analysis window it matches `test_run_transaction_stats.impact_score`). Both carry a classified compare config (`RED_duration`, lower is better, `mean`), so a small response-time shift on a high-volume transaction is judged by the total time it costs the run rather than by its percentage alone. Default 15 % / IQR thresholds apply; set an `absoluteThreshold` (ms per bucket) on the Impact panel's compare config to catch sub-threshold shifts that matter in total. The panels appear on runs analysed from this version on; against a baseline that predates them ADAPT reports `incomparable` until those runs are re-analysed. `isRequestPanel` (web + report) now spans 201-210 so the request-impact rows get their URL.
+
 ## [0.2.95.37] - 2026-09-17
 
 ### Added
