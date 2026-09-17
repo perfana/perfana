@@ -74,7 +74,7 @@ function setupQueryMock(responses: {
   sparse?: any[];
   sparseExclusions?: any[];
   statistics?: { total: string; all_missing: string };
-  rampUpCheck?: { total: string; ramp_up_only: string };
+  steadyState?: boolean;
   adapt?: { adapt_count: string; baseline_count: string; is_changepoint: string };
   collectionSources?: { count: string };
   appDashboards?: any[];
@@ -83,6 +83,11 @@ function setupQueryMock(responses: {
   mockDb.query.mockImplementation((sql: string) => {
     if (sql.includes('ds_panels') && sql.includes('application_dashboards')) {
       return Promise.resolve([responses.panels ?? { panels: '10', dashboards_with_panels: '2' }]);
+    }
+    // Steady-state probe (ramp_up = false) must be matched before the generic
+    // ds_metrics EXISTS below, which it otherwise also satisfies.
+    if (sql.includes('ramp_up IS DISTINCT FROM true')) {
+      return Promise.resolve([{ has_steady_state: responses.steadyState ?? true }]);
     }
     if (sql.includes('ds_metrics') && sql.includes('EXISTS')) {
       return Promise.resolve([responses.metrics ?? { has_metrics: 'true' }]);
@@ -97,9 +102,6 @@ function setupQueryMock(responses: {
     }
     if (sql.includes('ds_metric_statistics')) {
       return Promise.resolve([responses.statistics ?? { total: '100', all_missing: '0' }]);
-    }
-    if (sql.includes('ramp_up')) {
-      return Promise.resolve([responses.rampUpCheck ?? { total: '100', ramp_up_only: '0' }]);
     }
     if (sql.includes('ds_adapt_results')) {
       return Promise.resolve([responses.adapt ?? { adapt_count: '50', baseline_count: '10', is_changepoint: '0' }]);
@@ -455,6 +457,34 @@ describe('DataSanityCheckPipeline', () => {
         .find((sql: unknown) => typeof sql === 'string' && sql.includes('SUM(count)')) as string;
       expect(sparseQuery).toContain('ds_metric_statistics');
       expect(sparseQuery).toContain('HAVING SUM(count) <');
+    });
+
+    it('reports an all-ramp-up run from an EXISTS probe, never a COUNT(*) over ds_metrics', async () => {
+      const testRun = createMockTestRun();
+      mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
+      setupQueryMock({ statistics: { total: '0', all_missing: '0' }, steadyState: false });
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.data.valid).toBe(false);
+      expect(result.data.reasons.some((r: string) => r.startsWith('No steady-state data'))).toBe(true);
+
+      // CHK-P3: the old branch counted every data point of the run to answer a yes/no.
+      const rawCounts = mockDb.query.mock.calls.filter(
+        (call: unknown[]) =>
+          typeof call[0] === 'string' && call[0].includes('ds_metrics') && call[0].includes('COUNT(*)')
+      );
+      expect(rawCounts).toHaveLength(0);
+    });
+
+    it('falls back to "statistics not calculated" when steady-state rows exist but no statistics do', async () => {
+      const testRun = createMockTestRun();
+      mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
+      setupQueryMock({ statistics: { total: '0', all_missing: '0' }, steadyState: true });
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      expect(result.data.reasons).toContain('Statistics not calculated (metrics exist but no statistics)');
     });
 
     it('should NOT add zero-window warning when both offsets are 0', async () => {

@@ -10,7 +10,7 @@
  * - saveDsMetrics: scenario-level records only; requests/transactions insert in SQL
  * - statistics upsert: SQL scoping, grouping key, ramp-up/null filtering, ON CONFLICT
  * - saveDsCompareConfigs / insertCompareConfigBatch: panel-level vs metric-specific splits
- * - updateDashboardPanels: no-dashboards early-exit, successful update
+ * - grafana_dashboards is never written from this pipeline (PT-P2)
  * - Error handling: processor failure, DB failures, missing test run
  * - Edge cases: no metrics, partial processor results, very large metric sets
  */
@@ -165,6 +165,9 @@ describe('PerformanceTestMetricsPipeline', () => {
     mockDataSource = {
       query: vi.fn().mockResolvedValue([]),
     };
+    // The perf-metrics writers run inside dataSource.transaction; route the
+    // transactional manager to the same query mock so the SQL assertions still see it.
+    mockDataSource.transaction = vi.fn((fn: (em: unknown) => Promise<unknown>) => fn(mockDataSource));
     mockWriteDataSource = {
       query: vi.fn().mockResolvedValue([]),
     };
@@ -951,83 +954,20 @@ describe('PerformanceTestMetricsPipeline', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 9. updateDashboardPanels
+  // 9. No grafana_dashboards write on the tick path (PT-P2)
   // -------------------------------------------------------------------------
 
-  describe('updateDashboardPanels', () => {
-    beforeEach(() => {
+  describe('grafana_dashboards', () => {
+    it('is never touched: perf-test dashboards have no grafana_dashboards row, so the old panel sync scanned the run for nothing', async () => {
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValue(createMockTestRun());
-      // Default: no metrics returned, so saveDsMetrics is skipped; but we can
-      // still exercise updateDashboardPanels via spying on the private method
       mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
-    });
-
-    it('should log skip message when no dashboards found for the test run', async () => {
-      // saveDsMetrics will run (metrics present), then updateDashboardPanels queries dashboards
-      mockDataSource.query.mockImplementation((sql: string) => {
-        if (sql.includes('DELETE FROM ds_metrics') || sql.includes('DELETE FROM ds_metric_statistics')) {
-          return Promise.resolve([]);
-        }
-        if (sql.includes('SELECT DISTINCT ad.dashboard_uid')) {
-          return Promise.resolve([]); // No dashboards
-        }
-        if (sql.includes('INSERT INTO ds_metric_statistics')) {
-          return Promise.resolve([]);
-        }
-        return Promise.resolve([]);
-      });
       mockWriteDataSource.query.mockResolvedValue([]);
 
-      await pipeline.execute({ testRunId: 'tr-001' });
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('No dashboards found')
-      );
-    });
-
-    it('should update panels when dashboards are found', async () => {
-      mockDataSource.query.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT DISTINCT ad.dashboard_uid')) {
-          return Promise.resolve([
-            { dashboard_uid: 'perf-test-dashboard', grafana_dashboard_id: 'gd-uuid-001' },
-          ]);
-        }
-        if (sql.includes('UPDATE grafana_dashboards')) {
-          return Promise.resolve([{ id: 'gd-uuid-001', uid: 'perf-test-dashboard', panels: [{ id: 1 }] }]);
-        }
-        return Promise.resolve([]);
-      });
-      mockWriteDataSource.query.mockResolvedValue([]);
-
-      await pipeline.execute({ testRunId: 'tr-001' });
-
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Updating panels for 1 dashboard')
-      );
-    });
-
-    it('should not throw even when the UPDATE query fails (non-critical)', async () => {
-      mockDataSource.query.mockImplementation((sql: string) => {
-        if (sql.includes('SELECT DISTINCT ad.dashboard_uid')) {
-          return Promise.resolve([
-            { dashboard_uid: 'perf-test-dashboard', grafana_dashboard_id: 'gd-uuid-001' },
-          ]);
-        }
-        if (sql.includes('UPDATE grafana_dashboards')) {
-          return Promise.reject(new Error('DB update failure'));
-        }
-        return Promise.resolve([]);
-      });
-      mockWriteDataSource.query.mockResolvedValue([]);
-
-      // Pipeline should still succeed — updateDashboardPanels errors are swallowed
       const result = await pipeline.execute({ testRunId: 'tr-001' });
 
       expect(result.success).toBe(true);
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to update dashboard panels'),
-        expect.anything()
-      );
+      const sqls = [...mockDataSource.query.mock.calls, ...mockWriteDataSource.query.mock.calls].map((c) => String(c[0]));
+      expect(sqls.some((sql) => sql.includes('grafana_dashboards'))).toBe(false);
     });
   });
 
@@ -1293,8 +1233,8 @@ describe('PerformanceTestMetricsPipeline', () => {
       const deleteOrder = mockDataSource.query.mock.invocationCallOrder[deleteCall];
       const saveOrder = mockWriteDataSource.query.mock.invocationCallOrder[0];
       expect(deleteOrder).toBeGreaterThan(saveOrder);
-      // The ticks ran statistics and the panel update every minute, and statistics-calculation
-      // follows in the same analyze: the tail does not re-read the whole run for either.
+      // The ticks ran statistics every minute, and statistics-calculation follows in the
+      // same analyze: the tail does not re-read the whole run for it.
       expect(mockDataSource.query).not.toHaveBeenCalledWith(expect.stringContaining('ds_metric_statistics'), expect.anything());
       // The range is recorded to end_time and the run marked final so the next analyze skips.
       expect(mockDatabaseService.updateCollectedRanges).toHaveBeenCalledWith(

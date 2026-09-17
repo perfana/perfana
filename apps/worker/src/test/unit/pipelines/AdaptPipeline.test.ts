@@ -62,8 +62,6 @@ describe('AdaptPipeline', () => {
     adaptPipeline = new AdaptPipeline(mockLogger);
 
     // Mock base class methods
-    vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-      .mockResolvedValue({ totalDeleted: 0, duration: 10 });
   });
 
   describe('Input Validation', () => {
@@ -133,8 +131,6 @@ describe('AdaptPipeline', () => {
     beforeEach(() => {
       // Setup successful transaction and validation mocks
       vi.spyOn(adaptPipeline as any, 'validateTestRunExists').mockResolvedValue(true);
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 5, duration: 100 });
       // Mock validator methods
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
@@ -233,22 +229,6 @@ describe('AdaptPipeline', () => {
       expect(result.data.testRunIds).toBe(3);
     });
 
-    it('should cleanup stale data before processing', async () => {
-      // Arrange
-      const input = { testRunIds: ['test-run-1'] };
-      const cleanupSpy = vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards');
-
-      // Act
-      await adaptPipeline.execute(input);
-
-      // Assert
-      expect(cleanupSpy).toHaveBeenCalledWith([
-        'ds_adapt_results',
-        'ds_adapt_tracked_results',
-        'ds_compare_config',
-      ]);
-    });
-
     it('should update evaluation status to IN_PROGRESS', async () => {
       // Arrange
       const input = { testRunIds: ['test-run-1'] };
@@ -296,8 +276,6 @@ describe('AdaptPipeline', () => {
   describe('Changepoint Detection', () => {
     beforeEach(() => {
       vi.spyOn(adaptPipeline as any, 'validateTestRunExists').mockResolvedValue(true);
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 0, duration: 10 });
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).resultsProcessor, 'updateFinalStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).resultsProcessor, 'publishRealtimeUpdates').mockResolvedValue(undefined);
@@ -357,8 +335,6 @@ describe('AdaptPipeline', () => {
   describe('Empty Control Group Handling', () => {
     beforeEach(() => {
       vi.spyOn(adaptPipeline as any, 'validateTestRunExists').mockResolvedValue(true);
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 0, duration: 10 });
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).resultsProcessor, 'updateFinalStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).resultsProcessor, 'publishRealtimeUpdates').mockResolvedValue(undefined);
@@ -505,8 +481,6 @@ describe('AdaptPipeline', () => {
   describe('Metric Filtering', () => {
     beforeEach(() => {
       vi.spyOn(adaptPipeline as any, 'validateTestRunExists').mockResolvedValue(true);
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 0, duration: 10 });
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],
@@ -658,8 +632,6 @@ describe('AdaptPipeline', () => {
   describe('Tracked Results Management', () => {
     beforeEach(() => {
       vi.spyOn(adaptPipeline as any, 'validateTestRunExists').mockResolvedValue(true);
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 0, duration: 10 });
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],
@@ -1204,8 +1176,6 @@ describe('AdaptPipeline', () => {
 
   describe('Error Handling', () => {
     beforeEach(() => {
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 0, duration: 10 });
     });
 
     it('should return error result when input validation fails', async () => {
@@ -1278,8 +1248,6 @@ describe('AdaptPipeline', () => {
       const input = { testRunIds: ['test-run-1'] };
 
       vi.spyOn(adaptPipeline as any, 'validateTestRunExists').mockResolvedValue(true);
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 0, duration: 10 });
       mockDatabaseService.transaction.mockRejectedValue(new Error('Main error'));
       mockDatabaseService.query.mockRejectedValue(new Error('Status update error'));
 
@@ -1302,8 +1270,6 @@ describe('AdaptPipeline', () => {
   describe('Performance Logging', () => {
     beforeEach(() => {
       vi.spyOn(adaptPipeline as any, 'validateTestRunExists').mockResolvedValue(true);
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 0, duration: 10 });
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],
@@ -1360,8 +1326,6 @@ describe('AdaptPipeline', () => {
   describe('Optional Updates Control', () => {
     beforeEach(() => {
       vi.spyOn(adaptPipeline as any, 'validateTestRunExists').mockResolvedValue(true);
-      vi.spyOn(adaptPipeline as any, 'cleanupStaleApplicationDashboards')
-        .mockResolvedValue({ totalDeleted: 0, duration: 10 });
       vi.spyOn((adaptPipeline as any).validator, 'updateEvaluationStatus').mockResolvedValue(undefined);
       vi.spyOn((adaptPipeline as any).validator, 'runPreProcessingValidation').mockResolvedValue({
         changepoints: [],

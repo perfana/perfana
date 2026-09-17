@@ -58,12 +58,6 @@ export class AdaptPipeline extends BasePipelineTypeORM {
       this.logger.info(`Starting ADAPT analysis for test runs: ${testRunIds.join(', ')}`);
       const subStages: SubstageEntry[] = [];
 
-      // Cleanup stale data BEFORE transaction (commits immediately)
-      const cleanup = await this.cleanupStaleApplicationDashboards([
-        'ds_adapt_results', 'ds_adapt_tracked_results', 'ds_compare_config'
-      ]);
-      subStages.push({ stage: 'cleanup-stale-data', duration: cleanup.duration, rows: cleanup.totalDeleted });
-
       const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
         // JIT off for THIS transaction only, and deliberately not in
         // withAnalyticsTransaction — StatisticsPipeline is measurably faster with

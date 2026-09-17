@@ -167,8 +167,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -209,8 +207,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         testRunIds: ['test-run-1', 'test-run-2']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group queries for 2 test runs
       (mockEntityManager.query as any)
@@ -251,8 +247,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -293,8 +287,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['non-existent-control-group']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock empty control group query result
       (mockEntityManager.query as any).mockResolvedValueOnce([]);
@@ -318,8 +310,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-empty']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group with empty test_runs
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -352,8 +342,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-null-runs']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group with null test_runs
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -381,8 +369,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-no-metrics']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -418,8 +404,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -460,8 +444,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -514,8 +496,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock transaction failure
       mockDatabaseService.transaction.mockRejectedValueOnce(
@@ -539,8 +519,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query failure
       (mockEntityManager.query as any).mockRejectedValueOnce(
@@ -558,8 +536,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -596,8 +572,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         testRunIds: ['test-run-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock transaction failure
       const testError = new Error('Test error');
@@ -611,48 +585,9 @@ describe('ControlGroupStatisticsPipeline', () => {
     });
   });
 
-  describe('Stale Data Cleanup', () => {
-    test('should clean up stale application dashboards before processing', async () => {
-      const input: ControlGroupStatisticsInput = {
-        controlGroupIds: ['control-group-1']
-      };
-
-      // Mock cleanup query with deleted rows
-      mockDatabaseService.query.mockResolvedValueOnce([[], 5]);
-
-      // Mock control group query
-      (mockEntityManager.query as any).mockResolvedValueOnce([
-        {
-          control_group_id: 'control-group-1',
-          system_under_test_id: 'system-1',
-          workload: 'load-test',
-          test_environment: 'production',
-          test_runs: ['test-run-1'],
-          n_test_runs: 1
-        }
-      ]);
-
-      // Mock metric statistics count query
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ count: '10' }]);
-
-      // Mock sketch availability query (fast-path eligible)
-      (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: 0 }]);
-
-      // Mock insert query
-      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 5 }, () => ({ '?column?': 1 })));
-
-      await pipeline.execute(input);
-
-      // Verify cleanup was called
-      expect(mockDatabaseService.query).toHaveBeenCalledWith(
-        expect.stringContaining('DELETE FROM ds_control_group_statistics')
-      );
-    });
-  });
 
   describe('Aggregation budget', () => {
     test('raises the budget once for the whole batch, under the pool query_timeout', async () => {
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
       for (const i of [1, 2]) {
         (mockEntityManager.query as any)
           .mockResolvedValueOnce([{
@@ -692,8 +627,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1', 'control-group-2', 'control-group-3']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock queries for 3 control groups
       for (let i = 1; i <= 3; i++) {
@@ -728,8 +661,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1', 'missing-group', 'control-group-3']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control-group-1
       (mockEntityManager.query as any)
@@ -775,8 +706,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -817,8 +746,6 @@ describe('ControlGroupStatisticsPipeline', () => {
         controlGroupIds: ['control-group-1']
       };
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock control group query
       (mockEntityManager.query as any).mockResolvedValueOnce([
@@ -861,7 +788,6 @@ describe('ControlGroupStatisticsPipeline', () => {
       ['fast path', 0],
       ['legacy path', 7],
     ])('should scope dashboards by org without correlating on test_runs (%s)', async (_label, missingSketches) => {
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
       (mockEntityManager.query as any).mockResolvedValueOnce([
         {
           control_group_id: 'control-group-1',
@@ -889,7 +815,6 @@ describe('ControlGroupStatisticsPipeline', () => {
 
   describe('Row count after the INSERT', () => {
     const seedOneGroup = () => {
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
       (mockEntityManager.query as any).mockResolvedValueOnce([
         {
           control_group_id: 'control-group-1',

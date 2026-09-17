@@ -6,6 +6,7 @@ import { DynatraceRepository } from '../services/dynatrace/DynatraceRepository.j
 import { QueryConstructor } from '../services/dynatrace/QueryConstructor.js';
 import { DynatraceAPIClient } from '../services/dynatrace/DynatraceAPIClient.js';
 import { DataProcessor } from '../services/dynatrace/DataProcessor.js';
+import { MetricProcessor, type FlattenedMetricRecord } from './helpers/incremental/metric-processor.js';
 import { resolveDynatraceAxiosProxy } from '../config/proxy-resolver.js';
 import {
   DynatraceQueryConfig,
@@ -67,9 +68,6 @@ export class DynatracePipeline extends BasePipelineTypeORM {
 
     try {
       this.logger.info(`Starting Dynatrace DQL metrics collection for test runs: ${testRunIds.join(', ')}`);
-
-      // Cleanup stale data before processing
-      await this.cleanupStaleApplicationDashboards(['ds_panels']);
 
       let totalPanels = 0;
       let totalMetrics = 0;
@@ -400,7 +398,11 @@ export class DynatracePipeline extends BasePipelineTypeORM {
   }
 
   /**
-   * Store metrics directly into TimescaleDB metrics table
+   * Store metrics into ds_metrics through the shared batched upsert.
+   *
+   * The documents already carry timestep and ramp_up from DataProcessor, so this only
+   * reshapes them; it deliberately does not go through flattenDynatraceMetricsDocument,
+   * which recomputes both from the test run.
    */
   private async storeMetricsDocuments(
     metricsDocuments: PanelMetricsDocument[],
@@ -412,77 +414,37 @@ export class DynatracePipeline extends BasePipelineTypeORM {
       return;
     }
 
-    await this.withTransaction(async (manager: EntityManager) => {
-      const totalMetrics = metricsDocuments.reduce((sum, doc) => sum + doc.data.length, 0);
-      this.logger.info(`💾 Storing ${metricsDocuments.length} metrics documents (${totalMetrics} total data points) to ds_metrics table`);
-
-      // Store individual metrics directly into TimescaleDB ds_metrics table
-      let insertCount = 0;
-      for (const doc of metricsDocuments) {
-        const uniqueMetrics = [...new Set(doc.data.map(m => m.metricName))];
-        this.logger.info(`  Panel ${doc.panelId} (${doc.panelTitle}): ${doc.data.length} points, ${uniqueMetrics.length} metrics: ${uniqueMetrics.join(', ')}`);
-
-        for (const metric of doc.data) {
-          await manager.query(
-            `INSERT INTO ds_metrics (
-              test_run_id,
-              application_dashboard_id,
-              metrics_source_id,
-              dashboard_uid,
-              panel_id,
-              panel_title,
-              dashboard_label,
-              benchmark_ids,
-              errors,
-              metric_name,
-              time,
-              timestep,
-              ramp_up,
-              value,
-              unit,
-              organization_id,
-              team_id,
-              created_by,
-              updated_by
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-            ON CONFLICT (test_run_id, application_dashboard_id, panel_id, metric_name, time)
-            DO UPDATE SET
-              value = EXCLUDED.value,
-              timestep = EXCLUDED.timestep,
-              ramp_up = EXCLUDED.ramp_up,
-              unit = EXCLUDED.unit,
-              updated_at = NOW(),
-              organization_id = EXCLUDED.organization_id,
-              team_id = EXCLUDED.team_id,
-              updated_by = EXCLUDED.updated_by,
-              metrics_source_id = COALESCE(EXCLUDED.metrics_source_id, ds_metrics.metrics_source_id)`,
-            [
-              doc.testRunId,
-              doc.applicationDashboardId,
-              doc.metricsSourceId || null,
-              doc.dashboardUid,
-              doc.panelId,
-              doc.panelTitle,
-              doc.dashboardLabel,
-              doc.benchmarkIds || [],
-              doc.errors ? JSON.stringify(doc.errors) : null,
-              metric.metricName,
-              metric.time,
-              metric.timestep,
-              metric.rampUp,
-              metric.value,
-              metric.unit || null,
-              testRun?.organizationId ?? null,
-              testRun?.teamId ?? null,
-              'worker-pipeline',
-              'worker-pipeline'
-            ]
-          );
-          insertCount++;
-        }
+    const records: FlattenedMetricRecord[] = [];
+    for (const doc of metricsDocuments) {
+      const uniqueMetrics = [...new Set(doc.data.map(m => m.metricName))];
+      this.logger.info(`  Panel ${doc.panelId} (${doc.panelTitle}): ${doc.data.length} points, ${uniqueMetrics.length} metrics: ${uniqueMetrics.join(', ')}`);
+      for (const metric of doc.data) {
+        records.push({
+          test_run_id: doc.testRunId,
+          application_dashboard_id: doc.applicationDashboardId,
+          metrics_source_id: doc.metricsSourceId || null,
+          dashboard_uid: doc.dashboardUid,
+          panel_id: doc.panelId,
+          panel_title: doc.panelTitle,
+          dashboard_label: doc.dashboardLabel,
+          benchmark_ids: doc.benchmarkIds || [],
+          errors: doc.errors ? JSON.stringify(doc.errors) : null,
+          metric_name: metric.metricName,
+          time: metric.time,
+          timestep: metric.timestep,
+          ramp_up: metric.rampUp,
+          value: metric.value,
+          unit: metric.unit || null,
+          organization_id: testRun?.organizationId ?? null,
+          team_id: testRun?.teamId ?? null,
+          created_by: 'worker-pipeline',
+          updated_by: 'worker-pipeline',
+        });
       }
+    }
 
-      this.logger.info(`✅ Successfully inserted ${insertCount} metric records into ds_metrics table`);
-    });
+    this.logger.info(`💾 Storing ${metricsDocuments.length} metrics documents (${records.length} total data points) to ds_metrics table`);
+    await new MetricProcessor(this.logger, this.db).upsertMetricsToDatabase(records);
+    this.logger.info(`✅ Successfully upserted ${records.length} metric records into ds_metrics table`);
   }
 }

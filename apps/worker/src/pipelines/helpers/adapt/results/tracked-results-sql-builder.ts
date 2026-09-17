@@ -180,6 +180,12 @@ export class TrackedResultsSQLBuilder {
               AND ms.panel_id = hr.panel_id
               AND ms.metric_name = hr.metric_name
           )
+          -- Redundant with the join (current_test_run_id is one of the bound ids) but
+          -- the planner cannot see that through the CTE chain: without it the join
+          -- drove from historical_regressions and scanned ALL of ds_metric_statistics
+          -- (dev: 70 k rows/worker, 147 ms -> 7 k rows/worker, 37 ms; on a large table
+          -- it earns uniq_ds_metric_statistics, which leads with test_run_id).
+          WHERE ms.test_run_id IN (${placeholders})
       ),
       ${this.buildWithControlCTE()},
       ${this.buildWithCompareConfigCTE(testRunIdsCount)},

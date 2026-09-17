@@ -52,8 +52,9 @@ stays a candidate forever.
 A third writer runs it **inline** (v0.2.95.25): a re-evaluate's `checks-evaluation` job is enqueued
 with `repairRollup: true`, and `ChecksPipeline.ensureTransactionRollup` executes
 `TransactionStatsRollupPipeline` before the checks transaction when `test_run_transaction_stats` has
-zero rows for the run and `transactions` has at least one. Without it the Apdex check's per-transaction
-fast path misses on every transaction and falls back to raw `transactions` scans (45 s on a run with a
+zero rows for the run and `transactions` has at least one. Without it the Apdex check's rollup
+fast path (one `unnest` statement for the whole workload since v0.2.95.32, one per transaction before)
+misses every transaction and falls back to raw `transactions` scans (45 s on a run with a
 workload-level SLO). It is bounded to the re-evaluate path (the analyze path ran the rollup stage
 three positions earlier), at most one rollup per checks job (the stage is not chunked and the
 orchestrator waits 30 min on it), and never on a run with no `transactions` rows, because the
@@ -224,6 +225,17 @@ set. Two rules:
 `withAnalyticsTransaction`. It applies `AGGREGATION_STATEMENT_TIMEOUT_MS` (default `540000`) and
 `AGGREGATION_WORK_MEM` (default `128MB`) via `set_config(name, value, true)` — bound, not
 interpolated, so an operator-supplied env string never reaches the parser.
+
+Since v0.2.95.32 the logic lives in the leaf module `src/pipelines/helpers/aggregation-budget.ts`:
+`applyAggregationBudget(manager)` is what `setAggregationBudget` delegates to, and
+`withAggregationBudget(dataSource, fn)` opens its own transaction and applies it first. The
+perf-test writers in `helpers/perf-metrics-writer.ts` — `insertDsMetricsFromAggregate` (the
+requests and transactions aggregates) and `upsertPerfTestStatistics` — use the second form on every
+live tick and every full pass. Before that they ran as bare `dataSource.query` calls at the pool
+default `work_mem` (4MB, spilling 69 MB and 143 MB respectively on a 2.5 M-row run) with a
+`statement_timeout` equal to the client `query_timeout`. They run outside `HeavyStageMutex`, so
+count one budgeted statement per live run on top of the serialised heavy stages when sizing
+`AGGREGATION_WORK_MEM`.
 
 Three rules if you touch this:
 
@@ -491,9 +503,9 @@ Worker-specific tuning (full schema and defaults in `src/config/environment.ts`)
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ANALYTICS_STATEMENT_TIMEOUT_MS` | `120000` | Cap on analytics reads, to stop a runaway query holding a connection. Lowerable. Does **not** apply to the two heavy aggregations below. |
-| `AGGREGATION_STATEMENT_TIMEOUT_MS` | `540000` | Budget for `StatisticsPipeline` / `ControlGroupStatisticsPipeline`. Must stay strictly under the analytics pool's client-side `query_timeout` (600000). |
-| `AGGREGATION_WORK_MEM` | `128MB` | `work_mem` for those two. Keeps ~20k `percentile_agg` sketches in a HashAggregate; spilling turns the aggregation into a GroupAggregate that sorts every input row to disk. Charged per hash/sort node, per parallel worker, and per concurrent job — deploy-wide peak is roughly this x (1 + `max_parallel_workers_per_gather`) x 4. |
+| `ANALYTICS_STATEMENT_TIMEOUT_MS` | `120000` | Cap on analytics reads, to stop a runaway query holding a connection. Lowerable. Does **not** apply to the budgeted aggregations below. |
+| `AGGREGATION_STATEMENT_TIMEOUT_MS` | `540000` | Budget for `StatisticsPipeline` / `ControlGroupStatisticsPipeline`, and since v0.2.95.32 for the perf-test aggregates and statistics upsert in `helpers/perf-metrics-writer.ts` (`withAggregationBudget`). Must stay strictly under the analytics pool's client-side `query_timeout` (600000). |
+| `AGGREGATION_WORK_MEM` | `128MB` | `work_mem` for those same transactions. Keeps ~20k `percentile_agg` sketches in a HashAggregate; spilling turns the aggregation into a GroupAggregate that sorts every input row to disk. Charged per hash/sort node, per parallel worker, and per concurrent job — deploy-wide peak is roughly this x (1 + `max_parallel_workers_per_gather`) x 4. |
 | `REEVALUATE_CHUNK_SIZE` | `5` | Runs per `statistics-calculation` / `control-group-statistics` / `adapt-analysis` job inside the re-evaluate orchestrator, and per `StatisticsPipeline` invocation inside `backfillMissingSketches`. Read in `lib/utils/chunking.ts`, not `environment.ts`, so a pipeline can import it without pulling in BullMQ. |
 | `ADAPT_MIN_SAMPLE_COUNT` | `2` | Fewest data points a metric needs on the test run and on average per control run before ADAPT compares it; below that it is `incomparable` (v0.2.95.28). Folded into `control_exists` by `AdaptSQLFragments.buildControlExistsColumn`, after config resolution, so a compare config can override it via `thresholds.minSampleCount` (the perf-test scenario panels write `1`; migration 1806 backfills older configs). Read from `process.env` in the SQL fragments, validated at boot in `environment.ts`. |
 | `WORKER_ANALYZE_CONCURRENCY` / `WORKER_BATCH_CONCURRENCY` | `2` / `2` | Concurrent jobs per queue. Both multiply the `work_mem` peak above. Since v0.2.95.17 the heavy stages are serialised by `HeavyStageMutex`, so a second analyze job parks in its slot while the first aggregates; raise the analyze concurrency to 3 if incremental-collection ticks start missing coverage. |

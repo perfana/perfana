@@ -432,15 +432,6 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         count: metricsCreated
       });
       this.logger.info(`💾 Saved ${metricsCreated} ds_metrics records and computed statistics`);
-
-      // Update dashboard panels based on saved metrics
-      stepStart = Date.now();
-      await this.updateDashboardPanels(testRunId, testRun.start_time, testRun.end_time);
-      stepTiming.push({
-        step: 'update-panels',
-        duration: Date.now() - stepStart,
-        count: 0
-      });
     }
 
     // Save all compare configs to database
@@ -1018,98 +1009,5 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
     }
 
     return totalInserted;
-  }
-
-  /**
-   * Update dashboard panels based on saved metrics
-   * Queries distinct panels from ds_metrics and updates grafana_dashboards.panels JSONB field
-   */
-  private async updateDashboardPanels(
-    testRunId: string,
-    startTime: Date,
-    endTime: Date | null
-  ): Promise<void> {
-    this.logger.info('📊 Updating dashboard panels based on saved metrics...');
-
-    try {
-      // TimescaleDB optimization: Add generous time window to limit chunk scanning
-      // Add 1 hour buffer before start and after end to handle clock skew
-      const timeFrom = new Date(startTime.getTime() - 3600000); // 1 hour before
-      const timeTo = endTime ? new Date(endTime.getTime() + 3600000) : new Date(); // 1 hour after or now
-
-      // Get all dashboards that have metrics for this test run
-      const dashboards = await this.db.dataSource.query<
-        Array<{ dashboard_uid: string; grafana_dashboard_id: string }>
-      >(
-        `SELECT DISTINCT ad.dashboard_uid, gd.id as grafana_dashboard_id
-         FROM ds_metrics dm
-         JOIN application_dashboards ad ON ad.id = dm.application_dashboard_id
-         JOIN grafana_dashboards gd ON gd.uid = ad.dashboard_uid
-         WHERE dm.test_run_id = $1
-         AND dm.time >= $2
-         AND dm.time <= $3`,
-        [testRunId, timeFrom, timeTo]
-      );
-
-      if (!dashboards || dashboards.length === 0) {
-        this.logger.info(`⏭️  No dashboards found for test run: ${testRunId} - skipping panel update`);
-        return;
-      }
-
-      this.logger.info(`🔄 Updating panels for ${dashboards.length} dashboard(s)`);
-
-      // Single query to update all dashboards at once (eliminates N+1 loop)
-      const result = await this.db.dataSource.query<
-        Array<{ id: string; uid: string; panels: unknown[] }>
-      >(
-        `UPDATE grafana_dashboards gd
-         SET panels = panel_updates.panels
-         FROM (
-           SELECT
-             gd2.id,
-             jsonb_agg(
-               jsonb_build_object(
-                 'id', panels_deduped.panel_id,
-                 'title', panels_deduped.panel_title,
-                 'type', 'timeseries',
-                 'y_axes_format', panels_deduped.unit
-               )
-             ) as panels
-           FROM (
-             SELECT DISTINCT ON (ad.dashboard_uid, dm.panel_id)
-               ad.dashboard_uid,
-               dm.panel_id,
-               dm.panel_title,
-               dm.unit
-             FROM ds_metrics dm
-             JOIN application_dashboards ad ON ad.id = dm.application_dashboard_id
-             WHERE dm.test_run_id = $1
-               AND dm.time >= $2
-               AND dm.time <= $3
-               AND dm.unit IS NOT NULL
-               AND dm.unit != ''
-             ORDER BY ad.dashboard_uid, dm.panel_id, dm.unit
-           ) panels_deduped
-           JOIN grafana_dashboards gd2 ON gd2.uid = panels_deduped.dashboard_uid
-           GROUP BY gd2.id
-         ) panel_updates
-         WHERE gd.id = panel_updates.id
-         RETURNING gd.id, gd.uid, gd.panels`,
-        [testRunId, timeFrom, timeTo]
-      );
-
-      if (result) {
-        for (const row of result) {
-          const panelCount = row.panels ? row.panels.length : 0;
-          this.logger.info(`✅ Updated ${panelCount} panel(s) for dashboard: ${row.uid}`);
-        }
-      }
-
-      this.logger.info('✅ Dashboard panels update completed');
-    } catch (error) {
-      this.logger.error('❌ Failed to update dashboard panels:', error);
-      // Don't throw - this is a non-critical operation
-      // Metrics are saved, panels can be updated manually if needed
-    }
   }
 }

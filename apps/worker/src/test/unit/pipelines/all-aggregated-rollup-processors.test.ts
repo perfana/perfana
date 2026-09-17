@@ -79,12 +79,17 @@ const isAggregated = (m: { dashboard_label: string | null }) =>
  * records, so its roll-up contract is asserted against the SQL and its parameters.
  * `mockDataSource` answers the scenario lookup first, then the insert.
  */
-const mockDataSource = (scenarios: string[] = ['loadtest']) => ({
-  query: vi
+const mockDataSource = (scenarios: string[] = ['loadtest']) => {
+  const query = vi
     .fn()
     .mockResolvedValueOnce(scenarios.map((scenario_name) => ({ scenario_name })))
-    .mockResolvedValue([[], 42]),
-});
+    .mockResolvedValue([[], 42]);
+  // The insert runs inside dataSource.transaction behind two set_config budget
+  // statements; keep those out of `query` so calls[1] is still the insert.
+  const transaction = (fn: (em: { query: typeof query }) => Promise<unknown>) =>
+    fn({ query: ((sql: string, params?: unknown[]) => (sql.includes('set_config') ? Promise.resolve([]) : query(sql, params))) as typeof query });
+  return { query, transaction };
+};
 
 const insertSql = (dataSource: { query: { mock: { calls: unknown[][] } } }) =>
   (dataSource.query.mock.calls[1]![0] as string).replace(/\s+/g, ' ');

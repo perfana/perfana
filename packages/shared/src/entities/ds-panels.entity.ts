@@ -1,8 +1,9 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Index, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { ApplicationDashboard } from './application-dashboard.entity';
 import { MetricsSource } from './metrics-source.entity';
 
 @Entity('ds_panels')
+@Index('idx_ds_panels_test_run_dashboard', ['test_run_id', 'application_dashboard_id'])
 export class DsPanels {
   @PrimaryGeneratedColumn()
   id!: number;

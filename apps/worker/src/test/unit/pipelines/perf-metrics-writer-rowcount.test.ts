@@ -32,8 +32,12 @@ const testRun: TestRunMetadata = {
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 
 const fakeDataSource = (rows: unknown) => {
+  // The writer statements run inside a transaction whose first statements are the
+  // set_config budget calls; the INSERT is the one carrying `RETURNING 1`.
   const query = vi.fn().mockResolvedValue(rows);
-  return { ds: { query } as unknown as DataSource, query };
+  const transaction = vi.fn((fn: (em: { query: typeof query }) => Promise<unknown>) => fn({ query }));
+  const insertSql = () => query.mock.calls.map((c) => String(c[0])).find((sql) => sql.includes('INSERT INTO'));
+  return { ds: { transaction } as unknown as DataSource, query, insertSql };
 };
 
 const insert = (ds: DataSource) =>
@@ -53,19 +57,47 @@ const insert = (ds: DataSource) =>
 
 describe('perf-metrics-writer row counts', () => {
   it('counts ds_metrics rows from the SELECT count(*) the statement ends with', async () => {
-    const { ds, query } = fakeDataSource([{ n: 1946825 }]);
+    const { ds, insertSql } = fakeDataSource([{ n: 1946825 }]);
     await expect(insert(ds)).resolves.toBe(1946825);
 
-    const sql = String(query.mock.calls[0]?.[0]);
+    const sql = String(insertSql());
     expect(sql).toContain('RETURNING 1');
     expect(sql).toContain('SELECT count(*)::int AS n FROM ins');
   });
 
+  it('applies the aggregation budget inside the transaction before the INSERT', async () => {
+    // PT-P1: at the pool default work_mem the requests aggregate spilled 69 MB to disk
+    // and ran with statement_timeout == query_timeout. The budget is set_config(...,
+    // true), i.e. transaction-local, so it only counts if it precedes the INSERT in
+    // the same transaction.
+    const { ds, query } = fakeDataSource([{ n: 1 }]);
+    await insert(ds);
+    const sqls = query.mock.calls.map((c) => String(c[0]));
+    const params = query.mock.calls.map((c) => c[1] as unknown[]);
+    expect(sqls[0]).toContain('set_config');
+    expect(params[0]?.[0]).toBe('statement_timeout');
+    expect(sqls[1]).toContain('set_config');
+    expect(params[1]?.[0]).toBe('work_mem');
+    expect(sqls[2]).toContain('INSERT INTO ds_metrics');
+  });
+
+  it('upsertPerfTestStatistics applies the budget inside the transaction before its INSERT too', async () => {
+    // This one runs on every incremental tick of a live run; the 143 MB spill was here.
+    const { ds, query } = fakeDataSource([{ n: 1 }]);
+    await upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger);
+    const sqls = query.mock.calls.map((c) => String(c[0]));
+    const params = query.mock.calls.map((c) => c[1] as unknown[]);
+    expect(params[0]?.[0]).toBe('statement_timeout');
+    expect(params[1]?.[0]).toBe('work_mem');
+    expect(sqls[2]).toContain('INSERT INTO ds_metric_statistics');
+    expect((ds as unknown as { transaction: ReturnType<typeof vi.fn> }).transaction).toHaveBeenCalledTimes(1);
+  });
+
   it('counts ds_metric_statistics rows the same way', async () => {
-    const { ds, query } = fakeDataSource([{ n: 21123 }]);
+    const { ds, insertSql } = fakeDataSource([{ n: 21123 }]);
     await expect(upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger)).resolves.toBe(21123);
 
-    const sql = String(query.mock.calls[0]?.[0]);
+    const sql = String(insertSql());
     expect(sql).toContain('RETURNING 1');
     expect(sql).toContain('SELECT count(*)::int AS n FROM ins');
   });

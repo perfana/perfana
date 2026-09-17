@@ -156,8 +156,16 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
         await manager.query('SELECT set_config($1, $2, true)', ['statement_timeout', String(rollupTimeoutMs)]);
         // work_mem boost matches the current online query (see
         // TestRunsPerformanceQueryService). Needed for the tdigest
-        // aggregation over millions of rows per test run.
+        // aggregation over millions of rows per test run. Postgres charges it
+        // per sort node AND per parallel worker: since the sampler aggregate
+        // became a parallel CTAS (v0.2.95.32) its ceiling is leader + workers,
+        // ~1.5 GB at the default max_parallel_workers_per_gather = 2 (each
+        // worker sorted ~200 MB on a 2.5 M-row run), times the analyze/batch
+        // concurrency for the deploy-wide peak.
         await manager.query(`SET LOCAL work_mem = '512MB'`);
+        // Pin the multiplier so the ceiling above is the actual ceiling on a deploy
+        // whose server default is higher; 2 is what the measurements used.
+        await manager.query(`SET LOCAL max_parallel_workers_per_gather = 2`);
 
         // DELETE before INSERT: UPSERT alone can't evict groups that no
         // longer exist. Two scenarios where stale rows would otherwise
@@ -184,10 +192,8 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
           TRANSACTION_ROLLUP_SQL,
           [testRunId, startCutoff, endCutoff]
         );
-        const samplerResult = await manager.query<RollupRowCount[]>(
-          SAMPLER_ROLLUP_SQL,
-          [testRunId, startCutoff, endCutoff]
-        );
+        await manager.query(SAMPLER_ROLLUP_BASE_SQL, [testRunId, startCutoff, endCutoff]);
+        const samplerResult = await manager.query<RollupRowCount[]>(SAMPLER_ROLLUP_INSERT_SQL);
         const parallelGroupResult = await manager.query<RollupRowCount[]>(
           PARALLEL_GROUP_ROLLUP_SQL,
           [testRunId, startCutoff, endCutoff]
@@ -345,11 +351,24 @@ const TRANSACTION_ROLLUP_SQL = `
 `;
 
 /**
- * Sampler-level rollup: same pattern against `requests_raw`. The
- * `ARRAY_AGG(url_hash ORDER BY time DESC)[1]` trick is done twice — once for
- * the full window and once for the excluded window — because the "latest"
- * url_hash for a sampler can differ when a test saw URL changes near the
- * ramp-up boundary.
+ * Sampler-level rollup: same pattern against `requests_raw`, in two statements.
+ *
+ * `INSERT ... SELECT` cannot use parallel workers, so as one statement the aggregate
+ * sorted every requests_raw row of the run serially and spilled even at 512MB:
+ * `Sort Method: external merge Disk: 487,896 kB`, 7.9-8.0 s on a 2.53 M-row run. The
+ * same aggregate as `CREATE TEMP TABLE ... AS` plans with 2 workers: 2.65-2.8 s
+ * when the parallel scan splits the run's rows evenly (three ~200 MB quicksorts),
+ * up to ~6 s when one participant happens to claim most of the run's blocks and
+ * sorts them on disk — the split is scheduling, not a property of the query, and
+ * `parallel_leader_participation = off` measured slower (4.25 s) on the even case,
+ * so it is not set. The INSERT from the 2 k-row temp table is 0.11 s. `ON COMMIT DROP` ties the table to this transaction; a retry of the
+ * whole transaction starts clean.
+ *
+ * `last(url_hash, time)` (core timescaledb) replaces `ARRAY_AGG(url_hash ORDER BY
+ * time DESC)[1]`, which materialised every url_hash of the group to keep one. The
+ * "latest" url_hash is taken twice — full window and excluded window — because it
+ * can differ when a test saw URL changes near the ramp-up boundary. Byte-identical
+ * on the run above (EXCEPT both ways: 0 rows).
  *
  * $1 = testRunId, $2 = startCutoff (start + ramp_up), $3 = endCutoff (end - ramp_down)
  */
@@ -485,8 +504,8 @@ const PARALLEL_GROUP_ROLLUP_SQL = `
     computed_at       = now()
 `;
 
-const SAMPLER_ROLLUP_SQL = `
-  WITH base AS (
+const SAMPLER_ROLLUP_BASE_SQL = `
+  CREATE TEMP TABLE sampler_rollup_base ON COMMIT DROP AS
     SELECT
       r.test_run_id,
       r.transaction_name,
@@ -494,10 +513,9 @@ const SAMPLER_ROLLUP_SQL = `
       COALESCE(r.scenario_name, '')                                             AS scenario_name,
       r.system_under_test,
       r.test_environment,
-      (ARRAY_AGG(r.url_hash ORDER BY r.time DESC)
-        FILTER (WHERE r.url_hash IS NOT NULL))[1]                               AS url_hash_full,
-      (ARRAY_AGG(r.url_hash ORDER BY r.time DESC)
-        FILTER (WHERE r.url_hash IS NOT NULL AND r.time >= $2 AND r.time < $3))[1]              AS url_hash_excl,
+      last(r.url_hash, r.time) FILTER (WHERE r.url_hash IS NOT NULL)             AS url_hash_full,
+      last(r.url_hash, r.time)
+        FILTER (WHERE r.url_hash IS NOT NULL AND r.time >= $2 AND r.time < $3)       AS url_hash_excl,
       COUNT(*)                                                                  AS total_full,
       SUM(CASE WHEN r.success THEN 1 ELSE 0 END)                                AS passed_full,
       SUM(CASE WHEN NOT r.success THEN 1 ELSE 0 END)                            AS failed_full,
@@ -538,7 +556,9 @@ const SAMPLER_ROLLUP_SQL = `
     GROUP BY
       r.test_run_id, r.transaction_name, r.sampler_name,
       COALESCE(r.scenario_name, ''), r.system_under_test, r.test_environment
-  )
+`;
+
+const SAMPLER_ROLLUP_INSERT_SQL = `
   INSERT INTO test_run_sampler_stats (
     test_run_id, transaction_name, sampler_name, scenario_name, ramp_up_excluded,
     url_hash, system_under_test, test_environment,
@@ -554,7 +574,7 @@ const SAMPLER_ROLLUP_SQL = `
     avg_full, min_full, max_full,
     lat_full, conn_full,
     req_size_full, resp_size_full, pct_full, pct_passed_full
-  FROM base
+  FROM sampler_rollup_base
   UNION ALL
   SELECT
     test_run_id, transaction_name, sampler_name, scenario_name, true,
@@ -563,7 +583,7 @@ const SAMPLER_ROLLUP_SQL = `
     avg_excl, min_excl, max_excl,
     lat_excl, conn_excl,
     req_size_excl, resp_size_excl, pct_excl, pct_passed_excl
-  FROM base
+  FROM sampler_rollup_base
   WHERE total_excl > 0
   ON CONFLICT (test_run_id, transaction_name, sampler_name, scenario_name, ramp_up_excluded)
   DO UPDATE SET

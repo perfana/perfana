@@ -186,8 +186,6 @@ describe('PanelsPipeline', () => {
     test('should execute successfully with complete test scenario', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -278,8 +276,6 @@ describe('PanelsPipeline', () => {
     test('should handle test run with no dashboards', async () => {
       const testRunId = 'test-run-no-dashboards';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -321,8 +317,6 @@ describe('PanelsPipeline', () => {
     test('should handle test run with multiple panels', async () => {
       const testRunId = 'test-run-multi-panels';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -406,8 +400,6 @@ describe('PanelsPipeline', () => {
     test('should handle missing test run', async () => {
       const testRunId = 'non-existent-test-run';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock null test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce(null);
@@ -425,8 +417,6 @@ describe('PanelsPipeline', () => {
     test('should handle database connection errors', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock database error
       mockDatabaseService.getTestRunByTestRunId.mockRejectedValueOnce(
@@ -444,8 +434,6 @@ describe('PanelsPipeline', () => {
     test('should handle query execution errors', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -477,8 +465,6 @@ describe('PanelsPipeline', () => {
     test('should handle panel document creation errors', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -523,8 +509,6 @@ describe('PanelsPipeline', () => {
     test('should handle transaction rollback on insert error', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -591,8 +575,6 @@ describe('PanelsPipeline', () => {
     test('should delete existing panels before inserting new ones', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -666,8 +648,6 @@ describe('PanelsPipeline', () => {
     test('should insert panel documents with correct structure', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -747,8 +727,6 @@ describe('PanelsPipeline', () => {
     test('should handle empty panel documents array gracefully', async () => {
       const testRunId = 'test-run-no-panels';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -802,8 +780,6 @@ describe('PanelsPipeline', () => {
     test('should log performance metrics', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -878,8 +854,6 @@ describe('PanelsPipeline', () => {
     test('should log individual step timings', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -938,8 +912,6 @@ describe('PanelsPipeline', () => {
     test('should store Dynatrace panel records when queries exist', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -1008,8 +980,6 @@ describe('PanelsPipeline', () => {
     test('should skip Dynatrace panel storage when no queries configured', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -1051,8 +1021,6 @@ describe('PanelsPipeline', () => {
     test('should not log Dynatrace warning when disabled', async () => {
       const testRunId = 'test-run-001';
 
-      // Mock cleanup query
-      mockDatabaseService.query.mockResolvedValueOnce([[], 0]);
 
       // Mock test run
       mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
@@ -1090,44 +1058,4 @@ describe('PanelsPipeline', () => {
     });
   });
 
-  describe('Stale Data Cleanup', () => {
-    test('should clean up stale application dashboards before processing', async () => {
-      const testRunId = 'test-run-001';
-
-      // Mock cleanup query with deleted rows
-      mockDatabaseService.query.mockResolvedValueOnce([[], 3]);
-
-      // Mock test run
-      mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
-        id: '123e4567-e89b-12d3-a456-426614174000',
-        testRunId: testRunId,
-        systemUnderTestId: 'system-1',
-        testEnvironment: 'production',
-        workload: 'load-test',
-        startTime: new Date('2024-01-01T00:00:00Z'),
-        endTime: new Date('2024-01-01T01:00:00Z')
-      });
-
-      // Mock system name
-      mockDatabaseService.getSystemUnderTestName.mockResolvedValueOnce('MyApp');
-
-      // Mock application dashboards
-      (getApplicationDashboardsForTestRun as any).mockResolvedValueOnce([]);
-      (getGrafanaDashboardsForApplicationDashboards as any).mockResolvedValueOnce([]);
-      (getBenchmarksForTestRun as any).mockResolvedValueOnce([]);
-      (createPanelDocuments as any).mockResolvedValueOnce([]);
-
-      // Mock delete query
-      (mockEntityManager.query as any).mockResolvedValueOnce([[], 0]);
-
-      await pipeline.execute({
-        testRunId
-      });
-
-      // Verify cleanup was called
-      expect(mockDatabaseService.query).toHaveBeenCalledWith(
-        expect.stringContaining('DELETE FROM ds_panels')
-      );
-    });
-  });
 });

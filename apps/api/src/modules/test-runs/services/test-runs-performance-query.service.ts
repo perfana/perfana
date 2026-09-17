@@ -340,7 +340,7 @@ export class TestRunsPerformanceQueryService {
    *  - `transactions` has rows — the transaction half must be able to rebuild
    *    what the delete removes.
    *  - `requests_raw` has rows with `transaction_name IS NOT NULL` — mirrors
-   *    `SAMPLER_ROLLUP_SQL`'s own predicate exactly. A guard that passes where
+   *    `SAMPLER_ROLLUP_BASE_SQL`'s own predicate exactly. A guard that passes where
    *    the rollup declines to write is the same permanent loop.
    *  - zero sampler rows for the WHOLE run — distinguishes this from the
    *    legitimate per-transaction miss (an unsampled high-cardinality sampler,
