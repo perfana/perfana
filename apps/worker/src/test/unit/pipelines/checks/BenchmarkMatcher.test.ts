@@ -379,6 +379,39 @@ describe('BenchmarkMatcher', () => {
       expect(result[0].enabled).toBe(true);
     });
 
+    it('maps apdex_min_samples from the row and defaults it to 50 when the column is null', async () => {
+      // Arrange — one row carries the column, one predates it (null); Postgres may hand back a string
+      const testRun = {
+        test_run_id: 'test-run-1',
+        system_under_test_id: 'sut-1',
+        test_environment: 'production',
+        workload: 'load-test',
+      };
+      const base = {
+        system_under_test_id: 'sut-1',
+        test_environment: 'production',
+        workload: 'load-test',
+        benchmark_type: 'apdex',
+        min_apdex_score: '0.8',
+        configuration: { type: 'apdex' },
+        valid: true,
+        enabled: true,
+      };
+      mockManager.query.mockResolvedValue([
+        { ...base, id: 'apdex-explicit', apdex_min_samples: '25' },
+        { ...base, id: 'apdex-legacy', apdex_min_samples: null },
+      ]);
+
+      // Act
+      const result = await matcher.findMatchingBenchmarks(testRun);
+
+      // Assert
+      const sql = mockManager.query.mock.calls[0][0] as string;
+      expect(sql).toContain('COALESCE(apdex_min_samples, 50) as apdex_min_samples');
+      expect(result.find((b) => b.id === 'apdex-explicit')!.apdex_min_samples).toBe(25);
+      expect(result.find((b) => b.id === 'apdex-legacy')!.apdex_min_samples).toBe(50);
+    });
+
     it('should log metric filter information', async () => {
       // Arrange
       const testRun = {
@@ -517,6 +550,39 @@ describe('BenchmarkMatcher', () => {
       expect(result!.exclude_ramp_up_time).toBe(true);
       expect(result!.valid).toBe(true);
       expect(result!.enabled).toBe(true);
+    });
+  });
+
+  describe('findBenchmarkById — apdex_min_samples', () => {
+    const apdexRow = (overrides: Record<string, unknown>) => ({
+      id: 'apdex-1',
+      system_under_test_id: 'sut-1',
+      test_environment: 'production',
+      workload: 'load-test',
+      benchmark_type: 'apdex',
+      min_apdex_score: '0.8',
+      configuration: { type: 'apdex' },
+      valid: true,
+      enabled: true,
+      ...overrides,
+    });
+
+    it('maps apdex_min_samples from the row', async () => {
+      mockManager.query.mockResolvedValue([apdexRow({ apdex_min_samples: 10 })]);
+
+      const result = await matcher.findBenchmarkById('apdex-1');
+
+      const sql = mockManager.query.mock.calls[0][0] as string;
+      expect(sql).toContain('COALESCE(apdex_min_samples, 50) as apdex_min_samples');
+      expect(result!.apdex_min_samples).toBe(10);
+    });
+
+    it('defaults apdex_min_samples to 50 when the row has none', async () => {
+      mockManager.query.mockResolvedValue([apdexRow({ apdex_min_samples: undefined })]);
+
+      const result = await matcher.findBenchmarkById('apdex-1');
+
+      expect(result!.apdex_min_samples).toBe(50);
     });
   });
 

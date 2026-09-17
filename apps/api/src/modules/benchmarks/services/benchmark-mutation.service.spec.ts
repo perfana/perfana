@@ -248,4 +248,93 @@ describe('BenchmarkMutationService', () => {
       expect(payload).not.toHaveProperty('organization_id');
     });
   });
+
+  // apdexMinSamples is an untyped inline body field (no class-validator DTO), so the
+  // service is the only gate between the request and the NOT NULL integer column.
+  describe('apdexMinSamples validation and defaulting', () => {
+    const baseCreate = {
+      systemUnderTestId: 'sut-1',
+      testEnvironment: 'production',
+      workload: 'loadTest',
+      minApdexScore: 0.9,
+    };
+
+    beforeEach(() => {
+      const created = buildEntity({ id: 'bm-apdex', benchmark_type: 'apdex', min_apdex_score: 0.9, apdex_min_samples: 50 });
+      benchmarkRepo.create.mockReturnValue(created);
+      benchmarkRepo.save.mockResolvedValue(created);
+    });
+
+    it.each([0, -1, 1.5, Number.NaN, 2147483648])('createApdexSlo() rejects apdexMinSamples=%p before touching the repository', async (bad) => {
+      await expect(
+        service.createApdexSlo(userId, roles, { ...baseCreate, apdexMinSamples: bad } as never),
+      ).rejects.toThrow('apdexMinSamples must be an integer of at least 1');
+      expect(benchmarkRepo.create).not.toHaveBeenCalled();
+      expect(benchmarkRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('createApdexSlo() defaults apdex_min_samples to 50 when the body omits it', async () => {
+      await service.createApdexSlo(userId, roles, baseCreate as never);
+
+      const payload = (benchmarkRepo.create as jest.Mock).mock.calls[0][0];
+      expect(payload.apdex_min_samples).toBe(50);
+    });
+
+    it.each([1, 50, 500])('createApdexSlo() persists apdexMinSamples=%p as apdex_min_samples', async (value) => {
+      await service.createApdexSlo(userId, roles, { ...baseCreate, apdexMinSamples: value } as never);
+
+      const payload = (benchmarkRepo.create as jest.Mock).mock.calls[0][0];
+      expect(payload.apdex_min_samples).toBe(value);
+    });
+
+    describe('updateApdexSlo()', () => {
+      const arrangeExisting = () => {
+        const before = buildEntity({ id: 'bm-apdex', benchmark_type: 'apdex', min_apdex_score: 0.85, apdex_min_samples: 50 });
+        const after = buildEntity({ id: 'bm-apdex', benchmark_type: 'apdex', min_apdex_score: 0.85, apdex_min_samples: 10 });
+        queryService.findOne.mockResolvedValue({ ...before, benchmark_type: 'apdex' } as never);
+        benchmarkRepo.findOne
+          .mockResolvedValueOnce(before)
+          .mockResolvedValueOnce(after);
+        benchmarkRepo.update.mockResolvedValue({} as never);
+      };
+
+      it.each([0, 2.5, -3])('rejects apdexMinSamples=%p and does not issue the UPDATE', async (bad) => {
+        arrangeExisting();
+
+        await expect(
+          service.updateApdexSlo('bm-apdex', userId, roles, { apdexMinSamples: bad } as never),
+        ).rejects.toThrow('apdexMinSamples must be an integer of at least 1');
+        expect(benchmarkRepo.update).not.toHaveBeenCalled();
+        expect(auditService.logUpdate).not.toHaveBeenCalled();
+      });
+
+      it('writes apdex_min_samples when the body carries it', async () => {
+        arrangeExisting();
+
+        await service.updateApdexSlo('bm-apdex', userId, roles, { apdexMinSamples: 10 } as never);
+
+        const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
+        expect(data.apdex_min_samples).toBe(10);
+      });
+
+      it('resets apdex_min_samples to the default when the body sends null (like apdexThresholdMs)', async () => {
+        arrangeExisting();
+
+        await service.updateApdexSlo('bm-apdex', userId, roles, { apdexMinSamples: null } as never);
+
+        const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
+        expect(data.apdex_min_samples).toBe(50);
+      });
+
+      it('leaves apdex_min_samples untouched when the body omits it (partial update)', async () => {
+        arrangeExisting();
+
+        await service.updateApdexSlo('bm-apdex', userId, roles, { minApdexScore: 0.95 } as never);
+
+        const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
+        expect(data).not.toHaveProperty('apdex_min_samples');
+        expect(data.min_apdex_score).toBe(0.95);
+      });
+    });
+  });
 });

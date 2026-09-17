@@ -80,6 +80,7 @@ export interface Benchmark {
   min_apdex_score?: number;
   include_failed_requests: boolean;
   exclude_ramp_up_time: boolean;
+  apdex_min_samples: number;
   // Aggregated SLO fields
   aggregate_metric?: string;
   aggregate_stat?: string;

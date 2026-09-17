@@ -350,6 +350,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
               min_apdex_score: benchmark.min_apdex_score!,
               include_failed_requests: benchmark.include_failed_requests,
               exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
+              apdex_min_samples: benchmark.apdex_min_samples,
             });
 
             results.processed_benchmarks += 1;
@@ -710,6 +711,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         scenario_name: tr.scenario_name,
         value: tr.apdex_score,
         meets_requirement: tr.meets_requirement,
+        below_min_samples: tr.below_min_samples,
         is_artificial: false,
         threshold_ms: tr.threshold_ms,
         satisfied_count: tr.satisfied_count,
@@ -724,6 +726,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         target: apdexResult.apdex_result.transaction_name || 'workload',
         value: apdexResult.apdex_result.apdex_score,
         meets_requirement: apdexResult.meets_requirement,
+        below_min_samples: apdexResult.below_min_samples,
         is_artificial: false,
         threshold_ms: apdexResult.requirement.threshold_ms,
         satisfied_count: apdexResult.apdex_result.satisfied_count,
@@ -777,6 +780,7 @@ export class ChecksPipeline extends BasePipelineTypeORM {
         min_score: apdexResult.requirement.min_score,
         threshold_ms: apdexResult.requirement.threshold_ms,
         include_failed_requests: benchmark.include_failed_requests,
+        min_samples: benchmark.apdex_min_samples,
       }),                                        // requirement (JSONB)
       apdexResult.apdex_result.apdex_score,      // panel_average - stores the Apdex score
       apdexResult.meets_requirement,             // meets_requirement

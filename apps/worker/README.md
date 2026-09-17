@@ -72,6 +72,20 @@ and it returns `null` for an operator nobody defined, leaving the caller to deci
 still logs the warning and passes, deliberately, since the SLO row is what is wrong, not the run.
 Existing `check_results` are not rewritten; re-evaluate a run to get the corrected verdict.
 
+The Apdex SLO check (`src/pipelines/checks/ApdexCalculator.ts`) has a sample floor since v0.2.95.34:
+`benchmarks.apdex_min_samples` (default 50, `COALESCE`d in `BenchmarkMatcher` because the column is
+nullable for SUT imports). A transaction with fewer executions than the floor is reported with its
+score and counts but written as `meets_requirement: null` with `below_min_samples: true`, and a
+workload SLO in which no transaction reached the floor returns `null` too rather than a green pass.
+Two things not to undo: the floor is measured against `observed_count` (every row in the window,
+failed included), not `total_count` (the scored rows, success-only unless `include_failed_requests`),
+so a mostly-failing transaction cannot hide under it — that is why the success filter sits in each
+aggregate's `FILTER` clause rather than the `WHERE`; and the `total_count === 0` NO_DATA branch runs
+first, so the floor never turns a no-data failure into a pass. `ChecksPipeline` computes the run's
+verdict as `bool_and(COALESCE(meets_requirement, true))`, so a NULL row is a pass there; any reader
+that wants "failed" must test `=== false`. The rollup fast path and the raw fallback still count the
+window differently near the floor (TODOS.md).
+
 ### The perf-test pipeline writes an extra "all aggregated" dashboard
 
 `PerformanceTestMetricsPipeline` writes one dashboard per scenario, plus — since v0.2.95.4 — one

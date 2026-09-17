@@ -481,6 +481,49 @@ Two things it does not fix. If the job exhausts its BullMQ retries it stays in t
 
 The matching operator tool is `apps/worker/scripts/backfill-test-run-stats-rollup.ts`, which now selects runs missing **either** half — its old transaction-only predicate skipped exactly these runs — and terminates on "a poll returned no ids it has not already served this invocation" rather than on an empty poll, since an unrepairable run stays a candidate forever and would otherwise pin the head of `ORDER BY end_time DESC LIMIT 50`.
 
+### An Apdex SLO has a sample floor, and `meets_requirement = NULL` is "not evaluated", not "failed"
+
+A transaction that ran twice scored 0.0 and failed the whole workload SLO. Since v0.2.95.34 every
+Apdex SLO carries `benchmarks.apdex_min_samples` (default 50, migration 1808; `apdexMinSamples` on
+`POST`/`PUT /benchmarks/apdex`, "Minimum samples per transaction" in both dialogs). A transaction
+with fewer executions than the floor is still reported with its score and counts, but
+`ApdexCalculator` writes `meets_requirement: null` with `below_min_samples: true` on its target
+rather than a verdict. Four things about it are easy to get backwards:
+
+1. **The floor counts EVERY execution, failed ones included — not the count that feeds the score.**
+   `ApdexResult` carries two totals: `total_count` (the scored rows, success-only unless
+   `include_failed_requests`) and `observed_count` (every row in the window). The floor is checked
+   against `observed_count`, and the success filter moved from the `WHERE` into the per-aggregate
+   `FILTER` so the SQL can return both from one scan. Checking the scored count instead would let a
+   transaction with 960 errors and 40 successes read "too few samples" and pass, while a transaction
+   with zero successes still fails on `NO_DATA` as before (`total_count = 0` is checked first, so the
+   floor never turns a no-data failure into a pass).
+2. **`NULL` counts as a pass in the run verdict, on purpose.** `ChecksPipeline` decides
+   `valid` with `bool_and(COALESCE(meets_requirement, true))`, so an unevaluated transaction — or a
+   workload SLO in which nothing at all reached the floor — does not fail the run. Every reader has
+   to key on `=== false` for "failed", never on `!== true`: `slo-renderer` and `getSloSummary` in
+   the report did the latter and drew a red FAIL pill for a NULL row until this version. They now
+   render NULL as a neutral N/A (a warn ERROR pill when `status = 'ERROR'`), which also changes how
+   pre-existing errored or NO_DATA aggregated checks render — from FAIL to ERROR / N/A, matching the
+   worker's own verdict. Consolidated results and the Slack/Teams message builders still read "SLOs
+   Passed" for a run in which nothing was judged; that tri-state is the open TODOS.md item.
+3. **The column is nullable, and that is not a mistake to tighten.** `benchmarks` is a `core`
+   resource in SUT-transfer bundles, and `sut-import.service.ts` inserts every table via
+   `json_populate_recordset(null::t, $1::json)`, which yields NULL (not the column DEFAULT) for a
+   key the bundle lacks. `NOT NULL DEFAULT 50` would therefore have rejected every pre-1808 bundle
+   with 23502 and failed the whole import. So the migration adds `integer DEFAULT 50 CHECK (>= 1)`
+   nullable, and every reader COALESCEs (`BenchmarkMatcher`'s two queries, `?? 50` in
+   `BenchmarkMapper` and the API create/update paths). The same trap is armed for the next
+   `NOT NULL DEFAULT x` column on any exported table — see the SUT transfer entry in TODOS.md.
+4. **Existing `check_results` keep their stored verdict.** The floor is applied when the check runs,
+   so a run evaluated before the SLO gained its floor still shows the old FAIL until it is
+   re-evaluated. `requirement.min_samples` in the stored result says which floor was in force.
+
+Residue: the rollup fast path and the raw `transactions` fallback in `ApdexCalculator` count the
+window differently (the raw scan applies only the start offset and drops NULL response times), so a
+transaction near the floor can be "Too few" on one path and evaluated on the other. Also in
+TODOS.md.
+
 ### The SUT export is large by default, and only Chrome and Edge can stream it to disk
 
 `SUT_TRANSFER_ENABLED` gates an admin-only export that streams a gzipped NDJSON bundle with no
@@ -1303,6 +1346,7 @@ container mounts in tests at all.
 28. **The `checks-evaluation` stage of a re-evaluate takes ~45 s on a run with a workload-level Apdex SLO, and the per-transaction worker log lines read `Apdex for <name>` rather than `Apdex (rollup) for <name>`** (the `fast path miss` line is debug-level) → the run has no `test_run_transaction_stats` at all (its analyze never reached `transaction-stats-rollup`, and a re-evaluate has no rollup stage), so each transaction is a raw `transactions` scan. Fixed in v0.2.95.25 (a re-evaluate rolls the run up first when the table is empty); on an older deploy, run `apps/worker/scripts/backfill-test-run-stats-rollup.ts` or re-analyse the run. See "The transaction rollup is written in two halves" above.
 29. **`adapt-analysis` fails with `canceling statement due to statement timeout` in `ResultsProcessor.deleteOrphanedResults` on the first analysis of a large run, and every re-evaluate of that run fails the same way while other runs' `delete-orphaned-results` substage reads seconds and growing** → the orphan `DELETE`'s whole-run `EXISTS` guard was planned inside a per-row nested loop because the upsert's rows are invisible to the planner's statistics (metrics x metrics; ~25k metrics crosses the 120 s cap). Fixed in v0.2.95.26 (the guard is keyed on the unnested run list, uncorrelated to the row). On an older deploy the only workaround is a one-off raise of `ANALYTICS_STATEMENT_TIMEOUT_MS` for that worker; nothing in the data is wrong. The `⚠️ No metrics were available to aggregate` / `0 row(s) inserted` lines from `control-group-statistics` in the same log are unrelated and were a logging bug until the same version — TypeORM returns `[]` for an INSERT, so `.rowCount` was always undefined. See item 3 of "`ds_adapt_results` is written by an upsert, so it also needs a delete" above.
 30. **Some Dynatrace hosts have almost no points on a live run, the sanity check reports them as `1 points across a <N>s run`, and the collection status says the range was collected** → those hosts publish their minute buckets more than a minute late, and a tick that queried exactly `[last tick, now]` recorded the minute as collected because the other hosts answered. Fixed in v0.2.95.27 (every live tick re-queries the previous 2 minutes, `DYNATRACE_INGEST_LOOKBACK_MS`). On an older deploy, a force-refetch re-evaluate after the run completes recovers them from Dynatrace as long as the tenant still holds the window. The last one or two minutes of such a host can still be missing after the fix — that is the open TODOS.md item, not a regression. See item 5 of "Gap-filling a completed run must never fall back to a full re-collection" above.
+31. **A workload Apdex SLO fails on a transaction that ran a handful of times, or a report shows a red FAIL pill on an SLO row whose `meets_requirement` is NULL** → the first is the sample floor at work (v0.2.95.34): a transaction below `apdex_min_samples` (default 50, counted over every execution including failed ones) is reported as **Too few** and is neither a pass nor a fail; re-evaluate the run to apply it to results stored before the SLO gained the floor. The second is a reader keying on `!== true` instead of `=== false`; `slo-renderer` and `getSloSummary` did until this version. Note the run verdict is `bool_and(COALESCE(meets_requirement, true))`, so a NULL row counts as a pass there, and a run in which nothing reached the floor still announces "SLOs Passed" in Slack/Teams (open TODOS.md item). See "An Apdex SLO has a sample floor" above.
 
 ## How-To Tutorials
 

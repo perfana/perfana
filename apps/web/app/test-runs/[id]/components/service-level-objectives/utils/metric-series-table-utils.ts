@@ -62,7 +62,7 @@ export function sortMetricTargets(
  * Gets the sort priority for a given meets_requirement value.
  * Failed (false) = 0 (highest priority), Passed (true) = 1, Unknown (undefined) = 2
  */
-export function getStatusPriority(meetsRequirement: boolean | undefined): number {
+export function getStatusPriority(meetsRequirement: boolean | null | undefined): number {
   if (meetsRequirement === false) return 0;
   if (meetsRequirement === true) return 1;
   return 2;

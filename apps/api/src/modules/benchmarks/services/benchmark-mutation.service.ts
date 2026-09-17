@@ -1,4 +1,4 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Benchmark as BenchmarkEntity, SystemUnderTest } from '../../../entities';
@@ -29,6 +29,14 @@ export type {
   CreateAggregatedSloDto,
   UpdateAggregatedSloDto,
 } from './benchmark-mutation.types';
+
+/** The body is an untyped inline DTO, so the range check lives here beside minApdexScore's. `null` means reset to the default. The controller rethrows HttpExceptions as-is. */
+function assertApdexMinSamples(value: number | null | undefined): void {
+  if (value === undefined || value === null) return;
+  if (!Number.isInteger(value) || value < 1 || value > 2147483647) {
+    throw new BadRequestException('apdexMinSamples must be an integer of at least 1');
+  }
+}
 
 /**
  * Service responsible for benchmark mutation operations.
@@ -365,6 +373,7 @@ export class BenchmarkMutationService {
           min_apdex_score: benchmark.min_apdex_score,
           include_failed_requests: benchmark.include_failed_requests,
           exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
+          apdex_min_samples: benchmark.apdex_min_samples,
           enabled: benchmark.enabled,
           valid: benchmark.valid,
           updated_by: userId,
@@ -412,6 +421,7 @@ export class BenchmarkMutationService {
         min_apdex_score: benchmark.min_apdex_score,
         include_failed_requests: benchmark.include_failed_requests,
         exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
+        apdex_min_samples: benchmark.apdex_min_samples,
         average_all: benchmark.average_all,
         validate_with_default_if_no_data: benchmark.validate_with_default_if_no_data,
         metadata: benchmark.metadata ?? {},
@@ -454,6 +464,7 @@ export class BenchmarkMutationService {
       if (dto.minApdexScore < 0 || dto.minApdexScore > 1) {
         throw new Error('minApdexScore must be between 0 and 1');
       }
+      assertApdexMinSamples(dto.apdexMinSamples);
 
       // Validate user has access to the system and capture it to inherit org/team
       const system = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
@@ -469,6 +480,7 @@ export class BenchmarkMutationService {
         apdex_threshold_ms: dto.apdexThresholdMs || undefined,
         include_failed_requests: dto.includeFailedRequests ?? false,
         exclude_ramp_up_time: dto.excludeRampUpTime ?? true,
+        apdex_min_samples: dto.apdexMinSamples ?? 50,
         description: dto.description || '',
         tags: dto.tags || [],
         enabled: true,
@@ -537,6 +549,7 @@ export class BenchmarkMutationService {
       if (dto.minApdexScore !== undefined && (dto.minApdexScore < 0 || dto.minApdexScore > 1)) {
         throw new Error('minApdexScore must be between 0 and 1');
       }
+      assertApdexMinSamples(dto.apdexMinSamples);
 
       // Phase 5a: clone before-snapshot so the SQL-update-then-refetch flow
       // produces a faithful audit diff (the underlying `update` is a SQL
@@ -759,6 +772,7 @@ export class BenchmarkMutationService {
       data.include_failed_requests = dto.includeFailedRequests;
     }
     if (dto.excludeRampUpTime !== undefined) data.exclude_ramp_up_time = dto.excludeRampUpTime;
+    if (dto.apdexMinSamples !== undefined) data.apdex_min_samples = dto.apdexMinSamples ?? 50;
     if (dto.enabled !== undefined) data.enabled = dto.enabled;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.tags !== undefined) data.tags = dto.tags;

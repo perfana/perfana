@@ -15,8 +15,10 @@ export interface ApdexResult {
   tolerating_count: number;
   /** Number of requests with response_time > 4T */
   frustrated_count: number;
-  /** Total number of requests */
+  /** Number of requests that feed the score (successful only unless include_failed_requests) */
   total_count: number;
+  /** Every execution of the transaction in the window, failed ones included — what `apdex_min_samples` is measured against */
+  observed_count: number;
   /** Calculated Apdex score (0.000 - 1.000) */
   apdex_score: number | null;
   /** The T threshold used for calculation (in ms) */
@@ -39,6 +41,8 @@ export interface ApdexBenchmark {
   min_apdex_score: number;
   include_failed_requests: boolean;
   exclude_ramp_up_time: boolean;
+  /** Fewest samples before a transaction's score can fail the SLO. */
+  apdex_min_samples: number;
 }
 
 /**
@@ -50,6 +54,8 @@ interface TransactionApdexResult {
   apdex_score: number | null;
   threshold_ms: number;
   meets_requirement: boolean | null;
+  /** Has data, but fewer than `apdex_min_samples` — reported, not evaluated. */
+  below_min_samples: boolean;
   satisfied_count: number;
   tolerating_count: number;
   frustrated_count: number;
@@ -71,8 +77,15 @@ export interface ApdexCheckResult {
   };
   status: 'COMPLETE' | 'ERROR' | 'NO_DATA';
   message: string;
+  /** Nothing was judged: the transaction (or every transaction of the workload) had fewer than `apdex_min_samples` executions. */
+  below_min_samples?: boolean;
   /** Per-transaction breakdown for workload-level SLOs */
   transaction_results?: TransactionApdexResult[];
+}
+
+/** observed_count is absent only from hand-built rows (tests, older callers); fall back to the scored total. */
+function parseObserved(raw: unknown, total: number): number {
+  return raw === undefined || raw === null ? total : (parseInt(String(raw)) || 0);
 }
 
 /**
@@ -172,10 +185,9 @@ export class ApdexCalculator extends BaseCheckService {
       paramIndex++;
     }
 
-    // Exclude failed requests unless configured otherwise
-    if (!includeFailedRequests) {
-      conditions.push('success = true');
-    }
+    // Exclude failed requests from the score unless configured otherwise. Applied per
+    // aggregate, not in WHERE, so observed_count still counts every execution.
+    const scored = includeFailedRequests ? 'response_time IS NOT NULL' : 'response_time IS NOT NULL AND success = true';
 
     // Exclude analysis start offset period if configured
     if (excludeRampUp && testRun.ramp_up && testRun.start_time) {
@@ -193,14 +205,14 @@ export class ApdexCalculator extends BaseCheckService {
 
     const query = `
       SELECT
-        COUNT(*) FILTER (WHERE response_time <= $${paramIndex}) as satisfied_count,
-        COUNT(*) FILTER (WHERE response_time > $${paramIndex} AND response_time <= $${paramIndex + 1}) as tolerating_count,
-        COUNT(*) FILTER (WHERE response_time > $${paramIndex + 1}) as frustrated_count,
-        COUNT(*) as total_count,
-        AVG(response_time) as avg_response_time_ms
+        COUNT(*) FILTER (WHERE ${scored} AND response_time <= $${paramIndex}) as satisfied_count,
+        COUNT(*) FILTER (WHERE ${scored} AND response_time > $${paramIndex} AND response_time <= $${paramIndex + 1}) as tolerating_count,
+        COUNT(*) FILTER (WHERE ${scored} AND response_time > $${paramIndex + 1}) as frustrated_count,
+        COUNT(*) FILTER (WHERE ${scored}) as total_count,
+        COUNT(*) as observed_count,
+        AVG(response_time) FILTER (WHERE ${scored}) as avg_response_time_ms
       FROM transactions
       WHERE ${whereClause}
-        AND response_time IS NOT NULL
     `;
 
     this.logger.debug(`Calculating Apdex for test run ${testRun.test_run_id}, transaction: ${transactionName || 'ALL'}, threshold: ${thresholdMs}ms`);
@@ -212,6 +224,7 @@ export class ApdexCalculator extends BaseCheckService {
     const tolerating = parseInt(row.tolerating_count) || 0;
     const frustrated = parseInt(row.frustrated_count) || 0;
     const total = parseInt(row.total_count) || 0;
+    const observed = parseObserved(row.observed_count, total);
     const avgResponseTime = row.avg_response_time_ms !== null
       ? Math.round(parseFloat(row.avg_response_time_ms) * 100) / 100
       : null;
@@ -232,6 +245,7 @@ export class ApdexCalculator extends BaseCheckService {
       tolerating_count: tolerating,
       frustrated_count: frustrated,
       total_count: total,
+      observed_count: observed,
       apdex_score: apdexScore,
       threshold_ms: thresholdMs,
       avg_response_time_ms: avgResponseTime,
@@ -330,6 +344,7 @@ export class ApdexCalculator extends BaseCheckService {
         transaction_name,
         threshold_ms,
         effective_total                                                                        AS total_count,
+        sum_total_count                                                                        AS observed_count,
         GREATEST(
           ROUND(rank_t * effective_total)::bigint,
           0::bigint
@@ -372,6 +387,7 @@ export class ApdexCalculator extends BaseCheckService {
       const tolerating = parseInt(row.tolerating_count) || 0;
       const frustrated = parseInt(row.frustrated_count) || 0;
       const total = parseInt(row.total_count) || 0;
+      const observed = parseObserved(row.observed_count, total);
       const avgResponseTime = row.avg_response_time_ms !== null && row.avg_response_time_ms !== undefined
         ? Math.round(parseFloat(row.avg_response_time_ms) * 100) / 100
         : null;
@@ -391,6 +407,7 @@ export class ApdexCalculator extends BaseCheckService {
         tolerating_count: tolerating,
         frustrated_count: frustrated,
         total_count: total,
+        observed_count: observed,
         apdex_score: apdexScore,
         threshold_ms: thresholdMs,
         avg_response_time_ms: avgResponseTime,
@@ -551,6 +568,7 @@ export class ApdexCalculator extends BaseCheckService {
       min_apdex_score,
       include_failed_requests,
       exclude_ramp_up_time,
+      apdex_min_samples,
     } = benchmark;
 
     // Get all transactions with their scenarios for this test run
@@ -568,6 +586,7 @@ export class ApdexCalculator extends BaseCheckService {
           tolerating_count: 0,
           frustrated_count: 0,
           total_count: 0,
+          observed_count: 0,
           apdex_score: null,
           threshold_ms: apdex_threshold_ms || 500,
           avg_response_time_ms: null,
@@ -633,12 +652,20 @@ export class ApdexCalculator extends BaseCheckService {
     let totalTolerating = 0;
     let totalFrustrated = 0;
     let totalCount = 0;
+    let totalObserved = 0;
     const failedTransactions: string[] = [];
+    const belowMinSamplesTransactions: string[] = [];
 
     const record = (transactionName: string, scenarioName: string, resolvedThreshold: number, apdexResult: ApdexResult) => {
       const meetsReq = apdexResult.apdex_score !== null && apdexResult.apdex_score >= min_apdex_score;
+      // Too few executions to judge: reported, but neither passes nor fails the SLO. Measured
+      // on every execution (failed included) so a mostly-failing transaction cannot hide below the floor.
+      const belowMinSamples = apdexResult.total_count > 0 && apdexResult.observed_count < apdex_min_samples;
+      const evaluated = apdexResult.total_count > 0 && !belowMinSamples;
 
-      if (!meetsReq && apdexResult.total_count > 0) {
+      if (belowMinSamples) {
+        belowMinSamplesTransactions.push(transactionName);
+      } else if (evaluated && !meetsReq) {
         allPass = false;
         failedTransactions.push(transactionName);
       }
@@ -648,13 +675,15 @@ export class ApdexCalculator extends BaseCheckService {
       totalTolerating += apdexResult.tolerating_count;
       totalFrustrated += apdexResult.frustrated_count;
       totalCount += apdexResult.total_count;
+      totalObserved += apdexResult.observed_count;
 
       transactionResults.push({
         transaction_name: transactionName,
         scenario_name: scenarioName,
         apdex_score: apdexResult.apdex_score,
         threshold_ms: resolvedThreshold,
-        meets_requirement: apdexResult.total_count > 0 ? meetsReq : null,
+        meets_requirement: evaluated ? meetsReq : null,
+        below_min_samples: belowMinSamples,
         satisfied_count: apdexResult.satisfied_count,
         tolerating_count: apdexResult.tolerating_count,
         frustrated_count: apdexResult.frustrated_count,
@@ -711,6 +740,7 @@ export class ApdexCalculator extends BaseCheckService {
           apdex_score: null,
           threshold_ms: apdex_threshold_ms || 500,
           meets_requirement: null,
+          below_min_samples: false,
           satisfied_count: 0,
           tolerating_count: 0,
           frustrated_count: 0,
@@ -735,27 +765,38 @@ export class ApdexCalculator extends BaseCheckService {
     } else if (totalCount === 0) {
       status = 'NO_DATA';
       message = 'No request data found for any transaction';
+    } else if (allPass && belowMinSamplesTransactions.length >= transactionsWithScenarios.length) {
+      message = `No transactions evaluated: all ${transactionsWithScenarios.length} have fewer than ${apdex_min_samples} samples`;
     } else if (allPass) {
-      message = `All ${transactionsWithScenarios.length} transactions meet minimum Apdex ${min_apdex_score}`;
+      message = `All ${transactionsWithScenarios.length - belowMinSamplesTransactions.length} evaluated transactions meet minimum Apdex ${min_apdex_score}`;
     } else {
       message = `${failedTransactions.length} of ${transactionsWithScenarios.length} transactions below minimum Apdex ${min_apdex_score}: ${failedTransactions.slice(0, 3).join(', ')}${failedTransactions.length > 3 ? '...' : ''}`;
+    }
+    if (status === 'COMPLETE' && belowMinSamplesTransactions.length > 0 && belowMinSamplesTransactions.length < transactionsWithScenarios.length) {
+      message += ` (${belowMinSamplesTransactions.length} not evaluated: fewer than ${apdex_min_samples} samples)`;
     }
 
     this.logger.info(
       `Workload-level Apdex SLO result: ${allPass ? 'PASS' : 'FAIL'} ` +
-      `(${transactionsWithScenarios.length} transactions, ${failedTransactions.length} failed)`
+      `(${transactionsWithScenarios.length} transactions, ${failedTransactions.length} failed, ${belowMinSamplesTransactions.length} below ${apdex_min_samples} samples)`
     );
+
+    // Nothing judged at all: same contract as the transaction-level SLO (null, flagged), not a green pass.
+    const nothingEvaluated = belowMinSamplesTransactions.length > 0
+      && belowMinSamplesTransactions.length >= transactionsWithScenarios.length;
 
     return {
       benchmark_id: benchmarkId,
       test_run_id: testRun.test_run_id,
-      meets_requirement: totalCount > 0 ? allPass : false,
+      meets_requirement: totalCount > 0 ? (nothingEvaluated ? null : allPass) : false,
+      below_min_samples: nothingEvaluated,
       apdex_result: {
         transaction_name: null, // Workload-level
         satisfied_count: totalSatisfied,
         tolerating_count: totalTolerating,
         frustrated_count: totalFrustrated,
         total_count: totalCount,
+        observed_count: totalObserved,
         apdex_score: overallApdexScore,
         threshold_ms: apdex_threshold_ms || 500,
         avg_response_time_ms: null, // N/A for aggregate workload-level
@@ -784,6 +825,7 @@ export class ApdexCalculator extends BaseCheckService {
       min_apdex_score,
       include_failed_requests,
       exclude_ramp_up_time,
+      apdex_min_samples,
     } = benchmark;
 
     try {
@@ -820,6 +862,20 @@ export class ApdexCalculator extends BaseCheckService {
         };
       }
 
+      // Too few executions to judge: neither pass nor fail (null is a pass for the run's overall verdict).
+      if (apdexResult.observed_count < apdex_min_samples) {
+        return {
+          benchmark_id: benchmarkId,
+          test_run_id: testRun.test_run_id,
+          meets_requirement: null,
+          below_min_samples: true,
+          apdex_result: apdexResult,
+          requirement: { min_score: min_apdex_score, threshold_ms: resolvedThreshold },
+          status: 'COMPLETE',
+          message: `Apdex not evaluated for ${transactionName}: ${apdexResult.observed_count} samples, minimum ${apdex_min_samples}`,
+        };
+      }
+
       // Evaluate pass/fail
       const meetsRequirement = apdexResult.apdex_score !== null &&
         apdexResult.apdex_score >= min_apdex_score;
@@ -848,6 +904,7 @@ export class ApdexCalculator extends BaseCheckService {
           tolerating_count: 0,
           frustrated_count: 0,
           total_count: 0,
+          observed_count: 0,
           apdex_score: null,
           threshold_ms: apdex_threshold_ms || 500,
           avg_response_time_ms: null,

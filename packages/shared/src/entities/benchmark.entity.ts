@@ -63,6 +63,7 @@ export class Benchmark {
     'aggregate_metric',
     'aggregate_stat',
     'include_failed_requests',
+    'apdex_min_samples',
     // Behavior knobs
     'exclude_ramp_up_time',
     'average_all',
@@ -229,6 +230,14 @@ export class Benchmark {
    */
   @Column({ type: 'boolean', default: false })
   include_failed_requests!: boolean;
+
+  /**
+   * Fewest samples a transaction needs before its Apdex score can fail the SLO.
+   * Below it the transaction is reported but not evaluated (meets_requirement null).
+   * NULL (a SUT import from before this column) reads as 50.
+   */
+  @Column({ type: 'int', nullable: true, default: 50 })
+  apdex_min_samples?: number;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   aggregate_metric?: AggregateMetric;

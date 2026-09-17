@@ -56,6 +56,7 @@ export default function ApdexScenarioTable({
   const groupedByScenario = groupTargetsByScenario(sortedTargets);
 
   const defaultThreshold = result.requirement?.threshold_ms || 500;
+  const minSamples = result.requirement?.min_samples;
   const totalTargets = result.targets.length;
   const excludeRampUp = result.exclude_ramp_up_time !== false;
   let globalIdx = 0;
@@ -120,6 +121,7 @@ export default function ApdexScenarioTable({
                       isLastRow={isLastRow}
                       isEvenRow={idx % 2 === 0}
                       defaultThreshold={defaultThreshold}
+                      minSamples={minSamples}
                       scenario={target.scenario_name || scenario}
                       onToggle={() => onToggleTransaction(transactionKey, transactionName, excludeRampUp)}
                       onOpenActionMenu={(e) => onOpenApdexActionMenu(

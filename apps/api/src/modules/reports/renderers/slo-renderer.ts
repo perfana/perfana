@@ -111,7 +111,7 @@ export class SloRenderer {
     const allPassed = failed === 0;
 
     const headerChips = [
-      chip(`${passed}/${total} passed`, allPassed ? 'good' : 'bad'),
+      chip(`${passed}/${total} passed`, !allPassed ? 'bad' : passed > 0 ? 'good' : 'neutral'),
       failed > 0 ? chip(`${failed} failed`, 'bad') : '',
     ];
 
@@ -192,8 +192,16 @@ export class SloRenderer {
     const tableRows = results
       .map((result, idx) => {
         const isPassed = result.meets_requirement === true;
-        const rowBg = isPassed ? (idx % 2 === 1 ? '#fbfcfd' : '#ffffff') : '#fff7f6';
-        const statusBadge = isPassed ? pill('PASS', 'good') : pill('FAIL', 'bad');
+        // NULL with a COMPLETE status is "not evaluated" (Apdex below its sample floor), not a failure.
+        const isFailed = result.meets_requirement === false;
+        const rowBg = isFailed ? '#fff7f6' : (idx % 2 === 1 ? '#fbfcfd' : '#ffffff');
+        const statusBadge = isPassed
+          ? pill('PASS', 'good')
+          : isFailed
+            ? pill('FAIL', 'bad')
+            : result.status === 'ERROR'
+              ? pill('ERROR', 'warn')
+              : pill('N/A', 'neutral');
         const cell = `padding: 12px 16px; border-bottom: 1px solid #f0f2f5;`;
         const pattern = result.match_pattern
           ? `<div style="font-size:10.5px; color:${REPORT_COLORS.mutedInk}; margin-top:4px;">For series matching pattern: ${this.utils.escapeHtml(result.match_pattern)}</div>`

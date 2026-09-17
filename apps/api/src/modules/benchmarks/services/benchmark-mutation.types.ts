@@ -60,6 +60,8 @@ export interface CreateApdexSloDto {
   apdexThresholdMs?: number;
   includeFailedRequests?: boolean;
   excludeRampUpTime?: boolean;
+  /** Fewest samples before a transaction's score can fail the SLO (default 50). */
+  apdexMinSamples?: number;
   description?: string;
   tags?: string[];
 }
@@ -73,6 +75,8 @@ export interface UpdateApdexSloDto {
   apdexThresholdMs?: number | null;
   includeFailedRequests?: boolean;
   excludeRampUpTime?: boolean;
+  /** `null` resets to the default (50), like apdexThresholdMs. */
+  apdexMinSamples?: number | null;
   enabled?: boolean;
   description?: string;
   tags?: string[];

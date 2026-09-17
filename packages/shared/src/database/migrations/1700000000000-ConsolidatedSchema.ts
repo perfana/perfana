@@ -955,6 +955,12 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       `ALTER TABLE public.notification_channels ADD COLUMN IF NOT EXISTS use_proxy boolean NOT NULL DEFAULT false`,
     );
 
+    // Apdex SLO: fewest samples before a transaction's score counts (1808 for existing DBs).
+    // Nullable: older SUT-transfer bundles lack the key and json_populate_recordset inserts NULL.
+    await queryRunner.query(
+      `ALTER TABLE public.benchmarks ADD COLUMN IF NOT EXISTS apdex_min_samples integer DEFAULT 50 CHECK (apdex_min_samples IS NULL OR apdex_min_samples >= 1)`,
+    );
+
     // Free-form host labels on Dynatrace entity mappings — presentation only.
     await queryRunner.query(
       `ALTER TABLE public.dynatrace_entity_mappings ADD COLUMN IF NOT EXISTS labels text[] NOT NULL DEFAULT '{}'::text[]`,

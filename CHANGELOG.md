@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.34] - 2026-09-17
+
+### Added
+- **An Apdex SLO no longer fails on a transaction that barely ran.** A transaction with two executions scored 0.0 and failed the whole workload SLO. Every Apdex SLO now carries a minimum sample count (`apdex_min_samples`, default 50, "Minimum samples per transaction" in both Apdex SLO dialogs): a transaction with fewer executions than the floor is reported with its score and counts but is neither a pass nor a fail (`meets_requirement: null`, `below_min_samples: true` on its target), so the run's overall verdict — `bool_and(COALESCE(meets_requirement, true))` — is unaffected by it. The floor counts **every execution**, failed ones included, not the success-only count that feeds the score: otherwise a transaction with 960 errors and 40 successes would read "too few samples" and pass, while one with 0 successes still fails on NO_DATA. The scenario table shows an amber **Too few** chip (tooltip: the count and the SLO's floor); a transaction-level SLO below the floor — and a workload SLO in which nothing at all was evaluated — shows **Too few samples** in the SLO list with the checker's message, and the workload message reads `All N evaluated transactions meet …` / `No transactions evaluated: all N have fewer than 50 samples`. `POST`/`PUT /benchmarks/apdex` take `apdexMinSamples` (integer 1..2147483647, 400 otherwise; `null` on update resets to 50); the check result stores `requirement.min_samples`. Migration 1808 adds the column **nullable** with `DEFAULT 50` and a `CHECK (>= 1)`: `benchmarks` travels in SUT-transfer bundles, and `json_populate_recordset` inserts NULL for a key an older bundle lacks, so NOT NULL would have rejected every pre-1808 import; readers COALESCE. Existing check results keep their stored verdict until the run is re-evaluated.
+
+### Changed
+- **The report and its summary treat an unevaluated SLO as neither passed nor failed.** `slo-renderer` drew a red FAIL pill for any row whose `meets_requirement` was not `true`, and `getSloSummary` counted it as failed; both now key on `false`, render `null` as a neutral N/A (or a warn ERROR pill when `status = 'ERROR'`), and the header chip is neutral rather than green when nothing passed. This also changes how rows written before this version render: an errored or NO_DATA aggregated check used to show FAIL and now shows ERROR / N/A, matching the worker's own verdict.
+
+### Fixed
+- **The Apdex SLO dialogs' minimum-samples field can be cleared while typing.** The first cut mapped an empty field to 1 on every keystroke, so clearing "50" and typing "75" produced "175". One shared `ApdexMinSamplesField` holds a text draft, forwards only valid integers, flags an invalid draft and snaps back to the last valid value on blur. Disabling an SLO in the same save as a min-samples edit no longer drops the edit; the apdex-config dialog resets the field on reopen like the other fields.
+
 ## [0.2.95.33] - 2026-09-17
 
 ### Added

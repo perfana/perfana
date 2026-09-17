@@ -42,6 +42,7 @@ export interface Benchmark {
   apdex_threshold_ms?: number;
   min_apdex_score?: number;
   include_failed_requests: boolean;
+  apdex_min_samples: number;
   // Aggregated SLO fields
   aggregate_metric?: string;
   aggregate_stat?: string;
@@ -153,6 +154,7 @@ export class BenchmarkMatcher extends BaseCheckService {
         apdex_threshold_ms,
         min_apdex_score,
         COALESCE(include_failed_requests, false) as include_failed_requests,
+        COALESCE(apdex_min_samples, 50) as apdex_min_samples,
         aggregate_metric,
         aggregate_stat
       FROM benchmarks
@@ -196,6 +198,7 @@ export class BenchmarkMatcher extends BaseCheckService {
       apdex_threshold_ms: row.apdex_threshold_ms as number | undefined,
       min_apdex_score: row.min_apdex_score ? parseFloat(String(row.min_apdex_score)) : undefined,
       include_failed_requests: (row.include_failed_requests as boolean) || false,
+      apdex_min_samples: Number(row.apdex_min_samples ?? 50),
       // Aggregated SLO fields
       aggregate_metric: row.aggregate_metric as string | undefined,
       aggregate_stat: row.aggregate_stat as string | undefined,
@@ -243,6 +246,7 @@ export class BenchmarkMatcher extends BaseCheckService {
         apdex_threshold_ms,
         min_apdex_score,
         COALESCE(include_failed_requests, false) as include_failed_requests,
+        COALESCE(apdex_min_samples, 50) as apdex_min_samples,
         aggregate_metric,
         aggregate_stat
       FROM benchmarks
@@ -282,6 +286,7 @@ export class BenchmarkMatcher extends BaseCheckService {
       apdex_threshold_ms: row.apdex_threshold_ms,
       min_apdex_score: row.min_apdex_score ? parseFloat(String(row.min_apdex_score)) : undefined,
       include_failed_requests: row.include_failed_requests || false,
+      apdex_min_samples: Number(row.apdex_min_samples ?? 50),
       // Aggregated SLO fields
       aggregate_metric: row.aggregate_metric,
       aggregate_stat: row.aggregate_stat,

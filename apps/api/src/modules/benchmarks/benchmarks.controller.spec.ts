@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { BenchmarksController } from './benchmarks.controller';
 import { BenchmarksService } from './benchmarks.service';
 import { Benchmark } from '../../entities';
@@ -134,6 +134,8 @@ describe('BenchmarksController', () => {
     syncTagsWithApplicationDashboards: jest.fn(),
     getBenchmarkTagSyncStatus: jest.fn(),
     getSystemEnvironmentsAndWorkloads: jest.fn(),
+    createApdexSlo: jest.fn(),
+    updateApdexSlo: jest.fn(),
   });
 
   beforeEach(async () => {
@@ -1323,6 +1325,67 @@ describe('BenchmarksController', () => {
       // Act & Assert
       await expect(controller.getSystemConfigOptions(mockUserContext, 'system-uuid')).rejects.toThrow(HttpException);
       expect(loggerSpy).toHaveBeenCalledWith('Failed to fetch system config options:', error);
+    });
+  });
+
+  // The Apdex body is an untyped inline DTO, so range errors come back from the
+  // service as plain Errors and the controller has to map them to 400 by message.
+  describe('Apdex SLO endpoints — apdexMinSamples error mapping', () => {
+    const apdexCreateDto = {
+      systemUnderTestId: 'system-uuid',
+      testEnvironment: 'production',
+      workload: 'load-test',
+      minApdexScore: 0.9,
+      apdexMinSamples: 0,
+    };
+
+    it('createApdexSlo maps an apdexMinSamples range error to 400 with the service message', async () => {
+      service.createApdexSlo.mockRejectedValue(new BadRequestException('apdexMinSamples must be an integer of at least 1'));
+
+      await expect(controller.createApdexSlo(mockUserContext, apdexCreateDto)).rejects.toThrow(
+        new HttpException('apdexMinSamples must be an integer of at least 1', HttpStatus.BAD_REQUEST),
+      );
+      expect(service.createApdexSlo).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, apdexCreateDto);
+    });
+
+    it('createApdexSlo still maps unrelated errors to 500', async () => {
+      service.createApdexSlo.mockRejectedValue(new Error('connection refused'));
+
+      await expect(controller.createApdexSlo(mockUserContext, apdexCreateDto)).rejects.toThrow(
+        new HttpException('Failed to create Apdex SLO', HttpStatus.INTERNAL_SERVER_ERROR),
+      );
+    });
+
+    it('createApdexSlo passes apdexMinSamples through and returns the created SLO', async () => {
+      const created = { ...mockBenchmark, benchmark_type: 'apdex', apdex_min_samples: 25 } as any as Benchmark;
+      service.createApdexSlo.mockResolvedValue(created);
+
+      const result = await controller.createApdexSlo(mockUserContext, { ...apdexCreateDto, apdexMinSamples: 25 });
+
+      expect(result).toBe(created);
+      expect(service.createApdexSlo).toHaveBeenCalledWith(
+        mockUserContext.userId,
+        mockUserContext.roles,
+        expect.objectContaining({ apdexMinSamples: 25 }),
+      );
+    });
+
+    it('updateApdexSlo maps an apdexMinSamples range error to 400 with the service message', async () => {
+      service.updateApdexSlo.mockRejectedValue(new BadRequestException('apdexMinSamples must be an integer of at least 1'));
+
+      await expect(
+        controller.updateApdexSlo('benchmark-uuid-1', mockUserContext, { apdexMinSamples: 1.5 }),
+      ).rejects.toThrow(
+        new HttpException('apdexMinSamples must be an integer of at least 1', HttpStatus.BAD_REQUEST),
+      );
+    });
+
+    it('updateApdexSlo returns 404 when the service finds nothing', async () => {
+      service.updateApdexSlo.mockResolvedValue(null);
+
+      await expect(
+        controller.updateApdexSlo('missing', mockUserContext, { apdexMinSamples: 10 }),
+      ).rejects.toThrow(new HttpException('Apdex SLO not found', HttpStatus.NOT_FOUND));
     });
   });
 });

@@ -653,6 +653,30 @@ verdicts.
 **Where:** `apps/worker/src/pipelines/checks/ApdexCalculator.ts` (`evaluateWorkloadLevelApdex`,
 `calculateApdexFromRollupBulk`, `calculateApdexRaw`).
 
+### Apdex floor: the rollup and raw paths disagree on the window, and "nothing evaluated" reads as passed downstream
+
+**Priority:** P3
+**Origin:** /ship adversarial lane on `feat/apdex-min-samples` (v0.2.95.34, 2026-09-17); two
+pre-existing divergences that the sample floor promotes from a nudged score to a changed verdict.
+**Why:** (1) The rollup fast path answers from the `ramp_up_excluded` row, which spans
+`[start+ramp_up, end-ramp_down)` and is omitted when empty (a miss), while the raw fallback in
+`calculateApdexRaw` applies only the start cutoff (`loadTestRunForChecks` does not load `ramp_down`)
+and drops `response_time IS NULL` rows the rollup's `COUNT(*)` keeps. A transaction with 45 samples
+in the window and 10 in the ramp-down band is "Too few" from the rollup and evaluated from the raw
+scan; the raw path is reachable (rollup never written, `sp_apdex_rollup` failure, pre-#298 row).
+(2) A run whose every SLO is `meets_requirement: null` (all below the floor) is `valid`, the
+consolidated result reads `meetsRequirement: true`, and Slack/Teams and the dashboard announce
+"SLOs Passed"; only the per-row chips and the checker message say nothing was judged.
+**What to do:** (1) load `ramp_down` in `loadTestRunForChecks` and bound the raw scan by both
+offsets, and either keep NULL `response_time` rows out of the rollup's `total_count` or count them
+in the raw `observed_count` — pick one and pin it with a test on both paths. (2) carry a
+"not evaluated" tri-state into `consolidated_result` (or count nulls there) so the message builders
+can say "N SLOs not evaluated" instead of "Passed".
+**Where:** `apps/worker/src/pipelines/checks/ApdexCalculator.ts` (`calculateApdexRaw`,
+`calculateApdexFromRollupBulk`), `apps/worker/src/pipelines/ChecksPipeline.ts`
+(`loadTestRunForChecks`, `updateConsolidatedResult`),
+`apps/api/src/modules/notifications/message-builders/*.message-builder.ts`.
+
 ### The full Dynatrace collection materialises every point of the run before its first INSERT
 
 **Priority:** P3
@@ -1303,6 +1327,24 @@ timer. (3) and (4) are hardening.
 ---
 
 ## SUT transfer
+
+### The import writes NULL for every column a bundle predates, so NOT NULL columns reject old bundles
+
+**Priority:** P2
+**Origin:** /ship data-migration lane on `feat/apdex-min-samples` (v0.2.95.34, 2026-09-17).
+`apdex_min_samples` was made nullable to dodge it; the trap itself is still armed.
+**Why:** `sut-import.service.ts` inserts every table as
+`INSERT INTO t SELECT * FROM json_populate_recordset(null::t, $1::json)`. A key absent from the JSON
+comes out as NULL, not the column DEFAULT, so any `NOT NULL DEFAULT x` column added after a bundle
+was exported makes that bundle fail with 23502 on import. Verified locally. `benchmarks` is a
+`core` resource, so the whole import fails; `dynatrace_entity_mappings.labels` (1802) and the
+`use_proxy` columns already have this shape on `optional` tables, where the failure is partial. The
+manifest still accepts `schemaVersion: 1`, so nothing refuses the old bundle up front.
+**What to do:** build the column list from the intersection of the catalog columns and the keys
+present in the bundle rows (the `SERIAL_ID_TABLES` branch already reads the catalog), so an absent
+key falls to the column DEFAULT; then new columns can be NOT NULL again. Add a fixture bundle from
+a previous schema to the import tests.
+**Where:** `apps/api/src/modules/sut-transfer/sut-import.service.ts`.
 
 ### The SUT export has no completion signal, and leaves an empty file behind on cancel
 

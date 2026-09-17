@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import ApdexSloDialog from '@/app/test-runs/[id]/components/performance-analysis/ApdexSloDialog';
@@ -253,5 +253,97 @@ describe('ApdexSloDialog - excludeRampUpTime toggle', () => {
       expect(body!.excludeRampUpTime).toBe(false);
       expect(body!.enabled).toBe(true);
     });
+  });
+});
+
+describe('ApdexSloDialog - minimum samples per transaction', () => {
+  const onClose = jest.fn();
+  const onSuccess = jest.fn();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  const minSamplesInput = () =>
+    screen.getByLabelText(/Minimum samples per transaction/i) as HTMLInputElement;
+
+  it('defaults the field to 50 for a new SLO and sends it in the POST body', async () => {
+    routeFetch({ '/test-runs/': testRun, '/benchmarks?': [] });
+    const user = userEvent.setup();
+    render(<ApdexSloDialog open onClose={onClose} testRunId="run-1" currentThreshold={500} onSuccess={onSuccess} />);
+    await waitFor(() => expect(screen.getByText(/Create Apdex SLO/i)).toBeInTheDocument());
+    await enableSlo(user);
+
+    expect(minSamplesInput()).toHaveValue(50);
+
+    // Single replace (select-all + type / paste). Note: clearing the field first
+    // snaps it to 1 via the `|| 1` fallback, so clear-then-type would append.
+    fireEvent.change(minSamplesInput(), { target: { value: '20' } });
+    expect(minSamplesInput()).toHaveValue(20);
+
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      const body = findBodyFor('/benchmarks/apdex', 'POST');
+      expect(body).toBeDefined();
+      expect(body!.apdexMinSamples).toBe(20);
+    });
+  });
+
+  it('loads apdex_min_samples from an existing SLO and sends the edited value in the PUT body', async () => {
+    routeFetch({
+      '/test-runs/': testRun,
+      '/benchmarks?': [
+        { id: 'slo-42', min_apdex_score: 0.85, include_failed_requests: false, exclude_ramp_up_time: true, apdex_min_samples: 25, enabled: true, apdex_threshold_ms: 500 },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<ApdexSloDialog open onClose={onClose} testRunId="run-1" currentThreshold={500} onSuccess={onSuccess} />);
+    await waitFor(() => expect(screen.getByText(/Apply to analysis timerange only/i)).toBeInTheDocument());
+
+    expect(minSamplesInput()).toHaveValue(25);
+
+    fireEvent.change(minSamplesInput(), { target: { value: '75' } });
+    expect(minSamplesInput()).toHaveValue(75);
+
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      const body = findBodyFor('/benchmarks/apdex/slo-42', 'PUT');
+      expect(body).toBeDefined();
+      expect(body!.apdexMinSamples).toBe(75);
+      expect(body!.enabled).toBe(true);
+    });
+  });
+
+  it('falls back to 50 when an existing SLO has no apdex_min_samples (older API)', async () => {
+    routeFetch({
+      '/test-runs/': testRun,
+      '/benchmarks?': [
+        { id: 'slo-7', min_apdex_score: 0.9, include_failed_requests: false, exclude_ramp_up_time: true, enabled: true, apdex_threshold_ms: 500 },
+      ],
+    });
+    render(<ApdexSloDialog open onClose={onClose} testRunId="run-1" currentThreshold={500} onSuccess={onSuccess} />);
+    await waitFor(() => expect(screen.getByText(/Apply to analysis timerange only/i)).toBeInTheDocument());
+
+    expect(minSamplesInput()).toHaveValue(50);
+  });
+
+  it('keeps an invalid draft in the field and snaps back to the last valid value on blur', async () => {
+    routeFetch({ '/test-runs/': testRun, '/benchmarks?': [] });
+    const user = userEvent.setup();
+    render(<ApdexSloDialog open onClose={onClose} testRunId="run-1" currentThreshold={500} onSuccess={onSuccess} />);
+    await waitFor(() => expect(screen.getByText(/Create Apdex SLO/i)).toBeInTheDocument());
+    await enableSlo(user);
+
+    fireEvent.change(minSamplesInput(), { target: { value: '0' } });
+    expect(minSamplesInput()).toHaveValue(0);
+    expect(minSamplesInput()).toHaveAttribute('aria-invalid', 'true');
+
+    fireEvent.change(minSamplesInput(), { target: { value: '' } });
+    fireEvent.blur(minSamplesInput());
+    expect(minSamplesInput()).toHaveValue(50);
   });
 });
