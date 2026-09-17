@@ -1,4 +1,5 @@
-import { isUrlPanel, getUrlPanelMetric, buildUrlPanels, URL_PANEL_ID_MIN } from './url-perf-panels';
+import { isUrlPanel, isRequestPanel, getUrlPanelMetric, buildUrlPanels, URL_PANEL_ID_MIN } from './url-perf-panels';
+import { PERFORMANCE_METRICS_PANEL_UNITS } from '@/app/test-runs/[id]/components/shared/metric-options';
 
 describe('url-perf-panels', () => {
   it('recognises URL panel ids', () => {
@@ -26,5 +27,15 @@ describe('url-perf-panels', () => {
     expect(panels.find(p => p.id === 210)?.title).toBe('URL RT');
     expect(panels.find(p => p.id === 211)).toBeUndefined(); // per-percentile RT dupes removed
     expect(panels.find(p => p.id === 216)).toBeUndefined(); // no apdex
+  });
+
+  it('never shares an id between a stored perf-test panel and a virtual URL panel', () => {
+    // The worker writes 101-108, 201-209, 219 and 301-303; the web synthesises 210-218 on the
+    // same dashboards. A stored id inside the URL block is routed through isUrlPanel() to the
+    // sampler-URL rollup and answers with the wrong series (v0.2.95.38 review caught 210).
+    const urlIds = new Set(buildUrlPanels('d').map(p => p.id));
+    const storedIds = Object.keys(PERFORMANCE_METRICS_PANEL_UNITS).map(Number);
+    expect(storedIds.filter(id => urlIds.has(id))).toEqual([]);
+    expect([...urlIds].some(isRequestPanel)).toBe(false);
   });
 });

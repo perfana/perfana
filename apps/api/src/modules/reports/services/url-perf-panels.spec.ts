@@ -1,4 +1,4 @@
-import { getUrlPanel, isUrlPanel, presetAggregateSpec } from './url-perf-panels';
+import { getUrlPanel, isRequestPanel, isUrlPanel, presetAggregateSpec } from './url-perf-panels';
 import { unitLabel } from '../renderers/unit-format';
 
 /**
@@ -99,5 +99,14 @@ describe('presetAggregateSpec panel table (drift guard vs apps/web)', () => {
     for (const panelId of [100, 106, 200, 206, 210, 301]) {
       expect(spec(panelId)).toBeNull();
     }
+  });
+});
+
+describe('isRequestPanel (drift guard vs apps/web)', () => {
+  // Same literals as apps/web/app/test-runs/[id]/components/compare/utils/__tests__/metric-options.test.ts.
+  it('accepts the stored request panels and never a virtual URL panel', () => {
+    expect([201, 204, 205, 206, 207, 208, 209, 219].every(isRequestPanel)).toBe(true);
+    expect([101, 104, 108, 210, 211, 218, 220, null, undefined].some(isRequestPanel)).toBe(false);
+    expect([210, 214, 215, 217, 218].some((id) => isUrlPanel(id) && isRequestPanel(id))).toBe(false);
   });
 });

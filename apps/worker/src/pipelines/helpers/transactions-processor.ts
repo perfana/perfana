@@ -242,8 +242,13 @@ export class TransactionsProcessor {
           SUM(bd.is_error) as error_count,
 
           AVG(bd.response_time) FILTER (WHERE bd.response_time IS NOT NULL) as avg_response_time,
-          -- avg_rt x count: the Top 10 impact score, per bucket
-          SUM(bd.response_time) as impact,
+          -- avg_rt x count, i.e. the Top 10 impact score, per SECOND of run (divided by the
+          -- bucket size like throughput is): bucket size is a step function of run length, so
+          -- a per-bucket sum would double when a run overruns a boundary and ADAPT would flag
+          -- every series. SUM(value x bucket) over the window ~= impact_score. The cast is
+          -- load-bearing: response_time is integer, so without it SUM is bigint and the
+          -- division is only float because $4 happens to be typed by the INTERVAL above.
+          SUM(bd.response_time)::double precision / $4 as impact,
           PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY bd.response_time)
             FILTER (WHERE bd.response_time IS NOT NULL) as p90_response_time,
           PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY bd.response_time)
