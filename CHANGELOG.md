@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.37] - 2026-09-17
+
+### Added
+- **A golden-path template can select a panel by `panelTitle` (#611).** #609 made `dashboardUid` a pattern, but a Dynatrace host dashboard family gives the same panel a different `panelId` on every dashboard (`CPU Usage` is 15735 on one host, 19755 on the next — 28 ids for 28 hosts), so one stanza per (dashboard, panel) was still required and went stale on every new host. An entry may now omit `panelId` and give `panelTitle` instead; on test-run completion the title is resolved per dashboard against the panels its recent runs recorded in `ds_panels` (the SUT's last 10 completed runs, read once per run, index-bounded, and only when a title template exists). `regex: true` applies to `panelTitle` as it does to `dashboardUid`, so a literal uid can pair with a pattern title or both can be patterns. A title matching several panels on one dashboard seeds all of them; one matching none is a no-op for that dashboard; a dashboard whose panels have not been collected yet is picked up on the next completion. An exact `panelId` still wins over a title resolving to the same panel, after the exact > regex > wildcard uid precedence; an invalid title pattern is logged and skips that template only. The provisioning upsert keys a title-only row on `(dashboard_uid | NULL, NULL panel_id, panel_title, regex)`, and an entry with neither `panelId` nor `panelTitle` is counted as an error. Files that name every panel by id behave as before; `panelTitle` beside a `panelId` stays descriptive.
+
 ## [0.2.95.36] - 2026-09-17
 
 ### Fixed

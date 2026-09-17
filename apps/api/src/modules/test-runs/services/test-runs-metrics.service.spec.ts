@@ -7,6 +7,7 @@ import {
   DsCompareConfig,
   ProvisionedTemplateDsCompareConfig,
   ApplicationDashboard,
+  DsPanels,
 } from '../../../entities';
 import { createMockRepository, MockRepository } from '../../../../test/helpers/mock-repository.factory';
 import { createAuthorizationServiceMock } from '../../../../test/mocks/authorization-service.mock';
@@ -19,6 +20,7 @@ describe('TestRunsMetricsService', () => {
   let templateRepo: MockRepository<ProvisionedTemplateDsCompareConfig>;
   let compareConfigRepo: MockRepository<DsCompareConfig>;
   let applicationDashboardRepo: MockRepository<ApplicationDashboard>;
+  let dsPanelsRepo: MockRepository<DsPanels>;
   let auditService: jest.Mocked<AuditService>;
 
   beforeEach(async () => {
@@ -30,6 +32,7 @@ describe('TestRunsMetricsService', () => {
         { provide: getRepositoryToken(DsCompareConfig), useValue: createMockRepository() },
         { provide: getRepositoryToken(ProvisionedTemplateDsCompareConfig), useValue: createMockRepository() },
         { provide: getRepositoryToken(ApplicationDashboard), useValue: createMockRepository() },
+        { provide: getRepositoryToken(DsPanels), useValue: createMockRepository() },
         { provide: AuthorizationService, useValue: createAuthorizationServiceMock() },
         {
           provide: AuditService,
@@ -47,6 +50,7 @@ describe('TestRunsMetricsService', () => {
     templateRepo = module.get(getRepositoryToken(ProvisionedTemplateDsCompareConfig));
     compareConfigRepo = module.get(getRepositoryToken(DsCompareConfig));
     applicationDashboardRepo = module.get(getRepositoryToken(ApplicationDashboard));
+    dsPanelsRepo = module.get(getRepositoryToken(DsPanels));
     auditService = module.get(AuditService);
   });
 
@@ -319,6 +323,101 @@ describe('TestRunsMetricsService', () => {
         // dash-a already has a config on panel 201 (metric-level counts for a panel-level template, as before)
         expect(result).toEqual({ compareConfigsCreated: 2 });
         expect(created().map((c) => c.application_dashboard_id).sort()).toEqual(['dash-b', 'dash-jvm']);
+      });
+    });
+
+    describe('panel_title templates (issue #611)', () => {
+      // Two Dynatrace host dashboards whose ids for the same panel differ per dashboard.
+      const dashboards = [
+        { id: 'host-a', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production', dashboardUid: 'dynatrace-host-a', organizationId: 'org-1' },
+        { id: 'host-b', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production', dashboardUid: 'dynatrace-host-b', organizationId: 'org-1' },
+      ];
+      const panels = [
+        { dashboard_id: 'host-a', panel_id: 15735, panel_title: 'CPU Usage' },
+        { dashboard_id: 'host-a', panel_id: 15736, panel_title: 'Memory Usage' },
+        { dashboard_id: 'host-b', panel_id: 19755, panel_title: 'CPU Usage' },
+        { dashboard_id: 'host-b', panel_id: 19756, panel_title: 'Memory Usage' },
+        { dashboard_id: 'host-b', panel_id: 19757, panel_title: 'Memory Usage' }, // duplicate title
+      ];
+      const tmpl = (over: Record<string, unknown>) => ({
+        id: 'tmpl', system_under_test_id: null, dashboard_uid: '^dynatrace-', panel_id: null, panel_title: null,
+        metric_classification: 'USE_utilization', higher_is_better: false, regex: true, config_overrides: null, ...over,
+      });
+      const created = () => compareConfigRepo.create.mock.calls.map(([d]) => d as any);
+
+      beforeEach(() => {
+        applicationDashboardRepo.find.mockResolvedValue(dashboards);
+        dsPanelsRepo.query.mockResolvedValue(panels);
+        compareConfigRepo.create.mockImplementation((data) => data as any);
+        compareConfigRepo.save.mockImplementation((data) => Promise.resolve({ id: 'new-id', ...data } as any));
+      });
+
+      it('resolves the panel id per dashboard and seeds every panel a title matches', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ panel_title: 'Memory Usage' })]);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 3 });
+        expect(created().map((c) => `${c.application_dashboard_id}|${c.panel_id}`).sort())
+          .toEqual(['host-a|15736', 'host-b|19756', 'host-b|19757']);
+        // Panels come from the SUT's recent runs, loaded once.
+        expect(dsPanelsRepo.query).toHaveBeenCalledTimes(1);
+        expect(dsPanelsRepo.query).toHaveBeenCalledWith(expect.any(String), [['host-a', 'host-b'], 'sut-uuid-1', 'production']);
+      });
+
+      it('regex: true applies to panel_title; a literal uid pairs with a pattern title', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ dashboard_uid: 'dynatrace-host-a', panel_title: 'Usage$' })]);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 2 });
+        expect(created().map((c) => c.panel_id).sort()).toEqual([15735, 15736]);
+      });
+
+      it('a literal title is not a pattern when regex is false', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ dashboard_uid: null, regex: false, panel_title: 'Usage' })]);
+
+        expect(await service.applyGoldenPathClassifications(testRunInput)).toEqual({ compareConfigsCreated: 0 });
+      });
+
+      it('an exact panel_id wins over a title resolving to the same panel', async () => {
+        templateRepo.find.mockResolvedValue([
+          tmpl({ id: 'title', panel_title: 'CPU Usage', metric_classification: 'title-class' }),
+          tmpl({ id: 'exact', dashboard_uid: 'dynatrace-host-a', regex: false, panel_id: 15735, metric_classification: 'id-class' }),
+        ]);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 2 });
+        const byPanel = Object.fromEntries(created().map((c) => [c.panel_id, c.config_data.metricClassification.classification]));
+        expect(byPanel).toEqual({ 15735: 'id-class', 19755: 'title-class' });
+      });
+
+      it('a title matching no panel, or a dashboard with no collected panels, is a no-op', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ panel_title: 'Disk Utilization' })]);
+        dsPanelsRepo.query.mockResolvedValue([]);
+
+        expect(await service.applyGoldenPathClassifications(testRunInput)).toEqual({ compareConfigsCreated: 0 });
+      });
+
+      it('an invalid panel_title regex is logged and skips that template only', async () => {
+        templateRepo.find.mockResolvedValue([
+          tmpl({ id: 'bad', panel_title: '(unclosed' }),
+          tmpl({ id: 'ok', panel_title: 'CPU Usage' }),
+        ]);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 2 });
+        expect(created().map((c) => c.panel_id).sort()).toEqual([15735, 19755]);
+      });
+
+      it('does not load panels when every template has a panel_id', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ panel_id: 201 })]);
+
+        await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(dsPanelsRepo.query).not.toHaveBeenCalled();
       });
     });
 

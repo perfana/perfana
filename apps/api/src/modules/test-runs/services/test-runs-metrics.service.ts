@@ -8,6 +8,7 @@ import {
   DsCompareConfig,
   ProvisionedTemplateDsCompareConfig,
   ApplicationDashboard,
+  DsPanels,
 } from '../../../entities';
 import { OwnedResource } from '@perfana/shared';
 import { CreateMetricClassificationDto, MetricClassificationDto } from '../dto/metric-classification.dto';
@@ -45,6 +46,8 @@ export class TestRunsMetricsService {
     private templateRepo: Repository<ProvisionedTemplateDsCompareConfig>,
     @InjectRepository(ApplicationDashboard)
     private applicationDashboardRepo: Repository<ApplicationDashboard>,
+    @InjectRepository(DsPanels)
+    private dsPanelsRepo: Repository<DsPanels>,
     private authorizationService: AuthorizationService,
     private readonly auditService: AuditService,
   ) {}
@@ -498,6 +501,11 @@ export class TestRunsMetricsService {
    * (if they don't already exist) with the classification and thresholds embedded
    * in config_data.
    *
+   * A template names its panel by `panel_id`, or — when `panel_id IS NULL` — by `panel_title`,
+   * resolved per dashboard against the panels recorded in `ds_panels` by that dashboard's recent
+   * runs (exact title, or a regex when `regex = true`). A title matching several panels seeds all
+   * of them; a title matching none is a no-op for that dashboard.
+   *
    * The provisioned_template_ds_compare_configs table only holds templates (no per-test-run rows).
    * The per-test-run data lives in ds_compare_config.config_data.metricClassification.
    */
@@ -532,10 +540,30 @@ export class TestRunsMetricsService {
     // Three ways a template names its dashboards, in precedence order:
     //   exact uid > regex uid (`regex = true`) > wildcard (`dashboard_uid IS NULL`).
     // A dashboard takes at most one template per (panel_id, metric_name); the exact one wins.
+    // Within a tier an id template is offered before a title template, so an exact `panel_id`
+    // wins over a `panel_title` that resolves to the same panel.
+    goldenPathTemplates.sort((a, b) => Number(a.panel_id == null) - Number(b.panel_id == null));
     const exactByUid = new Map<string, typeof goldenPathTemplates>();
     const regexTemplates: Array<{ pattern: RegExp; template: (typeof goldenPathTemplates)[number] }> = [];
     const wildcardTemplates: typeof goldenPathTemplates = [];
+    const titlePatterns = new Map<string, RegExp>();
     for (const template of goldenPathTemplates) {
+      if (template.panel_id == null) {
+        if (!template.panel_title) {
+          this.logger.warn(`Skipping golden-path template ${template.id}: neither panel_id nor panel_title set`);
+          continue;
+        }
+        if (template.regex) {
+          try {
+            titlePatterns.set(template.id, new RegExp(template.panel_title));
+          } catch (err) {
+            this.logger.warn(
+              `Skipping golden-path template ${template.id}: invalid panel_title regex "${template.panel_title}": ${(err as Error).message}`,
+            );
+            continue;
+          }
+        }
+      }
       if (!template.dashboard_uid) {
         wildcardTemplates.push(template);
       } else if (template.regex) {
@@ -551,6 +579,29 @@ export class TestRunsMetricsService {
         const existing = exactByUid.get(template.dashboard_uid) ?? [];
         existing.push(template);
         exactByUid.set(template.dashboard_uid, existing);
+      }
+    }
+
+    // Title templates need each dashboard's panel list. `ds_panels` is per run, so read the SUT's
+    // most recent completed runs (index-bounded) rather than the whole table; a dashboard whose
+    // panels have never been collected resolves nothing this run and is picked up on the next.
+    const panelsByDashboard = new Map<string, Array<{ id: number; title: string }>>();
+    if (goldenPathTemplates.some((t) => t.panel_id == null && t.panel_title)) {
+      const rows: Array<{ dashboard_id: string; panel_id: number; panel_title: string }> = await this.dsPanelsRepo.query(
+        `SELECT DISTINCT p.application_dashboard_id AS dashboard_id, p.panel_id, p.panel_title
+           FROM ds_panels p
+          WHERE p.application_dashboard_id = ANY($1::uuid[])
+            AND p.panel_id IS NOT NULL AND p.panel_title IS NOT NULL
+            AND p.test_run_id IN (
+              SELECT test_run_id FROM test_runs
+               WHERE system_under_test_id = $2 AND test_environment = $3 AND completed = true
+               ORDER BY end_time DESC NULLS LAST LIMIT 10)`,
+        [dashboards.map((d) => d.id), systemUnderTestId, testEnvironment],
+      );
+      for (const r of rows) {
+        const list = panelsByDashboard.get(r.dashboard_id) ?? [];
+        list.push({ id: r.panel_id, title: r.panel_title });
+        panelsByDashboard.set(r.dashboard_id, list);
       }
     }
 
@@ -572,18 +623,27 @@ export class TestRunsMetricsService {
     // 4. For each dashboard, resolve its templates and create the missing DsCompareConfig records
     for (const dashboard of dashboards) {
       if (!dashboard.dashboardUid) continue;
-      const matchingTemplates = new Map<string, (typeof goldenPathTemplates)[number]>();
+      // Resolved (panel_id, template) pairs: a title template contributes one entry per panel it matches.
+      const matchingTemplates = new Map<string, { panelId: number; template: (typeof goldenPathTemplates)[number] }>();
       const offer = (template: (typeof goldenPathTemplates)[number]) => {
-        const key = `${template.panel_id}|${template.metric_name ?? ''}`;
-        if (!matchingTemplates.has(key)) matchingTemplates.set(key, template);
+        const panelIds =
+          template.panel_id != null
+            ? [template.panel_id]
+            : (panelsByDashboard.get(dashboard.id) ?? [])
+                .filter((p) => (template.regex ? titlePatterns.get(template.id)!.test(p.title) : p.title === template.panel_title))
+                .map((p) => p.id);
+        for (const panelId of panelIds) {
+          const key = `${panelId}|${template.metric_name ?? ''}`;
+          if (!matchingTemplates.has(key)) matchingTemplates.set(key, { panelId, template });
+        }
       };
       for (const t of exactByUid.get(dashboard.dashboardUid) ?? []) offer(t);
       for (const { pattern, template } of regexTemplates) if (pattern.test(dashboard.dashboardUid)) offer(template);
       for (const t of wildcardTemplates) offer(t);
       if (matchingTemplates.size === 0) continue;
 
-      for (const template of matchingTemplates.values()) {
-        const panelKey = `${dashboard.id}|${template.panel_id}`;
+      for (const { panelId, template } of matchingTemplates.values()) {
+        const panelKey = `${dashboard.id}|${panelId}`;
         const exists = template.metric_name
           ? existingMetrics.has(`${panelKey}|${template.metric_name}`)
           : existingPanels.has(panelKey);
@@ -619,7 +679,7 @@ export class TestRunsMetricsService {
             test_environment: testEnvironment,
             workload,
             application_dashboard_id: dashboard.id,
-            panel_id: template.panel_id ?? 0,
+            panel_id: panelId,
             metric_name: template.metric_name,
             config_data: configData,
             // Inherit ownership from the dashboard (organization_id NOT NULL on both).
