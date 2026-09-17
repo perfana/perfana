@@ -555,6 +555,34 @@ describe('ProvisioningService', () => {
       );
     });
 
+    it('keys a title-only template on NULL panel_id + panel_title (#611)', async () => {
+      templateRepo.findOne.mockResolvedValue(null);
+      templateRepo.insert.mockResolvedValue(undefined as any);
+
+      const result = await service.provisionMetricClassifications(
+        [{ dashboardUid: '^dynatrace-', regex: true, panelTitle: 'CPU Usage', metricClassification: 'USE_utilization' }],
+        null,
+      );
+
+      expect(result).toEqual({ created: 1, updated: 0, skipped: 0, errors: 0 });
+      expect(templateRepo.findOne).toHaveBeenCalledWith({
+        where: { dashboard_uid: '^dynatrace-', regex: true, panel_id: IsNull(), panel_title: 'CPU Usage' },
+      });
+      expect(templateRepo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ panel_id: null, panel_title: 'CPU Usage' }),
+      );
+    });
+
+    it('counts a template with neither panelId nor panelTitle as an error', async () => {
+      const result = await service.provisionMetricClassifications(
+        [{ dashboardUid: 'x', metricClassification: 'RED_rate' }],
+        null,
+      );
+
+      expect(result).toEqual({ created: 0, updated: 0, skipped: 0, errors: 1 });
+      expect(templateRepo.findOne).not.toHaveBeenCalled();
+    });
+
     it('should set organization_id when provided', async () => {
       templateRepo.findOne.mockResolvedValue(null);
       templateRepo.insert.mockResolvedValue(undefined as any);

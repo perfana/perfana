@@ -71,10 +71,12 @@ interface BenchmarkYaml {
 interface MetricClassificationYaml {
   /** Omit to apply the template to every dashboard carrying `panelId`. */
   dashboardUid?: string;
-  /** `true`: `dashboardUid` is a regular expression matched against each dashboard's uid. */
+  /** `true`: `dashboardUid` and `panelTitle` are regular expressions. */
   regex?: boolean;
   dashboardLabel?: string;
-  panelId: number;
+  /** Omit to select panels by `panelTitle` instead, resolved per dashboard from its collected panels. */
+  panelId?: number;
+  /** Descriptive beside `panelId`; the matching key when `panelId` is omitted. */
   panelTitle?: string;
   metricClassification: string;
   higherIsBetter?: boolean;
@@ -456,13 +458,17 @@ export class ProvisioningService implements OnApplicationBootstrap {
 
     for (const item of items) {
       try {
-        // Upsert key: dashboard_uid (NULL = wildcard) + panel_id + regex, so a pattern row and
-        // a literal row with the same text, or wildcard rows on different panels, never collide.
+        if (item.panelId == null && !item.panelTitle) {
+          throw new Error('panelId or panelTitle is required');
+        }
+        // Upsert key: dashboard_uid (NULL = wildcard) + panel (id, or title when there is no id) +
+        // regex, so a pattern row and a literal row with the same text, wildcard rows on different
+        // panels, or title-only rows on different titles, never collide.
         const existing = await this.templateRepo.findOne({
           where: {
             dashboard_uid: item.dashboardUid ?? IsNull(),
-            panel_id: item.panelId,
             regex: item.regex ?? false,
+            ...(item.panelId != null ? { panel_id: item.panelId } : { panel_id: IsNull(), panel_title: item.panelTitle }),
           },
         });
 
@@ -476,7 +482,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
           dashboard_uid: item.dashboardUid ?? null,
           regex: item.regex ?? false,
           dashboard_label: item.dashboardLabel,
-          panel_id: item.panelId,
+          panel_id: item.panelId ?? null,
           panel_title: item.panelTitle,
           metric_classification: item.metricClassification,
           higher_is_better: item.higherIsBetter,
@@ -500,7 +506,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
         }
       } catch (error) {
         this.logger.error(
-          `Failed to provision metric classification for dashboard "${item.dashboardUid ?? '*'}" panel ${item.panelId}`,
+          `Failed to provision metric classification for dashboard "${item.dashboardUid ?? '*'}" panel ${item.panelId ?? item.panelTitle}`,
           error instanceof Error ? error.message : String(error),
         );
         result.errors++;
