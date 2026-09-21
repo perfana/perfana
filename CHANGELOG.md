@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.1] - 2026-09-21
+
+### Fixed
+- **Transaction / Request Error Rate SLOs on the performance-test dashboards now judge the run's real error rate.** An `avg` check on panel 105 (Transaction Error Rate) or 205 (Request Error Rate) used to average the per-minute error-rate series unweighted, so one failed execution in a quiet minute counted 100 % beside a busy minute's 0 % — on a sparse transaction the SLO reported 10.97 % where Performance Analysis showed 7.49 % for the same run and window (WERKNL-00011, `WG_VAC_16_Stuur_Email`). `DataAggregator` now reads `SUM(failed) / SUM(total)` from the `test_run_transaction_stats` / `test_run_sampler_stats` rollup — the same figure Performance Analysis and the Apdex fast path use — scoped to the dashboard's scenario (taken from the pipeline-written label on the statistics rows; the `all aggregated` dashboard pools every scenario), over the same ramp-up/ramp-down-excluded window the bucket mean was computed over, and only for dashboards backed by a `performance_test` metrics source. A series the rollup does not know keeps the old bucket mean and is named in a worker warning, and a rollup read that fails logs the cause and keeps the bucket mean too, so a missing or half-written rollup is visible rather than silent and never turns a verdict into "no result". `max`/percentile checks on these panels still read the per-bucket series. Existing check results keep their stored value until the run is re-evaluated. The request-level series-name rule is now one shared SQL fragment (`samplerMetricNameSql`) used by both the writer and this reader, so the two cannot drift.
+
+### Changed
+- `package.json` / `package-lock.json` version caught up with `VERSION` (0.2.95 → 0.2.96); they had been left behind by the 0.2.96.0 bump.
+
 ## [0.2.96.0] - 2026-09-21
 
 ### Added
