@@ -17,6 +17,10 @@ import { ResourceNotFoundException, DatabaseException } from '../../../common/ex
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { AuditService } from '../../audit/audit.service';
 
+const GOLDEN_PATH_ACTOR = 'system:golden-path';
+/** What PerformanceTestMetricsPipeline stamps on the default compare configs it seeds. */
+const WORKER_ACTOR = 'worker-pipeline';
+
 @Injectable()
 export class TestRunsMetricsService {
   private readonly logger = new Logger(TestRunsMetricsService.name);
@@ -450,8 +454,9 @@ export class TestRunsMetricsService {
 
       await this.dsCompareConfigRepo.update(
         { id },
-        // Entity config_data is Record<string, any> from shared package
-        { config_data: updateDto.configData } as unknown as Parameters<typeof this.dsCompareConfigRepo.update>[1]
+        // Entity config_data is Record<string, any> from shared package. updated_by is what
+        // applyGoldenPathClassifications reads to tell a user edit from a worker-seeded default.
+        { config_data: updateDto.configData, updated_by: userId || 'user' } as unknown as Parameters<typeof this.dsCompareConfigRepo.update>[1]
       );
 
       const result = await this.dsCompareConfigRepo.findOne({
@@ -505,6 +510,10 @@ export class TestRunsMetricsService {
    * resolved per dashboard against the panels recorded in `ds_panels` by that dashboard's recent
    * runs (exact title, or a regex when `regex = true`). A title matching several panels seeds all
    * of them; a title matching none is a no-op for that dashboard.
+   *
+   * A row already on the panel normally wins (user edits are never overwritten). The exception is a
+   * row the worker seeded and nobody touched (`updated_by = 'worker-pipeline'`): the template is
+   * merged into it. `compareConfigsCreated` counts those merges too.
    *
    * The provisioned_template_ds_compare_configs table only holds templates (no per-test-run rows).
    * The per-test-run data lives in ds_compare_config.config_data.metricClassification.
@@ -611,13 +620,19 @@ export class TestRunsMetricsService {
     // findOne applied.
     const existingConfigs = await this.dsCompareConfigRepo.find({
       where: { system_under_test_id: systemUnderTestId, test_environment: testEnvironment, workload },
-      select: ['application_dashboard_id', 'panel_id', 'metric_name'],
+      select: ['id', 'application_dashboard_id', 'panel_id', 'metric_name', 'config_data', 'updated_by'],
     });
     const existingPanels = new Set<string>();
     const existingMetrics = new Set<string>();
+    // Rows the worker seeded and nobody has touched since. PerformanceTestMetricsPipeline writes a
+    // default panel-level config for every perf-test panel during the run, i.e. BEFORE this method
+    // runs at completion — so without this a template on those dashboards would be skipped as
+    // "already configured" on every run, forever. Key = `${dashboard}|${panel}|${metric ?? ''}`.
+    const workerSeeded = new Map<string, (typeof existingConfigs)[number]>();
     for (const c of existingConfigs) {
       existingPanels.add(`${c.application_dashboard_id}|${c.panel_id}`);
       if (c.metric_name) existingMetrics.add(`${c.application_dashboard_id}|${c.panel_id}|${c.metric_name}`);
+      if (c.updated_by === WORKER_ACTOR) workerSeeded.set(`${c.application_dashboard_id}|${c.panel_id}|${c.metric_name ?? ''}`, c);
     }
 
     // 4. For each dashboard, resolve its templates and create the missing DsCompareConfig records
@@ -647,11 +662,32 @@ export class TestRunsMetricsService {
         const exists = template.metric_name
           ? existingMetrics.has(`${panelKey}|${template.metric_name}`)
           : existingPanels.has(panelKey);
+        const overrides = template.config_overrides ?? {};
 
-        if (!exists) {
+        const seeded = workerSeeded.get(`${panelKey}|${template.metric_name ?? ''}`);
+        if (seeded) {
+          // Merge the template into the worker's default row: the template owns classification and
+          // the overrides it names, the worker keeps aggregation/minSampleCount/percentage/iqr.
+          const data = { ...(seeded.config_data ?? {}) } as Record<string, unknown>;
+          data.metricClassification = {
+            classification: template.metric_classification ?? 'none',
+            higherIsBetter: template.higher_is_better ?? null,
+          };
+          if (overrides.absThreshold !== undefined) {
+            data.thresholds = { ...((data.thresholds as Record<string, unknown>) ?? {}), absoluteThreshold: overrides.absThreshold };
+          }
+          if (overrides.ignore !== undefined) data.ignore = overrides.ignore;
+          if (overrides.ignoreMeanDiffSmallerThan !== undefined) data.ignoreMeanDiffSmallerThan = overrides.ignoreMeanDiffSmallerThan;
+          // eslint-disable-next-line audit-mutation-must-log
+          await this.dsCompareConfigRepo.update(
+            { id: seeded.id },
+            { config_data: data, updated_by: GOLDEN_PATH_ACTOR } as unknown as Parameters<typeof this.dsCompareConfigRepo.update>[1],
+          );
+          workerSeeded.delete(`${panelKey}|${template.metric_name ?? ''}`);
+          compareConfigsCreated++;
+        } else if (!exists) {
           // Build config_data matching actual DB schema:
           // { thresholds, metricClassification, defaultValueIfControlGroupMissing }
-          const overrides = template.config_overrides ?? {};
           const configData: Record<string, unknown> = {
             thresholds: {
               aggregation: 'mean',
@@ -685,8 +721,8 @@ export class TestRunsMetricsService {
             // Inherit ownership from the dashboard (organization_id NOT NULL on both).
             organization_id: dashboard.organizationId,
             team_id: dashboard.teamId,
-            created_by: 'system:golden-path',
-            updated_by: 'system:golden-path',
+            created_by: GOLDEN_PATH_ACTOR,
+            updated_by: GOLDEN_PATH_ACTOR,
           });
           // Phase 5a (PR13): NOT audited. applyGoldenPathClassifications is a
           // worker-driven system action triggered on test-run completion (the
