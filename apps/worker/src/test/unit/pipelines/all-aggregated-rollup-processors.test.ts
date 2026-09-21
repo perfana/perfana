@@ -138,8 +138,9 @@ describe('RequestsProcessor rollup rows', () => {
     const sql = insertSql(dataSource);
     // "{transaction}.{sampler}", collapsed when the prefix adds nothing.
     expect(sql).toContain("ELSE c.transaction_name || '.' || c.sampler_name");
-    expect(sql).toContain("OR c.transaction_name = 'overall'");
-    expect(sql).toContain('OR c.transaction_name = c.sampler_name THEN c.sampler_name');
+    expect(sql).toContain("c.transaction_name IN ('', 'overall')");
+    expect(sql).toContain('OR c.transaction_name = c.sampler_name');
+    expect(sql).toContain('THEN c.sampler_name');
   });
 
   it('issues no insert at all when every scenario dashboard fails', async () => {

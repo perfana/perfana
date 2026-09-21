@@ -317,6 +317,16 @@ export const ALL_AGGREGATED_SCENARIO = 'all aggregated';
 export const ALL_AGGREGATED_METRIC = 'All aggregated';
 
 /**
+ * SQL for a request-level series name: the transaction prefix is dropped when it
+ * adds nothing (no Transaction Controller, or it equals the sampler). Shared by
+ * the writer (requests-processor) and the readers that key on the stored name, so
+ * the two cannot drift — a mismatch there is a silent map miss, not an error.
+ */
+export const samplerMetricNameSql = (txn: string, sampler: string): string =>
+  `CASE WHEN ${txn} IS NULL OR ${txn} IN ('', 'overall') OR ${txn} = ${sampler}
+        THEN ${sampler} ELSE ${txn} || '.' || ${sampler} END`;
+
+/**
  * Fixed panel IDs for the panel-per-metric-type structure.
  */
 export const METRIC_TYPE_PANEL_IDS = {
