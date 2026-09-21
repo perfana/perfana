@@ -500,8 +500,11 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               -- date_part, not EXTRACT: on PG14+ EXTRACT returns numeric, and the per-row
               -- numeric divide + cast cost +75% on a 1.66 M-row run (measured); date_part
               -- is float8 and the /3600 is exact after aggregation (slope is linear in x).
+              -- A constant zero series (an error count with no errors) is a flat line, not
+              -- "no data": emit 0 so it takes the weak-trend path instead of vanishing.
               CASE WHEN AVG(value) <> 0
                    THEN regr_slope(value, date_part('epoch', time)) * 3600 / ABS(AVG(value)) * 100
+                   WHEN MIN(value) = MAX(value) THEN 0
               END as trend_pct_per_hour,
               corr(value, date_part('epoch', time)) as trend_corr,
 

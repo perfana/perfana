@@ -334,6 +334,28 @@ export default function SLOStatusChip({
     );
   }
 
+  // Complete but nothing judged (every series excluded by the pattern): say why.
+  if (result.status === 'COMPLETE' && result.meets_requirement == null && result.message) {
+    return (
+      <Tooltip title={result.message}>
+        <Chip
+          label="Not evaluated"
+          size="small"
+          tabIndex={0}
+          sx={{
+            height: '28px',
+            fontWeight: 700,
+            backgroundColor: alpha(theme.palette.warning.main, 0.1),
+            color: 'warning.dark',
+            border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
+            cursor: 'help',
+            '& .MuiChip-label': { px: 1.5, fontSize: '0.75rem' },
+          }}
+        />
+      </Tooltip>
+    );
+  }
+
   // Unknown status
   return (
     <Typography variant="body2" color="text.secondary">

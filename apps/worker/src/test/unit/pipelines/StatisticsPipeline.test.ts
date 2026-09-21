@@ -473,7 +473,7 @@ describe('StatisticsPipeline', () => {
       expect(sqlQuery).toContain('approx_percentile(0.90, sa.pct_agg) - approx_percentile(0.10, sa.pct_agg)) as idr');
     });
 
-    test('writes the trend slope (% of mean per hour, null on a zero mean) and its correlation', async () => {
+    test('writes the trend slope (% of mean per hour, 0 on a constant zero series) and its correlation', async () => {
       mockEntityManager.query
         .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
         .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
@@ -493,7 +493,8 @@ describe('StatisticsPipeline', () => {
       const slopeExpr = sqlQuery.slice(slopeStart, slopeEnd);
       expect(slopeExpr).toMatch(/THEN regr_slope\(value, /);
       expect(slopeExpr).toContain('3600');
-      expect(slopeExpr).toMatch(/\/ ABS\(AVG\(value\)\) \* 100\s+END\s*$/);
+      // A constant zero series yields 0 (weak path), never NULL (which drops the target).
+      expect(slopeExpr).toMatch(/\/ ABS\(AVG\(value\)\) \* 100\s+WHEN MIN\(value\) = MAX\(value\) THEN 0\s+END\s*$/);
       expect(sqlQuery).toMatch(/corr\(value, [^)]*\(.*?time\)\) as trend_corr/);
 
       // Both columns must travel through final_statistics and land in the INSERT at the

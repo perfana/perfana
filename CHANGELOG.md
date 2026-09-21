@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - A metric SLO's message counted every judged series as failed (`15 of 15 targets failed`) when only some did; it now counts the series whose `meets_requirement` is `false`.
-- A metric SLO in which no series could be judged (every series weak-trend, or every series excluded by the match pattern) is now recorded as not evaluated (`meets_requirement: null`, "None of the N targets could be evaluated", a "No clear trend" chip) instead of an affirmative pass.
+- A metric SLO in which no series could be judged (every series weak-trend, or every series excluded by the match pattern) is now recorded as not evaluated (`meets_requirement: null`, "None of the N targets could be evaluated", a "No clear trend" / "Not evaluated" chip) instead of an affirmative pass. This also applies to an existing SLO whose match pattern happens to exclude every series on a run: it read Pass before and reads Not evaluated now; the run verdict is unchanged (an unevaluated SLO counts as a pass there).
 - Switching an SLO away from Trend now restores the panel's unit (from the configuration sent with the update, or clears it), instead of leaving `%/h` on an average SLO; a Trend SLO created from a profile or via provisioning carries `%/h` as well.
 - The requirement sentence for a Trend SLO reads "Drift over the analysis window should be less than 10 %/h" in the SLO card and in reports, and a Trend threshold on a `percentunit` panel is no longer divided by 100 on save.
 
