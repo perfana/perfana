@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.4] - 2026-09-21
+
+### Added
+- **Trend SLO.** A new `Trend` evaluation type judges how a series drifts *within* the run: `StatisticsPipeline` now writes `ds_metric_statistics.trend_pct_per_hour` (OLS slope of value against time, as % of the series mean per hour) and `trend_corr` (Pearson r), and an SLO such as `Transaction RT Avg — Trend < 10 %/h` fails the series whose response times climb during the steady state. It catches what neither a scalar SLO nor ADAPT does: a run that starts fine and degrades, on a workload whose baseline runs all degrade the same way (WERKNL-00011, `WNL_WG_EXTRA_10_VolgendeCV`: +26 %/h at r 0.66). A series with |r| < 0.5 or fewer than 10 points is reported with its slope but not judged — `No clear trend` in the series table, `meets_requirement: null` and `weak_trend: true` on the target — so an outlier-driven slope on a flat series cannot fail the run. The unit is always `%/h`, whatever the panel measures. Migration 1809 adds the two columns; rows written before it hold NULL until the run's statistics are recalculated (a re-evaluate with "recalculate statistics", or the Recalculate baseline statistics button), so a trend SLO on an old run reports no targets until then.
+
+### Fixed
+- A metric SLO's message counted every judged series as failed (`15 of 15 targets failed`) when only some did; it now counts the series whose `meets_requirement` is `false`.
+
 ## [0.2.96.3] - 2026-09-21
 
 ### Fixed

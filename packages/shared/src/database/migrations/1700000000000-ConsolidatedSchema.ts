@@ -961,6 +961,11 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
       `ALTER TABLE public.benchmarks ADD COLUMN IF NOT EXISTS apdex_min_samples integer DEFAULT 50 CHECK (apdex_min_samples IS NULL OR apdex_min_samples >= 1)`,
     );
 
+    // Trend SLO: per-series OLS slope (% of mean per hour) and its correlation (1809 for existing DBs).
+    await queryRunner.query(
+      `ALTER TABLE public.ds_metric_statistics ADD COLUMN IF NOT EXISTS trend_pct_per_hour double precision, ADD COLUMN IF NOT EXISTS trend_corr double precision`,
+    );
+
     // Free-form host labels on Dynatrace entity mappings — presentation only.
     await queryRunner.query(
       `ALTER TABLE public.dynatrace_entity_mappings ADD COLUMN IF NOT EXISTS labels text[] NOT NULL DEFAULT '{}'::text[]`,

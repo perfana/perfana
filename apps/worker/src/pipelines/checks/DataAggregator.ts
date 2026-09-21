@@ -18,10 +18,21 @@ const POOLED_ERROR_RATE_PANELS = new Set<number>([
 
 const SCENARIO_LABEL_PREFIX = generateScenarioDashboardLabel('');
 
+/**
+ * Trend SLO floor: below this |r| the slope is noise, not a drift, and the series is
+ * reported but not judged (`weak_trend`). Same shape as the Apdex sample floor.
+ * ponytail: constants, not benchmark columns — make them per-SLO if a tenant needs to tune them.
+ */
+export const TREND_MIN_CORR = 0.5;
+export const TREND_MIN_POINTS = 10;
+
 export interface MetricTarget {
   target: string;
   value: number;
   isArtificial: boolean;
+  /** Trend SLO: r below TREND_MIN_CORR or too few points — reported, not judged. */
+  weakTrend?: boolean;
+  trendCorr?: number | null;
 }
 
 export interface AggregationResult {
@@ -43,6 +54,8 @@ export interface MetricStatistic {
   q95: number;
   q99: number;
   last_value: number;
+  trend_pct_per_hour?: number | null;
+  trend_corr?: number | null;
   count: number;
   is_constant: boolean;
   all_missing: boolean;
@@ -128,6 +141,7 @@ export class DataAggregator extends BaseCheckService {
           metric_name,
           mean, median, min_value, max_value,
           std_dev, last_value, count,
+          trend_pct_per_hour, trend_corr,
           q10, q25, q75, q90, q95, q99,
           is_constant, all_missing, pct_missing,
           dashboard_label
@@ -155,6 +169,8 @@ export class DataAggregator extends BaseCheckService {
         q95: row.q95 as number,
         q99: row.q99 as number,
         last_value: row.last_value as number,
+        trend_pct_per_hour: row.trend_pct_per_hour as number | null,
+        trend_corr: row.trend_corr as number | null,
         count: row.count as number,
         is_constant: row.is_constant as boolean,
         all_missing: row.all_missing as boolean,
@@ -270,12 +286,20 @@ export class DataAggregator extends BaseCheckService {
 
         if (value !== null && metricName) {
           const isArtificial = stat.is_constant || false;
-          targets.push({
+          const target: MetricTarget = {
             target: metricName,
             value: parseFloat(value.toString()),
             isArtificial
-          });
-          values.push(parseFloat(value.toString()));
+          };
+          if (fieldName === 'trend_pct_per_hour') {
+            const r = stat.trend_corr ?? null;
+            target.trendCorr = r;
+            // A weak series still carries its slope so the table can show it, but is left
+            // out of the panel average: an unjudged value must not tip an average_all verdict.
+            target.weakTrend = r === null || Math.abs(r) < TREND_MIN_CORR || Number(stat.count) < TREND_MIN_POINTS;
+          }
+          targets.push(target);
+          if (!target.weakTrend) { values.push(target.value); }
         }
       }
 
@@ -474,6 +498,7 @@ export class DataAggregator extends BaseCheckService {
       'q95': 'q95',
       'q99': 'q99',
       'last': 'last_value',
+      'trend': 'trend_pct_per_hour',
       'std': 'std_dev'
     };
     return mapping[aggregationType.toLowerCase()] || 'mean';
@@ -496,6 +521,7 @@ export class DataAggregator extends BaseCheckService {
       case 'q95': return stat.q95;
       case 'q99': return stat.q99;
       case 'last_value': return stat.last_value;
+      case 'trend_pct_per_hour': return stat.trend_pct_per_hour ?? null;
       default: return stat.mean;
     }
   }

@@ -116,6 +116,14 @@ export class DsMetricStatistics {
   @Column({ type: 'double precision', nullable: true })
   last_value?: number;
 
+  /** OLS slope over the analysis window as % of the series mean per hour (trend SLO). */
+  @Column({ type: 'double precision', nullable: true })
+  trend_pct_per_hour?: number;
+
+  /** Pearson r of value against time; the trend SLO does not judge a series below 0.5. */
+  @Column({ type: 'double precision', nullable: true })
+  trend_corr?: number;
+
   @Column({ type: 'integer', nullable: true })
   n_missing?: number;
 

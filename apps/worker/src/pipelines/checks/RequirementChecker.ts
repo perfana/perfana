@@ -11,6 +11,9 @@ export interface CheckResultTarget {
   value: number | null;
   meets_requirement: boolean | null;
   is_artificial: boolean;
+  /** Trend SLO: had a slope, but r or the point count was below the floor — not evaluated. */
+  weak_trend?: boolean;
+  trend_corr?: number | null;
 }
 
 export interface CheckResult {
@@ -150,11 +153,7 @@ export class RequirementChecker extends BaseCheckService {
       // Determine final status and message
       // Based on requirement_checker.py:172-176
       const status = targetResults.length === 0 ? 'ERROR' : 'COMPLETE';
-      const message = this.generateStatusMessage(
-        overallMeetsRequirement,
-        targetResults.length,
-        aggregationResult
-      );
+      const message = this.generateStatusMessage(overallMeetsRequirement, targetResults);
 
       // Extract panel configuration
       const panelId = (config?.id as number | null | undefined) ?? null;
@@ -295,7 +294,7 @@ export class RequirementChecker extends BaseCheckService {
     const targetValue = targetData.value;
 
     let meetsRequirement: boolean | null = null;
-    if (targetValue !== null && this.hasValidRequirement(benchmark)) {
+    if (targetValue !== null && !targetData.weakTrend && this.hasValidRequirement(benchmark)) {
       meetsRequirement = this.checkRequirement(targetValue, benchmark);
     }
 
@@ -303,7 +302,9 @@ export class RequirementChecker extends BaseCheckService {
       target: targetName,
       value: targetValue,
       meets_requirement: meetsRequirement,
-      is_artificial: false // Will be set later if needed
+      is_artificial: false, // Will be set later if needed
+      ...(targetData.trendCorr !== undefined && { trend_corr: targetData.trendCorr }),
+      ...(targetData.weakTrend && { weak_trend: true }),
     };
   }
 
@@ -371,23 +372,17 @@ export class RequirementChecker extends BaseCheckService {
    * Generate a status message for the check result
    * Based on requirement_checker.py:380-398
    */
-  private generateStatusMessage(
-    meetsRequirement: boolean,
-    targetCount: number,
-    aggregationResult: AggregationResult
-  ): string {
-    if (targetCount === 0) {
+  private generateStatusMessage(meetsRequirement: boolean, targets: CheckResultTarget[]): string {
+    if (targets.length === 0) {
       return 'No targets found for processing';
     }
 
     if (meetsRequirement) {
-      return `All ${targetCount} targets meet requirements`;
-    } else {
-      const failedCount = aggregationResult.targets.filter(
-        target => target.value !== null // This would be more sophisticated in the real implementation
-      ).length;
-      return `${failedCount} of ${targetCount} targets failed requirements`;
+      return `All ${targets.length} targets meet requirements`;
     }
+    // Only judged-and-failed rows count: a series the pattern excluded or a weak trend is null.
+    const failedCount = targets.filter((t) => t.meets_requirement === false).length;
+    return `${failedCount} of ${targets.length} targets failed requirements`;
   }
 
   /**

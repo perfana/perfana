@@ -474,6 +474,33 @@ describe('DataAggregator', () => {
     });
   });
 
+  describe('trend evaluate type', () => {
+    const stat = (metric_name: string, trend_pct_per_hour: number | null, trend_corr: number | null, count = 62) => ({
+      metric_name, mean: 290, median: 285, min_value: 200, max_value: 400, std_dev: 30,
+      q10: 0, q25: 0, q75: 0, q90: 0, q95: 0, q99: 0, last_value: 320, count,
+      is_constant: false, all_missing: false, pct_missing: 0, trend_pct_per_hour, trend_corr,
+    });
+
+    it('judges a correlated slope, reports but does not judge a weak one, and keeps weak rows out of the average', async () => {
+      const benchmark = createMockBenchmark({ evaluate_type: 'trend', average_all: true });
+      mockManager.query.mockResolvedValue([
+        stat('VolgendeCV', 26.4, 0.66),
+        stat('MijnWerkNl', 20.2, 0.10),   // slope from outliers, r below the floor
+        stat('Sparse', 30, 0.9, 5),       // too few points
+        stat('OldRow', null, null),       // statistics written before the column existed
+      ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), benchmark);
+
+      expect(result.targets).toEqual([
+        { target: 'VolgendeCV', value: 26.4, isArtificial: false, weakTrend: false, trendCorr: 0.66 },
+        { target: 'MijnWerkNl', value: 20.2, isArtificial: false, weakTrend: true, trendCorr: 0.10 },
+        { target: 'Sparse', value: 30, isArtificial: false, weakTrend: true, trendCorr: 0.9 },
+      ]);
+      expect(result.panel_average).toBe(26.4);
+    });
+  });
+
   describe('perf-test error-rate panels read the pooled rollup ratio', () => {
     const SCENARIO_LABEL = 'Performance test metrics T_WG_Mijn_Vacatures';
     // dashboard_label is the pipeline-written label on the statistics row — that, not

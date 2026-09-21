@@ -88,7 +88,7 @@ export class CreateProfileBenchmarkDto {
 
   @ApiProperty({
     description: 'Evaluation type',
-    enum: ['avg', 'max', 'min', 'last', 'fit', 'q50', 'q90', 'q95', 'q99'],
+    enum: ['avg', 'max', 'min', 'last', 'fit', 'trend', 'q50', 'q90', 'q95', 'q99'],
     example: 'avg',
     required: false
   })
@@ -290,7 +290,7 @@ export class UpdateProfileBenchmarkDto {
 
   @ApiProperty({
     description: 'Evaluation type',
-    enum: ['avg', 'max', 'min', 'last', 'fit', 'q50', 'q90', 'q95', 'q99'],
+    enum: ['avg', 'max', 'min', 'last', 'fit', 'trend', 'q50', 'q90', 'q95', 'q99'],
     example: 'avg',
     required: false
   })

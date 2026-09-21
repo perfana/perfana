@@ -149,7 +149,7 @@ export function SLOThresholdConfig({
           }
           InputProps={{
             endAdornment: (() => {
-              const chipLabel = getUnitChipLabel(sloFormData.requirementValue, sloFormData.selectedPanel);
+              const chipLabel = getUnitChipLabel(sloFormData.requirementValue, sloFormData.selectedPanel, sloFormData.evaluateType);
               if (chipLabel) {
                 return (
                   <InputAdornment position="end">

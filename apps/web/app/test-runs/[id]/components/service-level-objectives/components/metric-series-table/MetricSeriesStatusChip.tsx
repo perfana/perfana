@@ -80,6 +80,14 @@ export function MetricSeriesStatusChip({
     );
   }
 
+  if (target.weak_trend) {
+    return (
+      <Tooltip title="The slope is not a clear trend (correlation below 0.5 or too few points), so this series was not evaluated" arrow placement="top">
+        <Chip label="No clear trend" sx={getThemedChipStyles('error', false, theme)} />
+      </Tooltip>
+    );
+  }
+
   return (
     <Typography variant="body2" color="text.secondary">
       -

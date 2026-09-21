@@ -156,6 +156,9 @@ export interface CheckResultTarget {
   total_count?: number;
   /** Apdex: had data, but fewer than the SLO's minimum samples — not evaluated. */
   below_min_samples?: boolean;
+  /** Trend: slope present but its correlation or point count was below the floor — not evaluated. */
+  weak_trend?: boolean;
+  trend_corr?: number | null;
 }
 
 /**
