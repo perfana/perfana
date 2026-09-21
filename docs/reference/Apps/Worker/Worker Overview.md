@@ -174,7 +174,10 @@ is empty while `transactions` is not gets its `transaction-stats-rollup` written
 checks, so the Apdex SLO check takes the rollup fast path instead of a raw scan per transaction. At
 most one such rollup per checks job, since the stage is not chunked and the orchestrator waits 30
 min on it; the rest of the batch takes the raw path until `scripts/backfill-test-run-stats-rollup.ts`
-catches up.
+catches up. The same rollup also feeds the perf-test error-rate SLOs (v0.2.96.1): an `avg` check on
+panel 105 / 205 reads the pooled `SUM(failed) / SUM(total)` from it via `DataAggregator.pooledErrorRates`
+rather than the unweighted mean of the per-bucket series, falling back to that mean (with a warning)
+for any series the rollup has no row for.
 
 Two consequences for anyone reading its logs:
 
