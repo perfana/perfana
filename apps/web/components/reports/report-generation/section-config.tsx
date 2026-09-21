@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   CompareArrows as CompareIcon,
+  Dns as DnsIcon,
   ErrorOutline as ErrorIcon,
   FormatListNumbered as ListNumberedIcon,
   Notes as NotesIcon,
@@ -104,6 +105,12 @@ export const SECTION_CONFIG: Record<ReportSectionType, { icon: React.ReactNode; 
     label: 'Top 10 Lists',
     description: 'Ranked top-10 lists (slowest, throughput, impact, error rate) for transactions, requests, or URLs',
     color: '#7cb342',
+  },
+  dynatrace_hosts: {
+    icon: <DnsIcon />,
+    label: 'Dynatrace Hosts',
+    description: 'Per-host CPU, memory, disk and network averages from Dynatrace over the run',
+    color: '#6d4c41',
   },
   index: {
     icon: <TocIcon />,

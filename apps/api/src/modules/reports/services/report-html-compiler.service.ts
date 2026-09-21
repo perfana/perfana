@@ -32,6 +32,7 @@ import { ComparisonsRenderer } from '../renderers/comparisons-renderer';
 import { GraphsRenderer } from '../renderers/graphs-renderer';
 import { Top10ListsRenderer } from '../renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
+import { DynatraceHostsRenderer } from '../renderers/dynatrace-hosts-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import { IndexRenderer } from '../renderers/index-renderer';
 import {
@@ -64,6 +65,7 @@ export class ReportHtmlCompilerService {
     private readonly graphsRenderer: GraphsRenderer,
     private readonly top10ListsRenderer: Top10ListsRenderer,
     private readonly errorAnalysisRenderer: ErrorAnalysisRenderer,
+    private readonly dynatraceHostsRenderer: DynatraceHostsRenderer,
     private readonly placeholderRenderer: PlaceholderRenderer,
     private readonly indexRenderer: IndexRenderer,
     // Last on purpose: several suites construct this service positionally with
@@ -385,6 +387,8 @@ export class ReportHtmlCompilerService {
         return await this.top10ListsRenderer.renderTop10ListsSection(section, testRun, userId, roles);
       case 'error_analysis':
         return await this.errorAnalysisRenderer.renderErrorAnalysisSection(section, testRun, userId, roles);
+      case 'dynatrace_hosts':
+        return await this.dynatraceHostsRenderer.renderDynatraceHostsSection(section, testRun);
       case 'index':
         return this.indexRenderer.renderIndexSection(
           section,

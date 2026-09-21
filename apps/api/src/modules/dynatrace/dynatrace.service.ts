@@ -5,10 +5,11 @@ import { UpdateDynatraceConfigDto } from './dto/update-dynatrace-config.dto';
 import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
 import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
-import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, HostOverviewRow, TimeSeriesData } from './dto/host.dto';
+import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, HostOverviewRow, HostReportRow, TimeSeriesData } from './dto/host.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { OwnedResource, DynatraceQuery, DynatraceEntityMapping } from '@perfana/shared';
+import type { DynatraceHostColumn } from '@perfana/shared/types';
 import { validateExternalUrl } from '../../common/security/url-validator';
 import { attachPermissions } from '../../common/serializers/with-permissions.serializer';
 import { Capability } from '../../constants/capabilities.constants';
@@ -1749,6 +1750,115 @@ export class DynatraceService {
     return rows;
   }
 
+  /**
+   * Rows for the report's "Dynatrace Hosts" section — the Hosts tab plus the host detail
+   * page's extra columns, in one batch per Dynatrace config. Not authorization-gated: report
+   * rendering runs as the system (empty userId) after the run itself was authorized, so it
+   * reads the mappings straight from the repository. Fails soft per config like the tab.
+   */
+  async fetchHostsReport(
+    systemId: string,
+    environment: string,
+    workload: string,
+    startTime: Date,
+    endTime: Date,
+    opts: { hostIds?: string[]; columns: readonly DynatraceHostColumn[] },
+  ): Promise<HostReportRow[]> {
+    const wanted = new Set(opts.columns);
+    const only = opts.hostIds && opts.hostIds.length > 0 ? new Set(opts.hostIds) : null;
+    const mappings = await this.repository.getEntityMappings(systemId, environment, workload);
+    const hosts = (mappings ?? []).filter(
+      (m) => m.entityType === 'HOST' && (!only || only.has(m.entityId)),
+    );
+    if (hosts.length === 0) return [];
+
+    const byConfig = new Map<string, typeof hosts>();
+    for (const h of hosts) byConfig.set(h.dynatraceConfigId, [...(byConfig.get(h.dynatraceConfigId) ?? []), h]);
+
+    const from = startTime.toISOString();
+    const to = endTime.toISOString();
+    const rows: HostReportRow[] = [];
+
+    for (const [configId, configHosts] of byConfig) {
+      const base: HostReportRow[] = configHosts.map((h) => ({
+        hostId: h.entityId,
+        displayName: h.entityDisplayName,
+        labels: h.labels ?? [],
+      }));
+      try {
+        const config = await this.repository.findById(configId);
+        if (!config) throw new Error(`Dynatrace configuration ${configId} not found`);
+        const baseUrl = this.normalizeUrl(config.host);
+        const proxyOpts = await this.proxyOpts(config);
+        const entitySelector = `type("HOST"),entityId(${configHosts.map((h) => `"${h.entityId}"`).join(',')})`;
+        // Each column fails on its own, like the host detail page: one metric the tenant
+        // does not serve leaves a dash in that column, not a dash in every column.
+        const soft = <T>(name: string, p: Promise<T>): Promise<T | null> =>
+          p.catch((error: unknown) => {
+            this.logger.warn(`fetchHostsReport: ${name} failed for config ${configId}`, {
+              error: error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error',
+            });
+            return null;
+          });
+        const avg = (metric: string, aggregation = 'avg') =>
+          soft(metric, this.queryHostMetricAverages(baseUrl, config.apiToken, metric, entitySelector, from, to, proxyOpts, aggregation));
+
+        const [cpu, mem, disk, net, problems, props] = await Promise.all([
+          wanted.has('cpu') ? avg('builtin:host.cpu.usage') : null,
+          wanted.has('memory') ? avg('builtin:host.mem.usage') : null,
+          wanted.has('disk') ? avg('builtin:host.disk.utilTime') : null,
+          // Same selector shape as the host detail page: this metric rejects :avg.
+          wanted.has('network') ? avg('builtin:host.net.nic.traffic', '') : null,
+          wanted.has('problems')
+            ? soft('problems', this.queryHostProblemCounts(baseUrl, config.apiToken, entitySelector, from, to, proxyOpts))
+            : null,
+          wanted.has('cpu') || wanted.has('memory')
+            ? soft('properties', this.queryHostProperties(baseUrl, config.apiToken, entitySelector, proxyOpts))
+            : null,
+        ]);
+
+        for (const b of base) {
+          const p = props?.get(b.hostId);
+          const pr = problems?.get(b.hostId);
+          rows.push({
+            ...b,
+            ...(wanted.has('cpu') && { cpuAvg: cpu?.get(b.hostId) ?? null, cpuCores: p?.cpuCores ?? null }),
+            ...(wanted.has('memory') && { memAvg: mem?.get(b.hostId) ?? null, memoryTotal: p?.memoryTotal ?? null }),
+            ...(wanted.has('disk') && { diskAvg: disk?.get(b.hostId) ?? null }),
+            ...(wanted.has('network') && { networkAvg: net?.get(b.hostId) ?? null }),
+            ...(wanted.has('problems') && { problemCount: pr?.count ?? 0, worstSeverity: pr?.worst ?? null }),
+          });
+        }
+      } catch (error) {
+        this.logger.warn(`fetchHostsReport: failed for config ${configId}`, {
+          error: error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error',
+        });
+        rows.push(...base);
+      }
+    }
+    return rows;
+  }
+
+  /** One /entities call → Map<hostId, {cpuCores, memoryTotal}> for every host in the selector. */
+  private async queryHostProperties(
+    baseUrl: string,
+    apiToken: string,
+    entitySelector: string,
+    proxyOpts: DynatraceProxyOpts,
+  ): Promise<Map<string, { cpuCores?: number; memoryTotal?: number }>> {
+    const map = new Map<string, { cpuCores?: number; memoryTotal?: number }>();
+    const response = await axios.get(`${baseUrl}/api/v2/entities`, {
+      headers: { Authorization: `Api-Token ${apiToken}`, 'Content-Type': 'application/json' },
+      params: { entitySelector, fields: '+properties.cpuCores,+properties.memoryTotal', pageSize: 500 },
+      timeout: DynatraceService.ENTITIES_API_TIMEOUT_MS,
+      ...proxyOpts,
+    });
+    for (const e of response.data?.entities ?? []) {
+      if (e?.entityId) map.set(e.entityId, { cpuCores: e.properties?.cpuCores, memoryTotal: e.properties?.memoryTotal });
+    }
+    return map;
+  }
+
   /** One /metrics/query call → Map<hostId, avgValue> over the window (resolution=Inf gives one value per host). */
   private async queryHostMetricAverages(
     baseUrl: string,
@@ -1758,12 +1868,13 @@ export class DynatraceService {
     from: string,
     to: string,
     proxyOpts: DynatraceProxyOpts,
+    aggregation = 'avg',
   ): Promise<Map<string, number>> {
     const map = new Map<string, number>();
     const response = await axios.get(`${baseUrl}/api/v2/metrics/query`, {
       headers: { Authorization: `Api-Token ${apiToken}`, 'Content-Type': 'application/json' },
       params: {
-        metricSelector: `${metric}:splitBy("dt.entity.host"):avg`,
+        metricSelector: `${metric}:splitBy("dt.entity.host")${aggregation ? `:${aggregation}` : ''}`,
         entitySelector,
         from,
         to,

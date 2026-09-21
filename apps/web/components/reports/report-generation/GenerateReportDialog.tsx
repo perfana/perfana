@@ -81,6 +81,7 @@ import {
   AwrConfigForm,
   TrendsConfigForm,
   ComparisonsConfigForm,
+  DynatraceHostsConfigForm,
   Top10ListsConfigForm,
   ErrorAnalysisConfigForm,
   findSectionAnchorWarnings,
@@ -978,6 +979,8 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
         return <Top10ListsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
       case 'error_analysis':
         return <ErrorAnalysisConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} allSections={allSections} />;
+      case 'dynatrace_hosts':
+        return <DynatraceHostsConfigForm config={sectionConfig} onChange={handleChange} text={text} onTextChange={onTextChange} testRunId={testRunId} systemUnderTestId={systemUnderTestId} testEnvironment={testEnvironment} workload={workload} allSections={allSections} />;
       default:
         return null;
     }
