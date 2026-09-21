@@ -1971,4 +1971,58 @@ describe('DynatraceService', () => {
       expect(rows[0]).toMatchObject({ hostId: 'HOST-A', cpuAvg: null, memAvg: null, problemCount: 0, worstSeverity: null });
     });
   });
+
+  describe('fetchHostsReport', () => {
+    const start = new Date('2026-07-22T10:00:00.000Z');
+    const end = new Date('2026-07-22T10:30:00.000Z');
+    const hostMappings = [
+      { id: 'm1', entityId: 'HOST-A', entityType: 'HOST', entityDisplayName: 'web-1', dynatraceConfigId: 'config-123', labels: ['web'] },
+      { id: 'm2', entityId: 'HOST-B', entityType: 'HOST', entityDisplayName: 'web-2', dynatraceConfigId: 'config-123', labels: [] },
+    ];
+    const series = (hostId: string, value: number) => ({ dimensionMap: { 'dt.entity.host': hostId }, values: [value] });
+
+    it('queries only the requested columns, in one batch per config, and fills cores/memory from /entities', async () => {
+      repository.getEntityMappings.mockResolvedValue(hostMappings as never);
+      repository.findById.mockResolvedValue(mockDynatraceConfig as never);
+      mockedAxios.get.mockImplementation((url: string, cfg?: { params?: { metricSelector?: string } }) => {
+        if (url.endsWith('/api/v2/metrics/query')) {
+          const sel = cfg?.params?.metricSelector ?? '';
+          if (sel.startsWith('builtin:host.cpu.usage')) return Promise.resolve({ data: { result: [{ data: [series('HOST-A', 42)] }] } });
+          if (sel.startsWith('builtin:host.net.nic.traffic')) {
+            expect(sel).toBe('builtin:host.net.nic.traffic:splitBy("dt.entity.host")');
+            return Promise.resolve({ data: { result: [{ data: [series('HOST-A', 1e6), series('HOST-B', 2e6)] }] } });
+          }
+          return Promise.reject(new Error(`unexpected selector ${sel}`));
+        }
+        if (url.endsWith('/api/v2/entities')) {
+          return Promise.resolve({ data: { entities: [{ entityId: 'HOST-A', properties: { cpuCores: 8, memoryTotal: 1024 } }] } });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      });
+
+      const rows = await service.fetchHostsReport('sys-1', 'prod', 'load', start, end, { hostIds: [], columns: ['cpu', 'network'] });
+
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toEqual({ hostId: 'HOST-A', displayName: 'web-1', labels: ['web'], cpuAvg: 42, cpuCores: 8, networkAvg: 1e6 });
+      expect(rows[1]).toEqual({ hostId: 'HOST-B', displayName: 'web-2', labels: [], cpuAvg: null, cpuCores: null, networkAvg: 2e6 });
+      // cpu + network + entities; no memory, disk or problems call
+      expect(mockedAxios.get).toHaveBeenCalledTimes(3);
+    });
+
+    it('narrows to hostIds and fails soft per call', async () => {
+      repository.getEntityMappings.mockResolvedValue(hostMappings as never);
+      repository.findById.mockResolvedValue(mockDynatraceConfig as never);
+      mockedAxios.get.mockImplementation((url: string) =>
+        url.endsWith('/api/v2/entities')
+          ? Promise.resolve({ data: { entities: [{ entityId: 'HOST-B', properties: { cpuCores: 2 } }] } })
+          : Promise.reject(new Error('503')),
+      );
+
+      const rows = await service.fetchHostsReport('sys-1', 'prod', 'load', start, end, { hostIds: ['HOST-B'], columns: ['cpu', 'problems'] });
+
+      expect(rows).toEqual([
+        { hostId: 'HOST-B', displayName: 'web-2', labels: [], cpuAvg: null, cpuCores: 2, problemCount: 0, worstSeverity: null },
+      ]);
+    });
+  });
 });

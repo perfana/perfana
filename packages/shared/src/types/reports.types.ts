@@ -192,6 +192,26 @@ export interface GraphsSectionOptions {
 }
 
 /**
+ * Columns a Dynatrace Hosts section can show. `cpu` and `memory` also bring the host's
+ * CPU core count and total memory (from the entity properties) as a second column.
+ */
+export const DYNATRACE_HOST_COLUMNS = ['cpu', 'memory', 'disk', 'network', 'problems'] as const;
+export type DynatraceHostColumn = (typeof DYNATRACE_HOST_COLUMNS)[number];
+export const DEFAULT_DYNATRACE_HOST_COLUMNS: readonly DynatraceHostColumn[] = ['cpu', 'memory'];
+
+/**
+ * Dynatrace hosts section configuration options — the Dynatrace card's Hosts tab, in a report.
+ */
+export interface DynatraceHostsSectionOptions {
+  /** Dynatrace HOST entity ids to include (empty = every host mapped to the run's workload). */
+  hostIds?: string[];
+  /** Columns to render; defaults to DEFAULT_DYNATRACE_HOST_COLUMNS. */
+  columns?: DynatraceHostColumn[];
+  /** One table per host label instead of one flat table; a host appears under each of its labels. */
+  groupByLabel?: boolean;
+}
+
+/**
  * Union type for all section configuration options
  */
 export type SectionConfigOptions =
@@ -204,7 +224,8 @@ export type SectionConfigOptions =
   | AwrSectionOptions
   | TrendsSectionOptions
   | ComparisonsSectionOptions
-  | GraphsSectionOptions;
+  | GraphsSectionOptions
+  | DynatraceHostsSectionOptions;
 
 // ==================== Template List Types ====================
 
@@ -560,6 +581,7 @@ export const SECTION_TYPE_LABELS: Record<ReportSectionType, string> = {
   graphs: 'Custom Graphs',
   top_10_lists: 'Top 10 Lists',
   error_analysis: 'Error Analysis',
+  dynatrace_hosts: 'Dynatrace Hosts',
 } as const;
 
 /**
@@ -597,6 +619,7 @@ export const SECTION_RENDER_TITLES: Record<ReportSectionType, string> = {
   graphs: 'Custom Graphs',
   top_10_lists: 'Top 10 Lists',
   error_analysis: 'Error Analysis',
+  dynatrace_hosts: 'Dynatrace Hosts',
 } as const;
 
 /**

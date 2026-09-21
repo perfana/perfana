@@ -6,6 +6,7 @@ import type {
   TransactionResponseTimesConfig,
   ErrorAnalysisConfig,
   Top10ListsConfig,
+  DynatraceHostsConfig,
 } from './SectionConfigs';
 
 export const SUMMARY_MAX_LENGTH = 90;
@@ -84,6 +85,12 @@ export function sectionSummary(section: ReportSectionConfig): string | null {
         cfg.scope === 'requests' ? 'Requests' : cfg.scope === 'urls' ? 'URLs' : 'Transactions';
       const count = Array.isArray(cfg.lists) && cfg.lists.length > 0 ? cfg.lists.length : 4;
       return `${scopeLabel} · ${count} list${count === 1 ? '' : 's'}`;
+    }
+    case 'dynatrace_hosts': {
+      const cfg = (section.config ?? {}) as DynatraceHostsConfig;
+      const hosts = cfg.hostIds?.length ? `${cfg.hostIds.length} host${cfg.hostIds.length === 1 ? '' : 's'}` : 'All hosts';
+      const cols = cfg.columns?.length ? cfg.columns : ['cpu', 'memory'];
+      return [hosts, cols.join(', '), cfg.groupByLabel ? 'by label' : null, text].filter(Boolean).join(' · ');
     }
     default:
       // ponytail: no naming field in these configs — the text is the only distinguisher

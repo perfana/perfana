@@ -71,6 +71,27 @@ export interface HostOverviewRow {
 }
 
 /**
+ * One row of the report's Dynatrace Hosts section: the Hosts-tab row plus the
+ * optional columns the host detail page shows. A column that was not requested
+ * stays `undefined`; one that was requested but got no data is `null`.
+ */
+export interface HostReportRow {
+  hostId: string;
+  displayName: string;
+  labels: string[];
+  cpuAvg?: number | null;
+  cpuCores?: number | null;
+  memAvg?: number | null;
+  /** Bytes. */
+  memoryTotal?: number | null;
+  diskAvg?: number | null;
+  /** Bytes per second, averaged over the window. */
+  networkAvg?: number | null;
+  problemCount?: number;
+  worstSeverity?: string | null;
+}
+
+/**
  * DTO for storing host properties as test run configuration
  */
 export class StoreHostPropertiesDto {

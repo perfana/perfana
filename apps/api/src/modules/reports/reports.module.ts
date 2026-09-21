@@ -32,6 +32,8 @@ import { ComparisonsRenderer } from './renderers/comparisons-renderer';
 import { GraphsRenderer } from './renderers/graphs-renderer';
 import { Top10ListsRenderer } from './renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from './renderers/error-analysis-renderer';
+import { DynatraceHostsRenderer } from './renderers/dynatrace-hosts-renderer';
+import { DynatraceModule } from '../dynatrace/dynatrace.module';
 import { PlaceholderRenderer } from './renderers/placeholder-renderer';
 import { IndexRenderer } from './renderers/index-renderer';
 
@@ -40,6 +42,7 @@ import { IndexRenderer } from './renderers/index-renderer';
     TypeOrmModule.forFeature([GeneratedReport, ReportTemplate, TestRun, SystemUnderTest, TestRunConfiguration]),
     CommonModule, // Provides AuthorizationService
     AuditModule, // Phase 5a — provides AuditService + AuditResourceRegistry
+    DynatraceModule, // DynatraceService for the Dynatrace Hosts section
   ],
   controllers: [ReportGenerationController, ReportTemplateController, ReportShareController],
   providers: [
@@ -71,6 +74,7 @@ import { IndexRenderer } from './renderers/index-renderer';
     GraphsRenderer,
     Top10ListsRenderer,
     ErrorAnalysisRenderer,
+    DynatraceHostsRenderer,
     PlaceholderRenderer,
     IndexRenderer,
   ],

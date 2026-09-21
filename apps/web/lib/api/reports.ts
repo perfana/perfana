@@ -35,6 +35,7 @@ export const REPORT_SECTION_TYPES = [
   'graphs',
   'top_10_lists',
   'error_analysis',
+  'dynatrace_hosts',
 ] as const;
 
 export type ReportSectionType = (typeof REPORT_SECTION_TYPES)[number];
@@ -1050,6 +1051,7 @@ export function getSectionTypeLabel(type: ReportSectionType): string {
     graphs: 'Custom Graphs',
     top_10_lists: 'Top 10 Lists',
     error_analysis: 'Error Analysis',
+    dynatrace_hosts: 'Dynatrace Hosts',
     index: 'Index',
   };
   return labels[type] || type;

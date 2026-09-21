@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
-import { Autocomplete, Box, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton, ListItemText, OutlinedInput } from '@mui/material';
+import { Autocomplete, Box, Chip, TextField, Select, MenuItem, FormControlLabel, Switch, Typography, Button, Tooltip, FormControl, InputLabel, Checkbox, IconButton, ListItemText, OutlinedInput } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SectionPreviewModal from './SectionPreviewModal';
@@ -28,7 +28,7 @@ import {
   rawSlugOf,
   SECTION_ANCHOR_PREFIX,
 } from '@perfana/shared/utils';
-import { SECTION_RENDER_TITLES, isLinkableSection } from '@perfana/shared/types';
+import { SECTION_RENDER_TITLES, isLinkableSection, DEFAULT_DYNATRACE_HOST_COLUMNS, type DynatraceHostColumn } from '@perfana/shared/types';
 
 // Dynamically import preview components to reduce initial bundle size
 const ApdexSectionPreview = dynamic(() => import('./preview/ApdexSectionPreview'), { ssr: false });
@@ -1058,6 +1058,159 @@ export function ErrorAnalysisConfigForm({ config, onChange, text, onTextChange, 
         Counts and rates only. Response bodies, headers and cookies are never included — reports can be
         downloaded and shared by link.
       </Typography>
+    </SectionConfigShell>
+  );
+}
+
+// ==================== Dynatrace Hosts Config ====================
+
+export const DYNATRACE_HOST_COLUMN_OPTIONS: { key: DynatraceHostColumn; label: string; hint?: string }[] = [
+  { key: 'cpu', label: 'CPU', hint: 'average usage + core count' },
+  { key: 'memory', label: 'Memory', hint: 'average usage + total memory' },
+  { key: 'disk', label: 'Disk utilization' },
+  { key: 'network', label: 'Network traffic' },
+  { key: 'problems', label: 'Problems' },
+];
+
+/** @public */
+export interface DynatraceHostsConfig {
+  /** Empty or absent = every host mapped to the run's workload. */
+  hostIds?: string[];
+  columns?: DynatraceHostColumn[];
+  /** One table per label instead of one flat table. */
+  groupByLabel?: boolean;
+}
+
+interface DynatraceHostsConfigFormProps {
+  config: DynatraceHostsConfig;
+  onChange: (config: DynatraceHostsConfig) => void;
+  text?: string;
+  onTextChange: (text: string) => void;
+  testRunId?: string;
+  systemUnderTestId?: string;
+  testEnvironment?: string;
+  workload?: string;
+  allSections?: ReportSectionConfig[];
+}
+
+interface HostOption {
+  entityId: string;
+  entityDisplayName: string;
+  labels: string[];
+}
+
+export function DynatraceHostsConfigForm({ config, onChange, text, onTextChange, testRunId, systemUnderTestId, testEnvironment, workload, allSections }: DynatraceHostsConfigFormProps) {
+  const [hosts, setHosts] = useState<HostOption[]>([]);
+  const [labelFilter, setLabelFilter] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!systemUnderTestId) return;
+    let cancelled = false;
+    const params = new URLSearchParams({ systemId: systemUnderTestId });
+    if (testEnvironment) params.set('environment', testEnvironment);
+    if (workload) params.set('workload', workload);
+    authenticatedFetch(`/dynatrace/entities/mappings?${params}`, { method: 'GET' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: Array<{ entityType: string; entityId: string; entityDisplayName: string; labels?: string[] }>) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        setHosts(
+          rows
+            .filter((m) => m.entityType === 'HOST')
+            .map((m) => ({ entityId: m.entityId, entityDisplayName: m.entityDisplayName, labels: m.labels ?? [] }))
+            .sort((a, b) => a.entityDisplayName.localeCompare(b.entityDisplayName)),
+        );
+      })
+      .catch(() => { if (!cancelled) setHosts([]); });
+    return () => { cancelled = true; };
+  }, [systemUnderTestId, testEnvironment, workload]);
+
+  const labelOptions = useMemo(() => Array.from(new Set(hosts.flatMap((h) => h.labels))).sort(), [hosts]);
+  // AND across the chosen labels, like the Hosts tab filter.
+  const filteredHosts = useMemo(
+    () => (labelFilter.length === 0 ? hosts : hosts.filter((h) => labelFilter.every((l) => h.labels.includes(l)))),
+    [hosts, labelFilter],
+  );
+  const selectedIds = config.hostIds ?? [];
+  // A saved id whose mapping is gone still needs an option, or Autocomplete drops it silently.
+  const selected = selectedIds.map((id) => hosts.find((h) => h.entityId === id) ?? { entityId: id, entityDisplayName: id, labels: [] });
+  const columns = config.columns?.length ? config.columns : DEFAULT_DYNATRACE_HOST_COLUMNS;
+
+  const toggleColumn = (key: DynatraceHostColumn) => {
+    const next = columns.includes(key) ? columns.filter((c) => c !== key) : [...columns, key];
+    onChange({ ...config, columns: next });
+  };
+
+  return (
+    <SectionConfigShell
+      sectionTitle="Dynatrace Hosts"
+      sectionType="Dynatrace Hosts"
+      previewType="dynatrace_hosts"
+      previewConfig={config}
+      text={text}
+      onTextChange={onTextChange}
+      testRunId={testRunId}
+      allSections={allSections}
+    >
+      {labelOptions.length > 0 && (
+        <Autocomplete
+          multiple
+          size="small"
+          options={labelOptions}
+          value={labelFilter}
+          onChange={(_e, value) => setLabelFilter(value)}
+          renderInput={(params) => <TextField {...params} label="Filter hosts by label" helperText="Narrows the host list below; it is not saved." />}
+        />
+      )}
+      <Autocomplete
+        multiple
+        size="small"
+        options={filteredHosts}
+        value={selected}
+        isOptionEqualToValue={(a, b) => a.entityId === b.entityId}
+        getOptionLabel={(h) => h.entityDisplayName}
+        onChange={(_e, value) => onChange({ ...config, hostIds: value.map((h) => h.entityId) })}
+        renderOption={(props, h) => (
+          <li {...props} key={h.entityId}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+              <span>{h.entityDisplayName}</span>
+              {h.labels.map((l) => <Chip key={l} label={l} size="small" variant="outlined" color="info" />)}
+            </Box>
+          </li>
+        )}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="Hosts"
+            placeholder={selected.length ? '' : 'All hosts'}
+            helperText={hosts.length === 0 ? 'No Dynatrace hosts are mapped to this system' : 'Empty = every mapped host'}
+          />
+        )}
+      />
+      {labelFilter.length > 0 && filteredHosts.length > 0 && (
+        <Button
+          size="small"
+          sx={{ alignSelf: 'flex-start' }}
+          onClick={() => onChange({ ...config, hostIds: Array.from(new Set([...selectedIds, ...filteredHosts.map((h) => h.entityId)])) })}
+        >
+          Add all {filteredHosts.length} hosts matching the label filter
+        </Button>
+      )}
+
+      <FormControlLabel
+        control={<Switch checked={config.groupByLabel ?? false} onChange={(e) => onChange({ ...config, groupByLabel: e.target.checked })} />}
+        label="Group hosts by label"
+      />
+
+      <Typography variant="caption" color="text.secondary">Columns</Typography>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+        {DYNATRACE_HOST_COLUMN_OPTIONS.map((c) => (
+          <FormControlLabel
+            key={c.key}
+            control={<Checkbox size="small" checked={columns.includes(c.key)} onChange={() => toggleColumn(c.key)} />}
+            label={c.hint ? `${c.label} (${c.hint})` : c.label}
+          />
+        ))}
+      </Box>
     </SectionConfigShell>
   );
 }

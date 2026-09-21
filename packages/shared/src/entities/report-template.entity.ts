@@ -24,6 +24,7 @@ export type ReportSectionType =
   | 'graphs'
   | 'top_10_lists'
   | 'error_analysis'
+  | 'dynatrace_hosts'
   | 'index';
 
 /**

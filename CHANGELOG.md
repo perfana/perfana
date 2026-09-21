@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.0] - 2026-09-21
+
+### Added
+- **"Dynatrace Hosts" report section** — the Dynatrace card's Hosts tab, in a report. One row per HOST entity mapped to the run's system / environment / workload, showing the host's labels and, per selected column, the average over the run window: **CPU** (usage % plus the host's CPU core count), **Memory** (usage % plus total memory) — both on by default — and optionally **Disk utilization**, **Network traffic** and **Problems** (count with worst-severity colour, as on the tab). Rows sort like the tab: hosts with problems first, then CPU descending. The config form lists the mapped hosts in a multi-select that shows each host's labels, with a separate label filter to narrow that list (AND across labels, like the tab) and a one-click "add all hosts matching the filter"; leaving the selection empty means every mapped host. A **Group hosts by label** switch renders one table per label instead (a host with several labels appears under each; unlabelled hosts go last under "No label"). `DynatraceService.fetchHostsReport` batches per Dynatrace instance — one `/metrics/query` per column, one `/entities` call for cores and memory, one `/problems` call — and fails soft per call, so a metric the tenant does not serve leaves a dash in that column rather than blanking the row. Section type id `dynatrace_hosts`; config `{ hostIds?: string[], columns?: ('cpu'|'memory'|'disk'|'network'|'problems')[], groupByLabel?: boolean }`.
+
 ## [0.2.95.43] - 2026-09-21
 
 ### Fixed
