@@ -27,6 +27,7 @@ import {
   DEFAULT_APDEX_THRESHOLD_MS,
   ALL_AGGREGATED_SCENARIO,
   ALL_AGGREGATED_METRIC,
+  samplerMetricNameSql,
 } from '../../constants/performance-metrics.js';
 import type {
   TestRunMetadata,
@@ -340,13 +341,7 @@ export class RequestsProcessor {
         CASE
           WHEN c.g_scenario = 1 THEN $11
           WHEN c.g_txn = 1 THEN 'total'
-          -- Metric name for the request level: drop the transaction prefix when it
-          -- adds nothing (no Transaction Controller, or it equals the sampler).
-          WHEN c.transaction_name IS NULL
-            OR c.transaction_name = ''
-            OR c.transaction_name = 'overall'
-            OR c.transaction_name = c.sampler_name THEN c.sampler_name
-          ELSE c.transaction_name || '.' || c.sampler_name
+          ELSE ${samplerMetricNameSql('c.transaction_name', 'c.sampler_name')}
         END as metric_name,
         v.panel_id,
         v.value,

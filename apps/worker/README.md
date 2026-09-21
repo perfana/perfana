@@ -61,6 +61,14 @@ orchestrator waits 30 min on it), and never on a run with no `transactions` rows
 rollup's unconditional delete would wipe that run's sampler half on every pass. Best-effort: a failed
 or skipped rollup is logged at warn and the raw path runs as before.
 
+The checks stage reads the rollup a second way since v0.2.96.1: an `avg` SLO on the perf-test
+Transaction / Request Error Rate panels (105 / 205) takes `SUM(failed_count) / SUM(total_count)` from
+the `ramp_up_excluded = true` rows (`DataAggregator.pooledErrorRates`) instead of
+`ds_metric_statistics.mean`, which averaged the per-bucket ratios unweighted. A series without a
+rollup row keeps the bucket mean and is named in a `Pooled error rate unavailable` warning; the
+request-level series name comes from the same `samplerMetricNameSql` fragment the writer uses. See
+the root CLAUDE.md, "The perf-test error-rate SLO reads the transaction rollup".
+
 `checks-evaluation` evaluates every SLO operator in one place, `src/pipelines/checks/requirement-operator.ts`
 (v0.2.95.31), shared by `RequirementChecker` and `AggregatedBenchmarkEvaluator`: `lt lte gt gte eq ne`
 and their symbols (`< <= > >= = !=`). Until then `RequirementChecker` knew only `lt`/`gt` and answered

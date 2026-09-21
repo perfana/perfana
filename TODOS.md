@@ -275,6 +275,48 @@ nothing currently asserts it.
 
 ## Worker pipeline
 
+### Perf-test scenario dashboards never get their `metrics_source_id` linked
+
+**Priority:** P3
+**Origin:** found while fixing the perf-test error-rate SLO on `fix/perf-test-error-rate-slo-pooled` (2026-09-21).
+**Why:** `DashboardManager.getOrCreateScenarioDashboard` inserts the `application_dashboards` row and
+then upserts the `metrics_sources` row (`source_type = 'performance_test'`, `external_ref = <uid>`),
+but never writes the returned id back onto `application_dashboards.metrics_source_id` — on the dev DB
+all 76 perf-test dashboards have it NULL while all 76 sources exist. Anything that resolves a
+dashboard's source type through that FK (the API's `findAll` artificial-row filter, `getSourceType()`
+in the web) sees "no source" for these rows. `DataAggregator.pooledErrorRates` therefore resolves the
+source through `(system_under_test_id, test_environment, external_ref = dashboard_uid)` instead of
+the FK; once the FK is populated that lookup can become a plain join on `metrics_source_id`.
+**What:** `UPDATE application_dashboards SET metrics_source_id = $id WHERE id = $dashboardId AND
+metrics_source_id IS NULL` after the upsert, plus a one-off backfill migration joining on
+`(system_under_test_id, test_environment, dashboard_uid = external_ref)`. Check `collectable-sources.ts`
+and the web's `isArtificialDashboard` still classify the rows the same way once the FK is set.
+
+---
+
+### The error-rate SLO is now pinned to the transaction rollup, which has two known stale states
+
+**Priority:** P3
+**Origin:** adversarial review on `fix/perf-test-error-rate-slo-pooled` (2026-09-21, v0.2.96.1).
+**Why:** `DataAggregator.pooledErrorRates` (panels 105/205, `avg` checks) reads
+`test_run_transaction_stats` / `test_run_sampler_stats`, the same tables the Apdex fast path has read
+since v0.2.95.25, so the SLO verdict now inherits their two residues: (a) an analysis-window change
+enqueues the rollup and the re-evaluate independently (`test-runs-mutation.service.ts`), so a
+`checks-evaluation` child that runs before the rollup lands judges the new window's statistics
+against the old window's counts, and nothing re-runs the check when the rollup commits;
+(b) a sampler half written while `requests_raw` was still ingesting is *partial*, not empty, so
+`repairEmptySamplerRollup` / `ensureTransactionRollup` never fire and the 205 check is judged on an
+undercount. Both fall back to the bucket mean only when the row is *absent*. Two smaller ones from the
+same review: `average_all` on an error-rate panel is still an unweighted mean of the per-transaction
+ratios, and on the `all aggregated` dashboard the pooled 205 figure excludes samplers outside any
+Transaction Controller (the rollup drops NULL-transaction rows) while the stored series includes them.
+**What:** (a) have the window-change handler enqueue the re-evaluate *after* the rollup job settles,
+or make `checks-evaluation` await a `rollup-<id>` job when one is queued; (b) record the
+`requests_raw` row count the rollup saw and re-run it when `getRollupStatus` finds the table has grown;
+`average_all` → pool `SUM(failed)/SUM(total)` across the dashboard when the panel is 105/205.
+
+---
+
 ### Force re-fetch deletes a run's perf-test ds_metrics even when there is nothing to rebuild from
 
 **Priority:** P2

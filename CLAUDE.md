@@ -524,6 +524,52 @@ window differently (the raw scan applies only the start offset and drops NULL re
 transaction near the floor can be "Too few" on one path and evaluated on the other. Also in
 TODOS.md.
 
+### The perf-test error-rate SLO reads the transaction rollup, not the mean of the buckets
+
+The stored series on the perf-test **Transaction Error Rate** (panel 105) and **Request Error
+Rate** (205) is `errors / count` **per bucket**, and `ds_metric_statistics.mean` averages those
+buckets unweighted: a bucket holding one failed execution counts 100 %, beside a bucket of 40
+successes at 0 %. On a sparse transaction the SLO read 10.97 % where Performance Analysis showed
+7.49 % for the same run and window (WERKNL-00011, `WG_VAC_16_Stuur_Email`). Since v0.2.96.1 an
+`avg` check on those two panels is the rollup's third reader: `DataAggregator.pooledErrorRates`
+substitutes `SUM(failed_count) / SUM(total_count)` from `test_run_transaction_stats` /
+`test_run_sampler_stats` for `mean` before the targets are built, the same figure Performance
+Analysis and the Apdex fast path use. `max` and percentile checks on these panels still read the
+per-bucket series. Five things about it are deliberate:
+
+1. **Scoped by the pipeline-written label, never by `benchmarks.dashboard_label`.** The scenario
+   comes from `ds_metric_statistics.dashboard_label` (`Performance test metrics <scenario>`
+   verbatim; the uid is lossy), and a label the prefix does not match returns an empty map. The
+   benchmark's own label column is nullable and user-editable, so it is neither safe to dereference
+   nor to scope by. The `all aggregated` dashboard pools every scenario into the one `All aggregated`
+   series; the processors label a NULL scenario `default` where the rollup writes `''`, and the query
+   maps between them. The perf-test source is proven by an `EXISTS` on `metrics_sources`
+   `(system_under_test_id, test_environment, external_ref = dashboard_uid)` rather than the
+   `application_dashboards.metrics_source_id` FK, which `DashboardManager` never populates for these
+   rows (TODOS.md).
+2. **Always the `ramp_up_excluded = true` row.** That is the window the bucket mean it replaces was
+   computed over (`ds_metric_statistics` holds `ramp_up = false` only), and
+   `benchmarks.exclude_ramp_up_time` has never applied to metric SLOs.
+3. **A miss keeps the bucket mean, and says so.** A series the rollup does not know falls back to
+   `mean` and is named in a worker warning (`Pooled error rate unavailable for N/M series on panel
+   …`); a rollup read that throws logs the cause at error and falls back the same way, so a missing or
+   half-written rollup is visible rather than silent and never turns a verdict into "no result". Two
+   misses are expected and not warned: the artificial `default` row from
+   `createArtificialMetricStatistic`, and on panel 205 a sampler outside any Transaction Controller
+   (stored under its bare name; `SAMPLER_ROLLUP_BASE_SQL` drops NULL-transaction rows, so it never
+   has a rollup row).
+4. **The request-level series name is one shared SQL fragment.** `samplerMetricNameSql` in
+   `apps/worker/src/constants/performance-metrics.ts` (drop the transaction prefix when it is NULL,
+   `''`, `overall` or equal to the sampler) is used by the writer (`requests-processor.ts`) and by
+   this reader. A second copy would drift silently: the failure is a map miss and a bucket-mean
+   fallback, not an error.
+5. **It inherits the rollup's stale states.** The verdict is now pinned to a table that can be
+   *partial* (a sampler half written while `requests_raw` was still ingesting) or *behind* (an
+   analysis-window change enqueues the rollup and the re-evaluate independently), and the fallback
+   fires only when the row is *absent*. Both are in TODOS.md under "The error-rate SLO is now pinned
+   to the transaction rollup". Existing `check_results` keep their stored value until the run is
+   re-evaluated.
+
 ### The SUT export is large by default, and only Chrome and Edge can stream it to disk
 
 `SUT_TRANSFER_ENABLED` gates an admin-only export that streams a gzipped NDJSON bundle with no
@@ -1396,6 +1442,7 @@ container mounts in tests at all.
 29. **`adapt-analysis` fails with `canceling statement due to statement timeout` in `ResultsProcessor.deleteOrphanedResults` on the first analysis of a large run, and every re-evaluate of that run fails the same way while other runs' `delete-orphaned-results` substage reads seconds and growing** → the orphan `DELETE`'s whole-run `EXISTS` guard was planned inside a per-row nested loop because the upsert's rows are invisible to the planner's statistics (metrics x metrics; ~25k metrics crosses the 120 s cap). Fixed in v0.2.95.26 (the guard is keyed on the unnested run list, uncorrelated to the row). On an older deploy the only workaround is a one-off raise of `ANALYTICS_STATEMENT_TIMEOUT_MS` for that worker; nothing in the data is wrong. The `⚠️ No metrics were available to aggregate` / `0 row(s) inserted` lines from `control-group-statistics` in the same log are unrelated and were a logging bug until the same version — TypeORM returns `[]` for an INSERT, so `.rowCount` was always undefined. See item 3 of "`ds_adapt_results` is written by an upsert, so it also needs a delete" above.
 30. **Some Dynatrace hosts have almost no points on a live run, the sanity check reports them as `1 points across a <N>s run`, and the collection status says the range was collected** → those hosts publish their minute buckets more than a minute late, and a tick that queried exactly `[last tick, now]` recorded the minute as collected because the other hosts answered. Fixed in v0.2.95.27 (every live tick re-queries the previous 2 minutes, `DYNATRACE_INGEST_LOOKBACK_MS`). On an older deploy, a force-refetch re-evaluate after the run completes recovers them from Dynatrace as long as the tenant still holds the window. The last one or two minutes of such a host can still be missing after the fix — that is the open TODOS.md item, not a regression. See item 5 of "Gap-filling a completed run must never fall back to a full re-collection" above.
 31. **A workload Apdex SLO fails on a transaction that ran a handful of times, or a report shows a red FAIL pill on an SLO row whose `meets_requirement` is NULL** → the first is the sample floor at work (v0.2.95.34): a transaction below `apdex_min_samples` (default 50, counted over every execution including failed ones) is reported as **Too few** and is neither a pass nor a fail; re-evaluate the run to apply it to results stored before the SLO gained the floor. The second is a reader keying on `!== true` instead of `=== false`; `slo-renderer` and `getSloSummary` did until this version. Note the run verdict is `bool_and(COALESCE(meets_requirement, true))`, so a NULL row counts as a pass there, and a run in which nothing reached the floor still announces "SLOs Passed" in Slack/Teams (open TODOS.md item). See "An Apdex SLO has a sample floor" above.
+32. **A Transaction / Request Error Rate SLO reports a higher percentage than Performance Analysis shows for the same transaction and window** → the check averaged the per-bucket error-rate series unweighted, so one failed execution in a quiet minute counted 100 %. Fixed in v0.2.96.1 (`DataAggregator.pooledErrorRates` reads `SUM(failed)/SUM(total)` from the transaction rollup); re-evaluate the run to replace a stored result. If the two still disagree after that, look for `Pooled error rate unavailable` in the worker log — the series fell back to the bucket mean because the rollup has no row for it (a partial sampler half, a stale rollup after a window change, or a bare-named sampler on panel 205). See "The perf-test error-rate SLO reads the transaction rollup" above.
 
 ## How-To Tutorials
 
