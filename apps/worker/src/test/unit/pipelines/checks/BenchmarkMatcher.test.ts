@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { BenchmarkMatcher } from '../../../../pipelines/checks/BenchmarkMatcher.js';
+import { BenchmarkMatcher, withColumnMatchPattern } from '../../../../pipelines/checks/BenchmarkMatcher.js';
 import { BenchmarkNotFoundError } from '../../../../pipelines/checks/BaseCheckService.js';
 import type { EntityManager } from 'typeorm';
 
@@ -862,5 +862,20 @@ describe('BenchmarkMatcher', () => {
         ['', '', '']
       );
     });
+  });
+});
+
+// ─── column → configuration fold ───────────────────────────────────────────────
+describe('withColumnMatchPattern', () => {
+  it('folds a column-only pattern (profile-stamped benchmark) into configuration', () => {
+    expect(withColumnMatchPattern({ configuration: { id: 1 }, match_pattern: 'heap.*' }))
+      .toEqual({ id: 1, matchPattern: 'heap.*' });
+  });
+
+  it('leaves configuration alone when it already has a pattern or the column is empty', () => {
+    const cfg = { id: 1, matchPattern: '^cpu' };
+    expect(withColumnMatchPattern({ configuration: cfg, match_pattern: 'heap.*' })).toBe(cfg);
+    expect(withColumnMatchPattern({ configuration: cfg, match_pattern: null })).toBe(cfg);
+    expect(withColumnMatchPattern({ configuration: { id: 1 }, match_pattern: '' })).toEqual({ id: 1 });
   });
 });

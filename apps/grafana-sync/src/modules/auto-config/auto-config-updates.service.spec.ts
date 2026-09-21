@@ -608,6 +608,9 @@ describe('AutoConfigUpdatesService', () => {
             test_environment: 'production',
             source: 'gatling',
             grafana_instance: 'grafana-prod',
+            // The worker reads the pattern from configuration, not the column.
+            match_pattern: 'heap.*',
+            configuration: expect.objectContaining({ matchPattern: 'heap.*' }),
           }),
         );
       });

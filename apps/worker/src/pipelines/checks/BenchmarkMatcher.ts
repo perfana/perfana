@@ -16,6 +16,23 @@ export interface TestRun {
 
 type BenchmarkType = 'metric' | 'apdex' | 'aggregated';
 
+/**
+ * A benchmark's match pattern has two homes: the SLO dialog writes
+ * `configuration.matchPattern`, which is what `RequirementChecker` reads, while
+ * grafana-sync's auto-config stamps a profile benchmark's pattern into the
+ * `match_pattern` COLUMN only — so profile-driven patterns were never applied.
+ * Fold the column in when the JSON has no pattern of its own; the JSON wins
+ * when both are set, since that is the one a user can see and edit.
+ */
+export function withColumnMatchPattern(row: Record<string, unknown>): unknown {
+  const config = (row.configuration ?? {}) as Record<string, unknown>;
+  const column = row.match_pattern;
+  if (typeof column !== 'string' || column === '' || config.matchPattern) {
+    return row.configuration;
+  }
+  return { ...config, matchPattern: column };
+}
+
 export interface Benchmark {
   id: string;
   system_under_test_id: string;
@@ -138,6 +155,7 @@ export class BenchmarkMatcher extends BaseCheckService {
         dashboard_label,
         application_dashboard_id,
         configuration,
+        match_pattern,
         requirement_operator,
         requirement_value,
         validate_with_default_if_no_data,
@@ -180,7 +198,7 @@ export class BenchmarkMatcher extends BaseCheckService {
       dashboard_uid: row.dashboard_uid as string,
       dashboard_label: row.dashboard_label as string,
       application_dashboard_id: row.application_dashboard_id as string,
-      configuration: row.configuration,
+      configuration: withColumnMatchPattern(row),
       requirement_operator: row.requirement_operator as string | undefined,
       requirement_value: row.requirement_value as number | undefined,
       validate_with_default_if_no_data: (row.validate_with_default_if_no_data as boolean) || false,
@@ -230,6 +248,7 @@ export class BenchmarkMatcher extends BaseCheckService {
         dashboard_label,
         application_dashboard_id,
         configuration,
+        match_pattern,
         requirement_operator,
         requirement_value,
         validate_with_default_if_no_data,
@@ -268,7 +287,7 @@ export class BenchmarkMatcher extends BaseCheckService {
       dashboard_uid: row.dashboard_uid,
       dashboard_label: row.dashboard_label,
       application_dashboard_id: row.application_dashboard_id,
-      configuration: row.configuration,
+      configuration: withColumnMatchPattern(row),
       requirement_operator: row.requirement_operator,
       requirement_value: row.requirement_value,
       validate_with_default_if_no_data: row.validate_with_default_if_no_data || false,
