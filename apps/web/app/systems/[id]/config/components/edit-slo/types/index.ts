@@ -43,6 +43,7 @@ export interface SLOFormData {
   excludeRampUpTime: boolean;
   averageAll: boolean;
   matchPattern: string;
+  invertMatchPattern: boolean;
   validateWithDefaultIfNoData: boolean;
   validateWithDefaultIfNoDataValue: string;
 }
@@ -61,6 +62,7 @@ export const initialSLOFormData: SLOFormData = {
   excludeRampUpTime: true,
   averageAll: false,
   matchPattern: '',
+  invertMatchPattern: false,
   validateWithDefaultIfNoData: false,
   validateWithDefaultIfNoDataValue: '',
 };

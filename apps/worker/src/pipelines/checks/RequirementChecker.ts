@@ -90,6 +90,8 @@ export class RequirementChecker extends BaseCheckService {
       // Using safe-regex validation to prevent ReDoS attacks
       let regex: RegExp | null = null;
       const matchPattern = config?.matchPattern as string | null | undefined;
+      // Inverted: the pattern names the series to EXCLUDE, so users need no negative lookahead.
+      const invertMatchPattern = config?.invertMatchPattern === true;
       if (matchPattern) {
         const result = validateRegexPattern(matchPattern);
         if (result.safe && result.regex) {
@@ -110,8 +112,9 @@ export class RequirementChecker extends BaseCheckService {
 
         let targetResult: CheckResultTarget;
 
-        // If matchPattern is set and does not match, set meets_requirement=null
-        if (regex && !regex.test(targetName)) {
+        // A series the pattern filters out (no match; or a match, when inverted) is
+        // reported but not judged: meets_requirement=null.
+        if (regex && regex.test(targetName) === invertMatchPattern) {
           targetResult = this.createTargetResult(targetData, benchmark);
           targetResult.meets_requirement = null;
         } else {
@@ -193,7 +196,11 @@ export class RequirementChecker extends BaseCheckService {
         exclude_ramp_up_time: benchmark.exclude_ramp_up_time,
         ramp_up: testRun.ramp_up || 0,
         match_pattern: matchPattern || null,
-        requirement: this.convertRequirement(benchmark),
+        // ponytail: check_results has no invert column; the flag rides in the requirement
+        // JSONB beside the apdex extras, only when set, so older rows keep their shape.
+        requirement: invertMatchPattern
+          ? { ...this.convertRequirement(benchmark), invert_match_pattern: true }
+          : this.convertRequirement(benchmark),
         panel_average: aggregationResult.panel_average,
         meets_requirement: targetResults.length > 0 ? overallMeetsRequirement : null,
         targets: targetResults,

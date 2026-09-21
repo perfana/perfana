@@ -204,7 +204,7 @@ export class SloRenderer {
               : pill('N/A', 'neutral');
         const cell = `padding: 12px 16px; border-bottom: 1px solid #f0f2f5;`;
         const pattern = result.match_pattern
-          ? `<div style="font-size:10.5px; color:${REPORT_COLORS.mutedInk}; margin-top:4px;">For series matching pattern: ${this.utils.escapeHtml(result.match_pattern)}</div>`
+          ? `<div style="font-size:10.5px; color:${REPORT_COLORS.mutedInk}; margin-top:4px;">For series ${result.requirement?.invert_match_pattern ? 'not matching' : 'matching'} pattern: ${this.utils.escapeHtml(result.match_pattern)}</div>`
           : '';
 
         return `

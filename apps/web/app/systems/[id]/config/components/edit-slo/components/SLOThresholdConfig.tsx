@@ -240,6 +240,20 @@ export function SLOThresholdConfig({
           placeholder="e.g. transaction_*, /api/v1/*"
           helperText="Optional regex pattern to match specific metrics"
         />
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={sloFormData.invertMatchPattern}
+              onChange={(e) => setSloFormData((prev) => ({ ...prev, invertMatchPattern: e.target.checked }))}
+              color="primary"
+              disabled={!sloFormData.matchPattern}
+            />
+          }
+          label="Exclude matching series"
+        />
+        <FormHelperText sx={{ ml: 0, mt: 0.5 }}>
+          Evaluate every series except those matching the pattern
+        </FormHelperText>
       </Grid>
 
       {/* Use Default If No Data */}

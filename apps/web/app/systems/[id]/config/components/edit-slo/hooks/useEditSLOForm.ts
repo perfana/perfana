@@ -243,6 +243,7 @@ export function useEditSLOForm({
         excludeRampUpTime: benchmark.exclude_ramp_up_time !== false,
         averageAll: benchmark.configuration?.averageAll || false,
         matchPattern: benchmark.configuration?.matchPattern || '',
+        invertMatchPattern: benchmark.configuration?.invertMatchPattern === true,
         validateWithDefaultIfNoData: benchmark.configuration?.validateWithDefaultIfNoData || false,
         validateWithDefaultIfNoDataValue: displayDefaultValue,
       });

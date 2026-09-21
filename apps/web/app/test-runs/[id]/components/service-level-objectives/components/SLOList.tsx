@@ -438,7 +438,7 @@ export function SLOList({
                         fontSize: '0.7rem',
                         mt: 0.5
                       }}>
-                        For series matching pattern: {result.match_pattern}
+                        For series {result.requirement?.invert_match_pattern ? 'not matching' : 'matching'} pattern: {result.match_pattern}
                       </Typography>
                     )}
                   </>

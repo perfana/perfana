@@ -128,6 +128,8 @@ export interface CheckResultRequirement {
   type?: string;
   aggregate_metric?: string;
   aggregate_stat?: string;
+  /** Metric SLOs with a match pattern: the pattern excluded the matching series. */
+  invert_match_pattern?: boolean;
 }
 
 /**
@@ -174,6 +176,8 @@ export interface BenchmarkConfiguration {
   excludeRampUpTime?: boolean;
   averageAll?: boolean;
   matchPattern?: string;
+  /** Pattern names the series to exclude instead of the ones to judge. */
+  invertMatchPattern?: boolean;
   validateWithDefaultIfNoData?: boolean;
   validateWithDefaultIfNoDataValue?: number | string | null;
   [key: string]: unknown;
