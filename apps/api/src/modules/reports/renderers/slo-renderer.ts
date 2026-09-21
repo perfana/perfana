@@ -431,6 +431,7 @@ export class SloRenderer {
       max: 'Maximum value',
       min: 'Minimum value',
       last: 'Last value',
+      trend: 'Drift over the analysis window',
       sum: 'Sum value',
       count: 'Count value',
       median: 'Median value',

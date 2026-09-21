@@ -33,6 +33,7 @@ export const EVALUATE_TYPE_OPTIONS: EvaluateTypeOption[] = [
   { value: 'max', label: 'Maximum', description: 'Use the maximum value observed' },
   { value: 'min', label: 'Minimum', description: 'Use the minimum value observed' },
   { value: 'last', label: 'Last Value', description: 'Use the most recent value recorded' },
+  { value: 'trend', label: 'Trend', description: 'Drift over the analysis window as % of the series mean per hour; positive means rising' },
   { value: 'q50', label: '50th Percentile', description: 'Median value - 50% of values are below this' },
   { value: 'q90', label: '90th Percentile', description: '90% of values are below this threshold' },
   { value: 'q95', label: '95th Percentile', description: '95% of values are below this threshold' },
@@ -59,6 +60,7 @@ export const EVALUATE_TYPE_LABELS: Record<string, string> = {
   max: 'Maximum',
   min: 'Minimum',
   last: 'Last Value',
+  trend: 'Trend',
   q50: '50th Percentile',
   q90: '90th Percentile',
   q95: '95th Percentile',
@@ -73,6 +75,7 @@ export const EVALUATE_TYPE_DESCRIPTIONS: Record<string, string> = {
   max: 'Use the maximum value observed',
   min: 'Use the minimum value observed',
   last: 'Use the most recent value recorded',
+  trend: 'Drift over the analysis window as % of the series mean per hour; positive means rising',
   q50: 'Median value - 50% of values are below this',
   q90: '90% of values are below this threshold',
   q95: '95% of values are below this threshold',
@@ -184,7 +187,9 @@ export function getRequirementValueHelperText(value: string, selectedPanel: SloP
 /**
  * Get the unit chip label for a value
  */
-export function getUnitChipLabel(value: string, selectedPanel: SloPanel | null | undefined): string | null {
+export function getUnitChipLabel(value: string, selectedPanel: SloPanel | null | undefined, evaluateType?: string): string | null {
+  // A trend is % of the series mean per hour regardless of what the panel measures.
+  if (evaluateType === 'trend') return '%/h';
   const parsed = parseValueWithUnit(value);
   const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   const panelUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;

@@ -493,6 +493,21 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               -- forty lines above.
               last(value, time) FILTER (WHERE value IS NOT NULL) as last_value,
 
+              -- Trend SLO: OLS slope of value against time, normalised to % of the
+              -- series mean per hour so one threshold fits fast and slow series alike,
+              -- and Pearson r so the check can tell a drift from noise. Core Postgres
+              -- aggregates, one pass, same window as everything else here.
+              -- date_part, not EXTRACT: on PG14+ EXTRACT returns numeric, and the per-row
+              -- numeric divide + cast cost +75% on a 1.66 M-row run (measured); date_part
+              -- is float8 and the /3600 is exact after aggregation (slope is linear in x).
+              -- A constant zero series (an error count with no errors) is a flat line, not
+              -- "no data": emit 0 so it takes the weak-trend path instead of vanishing.
+              CASE WHEN AVG(value) <> 0
+                   THEN regr_slope(value, date_part('epoch', time)) * 3600 / ABS(AVG(value)) * 100
+                   WHEN MIN(value) = MAX(value) THEN 0
+              END as trend_pct_per_hour,
+              corr(value, date_part('epoch', time)) as trend_corr,
+
               -- n_missing: always 0 here because WHERE filters out NULLs, but kept
               -- for schema compatibility. Downstream code may re-count from raw data.
               COUNT(CASE WHEN value IS NULL THEN 1 END) as n_missing,
@@ -546,6 +561,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
               sa.max_value,
               sa.std_dev,
               sa.last_value,
+              sa.trend_pct_per_hour,
+              sa.trend_corr,
 
               sa.n_missing,
               sa.n_non_zero,
@@ -622,6 +639,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           max_value,
           std_dev,
           last_value,
+          trend_pct_per_hour,
+          trend_corr,
           n_missing,
           n_non_zero,
           q10,
@@ -666,6 +685,8 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
           max_value,
           std_dev,
           last_value,
+          trend_pct_per_hour,
+          trend_corr,
           n_missing,
           n_non_zero,
           q10,

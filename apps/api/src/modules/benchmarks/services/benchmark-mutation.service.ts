@@ -20,6 +20,9 @@ import type {
 } from './benchmark-mutation.types';
 import type { CopyBenchmarksDto } from '../dto/copy-benchmarks.dto';
 
+/** `metric_unit` of a trend SLO: the slope is % of the series mean per hour, whatever the panel's unit. */
+const TREND_UNIT = '%/h';
+
 // Re-export types
 export type {
   CreateBenchmarkDto,
@@ -188,7 +191,8 @@ export class BenchmarkMutationService {
         metrics_source_id: dto.metricsSourceId || undefined,
         panel_title: dto.panelTitle,
         config_title: dto.configTitle,
-        metric_unit: dto.configuration?.yAxesFormat,
+        // A trend is always % of the series mean per hour, whatever the panel's unit.
+        metric_unit: dto.evaluateType === 'trend' ? TREND_UNIT : dto.configuration?.yAxesFormat,
         evaluate_type: dto.evaluateType,
         requirement_operator: dto.requirementOperator,
         requirement_value: dto.requirementValue != null ? Number(dto.requirementValue) : undefined,
@@ -790,6 +794,14 @@ export class BenchmarkMutationService {
       if (config.yAxesFormat) data.metric_unit = config.yAxesFormat as string;
 
       data.configuration = config;
+    }
+    const evaluateType = dto.evaluateType ?? existing.evaluate_type;
+    if (evaluateType === 'trend') data.metric_unit = TREND_UNIT;
+    else if (existing.metric_unit === TREND_UNIT && dto.evaluateType !== undefined) {
+      // Switching away from trend: the panel unit lives in the (merged) configuration.
+      // null, not undefined: TypeORM's update() skips undefined keys, which would leave '%/h' on an
+      // avg SLO. The entity types the column as `string | undefined`, hence the cast.
+      data.metric_unit = ((data.configuration ?? existing.configuration)?.yAxesFormat ?? null) as string | undefined;
     }
 
     if (dto.configTitle !== undefined && data.configuration) {

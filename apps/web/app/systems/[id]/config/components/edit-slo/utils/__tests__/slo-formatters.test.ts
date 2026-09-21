@@ -295,6 +295,18 @@ describe('getUnitChipLabel', () => {
   it('should return null when value is empty and panel has no format', () => {
     expect(getUnitChipLabel('', null)).toBeNull();
   });
+
+  it('should return %/h for a trend SLO regardless of the panel unit or the typed value, and stay unit-driven otherwise', () => {
+    const msPanel = { yAxesFormat: 'ms' } as unknown as Parameters<typeof getUnitChipLabel>[1];
+    expect(getUnitChipLabel('', msPanel, 'trend')).toBe('%/h');
+    expect(getUnitChipLabel('500ms', msPanel, 'trend')).toBe('%/h');
+    expect(getUnitChipLabel('12', null, 'trend')).toBe('%/h');
+    // The third argument is optional and a non-trend type changes nothing.
+    expect(getUnitChipLabel('500', null, 'avg')).toBeNull();
+    expect(getUnitChipLabel('500', null, 'avg')).toBe(getUnitChipLabel('500', null));
+    // The dropdown offers the type the chip keys on.
+    expect(EVALUATE_TYPE_OPTIONS.map((o) => o.value)).toContain('trend');
+  });
 });
 
 // ---------------------------------------------------------------------------

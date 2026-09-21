@@ -96,7 +96,8 @@ export function useEditSLOHandlers({
         setSloFormLoading(true);
 
         // Handle percentunit conversion - divide by 100 if panel uses percentunit format
-        const effectiveUnitFormat = getEffectiveUnitFormat(sloFormData.selectedPanel);
+        // A trend threshold is %/h whatever the panel's unit, so the percentunit scaling must not touch it.
+        const effectiveUnitFormat = sloFormData.evaluateType === 'trend' ? undefined : getEffectiveUnitFormat(sloFormData.selectedPanel);
         const processedRequirementValue = processPercentunitValue(sloFormData.requirementValue, effectiveUnitFormat);
 
         // Handle percentunit conversion for default value too

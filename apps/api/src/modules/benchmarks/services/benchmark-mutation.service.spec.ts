@@ -152,6 +152,74 @@ describe('BenchmarkMutationService', () => {
     });
   });
 
+  // A trend SLO's value is % of the series mean per hour whatever the panel measures, so
+  // metric_unit is pinned to '%/h' on create and on every update that leaves it a trend,
+  // and put back to the panel's yAxesFormat when the evaluate type moves away again.
+  describe('trend SLO forces metric_unit to %/h', () => {
+    const updateWith = async (existing: BenchmarkEntity, body: Record<string, unknown>) => {
+      queryService.findOne.mockResolvedValue(existing as never);
+      benchmarkRepo.findOne.mockResolvedValue(existing);
+      benchmarkRepo.update.mockResolvedValue({} as never);
+      await service.update(existing.id, userId, roles, body as never);
+      return (benchmarkRepo.update as jest.Mock).mock.calls[0][1] as Partial<BenchmarkEntity>;
+    };
+
+    it('create() writes %/h for a trend SLO and the panel unit for every other evaluate type', async () => {
+      const created = buildEntity({ id: 'bm-trend' });
+      benchmarkRepo.create.mockReturnValue(created);
+      benchmarkRepo.save.mockResolvedValue(created);
+      const base = { systemUnderTestId: 'sut-1', testEnvironment: 'production', workload: 'loadTest', configuration: { yAxesFormat: 'ms' } };
+
+      await service.create(userId, roles, { ...base, evaluateType: 'trend' } as never);
+      await service.create(userId, roles, { ...base, evaluateType: 'avg' } as never);
+
+      const [trendPayload, avgPayload] = (benchmarkRepo.create as jest.Mock).mock.calls.map((c) => c[0]);
+      expect(trendPayload).toMatchObject({ evaluate_type: 'trend', metric_unit: '%/h' });
+      expect(avgPayload).toMatchObject({ evaluate_type: 'avg', metric_unit: 'ms' });
+    });
+
+    it('update() switching to trend pins %/h even when the body also posts the panel configuration', async () => {
+      const existing = buildEntity({ evaluate_type: 'avg', metric_unit: 'ms', configuration: { yAxesFormat: 'ms' } });
+
+      const data = await updateWith(existing, { evaluateType: 'trend', configuration: { yAxesFormat: 'ms' } });
+
+      expect(data.evaluate_type).toBe('trend');
+      expect(data.metric_unit).toBe('%/h');
+      expect(data.configuration).toMatchObject({ yAxesFormat: 'ms', evaluateType: 'trend' });
+    });
+
+    it('update() of an existing trend SLO keeps %/h when the body does not name an evaluate type', async () => {
+      const existing = buildEntity({ evaluate_type: 'trend', metric_unit: '%/h', configuration: { yAxesFormat: 'ms' } });
+
+      const data = await updateWith(existing, { requirementValue: 15, configuration: { yAxesFormat: 'ms' } });
+
+      expect(data).not.toHaveProperty('evaluate_type');
+      expect(data.metric_unit).toBe('%/h');
+    });
+
+    it('update() switching away from trend restores the stored panel unit, or clears it when there is none', async () => {
+      const withUnit = buildEntity({ id: 'bm-a', evaluate_type: 'trend', metric_unit: '%/h', configuration: { yAxesFormat: 'ms' } });
+      const dataA = await updateWith(withUnit, { evaluateType: 'avg' });
+      expect(dataA).toMatchObject({ evaluate_type: 'avg', metric_unit: 'ms' });
+
+      jest.clearAllMocks();
+      const noUnit = buildEntity({ id: 'bm-b', evaluate_type: 'trend', metric_unit: '%/h', configuration: {} });
+      const dataB = await updateWith(noUnit, { evaluateType: 'q95' });
+      expect(dataB.evaluate_type).toBe('q95');
+      // null, not undefined: TypeORM's update() skips undefined and would leave '%/h' behind.
+      expect(dataB).toHaveProperty('metric_unit', null);
+    });
+
+    it('update() of an SLO that was never a trend leaves metric_unit alone', async () => {
+      const existing = buildEntity({ evaluate_type: 'avg', metric_unit: 'ms', configuration: { yAxesFormat: 'ms' } });
+
+      const data = await updateWith(existing, { evaluateType: 'max', requirementValue: 3 });
+
+      expect(data.evaluate_type).toBe('max');
+      expect(data).not.toHaveProperty('metric_unit');
+    });
+  });
+
   describe('audit logging (Phase 5a, PR13)', () => {
     it('logs CREATE on create() with organizationIdOverride from the persisted benchmark', async () => {
       const created = buildEntity({ id: 'bm-create' });

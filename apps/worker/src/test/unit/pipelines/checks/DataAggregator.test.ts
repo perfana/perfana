@@ -474,6 +474,92 @@ describe('DataAggregator', () => {
     });
   });
 
+  describe('trend evaluate type', () => {
+    const stat = (metric_name: string, trend_pct_per_hour: number | null, trend_corr: number | null, count = 62) => ({
+      metric_name, mean: 290, median: 285, min_value: 200, max_value: 400, std_dev: 30,
+      q10: 0, q25: 0, q75: 0, q90: 0, q95: 0, q99: 0, last_value: 320, count,
+      is_constant: false, all_missing: false, pct_missing: 0, trend_pct_per_hour, trend_corr,
+    });
+
+    it('judges a correlated slope, reports but does not judge a weak one, and keeps weak rows out of the average', async () => {
+      const benchmark = createMockBenchmark({ evaluate_type: 'trend', average_all: true });
+      mockManager.query.mockResolvedValue([
+        stat('VolgendeCV', 26.4, 0.66),
+        stat('MijnWerkNl', 20.2, 0.10),   // slope from outliers, r below the floor
+        stat('Sparse', 30, 0.9, 5),       // too few points
+        stat('OldRow', null, null),       // statistics written before the column existed
+      ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), benchmark);
+
+      expect(result.targets).toEqual([
+        { target: 'VolgendeCV', value: 26.4, isArtificial: false, weakTrend: false, trendCorr: 0.66 },
+        { target: 'MijnWerkNl', value: 20.2, isArtificial: false, weakTrend: true, trendCorr: 0.10 },
+        { target: 'Sparse', value: 30, isArtificial: false, weakTrend: true, trendCorr: 0.9 },
+      ]);
+      expect(result.panel_average).toBe(26.4);
+    });
+
+    it('applies the floors as boundaries: |r| >= 0.5 and count >= 10 are judged, a null r is weak', async () => {
+      mockManager.query.mockResolvedValue([
+        stat('AtCorrFloor', 5, 0.5, 10),        // exactly on both floors → judged
+        stat('NegativeCorr', -5, -0.8, 62),     // falling series, |r| counts → judged
+        stat('JustUnderCorr', 5, 0.49, 62),     // r below the floor → weak
+        stat('JustUnderPoints', 5, 0.9, 9),     // one point short → weak
+        stat('SlopeNoCorr', 5, null, 62),       // slope without r (constant time?) → weak
+      ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(), createMockBenchmark({ evaluate_type: 'trend' })
+      );
+
+      expect(result.targets.map((t) => [t.target, t.weakTrend])).toEqual([
+        ['AtCorrFloor', false],
+        ['NegativeCorr', false],
+        ['JustUnderCorr', true],
+        ['JustUnderPoints', true],
+        ['SlopeNoCorr', true],
+      ]);
+      expect(result.targets[4].trendCorr).toBeNull();
+      // Not average_all: the panel value is the FIRST JUDGED series, not the first row.
+      expect(result.panel_average).toBe(5);
+      // The read must ask for the two trend columns; a stale SELECT would silently mark every row weak.
+      const sql = String(mockManager.query.mock.calls[0][0]);
+      expect(sql).toContain('trend_pct_per_hour, trend_corr');
+    });
+
+    it('returns a null panel average when every series is weak, so average_all has nothing to judge', async () => {
+      mockManager.query.mockResolvedValue([
+        stat('Noisy', 40, 0.2),
+        stat('Sparse', 90, 0.95, 3),
+      ]);
+
+      const averaged = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(), createMockBenchmark({ evaluate_type: 'trend', average_all: true })
+      );
+      expect(averaged.targets).toHaveLength(2);
+      expect(averaged.targets.every((t) => t.weakTrend)).toBe(true);
+      expect(averaged.panel_average).toBeNull();
+
+      mockManager.query.mockResolvedValue([stat('Noisy', 40, 0.2)]);
+      const single = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(), createMockBenchmark({ evaluate_type: 'trend', average_all: false })
+      );
+      expect(single.panel_average).toBeNull();
+    });
+
+    it('does not attach trend fields for a non-trend evaluate type even when the row carries them', async () => {
+      mockManager.query.mockResolvedValue([stat('cpu', 26.4, 0.66)]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(), createMockBenchmark({ evaluate_type: 'mean' })
+      );
+
+      expect(result.targets).toEqual([{ target: 'cpu', value: 290, isArtificial: false }]);
+      expect(result.panel_average).toBe(290);
+    });
+  });
+
   describe('perf-test error-rate panels read the pooled rollup ratio', () => {
     const SCENARIO_LABEL = 'Performance test metrics T_WG_Mijn_Vacatures';
     // dashboard_label is the pipeline-written label on the statistics row — that, not

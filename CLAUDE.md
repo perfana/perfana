@@ -524,6 +524,74 @@ window differently (the raw scan applies only the start offset and drops NULL re
 transaction near the floor can be "Too few" on one path and evaluated on the other. Also in
 TODOS.md.
 
+### A Trend SLO judges the slope of a series, and `%/h` is its unit whatever the panel measures
+
+A run whose response times climb for the whole steady state passes every scalar SLO — the average,
+the p95, even the last value can all sit under the threshold — and when every baseline run
+degrades the same way, ADAPT passes it too (WERKNL-00011, `WNL_WG_EXTRA_10_VolgendeCV`: +26 %/h at
+r 0.66, green everywhere). Since v0.2.96.4 `evaluate_type = 'trend'` judges the drift *within* the
+run: `StatisticsPipeline` writes `ds_metric_statistics.trend_pct_per_hour` (the OLS slope of value
+against time, normalised to % of the series mean per hour so one threshold fits a 40 ms and a 4 s
+series alike) and `trend_corr` (Pearson r), and `DataAggregator` maps `trend` onto the first the
+way it maps `avg` onto `mean`. Five things about it are easy to get backwards:
+
+1. **A slope is only judged when it is a trend, and the tri-state is the Apdex one.** A series with
+   `|r| < TREND_MIN_CORR` (0.5), fewer than `TREND_MIN_POINTS` (10) points, or a NULL/NaN r (a
+   constant series has no correlation; one NaN sample poisons `corr`) is reported with its slope but
+   written as `meets_requirement: null` with `weak_trend: true` and `trend_corr` on its target, and
+   left out of the panel average so an unjudged value cannot tip an `average_all` verdict. The
+   floors are module constants in `DataAggregator`, not benchmark columns (TODOS.md). A check in
+   which nothing was judged — every series weak, or every series excluded by the match pattern — is
+   `meets_requirement: null` with the message `None of the N targets could be evaluated`, never an
+   affirmative pass. That last rule is not trend-specific: an existing SLO of any type whose pattern
+   excludes every series on a run reads "Not evaluated" now where it read Pass. The run verdict is
+   unchanged either way (`bool_and(COALESCE(meets_requirement, true))`), and readers key on
+   `=== false` as before. The header chip says "No clear trend" when any target is weak-trend and
+   "Not evaluated" otherwise; the series table renders `+12.3 %/h (r 0.66)` and a "No clear trend"
+   chip per weak row. The failed count in the message now counts `meets_requirement === false`
+   rows only — it used to count every target with a value, so `15 of 15 targets failed` when one
+   did.
+2. **`metric_unit` is `%/h`, and three writers enforce it.** The slope is a percentage of the
+   series' own mean, so the panel's unit is meaningless for it. `BenchmarkMutationService`
+   (`TREND_UNIT`) forces it on create and update, and on an update that switches *away* from trend
+   restores the panel unit from the merged `configuration.yAxesFormat`, writing `null` rather than
+   `undefined` because TypeORM's `update()` skips undefined keys and would leave `%/h` on an average
+   SLO. `ProfilesService` forces it on profile benchmarks and clears it on a switch away unless the
+   update resends `metricUnit` (grafana-sync copies the profile's unit verbatim, so it inherits the
+   rule); `ProvisioningService` forces it on provisioned ones. The web side matches:
+   `getUnitChipLabel` answers `%/h` for a trend, and both SLO handlers skip the `percentunit` ÷100
+   on save, which would otherwise turn a 10 %/h threshold into 0.1. A fourth writer needs the same
+   two lines, or the SLO card shows the panel's unit against a percentage.
+3. **Migration 1809 adds the columns; nothing backfills them.** Rows written before it hold NULL
+   until the run's statistics are recalculated (a re-evaluate with "recalculate statistics", or the
+   Recalculate baseline statistics button), and NULL is "no value" to `DataAggregator`: the series
+   produces no target at all, so a trend SLO on an old run is `ERROR` / `No targets found for
+   processing`, not a weak trend. `upsertPerfTestStatistics` — the live tick's writer — sets both
+   columns to NULL on every conflict on purpose: it recomputes `mean` over the re-collected rows and
+   must not keep a slope computed over the previous ones, so during a live run every perf-test
+   series is absent to a trend SLO until `statistics-calculation` runs. The ALTER itself takes
+   `lock_timeout` 3 s with a plpgsql retry (same discipline as 1795): the table is held for up to
+   540 s by a running aggregation, and an unbounded ALTER would queue every read behind it. A
+   worker rolled out before the migration lands fails every `statistics-calculation` and
+   `checks-evaluation` with 42703 — the worker has no boot-time column probe (TODOS.md).
+4. **A constant series is a flat line, not "no data".** `regr_slope` is 0 for it, but the
+   normalisation divides by `ABS(AVG(value))`, which is 0 for an error count with no errors. The
+   SQL is `CASE WHEN AVG(value) <> 0 THEN slope * 3600 / ABS(AVG(value)) * 100 WHEN MIN(value) =
+   MAX(value) THEN 0 END`, so that series emits `0` and takes the weak-trend path (its `corr` is
+   NULL) instead of vanishing from the targets. The same reasoning skips the single-constant-series
+   artificial `default` shortcut for trend: judging a flat series on its `mean` would compare a
+   value in the panel's unit against a threshold in %/h. The one artificial row a trend does judge
+   is the `validate_with_default_if_no_data` default, whose value sits in `mean` and is taken as
+   the slope it claims to be.
+5. **`date_part('epoch', time)`, not `EXTRACT`.** On PG14+ `EXTRACT` returns `numeric`, and the
+   per-row numeric divide and cast cost +75 % on a 1.66 M-row run (measured); `date_part` is
+   `float8`. The `/ 3600` is applied once, after aggregation, which is exact because the slope is
+   linear in x.
+
+Residue: the floors are not per-SLO, the stored result does not say which floor applied (unlike
+`requirement.min_samples` for Apdex), `GET /metrics/ds-metric-statistics`' default `evaluateType`
+list does not include `trend`, and the series chart draws no fitted line. All in TODOS.md.
+
 ### The perf-test error-rate SLO reads the transaction rollup, not the mean of the buckets
 
 The stored series on the perf-test **Transaction Error Rate** (panel 105) and **Request Error
@@ -1443,6 +1511,7 @@ container mounts in tests at all.
 30. **Some Dynatrace hosts have almost no points on a live run, the sanity check reports them as `1 points across a <N>s run`, and the collection status says the range was collected** → those hosts publish their minute buckets more than a minute late, and a tick that queried exactly `[last tick, now]` recorded the minute as collected because the other hosts answered. Fixed in v0.2.95.27 (every live tick re-queries the previous 2 minutes, `DYNATRACE_INGEST_LOOKBACK_MS`). On an older deploy, a force-refetch re-evaluate after the run completes recovers them from Dynatrace as long as the tenant still holds the window. The last one or two minutes of such a host can still be missing after the fix — that is the open TODOS.md item, not a regression. See item 5 of "Gap-filling a completed run must never fall back to a full re-collection" above.
 31. **A workload Apdex SLO fails on a transaction that ran a handful of times, or a report shows a red FAIL pill on an SLO row whose `meets_requirement` is NULL** → the first is the sample floor at work (v0.2.95.34): a transaction below `apdex_min_samples` (default 50, counted over every execution including failed ones) is reported as **Too few** and is neither a pass nor a fail; re-evaluate the run to apply it to results stored before the SLO gained the floor. The second is a reader keying on `!== true` instead of `=== false`; `slo-renderer` and `getSloSummary` did until this version. Note the run verdict is `bool_and(COALESCE(meets_requirement, true))`, so a NULL row counts as a pass there, and a run in which nothing reached the floor still announces "SLOs Passed" in Slack/Teams (open TODOS.md item). See "An Apdex SLO has a sample floor" above.
 32. **A Transaction / Request Error Rate SLO reports a higher percentage than Performance Analysis shows for the same transaction and window** → the check averaged the per-bucket error-rate series unweighted, so one failed execution in a quiet minute counted 100 %. Fixed in v0.2.96.1 (`DataAggregator.pooledErrorRates` reads `SUM(failed)/SUM(total)` from the transaction rollup); re-evaluate the run to replace a stored result. If the two still disagree after that, look for `Pooled error rate unavailable` in the worker log — the series fell back to the bucket mean because the rollup has no row for it (a partial sampler half, a stale rollup after a window change, or a bare-named sampler on panel 205). See "The perf-test error-rate SLO reads the transaction rollup" above.
+33. **A Trend SLO reports `No targets found for processing` on a run that plainly has the series, or every perf-test series is missing from it while the run is live** → `ds_metric_statistics.trend_pct_per_hour` is NULL for those rows. Either the run was analysed before migration 1809 (nothing backfills the column; recalculate the run's statistics or re-evaluate with "recalculate statistics"), or the run is still going (`upsertPerfTestStatistics` NULLs both trend columns on every tick and only `statistics-calculation` writes them). If instead the header chip reads **No clear trend**, that is the floor at work: `|r| < 0.5` or fewer than 10 points, reported with its slope but not judged, and the run verdict treats it as a pass. A `%/h` unit on an *average* SLO means a writer other than the three that enforce the unit rule touched `metric_unit`, or a pre-v0.2.96.4 switch away from trend. See "A Trend SLO judges the slope of a series" above.
 
 ## How-To Tutorials
 
