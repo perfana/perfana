@@ -94,6 +94,24 @@ verdict as `bool_and(COALESCE(meets_requirement, true))`, so a NULL row is a pas
 that wants "failed" must test `=== false`. The rollup fast path and the raw fallback still count the
 window differently near the floor (TODOS.md).
 
+The Trend SLO (`evaluate_type = 'trend'`, v0.2.96.4) shares that tri-state.
+`StatisticsPipeline` writes `ds_metric_statistics.trend_pct_per_hour` (`regr_slope(value,
+date_part('epoch', time)) * 3600 / ABS(AVG(value)) * 100`, the OLS slope as % of the series mean per
+hour; `0` for a constant series whose mean is 0, so an error count with no errors is a flat line
+rather than a missing row) and `trend_corr` (`corr(value, date_part('epoch', time))`), in the same
+pass and window as every other statistic. `DataAggregator` maps `trend` onto the first and leaves a
+series unjudged — `meets_requirement: null`, `weak_trend: true`, `trend_corr` on the target, and
+excluded from the panel average — when `|r| < TREND_MIN_CORR` (0.5), `count < TREND_MIN_POINTS` (10),
+or r is NULL/NaN; both floors are module constants. `RequirementChecker` then writes
+`meets_requirement: null` with `None of the N targets could be evaluated` for a check in which nothing
+was judged (any evaluate type — a pattern that excludes every series no longer reads as a pass), and
+the failed count in the message counts `meets_requirement === false` rows only. Two things about the
+columns: `upsertPerfTestStatistics` sets both to NULL on every live tick, so only
+`statistics-calculation` ever writes them; and rows from before migration 1809 hold NULL until the
+run's statistics are recalculated, which `DataAggregator` reads as "no target", not as a weak trend.
+The `%/h` unit is the API's job (three writers), not the worker's. See the root CLAUDE.md, "A Trend
+SLO judges the slope of a series".
+
 ### The perf-test pipeline writes an extra "all aggregated" dashboard
 
 `PerformanceTestMetricsPipeline` writes one dashboard per scenario, plus — since v0.2.95.4 — one
