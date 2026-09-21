@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.2] - 2026-09-21
+
+### Added
+- **SLO dialog: "Exclude matching series" beside the Match Pattern field.** Excluding one series from an SLO used to need a negative lookahead (`^(?!.*WG_VAC_16_Stuur_Email).*`). The checkbox inverts the pattern instead: series that match are reported but not judged (`meets_requirement = null`), every other series is evaluated as before. Stored as `configuration.invertMatchPattern` on the benchmark — no schema change — and echoed into `check_results.requirement.invert_match_pattern` so the run page and the report read "For series not matching pattern". Existing SLOs are untouched; profile benchmarks do not carry the flag yet.
+
 ## [0.2.96.1] - 2026-09-21
 
 ### Fixed

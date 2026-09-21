@@ -151,6 +151,7 @@ export function useEditSLOHandlers({
             excludeRampUpTime: sloFormData.excludeRampUpTime,
             averageAll: sloFormData.averageAll,
             matchPattern: sloFormData.matchPattern,
+            invertMatchPattern: sloFormData.invertMatchPattern,
             validateWithDefaultIfNoData: sloFormData.validateWithDefaultIfNoData,
             validateWithDefaultIfNoDataValue: sloFormData.validateWithDefaultIfNoData ? processedDefaultValue : null,
           },

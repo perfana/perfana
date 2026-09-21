@@ -826,6 +826,40 @@ describe('RequirementChecker', () => {
       expect(other.meets_requirement).toBeNull();
     });
 
+    it('should judge only the targets NOT matching the pattern when invertMatchPattern is set', async () => {
+      // Arrange — the pattern names the series to exclude, no negative lookahead needed
+      const benchmark = createMockBenchmark({
+        requirement_operator: 'lt',
+        requirement_value: 200,
+        configuration: { id: 10, matchPattern: 'WG_VAC_16_Stuur_Email', invertMatchPattern: true },
+      });
+      const aggregation = createMockAggregationResult([
+        { target: 'WG_VAC_16_Stuur_Email', value: 9000 }, // matches → excluded
+        { target: 'WG_VAC_01_Login', value: 50 },         // no match → judged
+      ]);
+
+      // Act
+      const result = await checker.createCheckResult(createMockTestRun(), benchmark, aggregation);
+
+      // Assert
+      expect(result!.targets.find(t => t.target === 'WG_VAC_16_Stuur_Email')!.meets_requirement).toBeNull();
+      expect(result!.targets.find(t => t.target === 'WG_VAC_01_Login')!.meets_requirement).toBe(true);
+      expect(result!.meets_requirement).toBe(true);
+      expect(result!.requirement).toEqual({ operator: 'lt', value: 200, invert_match_pattern: true });
+    });
+
+    it('should not write invert_match_pattern into requirement when not inverted', async () => {
+      const benchmark = createMockBenchmark({
+        requirement_operator: 'lt',
+        requirement_value: 200,
+        configuration: { id: 10, matchPattern: '^cpu.*' },
+      });
+      const result = await checker.createCheckResult(
+        createMockTestRun(), benchmark, createMockAggregationResult([{ target: 'cpu.usage', value: 50 }])
+      );
+      expect(result!.requirement).toEqual({ operator: 'lt', value: 200 });
+    });
+
     it('should warn and not apply filtering for an invalid regex pattern', async () => {
       // Arrange — invalid regex (unmatched bracket)
       const benchmark = createMockBenchmark({

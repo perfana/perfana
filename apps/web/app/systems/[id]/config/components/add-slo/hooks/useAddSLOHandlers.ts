@@ -102,6 +102,7 @@ export function useAddSLOHandlers({
             excludeRampUpTime: sloFormData.excludeRampUpTime,
             averageAll: sloFormData.averageAll,
             matchPattern: sloFormData.matchPattern,
+            invertMatchPattern: sloFormData.invertMatchPattern,
             validateWithDefaultIfNoData: sloFormData.validateWithDefaultIfNoData,
             validateWithDefaultIfNoDataValue: sloFormData.validateWithDefaultIfNoData
               ? sloFormData.validateWithDefaultIfNoDataValue
@@ -142,6 +143,7 @@ export function useAddSLOHandlers({
             excludeRampUpTime: sloFormData.excludeRampUpTime,
             averageAll: sloFormData.averageAll,
             matchPattern: sloFormData.matchPattern,
+            invertMatchPattern: sloFormData.invertMatchPattern,
             validateWithDefaultIfNoData: sloFormData.validateWithDefaultIfNoData,
             validateWithDefaultIfNoDataValue: sloFormData.validateWithDefaultIfNoData
               ? sloFormData.validateWithDefaultIfNoDataValue
