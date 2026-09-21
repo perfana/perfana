@@ -2,6 +2,21 @@ import { EntityManager } from 'typeorm';
 import type { Logger } from 'pino';
 import { BaseCheckService, DataAggregationError } from './BaseCheckService.js';
 import { TestRun, Benchmark } from './BenchmarkMatcher.js';
+import {
+  METRIC_TYPE_PANEL_IDS,
+  ALL_AGGREGATED_SCENARIO,
+  ALL_AGGREGATED_METRIC,
+  samplerMetricNameSql,
+} from '../../constants/performance-metrics.js';
+import { generateScenarioDashboardLabel } from '../../utils/uuid-generator.js';
+
+/** Perf-test panels whose stored series is a per-bucket ratio, not a per-run one. */
+const POOLED_ERROR_RATE_PANELS = new Set<number>([
+  METRIC_TYPE_PANEL_IDS.TXN_ERROR_RATE,
+  METRIC_TYPE_PANEL_IDS.REQ_ERROR_RATE,
+]);
+
+const SCENARIO_LABEL_PREFIX = generateScenarioDashboardLabel('');
 
 export interface MetricTarget {
   target: string;
@@ -32,6 +47,8 @@ export interface MetricStatistic {
   is_constant: boolean;
   all_missing: boolean;
   pct_missing: number;
+  /** Pipeline-written; the scenario dashboard's label for perf-test rows. */
+  dashboard_label?: string | null;
 }
 
 /**
@@ -112,7 +129,8 @@ export class DataAggregator extends BaseCheckService {
           mean, median, min_value, max_value,
           std_dev, last_value, count,
           q10, q25, q75, q90, q95, q99,
-          is_constant, all_missing, pct_missing
+          is_constant, all_missing, pct_missing,
+          dashboard_label
         FROM ds_metric_statistics
         WHERE ${whereClauses.join('\n          AND ')}
           AND (
@@ -140,7 +158,8 @@ export class DataAggregator extends BaseCheckService {
         count: row.count as number,
         is_constant: row.is_constant as boolean,
         all_missing: row.all_missing as boolean,
-        pct_missing: row.pct_missing as number
+        pct_missing: row.pct_missing as number,
+        dashboard_label: (row.dashboard_label as string | null) ?? null,
       }));
 
       // Based on data_aggregator.py:59-131
@@ -187,6 +206,44 @@ export class DataAggregator extends BaseCheckService {
       // Based on data_aggregator.py:133-137
       const evaluateType = benchmark.evaluate_type || 'mean';
       const fieldName = this.mapAggregationTypeToField(evaluateType);
+
+      if (fieldName === 'mean' && POOLED_ERROR_RATE_PANELS.has(panelId)) {
+        // The label is pipeline-written on the statistics rows; `benchmarks.dashboard_label`
+        // is nullable and user-editable, so it is neither safe to dereference nor to scope by.
+        const dashboardLabel = metricStatistics[0]?.dashboard_label ?? '';
+        let pooled = new Map<string, number>();
+        try {
+          pooled = await this.pooledErrorRates(testRun, benchmark, panelId, dashboardLabel);
+        } catch (err) {
+          // Degrade to the bucket mean rather than erase the check: a rollup read that
+          // fails (timeout, table missing) must not turn a verdict into "no result".
+          this.logger.error(
+            { err },
+            `Pooled error rate read failed for panel ${panelId} (${dashboardLabel}) in ${testRun.test_run_id}; using the bucket mean`
+          );
+        }
+        // Known misses that are not worth a warning: the artificial `default` row (see
+        // createArtificialMetricStatistic; `is_constant` alone also matches a real series
+        // that failed in every bucket), and on panel 205 a sampler outside any Transaction
+        // Controller (stored under its bare name; SAMPLER_ROLLUP_BASE_SQL drops
+        // NULL-transaction rows, so it never has a rollup row and keeps the bucket mean).
+        const isArtificial = (stat: MetricStatistic) => stat.is_constant && stat.metric_name === 'default';
+        const isBareSampler = (name: string) =>
+          panelId === METRIC_TYPE_PANEL_IDS.REQ_ERROR_RATE && !name.includes('.');
+        const fellBack: string[] = [];
+        for (const stat of metricStatistics) {
+          const pct = pooled.get(stat.metric_name);
+          if (pct !== undefined) { stat.mean = pct; }
+          else if (!isArtificial(stat) && !isBareSampler(stat.metric_name)) { fellBack.push(stat.metric_name); }
+        }
+        // The bucket mean is the number this path exists to replace, so say when it is used.
+        if (fellBack.length > 0) {
+          this.logger.warn(
+            `Pooled error rate unavailable for ${fellBack.length}/${metricStatistics.length} series on panel ${panelId} ` +
+            `(${dashboardLabel}) in ${testRun.test_run_id}; using the bucket mean: ${fellBack.slice(0, 5).join(', ')}`
+          );
+        }
+      }
 
       const targets: MetricTarget[] = [];
       const values: number[] = [];
@@ -242,6 +299,79 @@ export class DataAggregator extends BaseCheckService {
         `Failed to aggregate metrics for benchmark ${benchmark.id}: ${error}`
       );
     }
+  }
+
+  /**
+   * Per-run error rate for the perf-test error-rate panels, keyed by series name.
+   *
+   * The stored series for panel 105/205 is `errors / count` PER BUCKET, and
+   * `ds_metric_statistics.mean` averages those buckets unweighted — a bucket
+   * holding one failed execution counts 100 %, the same as a bucket holding 40
+   * successes counts 0 %. On a sparse transaction that read 10.97 % against a
+   * real 7.49 % (WERKNL-00011, `WG_VAC_16_Stuur_Email`). The rollup tables hold
+   * the pooled counts, so the SLO reads `SUM(failed) / SUM(total)` from there,
+   * the same figure Performance Analysis shows.
+   *
+   * Always the ramp-up/ramp-down-excluded row: that is the window the bucket mean
+   * it replaces was computed over (`ds_metric_statistics` holds `ramp_up = false`
+   * only), and `benchmarks.exclude_ramp_up_time` has never applied to metric SLOs.
+   *
+   * Empty map when the dashboard is not a perf-test source or the run has no
+   * rollup yet — the caller then keeps the bucket mean, as before. A thrown
+   * error is the caller's to catch; it degrades the same way.
+   */
+  private async pooledErrorRates(
+    testRun: TestRun,
+    benchmark: Benchmark,
+    panelId: number,
+    dashboardLabel: string,
+  ): Promise<Map<string, number>> {
+    const isSampler = panelId === METRIC_TYPE_PANEL_IDS.REQ_ERROR_RATE;
+    // The label is `Performance test metrics <scenario>` verbatim (the uid is lossy).
+    const scenario = dashboardLabel.startsWith(SCENARIO_LABEL_PREFIX)
+      ? dashboardLabel.slice(SCENARIO_LABEL_PREFIX.length)
+      : null;
+    if (scenario === null) { return new Map(); }
+    const allAggregated = scenario === ALL_AGGREGATED_SCENARIO;
+
+    // Same naming rule the writer uses (transactions-processor / requests-processor).
+    const nameExpr = isSampler
+      ? samplerMetricNameSql('transaction_name', 'sampler_name')
+      : 'transaction_name';
+
+    // On the all-aggregated dashboard every scenario pools into one series ($6 is
+    // its name); elsewhere $6 is NULL and the rows group by their own name. The
+    // processors label a NULL scenario 'default' where the rollup writes ''. The
+    // EXISTS proves a perf-test source with this uid exists for the SUT/environment
+    // (`application_dashboards.metrics_source_id` is not populated for these rows,
+    // see TODOS.md). Rounded to 2 decimals like the stored per-bucket series.
+    const rows = await this.manager.query(
+      `SELECT COALESCE($6::text, ${nameExpr}) AS metric_name,
+              ROUND((SUM(failed_count)::numeric / NULLIF(SUM(total_count), 0)) * 100, 2)::float AS pct
+       FROM ${isSampler ? 'test_run_sampler_stats' : 'test_run_transaction_stats'}
+       WHERE test_run_id = $1
+         AND ramp_up_excluded = true
+         AND ($2::text IS NULL OR scenario_name = $2 OR ($2 = 'default' AND scenario_name = ''))
+         AND EXISTS (
+           SELECT 1 FROM metrics_sources
+           WHERE source_type = 'performance_test'
+             AND system_under_test_id = $3 AND test_environment = $4 AND external_ref = $5
+         )
+       GROUP BY 1`,
+      [
+        testRun.test_run_id,
+        allAggregated ? null : scenario,
+        benchmark.system_under_test_id,
+        benchmark.test_environment,
+        benchmark.dashboard_uid,
+        allAggregated ? ALL_AGGREGATED_METRIC : null,
+      ],
+    ) as Array<{ metric_name: string; pct: number | null }>;
+
+    // pct is NULL only when a group has zero executions; keep the bucket mean there.
+    return new Map(
+      rows.filter((r) => r.pct !== null).map((r) => [r.metric_name, Number(r.pct)]),
+    );
   }
 
   /**
@@ -333,6 +463,7 @@ export class DataAggregator extends BaseCheckService {
   private mapAggregationTypeToField(aggregationType: string): string {
     const mapping: Record<string, string> = {
       'mean': 'mean',
+      'avg': 'mean',
       'min': 'min_value',
       'max': 'max_value',
       'median': 'median',

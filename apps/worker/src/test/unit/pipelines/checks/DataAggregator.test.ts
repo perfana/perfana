@@ -474,6 +474,322 @@ describe('DataAggregator', () => {
     });
   });
 
+  describe('perf-test error-rate panels read the pooled rollup ratio', () => {
+    const SCENARIO_LABEL = 'Performance test metrics T_WG_Mijn_Vacatures';
+    // dashboard_label is the pipeline-written label on the statistics row — that, not
+    // the (nullable, user-editable) benchmark label, is what scopes the rollup read.
+    const stat = (metric_name: string, mean: number, dashboard_label: string | null = SCENARIO_LABEL) => ({
+      metric_name, mean, median: mean, min_value: 0, max_value: 100, std_dev: 0,
+      q10: 0, q25: 0, q75: 0, q90: 0, q95: 0, q99: 0, last_value: mean,
+      count: 117, is_constant: false, all_missing: false, pct_missing: 0, dashboard_label,
+    });
+    const perfBenchmark = (overrides?: Partial<Benchmark>) => createMockBenchmark({
+      configuration: { id: 105 },
+      dashboard_uid: 'performance-test-metrics-t-wg-mijn-vacatures',
+      dashboard_label: 'Performance test metrics T_WG_Mijn_Vacatures',
+      evaluate_type: 'avg',
+      ...overrides,
+    });
+
+    it('replaces the bucket mean with SUM(failed)/SUM(total) from the rollup, scoped to the scenario', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('WG_VAC_16_Stuur_Email', 10.97), stat('WG_VAC_01_Home', 0)])
+        .mockResolvedValueOnce([
+          { metric_name: 'WG_VAC_16_Stuur_Email', pct: 7.49 },
+        ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      expect(result.targets).toEqual([
+        { target: 'WG_VAC_16_Stuur_Email', value: 7.49, isArtificial: false },
+        { target: 'WG_VAC_01_Home', value: 0, isArtificial: false }, // no rollup row → bucket mean kept
+      ]);
+      const [sql, params] = mockManager.query.mock.calls[1];
+      expect(sql).toContain('FROM test_run_transaction_stats');
+      expect(sql).toContain('ramp_up_excluded = true');
+      expect(params).toEqual([
+        'test-run-1', 'T_WG_Mijn_Vacatures', 'sut-1', 'production',
+        'performance-test-metrics-t-wg-mijn-vacatures', null,
+      ]);
+    });
+
+    it('uses the sampler rollup for panel 205 and the run-wide name on the all-aggregated dashboard', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('All aggregated', 3, 'Performance test metrics all aggregated')])
+        .mockResolvedValueOnce([{ metric_name: 'All aggregated', pct: 1.5 }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark({
+        configuration: { id: 205 },
+        dashboard_label: null as unknown as string, // nullable in the DDL; must not matter
+        exclude_ramp_up_time: false, // inert for metric SLOs: the window is pinned to ramp-excluded
+      }));
+
+      expect(result.targets[0].value).toBe(1.5);
+      const [sql, params] = mockManager.query.mock.calls[1];
+      expect(sql).toContain('FROM test_run_sampler_stats');
+      expect(sql).toContain('ramp_up_excluded = true');
+      expect(params[1]).toBeNull();
+      expect(params[5]).toBe('All aggregated');
+    });
+
+    it('leaves non-mean evaluate types and non-perf-test dashboards alone', async () => {
+      mockManager.query.mockResolvedValueOnce([stat('x', 42)]);
+      const max = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark({ evaluate_type: 'max' }));
+      expect(max.targets[0].value).toBe(100);
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+
+      mockManager.query.mockResolvedValueOnce([stat('x', 42, 'Some Grafana board')]);
+      const grafana = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+      expect(grafana.targets[0].value).toBe(42);
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not consult the rollup for a perf-test panel that is not an error-rate panel', async () => {
+      mockManager.query.mockResolvedValueOnce([stat('WG_VAC_01_Home', 312.5)]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(),
+        perfBenchmark({ configuration: { id: 101 }, evaluate_type: 'mean' }),
+      );
+
+      expect(result.targets).toEqual([{ target: 'WG_VAC_01_Home', value: 312.5, isArtificial: false }]);
+      expect(mockManager.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('treats a missing evaluate_type as mean and takes the pooled path', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('WG_VAC_16_Stuur_Email', 10.97)])
+        .mockResolvedValueOnce([{ metric_name: 'WG_VAC_16_Stuur_Email', pct: 7.49 }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(),
+        perfBenchmark({ evaluate_type: undefined as unknown as string }),
+      );
+
+      expect(result.targets[0].value).toBe(7.49);
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps every bucket mean when the run has no rollup rows yet', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('WG_VAC_16_Stuur_Email', 10.97), stat('WG_VAC_01_Home', 0.5)])
+        .mockResolvedValueOnce([]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      expect(result.targets.map((t) => t.value)).toEqual([10.97, 0.5]);
+      expect(result.panel_average).toBe(10.97);
+    });
+
+    it('ignores a rollup row whose pct is NULL (zero total_count) and keeps the bucket mean', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('WG_VAC_16_Stuur_Email', 10.97)])
+        .mockResolvedValueOnce([
+          { metric_name: 'WG_VAC_16_Stuur_Email', pct: null },
+        ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      expect(result.targets).toEqual([{ target: 'WG_VAC_16_Stuur_Email', value: 10.97, isArtificial: false }]);
+    });
+
+    it('coerces a pct the driver returns as a string to a number', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('WG_VAC_16_Stuur_Email', 10.97)])
+        .mockResolvedValueOnce([{ metric_name: 'WG_VAC_16_Stuur_Email', pct: '7.49' }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      expect(result.targets[0].value).toBe(7.49);
+      expect(typeof result.targets[0].value).toBe('number');
+    });
+
+    it('keeps the bucket mean for a series the rollup does not know and warns about it', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('stray', 3.2), stat('WG_VAC_16_Stuur_Email', 10.97)])
+        .mockResolvedValueOnce([{ metric_name: 'WG_VAC_16_Stuur_Email', pct: 7.49 }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      expect(result.targets).toEqual([
+        { target: 'stray', value: 3.2, isArtificial: false },
+        { target: 'WG_VAC_16_Stuur_Email', value: 7.49, isArtificial: false },
+      ]);
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('1/2 series on panel 105'));
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('stray'));
+    });
+
+    it('passes the "default" scenario through and lets the SQL alias it to the rollup\'s empty scenario', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('Login', 4, 'Performance test metrics default')])
+        .mockResolvedValueOnce([{ metric_name: 'Login', pct: 2 }]);
+
+      await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(),
+        perfBenchmark({ dashboard_uid: 'performance-test-metrics-default' }),
+      );
+
+      const [sql, params] = mockManager.query.mock.calls[1];
+      expect(params[1]).toBe('default');
+      expect(params[5]).toBeNull();
+      expect(sql).toContain(`($2 = 'default' AND scenario_name = '')`);
+      expect(sql).toContain('$2::text IS NULL OR scenario_name = $2');
+    });
+
+    it('scopes the rollup read to the perf-test metrics source and excludes ramp-up per the benchmark', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('Login', 4)])
+        .mockResolvedValueOnce([]);
+
+      await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      const [sql] = mockManager.query.mock.calls[1];
+      expect(sql).toContain('ramp_up_excluded = true');
+      expect(sql).toContain(`source_type = 'performance_test'`);
+      expect(sql).toContain('system_under_test_id = $3 AND test_environment = $4 AND external_ref = $5');
+      expect(sql).toContain('GROUP BY 1');
+      expect(sql).toContain('ROUND((SUM(failed_count)::numeric / NULLIF(SUM(total_count), 0)) * 100, 2)::float');
+      expect(sql).toContain('SELECT COALESCE($6::text, transaction_name) AS metric_name');
+    });
+
+    it('composes the sampler series name as transaction.sampler for panel 205', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('Login.POST /login', 4)])
+        .mockResolvedValueOnce([{ metric_name: 'Login.POST /login', pct: 1.25 }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(),
+        perfBenchmark({ configuration: { id: 205 } }),
+      );
+
+      expect(result.targets[0].value).toBe(1.25);
+      const [sql, params] = mockManager.query.mock.calls[1];
+      expect(sql).toContain('FROM test_run_sampler_stats');
+      expect(sql).toContain(`transaction_name IS NULL OR transaction_name IN ('', 'overall') OR transaction_name = sampler_name`);
+      expect(sql).toContain(`transaction_name || '.' || sampler_name`);
+      expect(params[1]).toBe('T_WG_Mijn_Vacatures');
+      expect(params[5]).toBeNull();
+    });
+
+    it('averages the pooled values, not the bucket means, when average_all is set', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('A', 10), stat('B', 20)])
+        .mockResolvedValueOnce([
+          { metric_name: 'A', pct: 1 },
+          { metric_name: 'B', pct: 3 },
+        ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(),
+        perfBenchmark({ average_all: true }),
+      );
+
+      expect(result.panel_average).toBe(2);
+      expect(result.targets.map((t) => t.value)).toEqual([1, 3]);
+    });
+
+    it('applies the pooled value to a single metric selected by metricNameFilter', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('WG_VAC_16_Stuur_Email', 10.97)])
+        .mockResolvedValueOnce([
+          { metric_name: 'WG_VAC_16_Stuur_Email', pct: 7.49 },
+          { metric_name: 'WG_VAC_01_Home', pct: 0.1 },
+        ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(),
+        perfBenchmark(),
+        'WG_VAC_16_Stuur_Email',
+      );
+
+      expect(result.targets).toEqual([{ target: 'WG_VAC_16_Stuur_Email', value: 7.49, isArtificial: false }]);
+      const [statsSql, statsParams] = mockManager.query.mock.calls[0];
+      expect(statsSql).toContain('metric_name = $4');
+      expect(statsParams).toEqual(['test-run-1', 'app-dash-1', 105, 'WG_VAC_16_Stuur_Email']);
+    });
+
+    it('shifts the statistics params for organization_id without touching the rollup params', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('Login', 4)])
+        .mockResolvedValueOnce([{ metric_name: 'Login', pct: 2 }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun({ organization_id: 'org-1' } as Partial<TestRun>),
+        perfBenchmark(),
+      );
+
+      expect(result.targets[0].value).toBe(2);
+      const [statsSql, statsParams] = mockManager.query.mock.calls[0];
+      expect(statsParams).toEqual(['test-run-1', 'app-dash-1', 105, 'org-1', 'org-1']);
+      expect(statsSql).toContain('organization_id = $4 OR organization_id IS NULL');
+      expect(statsSql).toContain('organization_id = $5 OR organization_id IS NULL');
+      const [, rollupParams] = mockManager.query.mock.calls[1];
+      expect(rollupParams).toEqual([
+        'test-run-1', 'T_WG_Mijn_Vacatures', 'sut-1', 'production',
+        'performance-test-metrics-t-wg-mijn-vacatures', null,
+      ]);
+    });
+
+    it('still returns the artificial statistic untouched when the run has no rollup', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([{ ...stat('default', 0), is_constant: true, count: 1 }])
+        .mockResolvedValueOnce([]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      expect(result).toEqual({
+        panel_average: 0,
+        targets: [{ target: 'default', value: 0, isArtificial: true }],
+      });
+      expect(mockManager.query).toHaveBeenCalledTimes(2);
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it('does not warn for a bare sampler on panel 205 — the rollup drops NULL-transaction rows by design', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('POST /health', 2), stat('Login.POST /login', 4), stat('Pay.charge', 6)])
+        .mockResolvedValueOnce([{ metric_name: 'Login.POST /login', pct: 1.25 }]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(
+        createMockTestRun(),
+        perfBenchmark({ configuration: { id: 205 } }),
+      );
+
+      expect(result.targets.map((t) => t.value)).toEqual([2, 1.25, 6]);
+      expect(mockLogger.warn).toHaveBeenCalledTimes(1);
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('1/3 series on panel 205'));
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Pay.charge'));
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringContaining('POST /health'));
+    });
+
+    it('degrades to the bucket mean when the rollup read fails, and logs the cause', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([stat('Login', 4)])
+        .mockRejectedValueOnce(new Error('canceling statement due to statement timeout'));
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      // The check still produces a verdict — on the number it used before this fix.
+      expect(result.targets).toEqual([{ target: 'Login', value: 4, isArtificial: false }]);
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        expect.stringContaining('Pooled error rate read failed for panel 105'),
+      );
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Login'));
+    });
+
+    it('does not suppress the warning for a real series that happens to be constant', async () => {
+      mockManager.query
+        .mockResolvedValueOnce([{ ...stat('AlwaysFails', 100), is_constant: true }])
+        .mockResolvedValueOnce([]);
+
+      await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), perfBenchmark());
+
+      // one is_constant row would otherwise take the artificial early-return; assert the warn fired first
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('AlwaysFails'));
+    });
+  });
+
   describe('Field Mapping and Value Extraction', () => {
     it('should correctly map aggregation types to field names', () => {
       // Arrange
