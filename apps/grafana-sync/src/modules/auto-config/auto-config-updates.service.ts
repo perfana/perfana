@@ -418,6 +418,11 @@ export class AutoConfigUpdatesService {
             operator: profileBenchmark.requirement_operator,
             value: profileBenchmark.requirement_value,
           },
+          // The worker and the SLO edit dialog read the pattern from here, not from the
+          // match_pattern column (which is kept below for the API's benchmark response).
+          ...(profileBenchmark.match_pattern
+            ? { matchPattern: profileBenchmark.match_pattern }
+            : {}),
         },
         // FIX: requirement_operator and requirement_value are NOT generated columns
         // They must be set directly from the profile benchmark

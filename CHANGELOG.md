@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.3] - 2026-09-21
+
+### Fixed
+- **A profile benchmark's Match Pattern is now applied.** grafana-sync's auto-config stamped the profile's pattern into the `benchmarks.match_pattern` column only, while the worker's `RequirementChecker` reads `configuration.matchPattern` — so an SLO provisioned from a profile judged every series on the panel, and the edit dialog showed an empty pattern field. Auto-config now writes the pattern into `configuration` as well, and `BenchmarkMatcher` folds a column-only pattern into `configuration` for rows stamped before this version (the JSON wins when both are set). Runs whose profile-driven SLOs carry a pattern can change verdict on their next re-evaluate: series the pattern excludes become N/A instead of being judged.
+
 ## [0.2.96.2] - 2026-09-21
 
 ### Added
