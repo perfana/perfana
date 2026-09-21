@@ -20,7 +20,7 @@ import {
 } from '@mui/material';
 import { Save } from '@mui/icons-material';
 import { CompareSeriesConfig } from '@/lib/compare-presets';
-import { DisplayConfig } from './utils/compare-utils';
+import { DisplayConfig, resolvePresetDashboardId } from './utils/compare-utils';
 
 /**
  * Represents a series added for comparison (matching TrendsCard pattern)
@@ -191,7 +191,7 @@ export default function SavePresetModal({
     preset_type: getInitialPresetType(),
     series_search_text: currentFilters.seriesSearchText || '',
     show_percentiles: currentFilters.showPercentiles || false,
-    application_dashboard_id: currentFilters.selectedDashboard?.id,
+    application_dashboard_id: resolvePresetDashboardId(currentFilters),
     panel_id: currentFilters.selectedMetric?.id,
     panel_title: currentFilters.selectedMetric?.title,
     baseline_test_run_id: currentFilters.selectedTestRun?.test_run_id,
@@ -215,7 +215,7 @@ export default function SavePresetModal({
         preset_type: initialPresetType,
         series_search_text: currentFilters.seriesSearchText || '',
         show_percentiles: currentFilters.showPercentiles || false,
-        application_dashboard_id: currentFilters.selectedDashboard?.id,
+        application_dashboard_id: resolvePresetDashboardId(currentFilters),
         panel_id: currentFilters.selectedMetric?.id,
         panel_title: currentFilters.selectedMetric?.title,
         baseline_test_run_id: currentFilters.selectedTestRun?.test_run_id,
@@ -266,18 +266,13 @@ export default function SavePresetModal({
   };
 
   const handleClose = () => {
-    // For Dynatrace, use the metric's applicationDashboardId (UUID from query config)
-    // For Grafana, use the dashboard's id
-    const applicationDashboardId = currentFilters.selectedMetric?.applicationDashboardId
-      || currentFilters.selectedDashboard?.id;
-
     setFormData({
       name: '',
       description: '',
       preset_type: getInitialPresetType(),
       series_search_text: currentFilters.seriesSearchText || '',
       show_percentiles: currentFilters.showPercentiles || false,
-      application_dashboard_id: applicationDashboardId,
+      application_dashboard_id: resolvePresetDashboardId(currentFilters),
       source: currentFilters.source || 'grafana',
       dashboard_label: currentFilters.selectedDashboard?.dashboard_label,
       panel_id: currentFilters.selectedMetric?.id,

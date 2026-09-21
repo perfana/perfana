@@ -224,3 +224,21 @@ export const METRIC_COLUMN_LABELS: Record<string, string> = {
 /** Stable per-row key for graph state maps (rows are unique by dashboard+panel+metric). */
 export const graphKeyOf = (dashboardId: string, panelId: number, metricName: string): string =>
   `${dashboardId}::${panelId}::${metricName}`;
+
+/**
+ * The `application_dashboard_id` to store on a compare preset.
+ *
+ * The compare picker lists Dynatrace dashboards as synthetic rows whose `id` is `dynatrace-<n>`
+ * (`useCompareData.getAllDashboardsMerged`); posting that to the API fails with
+ * `invalid input syntax for type uuid`. The real uuid is on the selected metric or on the added
+ * series, so those are preferred and the synthetic id is never returned.
+ */
+export const resolvePresetDashboardId = (filters: {
+  selectedDashboard?: { id: string } | null;
+  selectedMetric?: { applicationDashboardId?: string } | null;
+  addedSeries?: Array<{ dashboardId: string }>;
+}): string | undefined => {
+  const picked = filters.selectedMetric?.applicationDashboardId || filters.selectedDashboard?.id;
+  if (picked && !picked.startsWith('dynatrace-')) return picked;
+  return filters.addedSeries?.[0]?.dashboardId || undefined;
+};

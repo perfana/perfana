@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.43] - 2026-09-21
+
+### Fixed
+- **Saving a compare preset on a Dynatrace dashboard failed with `invalid input syntax for type uuid: "dynatrace-61"`.** The compare picker lists Dynatrace dashboards as synthetic rows with id `dynatrace-<n>` (they are grouped per host from `dynatrace_queries`, not read from `application_dashboards`), and `SavePresetModal` posted that id as `application_dashboard_id` on open and on every filter change — only the reset-on-close path looked at the metric's real uuid first. The three sites now share `resolvePresetDashboardId`: the metric's `applicationDashboardId`, else the picked dashboard id when it is not synthetic, else the first added series' `dashboardId` (which is the real uuid); a synthetic id is never sent.
+
 ## [0.2.95.42] - 2026-09-21
 
 ### Fixed
