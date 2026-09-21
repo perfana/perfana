@@ -798,7 +798,10 @@ export class BenchmarkMutationService {
     const evaluateType = dto.evaluateType ?? existing.evaluate_type;
     if (evaluateType === 'trend') data.metric_unit = TREND_UNIT;
     else if (existing.metric_unit === TREND_UNIT && dto.evaluateType !== undefined) {
-      data.metric_unit = (existing.configuration?.yAxesFormat as string | undefined) ?? undefined;
+      // Switching away from trend: the panel unit lives in the (merged) configuration.
+      // null, not undefined: TypeORM's update() skips undefined keys, which would leave '%/h' on an
+      // avg SLO. The entity types the column as `string | undefined`, hence the cast.
+      data.metric_unit = ((data.configuration ?? existing.configuration)?.yAxesFormat ?? null) as string | undefined;
     }
 
     if (dto.configTitle !== undefined && data.configuration) {

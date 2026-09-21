@@ -407,7 +407,8 @@ export class ProvisioningService implements OnApplicationBootstrap {
           panel_id: item.panel.id,
           panel_title: item.panel.title,
           panel_type: item.panel.type,
-          metric_unit: item.panel.yAxesFormat,
+          // A trend is % of the series mean per hour whatever the panel measures.
+          metric_unit: item.panel.evaluateType === 'trend' ? '%/h' : item.panel.yAxesFormat,
           evaluate_type: item.panel.evaluateType,
           requirement_operator: item.panel.requirement?.operator,
           requirement_value: item.panel.requirement?.value,

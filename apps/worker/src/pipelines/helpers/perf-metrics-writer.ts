@@ -335,7 +335,11 @@ export async function upsertPerfTestStatistics(
       updated_by          = EXCLUDED.updated_by,
       pct_agg             = EXCLUDED.pct_agg,
       sum_value           = EXCLUDED.sum_value,
-      sum_sq_value        = EXCLUDED.sum_sq_value
+      sum_sq_value        = EXCLUDED.sum_sq_value,
+      -- StatisticsPipeline is the only writer of the trend columns; a re-collected
+      -- mean must not keep the slope computed over the previous rows.
+      trend_pct_per_hour  = NULL,
+      trend_corr          = NULL
     RETURNING 1
     )
     SELECT count(*)::int AS n FROM ins

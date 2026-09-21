@@ -58,7 +58,8 @@ export function useAddSLOHandlers({
 
       // Handle percentunit conversion - divide by 100 if panel uses percentunit format
       let processedRequirementValue = sloFormData.requirementValue;
-      if (grafanaPanel?.yAxesFormat === 'percentunit') {
+      // A trend threshold is %/h whatever the panel's unit, so the percentunit scaling must not touch it.
+      if (grafanaPanel?.yAxesFormat === 'percentunit' && sloFormData.evaluateType !== 'trend') {
         const parsedValue = parseValueWithUnit(sloFormData.requirementValue);
         if (parsedValue.value && !isNaN(Number(parsedValue.value))) {
           processedRequirementValue = String(Number(parsedValue.value) / 100);

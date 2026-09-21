@@ -182,7 +182,10 @@ export function useEditSLOForm({
   useEffect(() => {
     if (open && benchmark) {
       // Handle percentunit conversion for display - convert decimal back to percentage
-      const effectiveUnitFormat = benchmark.configuration?.yAxesFormat || benchmark.configuration?.metricUnit;
+      // A trend threshold is stored as typed (%/h), never percentunit-scaled.
+      const effectiveUnitFormat = benchmark.evaluate_type === 'trend'
+        ? undefined
+        : benchmark.configuration?.yAxesFormat || benchmark.configuration?.metricUnit;
       const displayRequirementValue = convertDecimalToPercentageForDisplay(
         benchmark.requirement_value,
         effectiveUnitFormat

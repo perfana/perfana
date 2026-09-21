@@ -86,7 +86,8 @@ export function formatMetricValue(target: MetricTarget, result: MetricSeriesResu
   // Trend: signed, one decimal, with r so a weak-trend row explains itself.
   if (result.evaluate_type === 'trend') {
     const r = target.trend_corr == null ? '' : ` (r ${Number(target.trend_corr).toFixed(2)})`;
-    return `${displayValue > 0 ? '+' : ''}${displayValue.toFixed(1)} %/h${r}`;
+    const v = Number(displayValue.toFixed(1)); // round first so -0.04 is '0.0', not '-0.0'
+    return `${v > 0 ? '+' : ''}${v.toFixed(1)} %/h${r}`;
   }
 
   const unitSuffix = result.metric_unit ? ' ' + formatMetricUnit(result.metric_unit) : '';

@@ -776,6 +776,96 @@ describe('RequirementChecker', () => {
     });
   });
 
+  // ─── trend evaluate type — weak-trend floor ───────────────────────────────────
+
+  describe('trend evaluate type (weak_trend)', () => {
+    const trendBenchmark = () =>
+      createMockBenchmark({ evaluate_type: 'trend', metric_unit: '%/h', requirement_operator: 'lt', requirement_value: 10 });
+
+    it('reports a weak series with its slope and r but does not judge it, and it cannot fail the run', async () => {
+      // Both slopes exceed the threshold; only the correlated one is a verdict.
+      const aggregation: AggregationResult = {
+        panel_average: 26.4,
+        targets: [
+          { target: 'VolgendeCV', value: 26.4, isArtificial: false, weakTrend: false, trendCorr: 0.66 },
+          { target: 'MijnWerkNl', value: 20.2, isArtificial: false, weakTrend: true, trendCorr: 0.10 },
+        ],
+      };
+
+      const result = await checker.createCheckResult(createMockTestRun(), trendBenchmark(), aggregation);
+
+      expect(result!.targets).toEqual([
+        { target: 'VolgendeCV', value: 26.4, meets_requirement: false, is_artificial: false, trend_corr: 0.66 },
+        { target: 'MijnWerkNl', value: 20.2, meets_requirement: null, is_artificial: false, trend_corr: 0.10, weak_trend: true },
+      ]);
+      // A judged row carries no weak_trend key at all (older rows keep their shape).
+      expect(result!.targets[0]).not.toHaveProperty('weak_trend');
+      expect(result!.meets_requirement).toBe(false);
+      expect(result!.message).toBe('1 of 2 targets failed requirements');
+    });
+
+    it('leaves the check unjudged when every series is weak (average_all with no judged rows → panel_average null)', async () => {
+      const aggregation: AggregationResult = {
+        panel_average: null, // DataAggregator leaves weak rows out of the average
+        targets: [
+          { target: 'a', value: 50, isArtificial: false, weakTrend: true, trendCorr: 0.2 },
+          { target: 'b', value: 80, isArtificial: false, weakTrend: true, trendCorr: null },
+        ],
+      };
+
+      const result = await checker.createCheckResult(
+        createMockTestRun(), createMockBenchmark({ ...trendBenchmark(), average_all: true }), aggregation
+      );
+
+      expect(result!.status).toBe('COMPLETE');
+      expect(result!.meets_requirement).toBeNull();
+      expect(result!.targets.every((t) => t.meets_requirement === null && t.weak_trend === true)).toBe(true);
+      expect(result!.targets[1].trend_corr).toBeNull();
+      expect(result!.message).toBe('None of the 2 targets could be evaluated');
+    });
+
+    it('does not add trend keys to a non-trend target', async () => {
+      const result = await checker.createCheckResult(
+        createMockTestRun(), createMockBenchmark(), createMockAggregationResult([{ target: 't', value: 50 }])
+      );
+
+      expect(result!.targets[0]).toEqual({ target: 't', value: 50, meets_requirement: true, is_artificial: false });
+    });
+  });
+
+  // ─── status message — failed count (regression) ──────────────────────────────
+
+  describe('status message counts only judged-and-failed targets', () => {
+    it('excludes pattern-excluded (null) rows from the failed count', async () => {
+      // Before v0.2.96.4 the count was every target with a non-null value, so this read "3 of 3".
+      const benchmark = createMockBenchmark({
+        requirement_operator: 'lt',
+        requirement_value: 100,
+        configuration: { id: 10, matchPattern: '^svc-.*' },
+      });
+      const aggregation = createMockAggregationResult([
+        { target: 'svc-a', value: 50 },   // judged, passes
+        { target: 'svc-b', value: 300 },  // judged, fails
+        { target: 'other', value: 999 },  // excluded by pattern → null
+      ]);
+
+      const result = await checker.createCheckResult(createMockTestRun(), benchmark, aggregation);
+
+      expect(result!.meets_requirement).toBe(false);
+      expect(result!.message).toBe('1 of 3 targets failed requirements');
+    });
+
+    it('reports the panel-average failure as "0 of N" when every target itself passed', async () => {
+      const benchmark = createMockBenchmark({ requirement_operator: 'lt', requirement_value: 200, average_all: true });
+      const aggregation = createMockAggregationResult([{ target: 't1', value: 50 }, { target: 't2', value: 60 }], 300);
+
+      const result = await checker.createCheckResult(createMockTestRun(), benchmark, aggregation);
+
+      expect(result!.meets_requirement).toBe(false);
+      expect(result!.message).toBe('0 of 2 targets failed requirements');
+    });
+  });
+
   // ─── matchPattern / regex filtering ──────────────────────────────────────────
 
   describe('matchPattern filtering', () => {

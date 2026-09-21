@@ -473,6 +473,45 @@ describe('StatisticsPipeline', () => {
       expect(sqlQuery).toContain('approx_percentile(0.90, sa.pct_agg) - approx_percentile(0.10, sa.pct_agg)) as idr');
     });
 
+    test('writes the trend slope (% of mean per hour, null on a zero mean) and its correlation', async () => {
+      mockEntityManager.query
+        .mockResolvedValueOnce({ rowCount: 0 })           // DELETE existing
+        .mockResolvedValueOnce(undefined)                 // INSERT (rowCount not used)
+        .mockResolvedValueOnce([{ count: 5 }]);          // Actual count verification
+
+      await pipeline.execute({ testRunIds: ['test-run-001'] });
+
+      const sqlQuery = stripSqlComments(callWith('INSERT INTO ds_metric_statistics')[0]);
+
+      // Slope of value against time, scaled to HOURS and normalised by |mean| — and guarded,
+      // because a series whose mean is 0 would otherwise divide by zero and abort the whole
+      // aggregation (every group in the statement, not just that series).
+      const slopeStart = sqlQuery.indexOf('CASE WHEN AVG(value) <> 0');
+      const slopeEnd = sqlQuery.indexOf('as trend_pct_per_hour');
+      expect(slopeStart).toBeGreaterThan(-1);
+      expect(slopeEnd).toBeGreaterThan(slopeStart);
+      const slopeExpr = sqlQuery.slice(slopeStart, slopeEnd);
+      expect(slopeExpr).toMatch(/THEN regr_slope\(value, /);
+      expect(slopeExpr).toContain('3600');
+      expect(slopeExpr).toMatch(/\/ ABS\(AVG\(value\)\) \* 100\s+END\s*$/);
+      expect(sqlQuery).toMatch(/corr\(value, [^)]*\(.*?time\)\) as trend_corr/);
+
+      // Both columns must travel through final_statistics and land in the INSERT at the
+      // same position in the column list and the SELECT list, or the values shift by two.
+      expect(sqlQuery).toContain('sa.trend_pct_per_hour');
+      expect(sqlQuery).toContain('sa.trend_corr');
+      const insertBody = sqlQuery.slice(sqlQuery.indexOf('INSERT INTO ds_metric_statistics'));
+      const columnList = insertBody.slice(insertBody.indexOf('(') + 1, insertBody.indexOf(')')).split(',').map((c) => c.trim());
+      const selectList = insertBody
+        .slice(insertBody.indexOf('SELECT') + 'SELECT'.length, insertBody.indexOf('FROM final_statistics'))
+        .split(',')
+        .map((c) => c.trim());
+      expect(columnList.indexOf('trend_pct_per_hour')).toBeGreaterThan(0);
+      expect(selectList.indexOf('trend_pct_per_hour')).toBe(columnList.indexOf('trend_pct_per_hour'));
+      expect(selectList.indexOf('trend_corr')).toBe(columnList.indexOf('trend_corr'));
+      expect(selectList).toHaveLength(columnList.length);
+    });
+
     test('should calculate missing value statistics', async () => {
       const testRunIds = ['test-run-001'];
 

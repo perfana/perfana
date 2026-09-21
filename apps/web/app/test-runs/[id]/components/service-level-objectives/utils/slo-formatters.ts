@@ -125,7 +125,7 @@ export function formatRequirement(requirement: CheckResultRequirement | undefine
     'max': 'Maximum value',
     'min': 'Minimum value',
     'last': 'Last value',
-    'trend': 'Trend',
+    'trend': 'Drift over the analysis window',
     'sum': 'Sum value',
     'count': 'Count value',
     'median': 'Median value',

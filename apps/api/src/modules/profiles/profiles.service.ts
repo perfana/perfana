@@ -841,7 +841,8 @@ export class ProfilesService {
         panel_type: createDto.panelType,
         panel_description: createDto.panelDescription,
         evaluate_type: createDto.evaluateType,
-        metric_unit: createDto.metricUnit,
+        // A trend is % of the series mean per hour whatever the panel measures (see BenchmarkMutationService).
+        metric_unit: createDto.evaluateType === 'trend' ? '%/h' : createDto.metricUnit,
         requirement_operator: createDto.requirementOperator,
         requirement_value: createDto.requirementValue,
         exclude_ramp_up_time: createDto.excludeRampUpTime ?? true,
@@ -1005,6 +1006,12 @@ export class ProfilesService {
       }
       if (updateDto.metricUnit !== undefined) {
         benchmark.metric_unit = updateDto.metricUnit;
+      }
+      if (benchmark.evaluate_type === 'trend') {
+        benchmark.metric_unit = '%/h';
+      } else if (benchmark.metric_unit === '%/h' && updateDto.metricUnit === undefined) {
+        // null, not undefined: save() skips undefined and would leave '%/h' on a scalar SLO.
+        benchmark.metric_unit = null as unknown as undefined; // switched away from trend; the panel unit must be resent
       }
       if (updateDto.requirementOperator !== undefined) {
         benchmark.requirement_operator = updateDto.requirementOperator;

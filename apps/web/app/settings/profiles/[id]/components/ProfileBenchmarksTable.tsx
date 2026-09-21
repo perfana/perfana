@@ -235,6 +235,7 @@ export default function ProfileBenchmarksTable({
                         'max': 'Maximum',
                         'min': 'Minimum',
                         'last': 'Last Value',
+                        'trend': 'Trend',
                         'q50': '50th Percentile',
                         'q90': '90th Percentile',
                         'q95': '95th Percentile',

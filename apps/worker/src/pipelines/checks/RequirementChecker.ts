@@ -153,7 +153,12 @@ export class RequirementChecker extends BaseCheckService {
       // Determine final status and message
       // Based on requirement_checker.py:172-176
       const status = targetResults.length === 0 ? 'ERROR' : 'COMPLETE';
-      const message = this.generateStatusMessage(overallMeetsRequirement, targetResults);
+      // Nothing judged (every series weak-trend or pattern-excluded, and no panel average) is
+      // "not evaluated", never an affirmative pass — same tri-state as the Apdex floor.
+      const anyJudged = targetResults.some((t) => t.meets_requirement !== null) || panelMeetsRequirement !== null;
+      const message = anyJudged || targetResults.length === 0
+        ? this.generateStatusMessage(overallMeetsRequirement, targetResults)
+        : `None of the ${targetResults.length} targets could be evaluated`;
 
       // Extract panel configuration
       const panelId = (config?.id as number | null | undefined) ?? null;
@@ -201,7 +206,7 @@ export class RequirementChecker extends BaseCheckService {
           ? { ...this.convertRequirement(benchmark), invert_match_pattern: true }
           : this.convertRequirement(benchmark),
         panel_average: aggregationResult.panel_average,
-        meets_requirement: targetResults.length > 0 ? overallMeetsRequirement : null,
+        meets_requirement: targetResults.length > 0 && anyJudged ? overallMeetsRequirement : null,
         targets: targetResults,
         validate_with_default_if_no_data: benchmark.validate_with_default_if_no_data,
         validate_with_default_if_no_data_value: benchmark.validate_with_default_if_no_data_value || 0.0,

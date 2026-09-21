@@ -23,8 +23,8 @@ const SCENARIO_LABEL_PREFIX = generateScenarioDashboardLabel('');
  * reported but not judged (`weak_trend`). Same shape as the Apdex sample floor.
  * ponytail: constants, not benchmark columns — make them per-SLO if a tenant needs to tune them.
  */
-export const TREND_MIN_CORR = 0.5;
-export const TREND_MIN_POINTS = 10;
+const TREND_MIN_CORR = 0.5;
+const TREND_MIN_POINTS = 10;
 
 export interface MetricTarget {
   target: string;
@@ -266,7 +266,9 @@ export class DataAggregator extends BaseCheckService {
 
       // Check if only one metric_statistic and it is artificial
       // Based on data_aggregator.py:141-152
-      if (metricStatistics.length === 1 && metricStatistics[0].is_constant) {
+      // A trend has no artificial default: a flat series has slope 0 and no correlation,
+      // so it takes the weak-trend path below instead of being judged on its mean.
+      if (metricStatistics.length === 1 && metricStatistics[0].is_constant && fieldName !== 'trend_pct_per_hour') {
         targets.push({
           target: 'default',
           value: metricStatistics[0].mean,
@@ -282,21 +284,25 @@ export class DataAggregator extends BaseCheckService {
       // Based on data_aggregator.py:153-174
       for (const stat of metricStatistics) {
         const metricName = stat.metric_name;
-        const value = this.getFieldValue(stat, fieldName);
+        const isArtificial = stat.is_constant || false;
+        // The artificial "default" row (validate_with_default_if_no_data) carries the default in
+        // `mean` and no trend columns; a trend SLO reads it from there and judges it as given.
+        const isDefaultRow = isArtificial && metricName === 'default';
+        const value = fieldName === 'trend_pct_per_hour' && isDefaultRow ? stat.mean : this.getFieldValue(stat, fieldName);
 
         if (value !== null && metricName) {
-          const isArtificial = stat.is_constant || false;
           const target: MetricTarget = {
             target: metricName,
             value: parseFloat(value.toString()),
             isArtificial
           };
-          if (fieldName === 'trend_pct_per_hour') {
+          if (fieldName === 'trend_pct_per_hour' && !isDefaultRow) {
             const r = stat.trend_corr ?? null;
             target.trendCorr = r;
             // A weak series still carries its slope so the table can show it, but is left
             // out of the panel average: an unjudged value must not tip an average_all verdict.
-            target.weakTrend = r === null || Math.abs(r) < TREND_MIN_CORR || Number(stat.count) < TREND_MIN_POINTS;
+            // NaN r (a NaN sample poisons corr) is weak too: Math.abs(NaN) < x is false.
+            target.weakTrend = r === null || !Number.isFinite(r) || Math.abs(r) < TREND_MIN_CORR || Number(stat.count) < TREND_MIN_POINTS;
           }
           targets.push(target);
           if (!target.weakTrend) { values.push(target.value); }

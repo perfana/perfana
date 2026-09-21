@@ -445,6 +445,7 @@ export class MetricsService {
           'max_value',
           'min_value',
           'last_value',
+          'trend_pct_per_hour',
           'count',
           'median',
           'percentiles',
@@ -501,6 +502,9 @@ export class MetricsService {
               break;
             case 'last':
               value = record.last_value ?? null;
+              break;
+            case 'trend':
+              value = record.trend_pct_per_hour ?? null;
               break;
             case 'count':
               value = record.count ?? null;
@@ -693,6 +697,7 @@ export class MetricsService {
       'max': 'max_value',
       'min': 'min_value',
       'last': 'last_value',
+      'trend': 'trend_pct_per_hour',
       'count': 'count',
       'q50': 'median',
       // Note: q90, q95, q99 are handled separately in the query logic

@@ -14,7 +14,7 @@ export interface SLOStatusChipProps {
     meets_requirement?: boolean | null;
     message?: string;
     created_at?: string;
-    targets?: Array<{ below_min_samples?: boolean }>;
+    targets?: Array<{ below_min_samples?: boolean; weak_trend?: boolean }>;
   };
   benchmark?: {
     id?: string;
@@ -296,6 +296,28 @@ export default function SLOStatusChip({
       <Tooltip title={result.message || 'Too few samples to evaluate'}>
         <Chip
           label="Too few samples"
+          size="small"
+          tabIndex={0}
+          sx={{
+            height: '28px',
+            fontWeight: 700,
+            backgroundColor: alpha(theme.palette.warning.main, 0.1),
+            color: 'warning.dark',
+            border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
+            cursor: 'help',
+            '& .MuiChip-label': { px: 1.5, fontSize: '0.75rem' },
+          }}
+        />
+      </Tooltip>
+    );
+  }
+
+  // Trend SLO in which no series showed a clear trend: complete, but not judged.
+  if (result.status === 'COMPLETE' && result.meets_requirement == null && result.targets?.some((t) => t.weak_trend)) {
+    return (
+      <Tooltip title={result.message || 'No series showed a clear trend'}>
+        <Chip
+          label="No clear trend"
           size="small"
           tabIndex={0}
           sx={{

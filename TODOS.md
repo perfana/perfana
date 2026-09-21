@@ -751,6 +751,29 @@ document's worth) to stay last-wins.
 **Where:** `apps/worker/src/pipelines/DynatracePipeline.ts`,
 `apps/worker/src/pipelines/helpers/incremental/metric-processor.ts`.
 
+### Trend SLO: floors are constants, the stored result does not say which floor applied, and the worker has no boot-time column check
+
+**Priority:** P3
+**Origin:** pre-landing review during /ship on `feat/trend-slo` (2026-09-21, v0.2.96.4).
+**Why:** `DataAggregator` leaves a series unjudged when `|r| < TREND_MIN_CORR` (0.5) or
+`count < TREND_MIN_POINTS` (10). Both are module constants, so a tenant with sparse or noisy
+series cannot tune them per SLO, and — unlike the Apdex floor, which writes `min_samples` into
+`check_results.requirement` — a stored trend result carries only `trend_corr`, not the floor it
+was judged against, so the web tooltip has to stay generic. Separately, the worker's
+`StatisticsPipeline` INSERT and `DataAggregator` SELECT name `trend_pct_per_hour`/`trend_corr`
+with no boot-time probe: a worker rolled before migration 1809 fails every
+`statistics-calculation` and `checks-evaluation` with 42703 until the migration lands; the API
+has `assert-entity-columns` for this, the worker has nothing.
+**What:** add `trend_min_corr` / `trend_min_points` to `benchmarks` (nullable, COALESCE to the
+constants, same SUT-transfer caveat as `apdex_min_samples`) and expose them in both SLO dialogs;
+write the applied floors into `requirement` so the UI can say which one fired; wire a worker
+boot-time column assertion mirroring `apps/api/src/common/db/assert-entity-columns.ts`. Also
+still open: `GET /metrics/ds-metric-statistics` default `evaluateType` list
+(`metrics.controller.ts`) does not include `trend`, and the series chart draws no fitted line.
+**Where:** `apps/worker/src/pipelines/checks/DataAggregator.ts`, `RequirementChecker.ts`,
+`apps/api/src/modules/benchmarks/services/benchmark-mutation.service.ts`,
+`MetricSeriesStatusChip.tsx`, `apps/worker/src/index.ts`.
+
 ## Dynatrace
 
 ### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster
