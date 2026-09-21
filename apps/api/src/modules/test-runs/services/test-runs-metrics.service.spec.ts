@@ -249,6 +249,53 @@ describe('TestRunsMetricsService', () => {
       expect(compareConfigRepo.findOne).not.toHaveBeenCalled();
     });
 
+    describe('worker-seeded rows', () => {
+      const dashboard = { id: 'dash-1', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production', dashboardUid: 'performance-test-metrics-a', organizationId: 'org-1' };
+      const template = {
+        id: 'tmpl-1', system_under_test_id: null, dashboard_uid: '^performance-test-metrics-', regex: true, panel_id: 101,
+        metric_classification: 'RED_duration', higher_is_better: false, config_overrides: { absThreshold: 25 },
+      };
+      const seededData = {
+        thresholds: { aggregation: 'mean', percentageThreshold: 0.15, iqrThreshold: 2, absoluteThreshold: null, minSampleCount: 1 },
+        metricClassification: { classification: 'RED_duration', higherIsBetter: false },
+        defaultValueIfControlGroupMissing: 0,
+      };
+
+      it('merges the template into a row the perf-test pipeline seeded, keeping the worker keys', async () => {
+        applicationDashboardRepo.find.mockResolvedValue([dashboard]);
+        templateRepo.find.mockResolvedValue([template]);
+        compareConfigRepo.find.mockResolvedValue([
+          { id: 'cfg-1', application_dashboard_id: 'dash-1', panel_id: 101, metric_name: null, config_data: seededData, updated_by: 'worker-pipeline' },
+        ] as any);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 1 });
+        expect(compareConfigRepo.create).not.toHaveBeenCalled();
+        expect(compareConfigRepo.update).toHaveBeenCalledWith(
+          { id: 'cfg-1' },
+          {
+            config_data: { ...seededData, thresholds: { ...seededData.thresholds, absoluteThreshold: 25 } },
+            updated_by: 'system:golden-path',
+          },
+        );
+      });
+
+      it('leaves a row a user edited alone', async () => {
+        applicationDashboardRepo.find.mockResolvedValue([dashboard]);
+        templateRepo.find.mockResolvedValue([template]);
+        compareConfigRepo.find.mockResolvedValue([
+          { id: 'cfg-1', application_dashboard_id: 'dash-1', panel_id: 101, metric_name: null, config_data: seededData, updated_by: 'user-sub' },
+        ] as any);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 0 });
+        expect(compareConfigRepo.update).not.toHaveBeenCalled();
+        expect(compareConfigRepo.create).not.toHaveBeenCalled();
+      });
+    });
+
     describe('generic templates (issue #607)', () => {
       const dashboards = [
         { id: 'dash-a', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production', dashboardUid: 'performance-test-metrics-a', organizationId: 'org-1' },

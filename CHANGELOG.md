@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.95.42] - 2026-09-21
+
+### Fixed
+- **A provisioned compare-config template on a `performance-test-metrics-*` dashboard never applied.** `applyGoldenPathClassifications` runs in the API at run completion and skips any panel that already has a `ds_compare_config` row — but `PerformanceTestMetricsPipeline` seeds a default panel-level row for every perf-test panel during the run, before completion, so the template was reported as "already configured" on every run, forever, and an `absThreshold` in `template_ds_compare_configs.yaml` never reached ADAPT. The golden path now merges a template into a row the worker seeded and nobody has touched since (`updated_by = 'worker-pipeline'`): the template sets the classification and the overrides it names, the worker's `aggregation` / `minSampleCount` / percentage / IQR keys are kept, and the row is stamped `system:golden-path`. Rows a user edited are still left alone — `updateDsCompareConfig` now stamps `updated_by` with the caller, which it previously did not, so that distinction actually holds. Unchanged but worth knowing: a `^performance-test-metrics-` regex also matches the display-only `performance-test-metrics-all-aggregated` dashboard, which the worker deliberately seeds no compare config for — the golden path has always created one there from such a template; exclude it in the pattern if that is not wanted.
+
 ## [0.2.95.41] - 2026-09-17
 
 ### Changed
