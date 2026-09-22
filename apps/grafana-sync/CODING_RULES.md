@@ -8,7 +8,8 @@ Background NestJS service that runs on a schedule (port 3002). It:
 
 1. **Syncs dashboards** from configured Grafana instances into the Perfana database
 2. **Auto-detects configuration** (variable mappings, panel selections) for new dashboards
-3. **Sanity-checks** existing dashboard configs for staleness or drift
+3. **Provisions profile SLOs** (`profile_benchmarks` → `benchmarks`) onto the application dashboards of recent test runs (`BenchmarkProcessorService`, part of auto-config)
+4. **Sanity-checks** existing dashboard configs for staleness or drift
 
 ## Project Structure
 
@@ -81,3 +82,5 @@ All behavior is configurable via environment variables. Key settings:
 | Letting one dashboard failure kill the batch | Use `Promise.allSettled()` |
 | Logging API keys or credentials | Log instance name/ID only, never secrets |
 | Forgetting to check feature flag | Always check `GRAFANA_SYNC_ENABLED` at task start |
+| Matching a perf-test profile benchmark by `template_dashboard_uid` | The worker writes `Performance test metrics <scenario>` dashboards with no template; a `source = 'performance-metrics'` row matches by a uid regex via `findApplicationDashboardsByUidPattern`, which must keep its `LIKE 'performance-test-metrics-%'` guard (v0.2.96.6) |
+| Skipping auto-config when an org has no profile dashboards | A perf-test profile benchmark needs none; `loadAutoConfigContext` returns early only when dashboards *and* benchmarks are both empty |

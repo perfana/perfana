@@ -63,9 +63,13 @@ When enabled, the sync service can automatically discover and configure dashboar
 3. **VariableMatcher** — Maps variables to test run dimensions
 4. **ApplicationDashboardCreator** — Creates dashboard entries in Perfana
 5. **DashboardConfigurator** — Sets up panel links and configurations
+6. **BenchmarkProcessor** — Provisions the profile's SLOs (`profile_benchmarks` → `benchmarks`) onto the matching application dashboards of every test run in the auto-config window. A Grafana row matches on `template_dashboard_uid`; a `source = 'performance-metrics'` row (v0.2.96.6) has no profile dashboard and matches the worker-written `Performance test metrics <scenario>` dashboards by a regex over their uid (`DashboardFinderService.findApplicationDashboardsByUidPattern`), so one profile row fans out to every scenario, including ones that first appear in a later run.
 
 > [!tip] Variable Discovery
 > Supports InfluxDB and Prometheus query patterns. Uses confidence scoring to determine the best variable matches.
+
+> [!note] Profile SLOs on the perf-test scenario dashboards
+> The regex only ever narrows the perf-test set — the finder ANDs `LIKE 'performance-test-metrics-%'`, so a stray `.` cannot fan an SLO out over the SUT's Grafana or Dynatrace dashboards — and it runs in Postgres (`~`, ARE dialect), so keep patterns to what the JS validator and Postgres both accept. The default pattern excludes the `all-aggregated` roll-up and the no-scenario `default` dashboard. Since v0.2.96.6 the pass no longer skips an organization that has profile benchmarks but no profile dashboards, and the fan-out catches per dashboard so one failed scenario does not abort the rest. Provisioned rows are write-once: editing or deleting the profile row does not propagate. Background and residue in `CLAUDE.md` → "A profile SLO can target the perf-test scenario dashboards, and the profile row is a regex".
 
 ## Configuration
 

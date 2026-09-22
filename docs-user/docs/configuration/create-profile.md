@@ -25,6 +25,7 @@ A profile is a reusable bundle of dashboards and SLOs. Create one so new test ru
 
 5. On the **Service Level Objectives** tab, click **Add Service Level Objective** and add each check.
    The checks appear in the list. For how thresholds and Apdex work, see [Define SLOs](define-slos.md).
+   To apply one check to every performance-test scenario of a system (for example, `Transaction Error Rate` below 2% on each JMeter or Gatling scenario), pick **Performance test metrics — every scenario** as the dashboard. The check is added to each scenario dashboard, including scenarios that first appear in a later run; the run-wide *all aggregated* roll-up is left out.
 
 **Result**
 The profile holds your standard dashboards and SLOs. New test runs that use this profile inherit them automatically, so you avoid repeating the same setup on every system.

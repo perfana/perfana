@@ -26,6 +26,8 @@ Profile
 
 **Usage**: When a test run initializes, it inherits the profile's dashboards and benchmarks for automatic monitoring.
 
+A `ProfileBenchmark` normally points at one `ProfileGrafanaDashboard` and is provisioned onto the application dashboards created from that template. With `source: performance-metrics` (v0.2.96.6) it points at no profile dashboard: `dashboard_uid` holds a regex over the worker-written `Performance test metrics <scenario>` dashboard uids (default `^performance-test-metrics-(?!all-aggregated$|default$)`), and grafana-sync fans it out over every matching scenario dashboard of the system. In the profile SLO dialog this is the **Performance test metrics — every scenario** entry; the same shape works from YAML provisioning (`source: performance-metrics`, `dashboardUid` optional). Mechanics in [[Grafana Sync Overview]] → Auto-Configuration.
+
 ### Dashboard Templates
 
 Grafana dashboard templates that can be propagated across multiple systems:
