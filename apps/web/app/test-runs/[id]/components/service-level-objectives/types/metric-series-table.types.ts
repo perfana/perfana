@@ -20,6 +20,12 @@ export interface MetricSeriesResult {
   message?: string;
   panel_type?: string;
   evaluate_type?: string;
+  /** Series identity for the row's "Open in …" links. */
+  dashboard_label?: string;
+  panel_id?: number;
+  panel_title?: string;
+  /** The validate_with_default_if_no_data row: a series no dashboard holds. */
+  is_artificial?: boolean;
 }
 
 export interface Benchmark {

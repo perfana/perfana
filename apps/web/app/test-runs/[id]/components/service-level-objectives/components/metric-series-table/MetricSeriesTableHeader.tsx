@@ -44,7 +44,7 @@ export function MetricSeriesTableHeader({
   return (
     <Box sx={{
       display: 'grid',
-      gridTemplateColumns: '2fr 1fr 1fr',
+      gridTemplateColumns: '2fr 1fr 1fr 32px',
       gap: 2,
       p: 2.5,
       background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.08)} 0%, ${alpha(theme.palette.primary.main, 0.06)} 50%, ${alpha(theme.palette.primary.main, 0.04)} 100%)`,

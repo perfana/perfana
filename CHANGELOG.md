@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.5] - 2026-09-22
+
+### Added
+- **Row menus now open a series in the Graphs, Compare or Trends card.** Every context menu on a row that names a series — the Performance Analysis overview (transaction and request rows), the Top 10 transactions and Top 10 requests lists, the Anomaly Detection table, and the SLO results (Grafana, Dynatrace and performance-metrics series rows, plus the Apdex transaction and request rows, which gain a ⋮ menu where they had none) — carries **Open in Graphs / Open in Compare / Open in Trends**. Each is a real link that opens the run in a new tab on the Reporting tab with that card expanded and its Dashboards → Panels → Series pickers already set to the row's series, so one click on "Add series" plots it. A link for a percentile RT panel lands on the Avg panel the Compare card keeps; a link applied once stays applied — collapsing and re-expanding the card does not put the picks back. The same menus on performance-test rows (Anomaly Detection and SLO results) also offer **View in Performance Analysis**, which jumps in the same tab to the Performance Analysis card's Overview with the row's scenario selected, expanded and its transaction filter set. The links compose the stored series name the way the worker writes it (`Performance test metrics <scenario>`, panel 101/201, `transaction.sampler` with the worker's prefix rule), so a request row lands on its own series, not its transaction's.
+
 ## [0.2.96.4] - 2026-09-21
 
 ### Added

@@ -4,6 +4,14 @@ import { NO_SCENARIO_LABEL } from '../components/ScenarioFilter';
 const normalize = (scenarioName?: string | null): string =>
   scenarioName && scenarioName.length > 0 ? scenarioName : NO_SCENARIO_LABEL;
 
+/**
+ * The scenario key a drill-down filters on. The worker labels a NULL scenario 'default'
+ * (its dashboards are "Performance test metrics default"); the overview groups it as
+ * NO_SCENARIO_LABEL.
+ */
+export const scenarioFilterKey = (scenario?: string | null): string =>
+  scenario && scenario !== 'default' ? scenario : NO_SCENARIO_LABEL;
+
 export function matchesSelectedScenarios(
   scenarioName: string | null | undefined,
   selectedScenarios: string[],

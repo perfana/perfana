@@ -1103,6 +1103,25 @@ escaper go back to being broad without printing artifacts.
 
 ## Metrics dropdowns
 
+### Row-menu drill-downs reconstruct scenario/transaction from a series NAME, which is lossy
+
+**Priority:** P3
+**Origin:** adversarial review during /ship on `feat/metric-card-links` (2026-09-22).
+**Why:** "View in Performance Analysis" on an anomaly or SLO series row goes through
+`parseRequestInfoFromMetric`, which splits `metric_name` at the first `.` and takes the scenario from
+the dashboard label. Two shapes the worker writes are ambiguous on the way back: a transaction or
+bare sampler containing a dot (`/v1.2/users`, `login.php`) yields the wrong transaction fragment and
+seeds the overview's substring filter with it; and the literal `default` is overloaded — the worker
+labels a NULL scenario `default`, so `scenarioFilterKey` maps it onto the overview's "No Scenario"
+group, which means a JMeter scenario genuinely *named* `default` cannot be drilled into (and an
+empty-string `scenario_name` is labelled `Performance test metrics ` with a trailing space, which
+`perfTestSeriesRef` never composes). Pre-existing for the tracing/Dynatrace drill-downs; v0.2.96.5
+widened the surface.
+**What to do:** either carry `scenario_name` / `transaction_name` / `sampler_name` structurally on
+the rows that offer the drill-down (`ds_adapt_results`, `check_results.targets`) so no parse is
+needed, or normalise the two edge shapes in the worker (`COALESCE(NULLIF(scenario_name, ''), …)`)
+and document the dot limitation next to `samplerMetricNameSql`.
+
 ### Retire the synthetic "All aggregated" option once every retained run has the real dashboard
 
 **Priority:** P3

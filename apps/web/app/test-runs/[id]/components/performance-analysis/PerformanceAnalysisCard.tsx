@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, useCallback } from 'react';
+import { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   Box,
   Card,
@@ -38,6 +38,7 @@ import {
 import {
   deriveAvailableScenarios,
   matchesSelectedScenarios,
+  scenarioFilterKey,
   filterThroughputStats,
   filterVirtualUserStats,
 } from './utils/scenario-filter';
@@ -59,6 +60,8 @@ interface PerformanceAnalysisCardProps {
   hasDynatrace?: boolean;
   onDrillDownToDistributedTracing?: (filters: DrillDownFilters) => void;
   onDrillDownToDynatrace?: (filters: DrillDownFilters) => void;
+  /** A drill-down from another card: open Overview filtered on this scenario/transaction. */
+  initialFilters?: DrillDownFilters;
 }
 
 export default function PerformanceAnalysisCard({
@@ -71,6 +74,7 @@ export default function PerformanceAnalysisCard({
   hasDynatrace = false,
   onDrillDownToDistributedTracing,
   onDrillDownToDynatrace,
+  initialFilters,
 }: PerformanceAnalysisCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -108,6 +112,7 @@ export default function PerformanceAnalysisCard({
     handleRowClick,
     expandedScenarios,
     handleToggleScenario,
+    expandScenario,
     overallApdexScore,
     poorApdexTransactions,
     refreshAll,
@@ -207,6 +212,16 @@ export default function PerformanceAnalysisCard({
     excludeRampUp,
     refreshAll,
   });
+
+  // Apply a drill-down: Overview tab, scenario filter, scenario expanded (the table seeds
+  // its own transaction filter from the same object).
+  useEffect(() => {
+    if (!initialFilters) return;
+    setActiveTab(0);
+    const scenario = scenarioFilterKey(initialFilters.scenario);
+    setSelectedScenarios([scenario]);
+    expandScenario(scenario);
+  }, [initialFilters, setActiveTab, expandScenario]);
 
   const handleExpand = () => {
     const wasCollapsed = !expanded;
@@ -567,6 +582,7 @@ export default function PerformanceAnalysisCard({
                   </Box>
                 ) : (
                   <TransactionsTable
+                    initialTransactionFilters={initialFilters}
                     scenarioGroups={filteredScenarioGroups}
                     transactions={filteredTransactions}
                     throughputStats={filteredThroughputStats}

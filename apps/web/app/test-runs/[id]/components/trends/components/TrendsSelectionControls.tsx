@@ -66,6 +66,7 @@ export function TrendsSelectionControls({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <MetricSeriesCascade
+        card="trends"
         allDashboards={allDashboards}
         dashboardsLoading={dashboardsLoading}
         testRun={testRun}

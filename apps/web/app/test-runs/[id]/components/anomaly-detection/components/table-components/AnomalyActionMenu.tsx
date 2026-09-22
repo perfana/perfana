@@ -16,6 +16,7 @@ import {
 import { AnomalyData } from '../../types';
 import { parseRequestInfoFromMetric, isPerformanceTestMetricsDashboard } from '../utils';
 import { DrillDownFilters } from '../types';
+import { OpenInCardMenuItems, ViewInPerformanceAnalysisMenuItem, perfDrillDownFilters } from '../../../shared/metric-card-links';
 
 interface AnomalyActionMenuProps {
   anchorEl: HTMLElement | null;
@@ -40,9 +41,10 @@ export function AnomalyActionMenu({
   onDrillDownToDynatrace,
   canDelete,
 }: AnomalyActionMenuProps) {
-  const showTracingOption = hasDistributedTracing && onDrillDownToDistributedTracing && menuData && isPerformanceTestMetricsDashboard(menuData);
-  const showDynatraceOption = hasDynatrace && onDrillDownToDynatrace && menuData && isPerformanceTestMetricsDashboard(menuData);
-  const showDivider = (showTracingOption || showDynatraceOption) && canDelete;
+  const isPerfTest = !!menuData && isPerformanceTestMetricsDashboard(menuData);
+  const showTracingOption = hasDistributedTracing && onDrillDownToDistributedTracing && isPerfTest;
+  const showDynatraceOption = hasDynatrace && onDrillDownToDynatrace && isPerfTest;
+  const perfFilters = menuData ? perfDrillDownFilters(menuData) : null;
 
   return (
     <Menu
@@ -58,6 +60,11 @@ export function AnomalyActionMenu({
         horizontal: 'right',
       }}
     >
+      <OpenInCardMenuItems
+        series={menuData ? { dashboardLabel: menuData.dashboard_label, panelId: Number(menuData.panel_id), metricName: menuData.metric_name } : null}
+        onClose={onClose}
+      />
+      <ViewInPerformanceAnalysisMenuItem filters={perfFilters} onClose={onClose} />
       {showTracingOption && (
         <MenuItem onClick={() => {
           if (menuData) {
@@ -88,7 +95,7 @@ export function AnomalyActionMenu({
         </MenuItem>
       )}
 
-      {showDivider && <Divider />}
+      {canDelete && <Divider />}
 
       {canDelete && (
         <MenuItem

@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Divider,
   Menu,
   MenuItem,
   ListItemIcon,
@@ -18,6 +19,7 @@ import {
 } from '@mui/icons-material';
 import { TransactionStat, DrillDownFilters } from '../types/performance-analysis.types';
 import { SamplerActionMenuData } from '../hooks/usePerformanceAnalysisHandlers';
+import { OpenInCardMenuItems, perfTestSeriesRef } from '../../shared/metric-card-links';
 
 interface PerformanceAnalysisMenusProps {
   transactions: TransactionStat[];
@@ -82,6 +84,16 @@ export function PerformanceAnalysisMenus({
   onShowSamplerDetails,
   onOpenSamplerErrors,
 }: PerformanceAnalysisMenusProps) {
+  // Only while a menu is open — the scan is per render otherwise.
+  const actionMenuStat = actionMenuTransaction
+    ? transactions.find(t => t.transaction_name === actionMenuTransaction) : undefined;
+  const samplerStat = samplerActionMenuData
+    ? transactions.find(t => t.transaction_name === samplerActionMenuData.transaction) : undefined;
+  const samplerFilters = samplerActionMenuData ? {
+    scenario: (samplerStat?.scenario_name || samplerActionMenuData.sampler.scenario_name) ?? undefined,
+    transaction: samplerActionMenuData.transaction,
+    sampler: samplerActionMenuData.sampler.sampler_name,
+  } : null;
   return (
     <>
       {/* Apdex actions menu */}
@@ -162,13 +174,17 @@ export function PerformanceAnalysisMenus({
           </ListItemIcon>
           <ListItemText>Show More Details</ListItemText>
         </MenuItem>
+        <Divider />
+        <OpenInCardMenuItems
+          series={actionMenuStat ? perfTestSeriesRef({ scenario: actionMenuStat.scenario_name ?? undefined, transaction: actionMenuStat.transaction_name }) : null}
+          onClose={onCloseActionMenu}
+        />
         {hasDistributedTracing && onDrillDownToDistributedTracing && (
           <MenuItem onClick={() => {
-            const transaction = transactions.find(t => t.transaction_name === actionMenuTransaction);
-            if (transaction) {
+            if (actionMenuStat) {
               onDrillDownToDistributedTracing({
-                scenario: transaction.scenario_name,
-                transaction: transaction.transaction_name,
+                scenario: actionMenuStat.scenario_name,
+                transaction: actionMenuStat.transaction_name,
               });
             }
             onCloseActionMenu();
@@ -181,11 +197,10 @@ export function PerformanceAnalysisMenus({
         )}
         {hasDynatrace && onDrillDownToDynatrace && (
           <MenuItem onClick={() => {
-            const transaction = transactions.find(t => t.transaction_name === actionMenuTransaction);
-            if (transaction) {
+            if (actionMenuStat) {
               onDrillDownToDynatrace({
-                scenario: transaction.scenario_name,
-                transaction: transaction.transaction_name,
+                scenario: actionMenuStat.scenario_name,
+                transaction: actionMenuStat.transaction_name,
               });
             }
             onCloseActionMenu();
@@ -244,16 +259,14 @@ export function PerformanceAnalysisMenus({
           </ListItemIcon>
           <ListItemText>View Errors</ListItemText>
         </MenuItem>
+        <Divider />
+        <OpenInCardMenuItems
+          series={samplerFilters ? perfTestSeriesRef(samplerFilters) : null}
+          onClose={onCloseSamplerActionMenu}
+        />
         {hasDistributedTracing && onDrillDownToDistributedTracing && (
           <MenuItem onClick={() => {
-            if (samplerActionMenuData) {
-              const transaction = transactions.find(t => t.transaction_name === samplerActionMenuData.transaction);
-              onDrillDownToDistributedTracing({
-                scenario: transaction?.scenario_name || samplerActionMenuData.sampler.scenario_name,
-                transaction: samplerActionMenuData.transaction,
-                sampler: samplerActionMenuData.sampler.sampler_name,
-              });
-            }
+            if (samplerFilters) onDrillDownToDistributedTracing(samplerFilters);
             onCloseSamplerActionMenu();
           }}>
             <ListItemIcon>
@@ -264,14 +277,7 @@ export function PerformanceAnalysisMenus({
         )}
         {hasDynatrace && onDrillDownToDynatrace && (
           <MenuItem onClick={() => {
-            if (samplerActionMenuData) {
-              const transaction = transactions.find(t => t.transaction_name === samplerActionMenuData.transaction);
-              onDrillDownToDynatrace({
-                scenario: transaction?.scenario_name || samplerActionMenuData.sampler.scenario_name,
-                transaction: samplerActionMenuData.transaction,
-                sampler: samplerActionMenuData.sampler.sampler_name,
-              });
-            }
+            if (samplerFilters) onDrillDownToDynatrace(samplerFilters);
             onCloseSamplerActionMenu();
           }}>
             <ListItemIcon>
