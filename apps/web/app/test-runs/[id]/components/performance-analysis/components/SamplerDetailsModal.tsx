@@ -23,7 +23,7 @@ import {
   ContentCopy as ContentCopyIcon,
 } from '@mui/icons-material';
 import { SamplerStat } from '../types/performance-analysis.types';
-import { formatNumber, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
+import { formatNumber, apdexRating } from '../utils/performance-formatters';
 
 interface SamplerDetailsModalProps {
   open: boolean;
@@ -39,6 +39,7 @@ export default function SamplerDetailsModal({
   const handleCopyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
   };
+  const apdex = apdexRating(sampler?.apdex_score, sampler?.passed_count ?? 0);
 
   return (
     <Dialog
@@ -271,23 +272,28 @@ export default function SamplerDetailsModal({
                         p: 2,
                         borderRadius: 2,
                         background: 'rgba(255, 255, 255, 0.7)',
-                        border: `2px solid ${getApdexColor(sampler.apdex_score)}`,
+                        border: `2px solid ${apdex.color}`,
                         textAlign: 'center'
                       }}>
                         <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, textTransform: 'uppercase', display: 'block', mb: 1 }}>
                           Apdex Score
                         </Typography>
-                        <Typography variant="h5" sx={{ fontFamily: 'monospace', fontWeight: 700, color: getApdexColor(sampler.apdex_score) }}>
-                          {sampler.apdex_score.toFixed(3)}
+                        <Typography variant="h5" sx={{ fontFamily: 'monospace', fontWeight: 700, color: apdex.color }}>
+                          {apdex.score}
                         </Typography>
                         <Typography variant="caption" sx={{
                           display: 'block',
                           mt: 0.5,
                           fontWeight: 600,
-                          color: getApdexColor(sampler.apdex_score)
+                          color: apdex.color
                         }}>
-                          {getApdexLabel(sampler.apdex_score)}
+                          {apdex.label}
                         </Typography>
+                        {apdex.reason && (
+                          <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary' }}>
+                            {apdex.reason}
+                          </Typography>
+                        )}
                       </Box>
                     </Grid>
                     <Grid size={12}>

@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.7] - 2026-09-22
+
+### Fixed
+- **Performance Analysis rated a transaction that failed every execution "Excellent".** The Apdex sketch a row is scored from holds the response times of the failed executions too, and a failure is usually fast, so a 100% error rate read as a perfect score. A transaction, sampler or scenario with no successful executions now shows **No data** with "No successful requests to score" instead of a rating, and is left out of the scenario and overall weighted Apdex it used to lift.
+- **Performance Analysis rated an Apdex computed over a handful of requests.** Below 50 successful executions — the same floor as an Apdex SLO's default `apdex_min_samples` — a single request moves the score by a fifth. Such a row now shows **Too few** and names the count it has, rather than an Excellent or an Unacceptable that means nothing. The threshold column, counts and error rate are unchanged; only the rating is withheld.
+- **A Trend SLO no longer withholds a verdict when there is no clear trend.** A series whose slope fails the correlation floor (`|r| < 0.5`, or fewer than 10 points) is what the floor exists to *not* flag, so it now **passes** instead of being reported as unevaluated; the series row still says "No clear trend" and carries its `r`. A trend check in which every series is weak is a pass rather than "None of the N targets could be evaluated". Stored results keep their previous verdict until the run is re-evaluated.
+
 ## [0.2.96.6] - 2026-09-22
 
 ### Added

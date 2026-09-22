@@ -3,7 +3,7 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 import { TransactionStat, VirtualUserStats, ThroughputStats } from '../types/performance-analysis.types';
-import { formatNumber, formatApdex } from '../utils/performance-formatters';
+import { formatNumber, apdexRating, calculateScenarioMetrics } from '../utils/performance-formatters';
 
 interface OverallTestMetricsProps {
   transactions: TransactionStat[];
@@ -34,9 +34,9 @@ export default function OverallTestMetrics({
   const weightedP99ResponseTime = totalRequests > 0
     ? transactions.reduce((sum, t) => sum + (t.p99_response_time * t.total_count), 0) / totalRequests
     : 0;
-  const weightedApdexScore = totalRequests > 0
-    ? transactions.reduce((sum, t) => sum + (t.apdex_score * t.total_count), 0) / totalRequests
-    : 0;
+  // Shared with the per-scenario row: only transactions whose own score is meaningful count.
+  const { weightedApdexScore, apdexSampleCount } = calculateScenarioMetrics(transactions);
+  const apdex = apdexRating(weightedApdexScore, apdexSampleCount);
 
   return (
     <Box sx={{ mb: 3 }}>
@@ -205,33 +205,33 @@ export default function OverallTestMetrics({
         <Box
           sx={{
             p: 2,
-            backgroundColor: weightedApdexScore >= 0.94 ? 'rgba(76, 175, 80, 0.04)' : weightedApdexScore >= 0.85 ? 'rgba(255, 152, 0, 0.04)' : weightedApdexScore >= 0.70 ? 'rgba(255, 193, 7, 0.04)' : 'rgba(244, 67, 54, 0.04)',
+            backgroundColor: `${apdex.color}0a`,
             borderRadius: 2,
-            border: `1px solid ${weightedApdexScore >= 0.94 ? 'rgba(76, 175, 80, 0.12)' : weightedApdexScore >= 0.85 ? 'rgba(255, 152, 0, 0.12)' : weightedApdexScore >= 0.70 ? 'rgba(255, 193, 7, 0.12)' : 'rgba(244, 67, 54, 0.12)'}`,
+            border: `1px solid ${apdex.color}1f`,
           }}
         >
           <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>
             Overall Apdex Score
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-            <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 700, color: weightedApdexScore >= 0.94 ? 'success.main' : weightedApdexScore >= 0.85 ? 'warning.main' : weightedApdexScore >= 0.70 ? 'warning.dark' : 'error.main' }}>
-              {formatApdex(weightedApdexScore)}
+            <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 700, color: apdex.color }}>
+              {apdex.score}
             </Typography>
             <Typography
               variant="caption"
               sx={{
                 fontSize: '0.7rem',
                 fontWeight: 700,
-                color: weightedApdexScore >= 0.94 ? 'success.main' : weightedApdexScore >= 0.85 ? 'warning.main' : weightedApdexScore >= 0.70 ? 'warning.dark' : 'error.main',
+                color: apdex.color,
                 textTransform: 'uppercase',
                 letterSpacing: '0.5px'
               }}
             >
-              {weightedApdexScore >= 0.94 ? 'Excellent' : weightedApdexScore >= 0.85 ? 'Good' : weightedApdexScore >= 0.70 ? 'Fair' : weightedApdexScore >= 0.50 ? 'Poor' : 'Unacceptable'}
+              {apdex.label}
             </Typography>
           </Box>
           <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
-            T={testLevelThreshold}ms
+            {apdex.reason ?? `T=${testLevelThreshold}ms`}
           </Typography>
         </Box>
       </Box>

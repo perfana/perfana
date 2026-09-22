@@ -10,9 +10,7 @@ import {
 import { ThroughputStats, VirtualUserStats } from '../types/performance-analysis.types';
 import {
   formatNumber,
-  formatApdex,
-  getApdexColor,
-  getApdexLabel,
+  apdexRating,
   ScenarioMetrics,
 } from '../utils/performance-formatters';
 
@@ -33,6 +31,7 @@ export function ScenarioMetricsRow({
 }: ScenarioMetricsRowProps) {
   const scenarioThroughput = throughputStats?.by_scenario?.find(s => s.scenario_name === scenarioName);
   const scenarioVU = virtualUserStats?.by_scenario?.find(s => s.scenario_name === scenarioName);
+  const apdex = apdexRating(metrics.weightedApdexScore, metrics.apdexSampleCount);
 
   return (
     <TableRow
@@ -135,13 +134,14 @@ export function ScenarioMetricsRow({
             title={
               <Box sx={{ p: 0.5 }}>
                 <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, mb: 0.5 }}>
-                  Apdex Score: {formatApdex(metrics.weightedApdexScore)}
+                  Apdex Score: {apdex.score}
                 </Typography>
                 <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                  Rating: {getApdexLabel(metrics.weightedApdexScore)}
+                  {apdex.reason ?? `Rating: ${apdex.label}`}
                 </Typography>
                 <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', mt: 0.5 }}>
-                  Weighted average across {metrics.totalRequests.toLocaleString()} total requests
+                  Weighted over {metrics.apdexSampleCount.toLocaleString()} scored requests
+                  {' '}of {metrics.totalRequests.toLocaleString()} total
                 </Typography>
               </Box>
             }
@@ -152,8 +152,8 @@ export function ScenarioMetricsRow({
               <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', display: 'block' }}>
                 Apdex
               </Typography>
-              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 700, color: getApdexColor(metrics.weightedApdexScore), fontSize: '0.9rem' }}>
-                {getApdexLabel(metrics.weightedApdexScore)}
+              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 700, color: apdex.color, fontSize: '0.9rem' }}>
+                {apdex.label}
               </Typography>
             </Box>
           </Tooltip>

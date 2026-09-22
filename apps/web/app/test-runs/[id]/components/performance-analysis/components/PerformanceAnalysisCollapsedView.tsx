@@ -4,7 +4,7 @@ import { Alert, Box, Divider, Typography, Tooltip, Switch, FormControlLabel } fr
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
 import { TransactionStat, ThroughputStats, RollupPendingState } from '../types/performance-analysis.types';
-import { formatNumber, getApdexLabel } from '../utils/performance-formatters';
+import { formatNumber, ApdexRating } from '../utils/performance-formatters';
 import { TestRun } from '@/types/test-runs';
 
 interface PerformanceAnalysisCollapsedViewProps {
@@ -12,7 +12,7 @@ interface PerformanceAnalysisCollapsedViewProps {
   error: string | null;
   transactions: TransactionStat[];
   throughputStats: ThroughputStats | null;
-  overallApdexScore: number;
+  overallApdex: ApdexRating;
   poorApdexTransactions: TransactionStat[];
   testRun?: TestRun | null;
   excludeRampUp: boolean;
@@ -25,7 +25,7 @@ export function PerformanceAnalysisCollapsedView({
   error,
   transactions,
   throughputStats,
-  overallApdexScore,
+  overallApdex,
   poorApdexTransactions,
   testRun,
   excludeRampUp,
@@ -71,10 +71,10 @@ export function PerformanceAnalysisCollapsedView({
         title={
           <Box>
             <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
-              Apdex Score: {loading ? 'Loading...' : error ? 'Error' : overallApdexScore.toFixed(3)}
+              Apdex Score: {loading ? 'Loading...' : error ? 'Error' : overallApdex.score}
             </Typography>
             <Typography variant="caption" sx={{ fontSize: '0.7rem', display: 'block', mb: 0.5 }}>
-              {loading ? '' : error ? '' : `Rating: ${getApdexLabel(overallApdexScore)}`}
+              {loading ? '' : error ? '' : (overallApdex.reason ?? `Rating: ${overallApdex.label}`)}
             </Typography>
             {!loading && !error && hasPoorApdexTransactions && (
               <>
@@ -100,14 +100,13 @@ export function PerformanceAnalysisCollapsedView({
           <KPIDisplay
             value={loading ? '—' : error ? 'Error' : transactions.length === 0
               ? (isRampUpState ? 'Ramp-up' : '—')
-              : getApdexLabel(overallApdexScore)}
+              : overallApdex.label}
             label="Overall Apdex"
             loading={loading}
             color={
-              loading || error || transactions.length === 0 ? undefined :
-              overallApdexScore >= 0.94 ? 'success' :
-              overallApdexScore >= 0.85 ? 'success' :
-              overallApdexScore >= 0.7 ? 'warning' : 'error'
+              loading || error || transactions.length === 0 || overallApdex.reason ? undefined :
+              (overallApdex.scoreValue ?? 0) >= 0.85 ? 'success' :
+              (overallApdex.scoreValue ?? 0) >= 0.7 ? 'warning' : 'error'
             }
           />
         </Box>

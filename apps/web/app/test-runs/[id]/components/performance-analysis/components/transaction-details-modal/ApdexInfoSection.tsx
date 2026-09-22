@@ -3,7 +3,7 @@
 import { Box, Grid, Paper, Typography } from '@mui/material';
 import { Assessment as AssessmentIcon } from '@mui/icons-material';
 import { TransactionStat } from '../../types/performance-analysis.types';
-import { getApdexColor, getApdexLabel } from '../../utils/performance-formatters';
+import { apdexRating } from '../../utils/performance-formatters';
 import { MetricCard } from './MetricCard';
 
 interface ApdexInfoSectionProps {
@@ -11,7 +11,8 @@ interface ApdexInfoSectionProps {
 }
 
 export function ApdexInfoSection({ transaction }: ApdexInfoSectionProps) {
-  const apdexColor = getApdexColor(transaction.apdex_score);
+  const apdex = apdexRating(transaction.apdex_score, transaction.passed_count);
+  const apdexColor = apdex.color;
 
   return (
     <Paper sx={{ p: 3 }}>
@@ -63,7 +64,7 @@ export function ApdexInfoSection({ transaction }: ApdexInfoSectionProps) {
                 mb: 0.5,
               }}
             >
-              {transaction.apdex_score.toFixed(3)}
+              {apdex.score}
             </Typography>
             <Typography
               variant="body2"
@@ -73,8 +74,13 @@ export function ApdexInfoSection({ transaction }: ApdexInfoSectionProps) {
                 textTransform: 'uppercase',
               }}
             >
-              {getApdexLabel(transaction.apdex_score)}
+              {apdex.label}
             </Typography>
+            {apdex.reason && (
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary' }}>
+                {apdex.reason}
+              </Typography>
+            )}
           </Box>
         </Grid>
         <Grid size={{ xs: 6, sm: 4, md: 3 }}>

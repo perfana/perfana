@@ -23,7 +23,7 @@ import {
   AccountTree as AccountTreeIcon,
 } from '@mui/icons-material';
 import { SamplerStat } from '../types/performance-analysis.types';
-import { formatNumber, formatApdex, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
+import { formatNumber, apdexRating } from '../utils/performance-formatters';
 import {
   buildSamplerSections,
   sectionSamples,
@@ -113,6 +113,7 @@ function SamplerRow({
   onOpenSamplerActionMenu,
   onOpenSamplerErrors,
 }: SamplerRowProps) {
+  const apdex = apdexRating(sampler.apdex_score, sampler.passed_count);
   return (
     <TableRow sx={{
       '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.04)' },
@@ -181,10 +182,10 @@ function SamplerRow({
           title={
             <Box sx={{ p: 0.5 }}>
               <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, mb: 0.5 }}>
-                Apdex Score: {formatApdex(sampler.apdex_score)}
+                Apdex Score: {apdex.score}
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                Rating: {getApdexLabel(sampler.apdex_score)}
+                {apdex.reason ?? `Rating: ${apdex.label}`}
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', mt: 0.5 }}>
                 Threshold: {sampler.active_threshold}ms
@@ -201,19 +202,19 @@ function SamplerRow({
             component="span"
             sx={{
               fontWeight: 700,
-              color: getApdexColor(sampler.apdex_score),
+              color: apdex.color,
               display: 'inline-block',
               px: 1.5,
               py: 0.5,
               borderRadius: 1,
-              backgroundColor: `${getApdexColor(sampler.apdex_score)}15`,
+              backgroundColor: `${apdex.color}15`,
               cursor: 'help',
               fontSize: '0.875rem',
               textTransform: 'uppercase',
               letterSpacing: '0.5px'
             }}
           >
-            {getApdexLabel(sampler.apdex_score)}
+            {apdex.label}
           </Box>
         </Tooltip>
       </TableCell>

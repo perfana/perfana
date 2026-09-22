@@ -791,6 +791,27 @@ document's worth) to stay last-wins.
 **Where:** `apps/worker/src/pipelines/DynatracePipeline.ts`,
 `apps/worker/src/pipelines/helpers/incremental/metric-processor.ts`.
 
+### Performance Analysis Apdex is still computed partly over failed executions
+
+**Priority:** P3
+**Origin:** fixing "a 100%-failing transaction reads Excellent" (2026-09-22, v0.2.96.7).
+**Why:** the card's Apdex comes from `apdexScoreSql`, and four of its eight call sites feed it
+the **all-rows** sketch (`pct_agg` / `rollup(trss.pct_agg)`) rather than the success-only
+`pct_agg_passed` the four CAGG sites use. Failed executions are usually fast, so their response
+times land in the satisfied bucket. v0.2.96.7 suppressed the two cases where that is
+unambiguously wrong — no successful executions at all, and fewer than 50 — but a transaction
+that failed, say, 90% of its executions still shows a rating lifted by the 90%.
+**What:** switch the four `pct_agg` sites to `pct_agg_passed` and divide by `passed_count`, or
+pool the per-bucket counts the way `DataAggregator.pooledErrorRates` does. The blocker is rows
+written before #298, whose `pct_agg_passed` is NULL: `approx_percentile_rank` over a NULL digest
+COALESCEs to 1.0, so the guard has to be `passed_count > 0 AND pct_agg_passed IS NOT NULL` and
+the fallback for an un-re-rolled-up run decided deliberately (N/A regresses old runs' display).
+**Where:** `apps/api/src/modules/test-runs/services/test-runs-performance-query.service.ts`
+(`apdexScoreSql` and its call sites at the transaction rollup, the sampler rollup, the two raw
+scans and the run-sampler rollup CTE);
+`apps/web/app/test-runs/[id]/components/performance-analysis/utils/performance-formatters.ts`
+(`apdexRating`, which would then have less to suppress).
+
 ### Trend SLO: floors are constants, the stored result does not say which floor applied, and the worker has no boot-time column check
 
 **Priority:** P3
