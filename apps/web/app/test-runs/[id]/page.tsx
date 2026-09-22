@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
 
@@ -41,6 +41,7 @@ import PendingReports from './components/reporting/PendingReports';
 import { JobProgressIndicator } from '@/components/job-progress/JobProgressIndicator';
 import { GenerateReportDialog } from '@/components/reports/report-generation/GenerateReportDialog';
 import { HtmlReportViewerModal } from '@/components/reports/HtmlReportViewerModal';
+import { LINKABLE_CARDS, LinkableCard, PerformanceAnalysisDrillDownContext } from './components/shared/metric-card-links';
 
 export default function TestRunDetailsPage() {
   const params = useParams();
@@ -48,6 +49,9 @@ export default function TestRunDetailsPage() {
 
   // Tab state
   const [activeTab, setActiveTab] = useState(0);
+  const [perfAnalysisFilters, setPerfAnalysisFilters] = useState<DrillDownFilters | undefined>(undefined);
+  // Prev/next keeps the page mounted; a drill-down must not re-filter the next run.
+  useEffect(() => setPerfAnalysisFilters(undefined), [testRunId]);
 
   // Toast notification state
   const [snackbarOpen, setSnackbarOpen] = useState(false);
@@ -150,6 +154,28 @@ export default function TestRunDetailsPage() {
     [handleDrillDownToDynatrace, activeTab]
   );
 
+  // Same-tab drill-down to Performance Analysis → Overview, filtered on the row's transaction
+  const onDrillDownToPerformanceAnalysis = useCallback(
+    (filters: DrillDownFilters) => {
+      setPerfAnalysisFilters(filters);
+      const needsTabSwitch = activeTab !== 0;
+      setActiveTab(0);
+      setExpansion('performanceExpanded', true);
+      scrollToCard('performance-analysis-card-expanded', needsTabSwitch ? { delay: 150, maxRetries: 8 } : undefined);
+    },
+    [activeTab, setExpansion]
+  );
+
+  // A row's "Open in Graphs / Compare / Trends" link lands here with ?card=…; the card's
+  // cascade reads the series itself.
+  const linkedCard = useSearchParams().get('card');
+  useEffect(() => {
+    if (!LINKABLE_CARDS.includes(linkedCard as LinkableCard)) return;
+    setActiveTab(2);
+    setExpansion(`${linkedCard as LinkableCard}Expanded`, true);
+    scrollToCard(`${linkedCard}-card-expanded`, { delay: 150, maxRetries: 8 });
+  }, [linkedCard, setExpansion]);
+
   // Anomaly expansion handler
   const onAnomalyExpand = useCallback(
     (tabIndex?: number) => {
@@ -201,6 +227,7 @@ export default function TestRunDetailsPage() {
   });
 
   return (
+    <PerformanceAnalysisDrillDownContext.Provider value={onDrillDownToPerformanceAnalysis}>
     <Box sx={{ backgroundColor: 'background.default', pb: 4 }}>
       {/* Deletion status banner */}
       {testRun.deletion_status === 'queued' || testRun.deletion_status === 'deleting' ? (
@@ -288,7 +315,7 @@ export default function TestRunDetailsPage() {
                 <AnomalyDetectionSection testRun={testRun} testRunId={testRunId} anomalyExpanded={expansionState.anomalyExpanded} onAnomalyExpand={onAnomalyExpand} activeTab={anomalyState.activeTab} onActiveTabChange={setAnomalyActiveTab} conclusionFilter={anomalyState.conclusionFilter} setConclusionFilter={setAnomalyConclusionFilter} showToast={showToast} onTestRunUpdate={handleTestRunUpdate} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
               </Box>
               <Box sx={cardBoxStyle(expansionState.performanceExpanded)}>
-                <PerformanceAnalysisCard testRunId={testRunId} testRun={testRun} expanded={expansionState.performanceExpanded} onExpand={() => { const wasCollapsed = !expansionState.performanceExpanded; toggleExpansion('performanceExpanded'); if (wasCollapsed) scrollToCard('performance-analysis-card-expanded'); }} showToast={showToast} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
+                <PerformanceAnalysisCard initialFilters={perfAnalysisFilters} testRunId={testRunId} testRun={testRun} expanded={expansionState.performanceExpanded} onExpand={() => { const wasCollapsed = !expansionState.performanceExpanded; toggleExpansion('performanceExpanded'); if (wasCollapsed) scrollToCard('performance-analysis-card-expanded'); }} showToast={showToast} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
               </Box>
               <Box sx={cardBoxStyle(expansionState.sloExpanded)}>
                 <ServiceLevelObjectivesSection testRun={testRun} testRunId={testRunId} sloExpanded={expansionState.sloExpanded} setSloExpanded={(val) => { const wasCollapsed = !expansionState.sloExpanded; setExpansion('sloExpanded', val); if (wasCollapsed && val) scrollToCard('slo-section-expanded'); }} hasDistributedTracing={configurationStatus.hasDistributedTracing} hasDynatrace={configurationStatus.hasDynatrace} onDrillDownToDistributedTracing={onDrillDownToDistributedTracing} onDrillDownToDynatrace={onDrillDownToDynatrace} />
@@ -400,5 +427,6 @@ export default function TestRunDetailsPage() {
         onError={(error) => showToast(error)}
       />
     </Box>
+    </PerformanceAnalysisDrillDownContext.Provider>
   );
 }

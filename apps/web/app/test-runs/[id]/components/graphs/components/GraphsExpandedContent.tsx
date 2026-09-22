@@ -75,6 +75,7 @@ export function GraphsExpandedContent({
     <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Builder row — pick what to plot */}
       <MetricSeriesCascade
+        card="graphs"
         allDashboards={allDashboards}
         dashboardsLoading={dashboardsLoading}
         testRun={testRun}

@@ -121,6 +121,7 @@ export function CompareSelectionPanel({
       )}
 
       <MetricSeriesCascade
+        card="compare"
         allDashboards={allDashboards}
         dashboardsLoading={dashboardsLoading}
         testRun={testRun}

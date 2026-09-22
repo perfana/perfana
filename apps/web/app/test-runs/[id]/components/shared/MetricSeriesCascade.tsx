@@ -9,7 +9,8 @@
  * six panels, and each trip had to be finished with "Add series" before the next.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Box,
   Typography,
@@ -22,7 +23,7 @@ import {
 } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
 import { getSourceDisplayInfo } from '@/lib/metrics-source-utils';
-import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName, isAllAggregatedDashboard } from '@/lib/aggregated-perf-series';
+import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName, isAllAggregatedDashboard, rtKeeperPanelId } from '@/lib/aggregated-perf-series';
 import HostLabelChips from '@/components/HostLabelChips';
 import {
   ApplicationDashboard,
@@ -35,6 +36,7 @@ import {
   panelKey,
   seriesKey,
 } from './metric-options';
+import { LinkableCard, readCardLinkPreselect } from './metric-card-links';
 
 /** The identity every card's added-series list carries, used to grey out picked series. */
 export interface AddedSeriesKey {
@@ -57,11 +59,18 @@ interface MetricSeriesCascadeProps {
   onPrimaryChange?: (dashboard: ApplicationDashboard | null, panel: PanelOption | null) => void;
   /** Which per-card extras the panel list gets; see PanelListOptions. */
   panelListOptions?: PanelListOptions;
+  /** Which card this is, so a `?card=…&dashboard=…&panel=…&metric=…` link preselects it. */
+  card: LinkableCard;
 }
 
 // Trends/Graphs use default-size inputs with 56px buttons; 92 stops "Select all" from
 // resizing when it toggles to "Clear".
 const PICKER_BUTTON_SX = { height: '56px', minWidth: 92, flexShrink: 0 } as const;
+
+// ponytail: a link is applied once per page load, not once per mount. The card unmounts on
+// every tab switch and collapse while the URL keeps its params, so without this the picks
+// the user cleared come back on re-expand. Module state resets on reload, which re-applies.
+const consumedLinks = new Set<string>();
 
 export function MetricSeriesCascade({
   allDashboards,
@@ -71,6 +80,7 @@ export function MetricSeriesCascade({
   onAddSeries,
   onPrimaryChange,
   panelListOptions,
+  card,
 }: MetricSeriesCascadeProps) {
   const [selectedDashboards, setSelectedDashboards] = useState<ApplicationDashboard[]>([]);
   const [panelOptions, setPanelOptions] = useState<PanelOption[]>([]);
@@ -86,6 +96,10 @@ export function MetricSeriesCascade({
   const dashboardsKey = selectedDashboards.map((d) => d.id).join('|');
   const panelsKey = selectedPanels.map(panelKey).join('|');
   const runKey = testRun ? `${testRun.test_run_id}|${testRun.system_under_test_id}|${testRun.test_environment}|${testRun.workload}` : '';
+  // Which selection the current option lists belong to: an empty list for a selection that
+  // has not loaded yet is not an empty result.
+  const panelsFor = useRef('');
+  const seriesFor = useRef('');
 
   // Load the panels of every selected dashboard.
   useEffect(() => {
@@ -97,7 +111,7 @@ export function MetricSeriesCascade({
     let cancelled = false;
     setPanelsLoading(true);
     fetchPanelsForDashboards(picked, testRun, panelListOptions)
-      .then((lists) => { if (!cancelled) setPanelOptions(lists.flat()); })
+      .then((lists) => { if (!cancelled) { panelsFor.current = dashboardsKey; setPanelOptions(lists.flat()); } })
       .finally(() => { if (!cancelled) setPanelsLoading(false); });
     return () => { cancelled = true; };
     // selectedDashboards is read through dashboardsKey, testRun through runKey.
@@ -114,7 +128,7 @@ export function MetricSeriesCascade({
     let cancelled = false;
     setSeriesLoading(true);
     fetchSeriesForPanels(picked, testRun)
-      .then((lists) => { if (!cancelled) setSeriesOptions(lists.flat()); })
+      .then((lists) => { if (!cancelled) { seriesFor.current = panelsKey; setSeriesOptions(lists.flat()); } })
       .finally(() => { if (!cancelled) setSeriesLoading(false); });
     return () => { cancelled = true; };
     // selectedPanels is read through panelsKey, testRun through runKey.
@@ -159,6 +173,43 @@ export function MetricSeriesCascade({
     setSelectedSeries([]);
   };
 
+  // Preselect from a row's "Open in …" link: one step per level, each as its options land,
+  // then never again — the user can clear what the link picked. The ref is disarmed the
+  // moment a level cannot be satisfied (option missing, or the list loaded empty), or the
+  // user picks by hand; an armed ref would otherwise hijack the next manual pick.
+  const searchParams = useSearchParams();
+  const linkKey = `${card}?${searchParams.toString()}`;
+  const preselect = useRef(consumedLinks.has(linkKey) ? null : readCardLinkPreselect(searchParams, card));
+  const disarm = () => { preselect.current = null; consumedLinks.add(linkKey); };
+  useEffect(() => {
+    const want = preselect.current;
+    if (!want || selectedDashboards.length > 0 || dashboardsLoading) return;
+    const dashboard = allDashboards.find((d) => d.dashboard_label === want.dashboardLabel);
+    if (dashboard) pickDashboards([dashboard]);
+    else if (allDashboards.length > 0) disarm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allDashboards, dashboardsLoading]);
+  useEffect(() => {
+    const want = preselect.current;
+    if (!want || selectedPanels.length > 0 || selectedDashboards.length === 0 || panelsFor.current !== dashboardsKey) return;
+    // Compare folds the percentile RT panels onto the Avg one (collapsePerfRtPanels) —
+    // a perf-test rule, so a Grafana panel that happens to be numbered 101 must not match.
+    const keeper = rtKeeperPanelId(want.panelId);
+    const panel = panelOptions.find((p) => p.id === want.panelId)
+      ?? panelOptions.find((p) => p.id === keeper && p.source === 'performance-metrics');
+    if (panel) pickPanels([panel]);
+    else disarm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelOptions]);
+  useEffect(() => {
+    const want = preselect.current;
+    if (!want || selectedPanels.length === 0 || seriesFor.current !== panelsKey) return;
+    const series = seriesOptions.find((s) => s.metricName === want.metricName);
+    if (series) setSelectedSeries([series]);
+    disarm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seriesOptions]);
+
   const allDashboardsPicked = selectedDashboards.length === allDashboards.length && allDashboards.length > 0;
   const allPanelsPicked = selectedPanels.length === panelOptions.length && panelOptions.length > 0;
   const allSeriesPicked = selectedSeries.length === seriesOptions.length && seriesOptions.length > 0;
@@ -182,7 +233,7 @@ export function MetricSeriesCascade({
           getOptionLabel={(option) => option.dashboard_label || ''}
           isOptionEqualToValue={(option, value) => option.id === value.id}
           value={selectedDashboards}
-          onChange={(_, newValue) => pickDashboards(newValue)}
+          onChange={(_, newValue) => { disarm(); pickDashboards(newValue); }}
           loading={dashboardsLoading}
           groupBy={(option) => getSourceDisplayInfo(option).groupLabel}
           sx={{ flex: 1 }}
@@ -261,7 +312,7 @@ export function MetricSeriesCascade({
           getOptionLabel={(o) => o.title}
           isOptionEqualToValue={(o, v) => panelKey(o) === panelKey(v)}
           value={selectedPanels}
-          onChange={(_, newValue) => pickPanels(newValue)}
+          onChange={(_, newValue) => { disarm(); pickPanels(newValue); }}
           disabled={selectedDashboards.length === 0}
           loading={panelsLoading}
           sx={{ flex: 1 }}
@@ -311,7 +362,7 @@ export function MetricSeriesCascade({
           getOptionLabel={(o) => o.metricName}
           isOptionEqualToValue={(o, v) => seriesKey(o) === seriesKey(v)}
           value={selectedSeries}
-          onChange={(_, newValue) => setSelectedSeries(newValue)}
+          onChange={(_, newValue) => { disarm(); setSelectedSeries(newValue); }}
           disabled={selectedPanels.length === 0}
           loading={seriesLoading}
           sx={{ flex: 1 }}

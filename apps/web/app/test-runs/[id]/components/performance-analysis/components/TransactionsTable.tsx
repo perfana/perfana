@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import {
   Box,
   Typography,
@@ -27,6 +27,7 @@ import {
   ThroughputStats,
   SortField,
   SortOrder,
+  DrillDownFilters,
 } from '../types/performance-analysis.types';
 import { calculateScenarioMetrics } from '../utils/performance-formatters';
 
@@ -34,6 +35,7 @@ import { calculateScenarioMetrics } from '../utils/performance-formatters';
 import { TransactionsTableHeader } from './TransactionsTableHeader';
 import { ScenarioMetricsRow } from './ScenarioMetricsRow';
 import { TransactionRow } from './TransactionRow';
+import { scenarioFilterKey } from '../utils/scenario-filter';
 
 export interface TransactionsTableProps {
   // Data
@@ -63,6 +65,9 @@ export interface TransactionsTableProps {
   onOpenTransactionErrors: (transactionName: string) => void;
   onOpenSamplerActionMenu: (event: React.MouseEvent<HTMLElement>, transaction: string, sampler: SamplerStat) => void;
   onOpenSamplerErrors: (transactionName: string, samplerName: string) => void;
+
+  /** Drill-down target: seeds that scenario's transaction filter with the transaction name. */
+  initialTransactionFilters?: DrillDownFilters;
 }
 
 export function TransactionsTable({
@@ -83,8 +88,14 @@ export function TransactionsTable({
   onOpenTransactionErrors,
   onOpenSamplerActionMenu,
   onOpenSamplerErrors,
+  initialTransactionFilters,
 }: TransactionsTableProps) {
   const [transactionFilters, setTransactionFilters] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!initialTransactionFilters?.transaction) return;
+    const key = scenarioFilterKey(initialTransactionFilters.scenario);
+    setTransactionFilters(prev => ({ ...prev, [key]: initialTransactionFilters.transaction! }));
+  }, [initialTransactionFilters]);
 
   return (
     <>

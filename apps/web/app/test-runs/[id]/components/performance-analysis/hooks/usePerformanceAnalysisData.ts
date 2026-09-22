@@ -79,6 +79,7 @@ export interface UsePerformanceAnalysisDataReturn {
   // Scenario expansion
   expandedScenarios: Set<string>;
   handleToggleScenario: (scenarioName: string) => void;
+  expandScenario: (scenarioName: string) => void;
 
   // Calculated metrics
   totalRequests: number;
@@ -463,6 +464,10 @@ export function usePerformanceAnalysisData({
     });
   }, []);
 
+  const expandScenario = useCallback((scenarioName: string) => {
+    setExpandedScenarios(prev => prev.has(scenarioName) ? prev : new Set(prev).add(scenarioName));
+  }, []);
+
   // Calculated metrics
   const totalRequests = transactions.reduce((sum, t) => sum + t.total_count, 0);
   const overallApdexScore = totalRequests > 0
@@ -515,6 +520,7 @@ export function usePerformanceAnalysisData({
     // Scenario expansion
     expandedScenarios,
     handleToggleScenario,
+    expandScenario,
 
     // Calculated metrics
     totalRequests,
