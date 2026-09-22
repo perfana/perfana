@@ -257,7 +257,8 @@ describe('BenchmarkFormDialog', () => {
         />
       );
 
-      expect(screen.getByText(/2 available/i)).toBeInTheDocument();
+      // 2 profile dashboards + the synthetic "every scenario" entry.
+      expect(screen.getByText(/3 available/i)).toBeInTheDocument();
     });
 
     it('should be required field', () => {
@@ -324,6 +325,118 @@ describe('BenchmarkFormDialog', () => {
       // Existing tags should be preserved
       expect(screen.getByText('performance')).toBeInTheDocument();
       expect(screen.getByText('http')).toBeInTheDocument();
+    });
+  });
+
+  describe('Performance test metrics — every scenario entry', () => {
+    it('is offered after the profile dashboards and counted in the helper text', async () => {
+      const user = userEvent.setup();
+      render(
+        <BenchmarkFormDialog
+          open={true}
+          mode="create"
+          profileDashboards={mockProfileDashboards}
+          loading={false}
+          onClose={mockOnClose}
+          onSubmit={mockOnSubmit}
+        />
+      );
+
+      // The synthetic entry is not a profile_grafana_dashboards row, but it is selectable.
+      expect(screen.getByText(/3 available/i)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('combobox', { name: /profile dashboard/i }));
+      const listbox = await screen.findByRole('listbox');
+      const options = within(listbox).getAllByRole('option');
+      expect(options).toHaveLength(3);
+      expect(options[2]).toHaveTextContent(/performance test metrics — every scenario/i);
+      expect(options[2]).toHaveTextContent(/applies to every performance-test scenario dashboard/i);
+      // Real dashboards keep their instance + uid subtitle.
+      expect(options[0]).toHaveTextContent(/grafana-prod • UID: jmeter-uid/);
+    });
+
+    it('lists the fixed perf-test panels without asking Grafana', async () => {
+      const user = userEvent.setup();
+      render(
+        <BenchmarkFormDialog
+          open={true}
+          mode="create"
+          profileDashboards={mockProfileDashboards}
+          loading={false}
+          onClose={mockOnClose}
+          onSubmit={mockOnSubmit}
+        />
+      );
+
+      await selectDashboard(user, /performance test metrics — every scenario/i);
+      await selectMetric(user, 'Transaction Error Rate');
+
+      expect(mockAuthenticatedFetch).not.toHaveBeenCalled();
+    });
+
+    it('submits a performance-metrics benchmark with no profile dashboard id', async () => {
+      const user = userEvent.setup();
+      render(
+        <BenchmarkFormDialog
+          open={true}
+          mode="create"
+          profileDashboards={mockProfileDashboards}
+          loading={false}
+          onClose={mockOnClose}
+          onSubmit={mockOnSubmit}
+        />
+      );
+
+      await selectDashboard(user, /performance test metrics — every scenario/i);
+      await selectMetric(user, 'Transaction RT P95');
+      await user.type(screen.getByLabelText(/requirement value/i), '800');
+      await user.click(screen.getByRole('button', { name: /create|save/i }));
+
+      await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled());
+      expect(mockOnSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profileDashboardId: undefined,
+          source: 'performance-metrics',
+          grafanaInstance: undefined,
+          dashboardUid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+          panelId: 103,
+          panelTitle: 'Transaction RT P95',
+          requirementValue: 800,
+        })
+      );
+    });
+
+    it('shows the synthetic entry as the selected dashboard when editing a perf-test benchmark', async () => {
+      render(
+        <BenchmarkFormDialog
+          open={true}
+          mode="edit"
+          benchmark={{
+            ...mockExistingBenchmark,
+            profileDashboardId: null,
+            source: 'performance-metrics',
+            grafanaInstance: undefined,
+            dashboardUid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+            panelId: 105,
+            panelTitle: 'Transaction Error Rate',
+            panelType: 'performance-metrics',
+            metricUnit: undefined,
+          }}
+          profileDashboards={mockProfileDashboards}
+          loading={false}
+          onClose={mockOnClose}
+          onSubmit={mockOnSubmit}
+        />
+      );
+
+      await waitFor(() => {
+        // No "(instance)" suffix: the entry is not on any Grafana.
+        expect(screen.getByRole('combobox', { name: /profile dashboard/i })).toHaveValue(
+          'Performance test metrics — every scenario'
+        );
+      });
+      expect(screen.getByRole('combobox', { name: /metric/i })).toHaveValue('Transaction Error Rate');
+      expect(mockAuthenticatedFetch).not.toHaveBeenCalled();
     });
   });
 

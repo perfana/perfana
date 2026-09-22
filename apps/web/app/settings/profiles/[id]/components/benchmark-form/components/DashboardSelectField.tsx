@@ -10,6 +10,7 @@ import {
   Typography,
 } from '@mui/material';
 import { ProfileDashboard } from '@/lib/profiles';
+import { PERF_TEST_PROFILE_DASHBOARD, isPerfTestProfileDashboard } from '@/lib/profile-benchmarks';
 
 interface DashboardSelectFieldProps {
   profileDashboards: ProfileDashboard[];
@@ -29,8 +30,11 @@ export function DashboardSelectField({
   return (
     <Grid size={{ xs: 12 }}>
       <Autocomplete
-        options={profileDashboards}
-        getOptionLabel={(option) => `${option.dashboardName} (${option.grafanaLabel})`}
+        options={[...profileDashboards, PERF_TEST_PROFILE_DASHBOARD]}
+        getOptionLabel={(option) =>
+          isPerfTestProfileDashboard(option) ? option.dashboardName : `${option.dashboardName} (${option.grafanaLabel})`
+        }
+        isOptionEqualToValue={(option, value) => option.id === value.id}
         value={selectedDashboard}
         onChange={(_, newValue) => onSelect(newValue)}
         loading={loading}
@@ -42,7 +46,7 @@ export function DashboardSelectField({
             fullWidth
             required
             error={!!error}
-            helperText={error || `Select dashboard from profile (${profileDashboards.length} available)`}
+            helperText={error || `Select dashboard from profile (${profileDashboards.length + 1} available)`}
             InputProps={{
               ...params.InputProps,
               endAdornment: (
@@ -61,7 +65,9 @@ export function DashboardSelectField({
               <Box>
                 <Typography variant="body1">{option.dashboardName}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {option.grafanaLabel} • UID: {option.dashboardUid}
+                  {isPerfTestProfileDashboard(option)
+                    ? 'Applies to every performance-test scenario dashboard, including scenarios added in later runs'
+                    : `${option.grafanaLabel} • UID: ${option.dashboardUid}`}
                 </Typography>
               </Box>
             </Box>

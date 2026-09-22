@@ -1,4 +1,29 @@
 import { authenticatedFetch } from './api';
+import { ProfileDashboard } from './profiles';
+import {
+  PERF_TEST_PROFILE_SOURCE,
+  PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+} from '@perfana/shared/constants';
+
+/**
+ * Synthetic dropdown entry for an SLO on the worker-written `Performance test metrics
+ * <scenario>` dashboards. Not a `profile_grafana_dashboards` row: the benchmark is stored
+ * with `source = 'performance-metrics'`, no profile dashboard, and `dashboardUid` holding the
+ * uid regex grafana-sync fans out over.
+ */
+export const PERF_TEST_PROFILE_DASHBOARD: ProfileDashboard = {
+  id: PERF_TEST_PROFILE_SOURCE,
+  profile: '',
+  dashboardName: 'Performance test metrics — every scenario',
+  dashboardUid: PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+  grafanaLabel: 'Perfana',
+  createdAt: '',
+  updatedAt: '',
+};
+
+export const isPerfTestProfileDashboard = (d: ProfileDashboard | null): boolean =>
+  d?.id === PERF_TEST_PROFILE_DASHBOARD.id;
+
 
 /**
  * Profile benchmark interface matching the backend response
@@ -6,7 +31,7 @@ import { authenticatedFetch } from './api';
 export interface ProfileBenchmark {
   id: string;
   profileId: string;
-  profileDashboardId: string;
+  profileDashboardId: string | null;
   workloadPattern: string;
   source: string;
   grafanaInstance?: string;
@@ -35,7 +60,7 @@ export interface ProfileBenchmark {
  * Data for creating a profile benchmark (SLO)
  */
 export interface CreateProfileBenchmarkData {
-  profileDashboardId: string;
+  profileDashboardId?: string;
   workloadPattern?: string;
   source?: string;
   grafanaInstance?: string;
