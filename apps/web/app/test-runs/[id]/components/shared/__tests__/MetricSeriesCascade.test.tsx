@@ -43,6 +43,7 @@ function setup(props: Partial<React.ComponentProps<typeof MetricSeriesCascade>> 
   const onPrimaryChange = jest.fn();
   const view = render(
     <MetricSeriesCascade
+      card="graphs"
       allDashboards={[perf, jvm]}
       dashboardsLoading={false}
       testRun={testRun}
@@ -161,6 +162,7 @@ it('does not reload the pickers when the page hands it a fresh run object of the
 
   view.rerender(
     <MetricSeriesCascade
+      card="graphs"
       allDashboards={[perf, jvm]} dashboardsLoading={false} testRun={{ ...(testRun as object) } as never}
       addedSeries={[]} onAddSeries={jest.fn()} panelListOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
     />,

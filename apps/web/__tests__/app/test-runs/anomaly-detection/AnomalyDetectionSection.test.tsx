@@ -25,6 +25,8 @@ import { AnomalyData } from '@/app/test-runs/[id]/components/anomaly-detection/t
 // Mock dependencies
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
+  // The row menu's "Open in …" links read the run id from the route.
+  useParams: () => ({ id: 'test-run-1' }),
 }));
 
 jest.mock('@/lib/api', () => ({
@@ -670,6 +672,12 @@ describe('AnomalyDetectionSection', () => {
           expect(deleteMenuItem).toBeInTheDocument();
         }
       });
+
+      // The same menu links the row's series to the Graphs card in a new tab.
+      const graphsLink = screen.getByText('Open in Graphs').closest('a');
+      expect(graphsLink).toHaveAttribute('target', '_blank');
+      expect(graphsLink?.getAttribute('href')).toContain('/test-runs/test-run-1?card=graphs&');
+      expect(graphsLink?.getAttribute('href')).toContain('metric=response_time');
     });
 
     it('should handle delete error', async () => {
