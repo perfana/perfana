@@ -99,10 +99,14 @@ The Trend SLO (`evaluate_type = 'trend'`, v0.2.96.4) shares that tri-state.
 date_part('epoch', time)) * 3600 / ABS(AVG(value)) * 100`, the OLS slope as % of the series mean per
 hour; `0` for a constant series whose mean is 0, so an error count with no errors is a flat line
 rather than a missing row) and `trend_corr` (`corr(value, date_part('epoch', time))`), in the same
-pass and window as every other statistic. `DataAggregator` maps `trend` onto the first and leaves a
-series unjudged — `meets_requirement: null`, `weak_trend: true`, `trend_corr` on the target, and
-excluded from the panel average — when `|r| < TREND_MIN_CORR` (0.5), `count < TREND_MIN_POINTS` (10),
-or r is NULL/NaN; both floors are module constants. `RequirementChecker` then writes
+pass and window as every other statistic. `DataAggregator` maps `trend` onto the first and flags a
+series as a non-trend — `weak_trend: true`, `trend_corr` on the target, and excluded from the panel
+average — when `|r| < TREND_MIN_CORR` (0.5), `count < TREND_MIN_POINTS` (10), or r is NULL/NaN; both
+floors are module constants. `RequirementChecker` writes such a row `meets_requirement: true`
+(v0.2.96.7): the SLO exists to flag a series that *is* drifting, so nothing to flag is nothing to
+fail, and judging the noise slope against the threshold would be a verdict on a number the floor
+already called meaningless. It was `null` until then, which made a check whose series were all weak
+read `None of the N targets could be evaluated`. `RequirementChecker` still writes
 `meets_requirement: null` with `None of the N targets could be evaluated` for a check in which nothing
 was judged (any evaluate type — a pattern that excludes every series no longer reads as a pass), and
 the failed count in the message counts `meets_requirement === false` rows only. Two things about the

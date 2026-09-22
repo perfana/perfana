@@ -159,6 +159,8 @@ export interface CheckResultTarget {
   /** Trend: slope present but its correlation or point count was below the floor — not evaluated. */
   weak_trend?: boolean;
   trend_corr?: number | null;
+  /** The validate_with_default_if_no_data row: judged, but no dashboard produced it. */
+  is_artificial?: boolean;
 }
 
 /**

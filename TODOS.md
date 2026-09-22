@@ -830,10 +830,65 @@ constants, same SUT-transfer caveat as `apdex_min_samples`) and expose them in b
 write the applied floors into `requirement` so the UI can say which one fired; wire a worker
 boot-time column assertion mirroring `apps/api/src/common/db/assert-entity-columns.ts`. Also
 still open: `GET /metrics/ds-metric-statistics` default `evaluateType` list
-(`metrics.controller.ts`) does not include `trend`, and the series chart draws no fitted line.
+(`metrics.controller.ts`) does not include `trend`. (The series chart's fitted line shipped in
+v0.2.96.8.)
 **Where:** `apps/worker/src/pipelines/checks/DataAggregator.ts`, `RequirementChecker.ts`,
 `apps/api/src/modules/benchmarks/services/benchmark-mutation.service.ts`,
 `MetricSeriesStatusChip.tsx`, `apps/worker/src/index.ts`.
+
+### The trend chart's fitted line is normalised by the chart's own mean, not the worker's
+
+**Priority:** P3
+**Origin:** red-team and adversarial review during /ship on `fix/trend-slo-chart-readable`
+(2026-09-22, v0.2.96.8).
+**Why:** `buildTrendLineTrace` draws the stored `%/h` against the mean of the CHARTED points.
+The worker normalised by `AVG(value)` over `ds_metric_statistics` (non-null, `ramp_up = false`,
+org-scoped dashboards). The two populations differ whenever `/metrics/ds-metrics/:id/:panelId`
+LTTB-downsamples (past 4000 points, which also drops `ramp_up` entirely). `%/h` is scale-free and
+anchoring on the charted mean is what keeps the line inside the cloud the reader sees, so the
+drawn line is right for the drawn data — but the absolute ms/hour it implies can differ from the
+figure the SLO was judged on, and nothing says so. Related: that endpoint hardcodes
+`metricName: undefined` (`metrics.controller.ts`), so a trend chart showing ONE series still
+fetches and downsamples every series on the panel, spending the 4000-point budget as
+`max(10, 4000/metricCount)` per series. On a 400-series panel that leaves 10 points each, and a
+window filter can cut that to fewer than two — the fit line then silently does not render.
+**What:** thread the resolved target through as `metricName` so a single-series chart spends the
+whole budget on it; and either return the worker's normalisation base alongside the target so the
+chart can use the same denominator, or mark the line approximate when the populations cannot be
+shown to match.
+**Where:** `apps/web/app/test-runs/[id]/components/service-level-objectives/utils/slo-chart-utils.ts`,
+`apps/api/src/modules/metrics/metrics.controller.ts`, `metrics.service.ts`.
+
+### A trend chart can show a stale %/h against a freshly-changed analysis window
+
+**Priority:** P3
+**Origin:** adversarial review during /ship on `fix/trend-slo-chart-readable` (2026-09-22).
+**Why:** `PUT /test-runs/:id/analysis-time-range` writes the offsets synchronously and
+re-evaluates asynchronously. Between the two, `check_results.targets[].value` still holds the
+`%/h` fitted under the OLD offsets while the chart filters points with the NEW ones, so the drawn
+line is reconstructed over a different population than the slope was fit over. No field on
+`CheckResult`/`CheckResultTarget` records which offsets were in force, so there is no cheap
+client-side guard.
+**What:** record the offsets (or an evaluation timestamp) on the stored result so the chart can
+suppress or mark the fitted line while it is stale.
+**Where:** `apps/worker/src/pipelines/checks/`, `apps/web/.../useSLOMetricsChart.ts`.
+
+### User-derived metric names are interpolated unescaped into Plotly hovertemplates
+
+**Priority:** P3
+**Origin:** adversarial and red-team review during /ship on `fix/trend-slo-chart-readable`
+(2026-09-22).
+**Why:** four builders in `slo-chart-utils.ts` (`buildBarTrace`, `buildLineTrace`,
+`buildRequirementTrace`, `buildTrendLineTrace`) interpolate the series name straight into a
+`hovertemplate` that Plotly renders as pseudo-HTML. The names come from JMeter/Gatling output, so
+they are authored by whoever wrote the load-test script. **This is not an XSS hole:** Plotly's
+`sanitizeHref` whitelists protocols (`PROTOCOLS = ['http:','https:','mailto:','',undefined,':']`
+in `lib/svg_text_utils.js`), resolving both the raw and the `encodeURI(decodeURI())` form, so
+`javascript:` is rejected. What does get through is markup — `<b>`, `<br>`, and `http(s)` links —
+so a crafted sampler name can restyle a hover label or put a clickable external link in it.
+**What:** pass the name via `customdata` + `%{customdata}` (which Plotly text-escapes) rather than
+string-interpolating it, at all four sites at once.
+**Where:** `apps/web/app/test-runs/[id]/components/service-level-objectives/utils/slo-chart-utils.ts`.
 
 ## Dynatrace
 

@@ -35,6 +35,7 @@ import {
   formatRequirement,
   formatAggregatedMetricLabel,
 } from '../utils/slo-formatters';
+import { defaultTrendTarget } from '../utils/metric-series-table-utils';
 
 interface SLOListProps {
   testRun: TestRun | null;
@@ -282,6 +283,19 @@ export function SLOList({
       {/* Table Rows */}
       {filteredResults.map((result) => {
         const resultKey = getCheckResultKey(result);
+        // A trend chart opens on one series (see defaultTrendTarget). Three
+        // states, and `??` alone cannot tell the last two apart:
+        //   absent -> never touched, so derive the default
+        //   ''     -> the user cleared it; show every series, do NOT re-derive
+        //   name   -> an explicit pick
+        const storedTarget = selectedTarget.get(resultKey);
+        const shownTarget =
+          storedTarget === undefined ? defaultTrendTarget(result) : storedTarget || undefined;
+        // MetricSeriesTable reads one key, so hand it that entry rather than a
+        // clone of the whole map (a derived default is never stored in it).
+        const effectiveSelectedTarget = shownTarget
+          ? new Map([[resultKey, shownTarget]])
+          : selectedTarget;
         return (
           <React.Fragment key={resultKey}>
             <Box
@@ -533,7 +547,7 @@ export function SLOList({
                       testRunId={testRunId}
                       checkResult={result}
                       testRun={testRun ?? undefined}
-                      targetName={selectedTarget.get(resultKey)}
+                      targetName={shownTarget}
                       isVisible={expandedSloRows.has(resultKey)}
                     />
                   </Box>
@@ -556,14 +570,13 @@ export function SLOList({
                     resultKey={resultKey}
                     sortConfig={sortConfig}
                     onSort={handleSort}
-                    selectedTarget={selectedTarget}
+                    selectedTarget={effectiveSelectedTarget}
                     onSelectTarget={(key, targetName) => {
                       if (targetName === undefined) {
-                        setSelectedTarget(prev => {
-                          const newMap = new Map(prev);
-                          newMap.delete(key);
-                          return newMap;
-                        });
+                        // '' records an explicit clear. Deleting the key would
+                        // read as "never touched", and a trend row would snap
+                        // straight back to its auto-picked default.
+                        setSelectedTarget(prev => new Map(prev).set(key, ''));
                       } else {
                         setSelectedTarget(prev => {
                           const newMap = new Map(prev);

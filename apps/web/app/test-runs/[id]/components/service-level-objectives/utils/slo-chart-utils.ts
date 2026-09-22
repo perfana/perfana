@@ -10,6 +10,7 @@ import type {
   ChartThemeColors,
 } from '../types';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
+import { formatTrendPctPerHour } from './slo-formatters';
 
 // Default chart height
 export const DEFAULT_CHART_HEIGHT = 320;
@@ -252,6 +253,90 @@ export function buildLineTrace(
 }
 
 /**
+ * The analysis window: the run's span minus the configured ramp-up/ramp-down
+ * offsets. `buildChartLayout` shades outside it and the trend fit is measured
+ * inside it, so both read it from here -- two copies drift, and only one of
+ * them had the inversion guard.
+ *
+ * The end never precedes the start: offsets that do not fit the run would
+ * otherwise describe a negative window. (The API refuses such offsets since
+ * v0.2.95.0, so this is a floor, not a live case.)
+ */
+export function analysisWindowBounds(
+  testRunStart: Date,
+  testRunEnd: Date,
+  analysisStartOffset: number | undefined,
+  analysisEndOffset: number | undefined
+): { start: Date; end: Date } {
+  const start = new Date(testRunStart.getTime() + (analysisStartOffset ?? 0) * 1000);
+  const end = new Date(testRunEnd.getTime() - (analysisEndOffset ?? 0) * 1000);
+  return { start, end: end.getTime() > start.getTime() ? end : start };
+}
+
+/**
+ * Fit the drawn trend line for a trend SLO series.
+ *
+ * The slope is the STORED `%/h`, never a refit: a refit would draw a line that
+ * disagrees with the number the row beside it reports.
+ *
+ * `%/h` is scale-free, so the line is anchored on the CHARTED points -- it
+ * rises by that percentage of their mean per hour, through their (x̄, ȳ). That
+ * is deliberately not the worker's own fit: the worker normalised by
+ * `AVG(value)` over `ds_metric_statistics` (non-null, `ramp_up = false`,
+ * org-scoped dashboards), while this chart holds whatever
+ * `/metrics/ds-metrics/:id/:panelId` returned -- LTTB-downsampled past 4000
+ * points, and downsampling drops `ramp_up` entirely. Anchoring on the charted
+ * mean is what keeps the line inside the cloud the reader can actually see;
+ * the absolute ms/hour it implies can differ from the worker's. The API would
+ * have to return the normalisation base to close that gap.
+ *
+ * Returns null when the window holds fewer than two points.
+ */
+export function buildTrendLineTrace(
+  metricName: string,
+  x: Date[],
+  y: number[],
+  pctPerHour: number,
+  windowStart: Date,
+  windowEnd: Date,
+  color: string
+): Record<string, unknown> | null {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < x.length; i++) {
+    const t = x[i].getTime();
+    if (t >= windowStart.getTime() && t <= windowEnd.getTime() && Number.isFinite(y[i])) {
+      xs.push(t);
+      ys.push(y[i]);
+    }
+  }
+  if (xs.length < 2) return null;
+
+  const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+  // %/h back to units per millisecond, normalised by the series mean as the worker does.
+  const slopePerMs = (pctPerHour / 100) * Math.abs(meanY) / 3_600_000;
+
+  const x0 = xs[0];
+  const x1 = xs[xs.length - 1];
+  const pct = formatTrendPctPerHour(pctPerHour);
+
+  return {
+    x: [new Date(x0), new Date(x1)],
+    y: [meanY + slopePerMs * (x0 - meanX), meanY + slopePerMs * (x1 - meanX)],
+    // Names the series, not just the slope: the chart title is the PANEL, the
+    // data line carries showlegend:false, and the copy-to-clipboard PNG loses
+    // the table underneath -- so this is the only place the series is named.
+    name: `${metricName} · ${pct}`,
+    type: 'scatter' as const,
+    mode: 'lines' as const,
+    showlegend: true,
+    hovertemplate: `<b>${metricName}</b><br>trend ${pct}<extra></extra>`,
+    line: { color, dash: 'dash' as const, width: 2.5 },
+  };
+}
+
+/**
  * Build requirement (SLO) line trace
  */
 export function buildRequirementTrace(
@@ -295,15 +380,9 @@ export function buildChartLayout(
   const shapes: unknown[] = [];
 
   if (hasTimeSeriesData) {
-    const startBoundary = new Date(
-      testRunStart.getTime() + ((analysisStartOffset ?? 0) * 1000)
+    const { start: startBoundary, end: safeEndBoundary } = analysisWindowBounds(
+      testRunStart, testRunEnd, analysisStartOffset, analysisEndOffset
     );
-    const endBoundary = new Date(
-      testRunEnd.getTime() - ((analysisEndOffset ?? 0) * 1000)
-    );
-    const safeEndBoundary = endBoundary.getTime() > startBoundary.getTime()
-      ? endBoundary
-      : startBoundary;
 
     if (analysisStartOffset !== undefined && analysisStartOffset > 0) {
       shapes.push({

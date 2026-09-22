@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.8] - 2026-09-22
+
+### Fixed
+- **A Trend SLO's chart is readable.** It opens on one series — the failing one, or the steepest drift if none failed — drawn with a dashed **fitted line** showing the drift the SLO judged, labelled with the series name and its `%/h` (`WG_01_Home · +28.5 %/h`). Clicking that series' row in the table returns to the all-series overview, and clicking any other row switches to it. The red SLO threshold line is no longer drawn on a trend chart: its unit is `%/h` while the axis is the panel's own, so the line sat at a meaningless height. A series is coloured from the verdict the worker reached rather than from comparing its values against a threshold in a different unit.
+- **Any SLO chart mixing a single-point series with a time series drew an unreadable wall of date labels.** A series with one point was drawn as a bar keyed on its own name, which puts Plotly's x-axis into category mode — so every timestamp of every other series on the panel became its own tick label. Single-point series are now drawn as a point on the time axis whenever the chart also holds a real time series; a panel where *every* series has one point still draws bars. This affected average and maximum SLOs too, not only trend.
+- **A trend SLO whose auto-picked series had no data rendered a blank chart.** The `validate_with_default_if_no_data` row is judged like any other series and can be the failing one, but no dashboard produced it, so selecting it matched no measurements. Such a row is no longer auto-picked, and any selection that matches nothing now falls back to showing every series instead of an empty box.
+- **A drift of less than 0.05 %/h read as `-0.0 %/h` on the chart and `0.0 %/h` in the table below it.** Both now round before taking the sign.
+
 ## [0.2.96.7] - 2026-09-22
 
 ### Fixed
