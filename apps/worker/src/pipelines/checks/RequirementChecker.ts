@@ -153,8 +153,9 @@ export class RequirementChecker extends BaseCheckService {
       // Determine final status and message
       // Based on requirement_checker.py:172-176
       const status = targetResults.length === 0 ? 'ERROR' : 'COMPLETE';
-      // Nothing judged (every series weak-trend or pattern-excluded, and no panel average) is
-      // "not evaluated", never an affirmative pass — same tri-state as the Apdex floor.
+      // Nothing judged (every series pattern-excluded, and no panel average) is "not
+      // evaluated", never an affirmative pass — same tri-state as the Apdex floor. A
+      // weak-trend series IS judged (it passes), so it no longer lands here.
       const anyJudged = targetResults.some((t) => t.meets_requirement !== null) || panelMeetsRequirement !== null;
       const message = anyJudged || targetResults.length === 0
         ? this.generateStatusMessage(overallMeetsRequirement, targetResults)
@@ -299,7 +300,13 @@ export class RequirementChecker extends BaseCheckService {
     const targetValue = targetData.value;
 
     let meetsRequirement: boolean | null = null;
-    if (targetValue !== null && !targetData.weakTrend && this.hasValidRequirement(benchmark)) {
+    if (targetData.weakTrend) {
+      // A Trend SLO exists to flag a series that IS drifting. No clear trend is nothing to
+      // flag, so it passes — judging the noise slope against the threshold would be a verdict
+      // on a number the correlation floor already said is meaningless. `weak_trend` still
+      // rides along so the UI can say why it passed.
+      meetsRequirement = true;
+    } else if (targetValue !== null && this.hasValidRequirement(benchmark)) {
       meetsRequirement = this.checkRequirement(targetValue, benchmark);
     }
 

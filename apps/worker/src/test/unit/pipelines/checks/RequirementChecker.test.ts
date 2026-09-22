@@ -782,7 +782,7 @@ describe('RequirementChecker', () => {
     const trendBenchmark = () =>
       createMockBenchmark({ evaluate_type: 'trend', metric_unit: '%/h', requirement_operator: 'lt', requirement_value: 10 });
 
-    it('reports a weak series with its slope and r but does not judge it, and it cannot fail the run', async () => {
+    it('reports a weak series with its slope and r and passes it — a non-trend is nothing to flag', async () => {
       // Both slopes exceed the threshold; only the correlated one is a verdict.
       const aggregation: AggregationResult = {
         panel_average: 26.4,
@@ -796,7 +796,7 @@ describe('RequirementChecker', () => {
 
       expect(result!.targets).toEqual([
         { target: 'VolgendeCV', value: 26.4, meets_requirement: false, is_artificial: false, trend_corr: 0.66 },
-        { target: 'MijnWerkNl', value: 20.2, meets_requirement: null, is_artificial: false, trend_corr: 0.10, weak_trend: true },
+        { target: 'MijnWerkNl', value: 20.2, meets_requirement: true, is_artificial: false, trend_corr: 0.10, weak_trend: true },
       ]);
       // A judged row carries no weak_trend key at all (older rows keep their shape).
       expect(result!.targets[0]).not.toHaveProperty('weak_trend');
@@ -804,7 +804,7 @@ describe('RequirementChecker', () => {
       expect(result!.message).toBe('1 of 2 targets failed requirements');
     });
 
-    it('leaves the check unjudged when every series is weak (average_all with no judged rows → panel_average null)', async () => {
+    it('passes the check when every series is weak (average_all with no judged rows → panel_average null)', async () => {
       const aggregation: AggregationResult = {
         panel_average: null, // DataAggregator leaves weak rows out of the average
         targets: [
@@ -818,10 +818,10 @@ describe('RequirementChecker', () => {
       );
 
       expect(result!.status).toBe('COMPLETE');
-      expect(result!.meets_requirement).toBeNull();
-      expect(result!.targets.every((t) => t.meets_requirement === null && t.weak_trend === true)).toBe(true);
+      expect(result!.meets_requirement).toBe(true);
+      expect(result!.targets.every((t) => t.meets_requirement === true && t.weak_trend === true)).toBe(true);
       expect(result!.targets[1].trend_corr).toBeNull();
-      expect(result!.message).toBe('None of the 2 targets could be evaluated');
+      expect(result!.message).not.toBe('None of the 2 targets could be evaluated');
     });
 
     it('does not add trend keys to a non-trend target', async () => {

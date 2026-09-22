@@ -18,7 +18,7 @@ import {
   MoreVert as MoreVertIcon,
 } from '@mui/icons-material';
 import { TransactionStat, SamplerStat } from '../types/performance-analysis.types';
-import { formatNumber, formatApdex, getApdexColor, getApdexLabel } from '../utils/performance-formatters';
+import { formatNumber, apdexRating } from '../utils/performance-formatters';
 import { SamplerTable } from './SamplerTable';
 
 export interface TransactionRowProps {
@@ -51,6 +51,7 @@ export function TransactionRow({
   const errorRate = transaction.total_count > 0
     ? (transaction.failed_count / transaction.total_count) * 100
     : 0;
+  const apdex = apdexRating(transaction.apdex_score, transaction.passed_count);
 
   return (
     <Fragment key={`${transaction.transaction_name}-${index}`}>
@@ -130,10 +131,10 @@ export function TransactionRow({
             title={
               <Box sx={{ p: 0.5 }}>
                 <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, mb: 0.5 }}>
-                  Apdex Score: {formatApdex(transaction.apdex_score)}
+                  Apdex Score: {apdex.score}
                 </Typography>
                 <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                  Rating: {getApdexLabel(transaction.apdex_score)}
+                  {apdex.reason ?? `Rating: ${apdex.label}`}
                 </Typography>
                 <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', mt: 0.5 }}>
                   Threshold: {transaction.active_threshold}ms
@@ -150,19 +151,19 @@ export function TransactionRow({
               component="span"
               sx={{
                 fontWeight: 700,
-                color: getApdexColor(transaction.apdex_score),
+                color: apdex.color,
                 display: 'inline-block',
                 px: 1.5,
                 py: 0.5,
                 borderRadius: 1,
-                backgroundColor: `${getApdexColor(transaction.apdex_score)}15`,
+                backgroundColor: `${apdex.color}15`,
                 cursor: 'help',
                 fontSize: '0.875rem',
                 textTransform: 'uppercase',
                 letterSpacing: '0.5px'
               }}
             >
-              {getApdexLabel(transaction.apdex_score)}
+              {apdex.label}
             </Box>
           </Tooltip>
         </TableCell>

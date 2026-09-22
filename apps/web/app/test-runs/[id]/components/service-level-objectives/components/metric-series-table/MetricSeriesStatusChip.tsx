@@ -60,6 +60,14 @@ export function MetricSeriesStatusChip({
     );
   }
 
+  if (target.weak_trend) {
+    return (
+      <Tooltip title="The slope is not a clear trend (weak correlation or too few points), so there is nothing to flag — this series passes" arrow placement="top">
+        <Chip label="No clear trend" tabIndex={0} sx={getThemedChipStyles('pass', false, theme)} />
+      </Tooltip>
+    );
+  }
+
   if (target.meets_requirement === true) {
     return (
       <Chip
@@ -77,14 +85,6 @@ export function MetricSeriesStatusChip({
         icon={isStale ? <WarningAmber sx={{ fontSize: '12px' }} /> : undefined}
         sx={getThemedChipStyles('fail', isStale, theme)}
       />
-    );
-  }
-
-  if (target.weak_trend) {
-    return (
-      <Tooltip title="The slope is not a clear trend (weak correlation or too few points), so this series was not evaluated" arrow placement="top">
-        <Chip label="No clear trend" tabIndex={0} sx={getThemedChipStyles('error', false, theme)} />
-      </Tooltip>
     );
   }
 

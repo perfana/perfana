@@ -12,6 +12,7 @@ import {
   SortOrder,
   RollupPendingState,
 } from '../types/performance-analysis.types';
+import { ApdexRating, apdexRating, calculateScenarioMetrics } from '../utils/performance-formatters';
 
 /**
  * Type guard for the `progress` field on the API's 202 rollup-pending response body.
@@ -84,6 +85,8 @@ export interface UsePerformanceAnalysisDataReturn {
   // Calculated metrics
   totalRequests: number;
   overallApdexScore: number;
+  /** Rating for `overallApdexScore`, or why it is not one. */
+  overallApdex: ApdexRating;
   poorApdexTransactions: TransactionStat[];
 
   // Refresh functions
@@ -470,10 +473,12 @@ export function usePerformanceAnalysisData({
 
   // Calculated metrics
   const totalRequests = transactions.reduce((sum, t) => sum + t.total_count, 0);
-  const overallApdexScore = totalRequests > 0
-    ? transactions.reduce((sum, t) => sum + (t.apdex_score * t.total_count), 0) / totalRequests
-    : 0;
-  const poorApdexTransactions = transactions.filter(t => t.apdex_score < 0.7);
+  const { weightedApdexScore: overallApdexScore, apdexSampleCount } = calculateScenarioMetrics(transactions);
+  const overallApdex = apdexRating(overallApdexScore, apdexSampleCount);
+  // A transaction with no scoreable Apdex is not a poor one — it has no score to be poor.
+  const poorApdexTransactions = transactions.filter(
+    t => apdexRating(t.apdex_score, t.passed_count).reason === null && t.apdex_score < 0.7,
+  );
 
   return {
     // Core data
@@ -525,6 +530,7 @@ export function usePerformanceAnalysisData({
     // Calculated metrics
     totalRequests,
     overallApdexScore,
+    overallApdex,
     poorApdexTransactions,
 
     // Refresh functions

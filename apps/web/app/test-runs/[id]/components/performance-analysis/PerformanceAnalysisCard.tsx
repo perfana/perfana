@@ -24,7 +24,7 @@ import {
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { DrillDownFilters } from './types/performance-analysis.types';
-import { getApdexColor } from './utils/performance-formatters';
+
 import { usePerformanceAnalysisData } from './hooks/usePerformanceAnalysisData';
 import { usePerformanceAnalysisHandlers } from './hooks/usePerformanceAnalysisHandlers';
 import {
@@ -113,7 +113,7 @@ export default function PerformanceAnalysisCard({
     expandedScenarios,
     handleToggleScenario,
     expandScenario,
-    overallApdexScore,
+    overallApdex,
     poorApdexTransactions,
     refreshAll,
     isRunning,
@@ -250,7 +250,7 @@ export default function PerformanceAnalysisCard({
           borderRadius: 3,
           bgcolor: 'background.paper',
           border: 'none',
-          borderTop: expanded ? 'none' : `3px solid ${getApdexColor(overallApdexScore)}`,
+          borderTop: expanded ? 'none' : `3px solid ${overallApdex.color}`,
           boxShadow: (theme) => theme.palette.mode === 'dark'
             ? '0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2)'
             : '0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04)',
@@ -435,8 +435,8 @@ export default function PerformanceAnalysisCard({
                   height: 32,
                   color: 'text.secondary',
                   '&:hover': {
-                    backgroundColor: `${getApdexColor(overallApdexScore)}15`,
-                    color: getApdexColor(overallApdexScore),
+                    backgroundColor: `${overallApdex.color}15`,
+                    color: overallApdex.color,
                   },
                   transition: 'all 0.2s ease',
                 }}
@@ -480,7 +480,7 @@ export default function PerformanceAnalysisCard({
               error={error}
               transactions={transactions}
               throughputStats={throughputStats}
-              overallApdexScore={overallApdexScore}
+              overallApdex={overallApdex}
               poorApdexTransactions={poorApdexTransactions}
               testRun={testRun}
               excludeRampUp={excludeRampUp}
