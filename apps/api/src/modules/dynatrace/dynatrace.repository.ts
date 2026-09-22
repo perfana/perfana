@@ -949,7 +949,7 @@ export class DynatraceRepository {
         // creation). NOTE: this runs on the plain pooled connection, not withRequestEm — under
         // a least-privilege deploy (no rolbypassrls) the subqueries would return zero rows and
         // the insert would fail on the NOT NULL org column. Same deployment constraint as the
-        // documented api_keys carve-out in CLAUDE.md.
+        // documented api_keys carve-out in apps/api/CLAUDE.md.
         await manager.query(
           `INSERT INTO ds_compare_config (
             system_under_test_id, test_environment, workload,

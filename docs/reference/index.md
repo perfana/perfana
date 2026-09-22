@@ -18,6 +18,9 @@ Perfana collects metrics from performance tests and compares them against histor
 
 ## Quick Navigation
 
+### How-To
+- [How-To Tutorials](tutorials.md) — add a metrics source, add a pipeline, add an endpoint/page/migration, testing patterns
+
 ### Architecture
 - [[Architecture Overview]] — System architecture and design principles
 - [[Tech Stack]] — Technologies, frameworks, and libraries

@@ -109,6 +109,6 @@ own check for the same reason.
 ## Related
 
 - Worker pipelines: `apps/worker/src/pipelines/{MetricsPipeline,StatisticsPipeline,PerformanceTestMetricsPipeline}.ts`
-- CLAUDE.md: "ADAPT's baseline depends on the `pct_agg` sketch" (item 7),
+- apps/worker/CLAUDE.md: "ADAPT's baseline depends on the `pct_agg` sketch" (item 7),
   "`ds_metric_statistics` is not a faster `ds_metrics`", and "The perf-test pipeline writes one extra
   dashboard, and its series name was already taken"

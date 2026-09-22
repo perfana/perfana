@@ -197,7 +197,7 @@ export class AddDsMetricsGroupKeyStatistics1801000000000 implements MigrationInt
                     RAISE NOTICE 'scheduled daily ANALYZE of ds_metrics';
                 EXCEPTION WHEN OTHERS THEN
                     -- Loud, because a swallowed failure here leaves the statistics
-                    -- object permanently empty while CLAUDE.md says it is working.
+                    -- object permanently empty while apps/worker/CLAUDE.md says it is working.
                     RAISE WARNING 'could not schedule ds_metrics ANALYZE job (%). '
                         'ds_metrics_groupkey will stay empty until ANALYZE public.ds_metrics '
                         'runs by other means.', SQLERRM;

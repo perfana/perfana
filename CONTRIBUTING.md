@@ -12,12 +12,12 @@ npm run dev
 ```
 
 - API: http://localhost:3001/api/docs
-- Web: http://localhost:4001
+- Web: http://localhost:4000
 - Login: perfana@example.com / perfana
 
 ## For AI Agents (Claude Code, Cursor, Codex)
 
-1. Read `CLAUDE.md` — it's the comprehensive project guide with architecture, conventions, and patterns.
+1. Read `CLAUDE.md` — the repo-wide guide (quick start, project index, auth, environment, symptom index). Each app also has its own `CLAUDE.md` (`apps/api/`, `apps/web/`, `apps/worker/`) with that app's gotchas; Claude Code loads it automatically when you touch files in that directory, other agents should read it directly.
 2. Look for issues labeled `good-first-issue-for-ai` — these include file paths, test expectations, and acceptance criteria.
 3. Follow the coding rules in `apps/api/CODING_RULES.md` and `apps/web/CODING_RULES.md`.
 4. Run `npm run test` before submitting. All tests must pass.
@@ -84,9 +84,11 @@ npm run dev
 ### Add a Database Migration
 
 ```bash
-cd apps/api
-npx typeorm migration:generate -d src/config/typeorm.config.ts src/migrations/YourMigrationName
+npm run migration:generate -- src/database/migrations/YourMigrationName
 ```
+
+Migrations live in `packages/shared/src/database/migrations/` and run automatically on service
+startup. Full walkthrough: [docs/reference/tutorials.md](docs/reference/tutorials.md).
 
 ## CI/CD Pipeline
 
@@ -135,7 +137,7 @@ Perfana uses Keycloak for authentication. The dev environment includes a pre-con
 ## Getting Help
 
 - Open an issue for bugs or feature requests
-- Check `CLAUDE.md` for architecture and conventions
+- Check `CLAUDE.md` for architecture and conventions, and the app's own `CLAUDE.md` for its gotchas
 - Check existing module READMEs for module-specific patterns
 
 ## RBAC migration (in progress until 2026-08-01)

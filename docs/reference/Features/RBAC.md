@@ -132,7 +132,7 @@ Every business resource implements `OwnedResource` (`packages/shared/src/entitie
 
 **Owner privilege**: if `resource.created_by == userId`, the user can always modify the resource — regardless of org/team role. Useful for users to clean up their own work.
 
-**Exceptions kept nullable** (documented in `CLAUDE.md`):
+**Exceptions kept nullable** (documented in `apps/api/CLAUDE.md`):
 - `audit_logs.organization_id` — system-level events have no org context.
 
 When creating a child entity, always pass camelCase `organizationId`, never snake_case `organization_id`. TypeORM silently drops unknown keys, which collides with the Phase 4 NOT NULL constraint at runtime.
@@ -307,7 +307,7 @@ Manual flush: `AuthorizationService.clearAllCaches()` (testing only — uses SCA
 | 5a | Audit logging | ✅ (2026-05-04) |
 | 5b | Postgres Row-Level Security | ✅ Shipped — `RlsTransactionInterceptor` + `withRequestEm()`; `.rls-em-migration-allowlist.json` empty; suite in `apps/api/src/test/rls/` runs in `npm run preflight` |
 
-See `CLAUDE.md` for the full burndown record and PR references.
+See `apps/api/CLAUDE.md` for the full burndown record and PR references.
 
 > [!warning] Partitioned tables need RLS on every partition
 > A policy on a partitioned parent covers parent-routed queries only. A partition with RLS off is

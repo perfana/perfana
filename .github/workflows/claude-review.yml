@@ -29,7 +29,9 @@ jobs:
           prompt: |
             Review this pull request against the project's coding standards.
 
-            Read CLAUDE.md for project context, conventions, and architecture.
+            Read CLAUDE.md for repo-wide context, conventions, and architecture.
+            For each app the PR touches, also read that app's own gotchas file:
+            apps/api/CLAUDE.md, apps/web/CLAUDE.md, apps/worker/CLAUDE.md.
             Read apps/api/CODING_RULES.md for backend standards.
             Read apps/web/CODING_RULES.md for frontend standards.
 

@@ -23,6 +23,6 @@ One sentence describing the desired outcome.
 
 ## Notes for AI Agents
 
-- Read `CLAUDE.md` first for project context
+- Read `CLAUDE.md` first for repo-wide context, then the `CLAUDE.md` of the app you are touching (`apps/api/`, `apps/web/`, `apps/worker/`) for its gotchas
 - Follow patterns in `apps/api/CODING_RULES.md` / `apps/web/CODING_RULES.md`
 - Do not modify unrelated files

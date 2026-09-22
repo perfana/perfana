@@ -67,7 +67,7 @@ the `ramp_up_excluded = true` rows (`DataAggregator.pooledErrorRates`) instead o
 `ds_metric_statistics.mean`, which averaged the per-bucket ratios unweighted. A series without a
 rollup row keeps the bucket mean and is named in a `Pooled error rate unavailable` warning; the
 request-level series name comes from the same `samplerMetricNameSql` fragment the writer uses. See
-the root CLAUDE.md, "The perf-test error-rate SLO reads the transaction rollup".
+[CLAUDE.md](CLAUDE.md), "The perf-test error-rate SLO reads the transaction rollup".
 
 `checks-evaluation` evaluates every SLO operator in one place, `src/pipelines/checks/requirement-operator.ts`
 (v0.2.95.31), shared by `RequirementChecker` and `AggregatedBenchmarkEvaluator`: `lt lte gt gte eq ne`
@@ -113,7 +113,7 @@ the failed count in the message counts `meets_requirement === false` rows only. 
 columns: `upsertPerfTestStatistics` sets both to NULL on every live tick, so only
 `statistics-calculation` ever writes them; and rows from before migration 1809 hold NULL until the
 run's statistics are recalculated, which `DataAggregator` reads as "no target", not as a weak trend.
-The `%/h` unit is the API's job (three writers), not the worker's. See the root CLAUDE.md, "A Trend
+The `%/h` unit is the API's job (three writers), not the worker's. See [CLAUDE.md](CLAUDE.md), "A Trend
 SLO judges the slope of a series".
 
 ### The perf-test pipeline writes an extra "all aggregated" dashboard
@@ -170,7 +170,7 @@ without the title filter every run reports three sparse metrics forever.
 
 The name `All aggregated` collides with a pre-existing **synthetic** dropdown entry in the web app
 and the report renderers, guarded on both sides; see "The perf-test pipeline writes one extra
-dashboard, and its series name was already taken" in [CLAUDE.md](../../CLAUDE.md) before touching
+dashboard, and its series name was already taken" in [CLAUDE.md](CLAUDE.md) before touching
 either.
 
 ### `ds_adapt_results` is upserted, so `AdaptPipeline` also has to delete
@@ -216,7 +216,7 @@ re-analysis cannot delete anything else. Three rules if you touch it:
   statistics rewrite to land between probe and DELETE), and keep the anti-join correlated on
   all four columns of `uniq_ds_metric_statistics` so it stays a per-row index probe. A
   re-evaluate of an already-analysed run never showed this (163 ms, merge anti-join); the
-  measurements are in CLAUDE.md, item 3 of "`ds_adapt_results` is written by an upsert".
+  measurements are in [CLAUDE.md](CLAUDE.md), item 3 of "`ds_adapt_results` is written by an upsert".
 
 ### The control-group fast path needs `pct_agg`
 
@@ -393,7 +393,7 @@ constant in `helpers/incremental/dynatrace-collector.ts`, not an env var) before
 window and lets the upsert overwrite the overlap. It is off once the run is `completed` — the
 gap-fill paths decompress exactly the window they query — and the range bookkeeping clamps
 `maxDataTimestamp` to `fromTime` so a lookback that returns only old rows cannot record an inverted
-range. Details in CLAUDE.md, "Gap-filling a completed run", item 5.
+range. Details in [CLAUDE.md](CLAUDE.md), "Gap-filling a completed run", item 5.
 
 Two switches mean "off", and registration used to read neither (v0.2.95.12):
 
@@ -518,7 +518,7 @@ What changed around it:
 The scope-lock re-park in `analyze.ts` (table below) exists because of this lock: a holder can now
 sit on `sut:env:workload` for an hour, and two runs of one workload finishing together is normal.
 The full write-up, with the failure modes, is in the "The heavy analyze stages run one at a time"
-section of [CLAUDE.md](../../CLAUDE.md); the rollout plan with timings is
+section of [CLAUDE.md](CLAUDE.md); the rollout plan with timings is
 `docs/superpowers/plans/2026-09-11-heavy-stage-mutex-rollout.md`.
 
 ### Complex Workers (custom logic)
@@ -575,7 +575,7 @@ deploy running its own Postgres has to set them too, restart required):
 2. Add a job name to `JOB_NAMES` in `src/types/jobs.ts` (+ Zod schema, queue config)
 3. Register in `src/workers/pipeline-registrations.ts` via `registerPipeline()`
 
-See [Tutorial 2 in CLAUDE.md](../../CLAUDE.md) for the full walkthrough.
+See [Tutorial 2](../../docs/reference/tutorials.md) for the full walkthrough.
 
 ### Adding a stage to the analyze-test pipeline
 

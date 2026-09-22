@@ -14,7 +14,7 @@
  * handed, and both have a per-transaction ceiling that scales with the batch:
  *
  *  - `AdaptPipeline` never calls `setAggregationBudget`, so it runs on the 120 s
- *    `ANALYTICS_STATEMENT_TIMEOUT_MS` cap. CLAUDE.md's measurement is ~13 s/run with JIT
+ *    `ANALYTICS_STATEMENT_TIMEOUT_MS` cap. apps/worker/CLAUDE.md's measurement is ~13 s/run with JIT
  *    off and says outright that "a 9-run batch already exceeds the 120s cap"; v0.2.94.7
  *    then added the orphan-results DELETE to that same transaction, so the per-run figure
  *    is now a floor rather than an estimate.

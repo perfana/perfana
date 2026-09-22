@@ -1,6 +1,6 @@
 # Perfana API — Coding Rules
 
-Perfana-specific development standards for `apps/api`. For general project context, see [CLAUDE.md](../../CLAUDE.md).
+Perfana-specific development standards for `apps/api`. For repo-wide context, see [CLAUDE.md](../../CLAUDE.md); for this app's gotchas (RBAC, row-level security, the SUT export), see [CLAUDE.md](CLAUDE.md) in this directory.
 
 ## Authentication & Authorization
 
