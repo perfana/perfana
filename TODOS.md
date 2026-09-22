@@ -275,6 +275,46 @@ nothing currently asserts it.
 
 ## Worker pipeline
 
+### The scenario-level perf-test panels (301-303) never reach `ds_metric_statistics`
+
+**Priority:** P2
+**Origin:** red-team review on `feat/profile-perf-test-slos` (2026-09-22, v0.2.96.6).
+**Why:** `Error Count`, `Avg Active Threads` and `Max Active Threads` hold one point per run,
+written AT `end_time` by the full pass (`scenarioMetricTime`). `RAMP_UP_EXPR` flags a sample
+`ramp_up` when `time - start > (end - start) - ramp_down`, which a point at `end_time` satisfies
+whenever the workload has any end offset — verified on `PerfanaWebshop-acc-loadTest-00019`
+(`ramp_down = 30`): all 301-303 rows are `ramp_up = true` and none has a statistics row. So an
+SLO on them can never evaluate, the SUT dialog (which lists panels from `ds_metric_statistics`)
+never offers them, and the ADAPT `minSampleCount = 1` these panels carry never applies either.
+`PERF_TEST_PROFILE_PANELS` excludes them for that reason.
+**What:** write the scenario point inside the analysis window (e.g. at `end_time - ramp_down`)
+or exempt the scenario-level panels from the ramp-down band in `MetricsPipeline` and
+`RAMP_UP_EXPR` (both must agree — see item 8 under "ADAPT's baseline depends on the `pct_agg`
+sketch" in CLAUDE.md). Then add 301-303 back to `PERF_TEST_PROFILE_PANELS` and its pin test.
+
+---
+
+### Profile-provisioned SLOs are write-once and can miss a scenario dashboard created late
+
+**Priority:** P3
+**Origin:** red-team review on `feat/profile-perf-test-slos` (2026-09-22, v0.2.96.6). Both
+pre-existing for Grafana templates; a perf-test row fans out to N scenarios, so both now scale
+with scenario count.
+**Why:** (1) `createBenchmarkIfNotExists` only inserts; editing the profile benchmark never
+propagates to the rows it provisioned, `ProfilesService.deleteBenchmark` leaves them behind
+(`benchmarks.generic_check_id` has no FK), and a row deleted in the SUT SLO table is re-created
+within 2 min while any run of the workload is inside the auto-config window. (2) That window is
+`end_time >= now - 5 min`; a scenario dashboard written only by the analyze full pass (SUT import,
+force re-fetch, a scenario first seen in the final tick) can land after the window closes when
+analyze parks behind `HeavyStageMutex`, so that SUT/env/workload has no SLO until a later run.
+**What:** (1) use the existing update branch of `insertBenchmarkBasedOnProfileBenchmark` when the
+profile row's `updated_at` is newer, cascade `deleteBenchmark` by `generic_check_id`, and mark
+provisioned rows read-only in the SUT UI. (2) also select runs whose `application_dashboards`
+rows were created in the last N minutes, or have `DashboardManager` enqueue auto-config after it
+creates a scenario dashboard.
+
+---
+
 ### Perf-test scenario dashboards never get their `metrics_source_id` linked
 
 **Priority:** P3

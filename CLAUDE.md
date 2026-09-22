@@ -592,6 +592,53 @@ Residue: the floors are not per-SLO, the stored result does not say which floor 
 `requirement.min_samples` for Apdex), `GET /metrics/ds-metric-statistics`' default `evaluateType`
 list does not include `trend`, and the series chart draws no fitted line. All in TODOS.md.
 
+### A profile SLO can target the perf-test scenario dashboards, and the profile row is a regex
+
+Auto-config provisions `benchmarks` rows from `profile_benchmarks` by matching
+`application_dashboards.template_dashboard_uid` against the profile row's `dashboard_uid`. The
+worker-written `Performance test metrics <scenario>` dashboards have no template (`DashboardManager`
+writes `template_dashboard_uid` NULL), so before v0.2.96.6 no profile could reach them and every
+per-scenario SLO was clicked in by hand (22 on WERKNL). A profile benchmark with
+`source = 'performance-metrics'` (`PERF_TEST_PROFILE_SOURCE`, `packages/shared/src/constants/perf-test-profile.ts`)
+has `profile_dashboard_id` NULL (migration 1810 dropped the NOT NULL) and its `dashboard_uid` is a
+**regex** over the app-dashboard uid; `BenchmarkProcessorService` fans it out over every matching
+scenario dashboard of the SUT/env/org through `findApplicationDashboardsByUidPattern`. Six things hold
+it together:
+
+1. **The regex is validated twice and pinned once.** `ProfilesService.resolveDashboardColumns` and
+   `ProvisioningService` reject it with `validateRegexPattern` on write; the processor re-checks it
+   before the query (rows written by SQL); the finder ANDs `LIKE 'performance-test-metrics-%'` so a
+   stray `.` cannot fan an SLO out over the SUT's Grafana and Dynatrace dashboards. It runs in
+   Postgres ARE, is validated by the JS engine — keep patterns to the common subset (`\b` is a
+   backspace in ARE). The default excludes `all-aggregated` and `default`, and because the uid is
+   lossy so is a real scenario literally named either (decision D2, 2026-09-22: keep both excluded).
+2. **`resolveDashboardColumns` is shared by create and update**, so a `PUT` that switches source
+   re-resolves `profile_dashboard_id` / `grafana_instance` / `dashboard_uid` the way `POST` does.
+   Cleared columns are written as `null`, never `undefined` — TypeORM's `save()` skips undefined and
+   the old template label would survive the switch.
+3. **The panel list is static.** The SUT dialog reads panels from `ds_metric_statistics`; a profile
+   has no run to read, so `PERF_TEST_PROFILE_PANELS` is a hand copy of the worker's
+   `METRIC_TYPE_PANEL_NAMES` pinned by `perf-test-profile-panels.test.ts` — minus 301-303, whose
+   single point at `end_time` is flagged `ramp_up` by any ramp-down offset and never gets a
+   statistics row (TODOS.md, Worker pipeline). `panelId` is validated against it.
+4. **`AutoConfigService.loadAutoConfigContext` must not abort on zero profile dashboards.** It used
+   to, before the benchmark step ran, so a JMeter-only org with a perf-test-only profile was never
+   provisioned — the WERKNL e2e passed only because its profile also carried a Grafana template.
+5. **`findApplicationDashboardsByUidPattern` fails closed without an org.** SUT names are unique per
+   organization only; the sibling template lookup still has the legacy `OR IS NULL` arm.
+6. **The fan-out catches per dashboard.** One 23505 (two grafana-sync replicas on the same tick) or
+   a transient error used to abort the remaining scenarios of that pass.
+
+Two bugs came out with it. `insertBenchmarkBasedOnProfileBenchmark` never wrote
+`benchmarks.evaluate_type` — only `configuration.evaluateType` — and the worker reads the column
+(`benchmark.evaluate_type || 'mean'`), so every profile-provisioned SLO was judged as an average
+(12 `max` SLOs on the dev DB); migration 1810 backfills it and verdicts may change on the next
+evaluation. And `mapAggregationTypeToField` had no `q50` key while both SLO dialogs offer it.
+
+Residue: provisioned rows are write-once and the 5-minute auto-config window can miss a scenario
+dashboard written by a parked analyze (both TODOS.md); the profile form has no field for the regex
+(API only).
+
 ### The perf-test error-rate SLO reads the transaction rollup, not the mean of the buckets
 
 The stored series on the perf-test **Transaction Error Rate** (panel 105) and **Request Error

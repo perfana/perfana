@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.6] - 2026-09-22
+
+### Added
+- **A profile SLO can now target the performance-test scenario dashboards.** The profile SLO dialog lists a **Performance test metrics — every scenario** entry beside the Grafana template dashboards. An SLO on it is provisioned onto every `Performance test metrics <scenario>` dashboard of a system that matches the profile — including scenarios that first appear in a later run — so the per-scenario `Transaction Error Rate < 2%` that had to be added by hand for each of a system's 22 scenarios is one row on the profile. The run-wide `all aggregated` roll-up and the no-scenario `default` bucket are left out; the pattern is a regex over the dashboard uid (`dashboardUid` on the API, `^performance-test-metrics-(?!all-aggregated$|default$)` by default) for anyone who wants a subset. The same works from YAML provisioning with `source: performance-metrics`. The regex is validated on save and cannot reach Grafana or Dynatrace dashboards.
+
+### Fixed
+- **Profile-provisioned SLOs were judged as an average whatever their evaluation type.** The provisioning step wrote the type into the SLO's configuration only; the worker reads the column, which was NULL, and fell back to `mean`. A `max` or `q95` SLO from a profile therefore passed or failed on the average. The column is written from this version and backfilled by migration 1810 for existing rows, so a profile SLO that used to pass as an average may fail as a maximum from its next evaluation on; stored results are not re-evaluated.
+- **An SLO evaluated on the 50th percentile was evaluated on the average.** Both SLO dialogs offer `q50`; the worker had no mapping for it and fell back to `mean`. It now maps to the median.
+- **A profile with only performance-test SLOs was never provisioned.** The auto-config pass skipped a system as soon as its organization had no Grafana template dashboards to sync, before it reached the profile SLOs.
+- **Switching a profile SLO between Grafana and performance-metrics via `PUT` now re-resolves its dashboard columns** the way `POST` does, instead of leaving the old template's label or uid behind; a Grafana source without a `profileDashboardId` is a 400 on update as well as on create.
+
 ## [0.2.96.5] - 2026-09-22
 
 ### Added
