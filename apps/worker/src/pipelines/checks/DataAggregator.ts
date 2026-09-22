@@ -497,6 +497,8 @@ export class DataAggregator extends BaseCheckService {
       'min': 'min_value',
       'max': 'max_value',
       'median': 'median',
+      // Both SLO dialogs offer the median as `q50`; without this key it fell to 'mean'.
+      'q50': 'median',
       'q10': 'q10',
       'q25': 'q25',
       'q75': 'q75',
