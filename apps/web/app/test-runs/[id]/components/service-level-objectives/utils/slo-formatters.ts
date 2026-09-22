@@ -158,3 +158,16 @@ export function formatRequirement(requirement: CheckResultRequirement | undefine
 
   return `${evaluateText} ${operatorText} ${displayValue}${unitSuffix}`;
 }
+
+/**
+ * A trend SLO's `%/h`, signed, one decimal.
+ *
+ * Rounds BEFORE testing the sign so -0.04 reads `0.0`, not `-0.0`. Shared by
+ * the series table and the chart's fitted-line legend: they sit one above the
+ * other, so a second copy of this rule shows up as the same number formatted
+ * two ways.
+ */
+export function formatTrendPctPerHour(pctPerHour: number): string {
+  const rounded = Number(pctPerHour.toFixed(1));
+  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)} %/h`;
+}

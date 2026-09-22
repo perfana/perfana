@@ -4,6 +4,7 @@ import type { MetricTarget, MetricSeriesResult, SortConfig } from '../types/metr
 import {
   formatMetricUnit,
   formatApdexScore,
+  formatTrendPctPerHour,
   isApdexResult,
 } from './slo-formatters';
 
@@ -69,6 +70,38 @@ export function getStatusPriority(meetsRequirement: boolean | null | undefined):
 }
 
 /**
+ * The series a trend SLO's chart opens on.
+ *
+ * Every series of the panel on one linear axis is unreadable for a trend -- the
+ * question is the shape of ONE series' drift -- so the chart shows one at a
+ * time and the table underneath is the selector. Default to the series the
+ * reader came for: a failing one, else the steepest drift.
+ *
+ * Returns undefined for every other evaluate type, which keeps showing all
+ * series until one is clicked.
+ */
+export function defaultTrendTarget(result: MetricSeriesResult): string | undefined {
+  if (result.evaluate_type !== 'trend') return undefined;
+
+  const ranked = [...(result.targets ?? [])]
+    // Truthy on purpose, and `''` must keep failing it: groupDataByMetricName
+    // reads a falsy targetName as "no filter", so an empty-string default would
+    // silently show every series instead of one.
+    // `is_artificial` is the validate_with_default_if_no_data row -- a trend SLO
+    // does judge it, and it can be the failing one, but no dashboard produced it
+    // so it has no ds_metrics points to chart.
+    .filter(t => t.target && !t.is_artificial)
+    .sort((a, b) => {
+      const byStatus =
+        getStatusPriority(a.meets_requirement) - getStatusPriority(b.meets_requirement);
+      if (byStatus !== 0) return byStatus;
+      return Math.abs(Number(b.value) || 0) - Math.abs(Number(a.value) || 0);
+    });
+
+  return ranked[0]?.target;
+}
+
+/**
  * Formats the metric value for display.
  */
 export function formatMetricValue(target: MetricTarget, result: MetricSeriesResult): string {
@@ -86,8 +119,7 @@ export function formatMetricValue(target: MetricTarget, result: MetricSeriesResu
   // Trend: signed, one decimal, with r so a weak-trend row explains itself.
   if (result.evaluate_type === 'trend') {
     const r = target.trend_corr == null ? '' : ` (r ${Number(target.trend_corr).toFixed(2)})`;
-    const v = Number(displayValue.toFixed(1)); // round first so -0.04 is '0.0', not '-0.0'
-    return `${v > 0 ? '+' : ''}${v.toFixed(1)} %/h${r}`;
+    return `${formatTrendPctPerHour(displayValue)}${r}`;
   }
 
   const unitSuffix = result.metric_unit ? ' ' + formatMetricUnit(result.metric_unit) : '';
