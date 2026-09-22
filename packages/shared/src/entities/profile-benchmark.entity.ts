@@ -51,9 +51,11 @@ export class ProfileBenchmark {
   @Column({ type: 'uuid' })
   profile_id!: string;
 
-  // Reference to profile_grafana_dashboards configuration
-  @Column({ type: 'uuid' })
-  profile_dashboard_id!: string;
+  // Reference to profile_grafana_dashboards configuration. NULL for a
+  // `performance-metrics` benchmark, which targets the worker-written perf-test
+  // dashboards through a `dashboard_uid` regex instead of a Grafana template.
+  @Column({ type: 'uuid', nullable: true })
+  profile_dashboard_id!: string | null;
 
   // Workload matching pattern (from addForWorkloadsMatchingRegex)
   @Column({ type: 'varchar', length: 500, default: '.*' })

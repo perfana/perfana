@@ -2416,7 +2416,7 @@ CREATE TABLE public.pending_ds_compare_config_changes (
 CREATE TABLE public.profile_benchmarks (
     id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
     profile_id uuid NOT NULL,
-    profile_dashboard_id uuid NOT NULL,
+    profile_dashboard_id uuid,
     workload_pattern character varying(500) DEFAULT '.*'::character varying NOT NULL,
     source character varying(50) DEFAULT 'grafana'::character varying NOT NULL,
     grafana_instance character varying(255),
