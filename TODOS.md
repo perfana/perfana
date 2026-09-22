@@ -290,7 +290,7 @@ never offers them, and the ADAPT `minSampleCount = 1` these panels carry never a
 **What:** write the scenario point inside the analysis window (e.g. at `end_time - ramp_down`)
 or exempt the scenario-level panels from the ramp-down band in `MetricsPipeline` and
 `RAMP_UP_EXPR` (both must agree — see item 8 under "ADAPT's baseline depends on the `pct_agg`
-sketch" in CLAUDE.md). Then add 301-303 back to `PERF_TEST_PROFILE_PANELS` and its pin test.
+sketch" in apps/worker/CLAUDE.md). Then add 301-303 back to `PERF_TEST_PROFILE_PANELS` and its pin test.
 
 ---
 
@@ -423,7 +423,7 @@ the same silent way.
 **What to do:** either assert at worker boot that the connection can read a known
 `application_dashboards` row (fail loud, the way `assertEntityColumns` does), or give the worker
 a real RLS context under `perfana_system`. This is the worker-side twin of the API-key
-deployment constraint already documented in CLAUDE.md; nothing enforces either yet.
+deployment constraint already documented in apps/api/CLAUDE.md; nothing enforces either yet.
 
 ### `all_missing` / `pct_missing` are structurally unreachable
 
@@ -434,7 +434,7 @@ deployment constraint already documented in CLAUDE.md; nothing enforces either y
 is therefore constant: `all_missing` (`sa.count = sa.n_missing`) is always false, and
 `pct_missing` / `missing_percentage` are always 0.0. Confirmed across all 58,319 rows currently in
 `ds_metric_statistics`.
-**Why it matters:** CLAUDE.md and the pipeline's own docblock describe `all_missing` as "every
+**Why it matters:** apps/worker/CLAUDE.md and the pipeline's own docblock describe `all_missing` as "every
 observation in the group is NULL … ADAPT labels these incomparable", which is behaviour that
 cannot occur. Anyone reasoning about missing-data handling from those docs is reasoning about a
 dead branch.
@@ -559,7 +559,7 @@ and actual counts, and replace the inline copies. Pure test refactor, no behavio
 `CREATE STATISTICS (ndistinct)` on the `ds_metrics` **parent** plus a daily `ANALYZE` job. Measured
 on the real join-bearing query: estimate 741,991 -> 21,372 against 17,882 actual. An earlier draft
 put the objects on chunks and was provably inert on that query — the joins block chunkwise
-aggregation, so the estimate is made at the parent. See CLAUDE.md.
+aggregation, so the estimate is made at the parent. See apps/worker/CLAUDE.md.
 
 **Still to verify on production:** that the `external merge Disk:` sort actually disappears. The
 estimate is fixed and measured, but the resulting plan switch was only ever inferred, and a dev
@@ -937,7 +937,7 @@ chunk is still row store, so the decompression concern does not apply), or recor
 Dynatrace range per host rather than per config. Add `WHERE ds_metrics.value IS DISTINCT
 FROM EXCLUDED.value OR ds_metrics.ramp_up IS DISTINCT FROM EXCLUDED.ramp_up` to the
 incremental upsert only for the live path — on a compressed chunk that guard is the
-expensive part (CLAUDE.md, "ADAPT's baseline depends on the `pct_agg` sketch", item 6).
+expensive part (apps/worker/CLAUDE.md, "ADAPT's baseline depends on the `pct_agg` sketch", item 6).
 
 ## Test run detail tables
 
@@ -1663,7 +1663,7 @@ during /ship on `fix/dynatrace-disabled-queries-coverage` (2026-09-10).
 **Why:** `simple-workers.ts` does `return await processor(job)`, so `analyze.ts:243`'s
 `{ status: 'failed' }` resolves the promise and BullMQ records the job **completed** — no retry, no
 failed-set entry, nothing for an operator to find. A failed analysis is indistinguishable from a
-successful one at the queue level. Documented as design-debt in CLAUDE.md ("A worker that reports
+successful one at the queue level. Documented as design-debt in apps/worker/CLAUDE.md ("A worker that reports
 failure by RETURNING is silently succeeding") and `apps/worker/README.md`, but never filed.
 **What to do:** throw from the catch-all, after deciding the retry policy — `analyze-test` is
 enqueued from several places and an analysis retried blind re-runs ten stages. Check the enqueue

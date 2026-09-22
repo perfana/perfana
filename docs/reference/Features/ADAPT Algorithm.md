@@ -156,7 +156,7 @@ Three kinds of run are deliberately left out, and each is reported rather than s
 | Reason | Why |
 |---|---|
 | `running` | `MetricsPipeline` bakes `ds_metrics.ramp_up` at ingestion, so moving the offsets mid-run leaves the run carrying rows flagged under two different settings |
-| `too-short` | the two offsets together leave no analysis window in that run — see the note on offsets fitting the run in [[Worker Overview]] and CLAUDE.md |
+| `too-short` | the two offsets together leave no analysis window in that run — see the note on offsets fitting the run in [[Worker Overview]] and apps/worker/CLAUDE.md |
 | `not-writable` | `test_runs.team_id` is a per-row nullable column, not derived from the system under test, so a workload can span teams; the caller proved write permission on the target's organization and team only |
 
 A bulk apply is capped at 100 runs and **refuses** past that rather than truncating: applying the

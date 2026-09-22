@@ -158,7 +158,7 @@ export function createSimpleWorker(
 
   worker.on('completed', (job: Job, result: unknown) => {
     // softFail pipelines report failure by RETURNING { status: 'failed' } (see
-    // CLAUDE.md); the one-line summary must not call that "done".
+    // apps/worker/CLAUDE.md); the one-line summary must not call that "done".
     const status = (result as { status?: string } | undefined)?.status === 'failed' ? 'Job soft-failed' : 'Job done';
     logger.info(`${status}: ${job.name} (ID: ${job.id}) ${jobTiming(job)} in ${queueName}`);
   });

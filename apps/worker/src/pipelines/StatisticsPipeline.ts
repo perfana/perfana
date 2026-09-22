@@ -302,7 +302,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     // This costs one full read of the run where the old EXISTS short-circuited on
     // the first disagreeing row. That trade is worth making: a read decompresses
     // transiently and rewrites nothing, while the run-wide bounds it replaces put
-    // every chunk of the run into row store for good. The 939ms in CLAUDE.md is the
+    // every chunk of the run into row store for good. The 939ms in apps/worker/CLAUDE.md is the
     // 2.6M-row figure and scales roughly linearly — budget ~8s on a 20M-row run.
     const sql = `
       SELECT tr.test_run_id, MIN(m.time) AS from_time, MAX(m.time) AS to_time
