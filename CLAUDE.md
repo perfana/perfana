@@ -603,10 +603,29 @@ way it maps `avg` onto `mean`. Five things about it are easy to get backwards:
    per-row numeric divide and cast cost +75 % on a 1.66 M-row run (measured); `date_part` is
    `float8`. The `/ 3600` is applied once, after aggregation, which is exact because the slope is
    linear in x.
+6. **The chart opens on ONE series, and a single-point series must not be a bar (v0.2.96.8).**
+   Every series of a panel on one linear axis is unreadable for a trend — the question is the
+   shape of one series' drift — so `defaultTrendTarget` (`metric-series-table-utils.ts`) opens on
+   the failing series, else the steepest, and the table underneath is the selector. Deselecting
+   stores `''`, never a deleted key: a deleted key reads as "never touched" and the row snaps
+   straight back to the auto-pick. The fitted line (`buildTrendLineTrace`) draws the **stored**
+   `%/h`, never a refit — a refit would disagree with the number in the row beside it — anchored
+   on the mean of the charted points inside `analysisWindowBounds`, the same bounds
+   `buildChartLayout` shades to (that mean is not the worker's normalisation base; see TODOS.md).
+   No requirement line is drawn for a trend: the threshold is in `%/h` and the axis is the panel's
+   own unit. Colour comes from the worker's `meets_requirement`, because "every value under the
+   requirement" is a level test and a trend judges slope. The single-point rule is **not**
+   trend-specific: a one-point series drawn as a **bar** puts Plotly's x-axis into category mode,
+   so every timestamp of every other series on the panel becomes its own tick label — the wall of
+   dates that hit average and maximum SLOs too. Bars only when nothing on the chart is a time
+   series. `formatTrendPctPerHour` (`slo-formatters.ts`) is shared by the table and the fitted
+   line's legend label, so the two cannot format the same number differently.
 
 Residue: the floors are not per-SLO, the stored result does not say which floor applied (unlike
-`requirement.min_samples` for Apdex), `GET /metrics/ds-metric-statistics`' default `evaluateType`
-list does not include `trend`, and the series chart draws no fitted line. All in TODOS.md.
+`requirement.min_samples` for Apdex), and `GET /metrics/ds-metric-statistics`' default
+`evaluateType` list does not include `trend`. The chart's fitted line has two of its own: it is
+normalised by the charted mean rather than the worker's, and it can be drawn from a `%/h` fitted
+under analysis offsets that have since changed. All in TODOS.md.
 
 ### A profile SLO can target the perf-test scenario dashboards, and the profile row is a regex
 
