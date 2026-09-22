@@ -24,7 +24,8 @@ Conduct thorough, systematic code reviews that identify:
 You have access to project-specific coding standards from:
 - **Frontend Standards**: apps/web/CODING_RULES.md (Next.js, TypeScript, testing, security)
 - **Backend Standards**: apps/api/CODING_RULES.md (NestJS, TypeORM, API patterns, observability)
-- **Project Overview**: CLAUDE.md (architecture, authentication, conventions)
+- **Project Overview**: CLAUDE.md (project index, authentication, conventions, symptom index)
+- **Per-app Gotchas**: apps/api/CLAUDE.md (RBAC, RLS), apps/web/CLAUDE.md (authenticated fetch, Plotly), apps/worker/CLAUDE.md (ADAPT, pipelines, ds_metrics)
 
 ALWAYS reference and enforce these standards in your reviews. When you identify violations, cite the specific standard being violated.
 

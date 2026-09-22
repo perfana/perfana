@@ -95,14 +95,18 @@ npm run lint          # Linting
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, branch naming, and PR guidelines.
 
-AI agents: read [CLAUDE.md](CLAUDE.md) for comprehensive project context. Issues labeled `good-first-issue-for-ai` include file paths and acceptance criteria.
+AI agents: read [CLAUDE.md](CLAUDE.md) first — it holds what is true across the repo, and each app carries its own `CLAUDE.md` (`apps/api/`, `apps/web/`, `apps/worker/`) with that app's gotchas, loaded when you touch files in that directory. Issues labeled `good-first-issue-for-ai` include file paths and acceptance criteria.
 
 ## Documentation
 
-- [CLAUDE.md](CLAUDE.md) — Complete project guide (architecture, auth, conventions)
+- [CLAUDE.md](CLAUDE.md) — Repo-wide guide (quick start, project index, auth, env vars, symptom index)
+- [apps/api/CLAUDE.md](apps/api/CLAUDE.md) — API gotchas: RBAC, row-level security, SUT export
+- [apps/web/CLAUDE.md](apps/web/CLAUDE.md) — Frontend gotchas: authenticated fetch, Plotly, time-series routes
+- [apps/worker/CLAUDE.md](apps/worker/CLAUDE.md) — Worker gotchas: ADAPT, pipelines, `ds_metrics`, SLO evaluation
 - [ARCHITECTURE.md](ARCHITECTURE.md) — System diagrams and data flow
 - [CONVENTIONS.md](CONVENTIONS.md) — Code patterns and naming rules
 - [docs/reference/](docs/reference/index.md) — Deep reference: ADAPT, RBAC, schema, features, CI/CD recipes
+- [docs/reference/tutorials.md](docs/reference/tutorials.md) — How-to tutorials: new metrics source, new pipeline, migrations, testing
 - [apps/api/CODING_RULES.md](apps/api/CODING_RULES.md) — Backend standards
 - [apps/web/CODING_RULES.md](apps/web/CODING_RULES.md) — Frontend standards
 - [CHANGELOG.md](CHANGELOG.md) — What shipped in each release

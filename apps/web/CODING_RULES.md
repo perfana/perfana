@@ -1,6 +1,6 @@
 # Perfana Web — Coding Rules
 
-Perfana-specific development standards for `apps/web`. For general project context, see [CLAUDE.md](../../CLAUDE.md).
+Perfana-specific development standards for `apps/web`. For repo-wide context, see [CLAUDE.md](../../CLAUDE.md); for this app's gotchas (authenticated fetch, the Plotly container rule, the transaction time-series route), see [CLAUDE.md](CLAUDE.md) in this directory.
 
 ## Project Structure
 

@@ -12,25 +12,28 @@ npm run dev
 ```
 
 - API: http://localhost:3001/api/docs (Swagger)
-- Web: http://localhost:4001
+- Web: http://localhost:4000
 - Keycloak: http://localhost:8080 (admin/admin, realm: perfana-prod)
 - Login: perfana@example.com / perfana
 
 ## Project Index
 
 > **Progressive disclosure:** Scan this index. Read only what's relevant to your task.
+> Each app's hard-won gotchas live in its own `CLAUDE.md` next to the code. Claude Code loads
+> those automatically when you touch that directory; every other agent has to open them
+> explicitly — this file keeps only what is true everywhere.
 
 | Area | Path | What's there | Docs |
 |------|------|-------------|------|
-| API | `apps/api/` | NestJS REST API, 36+ modules | [CODING_RULES](apps/api/CODING_RULES.md) |
-| Frontend | `apps/web/` | Next.js, MUI + Radix + Tailwind | [CODING_RULES](apps/web/CODING_RULES.md) |
-| Worker | `apps/worker/` | BullMQ pipelines, ADAPT algorithm | [README](apps/worker/README.md) |
+| API | `apps/api/` | NestJS REST API, 36+ modules | [CLAUDE](apps/api/CLAUDE.md) · [CODING_RULES](apps/api/CODING_RULES.md) |
+| Frontend | `apps/web/` | Next.js, MUI + Radix + Tailwind | [CLAUDE](apps/web/CLAUDE.md) · [CODING_RULES](apps/web/CODING_RULES.md) |
+| Worker | `apps/worker/` | BullMQ pipelines, ADAPT algorithm | [CLAUDE](apps/worker/CLAUDE.md) · [README](apps/worker/README.md) |
 | Grafana Sync | `apps/grafana-sync/` | Dashboard sync background service | [CODING_RULES](apps/grafana-sync/CODING_RULES.md) |
 | Shared | `packages/shared/` | TypeORM entities, types, utils | [README](packages/shared/README.md) |
 | Config | `packages/config/` | TypeORM config factory | — |
 | MCP Server | `apps/mcp/` | MCP tool server for AI agents | [README](apps/mcp/README.md) |
 | Report | `apps/perfana-report/` | Report generation service | [README](apps/perfana-report/README.md) |
-| Deep Reference | `docs/reference/` | ADAPT, RBAC, schemas, features (narrative). For derivable "how does X work / what calls this" use GitNexus. | [Index](docs/reference/index.md) |
+| Deep Reference | `docs/reference/` | ADAPT, RBAC, schemas, features (narrative), how-to tutorials. For derivable "how does X work / what calls this" use GitNexus. | [Index](docs/reference/index.md) · [Tutorials](docs/reference/tutorials.md) |
 | Infra | `docker-compose.infra.yml` | Full local stack | — |
 
 → System diagrams: [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -49,10 +52,10 @@ npm run dev
 
 ## Development Commands
 
-- `npm run dev` — Start all services (api :3001, web :4001, grafana-sync :3002, worker)
+- `npm run dev` — Start all services (api :3001, web :4000, grafana-sync :3002, worker)
 - `npm run build` / `npm run test` / `npm run type-check` / `npm run lint`
 - `npm run dev:api` / `npm run dev:web` / `npm run dev:grafana-sync` — Individual services
-- `lsof -ti:3001,3002,4001 | xargs kill -9 && npm run dev` — Kill and restart
+- `lsof -ti:3001,3002,4000 | xargs kill -9 && npm run dev` — Kill and restart
 
 ## Authentication System
 
@@ -334,6 +337,9 @@ Since v0.2.93.3 both aggregation transactions run under `AGGREGATION_STATEMENT_T
 5. **ADAPT could not build a baseline / INSUFFICIENT_DATA on a healthy baseline** → the baseline's `ds_metric_statistics` rows are missing `pct_agg`. The pipeline self-heals; if it could not, use the **Recalculate baseline statistics** button beside the message, then re-evaluate.
 
 ## How-To Tutorials
+
+> Kept inline here for agents that read only this file. The canonical copy, which is the one
+> that gets updated, is [docs/reference/tutorials.md](docs/reference/tutorials.md).
 
 ### Tutorial 1: How to Add a New Metrics Source
 
