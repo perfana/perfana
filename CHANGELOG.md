@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.9] - 2026-09-22
+
+### Changed
+- **The repository guide an AI assistant loads is a tenth of its former size.** `CLAUDE.md` had grown to 1872 lines (198 KB, roughly 50k tokens) that were read into every session before a single question was asked — and almost all of it was worker-internal detail that an API or frontend task never needs. It is now 329 lines of what is true everywhere: quick start, the project index, the stack, the dual-authentication contract, the environment variables, the cross-app patterns, and the 33-entry symptom index. Everything else moved, verbatim, into a `CLAUDE.md` beside the code it describes — `apps/worker/` (ADAPT, the pipelines, `ds_metrics`, the SLO evaluation types), `apps/api/` (RBAC and row-level security, idempotent provisioning, the SUT export) and `apps/web/` (authenticated fetch, the Plotly container rule, the transaction time-series route) — each of which is loaded automatically when that directory is touched, and not otherwise. The four how-to tutorials moved to `docs/reference/tutorials.md`. Nothing was deleted: every "Common Issues" entry now names the file that explains its cause instead of pointing "above".
+
 ## [0.2.96.8] - 2026-09-22
 
 ### Fixed
