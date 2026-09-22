@@ -195,6 +195,99 @@ export async function insertDsMetricsFromAggregate(
 }
 
 /**
+ * Has the run grown enough since the last statistics pass to be worth another one?
+ *
+ * `upsertPerfTestStatistics` aggregates the whole run, so its cost rises with the
+ * run while the ticks stay 60s apart — the total across a run is quadratic in its
+ * length. Running it on a geometric cadence instead of every tick makes the total
+ * ~4.3x one final pass rather than ~93x on a 3-hour run, for the price of a live
+ * display that lags the run by at most `PERF_TEST_STATS_MIN_GROWTH` of its length.
+ *
+ * Three things make that trade safe, and all three have to stay true:
+ *
+ *  - **Nothing a tick writes survives analysis.** `StatisticsPipeline` deletes and
+ *    rewrites every `ds_metric_statistics` row of the run from `ds_metrics`, scoped
+ *    by organisation only, with no source filter — so the perf-test rows are in it.
+ *    A skipped tick can only ever make the LIVE numbers stale, never the final ones.
+ *  - **The skip never widens a window.** The pass it skips would have aggregated the
+ *    same rows the next one will; it is the same query over a prefix, not a slice.
+ *    So skipping cannot lose a metric, only delay it.
+ *  - **The tail pass does not need it.** `PerformanceTestMetricsPipeline` already
+ *    skips this call on `finalPass` for the same reason (statistics-calculation
+ *    follows it in the same analyze), so a run whose last tick was throttled is not
+ *    left to the tail to repair.
+ *
+ * The watermark is `MAX(updated_at)` over the run's own statistics rows rather than
+ * worker-local state: ticks for one run are not pinned to a worker process, so an
+ * in-memory counter would be split across workers and reset by a restart. One
+ * statement writes every row, so the MAX is the last pass's timestamp exactly.
+ *
+ * Fails OPEN. A throttle that cannot read its own watermark must not be what stops
+ * a live run's statistics from ever being written, so any error here runs the pass.
+ */
+async function runHasGrownEnough(
+  dataSource: DataSource,
+  testRunId: string,
+  dashboardIds: string[],
+  testRun: TestRunMetadata,
+  logger: Logger
+): Promise<boolean> {
+  const minGrowth = Number(process.env.PERF_TEST_STATS_MIN_GROWTH ?? 0.3);
+  if (!Number.isFinite(minGrowth) || minGrowth <= 0) {
+    return true;
+  }
+
+  try {
+    const rows: Array<{ last_pass: Date | null }> = await dataSource.query(
+      `SELECT MAX(updated_at) AS last_pass
+         FROM ds_metric_statistics
+        WHERE test_run_id = $1
+          AND application_dashboard_id = ANY($2::uuid[])`,
+      [testRunId, dashboardIds]
+    );
+
+    const lastPass = rows[0]?.last_pass;
+    // No pass yet: the first tick of a run always writes, so the display is never
+    // empty while the throttle waits for a growth percentage of nearly nothing.
+    if (!lastPass) {
+      return true;
+    }
+
+    const startedAt = new Date(testRun.start_time).getTime();
+    const lastPassAt = new Date(lastPass).getTime();
+    if (!Number.isFinite(startedAt) || !Number.isFinite(lastPassAt)) {
+      return true;
+    }
+
+    const coveredMs = lastPassAt - startedAt;
+    const sinceMs = Date.now() - lastPassAt;
+    // A clock skew or a restored run can put the last pass before the start; treat
+    // anything non-positive as "no useful baseline" and recompute.
+    if (coveredMs <= 0) {
+      return true;
+    }
+    if (sinceMs >= coveredMs * minGrowth) {
+      return true;
+    }
+
+    logger.debug(
+      `⏭️  Performance-test statistics: skipped, run has grown ${(
+        (sinceMs / coveredMs) *
+        100
+      ).toFixed(1)}% since the last pass (need ${(minGrowth * 100).toFixed(0)}%)`
+    );
+    return false;
+  } catch (error) {
+    const msg =
+      error && typeof error === 'object' && 'message' in error
+        ? (error as Error).message
+        : 'Unknown error';
+    logger.warn(`Statistics growth check failed, recomputing anyway: ${msg}`);
+    return true;
+  }
+}
+
+/**
  * Recompute ds_metric_statistics for the dashboards this pipeline just wrote.
  *
  * Replaces an in-JS pass that filtered every metric record, grouped them in a Map and
@@ -228,6 +321,10 @@ export async function upsertPerfTestStatistics(
   logger: Logger
 ): Promise<number> {
   if (dashboardIds.length === 0) {
+    return 0;
+  }
+
+  if (!(await runHasGrownEnough(dataSource, testRunId, dashboardIds, testRun, logger))) {
     return 0;
   }
 

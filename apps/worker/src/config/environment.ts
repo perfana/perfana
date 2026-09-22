@@ -82,6 +82,25 @@ const envSchema = z.object({
   AGGREGATION_STATEMENT_TIMEOUT_MS: z.coerce.number().default(540000),
   AGGREGATION_WORK_MEM: z.string().default('128MB'),
 
+  // How much longer a live run must get before a tick recomputes the whole-run
+  // perf-test statistics again, as a fraction of the run so far. 0.3 = "the run
+  // has grown 30% since the last pass". Set 0 to recompute on every tick (the
+  // pre-v0.2.96.10 behaviour).
+  //
+  // upsertPerfTestStatistics reads the run, not the tick, so its cost grows with
+  // the run while the ticks stay 60s apart: the total is quadratic in run length.
+  // Measured on production (pg_stat_statements, 2026-09-22) it was the single
+  // largest consumer of I/O on the deployment by a factor of 8 — 7055 calls,
+  // 5509 GB read, 18.5 hours of database time — which is what collapses the
+  // buffer cache for every other query while a long test is running.
+  // A geometric cadence turns that sum into ~4.3x one final pass instead of ~93x.
+  //
+  // The cost of a higher value is staleness of the LIVE display only: analyze
+  // runs statistics-calculation, whose StatisticsPipeline deletes and rewrites
+  // every one of these rows from ds_metrics with no source filter. Nothing a tick
+  // writes survives the analysis it belongs to.
+  PERF_TEST_STATS_MIN_GROWTH: z.coerce.number().min(0).default(0.3),
+
   // Performance Tuning
   DB_POOL_SIZE: z.coerce.number().default(30), // Pool for 2 concurrent analyze jobs + headroom (reduced from 100 after write starvation post-mortem)
   METRICS_BATCH_SIZE: z.coerce.number().default(200),

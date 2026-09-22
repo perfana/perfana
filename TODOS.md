@@ -442,6 +442,42 @@ dead branch.
 the INSERT along with their docs, or missing-data really should be counted, in which case the
 count has to happen before the NULL filter rather than after it.
 
+### The `transactions` per-run reads still take the wrong index, and it cannot be dropped
+
+**Priority:** P3
+**Origin:** slow-query investigation during /ship on `perf/live-stats-throttle-and-summary-caggs` (2026-09-22).
+**Why:** `transactions` has the identical trap that migration 1811 fixed on `virtual_users`: a
+per-run query with a time window takes `transactions_time_idx` and demotes `test_run_id` to a
+filter. Measured on WERKNL-00012, warm: **7462 ms / 1,302,676 buffers** against **804 ms /
+814,650** for the same aggregate with no time predicate. `requests_raw` is worse in kind — it
+seq-scans (2453 ms vs 1017 ms). Dropping the index is NOT the fix here: it is what the
+`transactions_5s` / `transactions_passed_5s` refresh policies scan (`Index Scan using
+_hyper_4_566_chunk_transactions_time_idx`, 45,660 rows / 116 ms), twice a minute, ~1.49M recorded
+scans against the two jobs' 74,284 + ~74,000 runs. The root cause is correlated-predicate
+underestimation and `CREATE STATISTICS` does not survive on chunks — see "`virtual_users` has no
+time-only index" in `apps/api/CLAUDE.md` for the full sweep.
+**What to do:** nothing urgent — the biggest caller of that shape, `getSummaryTimeseries`, now
+reads the CAGGs, and the remaining raw readers mostly go through the rollup tables. If it does
+resurface, the candidate is a covering index on `(test_run_id, time) INCLUDE (...)` for the hot
+query, weighed against the write cost on a continuously-ingested table. Measure the hot caller
+first; do not drop the time index.
+
+### `ds_metrics_time_idx` does 40k scans over 6.4 billion tuples and nobody knows whose they are
+
+**Priority:** P4
+**Origin:** same sweep (2026-09-22).
+**Why:** `ds_metrics` has a default time index and no continuous aggregate over it, which is the
+shape that made `virtual_users` droppable. It is NOT droppable on the evidence so far: its per-run
+queries already take `uniq_ds_metrics_upsert` (an Index Only Scan with both predicates in the
+`Index Cond`, because that index carries `time` fifth), yet the time index still shows 40,679
+scans reading 6,375,822,490 tuples at 27% fetch. That is not application traffic — the LTTB series
+query and `upsertPerfTestStatistics` carry no time predicate at all. Most likely the compression
+policy walking chunks.
+**What to do:** identify the 40k scans before deciding anything. `pg_stat_statements` filtered to
+statements touching `ds_metrics` with a time range, or a targeted `auto_explain` window, would
+name them. If they turn out to be the compression policy, the index stays and this closes as
+working-as-intended.
+
 ### The stale-`ramp_up` pre-check scans every `ds_metrics` chunk ever created
 
 **Priority:** P3

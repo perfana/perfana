@@ -31,13 +31,22 @@ const testRun: TestRunMetadata = {
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 
-const fakeDataSource = (rows: unknown) => {
+const fakeDataSource = (rows: unknown, lastPass: Date | null = null) => {
   // The writer statements run inside a transaction whose first statements are the
   // set_config budget calls; the INSERT is the one carrying `RETURNING 1`.
   const query = vi.fn().mockResolvedValue(rows);
   const transaction = vi.fn((fn: (em: { query: typeof query }) => Promise<unknown>) => fn({ query }));
+  // upsertPerfTestStatistics reads its growth watermark OUTSIDE the transaction, so
+  // the fake needs a top-level query too. Default null = no pass yet = always
+  // recompute, which is the behaviour the row-count tests below assume.
+  const watermarkQuery = vi.fn().mockResolvedValue([{ last_pass: lastPass }]);
   const insertSql = () => query.mock.calls.map((c) => String(c[0])).find((sql) => sql.includes('INSERT INTO'));
-  return { ds: { transaction } as unknown as DataSource, query, insertSql };
+  return {
+    ds: { transaction, query: watermarkQuery } as unknown as DataSource,
+    query,
+    watermarkQuery,
+    insertSql,
+  };
 };
 
 const insert = (ds: DataSource) =>
@@ -120,5 +129,97 @@ describe('perf-metrics-writer row counts', () => {
     // back a string must not silently become 0 — that is the whole bug again.
     const { ds } = fakeDataSource([{ n: '21123' }]);
     await expect(upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger)).resolves.toBe(21123);
+  });
+});
+
+/**
+ * upsertPerfTestStatistics aggregates the WHOLE run on every 60s tick, so its cost
+ * grows with the run and the total across a run is quadratic in its length. On
+ * production (pg_stat_statements, 2026-09-22) it was the largest consumer of I/O on
+ * the deployment by 8x: 7055 calls, 5509 GB read, 18.5 hours of database time.
+ *
+ * The throttle runs it on a geometric cadence instead. What makes that safe is that
+ * StatisticsPipeline deletes and rewrites every one of these rows at analyze time,
+ * so a skipped tick can only ever stale the LIVE display.
+ */
+describe('perf-metrics-writer statistics growth throttle', () => {
+  const runStart = new Date('2026-01-01T00:00:00Z');
+  const at = (minutes: number) => new Date(runStart.getTime() + minutes * 60_000);
+
+  const withNow = async <T,>(now: Date, fn: () => Promise<T>): Promise<T> => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      return await fn();
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  it('recomputes on the first tick, when no pass has run yet', async () => {
+    const { ds, insertSql } = fakeDataSource([{ n: 5 }], null);
+    await expect(
+      upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger),
+    ).resolves.toBe(5);
+    expect(insertSql()).toBeDefined();
+  });
+
+  it('skips a tick that adds less than the growth fraction', async () => {
+    // Last pass covered 100 minutes; one more minute is 1%, well under the 30% default.
+    const { ds, insertSql } = fakeDataSource([{ n: 5 }], at(100));
+    const written = await withNow(at(101), () =>
+      upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger),
+    );
+    expect(written).toBe(0);
+    // The expensive statement must never have been issued.
+    expect(insertSql()).toBeUndefined();
+  });
+
+  it('recomputes once the run has grown past the fraction', async () => {
+    // Last pass covered 100 minutes; 31 more is 31%, past the 30% default.
+    const { ds, insertSql } = fakeDataSource([{ n: 7 }], at(100));
+    const written = await withNow(at(131), () =>
+      upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger),
+    );
+    expect(written).toBe(7);
+    expect(insertSql()).toContain('INSERT INTO ds_metric_statistics');
+  });
+
+  it('fails OPEN when the watermark cannot be read', async () => {
+    // A throttle that cannot read its own watermark must not be the reason a live
+    // run never gets statistics at all.
+    const { ds, insertSql } = fakeDataSource([{ n: 3 }], at(100));
+    (ds.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    const written = await withNow(at(101), () =>
+      upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger),
+    );
+    expect(written).toBe(3);
+    expect(insertSql()).toBeDefined();
+  });
+
+  it('recomputes when the watermark predates the run start', async () => {
+    // Clock skew or a restored run: a non-positive covered span is no baseline.
+    const { ds, insertSql } = fakeDataSource([{ n: 2 }], new Date(runStart.getTime() - 60_000));
+    const written = await withNow(at(1), () =>
+      upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger),
+    );
+    expect(written).toBe(2);
+    expect(insertSql()).toBeDefined();
+  });
+
+  it('PERF_TEST_STATS_MIN_GROWTH=0 restores the recompute-every-tick behaviour', async () => {
+    const prev = process.env.PERF_TEST_STATS_MIN_GROWTH;
+    process.env.PERF_TEST_STATS_MIN_GROWTH = '0';
+    try {
+      const { ds, insertSql } = fakeDataSource([{ n: 4 }], at(100));
+      const written = await withNow(at(100.01), () =>
+        upsertPerfTestStatistics(ds, 'tr-001', ['d-1'], testRun, logger),
+      );
+      expect(written).toBe(4);
+      expect(insertSql()).toBeDefined();
+    } finally {
+      if (prev === undefined) delete process.env.PERF_TEST_STATS_MIN_GROWTH;
+      else process.env.PERF_TEST_STATS_MIN_GROWTH = prev;
+    }
   });
 });

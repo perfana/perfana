@@ -64,6 +64,56 @@ Four things to know before touching this path:
 
 Related: `control-group-statistics` is registered with `softFail`, so a failed aggregation still completes its BullMQ job. The reevaluate orchestrator reads the job's return value through the exported `assertStageSucceeded()` (`apps/worker/src/workers/simple-orchestrate-reevaluate-batch.ts`) instead of logging a green tick and running ADAPT on an empty baseline. Any new stage waiting on a `softFail` pipeline has to do the same.
 
+### The live perf-test statistics pass is throttled, not incremental
+
+`upsertPerfTestStatistics` (`pipelines/helpers/perf-metrics-writer.ts`) recomputes
+`ds_metric_statistics` for the run's perf-test dashboards, and
+`PerformanceTestMetricsPipeline` calls it on every non-final pass — i.e. every 60 s tick
+of a live run. It reads the **run**, not the tick (deliberately, so the live numbers are
+cumulative rather than the latest slice), so its cost rises with the run while the ticks
+stay 60 s apart: the total across a run is **quadratic in run length**.
+
+That is not a theoretical cost. Profiled on production with `pg_stat_statements`
+(2026-09-22, ordered by `shared_blks_read`) it was the largest consumer of I/O on the
+whole deployment by a factor of 8: **7055 calls, 5509 GB read, 18.5 hours of database
+time, 9432 ms mean**, ~780 MB per call.
+
+**It runs only while a test is live**, so its effect is bounded to the run window — on
+this deployment the nightly 03:00-06:00 slot. Do not reach for it to explain a slow API
+read outside that window: the four `SlowRequest` entries that led to this investigation
+(2026-09-22 16:01, a run that had ended at 06:07) all carried `jobs=none` and
+`0waiting`, i.e. no worker job and no pool contention, and were slow on their own
+volume. Where it is worth checking is the recurring ~06:00 UTC API stall at nightly test
+end, which is exactly when the last and most expensive ticks of a long run fire.
+
+Since v0.2.96.10 `runHasGrownEnough` gates it: the pass runs only when the run has grown
+by `PERF_TEST_STATS_MIN_GROWTH` (default 0.3) of its own length since the last one, which
+turns the sum from ~93x one final pass into ~4.3x on a 3-hour run. Four things about it:
+
+1. **What makes throttling safe is that nothing a tick writes survives analysis.**
+   `StatisticsPipeline` deletes and rewrites every `ds_metric_statistics` row of the run
+   from `ds_metrics`, scoped by organisation only and with **no source filter**, so the
+   perf-test rows are in its scope. A skipped tick can only ever stale the LIVE display.
+   If that ever stops being true — a source filter, a partial rewrite — the throttle
+   becomes a correctness bug and has to go back to every tick.
+2. **The skip cannot lose a metric, only delay it.** The pass it skips would have
+   aggregated the same rows the next one will; it is the same query over a growing
+   prefix, not a slice. There is no window to miss.
+3. **The watermark is `MAX(updated_at)` over the run's own statistics rows, not
+   worker-local state.** Ticks for one run are not pinned to a worker process, so an
+   in-memory counter would be split across workers and reset by a restart. One statement
+   writes every row, so the MAX is the last pass's timestamp exactly.
+4. **It fails OPEN.** A throttle that cannot read its own watermark must not be the
+   reason a live run never gets statistics; any error there runs the pass and warns.
+
+The real fix is incremental accumulation — every aggregate in that statement is
+combinable (`count`/`sum_value`/`sum_sq_value` add, `min`/`max` extend, `pct_agg` rolls
+up), so a stable-prefix accumulator plus a recomputed tail would make each tick O(tick)
+instead of O(run). That needs somewhere to keep the stable half separate from the
+published total, i.e. a migration, and it was not done here. `ponytail:` throttle with a
+known ceiling — ~4.3x one pass per run; upgrade to the accumulator if that still shows on
+the I/O profile.
+
 ### The transaction rollup is written in two halves, and one can be silently empty
 
 `transaction-stats-rollup` writes `test_run_transaction_stats` (from `transactions`) and `test_run_sampler_stats` (from `requests_raw`) in one transaction. It runs at position 4 of the analyze pipeline, ~0.2 s after the run is marked completed, and `requests_raw` ingestion can still be in flight then — observed up to 36 s past `end_time`. The transaction half succeeds, the sampler half aggregates an empty table, and the whole thing **commits looking healthy**. Nothing retried it, because `getRollupStatus` reads the half that did get written and answers `ready` forever after. Every transaction row-expand then falls to the CAGG path: 95 ms warm / 737 ms cold against 0.95 ms for the rollup read, on a 1.4 M-request run. Six of the ten most recent runs on the deploy where this was found were in that state.
