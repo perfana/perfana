@@ -419,7 +419,9 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       // Statistics are recomputed from the rows just written rather than from a
       // second and third copy of them in the heap. See upsertPerfTestStatistics.
       stepStart = Date.now();
-      await upsertPerfTestStatistics(
+      // 0 means the growth throttle skipped this tick, not that nothing matched —
+      // see runHasGrownEnough in perf-metrics-writer.ts.
+      const statsWritten = await upsertPerfTestStatistics(
         this.db.dataSource,
         testRunId,
         this.dashboardManager.getResolvedDashboardIds(),
@@ -431,7 +433,10 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
         duration: Date.now() - stepStart,
         count: metricsCreated
       });
-      this.logger.info(`💾 Saved ${metricsCreated} ds_metrics records and computed statistics`);
+      this.logger.info(
+        `💾 Saved ${metricsCreated} ds_metrics records` +
+          (statsWritten > 0 ? ' and computed statistics' : ' (statistics unchanged this tick)')
+      );
     }
 
     // Save all compare configs to database
