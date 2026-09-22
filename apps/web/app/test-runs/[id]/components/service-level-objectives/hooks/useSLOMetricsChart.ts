@@ -23,6 +23,8 @@ import {
   buildBarTrace,
   buildLineTrace,
   buildRequirementTrace,
+  buildTrendLineTrace,
+  analysisWindowBounds,
   buildChartLayout,
   buildChartConfig,
 } from '../utils/slo-chart-utils';
@@ -129,11 +131,20 @@ export function useSLOMetricsChart({
       : (metricsData as DSMetric).data;
     if (!dataPoints || dataPoints.length === 0) return;
 
+    const isTrend = checkResult.evaluate_type === 'trend';
     const requirementValue = checkResult.requirement?.value || 0;
     const panelYAxesFormat = checkResult.metric_unit || '';
 
-    // Group data by metric name
-    const metricGroups = groupDataByMetricName(dataPoints, targetName);
+    // Group data by metric name. A selected target that matches no charted
+    // series -- an artificial validate_with_default_if_no_data row, which no
+    // dashboard produced, or a name that drifted from ds_metrics -- would leave
+    // this empty and render a titled but blank chart, because hasData below is
+    // computed from the raw fetch and would still be true. Fall back to every
+    // series rather than show nothing.
+    const selectedGroups = groupDataByMetricName(dataPoints, targetName);
+    const metricGroups = selectedGroups.size > 0
+      ? selectedGroups
+      : groupDataByMetricName(dataPoints);
 
     // Find global min/max for unit conversion
     const { min: globalMin, max: globalMax } = findGlobalDataRange(metricGroups);
@@ -156,11 +167,12 @@ export function useSLOMetricsChart({
       metricGroups
     );
 
-    // Create traces for each metric
-    const metricTraces: unknown[] = [];
-    let colorIndex = 0;
-    let hasTimeSeriesData = false;
-
+    // Collect every series before building a trace. A single-point series drawn
+    // as a bar puts Plotly's x-axis into CATEGORY mode, which turns each
+    // timestamp of every other series into its own tick label -- the wall of
+    // full dates that made this chart unreadable. Bars only when nothing on the
+    // chart is a time series.
+    const series: { name: string; x: Date[]; y: number[] }[] = [];
     metricGroups.forEach((metricData, groupMetricName) => {
       const x: Date[] = [];
       const y: number[] = [];
@@ -172,31 +184,60 @@ export function useSLOMetricsChart({
         }
       });
 
-      if (x.length === 0) return;
+      if (x.length > 0) series.push({ name: groupMetricName, x, y });
+    });
 
+    const hasTimeSeriesData = series.some(s => s.x.length > 1);
+
+    // The analysis window the worker fitted the trend over -- the same bounds
+    // buildChartLayout shades to, read from one place so they cannot drift.
+    const { start: windowStart, end: windowEnd } = analysisWindowBounds(
+      testRunStart,
+      testRunEnd,
+      testRun?.analysis_start_offset,
+      testRun?.analysis_end_offset
+    );
+
+    const metricTraces: unknown[] = [];
+    series.forEach(({ name, x, y }, colorIndex) => {
       const metricColor = METRIC_COLOR_PALETTE[colorIndex % METRIC_COLOR_PALETTE.length];
-      colorIndex++;
 
-      // Check if this metric meets requirements (only if we have a specific target)
-      const meetsRequirement = targetName
-        ? y.every(value => value <= adjustedRequirement)
-        : true;
-      const finalColor = targetName && !meetsRequirement ? theme.palette.error.main : metricColor;
+      // A trend SLO judges the slope, not the level, so the "every value under
+      // the requirement" test below is meaningless for it -- and its
+      // requirement is in %/h, a different unit from this axis. Colour from the
+      // verdict the worker already reached instead.
+      const trendTarget = isTrend
+        ? checkResult.targets?.find(t => t.target === name)
+        : undefined;
+      const finalColor = isTrend
+        ? (trendTarget?.meets_requirement === false ? theme.palette.error.main : metricColor)
+        : targetName && !y.every(value => value <= adjustedRequirement)
+          ? theme.palette.error.main
+          : metricColor;
 
-      if (x.length === 1) {
+      if (x.length === 1 && !hasTimeSeriesData) {
         metricTraces.push(
-          buildBarTrace(groupMetricName, y[0], finalColor, adjustedFormat, colors.textColor)
+          buildBarTrace(name, y[0], finalColor, adjustedFormat, colors.textColor)
         );
-      } else {
-        hasTimeSeriesData = true;
-        metricTraces.push(
-          buildLineTrace(groupMetricName, x, y, finalColor, colors.bgColor, adjustedFormat)
+        return;
+      }
+
+      metricTraces.push(
+        buildLineTrace(name, x, y, finalColor, colors.bgColor, adjustedFormat)
+      );
+
+      const pctPerHour = Number(trendTarget?.value);
+      if (isTrend && Number.isFinite(pctPerHour)) {
+        const fit = buildTrendLineTrace(
+          name, x, y, pctPerHour, windowStart, windowEnd, finalColor
         );
+        if (fit) metricTraces.push(fit);
       }
     });
 
-    // Add requirement line if we have a requirement value
-    const data: unknown[] = adjustedRequirement
+    // Add requirement line if we have a requirement value. Never for a trend:
+    // its requirement is %/h and this axis is the panel's own unit.
+    const data: unknown[] = adjustedRequirement && !isTrend
       ? [
           ...metricTraces,
           buildRequirementTrace(
@@ -220,6 +261,8 @@ export function useSLOMetricsChart({
       colors,
       theme.typography.fontFamily as string
     );
+    // The fitted line needs a legend entry to say what it is.
+    if (isTrend) layout.showlegend = true;
 
     // Build config
     const config = buildChartConfig(metricName);
@@ -227,7 +270,7 @@ export function useSLOMetricsChart({
     setPlotData(data);
     setPlotLayout(layout);
     setPlotConfig(config);
-  }, [metricsData, checkResult.requirement?.value, checkResult.metric_unit, targetName, testRun, theme, metricName]);
+  }, [metricsData, checkResult.requirement?.value, checkResult.metric_unit, checkResult.evaluate_type, checkResult.targets, targetName, testRun, theme, metricName]);
 
   // Fetch data on mount and when dependencies change
   useEffect(() => {
