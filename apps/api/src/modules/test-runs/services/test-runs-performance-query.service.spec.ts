@@ -3352,13 +3352,14 @@ const chainRow = (
     it('returns buckets with throughput, avgResponseTime, errorsPerSecond when data exists', async () => {
       // Arrange
       const duration = 600; // 10 minutes
-      const bucketSize = Math.max(5, Math.min(60, Math.round(duration / 100))); // = 6
 
       (testRunRepo.query as jest.Mock)
-        .mockResolvedValueOnce([{ start_time: '2024-01-01T10:00:00Z', duration }])
+        .mockResolvedValueOnce([
+          { start_time: '2024-01-01T10:00:00Z', end_time: '2024-01-01T10:10:00Z', duration, sut_name: 'SUT', test_environment: 'acc' },
+        ])
         .mockResolvedValueOnce([
           { time_seconds: '0', throughput: '25.5', avg_response_time: '120.3', errors_per_second: '0.5' },
-          { time_seconds: '6', throughput: '30.2', avg_response_time: '110.0', errors_per_second: '0' },
+          { time_seconds: '5', throughput: '30.2', avg_response_time: '110.0', errors_per_second: '0' },
         ]);
 
       // Act
@@ -3367,7 +3368,8 @@ const chainRow = (
       // Assert
       expect(result).not.toBeNull();
       expect(result!.duration).toBe(duration);
-      expect(result!.bucketSizeSeconds).toBe(bucketSize);
+      // 600/100 = 6, rounded to the nearest multiple of 5 so the 5s CAGG composes exactly.
+      expect(result!.bucketSizeSeconds).toBe(5);
       expect(result!.buckets).toHaveLength(2);
       expect(result!.buckets[0]).toMatchObject({
         timeSeconds: 0,
@@ -3376,11 +3378,73 @@ const chainRow = (
         errorsPerSecond: 0.5,
       });
       expect(result!.buckets[1]).toMatchObject({
-        timeSeconds: 6,
+        timeSeconds: 5,
         throughput: 30.2,
         avgResponseTime: 110.0,
         errorsPerSecond: 0,
       });
+    });
+
+    it('reads the 5s continuous aggregates, with the bucket bounds as bind parameters', async () => {
+      // A CTE holding the bounds hides them from the planner, which turns the bucket
+      // range from an index condition into a Join Filter and seq-scans the whole CAGG
+      // (measured: 58.5s vs 6s for the raw query it replaces). Pin the shape.
+      (testRunRepo.query as jest.Mock)
+        .mockResolvedValueOnce([
+          { start_time: '2024-01-01T10:00:00Z', end_time: '2024-01-01T10:10:00Z', duration: 600, sut_name: 'SUT', test_environment: 'acc' },
+        ])
+        .mockResolvedValueOnce([
+          { time_seconds: '0', throughput: '1', avg_response_time: '10', errors_per_second: '0' },
+        ]);
+
+      await service.getSummaryTimeseries(TEST_RUN_ID);
+
+      const aggCall = (testRunRepo.query as jest.Mock).mock.calls[1];
+      expect(aggCall[0]).toContain('transactions_5s');
+      // Both families: an ordinary JMeter run populates transactions AND requests_raw.
+      expect(aggCall[0]).toContain('requests_raw_5s');
+      expect(aggCall[0]).not.toContain('FROM test_runs');
+      expect(aggCall[1]).toEqual(['SUT', 'acc', '2024-01-01T10:00:00Z', '2024-01-01T10:10:00Z', 5]);
+    });
+
+    it('falls back to the raw scan when the continuous aggregates return nothing', async () => {
+      // SUT-imported runs, systems filtered by RLS, and deploys whose refresh policies
+      // are starved of worker slots all present as an empty CAGG read.
+      (testRunRepo.query as jest.Mock)
+        .mockResolvedValueOnce([
+          { start_time: '2024-01-01T10:00:00Z', end_time: '2024-01-01T10:10:00Z', duration: 600, sut_name: 'SUT', test_environment: 'acc' },
+        ])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { time_seconds: '0', throughput: '9', avg_response_time: '99', errors_per_second: '0' },
+        ]);
+
+      const result = await service.getSummaryTimeseries(TEST_RUN_ID);
+
+      const rawCall = (testRunRepo.query as jest.Mock).mock.calls[2];
+      expect(rawCall[0]).toContain('FROM transactions');
+      expect(rawCall[0]).toContain('FROM requests_raw');
+      expect(result!.buckets[0]).toMatchObject({ throughput: 9, avgResponseTime: 99 });
+    });
+
+    it('skips the aggregate read when the system under test is not visible', async () => {
+      // The LEFT JOIN means an RLS-filtered system yields a null name rather than a
+      // missing run; that must degrade to the raw scan, not to a 404.
+      (testRunRepo.query as jest.Mock)
+        .mockResolvedValueOnce([
+          { start_time: '2024-01-01T10:00:00Z', end_time: null, duration: 600, sut_name: null, test_environment: null },
+        ])
+        .mockResolvedValueOnce([
+          { time_seconds: '0', throughput: '3', avg_response_time: '30', errors_per_second: '0' },
+        ]);
+
+      const result = await service.getSummaryTimeseries(TEST_RUN_ID);
+
+      // Only two queries: metadata, then straight to the raw scan.
+      const secondCall = (testRunRepo.query as jest.Mock).mock.calls[1];
+      expect(secondCall[0]).toContain('FROM transactions');
+      expect(secondCall[0]).not.toContain('transactions_5s');
+      expect(result!.buckets).toHaveLength(1);
     });
 
     it('resolves UUID to test_run_id before querying', async () => {

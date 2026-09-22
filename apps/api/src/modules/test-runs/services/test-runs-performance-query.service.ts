@@ -33,6 +33,18 @@ export interface SummaryTimeseriesResponse {
 }
 
 /**
+ * One row of the summary timeseries as Postgres hands it back. node-postgres returns
+ * numeric and float8 as strings, so both source queries are typed the same way and
+ * `getSummaryTimeseries` maps them through Number() once.
+ */
+interface SummaryTimeseriesRow {
+  time_seconds: string;
+  throughput: string;
+  avg_response_time: string;
+  errors_per_second: string;
+}
+
+/**
  * Boundary-safe Apdex score SQL fragment. Apdex = satisfied + 0.5·tolerating
  * (see worker `ApdexCalculator`), approximated from a t-digest as
  * `rank(T) + (rank(4T) - rank(T)) / 2`.
@@ -2885,6 +2897,102 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
+   * The ~100 bucket overview, read from the 5s continuous aggregates.
+   *
+   * `transactions_5s` / `requests_raw_5s` hold `n` and `avg_rt` per 5 second bucket
+   * already, so this reads thousands of pre-aggregated rows where the raw scan reads
+   * millions of samples to answer the same question. On a 3h07m production run that
+   * raw scan was 5,041,887 rows for ~360 output buckets, and pg_stat_statements ranked
+   * it second on the whole deployment by blocks read (525 calls, 686 GB).
+   *
+   * Three things about the shape are load-bearing:
+   *
+   *  - **The bounds are bind parameters, not a CTE.** Written as a `WITH run AS (SELECT
+   *    … FROM test_runs …)` joined to the aggregate, the planner cannot see the values,
+   *    the bucket range degrades from an index condition to a `Join Filter`, and it
+   *    sequentially scans the entire CAGG. Measured on the same run: 58.5 SECONDS,
+   *    32.2M rows scanned with 14.0M discarded by the filter — ten times worse than the
+   *    raw query this replaces. Resolve the run first, pass scalars.
+   *  - **Both families are unioned.** The comment this replaces claimed only one of
+   *    `transactions` / `requests_raw` would have rows ("JMeter/Gatling vs JTL-imported").
+   *    That is not true — an ordinary JMeter run populates both, and dropping either
+   *    loses most of the samples. Verified: raw and CAGG agree at 5542 samples exactly.
+   *  - **`time_bucket` takes the run's own 5s-floored start as its origin.** Left to the
+   *    default it aligns to the wall clock, so the first bucket can precede the run and
+   *    `time_seconds` goes negative. Flooring to 5s keeps the origin on a CAGG boundary,
+   *    which is what makes the rollup exact; the cost is that buckets can sit up to 4s
+   *    earlier in absolute time than the raw query put them. Invisible at ~100 buckets
+   *    over a multi-hour run, but it is a real change, not a rounding detail.
+   */
+  private async querySummaryTimeseriesFromCaggs(
+    sutName: string | null,
+    testEnvironment: string | null,
+    startTime: string,
+    endTime: string,
+    bucketSizeSeconds: number,
+  ): Promise<SummaryTimeseriesRow[]> {
+    if (!sutName || !testEnvironment) return [];
+
+    return withRequestEm(this.testRunRepo).query(
+      `WITH origin AS (
+         SELECT time_bucket('5 seconds'::interval, $3::timestamptz) AS o
+       ),
+       agg AS (
+         SELECT bucket, n, avg_rt
+           FROM transactions_5s
+          WHERE system_under_test = $1
+            AND test_environment  = $2
+            AND bucket >= $3::timestamptz
+            AND bucket <= $4::timestamptz
+         UNION ALL
+         SELECT bucket, n, avg_rt
+           FROM requests_raw_5s
+          WHERE system_under_test = $1
+            AND test_environment  = $2
+            AND bucket >= $3::timestamptz
+            AND bucket <= $4::timestamptz
+       )
+       SELECT
+         EXTRACT(EPOCH FROM (
+           time_bucket(make_interval(secs => $5::int), agg.bucket, origin.o) - origin.o
+         ))::float8                            AS time_seconds,
+         SUM(agg.n)::float / $5                AS throughput,
+         SUM(agg.avg_rt * agg.n) / NULLIF(SUM(agg.n), 0) AS avg_response_time,
+         0                                     AS errors_per_second
+       FROM agg CROSS JOIN origin
+       GROUP BY 1
+       ORDER BY 1`,
+      [sutName, testEnvironment, startTime, endTime, bucketSizeSeconds],
+    );
+  }
+
+  /**
+   * The pre-v0.2.96.10 raw scan, kept as the fallback for runs the CAGGs cannot answer.
+   * Unchanged on purpose: it is the reference the CAGG path was verified against.
+   */
+  private async querySummaryTimeseriesFromRaw(
+    resolvedTestRunId: string,
+    startTime: string,
+    bucketSizeSeconds: number,
+  ): Promise<SummaryTimeseriesRow[]> {
+    return withRequestEm(this.testRunRepo).query(
+      `SELECT
+         FLOOR(EXTRACT(EPOCH FROM (t.time - $2::timestamptz)) / $3) * $3 AS time_seconds,
+         COUNT(*)::float / $3 AS throughput,
+         AVG(t.response_time) AS avg_response_time,
+         0 AS errors_per_second
+       FROM (
+         SELECT time, response_time FROM transactions   WHERE test_run_id = $1
+         UNION ALL
+         SELECT time, response_time FROM requests_raw   WHERE test_run_id = $1
+       ) t
+       GROUP BY 1
+       ORDER BY 1`,
+      [resolvedTestRunId, startTime, bucketSizeSeconds],
+    );
+  }
+
+  /**
    * Return time-bucketed performance data for the analysis time range dialog chart.
    * Buckets span the full test duration (ramp_up excluded via the transactions.ramp_up column).
    * Returns null when the test run cannot be found or has no JTL/transactions data.
@@ -2894,48 +3002,71 @@ export class TestRunsPerformanceQueryService {
       const resolvedTestRunId = await this.resolveTestRunId(testRunIdOrUuid).catch(() => null);
       if (!resolvedTestRunId) return null;
 
-      // Fetch test run metadata: start_time and duration
-      const metaRows: Array<{ start_time: string; duration: number }> = await withRequestEm(
-        this.testRunRepo,
-      ).query(`SELECT start_time, duration FROM test_runs WHERE test_run_id = $1 LIMIT 1`, [
-        resolvedTestRunId,
-      ]);
+      // Fetch test run metadata. The SUT name and environment are what the 5s CAGGs
+      // are keyed by (they carry no test_run_id), so they come back in the same round
+      // trip; LEFT JOIN because a system filtered by RLS must degrade to the raw scan
+      // rather than turn this into a 404.
+      const metaRows: Array<{
+        start_time: string;
+        end_time: string | null;
+        duration: number;
+        sut_name: string | null;
+        test_environment: string | null;
+      }> = await withRequestEm(this.testRunRepo).query(
+        `SELECT tr.start_time, tr.end_time, tr.duration,
+                sut.name AS sut_name, tr.test_environment
+           FROM test_runs tr
+           LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+          WHERE tr.test_run_id = $1
+          LIMIT 1`,
+        [resolvedTestRunId],
+      );
 
       const meta = metaRows[0];
       if (!meta || meta.duration == null) return null;
 
-      const { start_time, duration } = meta;
+      const { start_time, end_time, duration, sut_name, test_environment } = meta;
       const durationNum = Number(duration);
       const BUCKET_TARGET_COUNT = 100;
       const MIN_BUCKET_SECONDS = 5;
       const MAX_BUCKET_SECONDS = 60;
-      const bucketSizeSeconds = Math.max(MIN_BUCKET_SECONDS, Math.min(MAX_BUCKET_SECONDS, Math.round(durationNum / BUCKET_TARGET_COUNT)));
-
-      // Query bucketed stats across the FULL test run (no ramp_up filter) so the
-      // analysis time range dialog can show the user data outside the current
-      // analysis window and let them choose new boundaries.
-      // UNION ALL covers both JMeter/Gatling runs (transactions table) and
-      // JTL-imported runs (requests_raw table) — only one will have rows.
-      const bucketRows: Array<{
-        time_seconds: string;
-        throughput: string;
-        avg_response_time: string;
-        errors_per_second: string;
-      }> = await withRequestEm(this.testRunRepo).query(
-        `SELECT
-           FLOOR(EXTRACT(EPOCH FROM (t.time - $2::timestamptz)) / $3) * $3 AS time_seconds,
-           COUNT(*)::float / $3 AS throughput,
-           AVG(t.response_time) AS avg_response_time,
-           0 AS errors_per_second
-         FROM (
-           SELECT time, response_time FROM transactions   WHERE test_run_id = $1
-           UNION ALL
-           SELECT time, response_time FROM requests_raw   WHERE test_run_id = $1
-         ) t
-         GROUP BY 1
-         ORDER BY 1`,
-        [resolvedTestRunId, start_time, bucketSizeSeconds],
+      // Rounded to a multiple of CAGG_BUCKET_SECONDS so the 5s continuous aggregate
+      // composes exactly. Without this a 730s run picks 7s, which no whole number of
+      // 5s buckets adds up to, and the rollup below would silently misattribute.
+      const CAGG_BUCKET_SECONDS = 5;
+      const rawBucketSize = Math.max(
+        MIN_BUCKET_SECONDS,
+        Math.min(MAX_BUCKET_SECONDS, Math.round(durationNum / BUCKET_TARGET_COUNT)),
       );
+      const bucketSizeSeconds =
+        Math.round(rawBucketSize / CAGG_BUCKET_SECONDS) * CAGG_BUCKET_SECONDS;
+
+      // Buckets span the FULL test run (no ramp_up filter) so the analysis time range
+      // dialog can show data outside the current analysis window and let the user pick
+      // new boundaries.
+      const endBound =
+        end_time ?? new Date(new Date(start_time).getTime() + durationNum * 1000).toISOString();
+
+      let bucketRows = await this.querySummaryTimeseriesFromCaggs(
+        sut_name,
+        test_environment,
+        start_time,
+        endBound,
+        bucketSizeSeconds,
+      );
+
+      // Falls back for anything the CAGGs cannot answer: a SUT-imported run, a run
+      // whose system is filtered by RLS, a deploy whose refresh policies are starved
+      // of worker slots (see the Postgres worker budget note in the root CLAUDE.md).
+      // An empty result is the only signal available — the CAGGs are real-time, so a
+      // missing materialisation reads as "no rows" rather than as an error.
+      if (bucketRows.length === 0) {
+        bucketRows = await this.querySummaryTimeseriesFromRaw(
+          resolvedTestRunId,
+          start_time,
+          bucketSizeSeconds,
+        );
+      }
 
       if (bucketRows.length === 0) return null;
 
