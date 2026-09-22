@@ -170,6 +170,133 @@ if (result.conflict) {
 
 Example: `POST /api/systems-under-test` — creates the SUT (with optional environments and workloads) or returns the existing one with 409.
 
+### `virtual_users` has no time-only index, and that is the fix, not an omission
+
+TimescaleDB creates a default index on the time column of every hypertable.
+`virtual_users_time_idx` was dropped in v0.2.96.10 (migration 1811) because no query in
+this repo can use it and the planner kept choosing it anyway, at ~50x the buffers.
+
+Measured on production 2026-09-22, `GET /test-runs/:id/virtual-users` on a 3h07m run,
+both plans warm and with **literal** timestamps:
+
+| via | buffers | time | rows read -> returned |
+|---|---|---|---|
+| `virtual_users_time_idx` | 592,940 | 473 ms | 590,949 -> 261,597 |
+| `idx_virtual_users_test_run_id_time` | 11,975 | 265 ms | 313,617 -> 261,597 |
+
+The extra 329,352 rows are other tests. Four nightly runs share the 7-day chunk's time
+range, so the time index matches all of them and `test_run_id` is only a post-filter
+(`Rows Removed by Filter: 109784` per worker). Deployment-wide that index had read
+**1.65 billion tuples**, with `idx_tup_fetch` at 99.97% of `idx_tup_read`.
+
+Four things worth keeping straight:
+
+1. **It is not stale statistics, so do not go looking for an ANALYZE to schedule.** The
+   chunk had been autoanalyzed 52 times, most recently the same day, and `test_run_id`
+   carries all 18 of its distinct values in the MCV list. It is correlated-predicate
+   underestimation: each nightly run occupies its own band of the night, so the two
+   predicates are strongly correlated and Postgres multiplies their selectivities as if
+   they were not — estimating 26,315 rows per worker against 87,199 actual. `time` also
+   has correlation 0.9974, which makes a range scan on it look nearly sequential.
+2. **Extended statistics would not have held.** `CREATE STATISTICS` on `(test_run_id,
+   time)` is the textbook answer, but the planner reads the **chunk's** statistics for a
+   per-chunk scan and the object is not propagated to chunks created later, so it would
+   silently stop working for every new chunk. Same parent-versus-chunk trap as
+   `ds_metrics_groupkey`, in the opposite direction — see "`ds_metrics` carries one
+   group-key statistics object, on the PARENT" in [apps/worker/CLAUDE.md](../worker/CLAUDE.md).
+3. **Every reader must keep filtering by `test_run_id`.** That is what makes the drop
+   safe: the five read sites (the two queries in `test-runs-performance-query.service.ts`,
+   the two in `report-data-fetcher.service.ts`, and the worker's `scenario-processors.ts`)
+   all do, and the composite index carries `time` second so a time-ordered scan within one
+   run is still fully index-served. A new query filtering on time alone would fall back to
+   a scan bounded by chunk exclusion — correct, but much slower than it looks.
+4. **Removing the `CREATE INDEX` from `schema-sql.ts` would not have worked on its own.**
+   `createHypertables()` calls `create_hypertable()` with the default
+   `create_default_indexes => TRUE`, which recreates a time index when none exists, so it
+   would come back under the same name on every new install. The migration runs after the
+   consolidated schema so greenfield and existing databases share one code path.
+
+**The other four hypertables were swept on 2026-09-22 and only `virtual_users` was
+droppable.** Do not generalise this migration; the sweep is recorded here so nobody
+repeats it:
+
+| hypertable | per-run + time window query | CAGG reads it by time? | verdict |
+|---|---|---|---|
+| `virtual_users` | `virtual_users_time_idx`, 49x buffers | **no** | dropped (1811) |
+| `transactions` | `transactions_time_idx`, 7462 ms / 1.30M buffers vs 804 ms / 815k | **yes**, 2 jobs every 30 s | **keep** |
+| `requests_raw` | `Parallel Seq Scan`, 2453 ms vs 1017 ms | **yes**, 2 jobs every 30 s | **keep** |
+| `requests_error` | `idx_requests_error_test_run_id_time`, correct | yes | fine |
+| `ds_metrics` | `uniq_ds_metrics_upsert`, Index Only, correct | no CAGG | fine |
+
+Two things that sweep settled:
+
+- **`transactions` has the identical trap and still must not be dropped.** Its time index
+  is what the `transactions_5s` / `transactions_passed_5s` refresh policies scan — proven
+  directly, `Index Scan using _hyper_4_566_chunk_transactions_time_idx`, 45,660 rows in
+  116 ms, and the ~1.49M recorded scans line up with the two jobs' 74,284 + ~74,000 runs.
+  Drop it and every refresh becomes a sequential scan of a multi-million-row chunk twice a
+  minute. `requests_raw` and `requests_error` are the same story. The per-run cost is real
+  but it is the smaller of the two, and the biggest caller of that shape —
+  `getSummaryTimeseries` — now reads the CAGGs instead (above).
+- **`ds_metrics` does not have the trap**, even though it has a time index and no CAGG.
+  `uniq_ds_metrics_upsert` carries `time` as its fifth column, so a per-run query with a
+  window gets a Parallel Index Only Scan with both predicates in the `Index Cond`. Its
+  time index still shows 40,679 scans over 6.4 billion tuples, which is not application
+  traffic — most likely the compression policy walking chunks — so it is not a drop
+  candidate without establishing what those scans are.
+
+Do not "restore the missing time index" on a hypertable that has a composite leading with
+the column every query filters on. Verified on TimescaleDB 2.28.3: after the drop, a newly
+created chunk carries only `idx_virtual_users_test_run_id_time`.
+
+### The analysis-window overview reads the 5s CAGGs, and its bounds must be bind parameters
+
+`getSummaryTimeseries` (`modules/test-runs/services/test-runs-performance-query.service.ts`)
+backs the ~100 bucket chart in the analysis time range dialog. It used to aggregate raw
+`transactions` + `requests_raw` for the whole run to produce those buckets: 5,041,887 rows
+for ~360 output points on a 3h07m production run, and second on the entire deployment by
+blocks read in `pg_stat_statements` (525 calls, 686 GB, 7784 ms mean). Since v0.2.96.10 it
+reads `transactions_5s` / `requests_raw_5s`, which already hold `n` and `avg_rt` per 5 s
+bucket, and falls back to the raw scan when they answer with nothing.
+
+Four things are load-bearing, and three of them were learned by measuring the wrong version
+first:
+
+1. **Resolve the run, then pass scalars. Never join a `run` CTE to the aggregate.** Written
+   as `WITH run AS (SELECT … FROM test_runs …)` joined to the CAGG, the planner cannot see
+   the bounds: the bucket range degrades from an `Index Cond` to a `Join Filter` and it
+   sequentially scans the whole aggregate. Measured on the same run: **58.5 seconds**,
+   32.2 M rows scanned with 14.0 M discarded by the filter — ten times worse than the raw
+   query it was meant to replace. With the bounds as bind parameters it is one chunk per
+   CAGG and single-digit milliseconds. `getThroughputStats`' `loadThroughputRunInfo` is the
+   existing example of the same round-trip-first shape (issue #288).
+2. **Union both families.** The comment this replaced claimed only one of `transactions` /
+   `requests_raw` would hold rows ("JMeter/Gatling vs JTL-imported"). That is false — an
+   ordinary JMeter run populates both (983 and 4559 on a local run), and reading either
+   alone silently loses most of the samples. Verified equal: raw and CAGG both total 5542.
+3. **The bucket size is rounded to a multiple of 5** so the 5 s aggregate composes exactly.
+   A 730 s run picked 7 s before, which no whole number of 5 s buckets adds up to. This is
+   visible in the response: `bucketSizeSeconds` can now differ by a second or two from what
+   the old arithmetic produced, which is why the spec pins it.
+4. **`time_bucket` takes the run's own 5 s-floored start as its origin.** On the default
+   origin it aligns to the wall clock, so the first bucket can precede the run and
+   `time_seconds` goes negative. Flooring to 5 s keeps the origin on a CAGG boundary, which
+   is what makes the rollup exact; the price is that buckets can sit up to 4 s earlier in
+   absolute time than the raw query put them, so per-bucket values differ by a few percent
+   as samples move across a boundary. Invisible at ~100 buckets over a multi-hour run, but
+   it is a real change and not a rounding detail.
+
+The fallback fires on an **empty** CAGG read, which is the only signal available — the
+aggregates are real-time, so a missing materialisation reads as "no rows" rather than as an
+error. It covers SUT-imported runs, a system filtered by RLS (the metadata query joins
+`systems_under_test` with a LEFT JOIN so that degrades to the raw scan instead of a 404),
+and a deploy whose refresh policies are starved of worker slots — see the Postgres worker
+budget note in the root [CLAUDE.md](../../CLAUDE.md).
+
+Residue: `errors_per_second` is still hardcoded `0`, as it was before. The CAGGs carry
+`n_err` and could populate it for the first time, but that changes what the chart draws and
+was left out of a performance fix on purpose.
+
 ### The SUT export is large by default, and only Chrome and Edge can stream it to disk
 
 `SUT_TRANSFER_ENABLED` gates an admin-only export that streams a gzipped NDJSON bundle with no
