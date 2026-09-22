@@ -67,6 +67,8 @@ RootLayout
 - Test run comparison
 - Graph visualizations
 
+**Deep link into a card** (v0.2.96.5): `/test-runs/[id]?card=graphs|compare|trends&dashboard=<label>&panel=<id>&metric=<name>` opens the Reporting tab with that card expanded and its Dashboards → Panels → Series pickers preselected. The row context menus' **Open in Graphs / Compare / Trends** items build these links (`components/shared/metric-card-links.tsx`); the shared `MetricSeriesCascade` reads the three series params once per page load, so clearing a preselected pick is not undone by collapsing and re-expanding the card.
+
 ### Settings
 
 | Route | Description |

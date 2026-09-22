@@ -97,6 +97,13 @@ export function isAllAggregatedDashboard(labelOrUid?: string | null): boolean {
     || labelOrUid === ALL_AGGREGATED_DASHBOARD_UID;
 }
 
+/** The Avg panel a percentile RT panel collapses onto (101 / 201), or null for any other panel. */
+export function rtKeeperPanelId(panelId: number): number | null {
+  const spec = getAggregateSpec(panelId);
+  if (!spec || !RT_AGG_METRICS.has(spec.metric) || spec.stat === 'avg') return null;
+  return spec.metric === 'transaction_response_time' ? 101 : 201;
+}
+
 /**
  * Rewrite a legacy per-percentile aggregated series onto the keeper panel.
  *
@@ -109,13 +116,6 @@ export function isAllAggregatedDashboard(labelOrUid?: string | null): boolean {
  * Returns the input unchanged for anything that is not one of those panels, so it
  * is safe to run over every restored series.
  */
-/** The Avg panel a percentile RT panel collapses onto (101 / 201), or null for any other panel. */
-export function rtKeeperPanelId(panelId: number): number | null {
-  const spec = getAggregateSpec(panelId);
-  if (!spec || !RT_AGG_METRICS.has(spec.metric) || spec.stat === 'avg') return null;
-  return spec.metric === 'transaction_response_time' ? 101 : 201;
-}
-
 export function normaliseLegacyAggregatedSeries<
   T extends { panelId: number; panelTitle?: string; metricName?: string; isAggregated?: boolean },
 >(series: T): T {

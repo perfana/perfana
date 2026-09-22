@@ -611,7 +611,11 @@ per-bucket series. Five things about it are deliberate:
    benchmark's own label column is nullable and user-editable, so it is neither safe to dereference
    nor to scope by. The `all aggregated` dashboard pools every scenario into the one `All aggregated`
    series; the processors label a NULL scenario `default` where the rollup writes `''`, and the query
-   maps between them. The perf-test source is proven by an `EXISTS` on `metrics_sources`
+   maps between them. The web's Performance Analysis overview has a third spelling,
+   `NO_SCENARIO_LABEL`, and `scenarioFilterKey` (`performance-analysis/utils/scenario-filter.ts`)
+   maps `default` onto it for the row menus' same-tab "View in Performance Analysis" drill-down — so
+   a scenario literally named `default` cannot be drilled into (TODOS.md, "Row-menu drill-downs").
+   The perf-test source is proven by an `EXISTS` on `metrics_sources`
    `(system_under_test_id, test_environment, external_ref = dashboard_uid)` rather than the
    `application_dashboards.metrics_source_id` FK, which `DashboardManager` never populates for these
    rows (TODOS.md).
@@ -630,7 +634,13 @@ per-bucket series. Five things about it are deliberate:
    `apps/worker/src/constants/performance-metrics.ts` (drop the transaction prefix when it is NULL,
    `''`, `overall` or equal to the sampler) is used by the writer (`requests-processor.ts`) and by
    this reader. A second copy would drift silently: the failure is a map miss and a bucket-mean
-   fallback, not an error.
+   fallback, not an error. The web has an unavoidable TypeScript mirror of both rules —
+   `perfTestSeriesRef` in `apps/web/app/test-runs/[id]/components/shared/metric-card-links.tsx`
+   composes the label (`Performance test metrics <scenario>`, NULL scenario `default`) and the
+   `transaction.sampler` name for the row menus' "Open in Graphs / Compare / Trends" links
+   (v0.2.96.5). Its failure mode is just as silent: the cascade disarms at the first level it
+   cannot match and the series picker stays empty. `metric-card-links.test.ts` pins the prefix rule;
+   change `samplerMetricNameSql` or `generateScenarioDashboardLabel` and change that mirror too.
 5. **It inherits the rollup's stale states.** The verdict is now pinned to a table that can be
    *partial* (a sampler half written while `requests_raw` was still ingesting) or *behind* (an
    analysis-window change enqueues the rollup and the re-evaluate independently), and the fallback
