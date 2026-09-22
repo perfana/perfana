@@ -346,8 +346,9 @@ export class AutoConfigUpdatesService {
       this.logger.log(
         `Upserting benchmark for profile benchmark ${profileBenchmark.id} and test run ${testRun.testRunId}`,
       );
-      this.logger.log(`Profile benchmark data: ${JSON.stringify(profileBenchmark)}`);
-      this.logger.log(`Test run data: ${JSON.stringify(testRun)}`);
+      // debug: a perf-test row fans out to every scenario, and this runs once per scenario.
+      this.logger.debug(`Profile benchmark data: ${JSON.stringify(profileBenchmark)}`);
+      this.logger.debug(`Test run data: ${JSON.stringify(testRun)}`);
       this.logger.log(`Application dashboard ID: ${applicationDashboard.id}`);
 
       // Get system_under_test_id with organization filtering
@@ -428,6 +429,9 @@ export class AutoConfigUpdatesService {
         // They must be set directly from the profile benchmark
         requirement_operator: profileBenchmark.requirement_operator,
         requirement_value: profileBenchmark.requirement_value,
+        // The worker reads the column (`benchmark.evaluate_type || 'mean'`), never
+        // configuration.evaluateType — left unset, a `max` profile SLO was judged as an average.
+        evaluate_type: profileBenchmark.evaluate_type,
         metric_unit: profileBenchmark.metric_unit,
         exclude_ramp_up_time: profileBenchmark.exclude_ramp_up_time,
         average_all: profileBenchmark.average_all,

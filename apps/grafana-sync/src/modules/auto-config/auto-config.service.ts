@@ -99,8 +99,12 @@ export class AutoConfigService {
       return null;
     }
 
-    if (dashboards.length === 0) {
-      this.logger.log('No auto config dashboards found. AutoConfig processing skipped.');
+    // A perf-test profile benchmark needs no profile dashboard, so an org with only those
+    // still has work to do here.
+    if (dashboards.length === 0 && benchmarks.length === 0) {
+      this.logger.log(
+        'No auto config dashboards or profile benchmarks found. AutoConfig processing skipped.',
+      );
       return null;
     }
 

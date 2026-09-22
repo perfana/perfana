@@ -236,6 +236,35 @@ export class DashboardFinderService {
   }
 
   /**
+   * Perf-test dashboards are written by the worker with no template uid, so a
+   * `performance-metrics` profile benchmark matches them by a regex over the uid.
+   * The regex runs in Postgres (`~`), so an invalid one throws here rather than matching nothing.
+   */
+  async findApplicationDashboardsByUidPattern(
+    uidPattern: string,
+    application: string,
+    testEnvironment: string,
+    organizationId: string | undefined,
+  ): Promise<ApplicationDashboard[]> {
+    // SUT names are unique per organization only; without the org the name could vouch
+    // for another org's SUT. No legacy NULL-org rows exist, so fail closed.
+    if (!organizationId) return [];
+    return (
+      this.applicationDashboardRepo
+        .createQueryBuilder('ad')
+        .innerJoin('ad.systemUnderTest', 'sut')
+        // The regex can only narrow the perf-test set: a stray `.` must not fan an SLO out
+        // over the SUT's Grafana and Dynatrace dashboards.
+        .where("ad.dashboardUid LIKE 'performance-test-metrics-%'")
+        .andWhere('ad.dashboardUid ~ :uidPattern', { uidPattern })
+        .andWhere('sut.name = :application', { application })
+        .andWhere('ad.testEnvironment = :testEnvironment', { testEnvironment })
+        .andWhere('ad.organization_id = :organizationId', { organizationId })
+        .getMany()
+    );
+  }
+
+  /**
    * Find application dashboards via the generated dashboard uid
    */
   async findApplicationDashboards(

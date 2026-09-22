@@ -333,6 +333,30 @@ describe('AutoConfigService', () => {
         );
       });
 
+      it('still processes profile benchmarks when the org has no profile dashboards', async () => {
+        // A perf-test profile benchmark needs no Grafana template; the empty-dashboards
+        // early return used to skip the whole pass for a JMeter-only org.
+        const perfTestBenchmark: any = {
+          id: 'benchmark-perf',
+          profile: { name: 'Production Profile' },
+          profile_dashboard_id: null,
+          source: 'performance-metrics',
+          workload_pattern: '.*',
+        };
+        testRunFinderService.findRecentTestRuns.mockResolvedValue([mockTestRun]);
+        testRunFinderService.findProfiles.mockResolvedValue([mockProfile]);
+        dashboardFinderService.findAutoConfigGrafanaDashboards.mockResolvedValue([]);
+        testRunFinderService.findProfileBenchmarks.mockResolvedValue([perfTestBenchmark]);
+
+        await service.processAutoConfigDashboards();
+
+        expect(benchmarkProcessorService.processProfileBenchmarks).toHaveBeenCalledWith(
+          mockTestRun,
+          ['Production Profile'],
+          [perfTestBenchmark],
+        );
+      });
+
       it('should filter profiles by organization_id when test run has organizationId', async () => {
         // Arrange
         const orgId = 'org-123';
@@ -474,7 +498,7 @@ describe('AutoConfigService', () => {
 
         // Assert
         expect(logSpy).toHaveBeenCalledWith(
-          'No auto config dashboards found. AutoConfig processing skipped.',
+          'No auto config dashboards or profile benchmarks found. AutoConfig processing skipped.',
         );
       });
     });
