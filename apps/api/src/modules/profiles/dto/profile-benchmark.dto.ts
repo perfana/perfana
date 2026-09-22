@@ -1,16 +1,23 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, IsBoolean, IsNumber, IsArray, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, IsArray, IsUUID, IsIn } from 'class-validator';
+import { PERF_TEST_PROFILE_SOURCE } from '@perfana/shared/constants';
+
+export const PROFILE_BENCHMARK_SOURCES = ['grafana', 'dynatrace', PERF_TEST_PROFILE_SOURCE] as const;
 
 /**
  * DTO for creating a new profile benchmark
  */
 export class CreateProfileBenchmarkDto {
   @ApiProperty({
-    description: 'Profile dashboard ID to attach benchmark to',
-    example: '550e8400-e29b-41d4-a716-446655440000'
+    description:
+      'Profile dashboard ID to attach benchmark to. Omit for source `performance-metrics`, ' +
+      'which targets the perf-test scenario dashboards via a `dashboardUid` regex instead',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    required: false
   })
+  @IsOptional()
   @IsUUID()
-  profileDashboardId!: string;
+  profileDashboardId?: string;
 
   @ApiProperty({
     description: 'Workload pattern regex',
@@ -24,12 +31,12 @@ export class CreateProfileBenchmarkDto {
 
   @ApiProperty({
     description: 'Source type',
-    enum: ['grafana', 'dynatrace'],
+    enum: PROFILE_BENCHMARK_SOURCES,
     example: 'grafana',
     required: false
   })
   @IsOptional()
-  @IsString()
+  @IsIn(PROFILE_BENCHMARK_SOURCES)
   source?: string;
 
   @ApiProperty({
@@ -207,7 +214,10 @@ export class CreateProfileBenchmarkDto {
  */
 export class UpdateProfileBenchmarkDto {
   @ApiProperty({
-    description: 'Profile dashboard ID to attach benchmark to',
+    description:
+      'Profile dashboard ID. Required when the (resulting) source is grafana/dynatrace; ' +
+      'ignored and stored as null when it is `performance-metrics`. Switching source via PUT ' +
+      're-resolves the dashboard columns the way POST does',
     example: '550e8400-e29b-41d4-a716-446655440000',
     required: false
   })
@@ -226,12 +236,12 @@ export class UpdateProfileBenchmarkDto {
 
   @ApiProperty({
     description: 'Source type',
-    enum: ['grafana', 'dynatrace'],
+    enum: PROFILE_BENCHMARK_SOURCES,
     example: 'grafana',
     required: false
   })
   @IsOptional()
-  @IsString()
+  @IsIn(PROFILE_BENCHMARK_SOURCES)
   source?: string;
 
   @ApiProperty({
@@ -417,10 +427,11 @@ export class ProfileBenchmarkResponse {
   profileId!: string;
 
   @ApiProperty({
-    description: 'Profile dashboard ID',
-    example: '550e8400-e29b-41d4-a716-446655440002'
+    description: 'Profile dashboard ID (null for source `performance-metrics`)',
+    example: '550e8400-e29b-41d4-a716-446655440002',
+    nullable: true
   })
-  profileDashboardId!: string;
+  profileDashboardId!: string | null;
 
   @ApiProperty({
     description: 'Workload pattern regex',
