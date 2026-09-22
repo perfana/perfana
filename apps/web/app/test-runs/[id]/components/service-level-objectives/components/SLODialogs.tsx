@@ -3,6 +3,7 @@
 import React from 'react';
 import { CheckResult, Benchmark } from '@/lib/types';
 import {
+  Divider,
   Menu,
   MenuItem,
   ListItemIcon,
@@ -18,6 +19,7 @@ import EditSLODialog from '@/app/systems/[id]/config/components/EditSLODialog';
 import ApdexConfigDialog from '../../performance-analysis/ApdexConfigDialog';
 import ApdexThresholdsManagementDialog from '../ApdexThresholdsManagementDialog';
 import { DrillDownFilters } from '../types/slo.types';
+import { OpenInCardMenuItems, ViewInPerformanceAnalysisMenuItem, perfTestSeriesRef } from '../../shared/metric-card-links';
 import {
   RequestActionMenuData,
   ApdexActionMenuData,
@@ -141,6 +143,15 @@ export default function SLODialogs({
           </ListItemIcon>
           <ListItemText>Configure Apdex Threshold</ListItemText>
         </MenuItem>
+        <Divider />
+        <OpenInCardMenuItems
+          series={apdexActionMenuData ? perfTestSeriesRef({ scenario: apdexActionMenuData.scenarioName, transaction: apdexActionMenuData.transactionName }) : null}
+          onClose={handleCloseApdexActionMenu}
+        />
+        <ViewInPerformanceAnalysisMenuItem
+          filters={apdexActionMenuData ? { scenario: apdexActionMenuData.scenarioName, transaction: apdexActionMenuData.transactionName } : null}
+          onClose={handleCloseApdexActionMenu}
+        />
         {hasDistributedTracing && onDrillDownToDistributedTracing && (
           <MenuItem onClick={() => {
             if (apdexActionMenuData) {
@@ -189,6 +200,18 @@ export default function SLODialogs({
           horizontal: 'right',
         }}
       >
+        <OpenInCardMenuItems
+          series={requestActionMenuData ? perfTestSeriesRef({
+            scenario: requestActionMenuData.scenarioName,
+            transaction: requestActionMenuData.transactionName,
+            sampler: requestActionMenuData.samplerName,
+          }) : null}
+          onClose={handleCloseRequestActionMenu}
+        />
+        <ViewInPerformanceAnalysisMenuItem
+          filters={requestActionMenuData ? { scenario: requestActionMenuData.scenarioName, transaction: requestActionMenuData.transactionName } : null}
+          onClose={handleCloseRequestActionMenu}
+        />
         {hasDistributedTracing && onDrillDownToDistributedTracing && (
           <MenuItem onClick={() => {
             if (requestActionMenuData) {

@@ -10,6 +10,7 @@ import {
   AccountTree as AccountTreeIcon,
   Insights as InsightsIcon,
 } from '@mui/icons-material';
+import { OpenInCardMenuItems, perfTestSeriesRef } from '../../../shared/metric-card-links';
 import { Top10TransactionItem, DrillDownFilters } from '../types';
 
 export interface Top10TransactionActionMenuProps {
@@ -65,6 +66,7 @@ export function Top10TransactionActionMenu({
         horizontal: 'right',
       }}
     >
+      <OpenInCardMenuItems series={item ? perfTestSeriesRef({ scenario: item.scenarioName, transaction: item.transactionName }) : null} onClose={onClose} />
       {hasDistributedTracing && onDrillDownToDistributedTracing && (
         <MenuItem onClick={handleDistributedTracingClick}>
           <ListItemIcon>

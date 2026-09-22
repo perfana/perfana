@@ -1,8 +1,10 @@
 'use client';
 
-import React from 'react';
-import { Box, Typography, useTheme } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, IconButton, Menu, Typography, useTheme } from '@mui/material';
 import { alpha } from '@mui/material/styles';
+import { MoreVert } from '@mui/icons-material';
+import { OpenInCardMenuItems, ViewInPerformanceAnalysisMenuItem, perfDrillDownFilters } from '../../../shared/metric-card-links';
 import type { MetricSeriesTableRowProps } from '../../types';
 import { formatMetricValue } from '../../utils/metric-series-table-utils';
 import { getApdexScoreColor, isApdexResult } from '../../utils/slo-formatters';
@@ -19,13 +21,21 @@ export function MetricSeriesTableRow({
 }: MetricSeriesTableRowProps) {
   const theme = useTheme();
   const isLastRow = sortedIndex === totalCount - 1;
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const closeMenu = () => setMenuAnchor(null);
+  const series = result.dashboard_label && result.panel_id != null && target.target && !result.is_artificial
+    ? { dashboardLabel: result.dashboard_label, panelId: result.panel_id, metricName: target.target }
+    : null;
+  const perfFilters = series
+    ? perfDrillDownFilters({ dashboard_label: result.dashboard_label, panel_title: result.panel_title, metric_name: target.target })
+    : null;
 
   return (
     <Box
       onClick={onClick}
       sx={{
         display: 'grid',
-        gridTemplateColumns: '2fr 1fr 1fr',
+        gridTemplateColumns: '2fr 1fr 1fr 32px',
         gap: 2,
         p: 2.5,
         borderLeft: '1px solid',
@@ -115,6 +125,29 @@ export function MetricSeriesTableRow({
           result={result}
           isStale={isStale}
         />
+      </Box>
+
+      {/* Actions */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {series && (
+          <IconButton size="small" aria-label="Actions" onClick={(e) => { e.stopPropagation(); setMenuAnchor(e.currentTarget); }}>
+            <MoreVert sx={{ fontSize: '1rem', color: 'text.secondary' }} />
+          </IconButton>
+        )}
+        {/* Mounted only while open: one Popover per row adds up on a many-series SLO. */}
+        {menuAnchor && (
+          <Menu
+            anchorEl={menuAnchor}
+            open
+            onClose={closeMenu}
+            onClick={(e) => e.stopPropagation()}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <OpenInCardMenuItems series={series} onClose={closeMenu} />
+            <ViewInPerformanceAnalysisMenuItem filters={perfFilters} onClose={closeMenu} />
+          </Menu>
+        )}
       </Box>
     </Box>
   );
