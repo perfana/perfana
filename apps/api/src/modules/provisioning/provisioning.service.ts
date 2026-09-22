@@ -12,6 +12,12 @@ import {
   ProvisionedTemplateDsCompareConfig,
 } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
+import {
+  PERF_TEST_PROFILE_SOURCE,
+  PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+} from '@perfana/shared/constants';
+import { validateRegexPattern } from '@perfana/shared/utils';
+import { PROFILE_BENCHMARK_SOURCES } from '../profiles/dto/profile-benchmark.dto';
 
 const SYSTEM_ACTOR = 'system:provisioning';
 
@@ -48,8 +54,10 @@ interface DashboardYaml {
 
 interface BenchmarkYaml {
   profile: string;
+  /** `performance-metrics`: no profile dashboard; `dashboardUid` is a regex over the perf-test scenario uids (default when omitted). */
+  source?: string;
   grafana?: string;
-  dashboardUid: string;
+  dashboardUid?: string;
   addForWorkloadsMatchingRegex?: string;
   panel: {
     id: number;
@@ -369,20 +377,48 @@ export class ProvisioningService implements OnApplicationBootstrap {
           continue;
         }
 
-        // Resolve profile + dashboardUid + grafana → profile_dashboard_id
-        const dashboard = await withRequestEm(this.dashboardRepo).findOne({
-          where: {
-            profile: item.profile,
-            dashboardUid: item.dashboardUid,
-            grafanaLabel,
-          },
-        });
-        if (!dashboard) {
-          this.logger.warn(
-            `Benchmark skipped: dashboard "${item.dashboardUid}" for profile "${item.profile}" not found`,
-          );
+        const source = item.source ?? 'grafana';
+        if (!(PROFILE_BENCHMARK_SOURCES as readonly string[]).includes(source)) {
+          this.logger.warn(`Benchmark skipped: unknown source "${item.source}" for profile "${item.profile}"`);
           result.skipped++;
           continue;
+        }
+        const isPerfTest = source === PERF_TEST_PROFILE_SOURCE;
+        if (!isPerfTest && !item.dashboardUid) {
+          this.logger.warn(`Benchmark skipped: dashboardUid missing for profile "${item.profile}"`);
+          result.skipped++;
+          continue;
+        }
+        // Resolve profile + dashboardUid + grafana → profile_dashboard_id. A perf-test
+        // benchmark has no profile dashboard: its uid is a regex over the scenario uids.
+        let dashboardId: string | null = null;
+        if (!isPerfTest) {
+          const dashboard = await withRequestEm(this.dashboardRepo).findOne({
+            where: {
+              profile: item.profile,
+              dashboardUid: item.dashboardUid,
+              grafanaLabel,
+            },
+          });
+          if (!dashboard) {
+            this.logger.warn(
+              `Benchmark skipped: dashboard "${item.dashboardUid}" for profile "${item.profile}" not found`,
+            );
+            result.skipped++;
+            continue;
+          }
+          dashboardId = dashboard.id;
+        }
+        const dashboardUid = isPerfTest
+          ? item.dashboardUid ?? PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT
+          : item.dashboardUid;
+        if (isPerfTest) {
+          const check = validateRegexPattern(dashboardUid, { maxLength: 255 });
+          if (!check.safe) {
+            this.logger.warn(`Benchmark skipped: dashboardUid is not a valid regex (${check.error}) for profile "${item.profile}"`);
+            result.skipped++;
+            continue;
+          }
         }
 
         const workloadPattern = item.addForWorkloadsMatchingRegex ?? '.*';
@@ -391,7 +427,8 @@ export class ProvisioningService implements OnApplicationBootstrap {
         const existing = await withRequestEm(this.benchmarkRepo).findOne({
           where: {
             profile_id: profile.id,
-            profile_dashboard_id: dashboard.id,
+            profile_dashboard_id: dashboardId ?? IsNull(),
+            ...(isPerfTest ? { dashboard_uid: dashboardUid } : {}),
             panel_id: item.panel.id,
             workload_pattern: workloadPattern,
           },
@@ -399,11 +436,11 @@ export class ProvisioningService implements OnApplicationBootstrap {
 
         const values = {
           profile_id: profile.id,
-          profile_dashboard_id: dashboard.id,
+          profile_dashboard_id: dashboardId,
           workload_pattern: workloadPattern,
-          source: 'grafana' as const,
-          grafana_instance: grafanaLabel,
-          dashboard_uid: item.dashboardUid,
+          source,
+          grafana_instance: isPerfTest ? undefined : grafanaLabel,
+          dashboard_uid: dashboardUid,
           panel_id: item.panel.id,
           panel_title: item.panel.title,
           panel_type: item.panel.type,

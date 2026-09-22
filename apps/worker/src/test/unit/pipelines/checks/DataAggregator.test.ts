@@ -149,6 +149,42 @@ describe('DataAggregator', () => {
       expect(result.targets[0].value).toBe(400.0);
     });
 
+    it.each([
+      ['q50', 240.0],
+      ['median', 240.0],
+      ['Q50', 240.0],
+    ])('reads the median for evaluate type %s (the SLO dialogs store the median as q50)', async (evaluateType, expected) => {
+      // Regression: 'q50' had no mapping entry, so a median SLO was silently judged on the mean.
+      const benchmark = createMockBenchmark({ evaluate_type: evaluateType });
+      mockManager.query.mockResolvedValue([
+        {
+          metric_name: 'response_time',
+          mean: 250.0,
+          median: 240.0,
+          min_value: 100.0,
+          max_value: 500.0,
+          std_dev: 50.0,
+          q10: 180.0,
+          q25: 210.0,
+          q75: 280.0,
+          q90: 320.0,
+          q95: 400.0,
+          q99: 480.0,
+          last_value: 260.0,
+          count: 200,
+          is_constant: false,
+          all_missing: false,
+          pct_missing: 0.0,
+        },
+      ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(createMockTestRun(), benchmark);
+
+      expect(result.targets[0].value).toBe(expected);
+      expect(result.panel_average).toBe(expected);
+      expect(result.targets[0].value).not.toBe(250.0);
+    });
+
     it('should average all metrics when average_all is true', async () => {
       // Arrange
       const testRun = createMockTestRun();

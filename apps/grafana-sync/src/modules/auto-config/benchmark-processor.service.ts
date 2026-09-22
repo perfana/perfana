@@ -9,6 +9,10 @@ import { TestRunFinderService } from './test-run-finder.service';
 import { DashboardFinderService } from './dashboard-finder.service';
 import { AutoConfigUpdatesService } from './auto-config-updates.service';
 import { validateRegexPattern } from '@perfana/shared/utils';
+import {
+  PERF_TEST_PROFILE_SOURCE,
+  PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+} from '@perfana/shared/constants';
 
 @Injectable()
 export class BenchmarkProcessorService {
@@ -64,24 +68,54 @@ export class BenchmarkProcessorService {
         `Processing profile benchmark: ${profileBenchmark.panel_title || profileBenchmark.id}`,
       );
 
-      // Find application dashboards that match this profile benchmark's dashboard UID
       // RBAC: Pass organizationId to filter dashboards by organization
       const systemUnderTestName = testRun.systemUnderTest?.name || testRun.systemUnderTestId;
-      const applicationDashboards =
-        await this.dashboardFinderService.findApplicationDashboardsByTemplateDashboardUid(
-          profileBenchmark.dashboard_uid!,
-          systemUnderTestName,
-          testRun.testEnvironment,
-          testRun.organizationId,
-        );
+      const isPerfTest = profileBenchmark.source === PERF_TEST_PROFILE_SOURCE;
+      // A perf-test benchmark has no Grafana template: `dashboard_uid` is a regex over
+      // the worker-written `performance-test-metrics-<scenario>` uids, so one profile row
+      // fans out to every scenario dashboard the SUT has, including ones added later.
+      const lookup = isPerfTest
+        ? profileBenchmark.dashboard_uid || PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT
+        : profileBenchmark.dashboard_uid!;
+      if (isPerfTest) {
+        // The API validates on write; rows written before it did (or by SQL) reach Postgres `~` here.
+        const check = validateRegexPattern(lookup, { maxLength: 255 });
+        if (!check.safe) {
+          this.logger.warn(
+            `Profile benchmark ${profileBenchmark.id} has an unsafe uid pattern '${lookup}': ${check.error} - skipping`,
+          );
+          return;
+        }
+      }
+      const applicationDashboards = isPerfTest
+        ? await this.dashboardFinderService.findApplicationDashboardsByUidPattern(
+            lookup,
+            systemUnderTestName,
+            testRun.testEnvironment,
+            testRun.organizationId,
+          )
+        : await this.dashboardFinderService.findApplicationDashboardsByTemplateDashboardUid(
+            lookup,
+            systemUnderTestName,
+            testRun.testEnvironment,
+            testRun.organizationId,
+          );
 
       this.logger.log(
-        `Found ${applicationDashboards.length} application dashboards for dashboard UID ${profileBenchmark.dashboard_uid}`,
+        `Found ${applicationDashboards.length} application dashboards for ${isPerfTest ? 'uid pattern' : 'template uid'} ${lookup}`,
       );
 
-      // For each matching application dashboard, create a benchmark if it doesn't exist
+      // For each matching application dashboard, create a benchmark if it doesn't exist.
+      // A perf-test row fans out to N scenarios; one failure must not skip the rest.
       for (const applicationDashboard of applicationDashboards) {
-        await this.createBenchmarkIfNotExists(testRun, profileBenchmark, applicationDashboard);
+        try {
+          await this.createBenchmarkIfNotExists(testRun, profileBenchmark, applicationDashboard);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `Failed to provision profile benchmark ${profileBenchmark.id} on dashboard ${applicationDashboard.id}: ${msg}`,
+          );
+        }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.stack : String(error);

@@ -1071,6 +1071,156 @@ describe('ProfilesService', () => {
         })
       );
     });
+
+    it('should throw BadRequestException when a grafana benchmark omits profileDashboardId', async () => {
+      // Arrange — the DTO field is optional now (perf-test needs it absent), so the
+      // service has to refuse it for a Grafana source itself.
+      const { profileDashboardId: _omitted, ...dtoWithoutDashboard } = createDto;
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+
+      // Act & Assert
+      await expect(
+        service.createBenchmark('profile-uuid-1', dtoWithoutDashboard, mockUserId, mockIsAdmin)
+      ).rejects.toThrow(new BadRequestException('profileDashboardId is required'));
+      expect(profileDashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(profileBenchmarkRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('should default source to grafana and still require profileDashboardId when source is omitted', async () => {
+      // Arrange
+      const { profileDashboardId: _omitted, source: _source, ...dtoWithoutBoth } = createDto;
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+
+      // Act & Assert
+      await expect(
+        service.createBenchmark('profile-uuid-1', dtoWithoutBoth, mockUserId, mockIsAdmin)
+      ).rejects.toThrow(new BadRequestException('profileDashboardId is required'));
+    });
+
+    it('should create a performance-metrics benchmark with no profile dashboard and the default uid regex', async () => {
+      // Arrange
+      const perfTestDto: CreateProfileBenchmarkDto = {
+        source: 'performance-metrics',
+        panelId: 105,
+        panelTitle: 'Transaction Error Rate',
+        panelType: 'performance-metrics',
+        evaluateType: 'avg',
+        requirementOperator: 'lt',
+        requirementValue: 2,
+      };
+      const newBenchmark = {
+        ...mockProfileBenchmark,
+        profile_dashboard_id: null,
+        source: 'performance-metrics',
+        dashboard_uid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+        panel_id: 105,
+        panel_title: 'Transaction Error Rate',
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.create.mockReturnValue(newBenchmark as any);
+      profileBenchmarkRepo.save.mockResolvedValue(newBenchmark as any);
+
+      // Act
+      const result = await service.createBenchmark('profile-uuid-1', perfTestDto, mockUserId, mockIsAdmin);
+
+      // Assert — no Grafana template to validate against
+      expect(profileDashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(profileBenchmarkRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile_id: 'profile-uuid-1',
+          profile_dashboard_id: null,
+          source: 'performance-metrics',
+          grafana_instance: undefined,
+          dashboard_uid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+          panel_id: 105,
+        })
+      );
+      expect(result.profileDashboardId).toBeNull();
+      expect(result.source).toBe('performance-metrics');
+    });
+
+    it('should keep a caller-supplied uid regex on a performance-metrics benchmark', async () => {
+      // Arrange
+      const perfTestDto: CreateProfileBenchmarkDto = {
+        source: 'performance-metrics',
+        dashboardUid: '^performance-test-metrics-t-wm-',
+        panelId: 101,
+        requirementOperator: 'lt',
+        requirementValue: 500,
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.create.mockReturnValue(mockProfileBenchmark as any);
+      profileBenchmarkRepo.save.mockResolvedValue(mockProfileBenchmark as any);
+
+      // Act
+      await service.createBenchmark('profile-uuid-1', perfTestDto, mockUserId, mockIsAdmin);
+
+      // Assert
+      expect(profileBenchmarkRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dashboard_uid: '^performance-test-metrics-t-wm-',
+          profile_dashboard_id: null,
+        })
+      );
+    });
+
+    it('should reject a performance-metrics benchmark whose dashboardUid is not a valid regex', async () => {
+      // Arrange — grafana-sync hands the pattern straight to Postgres `~`, so it is validated on write.
+      const perfTestDto: CreateProfileBenchmarkDto = {
+        source: 'performance-metrics',
+        dashboardUid: '^performance-test-metrics-(',
+        panelId: 101,
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+
+      // Act & Assert
+      await expect(
+        service.createBenchmark('profile-uuid-1', perfTestDto, mockUserId, mockIsAdmin)
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.createBenchmark('profile-uuid-1', perfTestDto, mockUserId, mockIsAdmin)
+      ).rejects.toThrow(/dashboardUid must be a valid regex/);
+      expect(profileBenchmarkRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject a performance-metrics benchmark whose dashboardUid is ReDoS-prone', async () => {
+      // Arrange
+      const perfTestDto: CreateProfileBenchmarkDto = {
+        source: 'performance-metrics',
+        dashboardUid: '^(a+)+$',
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+
+      // Act & Assert
+      await expect(
+        service.createBenchmark('profile-uuid-1', perfTestDto, mockUserId, mockIsAdmin)
+      ).rejects.toThrow(/dashboardUid must be a valid regex/);
+      expect(profileBenchmarkRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('should ignore a profileDashboardId sent alongside source performance-metrics', async () => {
+      // Arrange — a perf-test benchmark never references a profile dashboard, even if the
+      // client sends one; the stored column must be NULL and no lookup must be made.
+      const perfTestDto: CreateProfileBenchmarkDto = {
+        source: 'performance-metrics',
+        profileDashboardId: 'profile-dashboard-uuid-1',
+        panelId: 101,
+        requirementOperator: 'lt',
+        requirementValue: 500,
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.create.mockReturnValue(mockProfileBenchmark as any);
+      profileBenchmarkRepo.save.mockResolvedValue(mockProfileBenchmark as any);
+
+      // Act
+      await service.createBenchmark('profile-uuid-1', perfTestDto, mockUserId, mockIsAdmin);
+
+      // Assert
+      expect(profileDashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(profileBenchmarkRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ profile_dashboard_id: null })
+      );
+    });
   });
 
   describe('updateBenchmark', () => {
@@ -1206,6 +1356,191 @@ describe('ProfilesService', () => {
       expect(result.averageAll).toBe(true);
       expect(result.validateWithDefaultIfNoData).toBe(true);
       expect(result.readOnly).toBe(true);
+    });
+
+    it('should null the Grafana template columns when a benchmark is switched to performance-metrics', async () => {
+      // Arrange — the stored template uid is not a uid regex; a switch must not carry it over.
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue({
+        ...mockProfileBenchmark,
+        source: 'grafana',
+        profile_dashboard_id: 'profile-dashboard-uuid-1',
+        grafana_instance: 'Default',
+        dashboard_uid: 'dashboard-uid-123',
+      } as any);
+      profileBenchmarkRepo.save.mockImplementation(async (b: any) => b);
+
+      // Act
+      // A Grafana panel id is not a perf-test panel; the switch has to pick one.
+      const result = await service.updateBenchmark(
+        'profile-uuid-1', 'benchmark-uuid-1', { source: 'performance-metrics', panelId: 105 }, mockUserId, mockIsAdmin
+      );
+
+      // Assert
+      expect(profileDashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(profileBenchmarkRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'performance-metrics',
+          profile_dashboard_id: null,
+          grafana_instance: null, // null, not undefined: save() skips undefined
+          dashboard_uid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+        })
+      );
+      expect(result.profileDashboardId).toBeNull();
+      expect(result.source).toBe('performance-metrics');
+    });
+
+    it('should require a profileDashboardId when a benchmark is switched from performance-metrics to grafana', async () => {
+      // Arrange
+      const perfTestBenchmark = {
+        ...mockProfileBenchmark,
+        profile_dashboard_id: null,
+        grafana_instance: undefined,
+        source: 'performance-metrics',
+        dashboard_uid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue(perfTestBenchmark as any);
+
+      // Act & Assert
+      await expect(
+        service.updateBenchmark(
+          'profile-uuid-1', 'benchmark-uuid-1', { source: 'grafana', dashboardUid: 'dashboard-uid-123' }, mockUserId, mockIsAdmin
+        )
+      ).rejects.toThrow(new BadRequestException('profileDashboardId is required'));
+      expect(profileBenchmarkRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should switch from performance-metrics to grafana when a valid profileDashboardId is sent', async () => {
+      // Arrange
+      const perfTestBenchmark = {
+        ...mockProfileBenchmark,
+        profile_dashboard_id: null,
+        grafana_instance: undefined,
+        source: 'performance-metrics',
+        dashboard_uid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue(perfTestBenchmark as any);
+      profileDashboardRepo.findOne.mockResolvedValue(mockProfileDashboard);
+      profileBenchmarkRepo.save.mockImplementation(async (b: any) => b);
+
+      // Act
+      await service.updateBenchmark(
+        'profile-uuid-1',
+        'benchmark-uuid-1',
+        {
+          source: 'grafana',
+          profileDashboardId: 'profile-dashboard-uuid-1',
+          grafanaInstance: 'Default',
+          dashboardUid: 'dashboard-uid-123',
+        },
+        mockUserId,
+        mockIsAdmin
+      );
+
+      // Assert — the stored uid regex is dropped in favour of the template uid.
+      expect(profileDashboardRepo.findOne).toHaveBeenCalledWith({ where: { id: 'profile-dashboard-uuid-1' } });
+      expect(profileBenchmarkRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'grafana',
+          profile_dashboard_id: 'profile-dashboard-uuid-1',
+          grafana_instance: 'Default',
+          dashboard_uid: 'dashboard-uid-123',
+        })
+      );
+    });
+
+    it('should reject an invalid uid regex on a performance-metrics update', async () => {
+      // Arrange
+      const perfTestBenchmark = {
+        ...mockProfileBenchmark,
+        profile_dashboard_id: null,
+        source: 'performance-metrics',
+        dashboard_uid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue(perfTestBenchmark as any);
+
+      // Act & Assert
+      await expect(
+        service.updateBenchmark(
+          'profile-uuid-1', 'benchmark-uuid-1', { dashboardUid: '^performance-test-metrics-(' }, mockUserId, mockIsAdmin
+        )
+      ).rejects.toThrow(/dashboardUid must be a valid regex/);
+      expect(profileBenchmarkRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should leave the dashboard columns alone when the update touches none of them', async () => {
+      // Arrange — no source/profileDashboardId/grafanaInstance/dashboardUid in the body:
+      // a Grafana row keeps its template without a profile-dashboard lookup.
+      // (Pinned explicitly: the shared fixture is mutated in place by an earlier update test.)
+      const grafanaBenchmark = {
+        ...mockProfileBenchmark,
+        source: 'grafana',
+        profile_dashboard_id: 'profile-dashboard-uuid-1',
+        grafana_instance: 'Default',
+        dashboard_uid: 'dashboard-uid-123',
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue(grafanaBenchmark as any);
+      profileBenchmarkRepo.save.mockImplementation(async (b: any) => b);
+
+      // Act
+      await service.updateBenchmark(
+        'profile-uuid-1', 'benchmark-uuid-1', { requirementValue: 42 }, mockUserId, mockIsAdmin
+      );
+
+      // Assert
+      expect(profileDashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(profileBenchmarkRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: 'grafana',
+          profile_dashboard_id: 'profile-dashboard-uuid-1',
+          grafana_instance: 'Default',
+          dashboard_uid: 'dashboard-uid-123',
+          requirement_value: 42,
+        })
+      );
+    });
+
+    it('should update a performance-metrics benchmark without touching the profile dashboard', async () => {
+      // Arrange — the web edit dialog posts profileDashboardId: undefined for a perf-test
+      // benchmark; the NULL reference must survive and no dashboard lookup must be made.
+      const perfTestBenchmark = {
+        ...mockProfileBenchmark,
+        profile_dashboard_id: null,
+        source: 'performance-metrics',
+        panel_id: 105,
+        dashboard_uid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+      };
+      const perfTestUpdate: UpdateProfileBenchmarkDto = {
+        profileDashboardId: undefined,
+        source: 'performance-metrics',
+        dashboardUid: '^performance-test-metrics-t-wm-',
+        requirementValue: 3,
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue(perfTestBenchmark as any);
+      profileBenchmarkRepo.save.mockImplementation(async (b: any) => b);
+
+      // Act
+      const result = await service.updateBenchmark(
+        'profile-uuid-1', 'benchmark-uuid-1', perfTestUpdate, mockUserId, mockIsAdmin
+      );
+
+      // Assert
+      expect(profileDashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(profileBenchmarkRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile_dashboard_id: null,
+          source: 'performance-metrics',
+          dashboard_uid: '^performance-test-metrics-t-wm-',
+          requirement_value: 3,
+        })
+      );
+      expect(result.profileDashboardId).toBeNull();
+      expect(result.dashboardUid).toBe('^performance-test-metrics-t-wm-');
     });
   });
 

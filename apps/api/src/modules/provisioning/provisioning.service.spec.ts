@@ -392,6 +392,33 @@ describe('ProvisioningService', () => {
       );
     });
 
+    it('provisions a performance-metrics benchmark without a profile dashboard', async () => {
+      profileRepo.findOne.mockResolvedValue(profileMock);
+      benchmarkRepo.findOne.mockResolvedValue(null);
+      benchmarkRepo.insert.mockResolvedValue(undefined as any);
+
+      const result = await service.provisionProfileBenchmarks(
+        [{
+          profile: 'gatling',
+          source: 'performance-metrics',
+          panel: { id: 105, title: 'Transaction Error Rate', evaluateType: 'avg', requirement: { operator: 'lt', value: 2 } },
+        }],
+        null,
+      );
+
+      expect(result).toEqual({ created: 1, updated: 0, skipped: 0, errors: 0 });
+      expect(dashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(benchmarkRepo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile_dashboard_id: null,
+          grafana_instance: undefined,
+          source: 'performance-metrics',
+          dashboard_uid: '^performance-test-metrics-(?!all-aggregated$|default$)',
+          panel_id: 105,
+        }),
+      );
+    });
+
     it('should skip when profile not found', async () => {
       profileRepo.findOne.mockResolvedValue(null);
 

@@ -30,6 +30,7 @@ The Grafana Sync service is a standalone NestJS application that runs scheduled 
   - Dashboard link relationships
 - Configurable confidence thresholds
 - Pattern-based variable detection
+- Profile SLO provisioning: `profile_benchmarks` rows are copied onto the matching application dashboards of recent test runs. Grafana rows match by template dashboard uid; `source: performance-metrics` rows (v0.2.96.6) match the worker-written `Performance test metrics <scenario>` dashboards by a regex over their uid, one profile row per scenario
 
 ### Sanity Checker
 - Validates dashboard configurations

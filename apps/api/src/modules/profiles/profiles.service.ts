@@ -4,6 +4,12 @@ import { Repository } from 'typeorm';
 import { Profile, ProfileGrafanaDashboard, ProfileBenchmark, GrafanaInstance, GrafanaDashboard, GenericDeepLink } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared/entities';
+import {
+  PERF_TEST_PROFILE_SOURCE,
+  PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+  PERF_TEST_PROFILE_PANELS,
+} from '@perfana/shared/constants';
+import { validateRegexPattern } from '@perfana/shared/utils';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
 import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto, ProfileBenchmarkResponse } from './dto/profile-benchmark.dto';
@@ -774,6 +780,61 @@ export class ProfilesService {
   }
 
   /**
+   * The dashboard-side columns of a profile benchmark depend on its source. A perf-test
+   * benchmark has no Grafana template: it matches app dashboards by a uid regex, so
+   * `profile_dashboard_id` and `grafana_instance` are NULL and `dashboard_uid` is the
+   * pattern (validated here, because grafana-sync hands it straight to Postgres `~`).
+   * Anything else needs a profile dashboard of this profile. Shared by create and update
+   * so a benchmark switched between sources by PUT ends up in the same state a POST would.
+   */
+  private async resolveDashboardColumns(
+    source: string,
+    dto: { profileDashboardId?: string; grafanaInstance?: string; dashboardUid?: string; panelId?: number },
+    profileName: string,
+  ): Promise<{
+    profile_dashboard_id: string | null;
+    grafana_instance: string | null;
+    dashboard_uid: string | null;
+  }> {
+    // null, not undefined, for a cleared column: TypeORM's save() skips undefined
+    // properties, so a switched row would keep its old template label / uid.
+    if (source === PERF_TEST_PROFILE_SOURCE) {
+      const pattern = dto.dashboardUid || PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT;
+      const check = validateRegexPattern(pattern, { maxLength: 255 });
+      if (!check.safe) {
+        throw new BadRequestException(`dashboardUid must be a valid regex: ${check.error}`);
+      }
+      if (dto.panelId !== undefined && !PERF_TEST_PROFILE_PANELS.some((p) => p.id === dto.panelId)) {
+        throw new BadRequestException(`panelId ${dto.panelId} is not a performance-test panel`);
+      }
+      return { profile_dashboard_id: null, grafana_instance: null, dashboard_uid: pattern };
+    }
+    if (!dto.profileDashboardId) {
+      throw new BadRequestException('profileDashboardId is required');
+    }
+    await this.assertProfileDashboard(dto.profileDashboardId, profileName);
+    return {
+      profile_dashboard_id: dto.profileDashboardId,
+      grafana_instance: dto.grafanaInstance ?? null,
+      dashboard_uid: dto.dashboardUid ?? null,
+    };
+  }
+
+  private async assertProfileDashboard(profileDashboardId: string, profileName: string): Promise<void> {
+    const profileDashboard = await withRequestEm(this.profileDashboardRepo).findOne({
+      where: { id: profileDashboardId },
+    });
+    if (!profileDashboard) {
+      throw new BadRequestException(`Profile dashboard with ID '${profileDashboardId}' not found`);
+    }
+    if (profileDashboard.profile !== profileName) {
+      throw new BadRequestException(
+        `Profile dashboard '${profileDashboardId}' does not belong to profile '${profileName}'`
+      );
+    }
+  }
+
+  /**
    * Create a new benchmark for a profile
    *
    * @param profileId - The profile ID
@@ -809,33 +870,19 @@ export class ProfilesService {
       // NOTE: Permission check will be added here when Profile entity has organization_id
       // For now, all profiles are modifiable (treated as legacy data)
 
-      // Validate that the profile dashboard exists
-      const profileDashboard = await withRequestEm(this.profileDashboardRepo).findOne({
-        where: { id: createDto.profileDashboardId },
-      });
-
-      if (!profileDashboard) {
-        throw new BadRequestException(
-          `Profile dashboard with ID '${createDto.profileDashboardId}' not found`
-        );
-      }
-
-      // Verify that the profile dashboard belongs to this profile
-      if (profileDashboard.profile !== profile.name) {
-        throw new BadRequestException(
-          `Profile dashboard '${createDto.profileDashboardId}' does not belong to profile '${profile.name}'`
-        );
-      }
+      const source = createDto.source || 'grafana';
+      const dashboardColumns = await this.resolveDashboardColumns(source, createDto, profile.name);
 
       // Create the new benchmark — inherit org/team from parent profile
       // (ProfileBenchmark.organization_id is NOT NULL).
       const benchmark = this.profileBenchmarkRepo.create({
         profile_id: profileId,
-        profile_dashboard_id: createDto.profileDashboardId,
         workload_pattern: createDto.workloadPattern || '.*',
-        source: createDto.source || 'grafana',
-        grafana_instance: createDto.grafanaInstance,
-        dashboard_uid: createDto.dashboardUid,
+        source,
+        profile_dashboard_id: dashboardColumns.profile_dashboard_id,
+        // An insert writes NULL for undefined; only update needs the explicit null.
+        grafana_instance: dashboardColumns.grafana_instance ?? undefined,
+        dashboard_uid: dashboardColumns.dashboard_uid ?? undefined,
         panel_id: createDto.panelId,
         panel_title: createDto.panelTitle,
         panel_type: createDto.panelType,
@@ -953,41 +1000,36 @@ export class ProfilesService {
       // Phase 5a — clone the pre-mutation state for the audit diff.
       const benchmarkBefore = Object.assign(new ProfileBenchmark(), benchmark);
 
-      // Validate profile dashboard if it's being updated
-      if (updateDto.profileDashboardId) {
-        const profileDashboard = await withRequestEm(this.profileDashboardRepo).findOne({
-          where: { id: updateDto.profileDashboardId },
-        });
-
-        if (!profileDashboard) {
-          throw new BadRequestException(
-            `Profile dashboard with ID '${updateDto.profileDashboardId}' not found`
-          );
+      // Dashboard-side columns are resolved against the effective source and the merged
+      // values, so a PUT that switches source cannot leave a Grafana template on a perf-test
+      // row or strip the template from a Grafana one. Only touched when one of them is sent.
+      const source = updateDto.source ?? benchmark.source;
+      if (
+        updateDto.source !== undefined ||
+        updateDto.profileDashboardId !== undefined ||
+        updateDto.grafanaInstance !== undefined ||
+        updateDto.dashboardUid !== undefined
+      ) {
+        const merged = {
+          profileDashboardId: updateDto.profileDashboardId ?? benchmark.profile_dashboard_id ?? undefined,
+          grafanaInstance: updateDto.grafanaInstance ?? benchmark.grafana_instance,
+          dashboardUid: updateDto.dashboardUid ?? benchmark.dashboard_uid,
+          panelId: updateDto.panelId ?? benchmark.panel_id,
+        };
+        // A stored uid regex is not a Grafana template uid and vice versa: drop it on a switch.
+        if (updateDto.source !== undefined && updateDto.source !== benchmark.source) {
+          merged.dashboardUid = updateDto.dashboardUid;
+          merged.grafanaInstance = updateDto.grafanaInstance;
+          if (updateDto.source === PERF_TEST_PROFILE_SOURCE) merged.profileDashboardId = undefined;
         }
-
-        // Verify that the profile dashboard belongs to this profile
-        if (profileDashboard.profile !== profile.name) {
-          throw new BadRequestException(
-            `Profile dashboard '${updateDto.profileDashboardId}' does not belong to profile '${profile.name}'`
-          );
-        }
-      }
-
-      // Update the benchmark properties
-      if (updateDto.profileDashboardId !== undefined) {
-        benchmark.profile_dashboard_id = updateDto.profileDashboardId;
+        const cols = await this.resolveDashboardColumns(source, merged, profile.name);
+        benchmark.source = source;
+        benchmark.profile_dashboard_id = cols.profile_dashboard_id;
+        benchmark.grafana_instance = cols.grafana_instance as unknown as undefined; // null on purpose, see resolveDashboardColumns
+        benchmark.dashboard_uid = cols.dashboard_uid as unknown as undefined;
       }
       if (updateDto.workloadPattern !== undefined) {
         benchmark.workload_pattern = updateDto.workloadPattern;
-      }
-      if (updateDto.source !== undefined) {
-        benchmark.source = updateDto.source;
-      }
-      if (updateDto.grafanaInstance !== undefined) {
-        benchmark.grafana_instance = updateDto.grafanaInstance;
-      }
-      if (updateDto.dashboardUid !== undefined) {
-        benchmark.dashboard_uid = updateDto.dashboardUid;
       }
       if (updateDto.panelId !== undefined) {
         benchmark.panel_id = updateDto.panelId;

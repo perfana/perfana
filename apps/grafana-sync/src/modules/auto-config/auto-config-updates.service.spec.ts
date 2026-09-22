@@ -611,6 +611,8 @@ describe('AutoConfigUpdatesService', () => {
             // The worker reads the pattern from configuration, not the column.
             match_pattern: 'heap.*',
             configuration: expect.objectContaining({ matchPattern: 'heap.*' }),
+            // ...but the evaluate type from the column, not configuration.
+            evaluate_type: 'avg',
           }),
         );
       });

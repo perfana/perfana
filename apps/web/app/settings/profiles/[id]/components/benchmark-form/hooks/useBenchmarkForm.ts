@@ -7,7 +7,10 @@ import {
   CreateProfileBenchmarkData,
   UpdateProfileBenchmarkData,
   ProfileBenchmark,
+  PERF_TEST_PROFILE_DASHBOARD,
+  isPerfTestProfileDashboard,
 } from '@/lib/profile-benchmarks';
+import { PERF_TEST_PROFILE_SOURCE, PERF_TEST_PROFILE_PANELS } from '@perfana/shared/constants';
 import { ProfileDashboard } from '@/lib/profiles';
 import {
   BenchmarkFormData,
@@ -64,8 +67,15 @@ export function useBenchmarkForm({
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>('');
 
-  // Fetch dashboard panels from Grafana
-  const fetchDashboardPanels = useCallback(async (dashboardUid: string) => {
+  // Fetch dashboard panels from Grafana. The perf-test pseudo-dashboard has no Grafana
+  // uid to ask for (its uid field holds a regex); its panels are the fixed set every
+  // scenario dashboard carries.
+  const fetchDashboardPanels = useCallback(async (dashboard: ProfileDashboard) => {
+    if (isPerfTestProfileDashboard(dashboard)) {
+      setAvailablePanels(PERF_TEST_PROFILE_PANELS.map((p) => ({ ...p, type: PERF_TEST_PROFILE_SOURCE })));
+      return;
+    }
+    const dashboardUid = dashboard.dashboardUid;
     if (!dashboardUid) return;
 
     try {
@@ -141,7 +151,9 @@ export function useBenchmarkForm({
   // Initialize form data when editing
   useEffect(() => {
     if (mode === 'edit' && benchmark && open) {
-      const dashboard = profileDashboards.find(d => d.id === benchmark.profileDashboardId);
+      const dashboard = benchmark.source === PERF_TEST_PROFILE_SOURCE
+        ? { ...PERF_TEST_PROFILE_DASHBOARD, dashboardUid: benchmark.dashboardUid || PERF_TEST_PROFILE_DASHBOARD.dashboardUid }
+        : profileDashboards.find(d => d.id === benchmark.profileDashboardId);
 
       setFormData({
         selectedDashboard: dashboard || null,
@@ -163,8 +175,8 @@ export function useBenchmarkForm({
         validateWithDefaultIfNoDataValue: benchmark.validateWithDefaultIfNoDataValue?.toString() || '',
       });
 
-      if (dashboard?.dashboardUid) {
-        fetchDashboardPanels(dashboard.dashboardUid);
+      if (dashboard) {
+        fetchDashboardPanels(dashboard);
       }
     } else if (mode === 'create' && open) {
       setFormData(INITIAL_FORM_DATA);
@@ -206,8 +218,8 @@ export function useBenchmarkForm({
       tags: mode === 'create' ? autoPopulatedTags : prev.tags,
     }));
 
-    if (dashboard?.dashboardUid) {
-      fetchDashboardPanels(dashboard.dashboardUid);
+    if (dashboard) {
+      fetchDashboardPanels(dashboard);
     } else {
       setAvailablePanels([]);
     }
@@ -259,11 +271,13 @@ export function useBenchmarkForm({
         ? processPercentUnitValue(formData.validateWithDefaultIfNoDataValue, isPercentUnit)
         : '';
 
+      const isPerfTest = isPerfTestProfileDashboard(formData.selectedDashboard);
       const payload: CreateProfileBenchmarkData | UpdateProfileBenchmarkData = {
-        profileDashboardId: formData.selectedDashboard!.id,
+        profileDashboardId: isPerfTest ? undefined : formData.selectedDashboard!.id,
         workloadPattern: formData.workloadPattern,
-        source: 'grafana',
-        grafanaInstance: formData.selectedDashboard!.grafanaLabel,
+        source: isPerfTest ? PERF_TEST_PROFILE_SOURCE : 'grafana',
+        grafanaInstance: isPerfTest ? undefined : formData.selectedDashboard!.grafanaLabel,
+        // For perf-test this is the uid regex grafana-sync fans out over, not a dashboard uid.
         dashboardUid: formData.selectedDashboard!.dashboardUid,
         panelId: formData.selectedPanel?.id,
         panelTitle: formData.selectedPanel?.title || '',
