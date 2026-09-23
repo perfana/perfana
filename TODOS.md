@@ -1449,14 +1449,44 @@ drive-by.
 **Priority:** P2
 **Origin:** performance review during /ship on `perf/metric-dropdown-statistics-source` (2026-09-08),
 after the DISTINCT-first rewrite took it from 2035 ms to 927 ms.
-**RE-MEASURED on production 2026-09-23: it has regressed to 2,740 ms, and the cause is not the
-query.** The plan is still the DISTINCT-first form, but one node now reports
-`Heap Fetches: 41316` where an index-only scan should report 0 — so the visibility map is not
-keeping up on `ds_metrics` and the "index-only" scan is going to the heap for a tenth of its rows.
-That is a vacuum/autovacuum question on a continuously-written hypertable, not a query rewrite,
-and rewriting the query again would not touch it. Check `last_autovacuum` on the run's chunks and
-the autovacuum settings for `ds_metrics` before changing any SQL here. `pg_stat_statements` for the
-same statement: 64 calls, 1,358 ms mean, 941 MB.
+**RE-MEASURED on production 2026-09-23: 2,740 ms.** `pg_stat_statements` for the same statement:
+64 calls, 1,358 ms mean, 941 MB.
+
+**The visibility-map diagnosis is REFUTED — do not chase vacuum.** A first reading of that
+re-measurement blamed `Heap Fetches: 41316` on a cold visibility map. Probed against production the
+same day (probe pack: `~/Downloads/perfana-vm-heapfetch-probes.sql`), every part of that fails:
+
+- `Heap Fetches: 0` on all three index-only scans, not 41,316.
+- `relallvisible / relpages = 100.0%` on every chunk that has pages.
+- `n_dead_tup 0`, `dead_pct 0.00` on all three hot chunks; `last_autovacuum` two hours before the probe.
+- Worker budget has headroom: `max_worker_processes` 32 against `timescaledb.max_background_workers`
+  16 + `max_parallel_workers` 8.
+- And execution came in at **3,657 ms — a second SLOWER than the 2,740 ms** that prompted the
+  investigation, with heap fetches at zero. Whatever costs the time, it was never the heap.
+
+**The real shape, from that same EXPLAIN.** The run lives in exactly one chunk
+(`_hyper_1_698_chunk`, uncompressed, 7,357 MB); every other chunk contributes 0 rows and costs ~2 ms.
+
+```
+Index Only Scan .. _hyper_1_698_chunk_idx_ds_metrics_panel_lookup
+    rows=3,198,212   2,749 ms   Heap Fetches: 0
+  -> Merge Append    rows=3,198,212   3,110 ms
+  -> Unique          rows=23,523      3,596 ms
+  -> GroupAggregate  rows=643         3,632 ms
+```
+
+3.2 M index tuples read to emit 643 rows, a 5,000:1 ratio, and 2.7 s of the 3.6 s is that one scan.
+`Unique` dedups a sorted stream, so it must consume every row and nothing downstream can shortcut
+it. This is not a regression in the index — it is the **"still linear in the run"** property this
+entry already described, showing up as the runs get bigger. That also explains the recorded dead
+end where a single-column `DISTINCT` is SkipScanned in 3.9 ms while this five-column one is not:
+the fix has to make the scan sublinear, not make the heap cheaper.
+
+**Incidental, and worth correcting in the record:** `ds_metrics` is not append-only. Production
+shows 154 M updates against 1.14 B inserts (13.5%), and on chunk `_hyper_1_698_chunk` specifically
+`n_tup_upd` (12.99 M) *exceeds* `n_tup_ins` (7.49 M) — the ramp-up `UPDATE`, force-refetch upserts
+and perf-test re-insert paths from migration 1805. Autovacuum is keeping up at the default 0.2
+scale factor today, so there is nothing to fix, but do not reason about this table as append-only.
 **Why:** 927 ms is an index-only scan over `idx_ds_metrics_panel_lookup` of every distinct
 (panel, metric) tuple in the run — better than walking every data point, but still linear in the
 run. The client makes it worse: `useGraphsData.fetchPerformanceTestPanels` and
