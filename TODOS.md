@@ -993,6 +993,48 @@ expensive part (apps/worker/CLAUDE.md, "ADAPT's baseline depends on the `pct_agg
 
 ## Test run detail tables
 
+### `alpha()` on an already-transparent theme token, in four more places
+
+**Priority:** P3
+**Origin:** maintainability and design review during /ship on `fix/slo-table-contrast` (2026-09-23).
+MUI's `alpha()` **replaces** a colour's alpha channel rather than multiplying it, so
+`alpha(theme.palette.divider, 0.6)` is a 60% border where `divider` itself is 12% — five times
+stronger, not weaker. v0.2.96.14 fixed the SLO sites (`MetricSeriesEmptyState`, `SLOList`) and left
+these, which belong to features that were not visually verified in that session:
+
+- `apps/web/app/test-runs/[id]/components/compare/ComparePresetsTable.tsx:164,172`
+- `apps/web/app/test-runs/[id]/components/graphs/GraphPresetsTable.tsx:222,230`
+
+Four `stroke={alpha(theme.palette.divider, 0.5)}` chart gridlines in `awr/charts/` are the same
+call but a deliberate judgement call on a different surface — decide rather than sweep them.
+
+The class is only closable by a lint rule: an eslint `no-restricted-syntax` banning `alpha()` whose
+first argument is `theme.palette.divider` or any `theme.palette.action.*` member. The explanatory
+comment added in v0.2.96.14 guards exactly one call site.
+
+### Frosted-glass blur left on the SLO list and its status chips
+
+**Priority:** P4
+**Origin:** design and performance review during /ship on `fix/slo-table-contrast` (2026-09-23).
+`backdropFilter` with nothing translucent behind it renders identically and still forces a
+compositing layer per element. v0.2.96.14 removed it from the metric-series rows, value chips,
+status-chip base and the anomaly rows/header, and kept it on the sticky `SortableTableHeader` and
+the floating tooltips, where content genuinely passes underneath. Still present with nothing behind
+it at `SLOStatusChip.tsx:43,123,218` and `SLOList.tsx:215,242,377,411`.
+
+### Contrast regression tests for `AnomalyDetectionTable`
+
+**Priority:** P3
+**Origin:** coverage audit and testing review during /ship on `fix/slo-table-contrast` (2026-09-23),
+recorded as an accepted gap at the 20-test cap.
+Two one-line token swaps in `AnomalyDetectionTable.tsx` (the "No results found" panel, the
+pagination footer) ship without a render-level assertion, while every sibling site got one. The
+component needs an anomaly-data + pagination harness that does not exist yet. Two smaller gaps in
+the same audit: the `getApdexScoreColor` arm of the value-colour ternary in `MetricSeriesTableRow`,
+and `AnomalyTableRow`'s `is_stale` arm, which must bypass the changed expanded-background
+expression. Hover tints are not assertable at all — jsdom never applies `sx['&:hover']`.
+
+
 ### Page, filter and sort the Anomaly Detection table server-side
 
 **Priority:** P2

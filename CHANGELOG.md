@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.14] - 2026-09-23
+
+### Fixed
+- **The SLO and anomaly detail tables were hard to read, in both themes, and for two separate reasons.** Every other row was painted as a 30% black slab in light mode and a 30% white one in dark, rather than the faint tint intended: the helper that dims a colour *replaces* its transparency instead of scaling it, and the value being dimmed was already almost fully transparent. Separately, the text on those rows asked for the "dark" shade of each colour regardless of which theme was active — those shades are drawn to sit on a white page, so on a dark one they came out the same brightness as the background and faded into it. Both are fixed, and the tables now read the same way in light and dark.
+- **The Apdex score in a series row stayed unreadable in dark mode even after the rest of the row was fixed.** It took its colour from a helper whose comment claimed to be theme-aware but which returned the same two fixed shades either way — about 3.3:1 against the surface behind it, below the accessibility floor for text that size.
+- **The same washed-out text ran through the rest of the SLO and anomaly screens**: the anomaly table's own column headers (the worst of them, at 2.8:1, below the floor even for large text), the SLO list, the status chips, the tracked-regression tables, the scenario headers and the feedback labels. All of them now follow the active theme.
+- **Expanding an anomaly row made it stand out less, not more.** An opened row was drawing a fainter background than an ordinary striped row sitting next to it. It now uses the same emphasis the panel beneath it already used.
+- **A border meant to be a hairline was rendering five times too strong** around the empty-SLO panel and in the SLO list — the same transparency mistake as the row striping, in a different place.
+
+### Changed
+- **Row states now read in order.** With the heavy band gone, a striped row, a hovered row and a selected row had ended up within about 3% brightness of each other, and hovering a row could make it lighter or darker depending on whether it was odd or even. Each state is now distinctly stronger than the last, whichever row you are on.
+- **Status chips are a flat tint instead of a gradient.** The gradient had three colour stops separated by two hundredths of a percent of transparency — invisible, but the browser still had to redraw it for every chip. The dark-mode error chip also had its tint lightened so its label clears the contrast floor, which it previously missed.
+- Removed a frosted-glass blur from table rows, value chips and status chips. There was nothing behind them to blur, so it changed nothing on screen while still forcing the browser to treat every row as its own layer. It is kept on the one header that genuinely has content scrolling beneath it.
+- Row transitions name the properties they animate rather than animating everything, so selecting a row no longer animates its border growing.
+- Removed two unused exports from the SLO table helpers, and the duplicated copy of the column-header styling that had drifted from the shared one.
+
 ## [0.2.96.13] - 2026-09-23
 
 ### Fixed
