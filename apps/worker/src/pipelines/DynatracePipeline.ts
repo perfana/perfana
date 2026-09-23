@@ -1,6 +1,5 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
-import { EntityManager } from 'typeorm';
 import { getConfig } from '../config/environment.js';
 import { DynatraceRepository } from '../services/dynatrace/DynatraceRepository.js';
 import { QueryConstructor } from '../services/dynatrace/QueryConstructor.js';
@@ -11,7 +10,6 @@ import { resolveDynatraceAxiosProxy } from '../config/proxy-resolver.js';
 import {
   DynatraceQueryConfig,
   DynatraceQueryResult,
-  PanelDocument,
   PanelMetricsDocument
 } from '../types/dynatrace/index.js';
 
@@ -327,73 +325,6 @@ export class DynatracePipeline extends BasePipelineTypeORM {
         result: result.result,
         error: result.error
       };
-    });
-  }
-
-  /**
-   * Store panel documents in database
-   */
-  private async storePanelDocuments(
-    panelDocuments: PanelDocument[],
-    _testRunId: string,
-    testRun?: { organizationId?: string | null; teamId?: string | null }
-  ): Promise<void> {
-    if (panelDocuments.length === 0) {
-      this.logger.info('No panel documents to store');
-      return;
-    }
-
-    await this.withTransaction(async (manager: EntityManager) => {
-      this.logger.info(`Storing ${panelDocuments.length} panel documents`);
-
-      for (const doc of panelDocuments) {
-        await manager.query(
-          `INSERT INTO ds_panels (
-            test_run_id,
-            application_dashboard_id,
-            metrics_source_id,
-            dashboard_uid,
-            panel_id,
-            panel_title,
-            dashboard_label,
-            panel,
-            query_variables,
-            datasource_type,
-            benchmark_ids,
-            requests,
-            errors,
-            warnings,
-            updated_at,
-            organization_id,
-            team_id,
-            created_by,
-            updated_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
-          [
-            doc.test_run_id,
-            doc.application_dashboard_id,
-            doc.metrics_source_id || null,
-            doc.dashboard_uid,
-            doc.panel_id,
-            doc.panel_title,
-            doc.dashboard_label,
-            JSON.stringify(doc.panel),
-            JSON.stringify(doc.query_variables || {}),
-            doc.datasource_type,
-            doc.benchmark_ids ? JSON.stringify(doc.benchmark_ids) : null,
-            JSON.stringify(doc.requests || []),
-            doc.errors ? JSON.stringify(doc.errors) : null,
-            doc.warnings ? JSON.stringify(doc.warnings) : null,
-            new Date(),
-            testRun?.organizationId || null,
-            testRun?.teamId || null,
-            'worker-pipeline',
-            'worker-pipeline'
-          ]
-        );
-      }
-
-      this.logger.info(`✅ Stored ${panelDocuments.length} panel documents`);
     });
   }
 
