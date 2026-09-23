@@ -1,6 +1,6 @@
 # Perfana Web — Coding Rules
 
-Perfana-specific development standards for `apps/web`. For repo-wide context, see [CLAUDE.md](../../CLAUDE.md); for this app's gotchas (authenticated fetch, the Plotly container rule, the transaction time-series route), see [CLAUDE.md](CLAUDE.md) in this directory.
+Perfana-specific development standards for `apps/web`. For repo-wide context, see [CLAUDE.md](../../CLAUDE.md); for this app's gotchas (authenticated fetch, the Plotly container rule, the transaction time-series route, the two theme-colour traps), see [CLAUDE.md](CLAUDE.md) in this directory.
 
 ## Project Structure
 
@@ -59,6 +59,8 @@ Perfana uses **MUI (Material UI)** as the primary component library, supplemente
 - Use Radix primitives (`Select`, `Popover`, `Tooltip`) when MUI lacks the component
 - Use Tailwind utilities for layout spacing and quick overrides
 - Theme is configured in `providers.tsx` — use `theme.palette` tokens, not hardcoded colors
+- **A coloured accent uses `readable.*`, not `.dark`.** `sx={{ color: 'readable.primary' }}` (or `readableShade(theme, key)` from `@/lib/theme`) resolves to `.light` in dark mode and `.dark` in light mode. A bare `primary.dark` is the same hex in both themes and fades into a dark surface (v0.2.96.14)
+- **Never pass an already-translucent token to `alpha()`.** `action.*` and `divider` are already rgba, and MUI's `alpha()` *replaces* the channel rather than scaling it, so `alpha(theme.palette.action.hover, 0.3)` is a 30% slab, not a 1.2% tint. Use the token itself; keep `alpha()` for opaque `.main` shades
 
 ## Component Patterns
 
@@ -98,3 +100,5 @@ Frontend env vars are defined in `lib/env.ts`:
 | Importing MUI wrong | Use `@mui/material/ComponentName` path imports for tree-shaking |
 | `dynamic(() => import('@/components/plotly-cartesian'))` in a new chart | Import `Plot` from `@/components/ResponsivePlot` — the raw import only relayouts on a window resize, so a container that changes size on its own leaves the hover label misaligned (v0.2.95.2) |
 | Hardcoded `rgba(...)` / hex colours or gradients in `sx` | Use palette tokens (`action.hover`, `divider`, `action.disabledBackground`, `text.secondary`). Light-theme literals are invisible in dark mode — a near-white bar on a dark background, or near-black text on a light tint. This has been fixed twice now (v0.2.71.0, v0.2.74.0) |
+| `alpha(theme.palette.action.hover, 0.3)` or `alpha(theme.palette.divider, 0.6)` | Use the token itself. `alpha()` **replaces** the alpha channel instead of multiplying it, and those tokens are already translucent — you get a 30% slab or a 60% border, not a faint tint (v0.2.96.14) |
+| `color: 'primary.dark'` / `success.dark` for text or an icon | Use `color: 'readable.primary'`, or `readableShade(theme, key)` from `@/lib/theme`. `.dark` shades are tuned for a light surface and resolve the same in both themes, so in dark mode they fade into the background (v0.2.96.14) |
