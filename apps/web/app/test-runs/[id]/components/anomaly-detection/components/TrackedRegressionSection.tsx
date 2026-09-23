@@ -245,7 +245,7 @@ export default function TrackedRegressionSection({
                     '&:hover': {
                       backgroundColor: 'primary.main',
                       color: 'white',
-                      borderColor: 'primary.dark'
+                      borderColor: 'readable.primary'
                     }
                   }}
                 >

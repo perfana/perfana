@@ -94,14 +94,13 @@ export function AnomalyTableRow({
         background: row.is_stale
           ? undefined
           : (isExpanded
-              ? `linear-gradient(135deg, ${alpha(theme.palette.action.hover, 0.2)} 0%, ${alpha(theme.palette.action.hover, 0.3)} 100%)`
+              ? theme.palette.action.selected
               : index % 2 === 0
                 ? undefined
                 : `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.08)} 0%, ${alpha(theme.palette.primary.main, 0.04)} 100%)`),
         minWidth: '1000px',
         cursor: 'pointer',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        backdropFilter: 'blur(8px)',
+        transition: 'background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease',
         '&:hover': {
           background: isExpanded
             ? `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.12)} 0%, ${alpha(theme.palette.primary.main, 0.08)} 100%)`

@@ -9,6 +9,7 @@ import type {
   SortDirection,
   DiffSortMode,
 } from '../../hooks/useAnomalyDetection';
+import { readableShade } from '@/lib/theme';
 
 type HeaderColumn = {
   label: string;
@@ -30,7 +31,7 @@ const HEADER_COLUMNS: HeaderColumn[] = [
 
 const headerTextStyles = {
   fontWeight: 700,
-  color: 'primary.dark',
+  color: 'readable.primary',
   fontSize: '0.85rem',
   letterSpacing: '0.5px',
   textTransform: 'uppercase' as const,
@@ -46,11 +47,11 @@ interface AnomalyTableHeaderProps {
 
 function SortIndicator({ active, direction }: { active: boolean; direction: SortDirection }) {
   if (!active) {
-    return <UnfoldMore sx={{ fontSize: 14, opacity: 0.35, color: 'primary.dark' }} />;
+    return <UnfoldMore sx={{ fontSize: 14, opacity: 0.35, color: 'readable.primary' }} />;
   }
   return direction === 'asc'
-    ? <ArrowUpward sx={{ fontSize: 14, color: 'primary.dark' }} />
-    : <ArrowDownward sx={{ fontSize: 14, color: 'primary.dark' }} />;
+    ? <ArrowUpward sx={{ fontSize: 14, color: 'readable.primary' }} />
+    : <ArrowDownward sx={{ fontSize: 14, color: 'readable.primary' }} />;
 }
 
 export function AnomalyTableHeader({
@@ -77,7 +78,6 @@ export function AnomalyTableHeader({
       borderColor: alpha(theme.palette.primary.main, 0.15),
       borderBottom: 'none',
       boxShadow: `0 1px 3px ${alpha(theme.palette.text.primary, 0.08)}`,
-      backdropFilter: 'blur(8px)',
       minWidth: '1000px'
     })}>
       <Box />
@@ -166,12 +166,12 @@ export function AnomalyTableHeader({
                     fontWeight: 600,
                     lineHeight: 1.4,
                     minHeight: '20px',
-                    color: alpha(theme.palette.primary.dark, 0.7),
+                    color: alpha(readableShade(theme, 'primary'), 0.7),
                     borderColor: alpha(theme.palette.primary.main, 0.25),
                     textTransform: 'none',
                     '&.Mui-selected': {
                       backgroundColor: alpha(theme.palette.primary.main, 0.15),
-                      color: theme.palette.primary.dark,
+                      color: readableShade(theme, 'primary'),
                       '&:hover': {
                         backgroundColor: alpha(theme.palette.primary.main, 0.22),
                       },

@@ -57,7 +57,7 @@ export function calculateFeedbackState(
 export const tbdChipStyles = (theme: Theme) => ({
   background: `linear-gradient(135deg, ${alpha(theme.palette.warning.main, 0.1)} 0%, ${alpha(theme.palette.warning.light, 0.15)} 100%)`,
   border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
-  color: 'warning.dark',
+  color: 'readable.warning',
   fontWeight: 600,
   cursor: 'pointer',
   '&:hover': {
@@ -75,7 +75,7 @@ export const tbdChipStyles = (theme: Theme) => ({
 export const acceptedChipStyles = (theme: Theme) => ({
   background: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.1)} 0%, ${alpha(theme.palette.success.light, 0.15)} 100%)`,
   border: `1px solid ${alpha(theme.palette.success.main, 0.3)}`,
-  color: 'success.dark',
+  color: 'readable.success',
   fontWeight: 600,
 });
 
@@ -85,7 +85,7 @@ export const acceptedChipStyles = (theme: Theme) => ({
 export const deniedChipStyles = (theme: Theme) => ({
   background: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.1)} 0%, ${alpha(theme.palette.error.light, 0.15)} 100%)`,
   border: `1px solid ${alpha(theme.palette.error.main, 0.3)}`,
-  color: 'error.dark',
+  color: 'readable.error',
   fontWeight: 600,
 });
 

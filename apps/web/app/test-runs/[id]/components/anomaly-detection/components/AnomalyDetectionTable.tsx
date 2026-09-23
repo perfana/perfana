@@ -92,7 +92,7 @@ export default function AnomalyDetectionTable({
             borderBottom: '1px solid',
             borderColor: alpha(theme.palette.primary.main, 0.12),
             borderRadius: '0 0 8px 8px',
-            backgroundColor: alpha(theme.palette.action.hover, 0.3)
+            backgroundColor: theme.palette.action.hover
           })}>
             <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
               No results found
@@ -165,7 +165,7 @@ export default function AnomalyDetectionTable({
         sx={(theme) => ({
           borderTop: '1px solid',
           borderColor: alpha(theme.palette.primary.main, 0.15),
-          backgroundColor: alpha(theme.palette.action.hover, 0.3),
+          backgroundColor: theme.palette.action.hover,
           '& .MuiTablePagination-toolbar': {
             minHeight: '52px'
           },
