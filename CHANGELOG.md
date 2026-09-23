@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.11] - 2026-09-23
+
+### Fixed
+- **A test run with more than 3449 panels lost its whole panels stage.** Postgres accepts at most 65535 parameters in one statement, and the panel insert spends 19 of them per panel in a single statement covering every panel of the run — so past that count the statement was rejected outright rather than running slowly. Panel counts scale with dashboards per run, so this was reachable rather than theoretical. The insert now splits into as many statements as the parameter budget allows.
+
+### Changed
+- **Metric writes make about five times fewer round trips.** The same parameter budget was being spent 200 rows at a time against a hard-coded constant, using 3800 of the 65535 available. Both sites now derive their batch size from their own column list, so the number moves by itself when a column is added instead of drifting toward the ceiling unnoticed — which is what the panel insert did.
+- Removed a dead Dynatrace method that stored panel documents. Nothing had called it since the pipeline moved to the shared batched upsert; its only remaining caller was a test reaching past the class to invoke it directly. The assertion that test made about the live panel insert moved to the pipeline that actually performs it.
+
 ## [0.2.96.10] - 2026-09-22
 
 ### Fixed
