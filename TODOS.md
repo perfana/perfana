@@ -473,10 +473,24 @@ queries already take `uniq_ds_metrics_upsert` (an Index Only Scan with both pred
 scans reading 6,375,822,490 tuples at 27% fetch. That is not application traffic — the LTTB series
 query and `upsertPerfTestStatistics` carry no time predicate at all. Most likely the compression
 policy walking chunks.
-**What to do:** identify the 40k scans before deciding anything. `pg_stat_statements` filtered to
-statements touching `ds_metrics` with a time range, or a targeted `auto_explain` window, would
-name them. If they turn out to be the compression policy, the index stays and this closes as
-working-as-intended.
+**Leading candidate (user hypothesis, 2026-09-23):** the tuples are other SUTs' rows. Four
+nightly runs overlap 03:00-06:00 on this deployment, so any `ds_metrics` read that walks the time
+index sweeps all four — the same 56%-waste shape measured on `virtual_users`. The one query that
+can produce it is `ReportDataFetcherService.getMetricsTimeSeries`
+(`report-data-fetcher.service.ts:2489`): it is the ONLY `ds_metrics` query in the repo that orders
+by raw `time`, and `uniq_ds_metrics_upsert` carries `time` as its FIFTH column, so one run's rows
+are not time-ordered in it. The planner therefore chooses between sorting the run's rows and
+walking `ds_metrics_time_idx` in order while filtering — and it is issued once PER PANEL in a
+`for (const panel of panels)` loop, which is what a five-figure scan count looks like.
+Locally (40,645 rows) it still sorts, spilling 2624 kB to disk; the flip is a cost crossover that
+needs production volume to reproduce.
+**What to do:** `EXPLAIN (ANALYZE, BUFFERS)` that query shape on a large run. If it shows
+`Index Scan using ..._ds_metrics_time_idx` with `test_run_id` demoted to `Filter`, the fix is to
+drop `ORDER BY dm.time ASC` and sort the per-panel rows in JS — they are already bounded per panel
+and the caller consumes them in order anyway. That removes the incentive without touching the
+index, which matters because the index cannot simply be dropped until the other ~40k scans are
+accounted for. If instead it sorts, the scans are something else (the compression policy walking
+chunks is the next candidate) and this closes as working-as-intended.
 
 ### The stale-`ramp_up` pre-check scans every `ds_metrics` chunk ever created
 
