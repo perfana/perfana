@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.11] - 2026-09-23
+
+### Changed
+- **Named the leading suspect for the last open item from the slow-query sweep.** `ds_metrics` carries a time index that nothing obvious uses, yet it had read 6.4 billion rows across 40,679 scans. The likely explanation is that four nightly tests overlap between 03:00 and 06:00, so anything reading that table in time order sweeps all four systems to answer about one — the same waste already measured and fixed on the virtual-user table. One query in the codebase can produce that shape: the report generator's per-panel metric fetch, which is the only place `ds_metrics` is read in time order and which runs once for every panel in a report. Not confirmed — on a small local run it still sorts rather than switching — so this records the check that settles it and the fix if it does, rather than changing anything.
+
 ## [0.2.96.10] - 2026-09-22
 
 ### Fixed
