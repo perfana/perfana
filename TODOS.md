@@ -1393,7 +1393,7 @@ incremental path needs a fallback.
 
 ### An unmatched dashboard/panel pair is an unindexed scan of the whole ds_metrics hypertable
 
-**Priority:** P1
+**Priority:** RESOLVED in v0.2.96.13 — scoped + bounded; the covering index was deliberately not added (see below)
 **Origin:** adversarial review during /ship on `perf/metric-dropdown-statistics-source` (2026-09-08).
 **Why:** Called without `testRunId` — the report-template path, where `MetricSelectionCascade`
 makes it conditional and fans one request out per selected panel — `getDistinctMetricNames` filters
@@ -1410,7 +1410,29 @@ blocks (100 MB). A direct `EXPLAIN` of one pair gave 6,720 ms / 583,333 buffers 
 **13.9 ms / 34 buffers** scoped — 484x the time and ~17,000x the buffers, and the production mean
 is worse than the pair I probed. So the answer to "is it hot" is: rare but pathological. Seven
 calls spent 378 seconds; whoever made them waited the better part of a minute per panel.
-**What:** A covering index for the unscoped shape (`application_dashboard_id, panel_id,
+**FIXED in v0.2.96.13.** `getDistinctMetricNames` now resolves the dashboard's most recent run
+when the caller gives none — through `application_dashboards` -> `test_runs`, never through
+`ds_metrics`, since asking `ds_metrics` which run touched a dashboard last is the same unindexed
+scan — and answers scoped to it. That is also the better answer: the report-template picker wanted
+today's series, not every name the panel ever recorded. When the resolved run has no rows for the
+panel (a dashboard added after it, or a failed collection) the unscoped scan still runs so the
+picker is never silently empty, now wrapped in `SET LOCAL statement_timeout = '10000ms'` —
+matching `TestRunsPerformanceQueryService.LIVE_QUERY_STATEMENT_TIMEOUT_MS`. Both halves are
+mutation-tested independently.
+
+**The covering index was deliberately NOT added.** It would be a full index over every row of a
+27 GB continuously-written hypertable, on top of the 17 GB of `test_run_id`-leading indexes
+already there, to fix a query that ran 7 times. If the fallback turns out to be hot after this
+ships, revisit — the `pg_stat_statements` line to watch is the unscoped `SELECT DISTINCT
+"dsMetrics"."metric_name"` shape, which should now approach zero calls.
+
+**Residue:** the latest-run resolution has only been EXPLAINed on a dev database (47 runs, where
+it seq-scans `test_runs` because that is cheaper at that size). It is *expected* to use
+`idx_test_runs_system_env_workload_start` at production scale, since `workload` is unconstrained
+and only (sut, env) is fixed, leaving a few hundred rows to top-N sort. Confirm that with the
+probe rather than assuming it.
+
+**Original options considered:** A covering index for the unscoped shape (`application_dashboard_id, panel_id,
 metric_name`), a `SET LOCAL statement_timeout` on the path, or require `testRunId`. The index is
 the real fix but it is a full index over every row of a 27 GB continuously-written hypertable,
 on top of the 17 GB of `test_run_id`-leading indexes already there — weigh the write cost. Cheapest

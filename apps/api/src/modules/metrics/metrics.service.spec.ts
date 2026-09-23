@@ -33,6 +33,13 @@ describe('MetricsService', () => {
     createQueryBuilder: jest.fn(),
     save: jest.fn(),
     delete: jest.fn(),
+    // getDistinctMetricNames runs ds_metrics reads through the manager (no RLS policy on
+    // that table) and wraps the unscoped fallback in a statement-timeout transaction.
+    manager: {
+      query: jest.fn(),
+      transaction: jest.fn(async (cb: (em: { query: jest.Mock }) => unknown) =>
+        cb({ query: jest.fn().mockResolvedValue([]) })),
+    },
   });
 
   beforeEach(async () => {
@@ -1932,71 +1939,163 @@ describe('MetricsService', () => {
   });
 
   describe('getDistinctMetricNames', () => {
-    const makeQb = () => ({
-      select: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([{ metric_name: 'T01.login' }]),
-    });
+    /**
+     * Unscoped, this query has no usable index prefix — nothing leads with
+     * (application_dashboard_id, panel_id). Measured on production 2026-09-23: 7 unscoped
+     * calls at a 54,077 ms mean and 25 GB read, against 827 scoped calls at 10.1 ms.
+     * So when the caller gives no run, the service resolves the dashboard's most recent
+     * one, which is also the answer a report-template author wants: the series the panel
+     * produces today, not every name it ever recorded.
+     */
+    const LATEST_RUN_SQL = 'FROM application_dashboards ad';
+    const NAMES_SQL = 'FROM ds_metrics';
 
-    it('limits the series list to one run when a testRunId is given', async () => {
-      // Unscoped, this answers with every series the panel EVER recorded — a run whose
-      // naming has since changed contributes names that match nothing in the comparison,
-      // which is how the compare card ended up listing value-less, URL-less rows.
-      const qb = makeQb();
-      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+    /** Routes the two raw queries by their SQL, since both land on the same mock. */
+    const wire = (opts: { latestRun?: string | null; scopedNames?: string[]; unscopedNames?: string[] }) => {
+      const unscopedQuery = jest.fn().mockResolvedValue(
+        (opts.unscopedNames ?? []).map((metric_name) => ({ metric_name })),
+      );
+      metricsRepo.query.mockImplementation(async (sql: string) => {
+        if (String(sql).includes(LATEST_RUN_SQL)) {
+          return opts.latestRun ? [{ test_run_id: opts.latestRun }] : [];
+        }
+        return [];
+      });
+      metricsRepo.manager.query.mockImplementation(async (sql: string) => {
+        if (String(sql).includes(NAMES_SQL)) {
+          return (opts.scopedNames ?? []).map((metric_name) => ({ metric_name }));
+        }
+        return [];
+      });
+      (metricsRepo.manager.transaction as jest.Mock).mockImplementation(
+        async (cb: (em: { query: jest.Mock }) => unknown) => cb({ query: unscopedQuery }),
+      );
+      return { unscopedQuery };
+    };
+
+    it('uses the run the caller named, and does not resolve one', async () => {
+      wire({ scopedNames: ['T01.login'] });
 
       const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user'], 'ms-1', 'run-18');
 
-      expect(qb.andWhere).toHaveBeenCalledWith('dsMetrics.test_run_id = :testRunId', { testRunId: 'run-18' });
       expect(names).toEqual(['T01.login']);
+      const sqls = metricsRepo.manager.query.mock.calls.map((c) => String(c[0]));
+      expect(sqls.some((q) => q.includes('test_run_id'))).toBe(true);
+      // No latest-run lookup when the caller already supplied one.
+      expect(metricsRepo.query).not.toHaveBeenCalled();
+    });
+
+    it('returns an explicitly-scoped empty result as-is, without falling back', async () => {
+      // The caller asked about THAT run. "No series in this run" is the true answer, and
+      // falling back to every run the panel ever had would contradict it.
+      const { unscopedQuery } = wire({ scopedNames: [] });
+
+      const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user'], undefined, 'run-18');
+
+      expect(names).toEqual([]);
+      expect(unscopedQuery).not.toHaveBeenCalled();
+    });
+
+    it('resolves the dashboard latest run when none is given, and scopes to it', async () => {
+      const { unscopedQuery } = wire({ latestRun: 'run-99', scopedNames: ['T02.browse'] });
+
+      const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user']);
+
+      expect(names).toEqual(['T02.browse']);
+      // Resolution goes through test_runs, NOT through ds_metrics -- asking ds_metrics
+      // which run touched this dashboard last is the same unindexed scan we are avoiding.
+      const resolveSql = String(metricsRepo.query.mock.calls[0]![0]);
+      expect(resolveSql).toContain('FROM application_dashboards ad');
+      expect(resolveSql).toContain('JOIN test_runs tr');
+      expect(resolveSql).not.toContain('ds_metrics');
+      expect(unscopedQuery).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the unscoped scan when the resolved run has nothing for the panel', async () => {
+      // A dashboard added after that run, or a run whose collection for it failed. An
+      // empty picker would be a worse regression than the slow query.
+      const { unscopedQuery } = wire({ latestRun: 'run-99', scopedNames: [], unscopedNames: ['legacy.name'] });
+
+      const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user']);
+
+      expect(names).toEqual(['legacy.name']);
+      expect(unscopedQuery).toHaveBeenCalled();
+    });
+
+    it('bounds that fallback with a statement timeout', async () => {
+      // Without it the scan holds one of the pool's connections for the full 54 s.
+      const timeoutSql: string[] = [];
+      wire({ latestRun: null, unscopedNames: ['legacy.name'] });
+      (metricsRepo.manager.transaction as jest.Mock).mockImplementation(
+        async (cb: (em: { query: jest.Mock }) => unknown) =>
+          cb({
+            query: jest.fn(async (sql: string) => {
+              timeoutSql.push(String(sql));
+              return String(sql).includes('statement_timeout') ? [] : [{ metric_name: 'legacy.name' }];
+            }),
+          }),
+      );
+
+      const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user']);
+
+      expect(names).toEqual(['legacy.name']);
+      expect(timeoutSql[0]).toContain("SET LOCAL statement_timeout = '10000ms'");
+      // The timeout must precede the scan, or it does not apply to it.
+      expect(timeoutSql[1]).toContain('FROM ds_metrics');
+    });
+
+    it('falls back when no run can be resolved at all', async () => {
+      const { unscopedQuery } = wire({ latestRun: null, unscopedNames: ['only.name'] });
+
+      const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user']);
+
+      expect(names).toEqual(['only.name']);
+      expect(unscopedQuery).toHaveBeenCalled();
+    });
+
+    it('prefers metricsSourceId over applicationDashboardId in the names query', async () => {
+      wire({ scopedNames: ['T01.login'] });
+
+      await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user'], 'ms-1', 'run-18');
+
+      const call = metricsRepo.manager.query.mock.calls.find((c) => String(c[0]).includes('FROM ds_metrics'))!;
+      expect(String(call[0])).toContain('metrics_source_id');
+      expect(String(call[0])).not.toContain('application_dashboard_id');
+      expect(call[1]).toContain('ms-1');
     });
 
     it('refuses a run the caller cannot access, without querying metrics', async () => {
       // Neither ds_metrics nor ds_metric_statistics has an RLS policy, so this check is
       // the only thing standing between a caller and another organization's data.
       testRunRepo.query.mockResolvedValue([]);
-      const qb = makeQb();
-      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+      wire({ scopedNames: ['T01.login'] });
 
       const names = await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user'], undefined, 'other-org-run');
 
       expect(names).toEqual([]);
-      expect(metricsRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(metricsRepo.manager.query).not.toHaveBeenCalled();
     });
 
     it('refuses a dashboard the caller cannot access when no run is given', async () => {
       appDashboardRepo.findOne.mockResolvedValue({ id: 'dash-9', organizationId: 'other-org', createdBy: 'someone' } as never);
       authzMock.canAccessResource.mockResolvedValue({ allowed: false, reason: 'not a member' });
-      const qb = makeQb();
-      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+      wire({ latestRun: 'run-99', scopedNames: ['T01.login'] });
 
       const names = await service.getDistinctMetricNames('dash-9', 201, 'user-1', ['user']);
 
       expect(names).toEqual([]);
-      expect(metricsRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(metricsRepo.manager.query).not.toHaveBeenCalled();
+      expect(metricsRepo.query).not.toHaveBeenCalled();
     });
 
     it('fails closed on an unknown dashboard id', async () => {
       appDashboardRepo.findOne.mockResolvedValue(null as never);
-      const qb = makeQb();
-      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
+      wire({ latestRun: 'run-99', scopedNames: ['T01.login'] });
 
       const names = await service.getDistinctMetricNames('does-not-exist', 201, 'user-1', ['user']);
 
       expect(names).toEqual([]);
-      expect(metricsRepo.createQueryBuilder).not.toHaveBeenCalled();
-    });
-
-    it('stays unscoped when no testRunId is given', async () => {
-      const qb = makeQb();
-      metricsRepo.createQueryBuilder.mockReturnValue(qb as never);
-
-      await service.getDistinctMetricNames('dash-1', 201, 'user-1', ['user']);
-
-      expect(qb.andWhere).not.toHaveBeenCalledWith(
-        'dsMetrics.test_run_id = :testRunId', expect.anything());
+      expect(metricsRepo.manager.query).not.toHaveBeenCalled();
     });
   });
 

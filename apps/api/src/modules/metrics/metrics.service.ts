@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, FindManyOptions } from 'typeorm';
+import { Repository, In, FindManyOptions, EntityManager } from 'typeorm';
 import {
   DsMetrics,
   DsMetricStatistics,
@@ -1006,6 +1006,102 @@ export class MetricsService {
   }
 
   /**
+   * Per-statement timeout for the unscoped metric-name fallback.
+   *
+   * That scan has no usable index prefix, so it is bounded by how much of `ds_metrics`
+   * it has to walk rather than by how much it returns — 54 s on production. Without a
+   * timeout it holds one of the pool's connections for that whole time; with one,
+   * Postgres aborts it and releases the connection. 10 s matches
+   * `TestRunsPerformanceQueryService.LIVE_QUERY_STATEMENT_TIMEOUT_MS`, which guards the
+   * comparable live-aggregation reads.
+   */
+  private static readonly UNSCOPED_NAMES_STATEMENT_TIMEOUT_MS = 10_000;
+
+  /**
+   * Run `fn` with a per-statement timeout so a runaway query cannot pin a pooled
+   * connection. `SET LOCAL` needs a transaction to be local to, hence the wrapper.
+   */
+  private async withStatementTimeout<T>(fn: (em: EntityManager) => Promise<T>): Promise<T> {
+    return withRequestEm(this.metricsRepo).manager.transaction(async (txEm) => {
+      await txEm.query(
+        `SET LOCAL statement_timeout = '${MetricsService.UNSCOPED_NAMES_STATEMENT_TIMEOUT_MS}ms'`,
+      );
+      return fn(txEm);
+    });
+  }
+
+  /**
+   * The most recent run that could have written to this dashboard.
+   *
+   * Resolved through the dashboard's (system_under_test_id, test_environment) rather than
+   * from `ds_metrics`, which is the whole point: asking `ds_metrics` "which run touched
+   * this dashboard last" is the same unindexed scan we are trying to avoid. This walks
+   * `idx_test_runs_system_env_workload_start` from the dashboard's primary key instead —
+   * `workload` is unconstrained so the rows still need sorting, but a (sut, env) pair holds
+   * runs in the hundreds, which sorts in microseconds.
+   *
+   * Returns null when the dashboard is unknown or its system has no runs; the caller then
+   * takes the bounded unscoped path.
+   */
+  private async resolveLatestRunForDashboard(applicationDashboardId: string): Promise<string | null> {
+    if (!applicationDashboardId) return null;
+
+    const rows: Array<{ test_run_id: string }> = await withRequestEm(this.metricsRepo).query(
+      `SELECT tr.test_run_id
+         FROM application_dashboards ad
+         JOIN test_runs tr
+           ON tr.system_under_test_id = ad.system_under_test_id
+          AND tr.test_environment = ad.test_environment
+        WHERE ad.id = $1
+        ORDER BY tr.start_time DESC
+        LIMIT 1`,
+      [applicationDashboardId],
+    );
+    return rows[0]?.test_run_id ?? null;
+  }
+
+  /**
+   * The distinct-name query itself, shared by the scoped and unscoped paths so the two
+   * cannot drift in what they filter on. `em` lets the caller run it inside the
+   * statement-timeout transaction.
+   */
+  private async queryDistinctMetricNames(
+    panelId: number,
+    applicationDashboardId: string,
+    metricsSourceId: string | undefined,
+    testRunId: string | undefined,
+    em?: EntityManager,
+  ): Promise<string[]> {
+    const conditions = ['panel_id = $1'];
+    const params: unknown[] = [panelId];
+
+    if (testRunId) {
+      params.push(testRunId);
+      conditions.push(`test_run_id = $${params.length}`);
+    }
+    // Prefer metricsSourceId over applicationDashboardId, as the caller does.
+    if (metricsSourceId) {
+      params.push(metricsSourceId);
+      conditions.push(`metrics_source_id = $${params.length}`);
+    } else {
+      params.push(applicationDashboardId);
+      conditions.push(`application_dashboard_id = $${params.length}`);
+    }
+
+    // ds_metrics carries no RLS policy (see the note in getDistinctMetricNames), so the
+    // plain manager is correct here; `em` is the statement-timeout transaction when the
+    // caller is on the unscoped fallback.
+    const runner = em ?? this.metricsRepo.manager;
+    const rows: Array<{ metric_name: string }> = await runner.query(
+      `SELECT DISTINCT metric_name FROM ds_metrics
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY metric_name ASC`,
+      params,
+    );
+    return rows.map((r) => r.metric_name);
+  }
+
+  /**
    * Get distinct metric names for a specific dashboard and panel
    */
   async getDistinctMetricNames(
@@ -1036,32 +1132,49 @@ export class MetricsService {
         return [];
       }
 
-      const qb = this.metricsRepo
-        .createQueryBuilder('dsMetrics')
-        .select('DISTINCT dsMetrics.metric_name', 'metric_name')
-        .where('dsMetrics.panel_id = :panelId', { panelId })
-        .orderBy('dsMetrics.metric_name', 'ASC');
-
-      // Without a run, this answers "every series this panel has EVER recorded" — including
+      // Without a run this answers "every series this panel has EVER recorded" — including
       // series from runs whose naming has since changed. The compare card then offered
       // e.g. `category_page_load` from a 2024 run next to today's
       // `T02_Browse_Category.category_page_load`: no values in either compared run, and no
-      // URL, because nothing matches it. Scoping to the run keeps the list to what can
-      // actually be compared. Optional so existing callers keep their behaviour.
-      if (testRunId) {
-        qb.andWhere('dsMetrics.test_run_id = :testRunId', { testRunId });
+      // URL, because nothing matches it.
+      //
+      // It is also pathologically slow, because no index leads with
+      // (application_dashboard_id, panel_id). Measured on production 2026-09-23:
+      // 7 unscoped calls at a 54,077 ms mean and 25 GB read, against 827 scoped calls at
+      // 10.1 ms. One probed pair was 6,720 ms / 583,333 buffers unscoped against
+      // 13.9 ms / 34 buffers scoped.
+      //
+      // So when the caller has no run, resolve one: the dashboard's most recent run gives
+      // the series the panel produces TODAY, which is what a report-template author is
+      // choosing between. Correctness and speed happen to want the same thing here.
+      const scopedRunId = testRunId ?? (await this.resolveLatestRunForDashboard(
+        metricsSourceId
+          ? ((await this.resolveApplicationDashboardId(metricsSourceId)) ?? '')
+          : applicationDashboardId,
+      ));
+
+      const scopedNames = scopedRunId
+        ? await this.queryDistinctMetricNames(panelId, applicationDashboardId, metricsSourceId, scopedRunId)
+        : [];
+
+      // An explicit run is the caller's choice and is returned as-is, empty or not.
+      if (testRunId || scopedNames.length > 0) {
+        return scopedNames;
       }
 
-      // Prefer metricsSourceId over applicationDashboardId
-      if (metricsSourceId) {
-        qb.andWhere('dsMetrics.metrics_source_id = :metricsSourceId', { metricsSourceId });
-      } else {
-        qb.andWhere('dsMetrics.application_dashboard_id = :applicationDashboardId', { applicationDashboardId });
-      }
-
-      const result = await qb.getRawMany();
-
-      return result.map((row: { metric_name: string }) => row.metric_name);
+      // The resolved run had nothing for this panel — a dashboard added after that run,
+      // or a run whose collection for it failed. Falling back to the unscoped scan keeps
+      // the picker populated rather than silently empty, and the statement timeout is what
+      // stops that costing another 54 seconds: Postgres aborts it and releases the
+      // connection instead of holding one of the pool's 50 for a minute. Same guard the
+      // live-aggregation paths in test-runs-performance-query.service.ts already use.
+      this.logger.warn(
+        `Distinct metric names: run ${scopedRunId ?? '(none resolved)'} had no rows for panel ${panelId}` +
+          ` on dashboard ${applicationDashboardId}; falling back to the unscoped scan`,
+      );
+      return this.withStatementTimeout((em) =>
+        this.queryDistinctMetricNames(panelId, applicationDashboardId, metricsSourceId, undefined, em),
+      );
     } catch (error) {
       this.logger.error(
         `Failed to get distinct metric names for dashboard ${applicationDashboardId} panel ${panelId}: ${(error as Error).message}`,

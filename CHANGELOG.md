@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.13] - 2026-09-23
+
+### Fixed
+- **The metric picker in report templates took the better part of a minute per panel, and offered names that could not match anything.** Asked without a test run — which is what the report-template path does — it answered "every series this panel has ever recorded", scanning a table with no index for that question: seven such calls on production averaged 54 seconds each and read 25 GB, where the same lookup scoped to one run averages 10 milliseconds. It now resolves the dashboard's most recent run and answers from that, which is both far faster and the more useful answer: the series the panel produces today, rather than names from runs whose naming has since changed. Those stale names were a real problem in their own right — the compare card would offer one, then draw a row with no values and no URL, because nothing in either compared run matched it.
+- If that run turns out to have nothing for the panel — a dashboard added after it, or a run whose collection for it failed — the old unscoped search still runs, so the picker is never silently empty. It is now bounded by a ten-second database timeout, the same guard the live analysis queries already use, so a slow one releases its database connection instead of holding one of fifty for a minute.
+
 ## [0.2.96.12] - 2026-09-23
 
 ### Fixed
