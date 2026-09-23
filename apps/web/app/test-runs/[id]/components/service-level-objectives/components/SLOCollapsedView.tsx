@@ -158,7 +158,7 @@ function BadgeSection({
         transition: 'all 0.2s ease',
         '&:hover': {
           transform: 'translateY(-1px)',
-          borderColor: 'primary.dark',
+          borderColor: 'readable.primary',
           backgroundColor: 'primary.main',
           color: 'primary.contrastText'
         }

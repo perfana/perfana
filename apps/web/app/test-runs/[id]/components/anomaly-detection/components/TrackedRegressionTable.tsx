@@ -108,14 +108,14 @@ export default function UnresolvedRegressionTable({ regressions, trendsData }: U
           <Box />
           <Typography variant="subtitle2" sx={{
             fontWeight: 700,
-            color: 'primary.dark',
+            color: 'readable.primary',
             fontSize: '0.85rem',
             letterSpacing: '0.5px',
             textTransform: 'uppercase'
           }}>Metric</Typography>
           <Typography variant="subtitle2" sx={{
             fontWeight: 700,
-            color: 'primary.dark',
+            color: 'readable.primary',
             fontSize: '0.85rem',
             letterSpacing: '0.5px',
             textTransform: 'uppercase'
@@ -204,7 +204,7 @@ export default function UnresolvedRegressionTable({ regressions, trendsData }: U
                   minWidth: '800px'
                 })}>
                   <Box sx={{ mb: 2 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 600, color: 'primary.dark' }}>
+                    <Typography variant="h6" sx={{ fontWeight: 600, color: 'readable.primary' }}>
                       Trends Chart: {regression.metricName}
                     </Typography>
                   </Box>

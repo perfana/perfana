@@ -86,3 +86,55 @@ Four things about it are load-bearing:
 jsdom has no `ResizeObserver`. `apps/web/jest.setup.js` stubs it so a component that observes its
 container mounts in tests at all.
 
+### Two colour bugs that look like one, and the `readable` palette
+
+Both of these made the SLO and anomaly detail tables unreadable, and neither is visible in a code
+review — the code reads as if it is asking for a subtle tint or a dark accent. Fixed across ~26
+sites in v0.2.96.14.
+
+1. **MUI's `alpha()` REPLACES the alpha channel, it does not multiply it.** `theme.palette.action.hover`
+   is already an rgba (4% black in light mode, 8% white in dark) and `divider` is 12%, so
+   `alpha(theme.palette.action.hover, 0.3)` is a **30% black slab** in light mode and a 30% white one
+   in dark — roughly seven times the token, not a third of it. Same call on `divider` gives a 60%
+   border where a hairline was intended. The rule: **never pass an already-translucent token
+   (`action.*`, `divider`) to `alpha()`** — use the token itself. `alpha()` on a `.main` shade is
+   fine, those are opaque. Two unswept sites (`ComparePresetsTable.tsx`, `GraphPresetsTable.tsx`)
+   and four deliberate chart gridlines are tracked in TODOS.md; only a lint rule closes the class.
+
+2. **`.dark` and `.light` palette shades are mode-blind.** MUI's `.dark` shade is tuned to sit on a
+   *light* surface, and `color: 'primary.dark'` resolves to the same hex whichever theme is active.
+   In dark mode it lands at roughly the lightness of the surface itself and the text fades out — the
+   anomaly column headers measured 2.8:1, below the contrast floor even for large text. Use the
+   derived palette entry, which needs no theme callback:
+
+   ```tsx
+   <Typography sx={{ color: 'readable.primary' }} />          // preferred
+   color: readableShade(theme, 'success')                     // where a Theme is already in hand
+   ```
+
+   `readableShade(theme, key)` (`apps/web/lib/theme.ts`) returns `.light` in dark mode and `.dark` in
+   light mode, for `primary | secondary | success | error | warning | info` (`READABLE_KEYS`).
+   `withReadablePalette` resolves all six once against the built theme and re-runs `createTheme` to
+   hang them off `palette.readable`. That indirection is required, not stylistic: this repo declares
+   only `main` for success/warning/error, so the `.light`/`.dark` shades are `augmentColor`
+   derivatives that do not exist until the theme is built and cannot be written into the palette
+   literal. `readableShade` is re-exported from
+   `app/test-runs/[id]/components/service-level-objectives/utils/metric-series-table-utils.ts` for
+   that feature's existing importers; new code imports it from `@/lib/theme`.
+
+   `getApdexScoreColor` in `.../service-level-objectives/utils/slo-formatters.ts` takes
+   `(score, theme)` as of this version — it was commented "theme-aware" and was not, returning two
+   fixed shades that measured ~3.3:1 in dark mode.
+
+**Ordering the row states is a third, separate problem.** With the 30% band gone, a striped row, a
+hovered row and a selected row sat within ~3% brightness of each other, and hovering could make a row
+lighter or darker depending on its parity. The invariant that keeps them ordered: **hover is keyed on
+`primary.main`, never on the stripe token**, so it is stronger than either parity's resting
+background. An *expanded* anomaly row uses `action.selected` rather than `action.hover` for the same
+reason — it has to stay above the stripe beneath it.
+
+The regression tests assert on the **rendered** style (`AnomalyTableRow.contrast.test.tsx`,
+`MetricSeriesTableRow.striping.test.tsx`, `metric-series-table-theme.test.ts`), so re-wrapping a
+token in `alpha()` or hard-coding an rgba fails them. Hover tints are not assertable — jsdom never
+applies `sx['&:hover']`.
+

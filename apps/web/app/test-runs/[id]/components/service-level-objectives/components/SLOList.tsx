@@ -216,7 +216,7 @@ export function SLOList({
             transition: 'all 0.2s ease',
             background: `linear-gradient(135deg, ${alpha(thm.palette.primary.main, 0.08)} 0%, ${alpha(thm.palette.primary.main, 0.12)} 100%)`,
             border: `1px solid ${alpha(thm.palette.primary.main, 0.3)}`,
-            color: 'primary.dark',
+            color: 'readable.primary',
             '&:hover': {
               transform: 'translateY(-1px)',
               boxShadow: `0 4px 12px ${alpha(thm.palette.primary.main, 0.2)}`,
@@ -243,7 +243,7 @@ export function SLOList({
             transition: 'all 0.2s ease',
             background: `linear-gradient(135deg, ${alpha(thm.palette.error.main, 0.08)} 0%, ${alpha(thm.palette.error.main, 0.12)} 100%)`,
             border: `1px solid ${alpha(thm.palette.error.main, 0.3)}`,
-            color: 'error.dark',
+            color: 'readable.error',
             '&:hover': {
               transform: 'translateY(-1px)',
               boxShadow: `0 4px 12px ${alpha(thm.palette.error.main, 0.2)}`,
@@ -307,7 +307,7 @@ export function SLOList({
                 p: 2,
                 mt: 0.75,
                 border: '1px solid',
-                borderColor: alpha(theme.palette.divider, 0.6),
+                borderColor: theme.palette.divider,
                 borderRadius: '4px',
                 backgroundColor: 'background.paper',
                 cursor: 'pointer',
@@ -318,7 +318,7 @@ export function SLOList({
                     : alpha(theme.palette.primary.main, 0.04),
                   transform: 'translateY(-1px)',
                   boxShadow: `0 2px 8px ${alpha(theme.palette.text.primary, 0.08)}`,
-                  borderColor: alpha(theme.palette.divider, 0.8)
+                  borderColor: theme.palette.divider
                 }
               }}
             >
@@ -382,7 +382,7 @@ export function SLOList({
                             border: isGrafana
                               ? `1px solid ${alpha(thm.palette.primary.main, 0.3)}`
                               : `1px solid ${alpha(thm.palette.secondary.main, 0.3)}`,
-                            color: isGrafana ? 'primary.dark' : 'secondary.main',
+                            color: isGrafana ? 'readable.primary' : 'secondary.main',
                             '&:hover': {
                               transform: 'translateY(-1px)',
                               boxShadow: isGrafana
@@ -412,7 +412,7 @@ export function SLOList({
                           transition: 'all 0.2s ease',
                           background: `linear-gradient(135deg, ${alpha(thm.palette.primary.main, 0.08)} 0%, ${alpha(thm.palette.primary.main, 0.12)} 100%)`,
                           border: `1px solid ${alpha(thm.palette.primary.main, 0.3)}`,
-                          color: 'primary.dark',
+                          color: 'readable.primary',
                           '&:hover': {
                             transform: 'translateY(-1px)',
                             boxShadow: `0 4px 12px ${alpha(thm.palette.primary.main, 0.2)}`,

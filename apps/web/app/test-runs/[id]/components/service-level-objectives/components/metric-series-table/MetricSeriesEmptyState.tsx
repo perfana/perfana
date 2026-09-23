@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Box, Typography, alpha, useTheme } from '@mui/material';
+import { Box, Typography, useTheme } from '@mui/material';
 import type { MetricSeriesEmptyStateProps } from '../../types';
 
 export function MetricSeriesEmptyState({
@@ -16,10 +16,10 @@ export function MetricSeriesEmptyState({
         gridTemplateColumns: '1fr',
         p: 4,
         border: '1px solid',
-        borderColor: alpha(theme.palette.divider, 0.6),
+        borderColor: theme.palette.divider,
         borderTop: 'none',
         borderRadius: '0 0 4px 4px',
-        backgroundColor: alpha(theme.palette.action.hover, 0.3),
+        backgroundColor: theme.palette.action.hover,
         textAlign: 'center'
       }}
     >

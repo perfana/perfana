@@ -95,7 +95,7 @@ export function ApdexTransactionRow({
         <Typography variant="body2" sx={{
           fontFamily: 'monospace',
           fontWeight: 600,
-          color: getApdexScoreColor(apdexScore),
+          color: getApdexScoreColor(apdexScore, theme),
           fontSize: '0.75rem'
         }}>
           {formatApdexScore(apdexScore)}
