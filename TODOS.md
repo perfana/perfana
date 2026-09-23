@@ -473,24 +473,26 @@ queries already take `uniq_ds_metrics_upsert` (an Index Only Scan with both pred
 scans reading 6,375,822,490 tuples at 27% fetch. That is not application traffic — the LTTB series
 query and `upsertPerfTestStatistics` carry no time predicate at all. Most likely the compression
 policy walking chunks.
-**Leading candidate (user hypothesis, 2026-09-23):** the tuples are other SUTs' rows. Four
-nightly runs overlap 03:00-06:00 on this deployment, so any `ds_metrics` read that walks the time
-index sweeps all four — the same 56%-waste shape measured on `virtual_users`. The one query that
-can produce it is `ReportDataFetcherService.getMetricsTimeSeries`
-(`report-data-fetcher.service.ts:2489`): it is the ONLY `ds_metrics` query in the repo that orders
-by raw `time`, and `uniq_ds_metrics_upsert` carries `time` as its FIFTH column, so one run's rows
-are not time-ordered in it. The planner therefore chooses between sorting the run's rows and
-walking `ds_metrics_time_idx` in order while filtering — and it is issued once PER PANEL in a
-`for (const panel of panels)` loop, which is what a five-figure scan count looks like.
-Locally (40,645 rows) it still sorts, spilling 2624 kB to disk; the flip is a cost crossover that
-needs production volume to reproduce.
-**What to do:** `EXPLAIN (ANALYZE, BUFFERS)` that query shape on a large run. If it shows
-`Index Scan using ..._ds_metrics_time_idx` with `test_run_id` demoted to `Filter`, the fix is to
-drop `ORDER BY dm.time ASC` and sort the per-panel rows in JS — they are already bounded per panel
-and the caller consumes them in order anyway. That removes the incentive without touching the
-index, which matters because the index cannot simply be dropped until the other ~40k scans are
-accounted for. If instead it sorts, the scans are something else (the compression policy walking
-chunks is the next candidate) and this closes as working-as-intended.
+**Report-generator candidate REFUTED by production EXPLAIN (2026-09-23).**
+`ReportDataFetcherService.getMetricsTimeSeries` was the leading suspect: the only
+`ds_metrics` query in the repo that orders by raw `time`, run once per panel in a loop,
+against a `uniq_ds_metrics_upsert` that carries `time` fifth. It does **not** use the
+index. On WERKNL-00012 (2,742,970 rows) the plan sorts instead —
+`Sort Method: external merge Disk: 122480kB` plus 104 MB and 109 MB in two workers,
+12.6 s — and `ds_metrics_time_idx` appears **zero times** across the ordered, unordered
+and per-panel variants. The cost crossover that local testing could not reach does not
+exist at production volume either. Do not re-propose this one.
+
+**What the same probe did surface**, and the better candidate: the three
+`SELECT tr.test_run_id, MIN(m.time), MAX(m.time) FROM test_runs tr JOIN ds_metrics m …`
+entries in `pg_stat_statements` (182 calls, 588 GB between them). A `MIN`/`MAX` over an
+indexed column is precisely what a time index serves, and this is the stale-`ramp_up`
+pre-check that already has its own entry above ("scans every `ds_metrics` chunk ever
+created") — whose recorded fix, bounding it to the run's window, would remove these scans
+as a side effect. Unproven: nobody has tied the 40,679 scans to it by count.
+**What to do:** before anything else, confirm attribution — `EXPLAIN` that MIN/MAX query
+and see whether it takes `ds_metrics_time_idx`. If it does, this item is a duplicate of
+the stale-`ramp_up` one and closes with it.
 
 ### The stale-`ramp_up` pre-check scans every `ds_metrics` chunk ever created
 
@@ -1239,6 +1241,11 @@ columns and the `ORDER BY start_time DESC`, so the planner walks that index back
 at the first passing row — cheap in the normal case. The pathological case is the one the feature
 exists for: a system/environment/workload where nothing ever passed walks the entire history for
 that scope and returns nothing, on every report render and every section preview.
+**MEASURED on production 2026-09-23: not worth fixing, and this item can be closed.**
+Five scopes have never had a passing run, and the deepest holds **9 runs** — not the hundreds the
+note below assumed. Walking 9 index entries backwards costs nothing, so the pathological case the
+partial index exists for does not exist on this deployment. Re-measure before reopening; the query
+that answers it is in `perfana-open-hypotheses-probes.sql` section 3.
 **What:** if a deploy is seen spending time here, add the partial index
 `CREATE INDEX CONCURRENTLY idx_test_runs_sew_start_slo_ok ON public.test_runs
 (system_under_test_id, test_environment, workload, start_time) WHERE completed AND
@@ -1396,9 +1403,21 @@ exclusion. There is no `statement_timeout` on this path either (only
 `test-runs-performance-query.service.ts` sets one). Combined with the missing authorization above,
 an authenticated caller can aim it deliberately. Note the *scoped* call is fine and needs nothing:
 TimescaleDB applies a native `Custom Scan (SkipScan)` there — measured 3.9 ms, `Heap Fetches: 0`.
+**MEASURED on production 2026-09-23, and it is as bad as the shape suggests.**
+`pg_stat_statements`, same window for both: the **unscoped** form is 7 calls at a **54,077 ms
+mean**, 3,211,340 blocks (25 GB); the **scoped** form is 827 calls at a **10.1 ms mean**, 12,757
+blocks (100 MB). A direct `EXPLAIN` of one pair gave 6,720 ms / 583,333 buffers unscoped against
+**13.9 ms / 34 buffers** scoped — 484x the time and ~17,000x the buffers, and the production mean
+is worse than the pair I probed. So the answer to "is it hot" is: rare but pathological. Seven
+calls spent 378 seconds; whoever made them waited the better part of a minute per panel.
 **What:** A covering index for the unscoped shape (`application_dashboard_id, panel_id,
-metric_name`), a `SET LOCAL statement_timeout` on the path, or require `testRunId`. Measure before
-choosing — check whether the unscoped call is actually hot in production first.
+metric_name`), a `SET LOCAL statement_timeout` on the path, or require `testRunId`. The index is
+the real fix but it is a full index over every row of a 27 GB continuously-written hypertable,
+on top of the 17 GB of `test_run_id`-leading indexes already there — weigh the write cost. Cheapest
+correct option given only 7 calls: scope the report-template path to the dashboard's most recent
+run, which also fixes the staleness the comment below describes (it currently offers series from
+runs whose naming has since changed). That is a behaviour change and wants a decision, not a
+drive-by.
 **Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getDistinctMetricNames`).
 
 ---
@@ -1408,6 +1427,14 @@ choosing — check whether the unscoped call is actually hot in production first
 **Priority:** P2
 **Origin:** performance review during /ship on `perf/metric-dropdown-statistics-source` (2026-09-08),
 after the DISTINCT-first rewrite took it from 2035 ms to 927 ms.
+**RE-MEASURED on production 2026-09-23: it has regressed to 2,740 ms, and the cause is not the
+query.** The plan is still the DISTINCT-first form, but one node now reports
+`Heap Fetches: 41316` where an index-only scan should report 0 — so the visibility map is not
+keeping up on `ds_metrics` and the "index-only" scan is going to the heap for a tenth of its rows.
+That is a vacuum/autovacuum question on a continuously-written hypertable, not a query rewrite,
+and rewriting the query again would not touch it. Check `last_autovacuum` on the run's chunks and
+the autovacuum settings for `ds_metrics` before changing any SQL here. `pg_stat_statements` for the
+same statement: 64 calls, 1,358 ms mean, 941 MB.
 **Why:** 927 ms is an index-only scan over `idx_ds_metrics_panel_lookup` of every distinct
 (panel, metric) tuple in the run — better than walking every data point, but still linear in the
 run. The client makes it worse: `useGraphsData.fetchPerformanceTestPanels` and
