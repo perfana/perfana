@@ -64,6 +64,43 @@ Four things to know before touching this path:
 
 Related: `control-group-statistics` is registered with `softFail`, so a failed aggregation still completes its BullMQ job. The reevaluate orchestrator reads the job's return value through the exported `assertStageSucceeded()` (`apps/worker/src/workers/simple-orchestrate-reevaluate-batch.ts`) instead of logging a green tick and running ADAPT on an empty baseline. Any new stage waiting on a `softFail` pipeline has to do the same.
 
+### A bulk INSERT's row count is derived from its column list, never hand-written
+
+Postgres carries the bind-parameter count as an Int16, so one extended-protocol
+statement binds at most **65535** values, and a multi-VALUES `INSERT` spends
+`rows x columns` of that. Both worker bulk inserts are 19 columns wide, which puts the
+hard ceiling at **3449 rows per statement**. Two sites had hand-written numbers against
+it, wrong in opposite directions (worker pipeline review 2026-09-14, COL-P4 / COL-P7):
+
+- `MetricProcessor.upsertMetricsToDatabase` batched at a literal `200` — 3800 of the
+  65535 budget, so ~5x more round trips than necessary.
+- `PanelsPipeline.insertPanelDocuments` did not chunk at all. Past 3449 panels the
+  statement is **rejected**, failing the whole panels stage; panels scale with dashboards
+  per run, so that is reachable, not theoretical. That one is a latent failure, not
+  slowness, which is why it was the more urgent of the two.
+
+Both now call `maxRowsPerStatement(COLUMNS.length)` from `utils/bind-params.ts`, and each
+file keeps its column list as a module-level constant (`UPSERT_COLUMNS`, `PANEL_COLUMNS`)
+that both the statement and the batch size read. That coupling is the point: **add a
+column and the batch narrows by itself**, where a literal would sit still and creep toward
+the cliff. `maxRowsPerStatement` takes a `preferredRows` (default 1000) and returns the
+smaller of it and the ceiling, so a caller can ask for a comfortable size without knowing
+the limit and cannot exceed it if it asks for too much.
+
+Three things to keep straight if you touch this:
+
+1. **The ceiling is exact, so the helper floors rather than rounds.** Neither statement
+   binds anything beyond the row values — `ON CONFLICT` uses `EXCLUDED`, and there is no
+   parameterised `WHERE` — so `floor(65535 / columns)` is the true maximum. A statement
+   one row over is refused in full.
+2. **1000 is a round number, not a measurement.** It is 5x the old constant and under a
+   third of the ceiling. Going higher builds a very large SQL string and holds every
+   parameter in memory, and on a compressed hypertable one enormous upsert is not
+   obviously faster than several medium ones. Changing it means measuring the two callers
+   at production volume, not reasoning about it.
+3. **Do not re-inline the column arrays.** A local `const columns = [...]` beside a
+   separately-derived batch size is exactly the drift this replaced.
+
 ### The live perf-test statistics pass is throttled, not incremental
 
 `upsertPerfTestStatistics` (`pipelines/helpers/perf-metrics-writer.ts`) recomputes

@@ -1269,58 +1269,6 @@ describe('DynatracePipeline', () => {
       expect(capturedParams[0][2]).toBeNull();
     });
 
-    it('should include metrics_source_id in ds_panels INSERT statements', async () => {
-      // Arrange
-      const input = { testRunIds: ['test-run-123'] };
-      const mockQueries = [createMockQuery()];
-
-      // Spy on storePanelDocuments to capture the SQL
-      const capturedSQL: string[] = [];
-      const capturedParams: any[][] = [];
-      const mockManager = {
-        query: vi.fn((sql: string, params: any[]) => {
-          capturedSQL.push(sql);
-          capturedParams.push(params);
-          return Promise.resolve({ rows: [] });
-        }),
-      } as unknown as EntityManager;
-
-      mockDatabaseService.transaction.mockImplementation(async (callback) => {
-        return callback(mockManager);
-      });
-
-      // Call storePanelDocuments directly since execute() calls storeMetricsDocuments
-      const panelDoc = {
-        test_run_id: 'test-run-123',
-        application_dashboard_id: 'app-dash-uuid',
-        metrics_source_id: 'ms-uuid-456',
-        dashboard_uid: 'dynatrace-dql',
-        panel_id: 1,
-        panel_title: 'Response Time',
-        dashboard_label: 'Response Time',
-        panel: {},
-        query_variables: {},
-        datasource_type: 'dynatrace',
-        benchmark_ids: [],
-        requests: [],
-        errors: null,
-        warnings: null,
-      };
-
-      const testRun = createMockTestRun();
-
-      // Access private method
-      await (pipeline as any).storePanelDocuments([panelDoc], 'test-run-123', testRun);
-
-      // Assert - ds_panels INSERT should include metrics_source_id
-      const panelInsertSQL = capturedSQL.find(sql => sql.includes('ds_panels'));
-      expect(panelInsertSQL).toBeDefined();
-      expect(panelInsertSQL).toContain('metrics_source_id');
-      // metrics_source_id is the 3rd parameter ($3) in the ds_panels INSERT
-      const panelParams = capturedParams[0];
-      expect(panelParams[2]).toBe('ms-uuid-456');
-    });
-
     it('should include metrics_source_id column in ds_metrics ON CONFLICT update', async () => {
       // Arrange
       const input = { testRunIds: ['test-run-123'] };

@@ -2,6 +2,7 @@ import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
 import { tryGetGrafanaConfig } from '../config/grafana-config-cache.js';
+import { maxRowsPerStatement } from '../utils/bind-params.js';
 import {
   getApplicationDashboardsForTestRun,
   getGrafanaDashboardsForApplicationDashboards,
@@ -9,6 +10,19 @@ import {
   createPanelDocuments,
   PerfanaData
 } from './panels/helpers.js';
+
+/**
+ * Column list of the `ds_panels` bulk insert, module-level so the chunk size can be
+ * derived from it. The statement binds `rows x PANEL_COLUMNS.length` parameters and
+ * `maxRowsPerStatement` reads the same array, so adding a column narrows the chunk
+ * instead of moving the insert closer to the 65535-parameter cap unnoticed.
+ */
+const PANEL_COLUMNS = [
+  'test_run_id', 'application_dashboard_id', 'metrics_source_id', 'dashboard_uid', 'panel_id',
+  'panel_title', 'dashboard_label', 'benchmark_ids', 'panel',
+  'query_variables', 'datasource_type', 'requests', 'errors', 'warnings', 'updated_at',
+  'organization_id', 'team_id', 'created_by', 'updated_by'
+] as const;
 
 export class PanelsPipeline extends BasePipelineTypeORM {
   async execute(input: { testRunId: string; includeDynatrace?: boolean }): Promise<PipelineResult> {
@@ -178,12 +192,21 @@ export class PanelsPipeline extends BasePipelineTypeORM {
   private async insertPanelDocuments(manager: EntityManager, panelDocuments: unknown[], testRun: { organizationId?: string | null; teamId?: string | null }): Promise<void> {
     if (panelDocuments.length === 0) {return;}
 
-    const columns = [
-      'test_run_id', 'application_dashboard_id', 'metrics_source_id', 'dashboard_uid', 'panel_id',
-      'panel_title', 'dashboard_label', 'benchmark_ids', 'panel',
-      'query_variables', 'datasource_type', 'requests', 'errors', 'warnings', 'updated_at',
-      'organization_id', 'team_id', 'created_by', 'updated_by'
-    ];
+    // One statement per chunk. This used to be a single statement over every panel
+    // document, which binds rows x columns parameters against Postgres' 65535 cap:
+    // at 19 columns, a run with more than 3449 panels failed the whole panels stage
+    // rather than running slowly. Panels scale with dashboards per run, so that is
+    // reachable, not theoretical. (worker pipeline review 2026-09-14, COL-P7)
+    const chunkSize = maxRowsPerStatement(PANEL_COLUMNS.length);
+    for (let i = 0; i < panelDocuments.length; i += chunkSize) {
+      await this.insertPanelDocumentChunk(manager, panelDocuments.slice(i, i + chunkSize), testRun);
+    }
+  }
+
+  private async insertPanelDocumentChunk(manager: EntityManager, panelDocuments: unknown[], testRun: { organizationId?: string | null; teamId?: string | null }): Promise<void> {
+    if (panelDocuments.length === 0) {return;}
+
+    const columns = PANEL_COLUMNS;
 
     // Build VALUES clause for batch insert: ($1, $2, ...), ($15, $16, ...), ...
     const values = panelDocuments.map((_, index) =>

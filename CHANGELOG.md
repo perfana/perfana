@@ -4,10 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.12] - 2026-09-23
+
+### Fixed
+- **A test run with more than 3449 panels lost its whole panels stage.** Postgres accepts at most 65535 parameters in one statement, and the panel insert spends 19 of them per panel in a single statement covering every panel of the run — so past that count the statement was rejected outright rather than running slowly. Panel counts scale with dashboards per run, so this was reachable rather than theoretical. The insert now splits into as many statements as the parameter budget allows.
+
+### Changed
+- **Metric writes make about five times fewer round trips.** The same parameter budget was being spent 200 rows at a time against a hard-coded constant, using 3800 of the 65535 available. Both sites now derive their batch size from their own column list, so the number moves by itself when a column is added instead of drifting toward the ceiling unnoticed — which is what the panel insert did.
+- Removed a dead Dynatrace method that stored panel documents. Nothing had called it since the pipeline moved to the shared batched upsert; its only remaining caller was a test reaching past the class to invoke it directly. The assertion that test made about the live panel insert moved to the pipeline that actually performs it.
+
 ## [0.2.96.11] - 2026-09-23
 
 ### Changed
-- **Named the leading suspect for the last open item from the slow-query sweep.** `ds_metrics` carries a time index that nothing obvious uses, yet it had read 6.4 billion rows across 40,679 scans. The likely explanation is that four nightly tests overlap between 03:00 and 06:00, so anything reading that table in time order sweeps all four systems to answer about one — the same waste already measured and fixed on the virtual-user table. One query in the codebase can produce that shape: the report generator's per-panel metric fetch, which is the only place `ds_metrics` is read in time order and which runs once for every panel in a report. Not confirmed — on a small local run it still sorts rather than switching — so this records the check that settles it and the fix if it does, rather than changing anything.
+- **Answered four open performance questions against the production database, instead of guessing at them.** Two were refuted, one confirmed and one re-diagnosed. The report generator is *not* what drives the unexplained reads on the metrics table — it sorts rather than using that index, and the index does not appear in its plan at all — so a candidate that looked convincing is now ruled out in writing. The lookup behind the report-template metric picker is confirmed pathological: a handful of calls averaging 54 seconds each where the same lookup scoped to one test run averages 10 milliseconds. The predecessor lookup everyone expected to be slow walks at most nine rows here, so it needs nothing. And the panel list slowed from 0.9 to 2.7 seconds for a reason the query cannot fix: the database is no longer able to answer it from the index alone. Notes and numbers are in TODOS.md so the next person starts from measurements rather than from the same guesses.
 
 ## [0.2.96.10] - 2026-09-22
 

@@ -16,6 +16,7 @@
 import type { Logger } from 'pino';
 import type { EntityManager } from 'typeorm';
 import { WorkerDatabaseService } from '../../../common/database.service.js';
+import { maxRowsPerStatement } from '../../../utils/bind-params.js';
 
 interface GrafanaMetricRecord {
   metric_name: string;
@@ -102,6 +103,35 @@ export interface TestRunContext {
  * Manages metric processing operations for the Incremental Metrics Pipeline
  * including document flattening, database upserts, and query preprocessing.
  */
+/**
+ * Column list of the `ds_metrics` bulk upsert, module-level so the batch size can be
+ * derived from it. Keeping the two together is the invariant: the statement binds
+ * `rows x UPSERT_COLUMNS.length` parameters, and `maxRowsPerStatement` reads the same
+ * array, so adding a column narrows the batch automatically instead of moving the
+ * insert closer to the 65535-parameter cap unnoticed.
+ */
+const UPSERT_COLUMNS = [
+  'test_run_id',
+  'application_dashboard_id',
+  'metrics_source_id',
+  'dashboard_uid',
+  'panel_id',
+  'panel_title',
+  'dashboard_label',
+  'benchmark_ids',
+  'errors',
+  'metric_name',
+  'time',
+  'timestep',
+  'ramp_up',
+  'value',
+  'unit',
+  'organization_id',
+  'team_id',
+  'created_by',
+  'updated_by',
+] as const;
+
 export class MetricProcessor {
   constructor(
     private logger: Logger,
@@ -271,7 +301,12 @@ export class MetricProcessor {
     const unique = [...byKey.values()];
 
     await this.db.transaction(async (manager: EntityManager) => {
-      const batchSize = 200; // Conservative batch size
+      // Derived from the column list, not hand-tuned: the insert binds
+      // rows x columns parameters against Postgres' 65535 cap, so the safe
+      // batch moves whenever a column is added. The old hard-coded 200 spent
+      // 3800 of the budget and cost ~5x the round trips this does.
+      // (worker pipeline review 2026-09-14, COL-P4)
+      const batchSize = maxRowsPerStatement(UPSERT_COLUMNS.length);
 
       for (let i = 0; i < unique.length; i += batchSize) {
         const batch = unique.slice(i, i + batchSize);
@@ -294,27 +329,7 @@ export class MetricProcessor {
       return;
     }
 
-    const columns = [
-      'test_run_id',
-      'application_dashboard_id',
-      'metrics_source_id',
-      'dashboard_uid',
-      'panel_id',
-      'panel_title',
-      'dashboard_label',
-      'benchmark_ids',
-      'errors',
-      'metric_name',
-      'time',
-      'timestep',
-      'ramp_up',
-      'value',
-      'unit',
-      'organization_id',
-      'team_id',
-      'created_by',
-      'updated_by',
-    ];
+    const columns = UPSERT_COLUMNS;
 
     // Generate VALUES clauses for bulk INSERT with UPSERT
     const values = batch
