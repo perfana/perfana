@@ -1,5 +1,44 @@
-import { createTheme, type ThemeOptions } from '@mui/material/styles';
+import { createTheme, type Theme, type ThemeOptions } from '@mui/material/styles';
 import type { ThemeMode } from '@/contexts/theme-context';
+
+/** The palette keys that carry a readable shade. */
+export const READABLE_KEYS = [
+  'primary',
+  'secondary',
+  'success',
+  'error',
+  'warning',
+  'info',
+] as const;
+
+export type ReadableKey = (typeof READABLE_KEYS)[number];
+
+/**
+ * The readable shade of a palette colour for a theme's mode.
+ *
+ * MUI's `.dark` shades are tuned to sit on a LIGHT surface. Used verbatim in dark mode they land
+ * at roughly the lightness of the surface itself and the text fades out — which is exactly what
+ * made the SLO tables unreadable. Prefer the `readable.*` palette entry below in `sx` (no theme
+ * argument needed); use this directly only where a `Theme` is already in hand.
+ */
+export function readableShade(theme: Theme, key: ReadableKey): string {
+  return theme.palette.mode === 'dark' ? theme.palette[key].light : theme.palette[key].dark;
+}
+
+type ReadablePalette = Record<ReadableKey, string>;
+
+/**
+ * Resolve every readable shade once, at theme construction, and hang it off the palette so a plain
+ * `sx={{ color: 'readable.primary' }}` is mode-correct with no callback. The shades themselves are
+ * augmentColor derivatives — this repo declares only `main` for success/warning/error — so they
+ * cannot be written inline in the palette literal; they are derived from the built theme.
+ */
+function withReadablePalette(theme: Theme): Theme {
+  const readable = Object.fromEntries(
+    READABLE_KEYS.map((key) => [key, readableShade(theme, key)]),
+  ) as ReadablePalette;
+  return createTheme(theme, { palette: { readable } });
+}
 
 // Extend the Theme interface to include custom integrations palette
 declare module '@mui/material/styles' {
@@ -10,6 +49,7 @@ declare module '@mui/material/styles' {
       pyroscope: string;
       tracing: string;
     };
+    readable: ReadablePalette;
   }
   interface PaletteOptions {
     integrations?: {
@@ -18,6 +58,7 @@ declare module '@mui/material/styles' {
       pyroscope?: string;
       tracing?: string;
     };
+    readable?: Partial<ReadablePalette>;
   }
 }
 
@@ -58,7 +99,7 @@ const sharedOptions: ThemeOptions = {
   },
 };
 
-export const lightTheme = createTheme({
+const baseLightTheme = createTheme({
   ...sharedOptions,
   palette: {
     mode: 'light',
@@ -92,7 +133,7 @@ export const lightTheme = createTheme({
   },
 });
 
-export const darkTheme = createTheme({
+const baseDarkTheme = createTheme({
   ...sharedOptions,
   components: {
     ...sharedOptions.components,
@@ -143,6 +184,9 @@ export const darkTheme = createTheme({
     },
   },
 });
+
+export const lightTheme = withReadablePalette(baseLightTheme);
+export const darkTheme = withReadablePalette(baseDarkTheme);
 
 export function getTheme(mode: ThemeMode) {
   return mode === 'dark' ? darkTheme : lightTheme;
