@@ -1,3 +1,6 @@
+import type { Theme } from '@mui/material/styles';
+import { readableShade } from './metric-series-table-utils';
+
 import { getUnit } from '@/lib/units';
 import { CheckResult, CheckResultRequirement, Benchmark } from '@/lib/types';
 
@@ -32,15 +35,20 @@ export function formatApdexRequirement(requirement: CheckResultRequirement | und
   return `Apdex ≥ ${minScoreFormatted}`;
 }
 
-// Helper function to get Apdex score color based on value (theme-aware)
-export function getApdexScoreColor(score: number | string | null | undefined): string {
+// Apdex score colour. The two extreme bands used to return the `.dark` tokens
+// unconditionally, which MUI resolves mode-blind: in dark mode that is ~3.3:1
+// against background.paper, below AA for the 0.8rem value text.
+export function getApdexScoreColor(
+  score: number | string | null | undefined,
+  theme: Theme
+): string {
   if (score === null || score === undefined) return 'text.secondary';
   const numScore = typeof score === 'string' ? parseFloat(score) : score;
   if (isNaN(numScore)) return 'text.secondary';
-  if (numScore >= 0.94) return 'success.dark'; // Excellent - green
+  if (numScore >= 0.94) return readableShade(theme, 'success'); // Excellent - green
   if (numScore >= 0.85) return 'success.main'; // Good - lighter green
   if (numScore >= 0.7) return 'warning.main'; // Fair - orange
-  if (numScore >= 0.5) return 'warning.dark'; // Poor - deep orange
+  if (numScore >= 0.5) return readableShade(theme, 'warning'); // Poor - deep orange
   return 'error.main'; // Unacceptable - red
 }
 

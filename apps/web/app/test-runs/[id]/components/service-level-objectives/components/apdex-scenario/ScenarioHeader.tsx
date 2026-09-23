@@ -44,11 +44,11 @@ export function ScenarioHeader({ scenario, transactionCount, failedCount, expand
       }}
     >
       {collapsible && (expanded
-        ? <ExpandMore sx={{ fontSize: 18, color: 'secondary.dark' }} />
-        : <ChevronRight sx={{ fontSize: 18, color: 'secondary.dark' }} />)}
+        ? <ExpandMore sx={{ fontSize: 18, color: 'readable.secondary' }} />
+        : <ChevronRight sx={{ fontSize: 18, color: 'readable.secondary' }} />)}
       <Typography variant="subtitle1" sx={{
         fontWeight: 700,
-        color: 'secondary.dark',
+        color: 'readable.secondary',
         fontSize: '0.9rem',
         letterSpacing: '0.3px',
       }}>

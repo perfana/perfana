@@ -5,7 +5,7 @@ import { Box, Typography, useTheme } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { ArrowUpward, ArrowDownward } from '@mui/icons-material';
 import type { MetricSeriesTableHeaderProps, SortConfig } from '../../types';
-import { headerTextSx } from '../../utils/metric-series-table-utils';
+import { getHeaderTextSx } from '../../utils/metric-series-table-utils';
 import type { SortField } from '../../types/slo.types';
 
 interface SortIndicatorProps {
@@ -29,6 +29,7 @@ export function MetricSeriesTableHeader({
   onSort,
 }: MetricSeriesTableHeaderProps) {
   const theme = useTheme();
+  const headerTextSx = getHeaderTextSx(theme);
 
   const sortableColumnSx = {
     display: 'flex',
@@ -54,8 +55,7 @@ export function MetricSeriesTableHeader({
       borderBottom: 'none',
       boxShadow: theme.palette.mode === 'dark'
         ? `0 1px 3px ${alpha(theme.palette.common.black, 0.3)}`
-        : `0 1px 3px ${alpha(theme.palette.common.black, 0.08)}`,
-      backdropFilter: 'blur(8px)'
+        : `0 1px 3px ${alpha(theme.palette.common.black, 0.08)}`
     }}>
       {/* Series Column Header */}
       <Box

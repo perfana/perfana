@@ -1,5 +1,9 @@
 import type { Theme } from '@mui/material/styles';
 import { alpha } from '@mui/material/styles';
+// Re-exported so existing importers in this feature keep working; it lives in lib/theme.
+import { readableShade } from '@/lib/theme';
+
+export { readableShade };
 import type { MetricTarget, MetricSeriesResult, SortConfig } from '../types/metric-series-table.types';
 import {
   formatMetricUnit,
@@ -147,34 +151,18 @@ export const getSortableColumnSx = (theme: Theme) => ({
   }
 });
 
-// Static fallback for components that pass sx directly (backward compat)
-export const sortableColumnSx = {
-  display: 'flex',
-  alignItems: 'center',
-  cursor: 'pointer',
-  borderRight: '1px solid',
-  borderColor: 'divider',
-  pr: 2,
-  transition: 'all 0.2s ease',
-  '&:hover': {
-    backgroundColor: 'action.hover',
-    transform: 'translateY(-1px)'
-  }
-};
-
-export const headerTextSx = {
+export const getHeaderTextSx = (theme: Theme, fontSize = '0.85rem') => ({
   fontWeight: 700,
-  color: 'primary.dark',
-  fontSize: '0.85rem',
+  color: readableShade(theme, 'primary'),
+  fontSize,
   letterSpacing: '0.5px',
   textTransform: 'uppercase' as const
-};
+});
 
 // Status chip base styles
 export const statusChipBaseSx = {
   height: '28px',
   fontWeight: 700,
-  backdropFilter: 'blur(12px)',
   transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
   '& .MuiChip-label': {
     px: 1.5,
@@ -186,35 +174,26 @@ export const statusChipBaseSx = {
 
 // Theme-aware color definitions for status chips
 export function getChipColorsForTheme(theme: Theme) {
-  return {
-    warning: {
-      background: `linear-gradient(135deg, ${alpha(theme.palette.warning.main, 0.1)} 0%, ${alpha(theme.palette.warning.main, 0.08)} 50%, ${alpha(theme.palette.warning.main, 0.06)} 100%)`,
-      backgroundHover: `linear-gradient(135deg, ${alpha(theme.palette.warning.main, 0.15)} 0%, ${alpha(theme.palette.warning.main, 0.12)} 50%, ${alpha(theme.palette.warning.main, 0.1)} 100%)`,
-      border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
-      borderHover: `1px solid ${alpha(theme.palette.warning.main, 0.5)}`,
-      shadow: `0 2px 8px ${alpha(theme.palette.warning.main, 0.15)}`,
-      shadowHover: `0 6px 20px ${alpha(theme.palette.warning.main, 0.25)}, 0 2px 8px ${alpha(theme.palette.warning.main, 0.15)}`,
-      color: theme.palette.warning.dark,
-    },
-    success: {
-      background: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.1)} 0%, ${alpha(theme.palette.success.main, 0.08)} 50%, ${alpha(theme.palette.success.light, 0.06)} 100%)`,
-      backgroundHover: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.15)} 0%, ${alpha(theme.palette.success.main, 0.12)} 50%, ${alpha(theme.palette.success.light, 0.1)} 100%)`,
-      border: `1px solid ${alpha(theme.palette.success.main, 0.3)}`,
-      borderHover: `1px solid ${alpha(theme.palette.success.main, 0.5)}`,
-      shadow: `0 2px 8px ${alpha(theme.palette.success.main, 0.15)}`,
-      shadowHover: `0 6px 20px ${alpha(theme.palette.success.main, 0.25)}, 0 2px 8px ${alpha(theme.palette.success.main, 0.15)}`,
-      color: theme.palette.success.dark,
-    },
-    error: {
-      background: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.1)} 0%, ${alpha(theme.palette.error.main, 0.08)} 50%, ${alpha(theme.palette.error.light, 0.06)} 100%)`,
-      backgroundHover: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.15)} 0%, ${alpha(theme.palette.error.main, 0.12)} 50%, ${alpha(theme.palette.error.light, 0.1)} 100%)`,
-      border: `1px solid ${alpha(theme.palette.error.main, 0.3)}`,
-      borderHover: `1px solid ${alpha(theme.palette.error.main, 0.5)}`,
-      shadow: `0 2px 8px ${alpha(theme.palette.error.main, 0.15)}`,
-      shadowHover: `0 6px 20px ${alpha(theme.palette.error.main, 0.25)}, 0 2px 8px ${alpha(theme.palette.error.main, 0.15)}`,
-      color: theme.palette.error.main,
-    },
+  // A flat tint, not the old three-stop gradient: its stops differed by 0.02
+  // alpha, which nothing could see. Dark mode gets a stronger tint and the
+  // `.light` shade -- `.dark` text on a dark chip was the unreadable part.
+  const isDark = theme.palette.mode === 'dark';
+  const make = (key: 'warning' | 'success' | 'error') => {
+    const main = theme.palette[key].main;
+    return {
+      // error is the outlier: #ef4444's tint darkens the chip further than the
+      // others, so 0.22 left its label at ~3.9:1. 0.16 lifts it over AA.
+      background: alpha(main, isDark ? (key === 'error' ? 0.16 : 0.22) : 0.12),
+      backgroundHover: alpha(main, isDark ? (key === 'error' ? 0.26 : 0.32) : 0.2),
+      border: `1px solid ${alpha(main, isDark ? 0.5 : 0.35)}`,
+      borderHover: `1px solid ${alpha(main, isDark ? 0.7 : 0.55)}`,
+      shadow: `0 2px 8px ${alpha(main, 0.15)}`,
+      shadowHover: `0 6px 20px ${alpha(main, 0.25)}, 0 2px 8px ${alpha(main, 0.15)}`,
+      color: readableShade(theme, key),
+    };
   };
+
+  return { warning: make('warning'), success: make('success'), error: make('error') };
 }
 
 /**
@@ -238,16 +217,5 @@ export function getThemedChipStyles(status: 'pass' | 'fail' | 'error', isStale: 
       border: isStale ? staleColors.borderHover : colors.borderHover,
       background: isStale ? staleColors.backgroundHover : colors.backgroundHover,
     },
-  };
-}
-
-/**
- * @deprecated Use getThemedChipStyles with theme parameter instead
- */
-export function getChipStyles(status: 'pass' | 'fail' | 'error', _isStale: boolean) {
-  // Fallback using static colors - components should migrate to getThemedChipStyles
-  return {
-    ...statusChipBaseSx,
-    cursor: status === 'error' ? 'help' : 'default',
   };
 }

@@ -6,7 +6,7 @@ import { alpha } from '@mui/material/styles';
 import { MoreVert } from '@mui/icons-material';
 import { OpenInCardMenuItems, ViewInPerformanceAnalysisMenuItem, perfDrillDownFilters } from '../../../shared/metric-card-links';
 import type { MetricSeriesTableRowProps } from '../../types';
-import { formatMetricValue } from '../../utils/metric-series-table-utils';
+import { formatMetricValue, readableShade } from '../../utils/metric-series-table-utils';
 import { getApdexScoreColor, isApdexResult } from '../../utils/slo-formatters';
 import { MetricSeriesStatusChip } from './MetricSeriesStatusChip';
 
@@ -47,18 +47,22 @@ export function MetricSeriesTableRow({
         borderLeftWidth: isSelected ? 4 : 1,
         borderRadius: isLastRow ? '0 0 8px 8px' : '0',
         backgroundColor: isSelected
-          ? alpha(theme.palette.primary.main, 0.06)
+          ? alpha(theme.palette.primary.main, 0.12)
           : sortedIndex % 2 === 0
             ? 'background.paper'
-            : alpha(theme.palette.action.hover, 0.3),
+            // action.hover is ALREADY an rgba; MUI's alpha() replaces the
+            // channel rather than multiplying it, so alpha(..., 0.3) was a
+            // 30% black (or white) band, not a 1.2% tint.
+            : theme.palette.action.hover,
         cursor: 'pointer',
         position: 'relative',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        backdropFilter: 'blur(8px)',
+        transition: 'background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease',
         '&:hover': {
+          // Stronger than either parity's resting background, so hover always reads as
+          // "darker" (light mode) regardless of which stripe the row sits on.
           backgroundColor: isSelected
-            ? alpha(theme.palette.primary.main, 0.1)
-            : alpha(theme.palette.primary.main, 0.04),
+            ? alpha(theme.palette.primary.main, 0.16)
+            : alpha(theme.palette.primary.main, 0.08),
           transform: 'translateY(-2px)',
           boxShadow: `0 4px 20px ${alpha(theme.palette.primary.main, 0.15)}, 0 2px 8px ${alpha(theme.palette.text.primary, 0.08)}`,
           borderColor: alpha(theme.palette.primary.main, 0.2),
@@ -77,7 +81,7 @@ export function MetricSeriesTableRow({
       }}>
         <Typography variant="body2" sx={{
           fontWeight: isSelected ? 600 : 500,
-          color: isSelected ? 'primary.dark' : 'text.primary',
+          color: isSelected ? readableShade(theme, 'primary') : 'text.primary',
           fontSize: '0.875rem',
           lineHeight: 1.4
         }}>
@@ -99,13 +103,12 @@ export function MetricSeriesTableRow({
           px: 1.5,
           py: 0.5,
           borderRadius: '6px',
-          border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
-          backdropFilter: 'blur(4px)'
+          border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`
         }}>
           <Typography variant="body2" sx={{
             fontFamily: 'monospace',
             fontWeight: 600,
-            color: isApdexResult(result) ? getApdexScoreColor(target.value) : 'primary.dark',
+            color: isApdexResult(result) ? getApdexScoreColor(target.value, theme) : readableShade(theme, 'primary'),
             fontSize: '0.8rem'
           }}>
             {formatMetricValue(target, result)}

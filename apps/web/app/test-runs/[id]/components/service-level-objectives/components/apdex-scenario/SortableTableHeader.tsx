@@ -5,6 +5,7 @@ import { Box, Typography, useTheme } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { ArrowUpward, ArrowDownward } from '@mui/icons-material';
 import type { SortableTableHeaderProps, ApdexScenarioSortConfig } from '../../types';
+import { getHeaderTextSx } from '../../utils/metric-series-table-utils';
 
 interface SortIndicatorProps {
   sortConfig: Map<string, ApdexScenarioSortConfig>;
@@ -35,13 +36,7 @@ export function SortableTableHeader({ resultKey, sortConfig, onSort }: SortableT
     '&:hover': { backgroundColor: alpha(theme.palette.primary.main, 0.06) }
   };
 
-  const headerTextSx = {
-    fontWeight: 700,
-    color: 'primary.dark',
-    fontSize: '0.75rem',
-    letterSpacing: '0.5px',
-    textTransform: 'uppercase' as const
-  };
+  const headerTextSx = getHeaderTextSx(theme, '0.75rem');
 
   return (
     <Box sx={{
