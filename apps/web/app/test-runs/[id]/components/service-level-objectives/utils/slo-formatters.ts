@@ -179,3 +179,32 @@ export function formatTrendPctPerHour(pctPerHour: number): string {
   const rounded = Number(pctPerHour.toFixed(1));
   return `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)} %/h`;
 }
+
+/**
+ * The identity of one SLO row: its React key, its entry in `expandedSloRows`, and the key
+ * its sort and selected-target maps are stored under.
+ *
+ * `benchmark_id` is in it because two SLOs really can share a dashboard, panel and metric
+ * name — nothing stopped that before `uq_benchmarks_active_metric_target` (migration 1812),
+ * and SUT-imported and pre-1812 data still carries such pairs. Two rows with one key means
+ * React drops the duplicate sibling on the first re-render, so neither row expands, and one
+ * row's expand toggles the other's.
+ *
+ * It is NOT just `result.id`: a re-evaluate rewrites `check_results` with fresh uuids, and
+ * the open rows would collapse under the user.
+ */
+export function getCheckResultKey(
+  result: Pick<
+    CheckResult,
+    'panel_type' | 'evaluate_type' | 'benchmark_id' | 'panel_title' | 'application_dashboard_id' | 'panel_id' | 'metric_name'
+  >,
+): string {
+  const benchmarkId = result.benchmark_id || 'unknown';
+  if (isApdexResult(result)) {
+    return `apdex_${benchmarkId}_${result.panel_title || 'unknown'}`;
+  }
+  const dashboardId = result.application_dashboard_id || benchmarkId;
+  const panelId = result.panel_id ?? 'unknown';
+  const metricName = result.metric_name || 'unknown';
+  return `${dashboardId}_${panelId}_${metricName}_${benchmarkId}`;
+}

@@ -7,6 +7,7 @@ import { authenticatedFetch } from '@/lib/api';
 import { TestRun, TestRunStatus } from '@/types/test-runs';
 import { SamplerStat, SortField, SortDirection } from '../types/slo.types';
 import { CheckResult, Benchmark } from '@/lib/types';
+import { getCheckResultKey as buildCheckResultKey } from '../utils/slo-formatters';
 
 export interface RequestActionMenuData {
   transactionName: string;
@@ -165,18 +166,9 @@ export function useSLOSection({
   // Ref for status change tracking
   const prevStatusRef = useRef<TestRunStatus | null>(null);
 
-  // Generate a unique key for each check result based on its properties
-  const getCheckResultKey = useCallback((result: CheckResult): string => {
-    if (result.panel_type === 'apdex' || result.evaluate_type === 'apdex') {
-      const benchmarkId = result.benchmark_id || 'unknown';
-      const panelTitle = result.panel_title || 'unknown';
-      return `apdex_${benchmarkId}_${panelTitle}`;
-    }
-    const dashboardId = result.application_dashboard_id || result.benchmark_id || 'unknown';
-    const panelId = result.panel_id ?? 'unknown';
-    const metricName = result.metric_name || 'unknown';
-    return `${dashboardId}_${panelId}_${metricName}`;
-  }, []);
+  // Identity of one SLO row. Lives in utils/slo-formatters so it can be tested directly —
+  // see the note there on why benchmark_id is part of it.
+  const getCheckResultKey = useCallback(buildCheckResultKey, []);
 
   // Load check results
   const loadCheckResults = useCallback(async (testRunId: string) => {
