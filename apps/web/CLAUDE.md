@@ -86,6 +86,41 @@ Four things about it are load-bearing:
 jsdom has no `ResizeObserver`. `apps/web/jest.setup.js` stubs it so a component that observes its
 container mounts in tests at all.
 
+### The Scenarios table earns its width back from the header labels, not from `minWidth`
+
+Performance Analysis scrolled sideways **at full width on a 16" MacBook** (1728px viewport,
+sidebar open → a 1302px content column), not only on a small screen. Measured on
+`SONAR-acceptatie-loadtest_perfana-00010` with one scenario expanded, the table's min-content
+width was 1703px: 401px of overflow, and the only horizontal scroller on the page.
+
+`<Table sx={{ minWidth: 800 }}>` looks like the cause and is not. 800 is *below* the real
+minimum, so it never produced the scrollbar — all it did was stop the **collapsed** table,
+whose true minimum is 606px, from shrinking. Removing it is worth doing, but on its own it
+changes nothing about the expanded case.
+
+The actual cause was `whiteSpace: 'nowrap'` in `utils/table-header-style.ts`. Eleven uppercase
+measurement labels that cannot wrap set the floor for eleven columns. The comment defending it
+was accurate about the mechanism — the transaction-name column claims the leftover width, so
+every other column is squeezed to its longest word and the labels answer by stacking — but it
+priced a three-row header as worse than a sideways scroll, which it is not.
+
+Two changes, measured in the running container, all eleven columns kept:
+
+| | min-content |
+|---|---|
+| before | 1703px |
+| header labels wrap (`whiteSpace: 'normal'`) | 1379px |
+| + `'& .MuiTableCell-root': { px: 1 }` on the `<Table>` | **1203px** |
+
+The padding is the other half and is not cosmetic: MUI's default 16px per side across eleven
+columns is 352px, and halving it returns 176px. It cascades into the nested request table
+(`SamplerTable`) on purpose — that one shares the same grid and would otherwise reintroduce
+the overflow when a transaction row is expanded.
+
+Do not put `nowrap` back on those labels without re-measuring against the content column.
+Do not add a `minWidth` back to that table either; the natural minimum is now below every
+width it is rendered at, and a hardcoded floor can only be wrong again.
+
 ### Two colour bugs that look like one, and the `readable` palette
 
 Both of these made the SLO and anomaly detail tables unreadable, and neither is visible in a code

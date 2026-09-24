@@ -159,8 +159,10 @@ active-job locks) is in Swagger.
 | `GET` | `/api/benchmarks` | List benchmarks |
 | `GET` | `/api/benchmarks/:id` | Get single benchmark |
 | `GET` | `/api/benchmarks/system/:id/config-options` | Available envs/workloads |
-| `POST` | `/api/benchmarks` | Create benchmark |
-| `PUT` | `/api/benchmarks/:id` | Update benchmark |
+| `POST` | `/api/benchmarks` | Create benchmark (409 if an enabled SLO already targets that panel, series and aggregation) |
+| `PUT` | `/api/benchmarks/:id` | Update benchmark (same 409; also where `enabled` is set) |
+| `POST` | `/api/benchmarks/:id/duplicate` | Clone a benchmark — the clone arrives **disabled** |
+| `POST` | `/api/benchmarks/copy` | Bulk-copy SLOs to another scope; refused rows count as `skipped` |
 | `DELETE` | `/api/benchmarks/:id` | Delete benchmark |
 
 ## Grafana

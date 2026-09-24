@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, HttpStatus } from '@nestjs/common';
 import { BenchmarksController } from './benchmarks.controller';
 import { BenchmarksService } from './benchmarks.service';
 import { Benchmark } from '../../entities';
@@ -479,6 +479,48 @@ describe('BenchmarksController', () => {
         // Assert
         expect(result).toEqual(mockBenchmark);
         expect(service.create).toHaveBeenCalledWith(mockUserContext.userId, mockUserContext.roles, dtoWithOptionalFields);
+      });
+
+      // The service-level spec for this cannot catch a controller that re-wraps the
+      // exception, and that is exactly what happened: create()'s catch had no
+      // `instanceof HttpException` guard, so the duplicate-target 409 reached the browser
+      // as a 500 reading "Failed to create benchmark" while the service spec stayed green.
+      it('lets a ConflictException from the service through as a 409, not a 500', async () => {
+        const dto = {
+          systemUnderTestId: 'system-uuid',
+          testEnvironment: 'production',
+          workload: 'load-test',
+          source: 'grafana',
+          configTitle: 'Test Benchmark',
+          panelTitle: 'Test Panel',
+          evaluateType: 'mean',
+          requirementOperator: '<',
+          requirementValue: 100,
+        };
+        service.create.mockRejectedValue(new ConflictException('An enabled SLO for this panel already…'));
+
+        await expect(controller.create(mockUserContext, dto)).rejects.toMatchObject({
+          status: HttpStatus.CONFLICT,
+        });
+      });
+
+      it('still converts an untyped failure to a 500', async () => {
+        const dto = {
+          systemUnderTestId: 'system-uuid',
+          testEnvironment: 'production',
+          workload: 'load-test',
+          source: 'grafana',
+          configTitle: 'Test Benchmark',
+          panelTitle: 'Test Panel',
+          evaluateType: 'mean',
+          requirementOperator: '<',
+          requirementValue: 100,
+        };
+        service.create.mockRejectedValue(new Error('connection reset'));
+
+        await expect(controller.create(mockUserContext, dto)).rejects.toMatchObject({
+          status: HttpStatus.INTERNAL_SERVER_ERROR,
+        });
       });
     });
 
@@ -1386,6 +1428,52 @@ describe('BenchmarksController', () => {
       await expect(
         controller.updateApdexSlo('missing', mockUserContext, { apdexMinSamples: 10 }),
       ).rejects.toThrow(new HttpException('Apdex SLO not found', HttpStatus.NOT_FOUND));
+    });
+  });
+
+  /**
+   * `uq_benchmarks_active_metric_target` (migration 1812) makes the service throw a
+   * ConflictException whose sentence is the only thing that tells the user what to change.
+   * Both catch-alls have to let a typed refusal through, or the Add/Edit SLO dialog shows
+   * "Failed to create SLO (500)" and the reason is lost.
+   */
+  describe('a duplicate SLO target reaches the client as a 409', () => {
+    const duplicate = new ConflictException(
+      'An enabled SLO for this panel already evaluates the same series with the same aggregation.',
+    );
+
+    const createDto = {
+      systemUnderTestId: 'system-uuid',
+      testEnvironment: 'production',
+      workload: 'load-test',
+      source: 'grafana',
+      configTitle: 'Response Time P95',
+      panelTitle: 'Response Time',
+      evaluateType: 'mean',
+      requirementOperator: '<',
+      requirementValue: 100,
+    };
+
+    it('create() rethrows the ConflictException instead of flattening it to a 500', async () => {
+      service.create.mockRejectedValue(duplicate);
+
+      await expect(controller.create(mockUserContext, createDto)).rejects.toBe(duplicate);
+    });
+
+    it('update() rethrows the ConflictException', async () => {
+      service.update.mockRejectedValue(duplicate);
+
+      await expect(
+        controller.update('benchmark-uuid-1', mockUserContext, { enabled: true }),
+      ).rejects.toBe(duplicate);
+    });
+
+    it('create() still flattens an untyped failure to a 500', async () => {
+      service.create.mockRejectedValue(new Error('connection terminated'));
+
+      await expect(controller.create(mockUserContext, createDto)).rejects.toThrow(
+        new HttpException('Failed to create benchmark', HttpStatus.INTERNAL_SERVER_ERROR),
+      );
     });
   });
 });

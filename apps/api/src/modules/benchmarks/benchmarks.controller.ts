@@ -69,7 +69,7 @@ export class BenchmarksController {
 
   @Post(':id/duplicate')
   @ApiOperation({ summary: 'Clone a benchmark into its own SUT / environment / workload' })
-  @ApiResponse({ status: 201, description: 'The new benchmark' })
+  @ApiResponse({ status: 201, description: 'The new benchmark. It arrives DISABLED: until it is edited it is identical to its source in every column uq_benchmarks_active_metric_target keys on, and two enabled SLOs on one panel produce indistinguishable check results. Enable it after giving it its own match pattern or aggregation.' })
   @ApiResponse({ status: 404, description: 'Benchmark not found' })
   async duplicateBenchmark(@UserCtx() ctx: UserContext, @Param('id') id: string) {
     const result = await this.benchmarksService.duplicate(id, ctx.userId, ctx.roles);
@@ -98,6 +98,7 @@ export class BenchmarksController {
   @ApiOperation({ summary: 'Create a new SLO/benchmark' })
   @ApiResponse({ status: 201, description: 'SLO created successfully' })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
+  @ApiResponse({ status: 409, description: 'An enabled SLO already targets this panel, series and aggregation (uq_benchmarks_active_metric_target). A hard refusal, not an idempotent-provisioning 409: no resource is returned.' })
   async create(
     @UserCtx() ctx: UserContext,
     @Body() createBenchmarkDto: {
@@ -124,6 +125,12 @@ export class BenchmarksController {
       return await this.benchmarksService.create(ctx.userId, ctx.roles, createBenchmarkDto);
     } catch (error) {
       this.logger.error('Failed to create benchmark:', error);
+      // Without this the catch-all below flattens every typed refusal into a 500 —
+      // including the ConflictException for a duplicate SLO target, whose whole value is
+      // the reason it carries. `update` and `copyBenchmarks` already guard this way.
+      if (error instanceof HttpException) {
+        throw error;
+      }
       throw new HttpException(
         'Failed to create benchmark',
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -191,6 +198,7 @@ export class BenchmarksController {
   @ApiResponse({ status: 200, description: 'SLO updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
   @ApiResponse({ status: 404, description: 'SLO not found' })
+  @ApiResponse({ status: 409, description: 'An enabled SLO already targets this panel, series and aggregation (uq_benchmarks_active_metric_target). A hard refusal, not an idempotent-provisioning 409: no resource is returned.' })
   async update(
     @Param('id') id: string,
     @UserCtx() ctx: UserContext,

@@ -151,6 +151,31 @@ catch (err) {
 }
 ```
 
+### Turning a constraint violation into a 409
+
+A unique violation the user can act on belongs in a `ConflictException`, not a 500. Three rules,
+all learned from `uq_benchmarks_active_metric_target` (v0.2.96.15):
+
+- **Let the typed exception out of the controller.** A `catch` that ends in
+  `throw new HttpException('Failed to …', 500)` flattens every typed refusal the service raised.
+  Guard it with `if (error instanceof HttpException) throw error;` first, or the 409's whole
+  value — the reason it carries — never reaches the caller.
+- **Recognise the violation in one place.** Put the index name and the predicate (`code === '23505'
+  && constraint === …`) in `@perfana/shared` when more than one app writes the table, and read
+  both `error.code` and `error.driverError?.code`: TypeORM's `QueryFailedError` normally copies
+  the driver's properties onto itself, but a rethrowing repository can hand back either shape.
+- **Swallowing one mid-request needs a SAVEPOINT.** `RlsTransactionInterceptor` wraps each
+  authenticated request in one transaction, so a 23505 aborts it (25P02) and every later query in
+  a loop fails with "current transaction is aborted". Catch-and-continue without
+  `SAVEPOINT` / `ROLLBACK TO SAVEPOINT` guarantees a 500 and loses the rows already written. Gate
+  the savepoint on `getRequestEm() !== null` — it is only legal inside a transaction, and with
+  `DB_ENABLE_RLS_ROLE=false` there is none. Worked example:
+  `BenchmarkMutationService.saveSkippingDuplicateTarget`.
+
+Do not confuse this with the repo's **idempotent-provisioning** 409, which returns the existing
+resource so a CI script can call the endpoint unconditionally. A constraint 409 is a hard refusal
+and returns nothing.
+
 ## Code Style
 
 - TypeScript strict mode

@@ -177,6 +177,13 @@ const CUSTOM_SOURCE_PROPS: UseEditSLOFormProps = { open: true, benchmark: CUSTOM
 const CLOSED_PROPS: UseEditSLOFormProps = { open: false, benchmark: GRAFANA_BENCHMARK, ...BASE_CONTEXT };
 const NULL_BENCHMARK_PROPS: UseEditSLOFormProps = { open: true, benchmark: null, ...BASE_CONTEXT };
 
+// The Enabled checkbox (v0.2.96.15). `duplicate()` clones an SLO disabled, so the dialog has
+// to load `false` faithfully; older rows may carry no value at all and must read as enabled.
+const DISABLED_BENCHMARK: Benchmark = { ...GRAFANA_BENCHMARK, id: 'bench-disabled', enabled: false };
+const NO_ENABLED_BENCHMARK: Benchmark = { ...GRAFANA_BENCHMARK, id: 'bench-no-enabled', enabled: undefined as unknown as boolean };
+const DISABLED_PROPS: UseEditSLOFormProps = { open: true, benchmark: DISABLED_BENCHMARK, ...BASE_CONTEXT };
+const NO_ENABLED_PROPS: UseEditSLOFormProps = { open: true, benchmark: NO_ENABLED_BENCHMARK, ...BASE_CONTEXT };
+
 // ---------------------------------------------------------------------------
 // Default mock setup
 // ---------------------------------------------------------------------------
@@ -770,6 +777,35 @@ describe('Re-pointing the dashboard', () => {
   it('exposes fetchPerfMetricsPanels for performance-test dashboards', () => {
     const { result, unmount } = renderHook(() => useEditSLOForm(GRAFANA_PROPS));
     expect(typeof result.current.fetchPerfMetricsPanels).toBe('function');
+    unmount();
+  });
+});
+
+// ===========================================================================
+// The Enabled checkbox's initial state
+// ===========================================================================
+
+describe('enabled loads from the benchmark', () => {
+  it('loads a disabled SLO as unchecked — the state a Duplicate clone arrives in', async () => {
+    const { result, unmount } = renderHook(() => useEditSLOForm(DISABLED_PROPS));
+    await waitFor(() => expect(result.current.sloFormData.selectedDashboard).not.toBeNull());
+    expect(result.current.sloFormData.enabled).toBe(false);
+    unmount();
+  });
+
+  it('loads an enabled SLO as checked', async () => {
+    const { result, unmount } = renderHook(() => useEditSLOForm(GRAFANA_PROPS));
+    await waitFor(() => expect(result.current.sloFormData.selectedDashboard).not.toBeNull());
+    expect(result.current.sloFormData.enabled).toBe(true);
+    unmount();
+  });
+
+  // `!== false`, not a truthiness check: a row with no value must not silently be switched
+  // off by opening and saving the dialog.
+  it('treats a benchmark with no enabled value as enabled', async () => {
+    const { result, unmount } = renderHook(() => useEditSLOForm(NO_ENABLED_PROPS));
+    await waitFor(() => expect(result.current.sloFormData.selectedDashboard).not.toBeNull());
+    expect(result.current.sloFormData.enabled).toBe(true);
     unmount();
   });
 });

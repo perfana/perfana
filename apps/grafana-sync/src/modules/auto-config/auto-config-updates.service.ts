@@ -20,6 +20,7 @@ import {
   inferSourceTypeFromDashboardUid,
 } from '@perfana/shared/services/metrics-source-upsert';
 import type { OwnedResource } from '@perfana/shared/entities';
+import { isDuplicateSloTargetError } from '@perfana/shared/utils/duplicate-slo-target';
 import { GrafanaSyncAuditService } from '../audit/grafana-sync-audit.service';
 import { DashboardVariable } from './types';
 
@@ -341,7 +342,7 @@ export class AutoConfigUpdatesService {
     profileBenchmark: ProfileBenchmark,
     testRun: TestRun,
     applicationDashboard: ApplicationDashboard,
-  ): Promise<{ insertedId: string; wasCreated?: boolean }> {
+  ): Promise<{ insertedId: string; wasCreated?: boolean; skippedDuplicateTarget?: boolean }> {
     try {
       this.logger.log(
         `Upserting benchmark for profile benchmark ${profileBenchmark.id} and test run ${testRun.testRunId}`,
@@ -479,6 +480,23 @@ export class AutoConfigUpdatesService {
 
       return { insertedId: savedBenchmark.id, wasCreated };
     } catch (e) {
+      // A profile SLO can land on a panel that already carries an *enabled manual* SLO with
+      // the same series and aggregation. The existence probe above keys on
+      // `generic_check_id`, which a manually-created SLO never has, so that row is invisible
+      // to it and only `uq_benchmarks_active_metric_target` catches the overlap. Rethrowing
+      // would abort provisioning for the whole dashboard over one collision — the v0.2.89.0
+      // "one rejected dashboard aborts the sweep" shape. Skip this benchmark instead, and say
+      // why in terms an operator can act on: the fix is to remove the manual SLO the profile
+      // now supersedes. Expected during a manual-to-profile cutover.
+      if (isDuplicateSloTargetError(e)) {
+        this.logger.warn(
+          `Skipped profile benchmark ${profileBenchmark.id} on dashboard ${applicationDashboard.id} ` +
+            `(panel ${profileBenchmark.panel_id ?? 'unknown'}): an enabled SLO already evaluates the ` +
+            'same series with the same aggregation on this panel. Remove or disable that manual SLO ' +
+            'for the profile SLO to take over.',
+        );
+        return { insertedId: '', wasCreated: false, skippedDuplicateTarget: true };
+      }
       this.logger.error('insertBenchmarkBasedOnProfileBenchmark failed:');
       const error = e as any;
       this.logger.error(`Error message: ${error?.message}`);

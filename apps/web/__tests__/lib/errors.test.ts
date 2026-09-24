@@ -20,6 +20,7 @@ import {
   createErrorFromResponse,
   isKnownError,
   getErrorMessage,
+  serverErrorMessage,
 } from '@/lib/errors';
 
 describe('Error Handling Utilities', () => {
@@ -546,6 +547,77 @@ describe('Error Handling Utilities', () => {
       // Assert
       expect(knownErrors).toHaveLength(1);
       expect(knownErrors[0]).toBeInstanceOf(PerfanaError);
+    });
+  });
+
+  /**
+   * The Add/Edit SLO dialogs show whatever this returns in an Alert and stay open, so a
+   * fallback where the server actually said something is a silent dead end for the user —
+   * a 409 from uq_benchmarks_active_metric_target carries the only sentence that says what
+   * to change.
+   */
+  describe('serverErrorMessage', () => {
+    const responseWith = (body: unknown): Response =>
+      ({ json: async () => body } as unknown as Response);
+
+    it('returns a plain string message from a NestJS exception body', async () => {
+      const message = 'An enabled SLO for this panel already evaluates the same series.';
+      await expect(
+        serverErrorMessage(responseWith({ statusCode: 409, message }), 'fallback'),
+      ).resolves.toBe(message);
+    });
+
+    it('joins a class-validator array of messages', async () => {
+      await expect(
+        serverErrorMessage(
+          responseWith({ statusCode: 400, message: ['value must be a number', 'operator is required'] }),
+          'fallback',
+        ),
+      ).resolves.toBe('value must be a number, operator is required');
+    });
+
+    it('drops non-string entries from the array and keeps the rest', async () => {
+      await expect(
+        serverErrorMessage(responseWith({ message: [null, 'only this one', 7] }), 'fallback'),
+      ).resolves.toBe('only this one');
+    });
+
+    it('falls back when the array holds nothing usable', async () => {
+      await expect(
+        serverErrorMessage(responseWith({ message: [null, 42] }), 'fallback'),
+      ).resolves.toBe('fallback');
+      await expect(serverErrorMessage(responseWith({ message: [] }), 'fallback')).resolves.toBe(
+        'fallback',
+      );
+    });
+
+    it('falls back on an empty or whitespace-only message', async () => {
+      await expect(serverErrorMessage(responseWith({ message: '' }), 'fallback')).resolves.toBe(
+        'fallback',
+      );
+      await expect(serverErrorMessage(responseWith({ message: '   ' }), 'fallback')).resolves.toBe(
+        'fallback',
+      );
+    });
+
+    it('falls back when the body has no message at all, or is null', async () => {
+      await expect(
+        serverErrorMessage(responseWith({ statusCode: 500 }), 'fallback'),
+      ).resolves.toBe('fallback');
+      await expect(serverErrorMessage(responseWith(null), 'fallback')).resolves.toBe('fallback');
+    });
+
+    // A proxy error page or an empty 502 is not JSON; json() rejects and must not escape.
+    it('falls back when the body is not JSON', async () => {
+      const notJson = {
+        json: async () => {
+          throw new SyntaxError('Unexpected token < in JSON at position 0');
+        },
+      } as unknown as Response;
+
+      await expect(serverErrorMessage(notJson, 'Failed to create SLO (502)')).resolves.toBe(
+        'Failed to create SLO (502)',
+      );
     });
   });
 });

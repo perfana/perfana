@@ -195,6 +195,25 @@ export function SLOThresholdConfig({
         />
       </Grid>
 
+      {/* Enabled. The checks pipeline filters on `valid AND enabled`, and so does
+          uq_benchmarks_active_metric_target — a clone from the Duplicate button arrives
+          disabled and only becomes a real SLO once it has been edited and switched on. */}
+      <Grid size={{ xs: 12, md: 6 }}>
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={sloFormData.enabled}
+              onChange={(e) => setSloFormData((prev) => ({ ...prev, enabled: e.target.checked }))}
+              color="primary"
+            />
+          }
+          label="Enabled"
+        />
+        <FormHelperText sx={{ ml: 0, mt: 0.5 }}>
+          A disabled SLO is kept but never evaluated, and produces no result on a test run
+        </FormHelperText>
+      </Grid>
+
       {/* Advanced Options */}
       {/* Apply to analysis timerange only */}
       <Grid size={{ xs: 12, md: 6 }}>

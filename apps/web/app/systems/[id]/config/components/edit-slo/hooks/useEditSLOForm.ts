@@ -181,6 +181,11 @@ export function useEditSLOForm({
   // Initialize form when dialog opens with benchmark data
   useEffect(() => {
     if (open && benchmark) {
+      // Both SLO dialogs stay mounted (ConfigDialogs renders them with an `open` prop), so
+      // state survives a close. The Add side clears this in resetForm(); without the same
+      // here, a duplicate-target 409 raised on one SLO is still on screen when the user
+      // reopens Edit on a different one.
+      setValidationErrors({});
       // Handle percentunit conversion for display - convert decimal back to percentage
       // A trend threshold is stored as typed (%/h), never percentunit-scaled.
       const effectiveUnitFormat = benchmark.evaluate_type === 'trend'
@@ -249,6 +254,7 @@ export function useEditSLOForm({
         invertMatchPattern: benchmark.configuration?.invertMatchPattern === true,
         validateWithDefaultIfNoData: benchmark.configuration?.validateWithDefaultIfNoData || false,
         validateWithDefaultIfNoDataValue: displayDefaultValue,
+        enabled: benchmark.enabled !== false,
       });
 
       // Also fetch real dashboards in background — if a match is found, it will

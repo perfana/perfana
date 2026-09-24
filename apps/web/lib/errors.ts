@@ -98,3 +98,28 @@ export function getErrorMessage(error: unknown): string {
   
   return 'An unexpected error occurred';
 }
+/**
+ * The reason a NestJS endpoint gave for refusing, or `fallback`.
+ *
+ * `createErrorFromResponse` above maps a status to a generic sentence and throws the body
+ * away, which is the wrong trade for a 400/409 whose whole value is what the server said
+ * (e.g. why an SLO is a duplicate). Nest puts that in `message` — a string, or an array of
+ * strings from class-validator. The body may not be JSON at all (a proxy error page, an
+ * empty 502), so parsing is guarded.
+ *
+ * Consumes the response body; call it once, on a response you are not going to read again.
+ */
+export async function serverErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const body: unknown = await response.json();
+    const message = (body as { message?: unknown } | null)?.message;
+    if (Array.isArray(message)) {
+      const joined = message.filter((m) => typeof m === 'string').join(', ');
+      if (joined) return joined;
+    }
+    if (typeof message === 'string' && message.trim()) return message;
+  } catch {
+    // Not JSON — fall through to the caller's wording.
+  }
+  return fallback;
+}

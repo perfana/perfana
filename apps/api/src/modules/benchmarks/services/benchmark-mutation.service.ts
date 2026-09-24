@@ -1,8 +1,8 @@
-import { Injectable, Logger, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { Benchmark as BenchmarkEntity, SystemUnderTest } from '../../../entities';
-import { withRequestEm } from '../../../common/db/request-em';
+import { getRequestEm, withRequestEm } from '../../../common/db/request-em';
 import { BenchmarkQueryService } from './benchmark-query.service';
 import { BenchmarkTagHelper } from './benchmark-tag.helper';
 import { BenchmarkMapper } from './benchmark.mapper';
@@ -19,6 +19,7 @@ import type {
   UpdateAggregatedSloDto,
 } from './benchmark-mutation.types';
 import type { CopyBenchmarksDto } from '../dto/copy-benchmarks.dto';
+import { DUPLICATE_TARGET_MESSAGE, isDuplicateSloTargetError } from '@perfana/shared';
 
 /** `metric_unit` of a trend SLO: the slope is % of the series mean per hour, whatever the panel's unit. */
 const TREND_UNIT = '%/h';
@@ -32,6 +33,13 @@ export type {
   CreateAggregatedSloDto,
   UpdateAggregatedSloDto,
 } from './benchmark-mutation.types';
+
+/**
+ * `isDuplicateTarget` and the 409 wording live in `@perfana/shared` because grafana-sync's
+ * profile provisioning writes to the same table and has to recognise the same refusal —
+ * see the docblock on `isDuplicateSloTargetError`.
+ */
+const isDuplicateTarget = isDuplicateSloTargetError;
 
 /** The body is an untyped inline DTO, so the range check lives here beside minApdexScore's. `null` means reset to the default. The controller rethrows HttpExceptions as-is. */
 function assertApdexMinSamples(value: number | null | undefined): void {
@@ -234,6 +242,10 @@ export class BenchmarkMutationService {
 
       return BenchmarkMapper.mapEntityToBenchmark(result);
     } catch (error) {
+      if (isDuplicateTarget(error)) {
+        this.logger.warn(`Refused duplicate SLO for panel ${dto.configuration?.id} on dashboard ${dto.applicationDashboardId}`);
+        throw new ConflictException(DUPLICATE_TARGET_MESSAGE);
+      }
       this.logger.error('Failed to create benchmark:', error);
       throw error;
     }
@@ -307,6 +319,11 @@ export class BenchmarkMutationService {
       this.logger.log(`Updated benchmark: ${result.config_title || id}`);
       return BenchmarkMapper.mapEntityToBenchmark(result);
     } catch (error) {
+      // Reached most often by enabling a clone that was never edited into a variant.
+      if (isDuplicateTarget(error)) {
+        this.logger.warn(`Refused duplicate SLO on update of benchmark ${id}`);
+        throw new ConflictException(DUPLICATE_TARGET_MESSAGE);
+      }
       this.logger.error(`Failed to update benchmark ${id}:`, error);
       throw error;
     }
@@ -361,6 +378,44 @@ export class BenchmarkMutationService {
       return true;
     } catch (error) {
       this.logger.error(`Failed to delete benchmark ${id}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Run one write of the copy loop, returning false when the duplicate-target index refused
+   * it and true when it landed. Anything else rethrows.
+   *
+   * The SAVEPOINT is the whole point. `RlsTransactionInterceptor` wraps each authenticated
+   * request in ONE transaction, and `POST /benchmarks/copy` carries no `@SkipRls` — so a
+   * 23505 aborts that transaction (25P02) and every later `findOne`/`save` in the loop fails
+   * with "current transaction is aborted". Catching the error without rolling back to a
+   * savepoint does not salvage the copy, it guarantees a 500 and loses every row that had
+   * already been written. Same shape as `TestRunsPerformanceQueryService`'s guarded repair
+   * read; `getRequestEm() !== null` is the gate because a SAVEPOINT is only legal inside a
+   * transaction, and with `DB_ENABLE_RLS_ROLE=false` there is none.
+   */
+  private async saveSkippingDuplicateTarget(
+    write: () => Promise<unknown>,
+    what: string,
+  ): Promise<boolean> {
+    const em = withRequestEm(this.benchmarkRepo);
+    const guarded = getRequestEm() !== null;
+    try {
+      if (guarded) await em.query('SAVEPOINT copy_benchmark');
+      await write();
+      if (guarded) await em.query('RELEASE SAVEPOINT copy_benchmark');
+      return true;
+    } catch (error) {
+      if (guarded) {
+        await em.query('ROLLBACK TO SAVEPOINT copy_benchmark').catch(() => undefined);
+      }
+      if (isDuplicateTarget(error)) {
+        this.logger.warn(
+          `Skipped ${what}: target scope already has an enabled SLO for the same panel and series`,
+        );
+        return false;
+      }
       throw error;
     }
   }
@@ -422,10 +477,21 @@ export class BenchmarkMutationService {
         // payload symmetric with the rest of the service.
         const beforeOverwrite = Object.assign(new BenchmarkEntity(), existing);
 
-        await withRequestEm(this.benchmarkRepo).update(existing.id, {
-          ...cloneColumns(benchmark),
-          updated_by: userId,
-        } as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);
+        // The overwrite can collide: `cloneColumns` carries the source's `enabled`, so
+        // switching a disabled target row on — or re-pointing it — can land on a THIRD row
+        // that already holds the target's panel, series and aggregation.
+        const overwritten = await this.saveSkippingDuplicateTarget(
+          () =>
+            withRequestEm(this.benchmarkRepo).update(existing.id, {
+              ...cloneColumns(benchmark),
+              updated_by: userId,
+            } as unknown as Parameters<typeof this.benchmarkRepo.update>[1]),
+          `overwrite of benchmark ${existing.id}`,
+        );
+        if (!overwritten) {
+          skipped++;
+          continue;
+        }
 
         // Re-fetch the persisted row so the audit diff sees the actual
         // post-update values (including any DB-side defaults / triggers).
@@ -456,7 +522,18 @@ export class BenchmarkMutationService {
         updated_by: userId,
       });
 
-      const savedNew = await withRequestEm(this.benchmarkRepo).save(newBenchmark);
+      // `conflictKey` probes on config/panel title, which is coarser than
+      // `uq_benchmarks_active_metric_target`: a target row that differs in title but targets
+      // the same panel, series and aggregation is invisible to the probe, and only the index
+      // catches it. Skip that row rather than failing the whole copy.
+      let savedNew: BenchmarkEntity | undefined;
+      const inserted = await this.saveSkippingDuplicateTarget(async () => {
+        savedNew = await withRequestEm(this.benchmarkRepo).save(newBenchmark);
+      }, `copy of benchmark ${benchmark.id}`);
+      if (!inserted || !savedNew) {
+        skipped++;
+        continue;
+      }
 
       // Phase 5a: per-row CREATE audit (one row per persisted benchmark, per
       // the audit architecture's "one row per entity" rule).
@@ -477,6 +554,13 @@ export class BenchmarkMutationService {
    * `generic_check_id` is dropped: it is the golden-path auto-config key and part of
    * `uq_benchmarks_unique`, so keeping it would both collide with the source and hand the
    * clone to grafana-sync to manage. A UI-created SLO never has one anyway.
+   *
+   * The clone arrives **disabled**. Until it has been edited it is identical to its source in
+   * every column `uq_benchmarks_active_metric_target` keys on, and two enabled SLOs on one
+   * panel produce two check results the run view cannot tell apart — that is the bug this
+   * index exists for. `WHERE valid AND enabled` is what keeps the clone legal in the
+   * meantime; switching it on before giving it its own match pattern or aggregation gets a
+   * 409 from `update`, which is the honest answer.
    */
   async duplicate(id: string, userId: string, roles: string[]): Promise<Benchmark | null> {
     const source = await this.queryService.findOne(id, userId, roles);
@@ -486,6 +570,7 @@ export class BenchmarkMutationService {
     const clone = this.benchmarkRepo.create({
       ...cloneColumns(source as unknown as BenchmarkEntity),
       generic_check_id: undefined,
+      enabled: false,
       system_under_test_id: source.system_under_test_id,
       test_environment: source.test_environment,
       workload: source.workload,

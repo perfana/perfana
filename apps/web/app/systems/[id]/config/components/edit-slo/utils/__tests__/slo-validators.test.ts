@@ -36,8 +36,13 @@ function makeFormData(overrides: Partial<SLOFormData> = {}): SLOFormData {
     excludeRampUpTime: true,
     averageAll: false,
     matchPattern: '',
+    // apps/web/tsconfig.json excludes **/*.test.ts, so nothing type-checks this
+    // literal against SLOFormData — it had already drifted (invertMatchPattern was
+    // missing) before `enabled` was added. Keep it complete by hand.
+    invertMatchPattern: false,
     validateWithDefaultIfNoData: false,
     validateWithDefaultIfNoDataValue: '',
+    enabled: true,
     ...overrides,
   };
 }

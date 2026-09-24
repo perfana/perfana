@@ -12,11 +12,15 @@ export const TABLE_HEADER_CELL_SX: SxProps<Theme> = {
   fontWeight: 700,
   textTransform: 'uppercase',
   letterSpacing: '0.05em',
-  // These are short measurement labels — "Avg Response (ms)", "95th Pct (ms)" — and the request
-  // column beside them claims the leftover width, which squeezes every other column down to its
-  // longest single word. Without this the labels answer by stacking one word per line and the
-  // header grows to three rows.
-  whiteSpace: 'nowrap',
+  // These labels used to be `nowrap`, to stop them stacking one word per line once the
+  // transaction-name column had claimed the leftover width. The cost was not a tidier
+  // header, it was a horizontal scrollbar: eleven nowrap labels put the table's min-content
+  // width at 1703px against a 1302px content column on a 16" MacBook — measured on
+  // SONAR-acceptatie-loadtest_perfana-00010 with one scenario expanded — so the section
+  // scrolled sideways at full screen, not just on a small one. Letting them wrap returns
+  // 324px of that; the other 176px comes from the tighter cell padding in
+  // TransactionsTable. A two- or three-line header is the price, and it is the cheaper one.
+  whiteSpace: 'normal',
 };
 
 /** The same, for a header cell that also needs its own overrides merged in. */
