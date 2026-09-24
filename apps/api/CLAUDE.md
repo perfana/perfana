@@ -297,6 +297,68 @@ Residue: `errors_per_second` is still hardcoded `0`, as it was before. The CAGGs
 `n_err` and could populate it for the first time, but that changes what the chart draws and
 was left out of a performance fix on purpose.
 
+### Two SLOs on one panel, and why `uq_benchmarks_unique` never stopped them
+
+`uq_benchmarks_unique` is `(system_under_test_id, test_environment, workload,
+application_dashboard_id, generic_check_id)`. `generic_check_id` is the golden-path
+auto-config key from grafana-sync and is **NULL for every SLO the UI creates** — 31 of 48 rows
+on the dev database. NULLs never collide in a btree unique, so for exactly the SLO type the
+Add-SLO dialog and the Duplicate button produce, the constraint is inert.
+
+The consequence was not a tidy extra row. Two benchmarks on one panel produce two
+`check_results` that match in `application_dashboard_id`, `panel_id` and `metric_name` — the
+three fields the run view keys its SLO rows on — so React saw two siblings with one key,
+dropped the duplicate on the first re-render, and **neither row could be expanded**. Observed
+on WERKNL / `Performance test metrics T_WG_Mijn_Vacatures` / Transaction Error Rate, and on
+Bravo; the audit trail shows the Bravo pair came from Duplicate (a `create` writes
+`description: ''`, `duplicate`'s `cloneColumns` preserves `null`).
+
+**`uq_benchmarks_active_metric_target`** (migration 1812) states the invariant the checks
+pipeline actually depends on: no two benchmarks that `BenchmarkMatcher` will evaluate may
+target the same panel, series and aggregation. Four things about its shape:
+
+1. **The predicate is `WHERE valid AND enabled`**, matching `BenchmarkMatcher`'s own filter
+   (`apps/worker/src/pipelines/checks/BenchmarkMatcher.ts`), and scoped to
+   `benchmark_type = 'metric'` with a non-NULL `application_dashboard_id`. Apdex and
+   aggregated SLOs carry a NULL dashboard and the UI keys their rows on `benchmark_id`
+   already, so they cannot collide.
+2. **The match pattern is a COALESCE, and it must stay one.** `withColumnMatchPattern`
+   prefers `configuration->>'matchPattern'` and falls back to the `match_pattern` column, so
+   the index reads
+   `COALESCE(NULLIF(configuration->>'matchPattern',''), NULLIF(match_pattern,''), '')`. Key
+   it on either source alone and two rows that evaluate the same series read as different.
+3. **`requirement_operator` / `requirement_value` and `exclude_ramp_up_time` are deliberately
+   NOT in the key.** Two SLOs differing only in those still collapse to one check-result key,
+   which is the bug — the stricter one just hides the other.
+4. **`duplicate()` clones disabled**, which is what keeps the Duplicate button working: the
+   clone is identical to its source in every key column until the user edits it, and
+   `WHERE enabled` is the only thing that lets it exist. Switching it on unedited gets a 409
+   from `update`. That made an **Enabled** checkbox in the edit dialog load-bearing — before
+   v0.2.96.15 nothing in the UI could set the column, so a disabled clone would have been
+   unrecoverable.
+
+Both `create` and `update` translate 23505 on this index to a `ConflictException` rather than
+a 500, and `copyToScope` counts it as `skipped`. Two things that are easy to get wrong there:
+
+- **The controller must let the ConflictException through.** `create`'s catch block had no
+  `if (error instanceof HttpException) throw error;` guard, so the 409 arrived as a 500
+  reading "Failed to create benchmark" — the feature was dead end to end on the create path
+  while the service-level spec passed. `update` and `copyBenchmarks` already guarded.
+- **Swallowing 23505 inside the RLS transaction needs a SAVEPOINT.** `RlsTransactionInterceptor`
+  wraps each authenticated request in one transaction and `POST /benchmarks/copy` has no
+  `@SkipRls`, so the unique violation aborts that transaction (25P02) and every later
+  `findOne`/`save` in the loop fails with "current transaction is aborted". Catching and
+  continuing without rolling back to a savepoint does not salvage the copy — it guarantees a
+  500 and loses the rows already written. `saveSkippingDuplicateTarget` guards both branches,
+  gated on `getRequestEm() !== null` because a SAVEPOINT is only legal inside a transaction.
+
+`copyToScope`'s own `conflictKey` probe is coarser than the index (it matches on config/panel
+title), so the index is the only thing that catches a target row with a different title on
+the same panel.
+
+Migration 1812 **disables** the newer of each existing pair rather than deleting it, and
+deletes the check results it produced. A user may have meant to edit one into a variant.
+
 ### The SUT export is large by default, and only Chrome and Edge can stream it to disk
 
 `SUT_TRANSFER_ENABLED` gates an admin-only export that streams a gzipped NDJSON bundle with no

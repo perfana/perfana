@@ -991,6 +991,74 @@ FROM EXCLUDED.value OR ds_metrics.ramp_up IS DISTINCT FROM EXCLUDED.ramp_up` to 
 incremental upsert only for the live path — on a compressed chunk that guard is the
 expensive part (apps/worker/CLAUDE.md, "ADAPT's baseline depends on the `pct_agg` sketch", item 6).
 
+## SLO configuration
+
+### `PUT /benchmarks/:id` takes an untyped inline body, so nothing validates it
+
+**Priority:** P2
+**Origin:** api-contract and security review during /ship on `fix/duplicate-slo-and-perf-analysis-width` (2026-09-24).
+The `@Body()` on `update` (and on `create`) is an inline TypeScript interface, not a
+class-validator DTO. The global `ValidationPipe` (`main.ts`, `whitelist: true`) resolves its
+metatype to `Object` and so validates and strips nothing. `enabled` became load-bearing in
+v0.2.96.15 — the edit dialog sends it on every save and it is the only way to recover a
+disabled Duplicate clone — and it is written straight through by `buildUpdateData`
+(`if (dto.enabled !== undefined) data.enabled = dto.enabled;`). There is no `@ApiBody` either,
+so the field is absent from the Swagger request schema that API-key consumers generate from.
+Promote the inline body types to `class UpdateBenchmarkDto` with `@IsOptional() @IsBoolean()
+@ApiPropertyOptional() enabled?: boolean` and the rest.
+
+### `update()` has no modify-capability check, and `enabled` raised the stakes
+
+**Priority:** P2
+**Origin:** security review during /ship on `fix/duplicate-slo-and-perf-analysis-width` (2026-09-24).
+`BenchmarkMutationService.update` checks READ access only — it calls `queryService.findOne`,
+which runs `canAccessResource` — and then carries the stale comment `// NOTE: Permission check
+will be added here when Benchmark entity has organization_id`. That column has existed since
+Phase 4. Flipping `enabled` off makes `BenchmarkMatcher` skip the SLO entirely, so a failing
+SLO silently disappears and the run verdict reads as passing; with `DB_ENABLE_RLS_ROLE=false`
+(the documented default) there is no `can_modify_resource` backstop either. Gate `update()` and
+`delete()` on `authzService.getCapabilities(userId, roles, benchmark.organizationId)`, per the
+repo's own rule against relying on RLS for a service-layer gate. At minimum treat
+`enabled`/`valid` as privileged fields.
+
+### `POST /benchmarks/copy` overloads `skipped` with two different outcomes
+
+**Priority:** P3
+**Origin:** api-contract review during /ship on `fix/duplicate-slo-and-perf-analysis-width` (2026-09-24).
+Before v0.2.96.15, `skipped` meant only "the caller asked for `conflictStrategy: skip` and the
+row was already there". It now also means "`uq_benchmarks_active_metric_target` refused the row
+because the target scope has an enabled SLO the `conflictKey` probe could not see". The response
+is still `{copied, skipped, total}` with no per-item detail, so a CI script asserting
+`skipped === expectedAlreadyPresent` passes while SLOs it asked for were never created. Only a
+server log line records the difference. Widen the response additively, e.g.
+`{copied, skipped, total, refused?: string[]}`, and document both on the route.
+
+### The Enabled checkbox is filed under Advanced Options and has no Add-dialog counterpart
+
+**Priority:** P4
+**Origin:** design review during /ship on `fix/duplicate-slo-and-perf-analysis-width` (2026-09-24).
+The control added in v0.2.96.15 sits in `edit-slo/components/SLOThresholdConfig.tsx` under the
+`{/* Advanced Options */}` marker, beside "Apply to analysis timerange only" and "Average All
+Values". Its markup is consistent with those siblings, but enabled/disabled is the SLO's
+lifecycle state rather than a tuning knob — it decides whether the row evaluates at all, and the
+SLO table now renders a badge for it. The Add dialog imports a different `SLOThresholdConfig`
+(`add-slo/components`) with no such field, so the control exists only on edit. Decide explicitly
+whether Add needs parity; if new SLOs are always created enabled, say so in the Add dialog rather
+than leaving the control silently absent.
+
+### ~20 ad-hoc copies of the "read the server's error message" rule
+
+**Priority:** P4
+**Origin:** maintainability review during /ship on `fix/duplicate-slo-and-perf-analysis-width` (2026-09-24).
+v0.2.96.15 added `serverErrorMessage` to `apps/web/lib/errors.ts` as the canonical parser for a
+NestJS error body (`message` as string or string[], non-JSON guarded). An identical inline
+implementation already exists at
+`app/test-runs/[id]/components/test-run-details/components/AnalysisTimeRangeDialog.tsx`, differing
+only in the join separator, plus roughly twenty `errorData.message || 'Failed to …'` sites
+(ApdexSloDialog, ApdexThresholdDialog, useApdexConfigDialog, useBaselineApdex, useAnomalyDetection,
+TestRunActionsMenu and others). Migrate them to the shared helper so the rule has one
+implementation.
+
 ## Test run detail tables
 
 ### `alpha()` on an already-transparent theme token, in four more places

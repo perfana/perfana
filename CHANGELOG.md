@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.15] - 2026-09-24
+
+### Fixed
+- **The same SLO could appear twice on a test run, and neither copy would open.** Two SLOs pointing at the same panel, judging the same series the same way, produced two results the run view could not tell apart — so it drew them on top of each other and the expand arrow did nothing on either. The rows now open independently, and Perfana no longer lets the redundant pair be created: a second SLO on a panel has to differ in which series it watches, how it aggregates them, or be switched off. Existing duplicates are switched off on upgrade rather than deleted, and their history is left untouched.
+- **The Add and Edit SLO dialogs now say why a save was refused.** Previously the Save button simply stopped responding and the reason never reached the screen. The message appears pinned to the bottom of the dialog, next to the button, and can be dismissed.
+- **Performance Analysis no longer scrolls sideways.** On a 16" MacBook the Scenarios table ran past the edge of the page as soon as a scenario was opened, so the Apdex and Actions columns sat off-screen behind a horizontal scrollbar. All eleven columns now fit without one.
+- **The scenario band in that table is readable in dark mode.** Its heading text and background were fixed colours drawn for a light page, so on a dark one the band nearly vanished.
+
+### Added
+- **An Enabled switch on every SLO.** A disabled SLO is kept but never evaluated, and the SLO list marks it. This is how a copied SLO is brought into service once it has been given its own series or aggregation to watch — copies now arrive switched off, so they cannot silently duplicate the SLO they came from.
+
+### Changed
+- **Duplicating an SLO now creates it switched off.** Edit the copy, then switch it on. Scripts calling the duplicate endpoint get the same behaviour.
+- **Copying SLOs between systems reports a copy it had to leave out** instead of stopping partway through.
+- **Profile-provisioned SLOs no longer fail silently against a manual SLO.** When a profile SLO would land on a panel a manual SLO already watches the same way, the sync now says so by name and carries on with the rest of the dashboard.
+
 ## [0.2.96.14] - 2026-09-23
 
 ### Fixed
