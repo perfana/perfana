@@ -356,8 +356,21 @@ a 500, and `copyToScope` counts it as `skipped`. Two things that are easy to get
 title), so the index is the only thing that catches a target row with a different title on
 the same panel.
 
-Migration 1812 **disables** the newer of each existing pair rather than deleting it, and
-deletes the check results it produced. A user may have meant to edit one into a variant.
+Migration 1812 **disables** the newer of each existing pair rather than deleting it, and keeps
+the `check_results` it already produced. A user may have meant to edit one into a variant, and
+the results are per-run history: `test_runs.consolidated_result` is a stored verdict derived
+from them and nothing here recomputes it, so deleting them would leave a finished run whose
+header says FAILED with every SLO row green and no evidence left to explain it. A duplicate
+check-result row renders correctly now anyway. The disabled rows are marked by appending
+`Disabled by migration 1812: duplicate of an identical SLO on the same panel` to `description`,
+which is what `down()` keys on to switch them back on.
+
+One deploy-time failure mode is worth knowing: `benchmarks` is `FORCE ROW LEVEL SECURITY` and
+the migration runner sets none of the `app.current_user_*` GUCs `can_modify_resource` reads, so
+a migration login that owns the table without superuser or `BYPASSRLS` would update zero rows
+and then fail the index build on rows it could not see. `up()` re-counts the duplicate groups
+after the dedupe and throws with that cause named rather than letting an opaque 23505 block the
+deploy.
 
 ### The SUT export is large by default, and only Chrome and Edge can stream it to disk
 
