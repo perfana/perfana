@@ -1,5 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 import { SCHEMA_SQL } from './schema-sql';
+import { UQ_BENCHMARKS_ACTIVE_METRIC_TARGET } from './1812000000000-ConstrainDuplicateMetricBenchmarks';
 
 /**
  * Consolidated Schema Migration
@@ -982,6 +983,14 @@ export class ConsolidatedSchema1700000000000 implements MigrationInterface {
         `ALTER TABLE public.${table} ALTER COLUMN organization_id SET NOT NULL`,
       );
     }
+
+    // No two enabled SLOs may target the same panel, series and aggregation: their check
+    // results are indistinguishable to a reader. uq_benchmarks_unique cannot do this — its
+    // last column is generic_check_id, which is NULL for every UI-created SLO, and NULLs
+    // never collide. Imported from 1812 rather than retyped, so the greenfield and migrated
+    // definitions cannot drift; `npm run check:schema-constraints` proves parity between two
+    // live databases. A fresh install needs none of 1812's dedupe.
+    await queryRunner.query(UQ_BENCHMARKS_ACTIVE_METRIC_TARGET);
 
     console.log('Phase 6: Post-schema column additions applied.');
   }

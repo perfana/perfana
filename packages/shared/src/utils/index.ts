@@ -215,3 +215,4 @@ export function formatImpactShare(value: number, total: number): string {
 export function sumImpact(rows: ReadonlyArray<{ impact?: number | null }>): number {
   return rows.reduce((sum, r) => sum + (Number(r.impact) || 0), 0);
 }
+export * from './duplicate-slo-target';
