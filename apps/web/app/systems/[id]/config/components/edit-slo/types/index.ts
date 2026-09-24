@@ -46,6 +46,8 @@ export interface SLOFormData {
   invertMatchPattern: boolean;
   validateWithDefaultIfNoData: boolean;
   validateWithDefaultIfNoDataValue: string;
+  /** `benchmarks.enabled` — the checks pipeline skips a disabled SLO entirely. */
+  enabled: boolean;
 }
 
 /**
@@ -65,6 +67,7 @@ export const initialSLOFormData: SLOFormData = {
   invertMatchPattern: false,
   validateWithDefaultIfNoData: false,
   validateWithDefaultIfNoDataValue: '',
+  enabled: true,
 };
 
 /**

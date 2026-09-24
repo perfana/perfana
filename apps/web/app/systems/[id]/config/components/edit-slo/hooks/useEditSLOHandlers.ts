@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
+import { getErrorMessage, serverErrorMessage } from '@/lib/errors';
 import {} from '../../types';
 import {
   SaveDialogOption,
@@ -139,6 +140,7 @@ export function useEditSLOHandlers({
           requirementOperator: sloFormData.requirementOperator,
           requirementValue: processedRequirementValue,
           tags: sloFormData.tags,
+          enabled: sloFormData.enabled,
           configuration: {
             requirement: {
               operator: sloFormData.requirementOperator,
@@ -168,7 +170,11 @@ export function useEditSLOHandlers({
         });
 
         if (!response.ok) {
-          throw new Error('Failed to update SLO configuration');
+          // A 409 here is uq_benchmarks_active_metric_target — most often an unedited clone
+          // being switched on, which would give the panel two indistinguishable SLOs.
+          throw new Error(
+            await serverErrorMessage(response, `Failed to update SLO configuration (${response.status})`),
+          );
         }
 
         const updatedBenchmark = await response.json();
@@ -271,11 +277,12 @@ export function useEditSLOHandlers({
         onClose();
       } catch (error) {
         console.error('Error updating SLO:', error);
+        setValidationErrors((prev) => ({ ...prev, submit: getErrorMessage(error) }));
       } finally {
         setSloFormLoading(false);
       }
     },
-    [benchmark, systemId, environment, workload, sloFormData, setSloFormLoading, onSLOUpdated, onClose, pollJobCompletion]
+    [benchmark, systemId, environment, workload, sloFormData, setSloFormLoading, setValidationErrors, onSLOUpdated, onClose, pollJobCompletion]
   );
 
   // Handle save button click

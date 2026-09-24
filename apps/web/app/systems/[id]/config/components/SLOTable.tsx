@@ -210,7 +210,21 @@ export default function SLOTable({
               </TableCell>
               <TableCell>
                 <Box>
-                  <Typography variant="body2" fontWeight="medium">
+                  {/* A disabled SLO is skipped by the checks pipeline and produces no result
+                      on a run, which is otherwise indistinguishable from a broken one.
+                      Duplicate clones arrive disabled. The chip is a SIBLING of the
+                      Typography, not a child: body2 renders a <p> and Chip renders a <div>,
+                      so nesting them closes the paragraph early and mismatches hydration. */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    {benchmark.enabled === false && (
+                      <Chip
+                        label="Disabled"
+                        size="small"
+                        variant="outlined"
+                        sx={{ fontSize: 11, fontWeight: 400, flexShrink: 0 }}
+                      />
+                    )}
+                    <Typography variant="body2" fontWeight="medium">
                     {(() => {
                       const name = benchmark.config_title || benchmark.panel_title || 'Unnamed Metric';
                       // Strip trailing " (stat)" suffix for aggregated benchmarks — stat shown in Evaluation column
@@ -219,7 +233,8 @@ export default function SLOTable({
                       }
                       return name;
                     })()}
-                  </Typography>
+                    </Typography>
+                  </Box>
                   <Typography variant="caption" color="text.secondary">
                     {benchmark.description}
                   </Typography>

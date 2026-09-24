@@ -20,6 +20,7 @@ import { AddSLODialogProps } from './add-slo/types';
 import { useAddSLOForm, useAddSLOHandlers } from './add-slo/hooks';
 
 // Components
+import { SubmitErrorAlert } from './SubmitErrorAlert';
 import { SLOFormFields, SLOThresholdConfig } from './add-slo/components';
 
 export default function AddSLODialog({
@@ -115,6 +116,15 @@ export default function AddSLODialog({
               setValidationErrors={setValidationErrors}
             />
           </Grid>
+          {/* Sticky to the bottom of the scroll container so it lands beside the button that
+              produced it — see SubmitErrorAlert. */}
+          <SubmitErrorAlert
+            message={validationErrors.submit}
+            onDismiss={() => setValidationErrors((prev) => {
+              const { submit: _submit, ...rest } = prev;
+              return rest;
+            })}
+          />
         </Box>
       </DialogContent>
       <DialogActions>

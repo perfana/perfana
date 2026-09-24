@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { isDynatraceDashboard, isDynatraceMetric } from '../types';
 import { authenticatedFetch } from '@/lib/api';
+import { getErrorMessage, serverErrorMessage } from '@/lib/errors';
 import {  UseAddSLOHandlersProps, UseAddSLOHandlersReturn } from '../types';
 import {
   validateSLOForm,
@@ -166,10 +167,16 @@ export function useAddSLOHandlers({
         onSLOCreated(newBenchmark);
         onClose();
       } else {
-        console.error('Failed to create SLO:', response.statusText);
+        // The dialog stays open on failure, so the reason has to reach it. A 409 here is
+        // uq_benchmarks_active_metric_target: an enabled SLO on this panel already evaluates
+        // the same series the same way, and the server's sentence says what to change.
+        const message = await serverErrorMessage(response, `Failed to create SLO (${response.status})`);
+        console.error('Failed to create SLO:', message);
+        setValidationErrors((prev) => ({ ...prev, submit: message }));
       }
     } catch (error) {
       console.error('Error creating SLO:', error);
+      setValidationErrors((prev) => ({ ...prev, submit: getErrorMessage(error) }));
     } finally {
       setSloFormLoading(false);
     }
@@ -180,6 +187,7 @@ export function useAddSLOHandlers({
     workload,
     validateForm,
     setSloFormLoading,
+    setValidationErrors,
     onSLOCreated,
     onClose,
   ]);

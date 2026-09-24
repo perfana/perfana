@@ -20,6 +20,7 @@ import { EditSLODialogProps } from './edit-slo/types';
 import { useEditSLOForm, useEditSLOHandlers } from './edit-slo/hooks';
 
 // Components
+import { SubmitErrorAlert } from './SubmitErrorAlert';
 import { SLOFormFields, SLOThresholdConfig, SLOSaveDialog } from './edit-slo/components';
 
 export default function EditSLODialog({
@@ -126,6 +127,15 @@ export default function EditSLODialog({
               setValidationErrors={setValidationErrors}
             />
           </Grid>
+          {/* Sticky to the bottom of the scroll container so it lands beside the button that
+              produced it — see SubmitErrorAlert. */}
+          <SubmitErrorAlert
+            message={validationErrors.submit}
+            onDismiss={() => setValidationErrors((prev) => {
+              const { submit: _submit, ...rest } = prev;
+              return rest;
+            })}
+          />
         </Box>
       </DialogContent>
       <DialogActions>
