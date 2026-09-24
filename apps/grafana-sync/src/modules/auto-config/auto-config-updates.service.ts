@@ -485,9 +485,19 @@ export class AutoConfigUpdatesService {
       // `generic_check_id`, which a manually-created SLO never has, so that row is invisible
       // to it and only `uq_benchmarks_active_metric_target` catches the overlap. Rethrowing
       // would abort provisioning for the whole dashboard over one collision — the v0.2.89.0
-      // "one rejected dashboard aborts the sweep" shape. Skip this benchmark instead, and say
-      // why in terms an operator can act on: the fix is to remove the manual SLO the profile
-      // now supersedes. Expected during a manual-to-profile cutover.
+      // "one rejected dashboard aborts the sweep" shape. Skip this benchmark instead and name
+      // the SLO in the way, so an operator can see which one won.
+      //
+      // Skipping is the CORRECT outcome, not a degraded one: a hand-made SLO is the user's,
+      // and the product rule is that it survives and the generic twin is not added beside it.
+      // So this is a steady state on any panel where a hand-made SLO covers what the profile
+      // would provision, not just a one-off during a manual-to-profile cutover.
+      //
+      // It is, however, being enforced by a constraint rather than by the sweep knowing
+      // better: `createBenchmarkIfNotExists` probes on `generic_check_id`, which a hand-made
+      // SLO never has, so it cannot see the row it is about to collide with. Widening that
+      // probe to the index key is filed in TODOS.md — until then, this catch is what keeps
+      // the rule.
       if (isDuplicateSloTargetError(e)) {
         this.logger.warn(
           `Skipped profile benchmark ${profileBenchmark.id} on dashboard ${applicationDashboard.id} ` +

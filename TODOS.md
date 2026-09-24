@@ -993,6 +993,38 @@ expensive part (apps/worker/CLAUDE.md, "ADAPT's baseline depends on the `pct_agg
 
 ## SLO configuration
 
+### grafana-sync cannot see a hand-made SLO, so it tries to provision a generic twin beside it
+
+**Priority:** P2
+**Origin:** production dry run of migration 1812 during /ship on `fix/duplicate-slo-and-perf-analysis-width` (2026-09-24).
+`createBenchmarkIfNotExists` probes for an already-provisioned row with
+`findBenchmarkForApplicationDashboardOrNull(applicationDashboard, profileBenchmark.id, workload)`,
+which keys on `generic_check_id` — a value a hand-made SLO never carries. So on a panel where
+the user created the SLO themselves, the probe finds nothing and the sweep adds the profile's
+generic twin alongside it. That is how WERKNL acquired 17 (manual + profile) pairs in one
+transaction on 2026-09-22 when v0.2.96.6 deployed: every one of the 17 profile rows landed on a
+panel that already had a hand-made SLO.
+
+**The product rule is that the user's SLO survives and the generic twin is not added.** Since
+v0.2.96.15 that rule holds, but it is enforced by `uq_benchmarks_active_metric_target` refusing
+the insert and `insertBenchmarkBasedOnProfileBenchmark` catching the 23505 and skipping with a
+warning — a constraint correcting the sweep rather than the sweep knowing better. The warning
+then repeats on every sweep for as long as the hand-made SLO exists.
+
+Fix: when `generic_check_id` finds nothing, fall back to probing the index key (panel id from
+`configuration->>'id'`, the effective match pattern per `withColumnMatchPattern`,
+`invertMatchPattern`, `average_all`, `evaluate_type`) so the sweep sees the hand-made row and
+skips cleanly. A further step, worth deciding separately, is whether to *adopt* that row by
+stamping the profile's `generic_check_id` onto it — cleanest end state, but it writes to a row
+the sync did not create.
+
+Note what is NOT broken and must stay that way: a tweak to a profile-provisioned SLO already
+survives. The `UPDATE` branch in `insertBenchmarkBasedOnProfileBenchmark` has one caller, which
+invokes it only when the probe found nothing, and both use the same `generic_check_id` key — so
+that branch is unreachable on the sweep path and an existing row is never overwritten. The
+probe also has no `enabled` filter, so a disabled profile row is still found and still skipped.
+Any probe change must preserve both properties.
+
 ### `PUT /benchmarks/:id` takes an untyped inline body, so nothing validates it
 
 **Priority:** P2
