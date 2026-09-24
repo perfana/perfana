@@ -8,7 +8,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Repository } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Logger } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import { BenchmarkMutationService } from './benchmark-mutation.service';
 import { BenchmarkQueryService } from './benchmark-query.service';
 import { BenchmarkTagHelper } from './benchmark-tag.helper';
@@ -217,6 +217,219 @@ describe('BenchmarkMutationService', () => {
 
       expect(data.evaluate_type).toBe('max');
       expect(data).not.toHaveProperty('metric_unit');
+    });
+  });
+
+  describe('duplicate SLO target (uq_benchmarks_active_metric_target, migration 1812)', () => {
+    // What node-postgres hands TypeORM when the partial unique index rejects the row.
+    const duplicateTarget = Object.assign(new Error('duplicate key value violates unique constraint'), {
+      code: '23505',
+      constraint: 'uq_benchmarks_active_metric_target',
+    });
+
+    it('create() answers 409 with the reason instead of a 500', async () => {
+      benchmarkRepo.create.mockReturnValue(buildEntity({ id: 'bm-dup' }));
+      benchmarkRepo.save.mockRejectedValue(duplicateTarget);
+
+      await expect(
+        service.create(userId, roles, {
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'production',
+          workload: 'loadTest',
+          evaluateType: 'avg',
+        } as never),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('update() answers 409 — the path an unedited clone takes when it is switched on', async () => {
+      const existing = buildEntity({ id: 'bm-clone', enabled: false });
+      queryService.findOne.mockResolvedValue(existing as never);
+      benchmarkRepo.update.mockRejectedValue(duplicateTarget);
+
+      await expect(
+        service.update(existing.id, userId, roles, { enabled: true } as never),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('leaves an unrelated failure alone', async () => {
+      benchmarkRepo.create.mockReturnValue(buildEntity({ id: 'bm-fk' }));
+      const foreignKey = Object.assign(new Error('violates foreign key constraint'), {
+        code: '23503',
+        constraint: 'FK_2e765498731db929f6c706dc4ab',
+      });
+      benchmarkRepo.save.mockRejectedValue(foreignKey);
+
+      await expect(
+        service.create(userId, roles, {
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'production',
+          workload: 'loadTest',
+          evaluateType: 'avg',
+        } as never),
+      ).rejects.toBe(foreignKey);
+    });
+
+    it('duplicate() clones disabled, so the copy sits outside the index until it is edited', async () => {
+      const source = buildEntity({ id: 'bm-source', enabled: true });
+      queryService.findOne.mockResolvedValue(source as never);
+      benchmarkRepo.create.mockImplementation((payload) => payload as never);
+      benchmarkRepo.save.mockImplementation(
+        async (entity) => ({ ...buildEntity({ id: 'bm-clone' }), ...(entity as object) }) as never,
+      );
+
+      await service.duplicate(source.id, userId, roles);
+
+      const [payload] = (benchmarkRepo.create as jest.Mock).mock.calls[0];
+      expect(payload).toMatchObject({ enabled: false });
+    });
+
+    // TypeORM wraps the pg error in a QueryFailedError; depending on the driver path the
+    // code/constraint may only be on `driverError`. isDuplicateTarget reads both, and if it
+    // stopped doing so the user would get a 500 with no explanation instead of the sentence.
+    it('recognises the failure when code and constraint are only on driverError', async () => {
+      benchmarkRepo.create.mockReturnValue(buildEntity({ id: 'bm-wrapped' }));
+      benchmarkRepo.save.mockRejectedValue(
+        Object.assign(new Error('QueryFailedError'), {
+          driverError: { code: '23505', constraint: 'uq_benchmarks_active_metric_target' },
+        }),
+      );
+
+      await expect(
+        service.create(userId, roles, {
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'production',
+          workload: 'loadTest',
+          evaluateType: 'avg',
+        } as never),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    // 23505 is not on its own enough: uq_benchmarks_unique is a different invariant with a
+    // different remedy, and translating it to this sentence would misdirect the user.
+    it('leaves a 23505 on a different constraint alone', async () => {
+      const otherIndex = Object.assign(new Error('duplicate key value violates unique constraint'), {
+        code: '23505',
+        constraint: 'uq_benchmarks_unique',
+      });
+      benchmarkRepo.create.mockReturnValue(buildEntity({ id: 'bm-other' }));
+      benchmarkRepo.save.mockRejectedValue(otherIndex);
+
+      await expect(
+        service.create(userId, roles, {
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'production',
+          workload: 'loadTest',
+          evaluateType: 'avg',
+        } as never),
+      ).rejects.toBe(otherIndex);
+    });
+
+    // A rejection that is not an object at all must not make the guard throw on its own.
+    it('survives a non-object rejection', async () => {
+      benchmarkRepo.create.mockReturnValue(buildEntity({ id: 'bm-string' }));
+      benchmarkRepo.save.mockRejectedValue('connection terminated');
+
+      await expect(
+        service.create(userId, roles, {
+          systemUnderTestId: 'sut-1',
+          testEnvironment: 'production',
+          workload: 'loadTest',
+          evaluateType: 'avg',
+        } as never),
+      ).rejects.toBe('connection terminated');
+    });
+
+    describe('copyToScope', () => {
+      const copyDto = {
+        sourceSystemUnderTestId: 'sut-1',
+        sourceTestEnvironment: 'production',
+        sourceWorkload: 'loadTest',
+        targetSystemUnderTestId: 'sut-2',
+        targetTestEnvironment: 'acceptance',
+        targetWorkload: 'loadTest',
+        conflictStrategy: 'skip' as const,
+      };
+
+      // `conflictKey` probes on config/panel title, so a target row with a different title on
+      // the same panel is invisible to it and only the index catches it — a throw here would
+      // abandon a bulk copy with audit rows already emitted for the benchmarks that made it.
+      // NOTE: these cases run with `getRequestEm() === null`, so they exercise the UNGUARDED
+      // path. The SAVEPOINT path that production actually takes is covered separately in
+      // benchmark-mutation.savepoint.spec.ts, which mocks the request-EM module.
+      it('counts a refused row as skipped and carries on with the rest of the copy', async () => {
+        const first = buildEntity({ id: 'bm-copy-1', config_title: 'first' });
+        const second = buildEntity({ id: 'bm-copy-2', config_title: 'second' });
+        benchmarkRepo.find.mockResolvedValue([first, second]);
+        benchmarkRepo.findOne.mockResolvedValue(null); // no title-level conflict in the target
+        benchmarkRepo.create.mockImplementation((payload) => payload as never);
+        benchmarkRepo.save
+          .mockRejectedValueOnce(duplicateTarget)
+          .mockImplementationOnce(async (entity) => ({ ...(entity as object), id: 'bm-copy-2-new' }) as never);
+
+        const result = await service.copyToScope(userId, roles, copyDto);
+
+        expect(result).toEqual({ copied: 1, skipped: 1, total: 2 });
+        // No audit row for the row that was never persisted.
+        expect(auditService.logCreate).toHaveBeenCalledTimes(1);
+      });
+
+      it('still rethrows an unrelated failure rather than swallowing it as a skip', async () => {
+        const boom = Object.assign(new Error('deadlock detected'), { code: '40P01' });
+        benchmarkRepo.find.mockResolvedValue([buildEntity({ id: 'bm-copy-1' })]);
+        benchmarkRepo.findOne.mockResolvedValue(null);
+        benchmarkRepo.create.mockImplementation((payload) => payload as never);
+        benchmarkRepo.save.mockRejectedValue(boom);
+
+        await expect(service.copyToScope(userId, roles, copyDto)).rejects.toBe(boom);
+      });
+    });
+  });
+
+  // The edit dialog gained an Enabled checkbox in v0.2.96.15; it is the only way to bring a
+  // disabled Duplicate clone back to life, and it is inert unless buildUpdateData forwards
+  // the field. TypeORM's update() skips undefined, so `false` in particular has to survive.
+  describe('update() forwards the enabled flag', () => {
+    it('writes enabled=false when the body switches the SLO off', async () => {
+      const existing = buildEntity({ id: 'bm-enable', enabled: true });
+      queryService.findOne.mockResolvedValue(existing as never);
+      benchmarkRepo.findOne.mockResolvedValue(existing);
+      benchmarkRepo.update.mockResolvedValue({} as never);
+
+      await service.update(existing.id, userId, roles, { enabled: false } as never);
+
+      const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
+      expect(data).toHaveProperty('enabled', false);
+    });
+
+    // A new SLO must arrive live. The Duplicate button is the ONLY path that writes
+    // enabled:false, and it is what keeps a clone legal under the index — a create that
+    // stopped defaulting to true would produce SLOs that silently never evaluate.
+    it('create() writes enabled=true, unlike duplicate()', async () => {
+      const created = buildEntity({ id: 'bm-new' });
+      benchmarkRepo.create.mockReturnValue(created);
+      benchmarkRepo.save.mockResolvedValue(created);
+
+      await service.create(userId, roles, {
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'production',
+        workload: 'loadTest',
+        evaluateType: 'avg',
+      } as never);
+
+      const [payload] = (benchmarkRepo.create as jest.Mock).mock.calls[0];
+      expect(payload).toMatchObject({ enabled: true });
+    });
+
+    it('leaves the column alone when the body does not name it', async () => {
+      const existing = buildEntity({ id: 'bm-enable-2', enabled: false });
+      queryService.findOne.mockResolvedValue(existing as never);
+      benchmarkRepo.findOne.mockResolvedValue(existing);
+      benchmarkRepo.update.mockResolvedValue({} as never);
+
+      await service.update(existing.id, userId, roles, { requirementValue: 42 } as never);
+
+      const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
+      expect(data).not.toHaveProperty('enabled');
     });
   });
 
