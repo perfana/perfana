@@ -30,7 +30,7 @@ npm run dev
 | 🔧 Worker | `apps/worker/` | BullMQ pipelines, ADAPT algorithm | [CLAUDE](apps/worker/CLAUDE.md) · [README](apps/worker/README.md) |
 | 🔄 Grafana Sync | `apps/grafana-sync/` | Dashboard sync background service | [CODING_RULES](apps/grafana-sync/CODING_RULES.md) |
 | 🗄️ Shared | `packages/shared/` | TypeORM entities, types, utils — the only package under `packages/`; its `exports` map is the legal import surface, enforced by `npm run check:workspace-exports` | [README](packages/shared/README.md) |
-| ⚙️ Config | `tsconfig.base.json` | Shared TypeScript compiler settings every app and package extends | — |
+| ⚙️ Config | `tsconfig.base.json` | Shared TypeScript compiler settings, extended by `apps/api`, `apps/worker`, `apps/grafana-sync`, `apps/perfana-report` and `packages/shared`. `apps/web` and `apps/mcp` stand alone — a compiler-option change here does not reach them | — |
 | 🔌 MCP Server | `apps/mcp/` | MCP tool server for AI agents | [README](apps/mcp/README.md) |
 | 📊 Report | `apps/perfana-report/` | Report generation service | [README](apps/perfana-report/README.md) |
 | 📚 Deep Reference | `docs/reference/` | ADAPT, RBAC, schemas, features (narrative), how-to tutorials. For derivable "how does X work / what calls this" use GitNexus. | [Index](docs/reference/index.md) · [Tutorials](docs/reference/tutorials.md) |
