@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.16] - 2026-09-27
+
+### Fixed
+- **Dashboard sync starts again on 0.2.96.15.** The service quit immediately on startup and never synced a dashboard or provisioned a profile SLO, because one of its internal imports pointed at a file that is present in the source tree but not in the shipped build. Upgrade to get dashboard sync and auto-config back; nothing else in the deployment was affected, and no data was lost. A new check now runs before every push and refuses an import of this shape, so a build cannot reach a release with the fault again — the previous release passed every test and type check with it in place.
+
 ## [0.2.96.15] - 2026-09-24
 
 ### Fixed
