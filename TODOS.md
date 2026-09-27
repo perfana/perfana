@@ -1664,6 +1664,34 @@ add a second tsconfig that includes tests and run it in preflight. For (3), wide
 to `components/` and burn down whatever it surfaces. Doing (3) first is cheapest and will produce
 the smallest backlog.
 
+### The workspace-exports gate has three blind spots, and only a real build closes the third
+
+**Priority:** P3
+**Origin:** shipped alongside the gate itself in v0.2.96.16, after v0.2.96.15 took grafana-sync
+down at boot with `MODULE_NOT_FOUND` on `@perfana/shared/utils/duplicate-slo-target`.
+**Why:** `scripts/check-workspace-exports.mjs` derives the legal specifier set from each package's
+`exports` map and refuses an undeclared subpath, in the working tree and in `HEAD`. It is a static
+read of source, so three cases get past it, all in the direction of a missed import rather than a
+false block:
+
+1. A `"./*"` wildcard key in an `exports` map is taken at face value — the target is never
+   resolved on disk, so such a key legalises its whole subtree. `packages/shared` has no wildcard
+   key today; nothing stops one being added.
+2. A specifier built at runtime (`require(base + name)`) is invisible, as it is to every other
+   static check.
+3. A **declared** export whose `default` points at a file the build never emits passes the check
+   and still fails at boot. This is the same failure the gate exists to prevent, arriving by the
+   other door, and no static read can see it.
+
+**What it costs:** (3) is the one that matters. The gate's green now reads as "this branch's
+imports will resolve in the container", and for a declared-but-unbuilt export that is false. Same
+family as the three gates above: green means "not looked at".
+
+**What to do:** for (3), assert after `packages/shared`'s build that every `exports` target exists
+in `dist` — cheap, deterministic, and it belongs in the shared package's own build script rather
+than in preflight, which does not build. For (1), refuse a wildcard key outright unless the check
+also resolves its targets. (2) is out of reach of a static check; leave it.
+
 ### `npm run test` and `npm run preflight` disagree about the RLS database
 
 **Priority:** P3

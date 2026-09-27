@@ -60,8 +60,16 @@ npm run dev
 | `apps/web/` | Next.js frontend |
 | `apps/worker/` | BullMQ job processing, ADAPT algorithm |
 | `apps/grafana-sync/` | Dashboard sync background service |
-| `packages/shared/` | TypeORM entities, types, utilities |
-| `packages/config/` | TypeORM configuration factory |
+| `apps/mcp/` | MCP tool server for AI agents |
+| `apps/perfana-report/` | Report generation service |
+| `packages/shared/` | TypeORM entities, types, utilities — the only package under `packages/` |
+| `tsconfig.base.json` | Shared TypeScript compiler settings every app and package extends |
+
+Import anything from `packages/shared` by a subpath its `package.json` `exports` map
+declares (`@perfana/shared/entities`, `@perfana/shared/utils`, …), never by a deeper
+path. The tsconfig alias resolves a deeper path at the source tree, so it type-checks
+and tests green and then fails at boot in the container. `npm run check:workspace-exports`
+blocks it — see the Health Stack entry in [CLAUDE.md](CLAUDE.md).
 
 ## Common Tasks
 
@@ -182,9 +190,12 @@ Run the local pre-push gate before pushing:
 npm run preflight
 ```
 
-`npm run preflight` runs lint + type-check across the monorepo plus the API
-RLS test suite. It is wired to `git push` via `.githooks/pre-push`, which is
-installed automatically when you run `npm install` (via the `prepare` script).
+`npm run preflight` runs, in order: lint + type-check across the monorepo,
+`check:entity-migrations` (an `@Column` added with no migration to carry it to
+existing installs), `check:workspace-exports` (an import naming an undeclared
+`@perfana/shared/...` subpath), then the API RLS test suite. It is wired to
+`git push` via `.githooks/pre-push`, which is installed automatically when you
+run `npm install` (via the `prepare` script).
 
 If you must bypass the gate, use `git push --no-verify` — but do so sparingly,
 and only when you understand why it would otherwise fail.

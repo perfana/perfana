@@ -7,39 +7,38 @@ tags:
 
 # Config Package
 
-Minimal configuration package for shared TypeScript compilation settings.
+> [!warning] Retired — there is no `packages/config/`
+> `@perfana/config` was removed in v0.2.61.12 (it had zero importers). `packages/`
+> contains exactly one package, `packages/shared/`. This page is kept so existing
+> links resolve; what it used to describe now lives in the two places below.
 
-> [!info] Location
-> `packages/config/`
+## Where the shared configuration actually lives
 
-## Purpose
+| What | Where |
+|---|---|
+| Shared TypeScript compiler settings | `tsconfig.base.json` at the repo root |
+| TypeORM connection / DataSource factory | `@perfana/shared/config` (`packages/shared/src/config/typeorm.config.ts`) |
 
-Provides shared `tsconfig.json` settings extended by all other packages and apps in the monorepo. Ensures consistent TypeScript compilation across the entire codebase.
-
-## Usage
-
-Other packages extend this config:
+Every app and package extends the root base config:
 
 ```json
 {
-  "extends": "@perfana/config/tsconfig.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     // App-specific overrides
   }
 }
 ```
 
-## Scripts
+`apps/web` and `apps/mcp` are the two exceptions — they carry standalone
+`tsconfig.json` files and do not extend the base.
 
-| Command | Description |
-|---|---|
-| `build` | `tsc` |
-| `dev` | `tsc --watch` |
-| `lint` | ESLint |
-| `type-check` | `tsc --noEmit` |
-| `clean` | Remove build output |
+`tsconfig.base.json` is also where the `"@perfana/shared/*"` path alias is declared.
+That alias resolves **any** subpath at the source tree, including one the shared
+package does not export, which is why `npm run check:workspace-exports` exists — see
+[[Shared Package]].
 
 ## Related
 
-- [[Shared Package]] — Main shared package
+- [[Shared Package]] — the one package under `packages/`, and its import surface
 - [[Tech Stack]] — TypeScript configuration

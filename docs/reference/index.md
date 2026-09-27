@@ -58,7 +58,7 @@ Perfana collects metrics from performance tests and compares them against histor
 
 ### Packages
 - [[Shared Package]] — Shared types, entities, and utilities
-- [[Config Package]] — Shared TypeScript configuration
+- [[Config Package]] — retired; where the shared TypeScript config lives now
 
 ## Repository
 
@@ -72,10 +72,11 @@ Perfana collects metrics from performance tests and compares them against histor
 > │   ├── web/              # Next.js frontend
 > │   ├── worker/           # BullMQ job processor
 > │   ├── grafana-sync/     # Dashboard sync service
+> │   ├── mcp/              # MCP tool server for AI agents
 > │   └── perfana-report/   # PDF report generator
 > ├── packages/
-> │   ├── shared/           # Shared entities, types, utils
-> │   └── config/           # Shared TS configuration
+> │   └── shared/           # Shared entities, types, utils (the only package)
+> ├── tsconfig.base.json    # Shared TS settings every app extends
 > └── database/             # Migration scripts
 > ```
 
@@ -89,3 +90,5 @@ Perfana collects metrics from performance tests and compares them against histor
 | `npm run test` | Run all tests |
 | `npm run lint` | Run linting |
 | `npm run type-check` | TypeScript checks |
+| `npm run preflight` | The pre-push gate: lint + type-check, `check:entity-migrations`, `check:workspace-exports`, API RLS suite |
+| `npm run check:workspace-exports` | Refuse an import naming an undeclared `@perfana/shared/...` subpath ([[Shared Package]]) |

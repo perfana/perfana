@@ -5,6 +5,12 @@
 - Max ~300 lines per file. Split when larger.
 - One class per file, one concern per module.
 - Every directory has an `index.ts` barrel export.
+- Import from `@perfana/shared` only by a subpath its `exports` map declares
+  (`@perfana/shared/entities`, `@perfana/shared/utils`, …) — never a file inside one
+  (`@perfana/shared/utils/duplicate-slo-target`). The tsconfig alias resolves the deeper
+  path at the source tree, so it type-checks and tests green and then dies at boot in the
+  container with `MODULE_NOT_FOUND`. Need a symbol the barrel does not re-export? Re-export
+  it there, or add an `exports` key. `npm run check:workspace-exports` enforces this.
 
 ## Naming
 

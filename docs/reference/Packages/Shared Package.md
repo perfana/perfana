@@ -15,18 +15,42 @@ The `@perfana/shared` package is the central repository for domain models, types
 
 ## Exports
 
+This is the complete list, and it is the complete list of specifiers you may import.
+It mirrors the `exports` map in `packages/shared/package.json`, which is the source of
+truth:
+
 ```typescript
-@perfana/shared/entities     // All TypeORM entities
-@perfana/shared/types         // TypeScript types
-@perfana/shared/config        // Configuration exports
-@perfana/shared/repositories  // Custom repository classes
-@perfana/shared/database      // Database utilities
-@perfana/shared/realtime      // Real-time/Pub-Sub exports
-@perfana/shared/constants     // Constants
-@perfana/shared/services/grafana  // Grafana service
-@perfana/shared/utils         // Utility functions
-@perfana/shared/security      // Security helpers
+@perfana/shared                             // Root barrel
+@perfana/shared/entities                    // All TypeORM entities
+@perfana/shared/types                       // TypeScript types
+@perfana/shared/config                      // TypeORM DataSource / connection factory
+@perfana/shared/repositories                // Custom repository classes
+@perfana/shared/database                    // Database utilities
+@perfana/shared/database/data-source-system // System-role DataSource
+@perfana/shared/database/system-connection  // System-role connection helper
+@perfana/shared/realtime                    // Real-time/Pub-Sub exports
+@perfana/shared/constants                   // Constants
+@perfana/shared/constants/dynatrace-metrics // Dynatrace metric constants
+@perfana/shared/services/grafana            // Grafana service
+@perfana/shared/services/metrics-source-upsert // Metrics-source upsert service
+@perfana/shared/services/proxy              // Proxy/NO_PROXY helpers
+@perfana/shared/utils                       // Utility functions
+@perfana/shared/security                    // Security helpers
 ```
+
+> [!danger] Never import a deeper path than these
+> The tsconfig alias `"@perfana/shared/*": ["../../packages/shared/src/*"]` resolves
+> **any** subpath at the source tree, so `@perfana/shared/utils/duplicate-slo-target`
+> type-checks, lints and passes every unit test — and then tsc emits a relative
+> `require("../../../../../packages/shared/src/utils/duplicate-slo-target")`, because
+> that file is outside the app's `rootDir`. The image ships `packages/shared/dist`, not
+> `src`, so the service exits at boot with `MODULE_NOT_FOUND`. That is what took
+> grafana-sync down in v0.2.96.15.
+>
+> `npm run check:workspace-exports` (in `npm run preflight` since v0.2.96.16) blocks it,
+> deriving the legal set from the `exports` map rather than a list of its own. Need a
+> symbol that is not reachable from one of the specifiers above? Re-export it from that
+> subpath's barrel, or add a new key to the `exports` map — do not deepen the import.
 
 ## Entities
 
@@ -157,4 +181,4 @@ pools to 5000 in code.
 ## Related
 
 - [[Schema Overview]] — Entity relationships
-- [[Config Package]] — Shared TypeScript config
+- [[Config Package]] — retired; where the shared TypeScript config lives now

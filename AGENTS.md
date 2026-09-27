@@ -29,8 +29,8 @@ npm run dev
 | Frontend | `apps/web/` | Next.js, MUI + Radix + Tailwind | [CLAUDE](apps/web/CLAUDE.md) · [CODING_RULES](apps/web/CODING_RULES.md) |
 | Worker | `apps/worker/` | BullMQ pipelines, ADAPT algorithm | [CLAUDE](apps/worker/CLAUDE.md) · [README](apps/worker/README.md) |
 | Grafana Sync | `apps/grafana-sync/` | Dashboard sync background service | [CODING_RULES](apps/grafana-sync/CODING_RULES.md) |
-| Shared | `packages/shared/` | TypeORM entities, types, utils | [README](packages/shared/README.md) |
-| Config | `packages/config/` | TypeORM config factory | — |
+| Shared | `packages/shared/` | TypeORM entities, types, utils — the only package under `packages/`; its `exports` map is the legal import surface, enforced by `npm run check:workspace-exports` | [README](packages/shared/README.md) |
+| Config | `tsconfig.base.json` | Shared TypeScript compiler settings every app and package extends | — |
 | MCP Server | `apps/mcp/` | MCP tool server for AI agents | [README](apps/mcp/README.md) |
 | Report | `apps/perfana-report/` | Report generation service | [README](apps/perfana-report/README.md) |
 | Deep Reference | `docs/reference/` | ADAPT, RBAC, schemas, features (narrative), how-to tutorials. For derivable "how does X work / what calls this" use GitNexus. | [Index](docs/reference/index.md) · [Tutorials](docs/reference/tutorials.md) |

@@ -89,6 +89,7 @@ npm run dev:web       # Frontend only (port 4000)
 npm run test          # Run all tests
 npm run type-check    # TypeScript checking
 npm run lint          # Linting
+npm run preflight     # Pre-push gate (runs automatically on git push)
 ```
 
 ## Contributing
