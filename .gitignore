@@ -216,3 +216,6 @@ docs/superpowers/
 
 # Written by apps/api/src/test/setup-database.ts from the running testcontainer (ephemeral port)
 apps/api/.test-db-config.json
+
+# Knowledge-graph output from the graphify skill (regenerable, hundreds of cache files)
+/graphify-out/
