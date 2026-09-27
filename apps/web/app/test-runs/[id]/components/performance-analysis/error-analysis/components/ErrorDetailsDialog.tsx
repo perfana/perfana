@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -20,6 +21,7 @@ import {
   Error as ErrorIcon,
   Close as CloseIcon,
 } from '@mui/icons-material';
+import { CopyButton } from '@/components/ui/copy-button';
 import FancyChip from '../../../shared/FancyChip';
 import { ErrorDetail } from '../types';
 import { formatJson } from '../utils/error-formatters';
@@ -28,28 +30,44 @@ interface ErrorDetailsDialogProps {
   open: boolean;
   onClose: () => void;
   selectedError: ErrorDetail | null;
+  /**
+   * Caption under the title, for a caller that drilled in from an aggregate row — the dialog
+   * shows ONE occurrence, so a row reading "4,812 errors" needs saying so.
+   */
+  occurrenceNote?: string;
 }
 
 interface DetailLabelProps {
   label: string;
+  /** When set, a copy-to-clipboard icon sits beside the label and copies this text. */
+  copyText?: string;
+  /** Overrides the icon's tooltip when the copied value is not what the label displays. */
+  copyTitle?: string;
 }
 
-function DetailLabel({ label }: DetailLabelProps) {
+function DetailLabel({ label, copyText, copyTitle }: DetailLabelProps) {
   return (
-    <Typography
-      variant="caption"
-      sx={{
-        display: 'block',
-        fontSize: '0.7rem',
-        fontWeight: 600,
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-        color: 'text.secondary',
-        mb: 0.5,
-      }}
-    >
-      {label}
-    </Typography>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5, minHeight: 20 }}>
+      <Typography
+        variant="caption"
+        sx={{
+          fontSize: '0.7rem',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px',
+          color: 'text.secondary',
+        }}
+      >
+        {label}
+      </Typography>
+      {copyText ? (
+        <CopyButton
+          text={copyText}
+          title={copyTitle ?? `Copy ${label.toLowerCase()}`}
+          fontSize={14}
+        />
+      ) : null}
+    </Box>
   );
 }
 
@@ -58,7 +76,6 @@ interface CodeBlockProps {
   backgroundColor?: string;
   borderColor?: string;
   maxHeight?: string | number;
-  formatAsJson?: boolean;
 }
 
 function CodeBlock({
@@ -66,11 +83,9 @@ function CodeBlock({
   backgroundColor,
   borderColor,
   maxHeight = '150px',
-  formatAsJson = false,
 }: CodeBlockProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
-  const displayContent = formatAsJson ? formatJson(content) : content;
 
   const resolvedBg = backgroundColor ?? (isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)');
   const resolvedBorder = borderColor ?? (isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)');
@@ -91,11 +106,7 @@ function CodeBlock({
         wordBreak: maxHeight === 'none' ? 'break-all' : 'normal',
       }}
     >
-      {maxHeight === 'none' ? (
-        displayContent
-      ) : (
-        <pre style={{ margin: 0 }}>{displayContent}</pre>
-      )}
+      {maxHeight === 'none' ? content : <pre style={{ margin: 0 }}>{content}</pre>}
     </Box>
   );
 }
@@ -158,9 +169,20 @@ export function ErrorDetailsDialog({
   open,
   onClose,
   selectedError,
+  occurrenceNote,
 }: ErrorDetailsDialogProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+
+  // Response bodies here are arbitrary error payloads with no size cap, and this dialog
+  // re-renders with its parent — so format once per error, not once per render per consumer.
+  const responseData = selectedError?.responseData ?? '';
+  const formattedResponseData = useMemo(() => formatJson(responseData), [responseData]);
+  const sessionVariables = selectedError?.sessionVariables;
+  const sessionVariablesJson = useMemo(
+    () => JSON.stringify(sessionVariables, null, 2),
+    [sessionVariables],
+  );
 
   if (!selectedError) return null;
 
@@ -189,9 +211,16 @@ export function ErrorDetailsDialog({
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <ErrorIcon sx={{ mr: 1.5, color: 'error.main', fontSize: 28 }} />
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>
-            Error Details
-          </Typography>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>
+              Error Details
+            </Typography>
+            {occurrenceNote && (
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                {occurrenceNote}
+              </Typography>
+            )}
+          </Box>
         </Box>
         <IconButton
           onClick={onClose}
@@ -210,19 +239,19 @@ export function ErrorDetailsDialog({
         <Box>
           <Grid container spacing={3}>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <DetailLabel label="Transaction" />
+              <DetailLabel label="Transaction" copyText={selectedError.transactionName} />
               <Typography variant="body1" sx={{ fontWeight: 600, mb: 2 }}>
                 {selectedError.transactionName}
               </Typography>
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <DetailLabel label="Sampler" />
+              <DetailLabel label="Sampler" copyText={selectedError.samplerName} />
               <Typography variant="body1" sx={{ fontWeight: 600, mb: 2 }}>
                 {selectedError.samplerName}
               </Typography>
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <DetailLabel label="Response Code" />
+              <DetailLabel label="Response Code" copyText={selectedError.responseCode} />
               <FancyChip
                 label={selectedError.responseCode}
                 colorTheme="red"
@@ -230,7 +259,10 @@ export function ErrorDetailsDialog({
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <DetailLabel label="Response Time" />
+              <DetailLabel
+                label="Response Time"
+                copyText={String(selectedError.responseTime)}
+              />
               <Typography
                 variant="body1"
                 sx={{
@@ -243,7 +275,11 @@ export function ErrorDetailsDialog({
               </Typography>
             </Grid>
             <Grid size={{ xs: 12 }}>
-              <DetailLabel label="Timestamp" />
+              <DetailLabel
+                label="Timestamp"
+                copyText={new Date(selectedError.time).toISOString()}
+                copyTitle="Copy timestamp (ISO 8601)"
+              />
               <Typography
                 variant="body1"
                 sx={{
@@ -257,12 +293,15 @@ export function ErrorDetailsDialog({
             {selectedError.sessionVariables &&
               Object.keys(selectedError.sessionVariables).length > 0 && (
                 <Grid size={{ xs: 12 }}>
-                  <DetailLabel label="Session Variables" />
+                  <DetailLabel
+                    label="Session Variables"
+                    copyText={sessionVariablesJson}
+                  />
                   <SessionVariablesTable variables={selectedError.sessionVariables} />
                 </Grid>
               )}
             <Grid size={{ xs: 12 }}>
-              <DetailLabel label="URL" />
+              <DetailLabel label="URL" copyText={selectedError.url} />
               <CodeBlock
                 content={selectedError.url}
                 backgroundColor={isDark ? 'rgba(56, 142, 232, 0.1)' : 'rgba(25, 118, 210, 0.04)'}
@@ -272,7 +311,7 @@ export function ErrorDetailsDialog({
             </Grid>
             {selectedError.responseMessage && (
               <Grid size={{ xs: 12 }}>
-                <DetailLabel label="Response Message" />
+                <DetailLabel label="Response Message" copyText={selectedError.responseMessage} />
                 <CodeBlock
                   content={selectedError.responseMessage}
                   backgroundColor={isDark ? 'rgba(239, 83, 80, 0.1)' : 'rgba(244, 67, 54, 0.04)'}
@@ -283,23 +322,19 @@ export function ErrorDetailsDialog({
             )}
             {selectedError.responseData && (
               <Grid size={{ xs: 12 }}>
-                <DetailLabel label="Response Data" />
-                <CodeBlock
-                  content={selectedError.responseData}
-                  maxHeight="200px"
-                  formatAsJson
-                />
+                <DetailLabel label="Response Data" copyText={formattedResponseData} />
+                <CodeBlock content={formattedResponseData} maxHeight="200px" />
               </Grid>
             )}
             {selectedError.requestHeaders && (
               <Grid size={{ xs: 12 }}>
-                <DetailLabel label="Request Headers" />
+                <DetailLabel label="Request Headers" copyText={selectedError.requestHeaders} />
                 <CodeBlock content={selectedError.requestHeaders} />
               </Grid>
             )}
             {selectedError.responseHeaders && (
               <Grid size={{ xs: 12 }}>
-                <DetailLabel label="Response Headers" />
+                <DetailLabel label="Response Headers" copyText={selectedError.responseHeaders} />
                 <CodeBlock content={selectedError.responseHeaders} />
               </Grid>
             )}

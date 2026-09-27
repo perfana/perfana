@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import { NO_SCENARIO_LABEL } from '../../components/ScenarioFilter';
+import { fetchErrorDetails } from '../utils/fetch-error-details';
 import {
   ErrorSummary,
   ErrorByCode,
@@ -154,15 +155,12 @@ export function useErrorAnalysisData({
   // View error details handler
   const handleViewDetails = useCallback(async (transaction: ErrorByTransaction) => {
     try {
-      const response = await authenticatedFetch(
-        `test-runs/${testRunId}/error-analysis/details?` +
-          `transaction=${encodeURIComponent(transaction.transactionName)}&` +
-          `sampler=${encodeURIComponent(transaction.samplerName)}&` +
-          `url=${encodeURIComponent(transaction.url)}`
-      );
-      if (!response.ok) throw new Error('Failed to fetch error details');
-      const details = await response.json();
-      setSelectedError(details[0]); // Show first error instance
+      const details = await fetchErrorDetails(testRunId, {
+        transaction: transaction.transactionName,
+        sampler: transaction.samplerName,
+        url: transaction.url,
+      });
+      setSelectedError(details[0] ?? null); // Show first error instance
       setDetailsOpen(true);
     } catch (err) {
       // Log error but don't show to user
