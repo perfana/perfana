@@ -2142,6 +2142,9 @@ export class TestRunsPerformanceQueryService {
             COUNT(*) as count,
             MIN(re.time) as first_occurrence,
             MAX(re.time) as last_occurrence,
+            -- No apps/web consumer since v0.2.96.17 (the drill-down fetches the body from
+            -- /error-analysis/details on demand). Kept because it is a documented public field
+            -- of this REST endpoint; see TODOS.md for dropping it with its Swagger schema.
             (ARRAY_AGG(re.response_data ORDER BY re.time DESC))[1] as sample_response_data
           FROM requests_error re
           LEFT JOIN test_runs tr ON tr.test_run_id = re.test_run_id
@@ -2160,7 +2163,12 @@ export class TestRunsPerformanceQueryService {
           eg.response_message,
           eg.sampler_name,
           LOWER(eg.normalized_url) as url,
-          LOWER(eg.sample_url) as sample_url,
+          -- NOT lowercased, unlike normalized_url above: the mapper below returns this as the
+          -- row's url, and the client sends it straight back to GET /error-analysis/details,
+          -- whose WHERE matches url exactly. LOWER() here made every mixed-case URL a
+          -- guaranteed zero-row lookup (a dead drill-down click, and the most expensive query
+          -- shape there is, since LIMIT 10 cannot stop early on a miss).
+          eg.sample_url,
           eg.url_hash,
           LOWER(up.normalized_url) as url_pattern,
           eg.count,

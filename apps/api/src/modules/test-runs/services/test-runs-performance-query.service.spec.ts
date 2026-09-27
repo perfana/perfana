@@ -2542,6 +2542,22 @@ const chainRow = (
         expect(row.apdex_score).toBe(0.85);
       });
 
+      // The url this endpoint returns is sent straight back to GET /error-analysis/details,
+      // whose WHERE matches `url = $4` exactly. LOWER()-ing it here made every mixed-case URL a
+      // guaranteed zero-row lookup, i.e. a drill-down click that did nothing.
+      it('selects the sample url as stored, never lowercased', async () => {
+        mockQuerySequence([RAW_ERROR_ROW]);
+
+        await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
+
+        const sql = (testRunRepo.query as jest.Mock).mock.calls
+          .map((call) => String(call[0]))
+          .find((text) => text.includes('sample_url'));
+        expect(sql).toBeDefined();
+        expect(sql).toMatch(/^\s*eg\.sample_url,\s*$/m);
+        expect(sql).not.toMatch(/LOWER\(\s*eg\.sample_url\s*\)/i);
+      });
+
       it('falls back to url field when sample_url is null', async () => {
         mockQuerySequence([{ ...RAW_ERROR_ROW, sample_url: null }]);
 
