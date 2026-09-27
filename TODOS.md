@@ -1061,6 +1061,82 @@ implementation.
 
 ## Test run detail tables
 
+### The error-details lookup is coarser than the row that opens it
+
+**Priority:** P3
+**Origin:** cycle-2 review during /ship on `fix/unify-error-details-view` (2026-09-27). Pre-existing
+on both drill-down paths; v0.2.96.17 only stopped the new caption from asserting an attribution
+the endpoint cannot guarantee.
+
+`GET /error-analysis/details` discriminates on `transaction_name`, `sampler_name` and `url` only
+(`test-runs-error-analysis.service.ts:478-483`), and returns the globally latest match. Two
+problems follow:
+
+1. **Response code is not a predicate.** The overview's rows are grouped by
+   `error_type, response_code, response_message, sampler_name, system_under_test,
+   test_environment, normalized_url, url_hash`
+   (`test-runs-performance-query.service.ts:2157`), so one URL failing with both 500 and 503 gives
+   two rows whose Details icons open the *same* occurrence. The Error Analysis tab's
+   `by-transaction` grouping also includes `response_code` and also passes only the url, so it has
+   the same defect.
+2. **No time filter at all.** The sibling `getErrorsByTransaction` applies `${time.clause}`
+   (`:361`); the details query applies none. `ErrorsModal` defaults `excludeRampUp` to true, so a
+   windowed list can drill into a ramp-up or ramp-down occurrence the list deliberately excluded —
+   under a count computed over the narrower window.
+
+Fix both together, since each alone leaves the row/occurrence relationship fuzzy: add an optional
+`responseCode` query param and an `excludeRampUp` flag to the endpoint, apply the same
+`getAnalysisBounds`/`buildTimeFilter` clause `getErrorsByTransaction` uses, and pass both from
+`fetchErrorDetails`' two callers (`ErrorsModal` and `useErrorAnalysisData`). Then restore the
+stronger caption — `ErrorsModal.tsx` currently reads "One of N occurrences on this sampler and
+URL" precisely because it cannot promise more.
+
+### `/test-runs/:id/errors` still aggregates a response body no client reads
+
+**Priority:** P3
+**Origin:** performance and maintainability review during /ship on `fix/unify-error-details-view`
+(2026-09-27). The error-groups CTE in `test-runs-performance-query.service.ts` carries
+`(ARRAY_AGG(re.response_data ORDER BY re.time DESC))[1] as sample_response_data`, so every
+response body in a group is materialised server-side to keep one of them, and one full body per
+group (up to `LIMIT 100`) ships in the JSON. Since v0.2.96.17 nothing in `apps/web` reads it: the
+drill-down fetches the body from `/error-analysis/details` on demand, which is what made the field
+redundant.
+
+It was left in place rather than deleted because it is a **documented public field** of this REST
+endpoint (`test-runs-errors.controller.ts` Swagger schema, `ErrorGroup` in
+`types/test-run.types.ts` and `test-runs.service.ts`), reachable by any API-key client, and two
+specs assert it. Dropping it is a breaking change to that response shape.
+
+Two ways to close this, in order of preference:
+1. Drop it — from the CTE, the outer SELECT, the row mapper, both type declarations, the Swagger
+   property and the two spec assertions. Check first whether any external consumer reads it.
+2. Keep the field but stop aggregating the whole group for it: replace the `ARRAY_AGG(...)[1]`
+   with a lateral `SELECT response_data ... ORDER BY time DESC LIMIT 1`.
+
+### 13 hand-rolled clipboard handlers left under `apps/web`
+
+**Priority:** P4
+**Origin:** simplification review during /ship on `fix/unify-error-details-view` (2026-09-27).
+v0.2.96.17 extracted `CopyButton` (`apps/web/components/ui/copy-button.tsx`) — a Tooltip +
+IconButton + `navigator.clipboard.writeText` with a transient "Copied!" confirmation, an
+unmount-safe revert timer and a >=24px hit area — and converted two callers (the error-details
+dialog and `SamplerDetailsModal`). Thirteen files still hand-roll the same trio, most of them
+without the confirmation, several without the >=24px target, and none clearing their timer:
+
+`app/settings/hooks/useApiKeys.ts`, `app/test-runs/hooks/useTestRunsFilters.ts`,
+`deep-links/components/DeepLinkDialog.tsx`, `reporting/ReportCard.tsx`,
+`anomaly-detection/components/utils/trends-plot-utils.ts`,
+`test-run-details/components/TestRunDetailsCollapsedView.tsx`,
+`test-run-details/components/TestRunIdentitySection.tsx`,
+`performance-analysis/hooks/usePerformanceAnalysisHandlers.ts`,
+`compare/current-test-run-chart/utils/current-test-run-chart-utils.ts`,
+`awr/sql/SqlStatementCard.tsx`, `awr/sql/SqlTextViewer.tsx`,
+`systems/[id]/config/components/TemplateTable.tsx`, `components/reports/HtmlReportViewerModal.tsx`.
+
+Not a mechanical sweep: some are hooks that also raise a snackbar (`useApiKeys`), and
+`trends-plot-utils.ts` builds a Plotly modebar button that copies a PNG data URL — those two are
+not `CopyButton` shaped. The dozen that are plain icon-copies-text are.
+
 ### `alpha()` on an already-transparent theme token, in four more places
 
 **Priority:** P3

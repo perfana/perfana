@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.17] - 2026-09-27
+
+### Fixed
+- **Error details look the same wherever you open them from, and the drill-down works on every URL.** Opening an error from the Performance Analysis overview used to show a different, thinner view than opening the same error from the Error Analysis tab — an inline panel with a sample response body instead of the full detail dialog. Both now open the same dialog, with the transaction, sampler, response code, response time, timestamp, URL, message, body, request and response headers and captured session variables all in one place. Separately, that drill-down returned nothing at all for any URL containing an upper-case character: the error list handed back a lower-cased URL and the detail lookup matches the URL exactly, so the click did nothing and reported nothing. The URL now round-trips untouched, the button shows it is working while it loads, and a run with no stored occurrence of that error says so instead of staying silent. A row that groups thousands of errors now states which occurrence you are looking at.
+- **The Apdex colour for a Poor score is the same in the error list as everywhere else.** The list had its own copy of the colour scale that had drifted to a red where the rest of the app shows dark orange.
+
+### Added
+- **Copy buttons on every field of the error details dialog.** Each one copies just that value — the URL, the response body, the request or response headers, the session variables as formatted JSON. The timestamp copies as ISO 8601, ready to paste into a Grafana time range, a SQL predicate or a log query, while still displaying in your local format.
+
 ## [0.2.96.16] - 2026-09-27
 
 ### Fixed
