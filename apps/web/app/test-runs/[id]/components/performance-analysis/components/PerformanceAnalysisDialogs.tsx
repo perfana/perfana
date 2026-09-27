@@ -184,6 +184,7 @@ export function PerformanceAnalysisDialogs({
         samplerName={errorModalConfig.samplerName}
         title={errorModalConfig.title}
         excludeRampUp={excludeRampUp}
+        showToast={showToast}
       />
 
       {/* Graph Modal */}

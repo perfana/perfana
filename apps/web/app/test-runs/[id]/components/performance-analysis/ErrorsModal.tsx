@@ -19,19 +19,23 @@ import {
   Typography,
   Box,
   Chip,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   IconButton,
   Tooltip,
 } from '@mui/material';
 import {
   Close as CloseIcon,
-  ExpandMore as ExpandMoreIcon,
   Error as ErrorIcon,
-  ContentCopy as ContentCopyIcon,
+  InfoOutlined as InfoIcon,
 } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
+import ErrorDetailsDialog from './error-analysis/components/ErrorDetailsDialog';
+import { ErrorDetail } from './error-analysis/types';
+import { fetchErrorDetails } from './error-analysis/utils/fetch-error-details';
+import {
+  getApdexColor,
+  getApdexLabel,
+  maskUrlDynamicData,
+} from './utils/performance-formatters';
 
 interface ErrorGroup {
   error_type: string;
@@ -44,53 +48,8 @@ interface ErrorGroup {
   count: number;
   first_occurrence: string;
   last_occurrence: string;
-  sample_response_data: string;
   total_requests: number;
   apdex_score: number;
-}
-
-/**
- * Masks dynamic data in URLs to show URL patterns
- * - UUIDs → {uuid}
- * - Numeric IDs → {id}
- * - Hash-like strings → {hash}
- */
-function maskUrlDynamicData(url: string): string {
-  if (!url || url === 'N/A') return url;
-
-  return url
-    // Mask UUIDs (8-4-4-4-12 format)
-    .replace(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, '{uuid}')
-    // Mask long hex strings (likely hashes) - 16+ hex characters
-    .replace(/\/[0-9a-fA-F]{16,}/g, '/{hash}')
-    // Mask numeric IDs in paths (e.g., /user/123 → /user/{id})
-    .replace(/\/\d+(?=\/|$)/g, '/{id}')
-    // Mask query parameter values with numbers
-    .replace(/([?&][^=]+)=\d+/g, '$1={id}')
-    // Mask query parameter values with UUIDs
-    .replace(/([?&][^=]+)=[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, '$1={uuid}');
-}
-
-/**
- * Get Apdex label based on score
- */
-function getApdexLabel(score: number): string {
-  if (score >= 0.94) return 'Excellent';
-  if (score >= 0.85) return 'Good';
-  if (score >= 0.70) return 'Fair';
-  if (score >= 0.50) return 'Poor';
-  return 'Unacceptable';
-}
-
-/**
- * Get Apdex color based on score
- */
-function getApdexColor(score: number): string {
-  if (score >= 0.94) return '#4caf50'; // Green
-  if (score >= 0.85) return '#66bb6a'; // Light Green
-  if (score >= 0.70) return '#ff9800'; // Orange
-  if (score >= 0.50) return '#ef5350'; // Red
-  return '#f44336'; // Dark Red
 }
 
 interface ErrorsModalProps {
@@ -101,6 +60,8 @@ interface ErrorsModalProps {
   samplerName?: string;
   title?: string;
   excludeRampUp?: boolean;
+  /** Same toast the other Performance Analysis dialogs get; drill-down feedback goes here. */
+  showToast?: (message: string) => void;
 }
 
 export default function ErrorsModal({
@@ -111,10 +72,15 @@ export default function ErrorsModal({
   samplerName,
   title,
   excludeRampUp = true,
+  showToast,
 }: ErrorsModalProps) {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<ErrorGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [selectedError, setSelectedError] = useState<ErrorDetail | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [occurrenceNote, setOccurrenceNote] = useState<string | undefined>(undefined);
+  const [detailsPendingFor, setDetailsPendingFor] = useState<number | null>(null);
 
   useEffect(() => {
     if (open && testRunId) {
@@ -155,8 +121,40 @@ export default function ErrorsModal({
     }
   };
 
-  const handleCopyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  /**
+   * Opens the same Error Details dialog the Error Analysis tab uses, so a drill-down from the
+   * overview and one from that tab show the error in one shape.
+   */
+  const handleViewDetails = async (errorGroup: ErrorGroup, rowIndex: number) => {
+    if (!transactionName) return;
+    setDetailsPendingFor(rowIndex);
+    try {
+      const details = await fetchErrorDetails(testRunId, {
+        transaction: transactionName,
+        sampler: errorGroup.sampler_name,
+        url: errorGroup.url,
+      });
+      if (details.length === 0) {
+        showToast?.('No stored occurrence found for this error');
+        return;
+      }
+      setSelectedError(details[0] ?? null);
+      // The row is an aggregate and the dialog shows ONE occurrence, so say so — but do not
+      // claim it is this row's latest. The row is grouped by response code too, while the
+      // details lookup keys only on transaction/sampler/url and is not scoped to the analysis
+      // window, so the occurrence it returns may belong to a sibling row. See TODOS.md,
+      // "The error-details lookup is coarser than the row that opens it".
+      setOccurrenceNote(
+        errorGroup.count > 1
+          ? `One of ${errorGroup.count.toLocaleString()} occurrences on this sampler and URL`
+          : undefined,
+      );
+      setDetailsOpen(true);
+    } catch {
+      showToast?.('Could not load error details');
+    } finally {
+      setDetailsPendingFor(null);
+    }
   };
 
   const formatTimestamp = (timestamp: string) => {
@@ -177,6 +175,7 @@ export default function ErrorsModal({
   };
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={onClose}
@@ -232,7 +231,7 @@ export default function ErrorsModal({
                     <TableCell align="right">Errors / Total</TableCell>
                     <TableCell>Apdex</TableCell>
                     <TableCell>First / Last</TableCell>
-                    <TableCell>Details</TableCell>
+                    <TableCell align="center">Details</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -342,138 +341,24 @@ export default function ErrorsModal({
                           {formatTimestamp(errorGroup.last_occurrence)}
                         </Typography>
                       </TableCell>
-                      <TableCell>
-                        {errorGroup.sample_response_data && (
-                          <Accordion elevation={0}>
-                            <AccordionSummary
-                              expandIcon={<ExpandMoreIcon />}
-                              sx={{ minHeight: 'auto', '& .MuiAccordionSummary-content': { margin: '4px 0' } }}
+                      <TableCell align="center">
+                        {/* ponytail: no transaction name means no details endpoint to call; both
+                            current call sites pass one, so this only guards a future caller. */}
+                        {transactionName && (
+                          <Tooltip title="View Error Details" arrow>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleViewDetails(errorGroup, index)}
+                              disabled={detailsPendingFor !== null}
+                              sx={{ color: 'primary.main' }}
                             >
-                              <Typography variant="caption">View Response</Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
-                              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                {/* URL Information Section */}
-                                <Box>
-                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                      URL Information
-                                    </Typography>
-                                  </Box>
-                                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                    {errorGroup.url_pattern && (
-                                      <Box>
-                                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                                          Pattern:
-                                        </Typography>
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                          <Paper
-                                            variant="outlined"
-                                            sx={{
-                                              px: 1,
-                                              py: 0.5,
-                                              backgroundColor: '#e3f2fd',
-                                              flex: 1,
-                                            }}
-                                          >
-                                            <Typography
-                                              variant="body2"
-                                              sx={{
-                                                fontFamily: 'monospace',
-                                                fontSize: '0.75rem',
-                                                wordBreak: 'break-all',
-                                                textTransform: 'none',
-                                              }}
-                                            >
-                                              {errorGroup.url_pattern}
-                                            </Typography>
-                                          </Paper>
-                                          <IconButton
-                                            size="small"
-                                            onClick={() => handleCopyToClipboard(errorGroup.url_pattern || '')}
-                                          >
-                                            <ContentCopyIcon fontSize="small" />
-                                          </IconButton>
-                                        </Box>
-                                      </Box>
-                                    )}
-                                    <Box>
-                                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                                        Full URL:
-                                      </Typography>
-                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <Paper
-                                          variant="outlined"
-                                          sx={{
-                                            px: 1,
-                                            py: 0.5,
-                                            backgroundColor: '#f5f5f5',
-                                            flex: 1,
-                                          }}
-                                        >
-                                          <Typography
-                                            variant="body2"
-                                            sx={{
-                                              fontFamily: 'monospace',
-                                              fontSize: '0.7rem',
-                                              wordBreak: 'break-all',
-                                              textTransform: 'none',
-                                            }}
-                                          >
-                                            {errorGroup.url}
-                                          </Typography>
-                                        </Paper>
-                                        <IconButton
-                                          size="small"
-                                          onClick={() => handleCopyToClipboard(errorGroup.url)}
-                                        >
-                                          <ContentCopyIcon fontSize="small" />
-                                        </IconButton>
-                                      </Box>
-                                    </Box>
-                                  </Box>
-                                </Box>
-
-                                {/* Response Data Section */}
-                                <Box>
-                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                      Sample Response Data
-                                    </Typography>
-                                    <IconButton
-                                      size="small"
-                                      onClick={() => handleCopyToClipboard(errorGroup.sample_response_data)}
-                                    >
-                                      <ContentCopyIcon fontSize="small" />
-                                    </IconButton>
-                                  </Box>
-                                  <Paper
-                                    variant="outlined"
-                                    sx={{
-                                      p: 1,
-                                      maxHeight: '200px',
-                                      overflow: 'auto',
-                                      backgroundColor: '#f5f5f5',
-                                    }}
-                                  >
-                                    <Typography
-                                      variant="body2"
-                                      component="pre"
-                                      sx={{
-                                        fontFamily: 'monospace',
-                                        fontSize: '0.7rem',
-                                        margin: 0,
-                                        whiteSpace: 'pre-wrap',
-                                        wordBreak: 'break-word',
-                                      }}
-                                    >
-                                      {errorGroup.sample_response_data}
-                                    </Typography>
-                                  </Paper>
-                                </Box>
-                              </Box>
-                            </AccordionDetails>
-                          </Accordion>
+                              {detailsPendingFor === index ? (
+                                <CircularProgress size={18} />
+                              ) : (
+                                <InfoIcon fontSize="small" />
+                              )}
+                            </IconButton>
+                          </Tooltip>
                         )}
                       </TableCell>
                     </TableRow>
@@ -490,6 +375,19 @@ export default function ErrorsModal({
           Close
         </Button>
       </DialogActions>
+
     </Dialog>
+
+    <ErrorDetailsDialog
+      open={detailsOpen}
+      onClose={() => {
+        setDetailsOpen(false);
+        setSelectedError(null);
+        setOccurrenceNote(undefined);
+      }}
+      selectedError={selectedError}
+      occurrenceNote={occurrenceNote}
+    />
+    </>
   );
 }
