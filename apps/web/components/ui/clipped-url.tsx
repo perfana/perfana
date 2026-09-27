@@ -2,22 +2,12 @@
 
 import { useState } from 'react';
 import { Box, IconButton, Popover, Typography, Tooltip, type SxProps, type Theme } from '@mui/material';
-import { Visibility, ContentCopy, Check } from '@mui/icons-material';
+import { Visibility } from '@mui/icons-material';
+import { CopyButton } from './copy-button';
 
 /** Clickable icon that opens a popover with the full URL and a copy-to-clipboard button. */
 function UrlViewer({ url }: { url: string }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable (insecure context / denied) — nothing to do
-    }
-  };
 
   return (
     <>
@@ -46,15 +36,7 @@ function UrlViewer({ url }: { url: string }) {
           >
             {url}
           </Typography>
-          <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
-            <IconButton size="small" onClick={copy} sx={{ flexShrink: 0 }}>
-              {copied ? (
-                <Check sx={{ fontSize: 16 }} color="success" />
-              ) : (
-                <ContentCopy sx={{ fontSize: 16 }} />
-              )}
-            </IconButton>
-          </Tooltip>
+          <CopyButton text={url} />
         </Box>
       </Popover>
     </>

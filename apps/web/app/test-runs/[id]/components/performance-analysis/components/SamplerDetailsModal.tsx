@@ -11,8 +11,6 @@ import {
   Typography,
   Grid,
   Paper,
-  Tooltip,
-  IconButton,
 } from '@mui/material';
 import {
   Info as InfoIcon,
@@ -20,8 +18,8 @@ import {
   TrendingUp as TrendingUpIcon,
   Assessment as AssessmentIcon,
   NetworkCheck as NetworkCheckIcon,
-  ContentCopy as ContentCopyIcon,
 } from '@mui/icons-material';
+import { CopyButton } from '@/components/ui/copy-button';
 import { SamplerStat } from '../types/performance-analysis.types';
 import { formatNumber, apdexRating } from '../utils/performance-formatters';
 
@@ -36,9 +34,6 @@ export default function SamplerDetailsModal({
   onClose,
   sampler,
 }: SamplerDetailsModalProps) {
-  const handleCopyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
   const apdex = apdexRating(sampler?.apdex_score, sampler?.passed_count ?? 0);
 
   return (
@@ -103,15 +98,10 @@ export default function SamplerDetailsModal({
                           >
                             {sampler.url_pattern}
                           </Typography>
-                          <Tooltip title="Copy URL pattern">
-                            <IconButton
-                              size="small"
-                              onClick={() => handleCopyToClipboard(sampler.url_pattern || '')}
-                              sx={{ color: 'primary.main' }}
-                            >
-                              <ContentCopyIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
+                          <CopyButton
+                            text={sampler.url_pattern || ''}
+                            title="Copy URL pattern"
+                          />
                         </Box>
                       </Box>
                     )}
