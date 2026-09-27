@@ -20,7 +20,7 @@ import {
   inferSourceTypeFromDashboardUid,
 } from '@perfana/shared/services/metrics-source-upsert';
 import type { OwnedResource } from '@perfana/shared/entities';
-import { isDuplicateSloTargetError } from '@perfana/shared/utils/duplicate-slo-target';
+import { isDuplicateSloTargetError } from '@perfana/shared/utils';
 import { GrafanaSyncAuditService } from '../audit/grafana-sync-audit.service';
 import { DashboardVariable } from './types';
 

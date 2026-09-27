@@ -752,6 +752,112 @@ describe('AutoConfigUpdatesService', () => {
           ),
         ).rejects.toThrow("System under test 'nonexistent' not found");
       });
+
+      it('should skip (not throw) when the insert collides with an enabled manual SLO on the same panel target', async () => {
+        // Arrange: benchmarkRepo.save fails with the 23505 that
+        // uq_benchmarks_active_metric_target raises when a profile-derived SLO lands on a
+        // panel that already carries an enabled manual SLO for the same series/aggregation.
+        const mockSut = { id: 'sut-1', name: 'my-app' };
+        const profileBenchmark: any = {
+          id: 'pb-dup-1',
+          source: 'jmeter',
+          panel_id: 42,
+          panel_title: 'Response Time',
+          panel_type: 'graph',
+          tags: [],
+          metadata: {},
+          read_only: false,
+        };
+        const testRun: any = {
+          testRunId: 'test-1',
+          systemUnderTest: { name: 'my-app' },
+          systemUnderTestId: 'sut-id',
+          testEnvironment: 'production',
+          workload: 'load-test',
+          endTime: new Date(),
+          tags: [],
+          variables: [],
+        };
+        const applicationDashboard = {
+          id: 'app-dash-1',
+          grafanaInstance: 'grafana-prod',
+          dashboardLabel: 'JVM',
+          dashboardId: 1,
+          dashboardUid: 'jvm-uid',
+        } as any;
+
+        systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
+        benchmarkRepo.create.mockReturnValue({});
+        const duplicateError = Object.assign(new Error('duplicate key value'), {
+          code: '23505',
+          constraint: 'uq_benchmarks_active_metric_target',
+        });
+        benchmarkRepo.save.mockRejectedValue(duplicateError);
+
+        // Act
+        const result = await service.insertBenchmarkBasedOnProfileBenchmark(
+          profileBenchmark,
+          testRun,
+          applicationDashboard,
+        );
+
+        // Assert: skipped, not thrown
+        expect(result).toEqual({
+          insertedId: '',
+          wasCreated: false,
+          skippedDuplicateTarget: true,
+        });
+      });
+
+      it('should rethrow a save failure that is not the duplicate-SLO-target constraint', async () => {
+        // Arrange: a 23505 on a *different* constraint (or a wholly different error) must
+        // still abort provisioning for this dashboard rather than being swallowed.
+        const mockSut = { id: 'sut-1', name: 'my-app' };
+        const profileBenchmark: any = {
+          id: 'pb-other-1',
+          source: 'jmeter',
+          panel_id: 7,
+          panel_title: 'Throughput',
+          panel_type: 'graph',
+          tags: [],
+          metadata: {},
+          read_only: false,
+        };
+        const testRun: any = {
+          testRunId: 'test-1',
+          systemUnderTest: { name: 'my-app' },
+          systemUnderTestId: 'sut-id',
+          testEnvironment: 'production',
+          workload: 'load-test',
+          endTime: new Date(),
+          tags: [],
+          variables: [],
+        };
+        const applicationDashboard = {
+          id: 'app-dash-1',
+          grafanaInstance: 'grafana-prod',
+          dashboardLabel: 'JVM',
+          dashboardId: 1,
+          dashboardUid: 'jvm-uid',
+        } as any;
+
+        systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
+        benchmarkRepo.create.mockReturnValue({});
+        const unrelatedError = Object.assign(new Error('duplicate key value'), {
+          code: '23505',
+          constraint: 'some_other_unique_index',
+        });
+        benchmarkRepo.save.mockRejectedValue(unrelatedError);
+
+        // Act & Assert
+        await expect(
+          service.insertBenchmarkBasedOnProfileBenchmark(
+            profileBenchmark,
+            testRun,
+            applicationDashboard,
+          ),
+        ).rejects.toThrow('duplicate key value');
+      });
     });
 
     describe('Audit logging', () => {
