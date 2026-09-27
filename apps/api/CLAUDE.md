@@ -412,3 +412,32 @@ server-side export failure arrive as an unexplained connection error before v0.2
 Cancelling still leaves a 0-byte file at the chosen location: the picker creates the entry
 before the first byte arrives, and `abort()` discards the swap file, not the entry.
 
+
+### The errors endpoint's `sample_url` is a key the client sends back, so it must not be normalised
+
+`GET /test-runs/:id/errors` groups `requests_error` rows and hands each group a `url`. That value
+is not display text — the web client sends it straight back as the `url` query param of
+`GET /test-runs/:id/error-analysis/details`, whose `WHERE` matches `url` **exactly**. Any
+transform on the way out is a guaranteed zero-row lookup on the way back.
+
+Until v0.2.96.17 the group query selected `LOWER(eg.sample_url) as sample_url`, so every error on
+a mixed-case URL produced a drill-down click that returned `[]` — an empty dialog with nothing in
+the log. It was also the worst query shape available: `ORDER BY time DESC LIMIT 10` cannot stop
+early when nothing matches, so the miss costs a full scan of the run's errors for that sampler.
+
+Three things to keep straight in that same `SELECT`
+(`services/test-runs-performance-query.service.ts`, the error-groups CTE):
+
+1. **`normalized_url` and `url_pattern` stay lowercased.** They are grouping keys the client only
+   ever displays, and the lowering is what makes the grouping case-insensitive.
+2. **`sample_url` stays raw.** It is the sample row's own URL, the one `/error-analysis/details`
+   stored. `test-runs-performance-query.service.spec.ts` asserts the raw form (mutation-verified:
+   re-adding `LOWER()` fails it), so the guard is the spec, not the comment.
+3. **`sample_response_data` has had no web consumer since v0.2.96.17** — the drill-down fetches
+   bodies from `/error-analysis/details` on demand instead. It is still selected because it is a
+   documented response field of a public REST endpoint; dropping it and its Swagger schema is
+   filed in TODOS.md.
+
+The general rule this is an instance of: when one endpoint's response field is another endpoint's
+exact-match lookup key, the two ends are a contract. Normalise for grouping in a separate column,
+never in place.

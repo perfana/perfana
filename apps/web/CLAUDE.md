@@ -173,3 +173,46 @@ The regression tests assert on the **rendered** style (`AnomalyTableRow.contrast
 token in `alpha()` or hard-coding an rgba fails them. Hover tints are not assertable — jsdom never
 applies `sx['&:hover']`.
 
+
+### There is one `CopyButton` — reach for it instead of hand-rolling the next one
+
+`apps/web/components/ui/copy-button.tsx` is the shared copy-to-clipboard icon button
+(`import { CopyButton } from '@/components/ui/copy-button'`). It takes `text`, an optional `title`
+and an optional glyph `fontSize`, shows a transient "Copied!" check for 1.5 s, and swallows a
+rejected `navigator.clipboard.writeText` without showing a false confirmation (an insecure context
+or a denied permission).
+
+Two details it exists to get right, and that a fresh hand-rolled handler tends to miss:
+
+- **The revert timer is cleared on unmount.** A dialog can render eight of these (every field of
+  `ErrorDetailsDialog` has one), and a copy followed within 1.5 s by the dialog closing would
+  otherwise leave a pending `setTimeout` per instance.
+- **The hit area stays >= 24 px** (`minWidth`/`minHeight`, WCAG 2.5.8) no matter how small
+  `fontSize` gets. Shrinking the glyph to fit a dense row must not shrink the target.
+
+~13 sites under `apps/web` still hand-roll the same Tooltip + IconButton + `writeText` trio; they
+are filed in TODOS.md and are convertible one at a time. `SamplerDetailsModal` and
+`components/ui/clipped-url.tsx` are the worked examples. Do not add a fourteenth.
+
+### The error drill-down has one dialog and one fetcher, reached from two places
+
+The Performance Analysis overview (`ErrorsModal`) and the Error Analysis tab both open the same
+`ErrorDetailsDialog`
+(`app/test-runs/[id]/components/performance-analysis/error-analysis/components/`) through the same
+`fetchErrorDetails` helper in that feature's `utils/`. Before v0.2.96.17 the overview carried its
+own ~140-line accordion, which drifted: it hard-coded two light-mode greys and had no loading or
+failure state, so the drill-down icon was a dead click on a slow or failed fetch. It now shows a
+spinner, disables the icon while in flight, and surfaces a toast on failure.
+
+Consequences worth knowing before editing either side:
+
+- **`fetchErrorDetails` requires the URL exactly as the server stored it.** The details query
+  matches `url` with `=`; see "The errors endpoint's `sample_url` is a key the client sends back"
+  in [apps/api/CLAUDE.md](../api/CLAUDE.md). Do not lowercase, trim or re-encode it in the client
+  either.
+- **Formatters come from `utils/performance-formatters`**, not from local copies. Replacing the
+  overview's three private helpers moved one Apdex colour on screen: `getApdexColor`'s `>= 0.50`
+  band is `#ef5350` in the shared copy against the local copy's `#f57c00`. That is the shared
+  version winning on purpose, not a regression.
+- **The timestamp field copies ISO 8601 while displaying the local format.** What is on screen is
+  for reading; what lands on the clipboard is for pasting into a query.
