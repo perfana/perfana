@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.21] - 2026-09-28
+
+### Security
+- **Updated the bundled libraries that carried known vulnerabilities.** Three were rated critical and around fifty more high, all of them in libraries Perfana depends on rather than in Perfana's own code: the proxy-address parser in the API's HTTP layer, an HTTP client bundled with the HTML parser that reads uploaded AWR reports, and the bundler used to build the web app. No configuration changes and no action on upgrade.
+- **A malformed or deliberately oversized JTL upload can no longer exhaust the API's memory.** The zip reader that unpacks an uploaded JTL archive would allocate whatever size the archive claimed, so a small crafted file could declare an enormous one and take the API down. It now allocates only what the archive actually contains, and rejects archives whose entries run past the end of the file or repeat the same entry name. A valid archive is unaffected.
+
+- **Image processing was dropped from the web app's dependencies.** It arrived as an optional part of Next.js for optimising images, carried four high-severity advisories, and was never used — Perfana renders no optimised images. Removing it also takes about forty platform-specific binaries out of the web image. A version floor remains in place so it cannot return at the vulnerable version.
+
+### Fixed
+- **An unreadable JTL upload now says so instead of failing as a server error.** A file that is not a zip, or a zip that was truncated in transit, produced a generic 500 with nothing useful in it; the same was true of a zip containing no `.jtl` files at all. All three now return a 400 naming what was wrong with the file, which is what the endpoint always documented.
+
+### Changed
+- **The database library moved to its latest patch release across all services**, along with the upload, validation and configuration-parsing libraries. These are maintenance updates; no behaviour that Perfana relies on changed.
+
 ## [0.2.96.20] - 2026-09-28
 
 ### Added
