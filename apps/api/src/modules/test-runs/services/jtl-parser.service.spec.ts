@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import AdmZip = require('adm-zip');
 import { JtlParserService, ParsedScenario } from './jtl-parser.service';
 
@@ -122,6 +123,36 @@ describe('JtlParserService', () => {
       expect(() => service.parseZip(zipBuffer)).toThrow(
         'No .jtl files found in the zip archive',
       );
+    });
+
+    // An unreadable upload is a 400, not a 500. adm-zip >= 0.6 throws where it
+    // used to clamp silently, so these three shapes all reach the client as
+    // BadRequestException rather than an unhandled error.
+    it('should throw BadRequestException, not a bare Error, when the ZIP has no .jtl files', () => {
+      const zip = new AdmZip();
+      zip.addFile('readme.txt', Buffer.from('no jtl here'));
+
+      expect(() => service.parseZip(zip.toBuffer())).toThrow(BadRequestException);
+    });
+
+    it('should reject a buffer that is not a zip archive at all', () => {
+      const notAZip = Buffer.from('this is plain text, not a zip', 'utf-8');
+
+      expect(() => service.parseZip(notAZip)).toThrow(BadRequestException);
+      expect(() => service.parseZip(notAZip)).toThrow(/Could not read the zip archive/);
+    });
+
+    it('should reject a truncated zip whose entry data runs past the end of the buffer', () => {
+      const zip = new AdmZip();
+      zip.addFile(
+        'scenario/results.jtl',
+        Buffer.from(buildJtlCsv([{ label: 'GET /ping' }]), 'utf-8'),
+      );
+      const full = zip.toBuffer();
+      // Keep the central directory intact enough to enumerate, drop the tail.
+      const truncated = full.subarray(0, Math.floor(full.length / 2));
+
+      expect(() => service.parseZip(truncated)).toThrow(BadRequestException);
     });
 
     it('should skip non-.jtl entries and still parse valid .jtl entries', () => {

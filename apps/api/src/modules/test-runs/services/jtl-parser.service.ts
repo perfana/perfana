@@ -1,6 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import AdmZip = require('adm-zip');
 import { parse } from 'csv-parse/sync';
+
+function errorMessage(err: unknown): string {
+  return err && typeof err === 'object' && 'message' in err
+    ? (err as Error).message
+    : 'Unknown error';
+}
 
 interface JtlRequestRow {
   time: Date;
@@ -60,8 +66,18 @@ export class JtlParserService {
    */
   parseZip(zipBuffer: Buffer, options?: { includeSubTransactions?: boolean }): ParsedScenario[] {
     const includeSubTransactions = options?.includeSubTransactions ?? false;
-    const zip = new AdmZip(zipBuffer);
-    const entries = zip.getEntries();
+
+    // adm-zip >= 0.6 rejects archives whose entries run past the end of the buffer
+    // instead of silently clamping them. That is the right call on an upload
+    // endpoint, but it throws, and an unreadable upload is a 400, not a 500.
+    let entries: AdmZip.IZipEntry[];
+    try {
+      entries = new AdmZip(zipBuffer).getEntries();
+    } catch (err) {
+      throw new BadRequestException(
+        `Could not read the zip archive: ${errorMessage(err)}`,
+      );
+    }
 
     // Find all .jtl files
     const jtlEntries = entries.filter(
@@ -69,7 +85,7 @@ export class JtlParserService {
     );
 
     if (jtlEntries.length === 0) {
-      throw new Error('No .jtl files found in the zip archive');
+      throw new BadRequestException('No .jtl files found in the zip archive');
     }
 
     this.logger.log(`Found ${jtlEntries.length} JTL file(s) in zip`);
@@ -78,7 +94,16 @@ export class JtlParserService {
 
     for (const entry of jtlEntries) {
       const scenarioName = this.extractScenarioName(entry.entryName);
-      const csvContent = entry.getData().toString('utf-8');
+
+      // Decompression is where a truncated or corrupt entry actually fails.
+      let csvContent: string;
+      try {
+        csvContent = entry.getData().toString('utf-8');
+      } catch (err) {
+        throw new BadRequestException(
+          `Could not read ${entry.entryName} from the zip archive: ${errorMessage(err)}`,
+        );
+      }
 
       this.logger.log(
         `Parsing JTL file: ${entry.entryName} (scenario: ${scenarioName}, size: ${csvContent.length} bytes)`,
