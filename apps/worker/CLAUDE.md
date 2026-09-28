@@ -34,6 +34,27 @@ Four things to know before touching this path:
 
    - **A DELETE filtered on `test_run_id` ALONE needs no decompression at all — one extra predicate destroys that (v0.2.95.16, #563).** `test_run_id` is `compress_segmentby`, so `DELETE FROM ds_metrics WHERE test_run_id = $1` drops whole compressed segments. The force-refetch delete carried one more column — `metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')` — and that alone forced TimescaleDB to decompress the run's segments as DML, which is the entire reason `decompressChunksForRange` had to run in front of it. Measured on one 2,453,285-row run in a compressed chunk (TimescaleDB 2.28.3 / PG 15.18), each in a rolled-back transaction: `decompress_chunk` + filtered delete **162,743 ms / 11 GB WAL** (153.5 s of it decompression); the filtered delete alone **54,233 ms / 4,023 MB, then `ERROR: tuple decompression limit exceeded`**; `DELETE WHERE test_run_id = $1` **181 ms / 41 MB**. ~900x faster, ~275x less WAL.
 
+     **That 181 ms is the unblocked cost. The same statement has no `time` predicate, so it locks
+     every chunk of the hypertable rather than the run's own, and queueing dwarfs the work
+     (v0.2.96.18).** RowExclusive on all of them means anything holding a conflicting lock on ANY
+     chunk — `perfana_compress_chunk` (Exclusive), the columnstore policy, `drop_chunks`, DDL —
+     blocks a delete with nothing to do with it. Observed on 2026-09-28 with the worker and API both
+     idle and the pool at `11/11idle/0waiting`: **238,643 ms on 32,698 rows** and **290,980 ms on
+     154 rows**, against **3,255 ms for 228,557 rows** on the same statement an hour earlier.
+     Duration uncorrelated with row count is the signature — read it as a lock wait, not as slow
+     work, and do not go looking for a row-count explanation. `DELETE_LOCK_TIMEOUT_MS` (30 s) now
+     bounds the wait and each of the three statements is timed separately: before that, one
+     aggregate covered all three and identifying the DELETE depended on `SLOW_QUERY_MS` catching it
+     by coincidence. A 55P03 is deliberately **not** added to the 40001 retry — a holder that
+     outlasts 30 s outlasts a 1 s backoff, and `analyze.ts` rethrowing into BullMQ's 3 attempts
+     (exponential from 5 s) is the right place to wait. **The holder on 2026-09-28 was never
+     identified**, and nothing in the worker or API log can name it: that needs `log_lock_waits` on
+     the deployment's own Postgres, which `docker-compose.infra.yml` does not reach. Both that and
+     the option of bounding the DELETE by the run's span — feasible, `time` is `compress_orderby`,
+     but two row classes legitimately land outside the run window — are in TODOS.md. Worth knowing
+     this is a recurring path, not an edge case: every **aborted** long test rebuilds (`tick !==
+     final`), so every one of them runs this delete.
+
      **When you need to delete less than the whole run, preserve and restore — do not narrow the predicate.** `WorkerDatabaseService.deletePerfTestMetricsForRun` copies the rows that must survive into a `TEMP TABLE ... ON COMMIT DROP`, deletes the run wholesale, and re-inserts them, all three statements in one transaction so the survivors cannot be lost in between. The *read* is allowed to touch `metrics_source_id`: a SELECT decompresses transiently and rewrites nothing (~1 s on 2.6 M rows), unlike the DML guard. That trade only holds while the keep-set is small — ~3k rows per run here, against a run of millions — so it is not a general licence to round-trip a table through a temp copy.
 
      **What survives is every non-`performance_test` row, regardless of what is being re-collected, and that is deliberately not a coverage question.** Grafana and Dynatrace are external and may no longer hold the window — retention expires, tokens lapse — and Perfana exists to keep those metrics after the source has dropped them. The delete this replaced only ever removed perf-test rows and let the other sources upsert over their own, so a re-collection that returned nothing left the old rows intact; deleting them on the promise of a refetch destroys the only remaining copy. Perf-test rows are the one exception, because they rebuild from `requests_raw`/`transactions` in this same database. A row with a NULL `metrics_source_id` belongs to no source and nothing re-collects it either: `getRunMetricsSourceTypes` reports it as `'unknown'` and it is preserved with the rest.

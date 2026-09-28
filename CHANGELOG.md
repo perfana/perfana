@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.18] - 2026-09-28
+
+### Fixed
+- **An analysis that gets stuck waiting on the database now gives up and retries instead of stalling for minutes.** Analysing a short or aborted test run could take four minutes where it normally takes seconds, with nothing in the log to say why and no sign of activity anywhere — the step that clears a run's old metrics before rebuilding them was queued behind unrelated database maintenance, and simply waited. It now waits at most 30 seconds, reports that it was blocked, and is retried automatically once whatever held it up has finished. The analysis itself was always correct; only the time it took was affected, and nothing was lost while it waited.
+- **The log now says which part of that step was slow.** It previously reported a single total for three separate database operations, so a slow one could not be told from its neighbours without guesswork.
+
 ## [0.2.96.17] - 2026-09-27
 
 ### Fixed

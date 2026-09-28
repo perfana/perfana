@@ -46,31 +46,105 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
     });
   });
 
+  /** The SQL of every statement in the transaction except the `lock_timeout` preamble. */
+  const workSqls = (): string[] =>
+    txQuery.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .filter((sql: string) => !sql.includes('set_config'));
+
+  /** The one `set_config` call, or undefined if the preamble is missing. */
+  const lockTimeoutCall = (): unknown[] | undefined =>
+    txQuery.mock.calls.find((c: unknown[]) => String(c[0]).includes('set_config'));
+
   describe('nothing to preserve', () => {
-    it('issues the bare segment-targeted delete, outside a transaction', async () => {
-      query.mockResolvedValue([[], 2620348]);
+    it('issues the bare segment-targeted delete', async () => {
+      txQuery.mockResolvedValue([[], 2620348]);
 
       const result = await service.deletePerfTestMetricsForRun('tr-1', ['performance_test']);
 
       expect(result).toEqual({ deleted: 2620348, restored: 0 });
-      expect(query).toHaveBeenCalledTimes(1);
-      const [sql, params] = query.mock.calls[0];
-      expect(sql).toContain('DELETE FROM ds_metrics WHERE test_run_id = $1');
-      expect(params).toEqual(['tr-1']);
+      const sqls = workSqls();
+      expect(sqls).toHaveLength(1);
+      expect(sqls[0]).toContain('DELETE FROM ds_metrics WHERE test_run_id = $1');
+      expect(txQuery.mock.calls.at(-1)?.[1]).toEqual(['tr-1']);
       // The predicate that made this expensive must not come back.
-      expect(sql).not.toContain('metrics_source_id');
+      expect(sqls[0]).not.toContain('metrics_source_id');
     });
 
     it('treats a run with no rows at all as nothing to preserve', async () => {
       await service.deletePerfTestMetricsForRun('tr-1', []);
-      expect(query).toHaveBeenCalledTimes(1);
-      expect(String(query.mock.calls[0][0])).toContain('DELETE FROM ds_metrics');
+      expect(workSqls()).toEqual([expect.stringContaining('DELETE FROM ds_metrics')]);
+    });
+
+    it('wraps the single statement in a transaction, only to scope the lock timeout', async () => {
+      // A transaction for one DELETE looks gratuitous and is not: `SET LOCAL` needs a scope to
+      // be local to, and a session-level `SET` would leak the budget onto a pooled connection.
+      await service.deletePerfTestMetricsForRun('tr-1', ['performance_test']);
+
+      const ds = (service as unknown as { dataSource: { transaction: ReturnType<typeof vi.fn> } }).dataSource;
+      expect(ds.transaction).toHaveBeenCalledTimes(1);
+      // Default isolation — only the preserve path needs one snapshot across two statements.
+      expect(typeof ds.transaction.mock.calls[0][0]).toBe('function');
+      expect(query).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // lock_timeout — the delete takes RowExclusive on EVERY chunk (no time
+  // predicate), so a compress/drop/DDL on any unrelated chunk blocks it.
+  // Observed 2026-09-28: 238,643 ms on 32,698 rows, against 3,255 ms for
+  // 228,557 rows an hour earlier, with worker and API both idle.
+  // -------------------------------------------------------------------------
+
+  describe('lock timeout', () => {
+    it.each([
+      ['nothing to preserve', ['performance_test']],
+      ['other sources present', ['performance_test', 'grafana']],
+    ])('bounds the lock wait on the %s path', async (_label, sourceTypes) => {
+      await service.deletePerfTestMetricsForRun('tr-1', sourceTypes as string[]);
+
+      const call = lockTimeoutCall();
+      expect(call).toBeDefined();
+      expect(call![1]).toEqual(['lock_timeout', '30000']);
+    });
+
+    it('sets the timeout BEFORE any statement that can block', async () => {
+      await service.deletePerfTestMetricsForRun('tr-1', ['performance_test', 'grafana']);
+
+      // Ordering is the whole point: a budget applied after the DELETE has begun bounds nothing.
+      expect(String(txQuery.mock.calls[0][0])).toContain('set_config');
+    });
+
+    it('is transaction-local, so it cannot follow the connection back into the pool', async () => {
+      await service.deletePerfTestMetricsForRun('tr-1', ['performance_test']);
+
+      // `set_config(name, value, is_local)` — the third argument is what makes it revert on
+      // commit. Passed false, every later query on this pooled connection inherits the budget.
+      expect(lockTimeoutCall()![0]).toContain('set_config($1, $2, true)');
+    });
+
+    it('lets a lock timeout propagate rather than retrying it here', async () => {
+      // Only 40001 is retried. A holder that outlasts 30 s outlasts a 1 s backoff too, so the
+      // stage must fail visibly and let the job's own retry policy wait for the holder to go.
+      const lockTimeout = Object.assign(new Error('canceling statement due to lock timeout'), {
+        code: '55P03',
+      });
+      // The preamble succeeds; the DELETE is what blocks and then aborts.
+      txQuery.mockResolvedValueOnce([]).mockRejectedValueOnce(lockTimeout);
+
+      await expect(service.deletePerfTestMetricsForRun('tr-1', ['performance_test'])).rejects.toThrow(
+        /lock timeout/
+      );
+      // One attempt, not two: 40001 is retried here, 55P03 is not.
+      const ds = (service as unknown as { dataSource: { transaction: ReturnType<typeof vi.fn> } }).dataSource;
+      expect(ds.transaction).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('other sources present', () => {
     it('copies the survivors aside, deletes wholesale, then restores them — in one transaction', async () => {
       txQuery
+        .mockResolvedValueOnce([]) // set_config lock_timeout
         .mockResolvedValueOnce([[], 0]) // CREATE TEMP TABLE ... AS SELECT
         .mockResolvedValueOnce([{ n: 3120 }]) // SELECT count(*) FROM ds_metrics_keep
         .mockResolvedValueOnce([[], 2620348]) // DELETE
@@ -87,7 +161,7 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
       const ds = (service as unknown as { dataSource: { transaction: ReturnType<typeof vi.fn> } }).dataSource;
       expect(ds.transaction.mock.calls[0][0]).toBe('REPEATABLE READ');
 
-      const sqls = txQuery.mock.calls.map((c: unknown[]) => String(c[0]));
+      const sqls = workSqls();
       expect(sqls[0]).toContain('CREATE TEMP TABLE ds_metrics_keep');
       expect(sqls[0]).toContain('ON COMMIT DROP');
       // The survivor count comes from the temp table, never from the INSERT result:
@@ -105,7 +179,7 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
     it('keeps rows with a NULL metrics_source_id, which no source re-collects', async () => {
       await service.deletePerfTestMetricsForRun('tr-1', ['performance_test', 'unknown']);
 
-      const keepSql = String(txQuery.mock.calls[0][0]);
+      const keepSql = workSqls()[0]!;
       expect(keepSql).toContain('metrics_source_id IS NULL');
       expect(keepSql).toContain("source_type = 'performance_test'");
       expect(keepSql).toContain('NOT IN');
@@ -117,10 +191,43 @@ describe('WorkerDatabaseService.deletePerfTestMetricsForRun', () => {
       // instead would take the no-preserve branch here and delete them.
       await service.deletePerfTestMetricsForRun('tr-1', ['performance_test', 'grafana', 'dynatrace']);
 
-      expect(txQuery).toHaveBeenCalledTimes(4);
-      expect(String(txQuery.mock.calls[0][0])).toContain('CREATE TEMP TABLE ds_metrics_keep');
+      expect(workSqls()).toHaveLength(4);
+      expect(workSqls()[0]).toContain('CREATE TEMP TABLE ds_metrics_keep');
       // The bare delete is the branch that would have destroyed them.
       expect(query).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Per-statement timing. The caller logs one aggregate for all three, so when
+  // this method took 238,882 ms it was SLOW_QUERY_MS catching the DELETE by
+  // coincidence that identified which one had stalled.
+  // -------------------------------------------------------------------------
+
+  describe('timing breakdown', () => {
+    const logged = (): string =>
+      ((service as unknown as { logger: { log: ReturnType<typeof vi.fn> } }).logger.log.mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .find((m: string) => m.includes('timing')) ?? '');
+
+    it('names each of the three statements on the preserve path', async () => {
+      txQuery
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([[], 0])
+        .mockResolvedValueOnce([{ n: 12 }])
+        .mockResolvedValueOnce([[], 400])
+        .mockResolvedValueOnce([[], 0]);
+
+      await service.deletePerfTestMetricsForRun('tr-1', ['performance_test', 'dynatrace']);
+
+      // The point is attribution, not the numbers: all three have to be separable.
+      expect(logged()).toMatch(/copy \d+ms, delete \d+ms, restore \d+ms/);
+      expect(logged()).toContain('tr-1');
+    });
+
+    it('reports the delete on the bare path too', async () => {
+      await service.deletePerfTestMetricsForRun('tr-1', ['performance_test']);
+      expect(logged()).toMatch(/delete \d+ms/);
     });
   });
 

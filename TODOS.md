@@ -508,6 +508,37 @@ aggregate that runs on every statistics job.
 trailing scrape excluded by the bound would keep its stale flag forever — and take the margin from
 the collector's step, not zero.
 
+### `deletePerfTestMetricsForRun` locks every chunk, and the 2026-09-28 holder was never identified
+
+**Priority:** P2
+**Origin:** log investigation of `BMS-acceptatie-loadtest_perfana-00017` (2026-09-28).
+**Why:** `DELETE FROM ds_metrics WHERE test_run_id = $1` carries no `time` predicate, so it takes
+RowExclusive on every chunk of the hypertable instead of the run's own. Anything holding a
+conflicting lock on ANY chunk blocks a delete that has nothing to do with it. Two stalls that day
+on the same statement, with the worker and the API both idle and the pool at `11/11idle/0waiting`:
+**238,643 ms** on 32,698 rows (`BMS-…-00017`, analyze total 247 s) and **290,980 ms** on 154 rows
+(`WERKNL-acceptatie-combitest-00004`) — against **3,255 ms for 228,557 rows** on the same statement
+an hour earlier. Duration is uncorrelated with row count, so it is queueing, not work. v0.2.96.18
+bounds the wait at 30 s and times the three statements separately, so the next occurrence fails
+visibly and names which statement; it does **not** identify the holder. Two candidates remain
+unexcluded, neither visible in the worker or API logs: a second worker replica, and the TimescaleDB
+job scheduler (the 02:00 compression policy is the wrong time of day, but the 15 CAGG refresh
+policies are not). `perfana_compress_chunk` / `perfana_decompress_chunk` were ruled out for the
+worker itself — zero such log lines all day. Note this is on the hot path for a recurring class,
+not an edge case: **every aborted long test takes the rebuild path** (`tick !== final`), which is
+exactly what `BMS-…-00017` was — 9000 s planned, aborted at 1196 s.
+**What to do:** two independent steps. (1) Ask the deployment to set `log_lock_waits = on` and
+`deadlock_timeout = 1s` on its Postgres — it logs the blocking PID and its query, costs nothing
+when nothing waits, and is the only thing that names the holder. `docker-compose.infra.yml` is the
+local stack and does not reach that deploy, the same footgun as `max_worker_processes`. (2) Consider
+bounding the DELETE by the run's `[start_time, end_time]`, which would shrink the lock footprint
+from the whole hypertable to the run's chunks and would **not** defeat the segment drop (`time` is
+`compress_orderby`). That is not free and must not be done blind: a row outside the bounds would
+survive the delete, and two are known to land there — the scenario-level points written at
+`end_time`, and late-arriving Dynatrace rows (see `DYNATRACE_INGEST_LOOKBACK_MS`). Take the margin
+from the collector's step, not zero, and prove the bound against a run of each shape first. Same
+hazard and same reasoning as the stale-`ramp_up` item above; fix them together.
+
 ### Perf-test tick parity: three edges left open
 
 **Priority:** P3

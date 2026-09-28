@@ -885,6 +885,28 @@ export class WorkerDatabaseService implements OnModuleInit {
    * write stage visibly (tuple decompression limit) instead of filling the disk.
    */
   private static readonly MAX_DECOMPRESSED_CHUNKS = 8;
+  /**
+   * How long `deletePerfTestMetricsForRun`'s statements may WAIT FOR A LOCK. It bounds queueing
+   * only, never execution — a statement doing real work is unaffected however long it takes.
+   *
+   * `DELETE FROM ds_metrics WHERE test_run_id = $1` carries no time predicate, so it takes
+   * RowExclusive on every chunk of the hypertable rather than the run's own. Anything holding a
+   * conflicting lock on ANY chunk — `perfana_compress_chunk` (Exclusive), the columnstore
+   * policy, `drop_chunks`, DDL — therefore blocks a delete that has nothing to do with it.
+   * Observed on 2026-09-28: 238,643 ms on 32,698 rows and 290,980 ms on 154, against 3,255 ms
+   * for 228,557 rows on the same statement an hour earlier, with the worker and API both idle.
+   *
+   * 30 s matches `delete-test-run.handler.ts`. Timing out is the desired outcome: the stage
+   * fails visibly, `analyze.ts` rethrows, and the job's own retry policy (3 attempts,
+   * exponential from 5 s) re-runs it once the holder is gone. A silent multi-minute stall is
+   * what this replaces. It is deliberately NOT added to the 40001 retry below — a holder that
+   * outlasts 30 s will outlast a 1 s backoff too, and BullMQ is the right place to wait.
+   *
+   * ponytail: the budget is per lock acquisition, not cumulative across the chunks, so a table
+   * under steady chunk maintenance could trip on one chunk while otherwise progressing. Bound
+   * the DELETE by the run's time span if that shows up — see TODOS.md for why that is not free.
+   */
+  private static readonly DELETE_LOCK_TIMEOUT_MS = 30_000;
 
   /**
    * Decompress the chunks overlapping [from, to], one per transaction.
@@ -1094,8 +1116,15 @@ export class WorkerDatabaseService implements OnModuleInit {
     const hasRowsToPreserve = presentSourceTypes.some((t) => t !== 'performance_test');
 
     if (!hasRowsToPreserve) {
-      const result = await this.dataSource.query(`DELETE FROM ds_metrics WHERE test_run_id = $1`, [testRunId]);
-      return { deleted: Array.isArray(result) ? (result[1] ?? 0) : 0, restored: 0 };
+      // A transaction for a single statement, only so `SET LOCAL lock_timeout` has a scope to be
+      // local to. Session-level `SET` would leak the budget onto a pooled connection.
+      return await this.dataSource.transaction(async (manager) => {
+        await this.applyDeleteLockTimeout(manager);
+        const started = Date.now();
+        const result = await manager.query(`DELETE FROM ds_metrics WHERE test_run_id = $1`, [testRunId]);
+        this.logger.log(`deletePerfTestMetricsForRun(${testRunId}) timing: delete ${Date.now() - started}ms`);
+        return { deleted: Array.isArray(result) ? (result[1] ?? 0) : 0, restored: 0 };
+      });
     }
 
     // REPEATABLE READ, not the default READ COMMITTED: the CTAS below and the DELETE are
@@ -1104,6 +1133,13 @@ export class WorkerDatabaseService implements OnModuleInit {
     // exclude it is not an option — that is the non-segmentby predicate this whole method
     // exists to avoid. One snapshot turns that silent loss into a serialization error.
     return await this.dataSource.transaction('REPEATABLE READ', async (manager) => {
+      await this.applyDeleteLockTimeout(manager);
+
+      // Each statement is timed separately. The caller logs one aggregate, and when this method
+      // took 238,882 ms it was `SLOW_QUERY_MS` catching the DELETE by coincidence that told us
+      // which of the three had stalled. Three timings cost nothing and make that a given.
+      const copyStarted = Date.now();
+
       // CREATE TEMP TABLE ... AS SELECT * keeps ds_metrics' exact column order, so the
       // restore below can stay a bare `INSERT INTO ds_metrics SELECT *`. ON COMMIT DROP
       // ties its lifetime to this transaction — the connection is pooled and reused.
@@ -1125,14 +1161,38 @@ export class WorkerDatabaseService implements OnModuleInit {
         `SELECT count(*)::int AS n FROM ds_metrics_keep`
       );
       const restored = Number(keepCount?.[0]?.n ?? 0) || 0;
+      const copyMs = Date.now() - copyStarted;
 
+      const deleteStarted = Date.now();
       const deleteResult = await manager.query(`DELETE FROM ds_metrics WHERE test_run_id = $1`, [testRunId]);
       const deleted = Array.isArray(deleteResult) ? (deleteResult[1] ?? 0) : 0;
+      const deleteMs = Date.now() - deleteStarted;
 
+      const restoreStarted = Date.now();
       await manager.query(`INSERT INTO ds_metrics SELECT * FROM ds_metrics_keep`);
+
+      this.logger.log(
+        `deletePerfTestMetricsForRun(${testRunId}) timing: copy ${copyMs}ms, delete ${deleteMs}ms, ` +
+          `restore ${Date.now() - restoreStarted}ms`
+      );
 
       return { deleted: deleted - restored, restored };
     });
+  }
+
+  /**
+   * Bound how long the caller's statements queue for a lock. Separate from the per-statement
+   * timings only because both branches need it; see `DELETE_LOCK_TIMEOUT_MS` for why it exists.
+   *
+   * `SET LOCAL` reverts at commit or rollback, so it cannot follow the connection back into the
+   * pool. It is a `set_config(..., true)` rather than a literal `SET LOCAL` so the value stays a
+   * bind parameter, matching `setAggregationBudget` and the decompression transactions.
+   */
+  private async applyDeleteLockTimeout(manager: EntityManager): Promise<void> {
+    await manager.query('SELECT set_config($1, $2, true)', [
+      'lock_timeout',
+      String(WorkerDatabaseService.DELETE_LOCK_TIMEOUT_MS),
+    ]);
   }
 
   /**
