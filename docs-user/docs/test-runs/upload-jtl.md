@@ -3,7 +3,7 @@
 This lets you bring a JMeter `.jtl` result file into Perfana by hand, without wiring up the API. Use it for a one-off run, a quick experiment, or when you have a result file but no pipeline integration yet.
 
 **Before you start**
-- A JMeter result file in `.jtl` format.
+- A `.zip` archive holding your JMeter `.jtl` result file(s) — one folder per scenario if the test ran several. The upload takes the zip, not a bare `.jtl`, and caps at 100 MB.
 - The system, environment, and workload this run belongs to (you choose these in the dialog).
 
 **When to use this vs the API path**
@@ -20,7 +20,7 @@ This lets you bring a JMeter `.jtl` result file into Perfana by hand, without wi
    ![The Test Runs list with the Upload JTL button](../assets/test-runs-list.png)
    *Figure: the Upload JTL button on the Test Runs list.*
 
-3. **Choose your `.jtl` file** and fill in the run details (system, environment, workload) the dialog asks for.
+3. **Choose your `.zip` file** and fill in the run details (system, environment, workload) the dialog asks for.
    The file is staged and the run details are set.
    ![The Upload JTL dialog with a file picker and run-detail fields](../assets/upload-jtl-dialog.png)
    *Figure: the Upload JTL dialog.*
@@ -32,6 +32,7 @@ This lets you bring a JMeter `.jtl` result file into Perfana by hand, without wi
 Your JMeter run is in Perfana. Open it from the list to see results, and Perfana analyses it just like a run sent through the API.
 
 **Troubleshooting**
+- *"Could not read the zip archive" or "No .jtl files found in the zip archive"* — the upload has to be a zip, it has to arrive intact, and it has to contain at least one `.jtl`. A file that is not a zip, one truncated mid-upload, and a zip with nothing but other files in it all fail here. Re-zip the results and try again.
 - *Upload rejected or empty results* — the file is not a valid JMeter `.jtl`, or it is missing the columns Perfana needs. Re-export from JMeter and try again.
 - *Run shows no metrics from other sources* — uploading a `.jtl` brings in the load-test results only. Server-side metrics (Grafana, Dynatrace) are collected for runs sent during a live test, not for after-the-fact uploads.
 

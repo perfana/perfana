@@ -1818,6 +1818,36 @@ CLAUDE.md's Quick Start, so a fresh clone can run `npm run test` to green. Recov
 `docker exec perfana-postgres psql -U perfana -d postgres -c 'CREATE DATABASE perfana_test'` then
 `DB_NAME=perfana_test npm run migration:run`.
 
+### Two residues of the v0.2.96.21 Snyk sweep that nothing asserts
+
+**Priority:** P3
+**Origin:** /ship on `fix/snyk-critical-bumps` (2026-09-28), which cleared 3 criticals and most of
+59 highs on the `perfana-api` image.
+**Why:** both are cases where the fix lives in a file no check reads back.
+
+1. **`overrides.sharp: ^0.35.4` in the root `package.json` is a floor with no dependency behind
+   it.** sharp arrived only as `next`'s optional `next/image` dependency, is unused (Perfana
+   optimises no images), and was dropped from the tree — which also removed ~40 platform binaries
+   from the web image. The override stays because `next`'s `optionalDependencies` range still
+   admits the vulnerable 0.34.5, so a lockfile regen would pull it straight back. Nothing records
+   that: an override whose package appears nowhere in `dependencies` reads as dead config, and the
+   obvious cleanup ("no one depends on sharp, drop the override") silently reopens four highs. Same
+   shape as the `maplibre-gl` override, which at least has `plotly.js` declaring it.
+2. **typeorm 0.3.31's empty-`WHERE` throw is not pinned by a test.** The bump turns an unfiltered
+   `UPDATE`/`DELETE` from a write `QueryBuilder` into a `TypeORMError` instead of a whole-table
+   write — strictly safer, and the reason the bump is worth having. Every write-query call site
+   today passes a literal fragment or a required id, so none can reach it, but the guarantee is a
+   runtime behaviour of a transitive library with no assertion anywhere in this repo; a downgrade
+   or a resolution drift restores the silent whole-table write with nothing going red. Documented
+   in `apps/api/CODING_RULES.md`, "A write QueryBuilder must never reach an empty `WHERE`".
+
+**What to do:** for (1), the cheap version is a line in the `overrides` block's own documentation
+(there is none today) plus an entry in whatever dependency-hygiene check comes next — ideally a
+script that fails when an override's package is absent from every workspace's `dependencies` **and**
+absent from this allowlist of deliberate floors. For (2), one spec that builds a write
+`QueryBuilder` with an empty criteria object and asserts it throws; it belongs in `apps/api` next
+to the rule it guards, and it is ~10 lines.
+
 ---
 
 ## TimescaleDB continuous aggregates

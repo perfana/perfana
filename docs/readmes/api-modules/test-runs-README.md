@@ -19,7 +19,7 @@ Domain module for the full lifecycle of a performance test run — from init thr
 | DELETE | `/test-runs/:id` | Crud | Hard-delete a run |
 | POST | `/test/init` | Crud | Reserve a `testRunId` before a test starts |
 | POST | `/test` | Crud | Event-reporting endpoint (throttled 200 req/min) |
-| POST | `/test-runs/jtl-upload` | Crud | JTL zip upload — stub, wired in Phase 3 |
+| POST | `/test-runs/jtl-upload` | Crud | JTL zip upload (multipart, max 100 MB; one scenario folder per run). 400 when the file is not a readable zip or holds no `.jtl` entries |
 | GET | `/test-runs/baseline-candidates` | Analysis | Completed runs eligible for baseline comparison |
 | GET | `/test-runs/test-runs-after-changepoint` | Analysis | Runs after the most recent changepoint |
 | GET | `/test-runs/test-runs-more-recent-than` | Analysis | Runs newer than a given `baseTestRunId` |

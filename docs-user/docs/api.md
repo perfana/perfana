@@ -147,6 +147,10 @@ Upload JMeter `.jtl` results directly, as an alternative to streaming during the
 
 Response: `{ testRunId, scenarioCount, message }`.
 
+A file Perfana cannot read comes back as **400** with a message naming the problem — not a zip,
+a zip truncated in transit, or a zip with no `.jtl` files inside. Retry with a re-zipped archive;
+a 400 here is never worth retrying unchanged.
+
 ## Read results for a build gate
 
 The run record carries a **consolidated verdict**, so your pipeline can gate on a single
