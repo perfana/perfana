@@ -55,9 +55,11 @@ export function useConfigurationStatus(): UseConfigurationStatusReturn {
           );
           if (mappingsResponse.ok) {
             const mappings = await mappingsResponse.json();
+            // SERVICE only: the drill-downs this gates all open a Dynatrace service view,
+            // so a system mapped to hosts alone would offer a menu item that lands nowhere.
             setConfigurationStatus(prev => ({
               ...prev,
-              hasDynatrace: Array.isArray(mappings) && mappings.length > 0,
+              hasDynatrace: Array.isArray(mappings) && mappings.some((m: { entityType?: string }) => m.entityType === 'SERVICE'),
             }));
           }
         }

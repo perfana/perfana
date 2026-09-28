@@ -192,6 +192,12 @@ export function MetricSeriesCascade({
   useEffect(() => {
     const want = preselect.current;
     if (!want || selectedPanels.length > 0 || selectedDashboards.length === 0 || panelsFor.current !== dashboardsKey) return;
+    // A dashboard-only link (a Dynatrace host) names no panel: take them all.
+    if (want.panelId === undefined) {
+      if (panelOptions.length > 0) pickPanels([...panelOptions]);
+      else disarm();
+      return;
+    }
     // Compare folds the percentile RT panels onto the Avg one (collapsePerfRtPanels) —
     // a perf-test rule, so a Grafana panel that happens to be numbered 101 must not match.
     const keeper = rtKeeperPanelId(want.panelId);
@@ -204,8 +210,12 @@ export function MetricSeriesCascade({
   useEffect(() => {
     const want = preselect.current;
     if (!want || selectedPanels.length === 0 || seriesFor.current !== panelsKey) return;
-    const series = seriesOptions.find((s) => s.metricName === want.metricName);
-    if (series) setSelectedSeries([series]);
+    if (want.metricName === undefined) {
+      setSelectedSeries([...seriesOptions]);
+    } else {
+      const series = seriesOptions.find((s) => s.metricName === want.metricName);
+      if (series) setSelectedSeries([series]);
+    }
     disarm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesOptions]);

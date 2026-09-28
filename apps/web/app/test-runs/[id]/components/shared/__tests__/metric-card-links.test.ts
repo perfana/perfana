@@ -1,4 +1,4 @@
-import { buildCardLink, perfTestSeriesRef, readCardLinkPreselect } from '../metric-card-links';
+import { buildCardLink, dynatraceHostSeriesRef, perfTestSeriesRef, readCardLinkPreselect } from '../metric-card-links';
 
 describe('metric-card-links', () => {
   it('round-trips a series through the URL, encoding the awkward characters', () => {
@@ -28,14 +28,25 @@ describe('metric-card-links', () => {
     expect(readCardLinkPreselect(new URLSearchParams(), 'graphs')).toBeNull();
     expect(readCardLinkPreselect(without('dashboard'), 'graphs')).toBeNull();
     expect(readCardLinkPreselect(without('dashboard', ''), 'graphs')).toBeNull();
-    expect(readCardLinkPreselect(without('metric'), 'graphs')).toBeNull();
     expect(readCardLinkPreselect(without('metric', ''), 'graphs')).toBeNull();
     expect(readCardLinkPreselect(without('panel', '101.5'), 'graphs')).toBeNull();
-    // Number(null) and Number('') are 0 — an integer — so these need their own guard.
-    expect(readCardLinkPreselect(without('panel'), 'graphs')).toBeNull();
+    // Number('') is 0 — an integer — so this needs its own guard.
     expect(readCardLinkPreselect(without('panel', ''), 'graphs')).toBeNull();
+    // A named panel with no metric is "every series on that panel"; a named metric with no
+    // panel is a link nothing builds, so it is rejected rather than half-applied.
+    expect(readCardLinkPreselect(without('metric'), 'graphs')).toEqual({ dashboardLabel: 'd', panelId: 101 });
+    expect(readCardLinkPreselect(without('panel'), 'graphs')).toBeNull();
     // The full link still works, so the rejections above are not a broken fixture.
     expect(readCardLinkPreselect(new URLSearchParams(full), 'graphs')).toEqual({ dashboardLabel: 'd', panelId: 101, metricName: 'm' });
+  });
+
+  it('round-trips a dashboard-only link, which means every panel and every series', () => {
+    const ref = dynatraceHostSeriesRef('UWVA3VWPAPP0106');
+    expect(ref).toEqual({ dashboardLabel: 'Dynatrace host metrics UWVA3VWPAPP0106' });
+    const params = new URL(buildCardLink('WERKNL-00011', 'graphs', ref), 'http://x').searchParams;
+    expect(params.get('panel')).toBeNull();
+    expect(params.get('metric')).toBeNull();
+    expect(readCardLinkPreselect(params, 'graphs')).toEqual(ref);
   });
 
   it('names perf-test series the way the worker stores them', () => {

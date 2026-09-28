@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react';
+import { useParams } from 'next/navigation';
 import HostsOverviewTable from './HostsOverviewTable';
 
 const hosts = [
@@ -20,6 +21,23 @@ describe('HostsOverviewTable', () => {
     expect(screen.getByText('—')).toBeInTheDocument();       // HOST-B cpuAvg null
     expect(screen.getByText('2')).toBeInTheDocument();        // problem count chip
     expect(screen.getByText('healthy')).toBeInTheDocument();  // HOST-B no problems
+  });
+
+  it('opens the card links for the host\'s own dashboard, without drilling into the host', () => {
+    (useParams as jest.Mock).mockReturnValue({ id: 'WERKNL-00011' });
+    const onSelect = jest.fn();
+    render(<HostsOverviewTable hosts={hosts} rows={rows} loading={false} onSelectHost={onSelect} />);
+    fireEvent.click(screen.getByLabelText('Actions for web-1'));
+    // The menu button sits inside the clickable row; opening it must not drill down.
+    expect(onSelect).not.toHaveBeenCalled();
+    const href = screen.getByText('Open in Graphs').closest('a')?.getAttribute('href') ?? '';
+    const params = new URL(href, 'http://x').searchParams;
+    expect(params.get('card')).toBe('graphs');
+    expect(params.get('dashboard')).toBe('Dynatrace host metrics web-1');
+    // No panel/metric: the whole host dashboard, since its panel ids are minted per query.
+    expect(params.get('panel')).toBeNull();
+    expect(screen.getByText('Open in Compare')).toBeInTheDocument();
+    expect(screen.getByText('Open in Trends')).toBeInTheDocument();
   });
 
   it('calls onSelectHost with the entityId when a row is clicked', () => {

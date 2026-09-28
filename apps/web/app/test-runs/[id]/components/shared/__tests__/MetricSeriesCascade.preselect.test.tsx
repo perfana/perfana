@@ -127,3 +127,18 @@ it('preselects once: clearing and re-picking after the link has been applied sel
   expect(screen.getByText('Select a panel to see its series')).toBeInTheDocument();
   expect(fetchSeriesForPanels).toHaveBeenCalledTimes(1);
 });
+
+it('takes every panel and every series when the link names only a dashboard (a Dynatrace host)', async () => {
+  (useSearchParams as jest.Mock).mockReturnValue(
+    new URLSearchParams({ card: 'compare', dashboard: perf.dashboard_label }),
+  );
+  const { onAddSeries } = setup();
+
+  await waitFor(() => expect(fetchPanelsForDashboards).toHaveBeenCalledWith([perf], testRun, expect.anything()));
+  await waitFor(() => expect(fetchSeriesForPanels).toHaveBeenCalledWith([rtAvg, errPanel], testRun));
+  fireEvent.click(await screen.findByRole('button', { name: 'Add 4 series' }));
+  expect(onAddSeries).toHaveBeenCalledWith(expect.arrayContaining([
+    { dashboard: perf, panel: rtAvg, metricName: 'T01' },
+    { dashboard: perf, panel: errPanel, metricName: 'T02' },
+  ]));
+});

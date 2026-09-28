@@ -25,37 +25,48 @@ import { isPerformanceTestMetricsDashboard, parseRequestInfoFromMetric } from '.
 
 export type LinkableCard = 'graphs' | 'compare' | 'trends';
 
-/** What identifies one stored series across every card: the cascade matches on exactly these. */
+/**
+ * What identifies one stored series across every card: the cascade matches on exactly these.
+ * Omitting `panelId`/`metricName` means "the whole dashboard" — the cascade then picks every
+ * panel and every series it has. That is the only useful unit for a Dynatrace host, whose
+ * panel ids are minted per query and so cannot be named by a caller.
+ */
 export interface MetricSeriesRef {
   dashboardLabel: string;
-  panelId: number;
-  metricName: string;
+  panelId?: number;
+  metricName?: string;
 }
 
 export function buildCardLink(testRunId: string, card: LinkableCard, ref: MetricSeriesRef): string {
-  const q = new URLSearchParams({
-    card,
-    dashboard: ref.dashboardLabel,
-    panel: String(ref.panelId),
-    metric: ref.metricName,
-  });
+  const q = new URLSearchParams({ card, dashboard: ref.dashboardLabel });
+  if (ref.panelId !== undefined) q.set('panel', String(ref.panelId));
+  if (ref.metricName !== undefined) q.set('metric', ref.metricName);
   return `/test-runs/${encodeURIComponent(testRunId)}?${q.toString()}`;
 }
 
-/** The three URL params the cascade preselects from, or null when the link is for another card. */
+/** The URL params the cascade preselects from, or null when the link is for another card. */
 export function readCardLinkPreselect(
   params: { get(name: string): string | null },
   card: LinkableCard,
 ): MetricSeriesRef | null {
   if (params.get('card') !== card) return null;
   const dashboardLabel = params.get('dashboard');
+  if (!dashboardLabel) return null;
   const rawPanel = params.get('panel');
-  const metricName = params.get('metric');
-  // Number(null) and Number('') are 0, which would pass isInteger.
-  if (!dashboardLabel || !metricName || !rawPanel) return null;
+  const rawMetric = params.get('metric');
+  // Absent is "all"; present-but-empty or malformed is a broken link, not a wildcard.
+  if (rawPanel === null) return rawMetric === null ? { dashboardLabel } : null;
   const panelId = Number(rawPanel);
-  if (!Number.isInteger(panelId)) return null;
-  return { dashboardLabel, panelId, metricName };
+  // Number('') is 0, which would pass isInteger.
+  if (!rawPanel || !Number.isInteger(panelId)) return null;
+  if (rawMetric === null) return { dashboardLabel, panelId };
+  if (!rawMetric) return null;
+  return { dashboardLabel, panelId, metricName: rawMetric };
+}
+
+/** The dashboard a Dynatrace host's metrics hang off — mirrors hostDashboardLabel in the API. */
+export function dynatraceHostSeriesRef(hostDisplayName: string): MetricSeriesRef {
+  return { dashboardLabel: `Dynatrace host metrics ${hostDisplayName}` };
 }
 
 /**
@@ -98,7 +109,9 @@ export const LINKABLE_CARDS: readonly LinkableCard[] = CARD_ITEMS.map((c) => c.c
 export function OpenInCardMenuItems({ series, onClose }: { series: MetricSeriesRef | null; onClose: () => void }) {
   const params = useParams();
   const testRunId = typeof params?.id === 'string' ? params.id : '';
-  if (!series || !testRunId || !series.metricName) return null;
+  // An absent metric name means "every series on the dashboard"; an EMPTY one means the row
+  // has no target to link (the SLO table renders those as "Series N").
+  if (!series || !testRunId || !series.dashboardLabel || series.metricName === '') return null;
   return (
     <>
       {CARD_ITEMS.map(({ card, label, icon }) => (

@@ -80,7 +80,7 @@ export default function DynatraceSection({
         </Box>
       </Box>
 
-      {/* Subtabs for Queries and Entities */}
+      {/* Subtabs for Entities and Queries */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs
           value={activeSubTab}
@@ -88,14 +88,14 @@ export default function DynatraceSection({
           aria-label="dynatrace configuration sections"
         >
           <Tab
-            icon={<SearchIcon />}
-            label="Queries"
+            icon={<LinkIcon />}
+            label="Entities"
             id="dynatrace-subtab-0"
             aria-controls="dynatrace-subtabpanel-0"
           />
           <Tab
-            icon={<LinkIcon />}
-            label="Entities"
+            icon={<SearchIcon />}
+            label="Queries"
             id="dynatrace-subtab-1"
             aria-controls="dynatrace-subtabpanel-1"
           />
@@ -103,7 +103,7 @@ export default function DynatraceSection({
       </Box>
 
       {/* Content for Queries Tab */}
-      {activeSubTab === 0 && (
+      {activeSubTab === 1 && (
         <Box>
           <Box
             sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}
@@ -213,7 +213,7 @@ export default function DynatraceSection({
       )}
 
       {/* Content for Entities Tab */}
-      {activeSubTab === 1 && (
+      {activeSubTab === 0 && (
         <DynatraceDeeplinkSection
           systemId={systemId}
           systemName={systemName}
