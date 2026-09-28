@@ -5,9 +5,7 @@ import {
   Autocomplete,
   Box,
   Chip,
-  IconButton,
   InputAdornment,
-  Menu,
   Paper,
   Skeleton,
   Table,
@@ -20,11 +18,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SearchIcon from '@mui/icons-material/Search';
 import { HostOverviewRow } from '@/lib/dynatrace';
 import HostLabelChips from '@/components/HostLabelChips';
-import { OpenInCardMenuItems, dynatraceHostSeriesRef } from '../shared/metric-card-links';
+import HostCardLinksMenu from './HostCardLinksMenu';
 
 interface HostEntity {
   id: string;
@@ -63,7 +60,6 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [filter, setFilter] = useState('');
   const [labelFilter, setLabelFilter] = useState<string[]>([]);
-  const [menu, setMenu] = useState<{ anchorEl: HTMLElement; hostName: string } | null>(null);
 
   const byId = useMemo(() => new Map(rows.map((r) => [r.hostId, r])), [rows]);
 
@@ -229,14 +225,7 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
                     )}
                   </TableCell>
                   <TableCell padding="checkbox">
-                    <IconButton
-                      size="small"
-                      aria-label={`Actions for ${host.entityDisplayName}`}
-                      // The row itself drills down to the host; the menu must not.
-                      onClick={(e) => { e.stopPropagation(); setMenu({ anchorEl: e.currentTarget, hostName: host.entityDisplayName }); }}
-                    >
-                      <MoreVertIcon fontSize="small" />
-                    </IconButton>
+                    <HostCardLinksMenu hostDisplayName={host.entityDisplayName} />
                   </TableCell>
                 </TableRow>
               );
@@ -244,20 +233,6 @@ export default function HostsOverviewTable({ hosts, rows, loading, onSelectHost 
           </TableBody>
         </Table>
       </TableContainer>
-      <Menu
-        anchorEl={menu?.anchorEl ?? null}
-        open={Boolean(menu)}
-        onClose={() => setMenu(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-      >
-        {/* No panel/metric: a host's panel ids are minted per query, so the link opens the
-            whole "Dynatrace host metrics <host>" dashboard. */}
-        <OpenInCardMenuItems
-          series={menu ? dynatraceHostSeriesRef(menu.hostName) : null}
-          onClose={() => setMenu(null)}
-        />
-      </Menu>
     </Box>
   );
 }

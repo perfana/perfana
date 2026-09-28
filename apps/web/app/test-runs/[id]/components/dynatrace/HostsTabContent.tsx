@@ -6,6 +6,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { TestRun } from '@/types/test-runs';
 import { DynatraceConfig, fetchHostsOverview, HostOverviewRow } from '@/lib/dynatrace';
 import HostLabelChips from '@/components/HostLabelChips';
+import HostCardLinksMenu from './HostCardLinksMenu';
 import HostDetailPanel from './HostDetailPanel';
 import HostsOverviewTable from './HostsOverviewTable';
 
@@ -100,6 +101,7 @@ export default function HostsTabContent({ hostEntities, testRun, configs }: Host
             {selectedHost.entityDisplayName}
           </Typography>
           <HostLabelChips labels={selectedHost.labels} />
+          <HostCardLinksMenu hostDisplayName={selectedHost.entityDisplayName} />
         </Box>
         <HostDetailPanel
           host={selectedHost}

@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { useParams } from 'next/navigation';
 import HostsTabContent from './HostsTabContent';
 import { fetchHostsOverview } from '@/lib/dynatrace';
 
@@ -67,5 +68,15 @@ describe('HostsTabContent', () => {
     fireEvent.click(screen.getByRole('button', { name: /back to hosts/i }));
     await waitFor(() => expect(screen.getByText('web-1')).toBeInTheDocument());
     expect(screen.queryByText('detail-for-web-1')).not.toBeInTheDocument();
+  });
+
+  it('offers the card links from the detail header too', async () => {
+    (useParams as jest.Mock).mockReturnValue({ id: 'WERKNL-00011' });
+    render(<HostsTabContent hostEntities={hostEntities} testRun={testRun} configs={configs} />);
+
+    fireEvent.click(await screen.findByText('web-1'));
+    fireEvent.click(screen.getByLabelText('Actions for web-1'));
+    const href = screen.getByText('Open in Graphs').closest('a')?.getAttribute('href') ?? '';
+    expect(new URL(href, 'http://x').searchParams.get('dashboard')).toBe('Dynatrace host metrics web-1');
   });
 });

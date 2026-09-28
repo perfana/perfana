@@ -4,10 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.96.19] - 2026-09-28
+## [0.2.96.20] - 2026-09-28
 
 ### Added
-- **Open a Dynatrace host's metrics in the Graphs, Compare and Trends cards.** Every row of the Hosts tab now carries the same context menu the rest of the app uses. The links open that host's own dashboard with all of its panels and series already selected, since a host's panels are created per query and cannot be named in advance.
+- **Open a Dynatrace host's metrics in the Graphs, Compare and Trends cards.** Every row of the Hosts tab, and the header of a host's detail view, now carries the same context menu the rest of the app uses. The links open that host's own dashboard with all of its panels and series already selected, since a host's panels are created per query and cannot be named in advance.
 
 ### Changed
 - **Entities comes before Queries in a system's Dynatrace settings.** Entities are what you pick first — the queries hang off them.
