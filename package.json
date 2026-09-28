@@ -58,16 +58,19 @@
     "jws": "^3.2.3",
     "validator": "^13.15.22",
     "qs": "^6.14.0",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^4.3.2",
     "ioredis": "5.10.1",
     "basic-ftp": "^5.2.0",
     "axios": "^1.16.1",
     "ws": "^8.21.0",
     "webpack": "^5.104.1",
-    "multer": "^2.2.0",
+    "multer": "^2.4.0",
     "maplibre-gl": "^6.4.1",
     "@typescript-eslint/typescript-estree": {
       "minimatch": "^9.0.9"
-    }
+    },
+    "sharp": "^0.35.4",
+    "postcss": "^8.5.18",
+    "typeorm": "^0.3.31"
   }
 }
