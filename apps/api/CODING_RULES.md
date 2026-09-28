@@ -101,6 +101,33 @@ Guards live at `src/guards/`, not `src/common/guards/`:
 - **Generate**: `npm run migration:generate -- src/database/migrations/DescriptiveName`
 - **Transactions**: Use TypeORM `DataSource.transaction()` or `QueryRunner`
 
+### A write QueryBuilder must never reach an empty `WHERE`
+
+Since typeorm 0.3.31 (v0.2.96.21) `QueryBuilder` **throws** when the query type is
+`update`, `delete`, `soft-delete` or `restore` and the compiled where clause is empty or
+`1=1`:
+
+```js
+// typeorm/query-builder/QueryBuilder.js, new in 0.3.31 — absent in 0.3.30
+if (WRITE_QUERY_TYPES.includes(this.expressionMap.queryType) &&
+    this.expressionMap.wheres.length > 0 &&
+    (whereExpression.length === 0 || whereExpression === "1=1")) {
+    throw new TypeORMError(`Empty criteria(s) are not allowed for the ${...} operation.`);
+}
+```
+
+Before 0.3.31 the same builder silently emitted an **unfiltered** `UPDATE`/`DELETE` — the
+whole table. The throw is the safer behaviour and it is why the bump is worth having, but
+it is a runtime error, not a compile-time one, and no test in this repo pins it.
+
+Every write-query call site today passes either a literal SQL fragment with typed
+parameters (`'id = :id'`) or a required, already-validated id, so none of them can reach
+it. The rule for new code: if a write builder's `.where()` argument is **built** rather
+than literal — a spread object, a conditionally-assigned criteria variable, a
+`FindOptionsWhere` composed from optional filter fields — guard the empty case explicitly
+before calling `.execute()`. A filter object that happens to be `{}` is now a 500, where it
+used to be a deleted table.
+
 ### Ownership Columns
 
 All owned-resource entities include four ownership columns for RBAC:
