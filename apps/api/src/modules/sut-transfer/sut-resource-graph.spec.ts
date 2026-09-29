@@ -70,6 +70,21 @@ describe('SUT_RESOURCES', () => {
     expect(coreOnly.every((r: SutResource) => r.group === 'core' || r.group === 'shared')).toBe(true);
   });
 
+  // The bundle has to be self-consistent: grafana_dashboards.grafana_instance_id is
+  // NOT NULL and FKs to grafana_instances, but an artificial Dynatrace
+  // application_dashboard links a synthetic grafana_dashboards row while carrying
+  // grafana_instance_id NULL itself. Reaching instances only through
+  // ad.grafana_instance_id therefore ships a dashboard with no instance, and the
+  // import FK-violates on a Dynatrace-only SUT.
+  it('collects grafana_instances through grafana_dashboards as well as application_dashboards', () => {
+    const sql = SUT_RESOURCES.find((r) => r.table === 'grafana_instances')?.customSql;
+    expect(sql).toBeDefined();
+    expect(sql).toContain('JOIN application_dashboards ad ON ad.grafana_dashboard_id = gd.id');
+    expect(sql).toMatch(/\bUNION\b/);
+    // Whole-row UNION on grafana_instances would need an equality operator per column
+    expect(sql).not.toMatch(/UNION\s+SELECT\s+DISTINCT\s+gi\.\*/);
+  });
+
   it('selectResources preserves SUT_RESOURCES order', () => {
     const selected = selectResources({ includeOptional: true, includeRaw: true }).map((r) => r.table);
     const full = SUT_RESOURCES.map((r) => r.table);

@@ -20,12 +20,24 @@ export const SUT_RESOURCES: SutResource[] = [
   // Note: DISTINCT must apply to the real row (via a subquery), not to the
   // row_to_json() result — Postgres' plain `json` type has no equality
   // operator, so `SELECT DISTINCT row_to_json(t)` fails with error 42883.
+  // Two paths reach an instance, and the second is not optional. An artificial
+  // Dynatrace application_dashboard has grafana_instance_id NULL (see "An artificial
+  // Dynatrace dashboard is per-workload" in apps/api/CLAUDE.md) but still links the
+  // synthetic grafana_dashboards row below — whose own grafana_instance_id is NOT NULL
+  // and FKs here. Export only via ad.grafana_instance_id and a Dynatrace-only SUT ships
+  // that dashboard with no instance to hang it on, and the import FK-violates.
+  // `t.id IN (... UNION ...)` rather than a UNION of `gi.*`: unioning whole rows needs an
+  // equality operator on every column, the same 42883 trap the note above describes.
   { table: 'grafana_instances', filter: 'byReference', group: 'shared',
-    customSql: `SELECT row_to_json(t) AS r FROM (
-                  SELECT DISTINCT gi.* FROM grafana_instances gi
-                  JOIN application_dashboards ad ON ad.grafana_instance_id = gi.id
+    customSql: `SELECT row_to_json(t) AS r FROM grafana_instances t
+                WHERE t.id IN (
+                  SELECT ad.grafana_instance_id FROM application_dashboards ad
                   WHERE ad.system_under_test_id = $1
-                ) t` },
+                  UNION
+                  SELECT gd.grafana_instance_id FROM grafana_dashboards gd
+                  JOIN application_dashboards ad ON ad.grafana_dashboard_id = gd.id
+                  WHERE ad.system_under_test_id = $1
+                )` },
   { table: 'grafana_dashboards', filter: 'byReference', group: 'shared',
     customSql: `SELECT row_to_json(t) AS r FROM (
                   SELECT DISTINCT gd.* FROM grafana_dashboards gd
