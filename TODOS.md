@@ -975,6 +975,68 @@ string-interpolating it, at all four sites at once.
 
 ## Dynatrace
 
+### The Dynatrace disk latency unit is assumed, not verified
+
+**Priority:** P2
+**Origin:** Shipped as a deliberate assumption in `feat/dynatrace-copy-scope-and-disk-metrics`
+(2026-09-29, v0.2.96.22). Nothing reachable from this machine could answer it.
+**Why:** `HOST_METRICS` in `apps/api/src/modules/dynatrace/dynatrace.service.ts` declares
+`unit: 'ms'` for `builtin:host.disk.readTime` and `builtin:host.disk.writeTime`. That is a
+guess — Dynatrace has shipped both MilliSecond and MicroSecond descriptors for these across
+versions — and `infra/dynatrace-mock` stubs only `builtin:host.cpu.usage`, so there is no
+local fixture to check it against. If it is µs, every disk-latency axis and every SLO
+threshold expressed against those panels is off by 1000x, silently: the numbers render, they
+are just the wrong magnitude.
+**Why it is P2 and not P1:** the unit drives the axis suffix and the SLO threshold
+comparison, not collection. The stored values are whatever Dynatrace returned either way, so
+fixing the declaration later does not require re-collecting anything, and a user can already
+override it per query in the edit dialog.
+**What to do:** `GET /api/v2/metrics/builtin:host.disk.readTime` against a real tenant and
+read `unit` from the descriptor. Fix the two entries in `HOST_METRICS` if it says
+MicroSecond, and add the descriptor to the mock so the next person has a fixture. The
+`ponytail:` comment above the list names the same command.
+
+### The hosts overview table and report column still measure disk busyness
+
+**Priority:** P3
+**Origin:** Scoped out of `feat/dynatrace-copy-scope-and-disk-metrics` (2026-09-29,
+v0.2.96.22), which replaced `utilTime` everywhere else.
+**Why:** `fetchHostsOverview` / `fetchHostsReport` still fill their `disk` column from
+`builtin:host.disk.utilTime` — iostat's `%util`, which saturates at 100% on any device that
+services requests in parallel and then cannot distinguish 2x over capacity from 20x. The
+host-detail graphs and the collected queries moved to latency and IOPS in that version, so
+the table and the graphs beneath it now measure different things.
+**Why it is not just a one-line swap:** `DYNATRACE_HOST_COLUMNS` in
+`packages/shared/src/types/reports.types.ts` is persisted inside saved report section
+configs (`DynatraceHostsSectionOptions.columns`). Changing what the existing `disk` key
+*means* silently rewrites every stored template that selected it, with no signal to whoever
+built it.
+**What to do:** add new keys (`diskLatency`, `diskIops`) beside `disk` rather than
+redefining it, offer them in `DYNATRACE_HOST_COLUMN_OPTIONS`, and leave `disk` working for
+templates that already chose it. Decide separately whether to drop `disk` from
+`DEFAULT_DYNATRACE_HOST_COLUMNS` — it is not in the default set today, so this is
+lower-stakes than it looks.
+
+### `packages/shared/src/constants/dynatrace-metrics.ts` is dead and now actively wrong
+
+**Priority:** P4
+**Origin:** Found while replacing `utilTime` in `feat/dynatrace-copy-scope-and-disk-metrics`
+(2026-09-29, v0.2.96.22).
+**Why:** Nothing in the monorepo imports it — verified by grep across all apps and packages
+for `DYNATRACE_HOST_METRIC_PANEL_IDS`, `getDynatraceHostPanelId`,
+`DYNATRACE_METRIC_NAME_TEMPLATES`, `isDynatraceHostMetric` and
+`getDynatraceMetricClassification`, all zero hits outside the file itself. It documents
+panel ids 100-105, a USE classification table and metric-name templates for a host metric
+set Perfana no longer collects, and its comment on `DISK_UTILIZATION` ("high disk
+utilization indicates I/O bottleneck") is the misconception v0.2.96.22 removed. The risk is
+that someone finds it and treats it as the registry rather than `HOST_METRICS`.
+**What to do:** delete the file, its `export * from './dynatrace-metrics'` line in
+`packages/shared/src/constants/index.ts`, and the `"./constants/dynatrace-metrics"` key in
+`packages/shared/package.json`'s `exports` map — it is reachable both ways, so removing only
+one leaves it importable. Run `npm run check:workspace-exports` and `npx knip` after. If any
+of it turns out to be wanted, the USE classification table is the only part with content
+worth moving.
+
 ### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster
 
 **Priority:** P3
