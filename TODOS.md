@@ -1001,6 +1001,35 @@ produce identical rows. Existing rows need a backfill or the population stays mi
 spec case `forwards a NULL team_id unchanged — the API path never sets one` pins today's
 behaviour and should flip to asserting propagation.
 
+### `findDashboardByLabel` matches a label across every system and environment
+
+**Priority:** P2
+**Origin:** Documentation review during /ship on
+`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29). Pre-existing.
+**Why:** `apps/api/src/modules/dynatrace/dynatrace.repository.ts`:
+
+```ts
+async findDashboardByLabel(dashboardLabel: string) {
+  const result = await withRequestEm(this.queryRepo).findOne({
+    where: { dashboardLabel },
+    ...
+```
+
+No system, no environment, no workload — it returns the `applicationDashboardId` of the
+first `dynatrace_queries` row anywhere with that label. `createQuerySmart` uses it as its
+reuse arm, so a query created for system A / acceptatie can be handed system B / productie's
+artificial dashboard id purely because the labels match, and its metrics then land on the
+other scope's dashboard. Labels like `Dynatrace host metrics <hostname>` are exactly the ones
+that repeat across systems. RLS narrows the blast radius to rows the caller can see, which is
+why this has not been loud.
+**The contrast is now in the same function.** v0.2.96.23 changed the *fallback* beside it to
+`generateDynatraceDashboardUuid(systemUnderTestId, testEnvironment, dashboardLabel, workload)`
+— scoped to all four. The reuse arm is the only unscoped half left.
+**What to do:** scope the lookup to `(systemUnderTestId, testEnvironment, workload,
+dashboardLabel)`. At that point it returns exactly what the deterministic derive would
+compute, so the cleaner end state is deleting it and always deriving — check first whether any
+caller depends on picking up a dashboard created under a different workload.
+
 ### A Dynatrace query can be created against another organization's system
 
 **Priority:** P2
