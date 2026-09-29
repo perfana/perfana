@@ -117,6 +117,8 @@ export class DynatraceHostsRenderer {
       `<th style="${TH_TEXT}">Labels</th>`,
       has('cpu') ? `<th style="${TH_NUM}">CPU avg</th><th style="${TH_NUM}">CPU cores</th>` : '',
       has('memory') ? `<th style="${TH_NUM}">Memory avg</th><th style="${TH_NUM}">Memory total</th>` : '',
+      has('diskLatency') ? `<th style="${TH_NUM}">Disk read avg</th><th style="${TH_NUM}">Disk write avg</th>` : '',
+      has('diskIops') ? `<th style="${TH_NUM}">Disk read ops</th><th style="${TH_NUM}">Disk write ops</th>` : '',
       has('disk') ? `<th style="${TH_NUM}">Disk util avg</th>` : '',
       has('network') ? `<th style="${TH_NUM}">Network traffic avg</th>` : '',
       has('problems') ? `<th style="${TH_CENTER}">Problems</th>` : '',
@@ -128,6 +130,8 @@ export class DynatraceHostsRenderer {
         <td style="${TD}">${r.labels.map((l) => markerChip(l, 'info')).join(' ')}</td>
         ${has('cpu') ? `<td style="${TD_NUM}">${formatPercent(r.cpuAvg)}</td><td style="${TD_NUM}">${formatInt(r.cpuCores)}</td>` : ''}
         ${has('memory') ? `<td style="${TD_NUM}">${formatPercent(r.memAvg)}</td><td style="${TD_NUM}">${formatMetricValue(r.memoryTotal, 'bytes')}</td>` : ''}
+        ${has('diskLatency') ? `<td style="${TD_NUM}">${formatMetricValue(r.diskReadTimeAvg, 'ms')}</td><td style="${TD_NUM}">${formatMetricValue(r.diskWriteTimeAvg, 'ms')}</td>` : ''}
+        ${has('diskIops') ? `<td style="${TD_NUM}">${formatMetricValue(r.diskReadOpsAvg, 'iops')}</td><td style="${TD_NUM}">${formatMetricValue(r.diskWriteOpsAvg, 'iops')}</td>` : ''}
         ${has('disk') ? `<td style="${TD_NUM}">${formatPercent(r.diskAvg)}</td>` : ''}
         ${has('network') ? `<td style="${TD_NUM}">${r.networkAvg == null ? '—' : `${formatMetricValue(r.networkAvg, 'bytes')}/s`}</td>` : ''}
         ${has('problems') ? `<td style="${TD} text-align:center;">${this.problems(r)}</td>` : ''}

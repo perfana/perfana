@@ -89,7 +89,18 @@ export interface HostReportRow {
   memAvg?: number | null;
   /** Bytes. */
   memoryTotal?: number | null;
+  /**
+   * `builtin:host.disk.utilTime`, averaged across the host's disks. Kept for report
+   * templates that already selected the `disk` column; see DYNATRACE_HOST_COLUMNS for
+   * why it is a poor performance signal and what to use instead.
+   */
   diskAvg?: number | null;
+  /** Milliseconds, averaged across the host's disks — see the unit caveat on HOST_METRICS. */
+  diskReadTimeAvg?: number | null;
+  diskWriteTimeAvg?: number | null;
+  /** Operations per second, summed across the host's disks. */
+  diskReadOpsAvg?: number | null;
+  diskWriteOpsAvg?: number | null;
   /** Bytes per second, averaged over the window. */
   networkAvg?: number | null;
   problemCount?: number;

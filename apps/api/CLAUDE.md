@@ -405,11 +405,16 @@ Three residues:
 - **Hosts mapped before that version keep their `Disk Utilization` query** and do not gain
   the new ones. Nothing migrates them — an SLO or compare config may target that panel.
   Re-adding the host, or copying it to the scope, writes the new set.
-- **The hosts overview table and the Dynatrace hosts report section still have a `disk`
-  column, still fed by `utilTime`.** That column set is `DYNATRACE_HOST_COLUMNS` in
-  `packages/shared/src/types/reports.types.ts` and is persisted inside saved report section
-  configs, so changing what `disk` means there silently rewrites existing templates. Left
-  alone on purpose.
+- **The report's `disk` column still means `utilTime`, and must keep meaning it.**
+  `DYNATRACE_HOST_COLUMNS` in `packages/shared/src/types/reports.types.ts` is persisted
+  inside saved report section configs, so removing the key or redefining what it measures
+  silently rewrites every template that selected it — `pickColumns` drops anything outside
+  the whitelist, and a template left with nothing falls all the way back to the cpu+memory
+  default. `diskLatency` and `diskIops` were added **beside** it instead, each rendering a
+  read and a write column, and are what new sections should use. The card's Hosts tab
+  (`fetchHostsOverview`) has no disk column at all and never did.
+  `dynatrace-hosts-renderer.spec.ts` pins both halves (mutation-verified: deleting `'disk'`
+  from the list fails two cases).
 - **`packages/shared/src/constants/dynatrace-metrics.ts` still documents utilTime as *the*
   disk metric.** Nothing imports that file — it is dead — so it was not updated; read
   `HOST_METRICS` instead, and delete the constants file rather than "fixing" it.

@@ -1830,10 +1830,20 @@ export class DynatraceService {
         const avg = (metric: string, aggregation = 'avg') =>
           soft(metric, this.queryHostMetricAverages(baseUrl, config.apiToken, metric, entitySelector, from, to, proxyOpts, aggregation));
 
-        const [cpu, mem, disk, net, problems, props] = await Promise.all([
+        const [cpu, mem, disk, diskReadTime, diskWriteTime, diskReadOps, diskWriteOps, net, problems, props] = await Promise.all([
           wanted.has('cpu') ? avg('builtin:host.cpu.usage') : null,
           wanted.has('memory') ? avg('builtin:host.mem.usage') : null,
+          // `disk` is utilTime, kept only for templates that already selected it — see
+          // DYNATRACE_HOST_COLUMNS. diskLatency / diskIops are what to reach for.
           wanted.has('disk') ? avg('builtin:host.disk.utilTime') : null,
+          // queryHostMetricAverages splits by dt.entity.host ONLY, so the aggregation
+          // folds the host's disks for us: avg for a latency, sum for a rate. Averaging
+          // the ops would report a host doing 4000 IOPS on one volume and nothing on
+          // three others as 1000.
+          wanted.has('diskLatency') ? avg('builtin:host.disk.readTime') : null,
+          wanted.has('diskLatency') ? avg('builtin:host.disk.writeTime') : null,
+          wanted.has('diskIops') ? avg('builtin:host.disk.readOps', 'sum') : null,
+          wanted.has('diskIops') ? avg('builtin:host.disk.writeOps', 'sum') : null,
           // Same selector shape as the host detail page: this metric rejects :avg.
           wanted.has('network') ? avg('builtin:host.net.nic.traffic', '') : null,
           wanted.has('problems')
@@ -1852,6 +1862,14 @@ export class DynatraceService {
             ...(wanted.has('cpu') && { cpuAvg: cpu?.get(b.hostId) ?? null, cpuCores: p?.cpuCores ?? null }),
             ...(wanted.has('memory') && { memAvg: mem?.get(b.hostId) ?? null, memoryTotal: p?.memoryTotal ?? null }),
             ...(wanted.has('disk') && { diskAvg: disk?.get(b.hostId) ?? null }),
+            ...(wanted.has('diskLatency') && {
+              diskReadTimeAvg: diskReadTime?.get(b.hostId) ?? null,
+              diskWriteTimeAvg: diskWriteTime?.get(b.hostId) ?? null,
+            }),
+            ...(wanted.has('diskIops') && {
+              diskReadOpsAvg: diskReadOps?.get(b.hostId) ?? null,
+              diskWriteOpsAvg: diskWriteOps?.get(b.hostId) ?? null,
+            }),
             ...(wanted.has('network') && { networkAvg: net?.get(b.hostId) ?? null }),
             ...(wanted.has('problems') && { problemCount: pr?.count ?? 0, worstSeverity: pr?.worst ?? null }),
           });

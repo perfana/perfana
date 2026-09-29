@@ -26,6 +26,21 @@ describe('pickColumns', () => {
     expect(pickColumns(['bogus'])).toEqual(['cpu', 'memory']);
     expect(pickColumns(['network', 'cpu', 'x'])).toEqual(['cpu', 'network']);
   });
+
+  // The column list is persisted inside saved report section configs. Dropping 'disk'
+  // when v0.2.96.22 stopped collecting utilTime would have silently rewritten every
+  // template that selected it — the key falls out of the whitelist, and a template left
+  // with nothing else falls all the way back to the cpu+memory default.
+  it('keeps accepting the legacy disk column a stored template may hold', () => {
+    expect(pickColumns(['disk'])).toEqual(['disk']);
+    expect(pickColumns(['disk', 'problems'])).toEqual(['disk', 'problems']);
+  });
+
+  it('accepts the new disk columns and returns them in canonical order', () => {
+    expect(pickColumns(['problems', 'diskIops', 'diskLatency', 'cpu'])).toEqual([
+      'cpu', 'diskLatency', 'diskIops', 'problems',
+    ]);
+  });
 });
 
 describe('DynatraceHostsRenderer', () => {
@@ -64,6 +79,35 @@ describe('DynatraceHostsRenderer', () => {
     expect(html).not.toContain('CPU cores');
     expect(html).toContain('>2<');
     expect(html).toContain('healthy');
+  });
+
+  it('renders disk latency and IOPS as a read + write pair each', async () => {
+    dynatrace.fetchHostsReport.mockResolvedValueOnce([
+      {
+        hostId: 'HOST-1', displayName: 'web01', labels: [],
+        diskReadTimeAvg: 1.25, diskWriteTimeAvg: null,
+        diskReadOpsAvg: 420, diskWriteOpsAvg: 7.5,
+      },
+    ]);
+    const html = await renderer.renderDynatraceHostsSection(
+      section({ columns: ['diskLatency', 'diskIops'] }), testRun,
+    );
+
+    expect(dynatrace.fetchHostsReport).toHaveBeenCalledWith(
+      'sut', 'acc', 'load', testRun.startTime, testRun.endTime,
+      { hostIds: [], columns: ['diskLatency', 'diskIops'] },
+    );
+    expect(html).toContain('Disk read avg');
+    expect(html).toContain('Disk write avg');
+    expect(html).toContain('Disk read ops');
+    expect(html).toContain('Disk write ops');
+    expect(html).toContain('1.25 ms');
+    expect(html).toContain('420 io/s');
+    expect(html).toContain('7.5 io/s');
+    // A column asked for but unanswered is a dash, not a zero.
+    expect(html).toContain('-');
+    // The legacy utilTime column stays off unless it was asked for.
+    expect(html).not.toContain('Disk util avg');
   });
 
   it('shows an empty state when no hosts are mapped and a warning when Dynatrace fails', async () => {

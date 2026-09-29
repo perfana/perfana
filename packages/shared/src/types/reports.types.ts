@@ -193,9 +193,29 @@ export interface GraphsSectionOptions {
 
 /**
  * Columns a Dynatrace Hosts section can show. `cpu` and `memory` also bring the host's
- * CPU core count and total memory (from the entity properties) as a second column.
+ * CPU core count and total memory (from the entity properties) as a second column, and
+ * `diskLatency` / `diskIops` each bring a read and a write column.
+ *
+ * `disk` is `builtin:host.disk.utilTime` — iostat's `%util`, the share of wall-clock time
+ * a device had any request in flight. It saturates at 100% on any device that services
+ * requests in parallel (every SSD, every SAN volume) and then cannot distinguish 2x over
+ * capacity from 20x, which is why v0.2.96.22 dropped it from what Perfana collects per
+ * host. It is KEPT here, and must stay: this list is persisted inside saved report section
+ * configs (`DynatraceHostsSectionOptions.columns`), so removing the key or redefining what
+ * it measures silently rewrites every template that selected it. Prefer `diskLatency` and
+ * `diskIops` for anything new.
+ *
+ * Order is canonical — `pickColumns` renders in this order, not the order the config lists.
  */
-export const DYNATRACE_HOST_COLUMNS = ['cpu', 'memory', 'disk', 'network', 'problems'] as const;
+export const DYNATRACE_HOST_COLUMNS = [
+  'cpu',
+  'memory',
+  'diskLatency',
+  'diskIops',
+  'disk',
+  'network',
+  'problems',
+] as const;
 export type DynatraceHostColumn = (typeof DYNATRACE_HOST_COLUMNS)[number];
 export const DEFAULT_DYNATRACE_HOST_COLUMNS: readonly DynatraceHostColumn[] = ['cpu', 'memory'];
 

@@ -996,27 +996,6 @@ read `unit` from the descriptor. Fix the two entries in `HOST_METRICS` if it say
 MicroSecond, and add the descriptor to the mock so the next person has a fixture. The
 `ponytail:` comment above the list names the same command.
 
-### The hosts overview table and report column still measure disk busyness
-
-**Priority:** P3
-**Origin:** Scoped out of `feat/dynatrace-copy-scope-and-disk-metrics` (2026-09-29,
-v0.2.96.22), which replaced `utilTime` everywhere else.
-**Why:** `fetchHostsOverview` / `fetchHostsReport` still fill their `disk` column from
-`builtin:host.disk.utilTime` — iostat's `%util`, which saturates at 100% on any device that
-services requests in parallel and then cannot distinguish 2x over capacity from 20x. The
-host-detail graphs and the collected queries moved to latency and IOPS in that version, so
-the table and the graphs beneath it now measure different things.
-**Why it is not just a one-line swap:** `DYNATRACE_HOST_COLUMNS` in
-`packages/shared/src/types/reports.types.ts` is persisted inside saved report section
-configs (`DynatraceHostsSectionOptions.columns`). Changing what the existing `disk` key
-*means* silently rewrites every stored template that selected it, with no signal to whoever
-built it.
-**What to do:** add new keys (`diskLatency`, `diskIops`) beside `disk` rather than
-redefining it, offer them in `DYNATRACE_HOST_COLUMN_OPTIONS`, and leave `disk` working for
-templates that already chose it. Decide separately whether to drop `disk` from
-`DEFAULT_DYNATRACE_HOST_COLUMNS` — it is not in the default set today, so this is
-lower-stakes than it looks.
-
 ### `packages/shared/src/constants/dynatrace-metrics.ts` is dead and now actively wrong
 
 **Priority:** P4

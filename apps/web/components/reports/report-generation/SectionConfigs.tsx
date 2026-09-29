@@ -1067,7 +1067,12 @@ export function ErrorAnalysisConfigForm({ config, onChange, text, onTextChange, 
 export const DYNATRACE_HOST_COLUMN_OPTIONS: { key: DynatraceHostColumn; label: string; hint?: string }[] = [
   { key: 'cpu', label: 'CPU', hint: 'average usage + core count' },
   { key: 'memory', label: 'Memory', hint: 'average usage + total memory' },
-  { key: 'disk', label: 'Disk utilization' },
+  { key: 'diskLatency', label: 'Disk latency', hint: 'average read + write time' },
+  { key: 'diskIops', label: 'Disk IOPS', hint: 'read + write operations per second' },
+  // Kept for templates that already selected it. utilTime saturates at 100% on any
+  // device that services requests in parallel, so it cannot say how far past capacity
+  // a disk is — see DYNATRACE_HOST_COLUMNS.
+  { key: 'disk', label: 'Disk utilization', hint: 'busy time; prefer latency or IOPS' },
   { key: 'network', label: 'Network traffic' },
   { key: 'problems', label: 'Problems' },
 ];
