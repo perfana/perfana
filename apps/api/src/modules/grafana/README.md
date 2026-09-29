@@ -33,7 +33,7 @@ database 40 of 46 rows sit above 900000 and every one is a real dashboard. A
 `grafana_id >= 800000` test would classify the whole table as artificial. Use
 `grafana_json` and the `metrics_sources` join instead.
 
-Three things to know before writing code against this table:
+Four things to know before writing code against this table:
 
 - **`findAll`'s artificial-row filter is deliberately loose. Do not tighten
   it.** The `NOT EXISTS` on `metrics_sources.source_type != 'grafana'` is
@@ -49,6 +49,18 @@ Three things to know before writing code against this table:
   grafana-sync restore sweep), `grafana_json` is the reliable signal.
 - A dashboard `uid` is unique only *within* a Grafana instance, so a lookup by
   uid must also scope by `grafana_instance_id` — `remove()` included.
+- **The two tables disagree about `grafana_instance_id`, on purpose.** An
+  artificial `grafana_dashboards` row still carries one (the column is NOT NULL
+  and FKs to `grafana_instances`); the `application_dashboards` row above it
+  carries NULL as of v0.2.96.23, so a second workload's row can be written
+  without colliding on `uq_application_dashboards_unique`. Do not treat
+  `application_dashboards.grafana_instance_id` as a "is this Grafana?" test in
+  either direction, and note that `?grafanaInstanceId=…` on
+  `GET /grafana/application-dashboards` will not return artificial rows written
+  after that version (rows written before it keep whatever arbitrary instance
+  they were given; nothing backfills them). Rationale and the full reader list:
+  "An artificial Dynatrace dashboard is per-workload, but its unique constraint
+  is not" in `apps/api/CLAUDE.md`.
 
 The same rules govern the restore sweep in `apps/grafana-sync` — see
 `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md`.

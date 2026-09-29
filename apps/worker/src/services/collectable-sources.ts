@@ -31,9 +31,14 @@ import { NO_ANOMALY_DETECTION_MARKER } from '../constants/dashboard-tags.js';
  *
  * Plus the artificial `grafana_dashboards` placeholders, which are not Grafana dashboards
  * at all: `ensureArtificialDashboardExists` writes them so non-Grafana sources have
- * somewhere to hang their panels, and their `application_dashboards` rows carry a
- * `grafana_instance_id`, so they look like Grafana sources to anything reading only that
- * column.
+ * somewhere to hang their panels. The placeholder row's OWN `grafana_instance_id` is NOT
+ * NULL and names a real instance, so anything classifying by that column reads it as a
+ * Grafana source. Do not reach for the `application_dashboards` copy of the column as a
+ * substitute: the API leaves it NULL as of v0.2.96.23 and the worker's own writer never set
+ * it, so on that side the column says nothing either way (see "An artificial Dynatrace
+ * dashboard is per-workload, but its unique constraint is not" in apps/api/CLAUDE.md).
+ * `grafana_json IS NULL` is the test that holds for every artificial row however it was
+ * written, which is what the query below uses.
  */
 
 /** Ids of the `grafana_dashboards` rows that cannot yield Grafana data for a run. */

@@ -22,17 +22,24 @@ DynatraceModule
 
 ## Key Design Decisions
 
-### MetricsSource Replaces ApplicationDashboard
+### A query carries a MetricsSource *and* an artificial dashboard
 
-When a `DynatraceQuery` is created, the service automatically creates (or reuses) a `MetricsSource` row with `source_type='dynatrace'`. The MetricsSource ID becomes the `applicationDashboardId` on the query. This replaces the old pattern of creating fake Grafana dashboards for Dynatrace metrics.
+Creating a `DynatraceQuery` writes two things, and they are separate columns on the query row:
 
-### Smart UUID Reuse (`POST /dynatrace/query/smart`)
+- `metrics_source_id` — `ensureMetricsSourceExists` upserts one `MetricsSource` with `source_type='dynatrace'` per `(system, environment, workload, config)`. This is what the rest of the platform uses to tell a Dynatrace source from a Grafana one.
+- `application_dashboard_id` — `ensureArtificialDashboardExists` writes an *artificial* `grafana_dashboards` placeholder plus the `application_dashboards` row that points at it, so Dynatrace panels have somewhere to hang. These are not fake dashboards left over from an older design; the SLO dialog looks them up by uid and they are still required. See "`grafana_dashboards` is a mixed table" in the root `CLAUDE.md`.
 
-The smart endpoint checks whether a `MetricsSource` already exists for the given `dashboardLabel` + `systemUnderTestId` + `testEnvironment`. If one exists its UUID is reused, ensuring all queries under the same dashboard label share a single MetricsSource.
+### UUID reuse (`POST /dynatrace/query/smart`, `POST /dynatrace/query/bulk-import`)
+
+Both endpoints reuse one `application_dashboard_id` across every query under the same dashboard label. `findDashboardByLabel` looks for an existing `dynatrace_queries` row with that label and reuses its id.
+
+**When nothing matches, the id must be derived, never random.** The fallback is `generateDynatraceDashboardUuid(system, environment, label, workload)`. Since v0.2.96.23 the artificial `application_dashboards` row leaves `grafana_instance_id` NULL — which is what lets a second workload have its own row — and `ON CONFLICT (id) DO NOTHING` is then that insert's only dedupe. A `randomUUID()` here never matches the conflict target, so every call that missed the lookup inserted another dashboard row for the same logical dashboard, silently. Both endpoints used `randomUUID()` and were changed in that version. Full reasoning: "An artificial Dynatrace dashboard is per-workload, but its unique constraint is not" in `apps/api/CLAUDE.md`.
+
+Note what `findDashboardByLabel` actually matches: `where: { dashboardLabel }` on `dynatrace_queries`, with no system, environment or workload in the predicate. The reuse arm is therefore global across the table, while the derive arm is scoped to all four. Do not read the two as equivalent.
 
 ### HOST Entity Auto-Provisioning
 
-When an entity mapping is created for a `HOST` entity type, the controller automatically calls `createHostMetricQueries`, which creates four standard DQL queries (CPU, Memory, Disk, Network) and registers `ds_compare_config` rows for anomaly detection.
+When an entity mapping is created for a `HOST` entity type, the controller automatically calls `createHostMetricQueries`, which creates one DQL query per entry in `HOST_METRICS` (`dynatrace.service.ts`) and registers `ds_compare_config` rows for anomaly detection. As of v0.2.96.22 that is eight: CPU Usage, Memory Usage, Disk Read/Write Latency, Disk Read/Write Operations, Disk Queue Length and Network Traffic. `HOST_METRICS` is the single definition shared with the host-detail card — see "The host metric list has ONE definition" in `apps/api/CLAUDE.md`. Hosts mapped before v0.2.96.22 keep their old query set; nothing migrates them.
 
 ## REST Endpoints
 
@@ -53,8 +60,8 @@ When an entity mapping is created for a `HOST` entity type, the controller autom
 | `GET` | `/dynatrace/queries/metrics` | Panel titles for a specific dashboard (for SLO config) |
 | `GET` | `/dynatrace/queries/:id` | Get a single query |
 | `POST` | `/dynatrace/queries` | Create query |
-| `POST` | `/dynatrace/query/smart` | Create query with MetricsSource UUID reuse |
-| `POST` | `/dynatrace/query/bulk-import` | Bulk import queries |
+| `POST` | `/dynatrace/query/smart` | Create query, reusing one artificial dashboard id per label |
+| `POST` | `/dynatrace/query/bulk-import` | Bulk import queries (shares one dashboard id when asked) |
 | `PATCH` | `/dynatrace/queries/:id` | Update query |
 | `DELETE` | `/dynatrace/queries/:id` | Delete query |
 

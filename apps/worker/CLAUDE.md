@@ -975,9 +975,13 @@ Two switches say "this source is off", and the code that decided a source *exist
 (v0.2.95.12): `dynatrace_queries.enabled = false` (filtered by `DynatraceRepository` and the
 incremental collector, but not the scheduler) and the Grafana `no-anomaly-detection` tag (honoured by
 `createPanelDocuments`, which skips a tagged dashboard so it yields no `ds_panels`, but nowhere
-else). The artificial `grafana_dashboards` placeholders belong with them: they carry a
-`grafana_instance_id` on their `application_dashboards` row, so anything reading only that column
-mistakes them for Grafana dashboards.
+else). The artificial `grafana_dashboards` placeholders belong with them: the placeholder row's
+own `grafana_instance_id` is NOT NULL and names a real instance, so anything classifying by that
+column mistakes it for a Grafana dashboard. Do not swap in the `application_dashboards` copy of
+the column as the test — since v0.2.96.23 the API writes NULL there (and the worker's own writer
+never set it), so it says nothing either way; see "An artificial Dynatrace dashboard is
+per-workload, but its unique constraint is not" in [apps/api/CLAUDE.md](../api/CLAUDE.md).
+`grafana_json IS NULL` is the test that holds.
 
 **All three call sites now share `services/collectable-sources.ts`.** They used to answer "which
 sources exist" independently — the scheduler, `PipelineOrchestrator.removeOrphanedCollectionSources`

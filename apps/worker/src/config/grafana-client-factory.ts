@@ -9,6 +9,14 @@
  * This module builds a `GrafanaClient` for a given instance id (falling back to the
  * default singleton for legacy rows with a null instance id) and groups a batch of
  * panels by their owning instance so each group is queried against the right host.
+ *
+ * That fallback FAILS OPEN, and since v0.2.96.23 a NULL means one more thing than it used
+ * to: an artificial Dynatrace `application_dashboards` row, which is not a Grafana source
+ * at all (see "An artificial Dynatrace dashboard is per-workload, but its unique constraint
+ * is not" in apps/api/CLAUDE.md). This module reads that as "the default Grafana singleton",
+ * the opposite of `services/collectable-sources.ts`, which skips it. No production path
+ * feeds an artificial dashboard's panels in here today — one that did would ask a Grafana
+ * for a Dynatrace panel rather than error.
  */
 import type { Logger } from 'pino';
 import { GrafanaClient } from '@perfana/shared/services/grafana';
