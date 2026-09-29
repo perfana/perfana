@@ -15,6 +15,76 @@ interface HostPerformanceGraphsProps {
   hostDisplayName?: string;
 }
 
+type MetricKey = keyof HostMetricsResponse['metrics'];
+
+/**
+ * One chart per row of this list. A chart can draw several of the response's
+ * series — disk read and write belong on the same axis, and separating them
+ * would cost two charts to say one thing.
+ *
+ * The series are the same ones `HOST_METRICS` in the API collects, folded across
+ * every disk on the host. Before v0.2.96.22 this drew a single "Disk Utilization"
+ * chart from `metrics.disk[0]` — the FIRST of several per-disk series, labelled as
+ * if it were the host's. Keep reading `[0]` here only because each key now holds
+ * exactly one folded series by construction.
+ */
+const CHARTS: {
+  id: string;
+  title: string;
+  yAxisTitle: string;
+  ticksuffix: string;
+  series: { key: MetricKey; name: string; color: string }[];
+}[] = [
+  {
+    id: 'cpu_usage',
+    title: 'CPU Usage',
+    yAxisTitle: 'Usage (%)',
+    ticksuffix: '%',
+    series: [{ key: 'cpu', name: 'CPU Usage', color: '#1976d2' }],
+  },
+  {
+    id: 'memory_usage',
+    title: 'Memory Usage',
+    yAxisTitle: 'Usage (%)',
+    ticksuffix: '%',
+    series: [{ key: 'memory', name: 'Memory Usage', color: '#9c27b0' }],
+  },
+  {
+    id: 'disk_latency',
+    title: 'Disk Latency',
+    yAxisTitle: 'Latency (ms)',
+    ticksuffix: ' ms',
+    series: [
+      { key: 'diskReadTime', name: 'Read', color: '#ff9800' },
+      { key: 'diskWriteTime', name: 'Write', color: '#e91e63' },
+    ],
+  },
+  {
+    id: 'disk_iops',
+    title: 'Disk IOPS',
+    yAxisTitle: 'Operations (io/s)',
+    ticksuffix: ' io/s',
+    series: [
+      { key: 'diskReadOps', name: 'Read', color: '#ff9800' },
+      { key: 'diskWriteOps', name: 'Write', color: '#e91e63' },
+    ],
+  },
+  {
+    id: 'disk_queue_length',
+    title: 'Disk Queue Length',
+    yAxisTitle: 'Queued requests',
+    ticksuffix: '',
+    series: [{ key: 'diskQueueLength', name: 'Queue Length', color: '#795548' }],
+  },
+  {
+    id: 'network_traffic',
+    title: 'Network Traffic',
+    yAxisTitle: 'Traffic (Bytes/s)',
+    ticksuffix: ' B/s',
+    series: [{ key: 'network', name: 'Network Traffic', color: '#4caf50' }],
+  },
+];
+
 export default function HostPerformanceGraphs({
   metrics,
   startTime,
@@ -28,8 +98,8 @@ export default function HostPerformanceGraphs({
 
   // On the very first render these plots mount after the async metrics fetch and
   // after the lazy react-plotly chunk loads, so Plotly's first draw can measure
-  // the grid before it has its final width — leaving the 2x2 plots overlapping
-  // until an unrelated resize (e.g. switching host tabs) fixes them. autosize +
+  // the grid before it has its final width — leaving the plots overlapping until
+  // an unrelated resize (e.g. switching host tabs) fixes them. autosize +
   // useResizeHandler only relayout on a window resize, so dispatch one on mount.
   useEffect(() => {
     const nudge = () => window.dispatchEvent(new Event('resize'));
@@ -54,11 +124,16 @@ export default function HostPerformanceGraphs({
       mode: 'lines' as const,
       name,
       line: { color, width: 2 },
-      hovertemplate: `%{y:.2f}${unit}<extra></extra>`,
+      hovertemplate: `%{y:.2f}${unit}<extra>${name}</extra>`,
     };
   };
 
-  const createLayout = (title: string, yAxisTitle: string, ticksuffix: string) => {
+  const createLayout = (
+    title: string,
+    yAxisTitle: string,
+    ticksuffix: string,
+    showlegend: boolean,
+  ) => {
     return {
       title: {
         text: title,
@@ -89,7 +164,8 @@ export default function HostPerformanceGraphs({
       autosize: true,
       height: 300,
       hovermode: 'x unified' as const,
-      showlegend: false,
+      showlegend,
+      legend: { orientation: 'h' as const, y: -0.3, font: { color: textColor } },
     };
   };
 
@@ -100,18 +176,12 @@ export default function HostPerformanceGraphs({
     modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'],
     toImageButtonOptions: {
       format: 'png' as const,
-      filename: `${hostDisplayName || 'host'}_${metricName.toLowerCase().replace(/\s+/g, '_')}`,
+      filename: `${hostDisplayName || 'host'}_${metricName}`,
       height: 300,
       width: 1200,
       scale: 2
     },
   });
-
-  // Extract first data series from each metric category
-  const cpuData = metrics.metrics.cpu[0]?.dataPoints || [];
-  const memoryData = metrics.metrics.memory[0]?.dataPoints || [];
-  const diskData = metrics.metrics.disk[0]?.dataPoints || [];
-  const networkData = metrics.metrics.network[0]?.dataPoints || [];
 
   return (
     <Paper
@@ -133,7 +203,6 @@ export default function HostPerformanceGraphs({
         </Typography>
       </Box>
 
-      {/* 2x2 Grid of Graphs */}
       <Box
         sx={{
           display: 'grid',
@@ -141,73 +210,35 @@ export default function HostPerformanceGraphs({
           gap: 3,
         }}
       >
-        {/* CPU Usage */}
-        <Box>
-          {cpuData.length > 0 ? (
-            <Plot
-              data={[createPlotData(cpuData, 'CPU Usage', '#1976d2', '%')]}
-              layout={createLayout('CPU Usage', 'Usage (%)', '%')}
-              config={createPlotConfig('cpu_usage')}
-              style={{ width: '100%' }}
-              useResizeHandler={true}
-            />
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-              No CPU data available
-            </Box>
-          )}
-        </Box>
+        {CHARTS.map((chart) => {
+          const traces = chart.series
+            .map((s) => ({ ...s, points: metrics.metrics[s.key]?.[0]?.dataPoints ?? [] }))
+            .filter((s) => s.points.length > 0)
+            .map((s) => createPlotData(s.points, s.name, s.color, chart.ticksuffix));
 
-        {/* Memory Usage */}
-        <Box>
-          {memoryData.length > 0 ? (
-            <Plot
-              data={[createPlotData(memoryData, 'Memory Usage', '#9c27b0', '%')]}
-              layout={createLayout('Memory Usage', 'Usage (%)', '%')}
-              config={createPlotConfig('memory_usage')}
-              style={{ width: '100%' }}
-              useResizeHandler={true}
-            />
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-              No memory data available
+          return (
+            <Box key={chart.id}>
+              {traces.length > 0 ? (
+                <Plot
+                  data={traces}
+                  layout={createLayout(
+                    chart.title,
+                    chart.yAxisTitle,
+                    chart.ticksuffix,
+                    chart.series.length > 1,
+                  )}
+                  config={createPlotConfig(chart.id)}
+                  style={{ width: '100%' }}
+                  useResizeHandler={true}
+                />
+              ) : (
+                <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
+                  No {chart.title.toLowerCase()} data available
+                </Box>
+              )}
             </Box>
-          )}
-        </Box>
-
-        {/* Disk Utilization */}
-        <Box>
-          {diskData.length > 0 ? (
-            <Plot
-              data={[createPlotData(diskData, 'Disk Utilization', '#ff9800', '%')]}
-              layout={createLayout('Disk Utilization', 'Utilization (%)', '%')}
-              config={createPlotConfig('disk_utilization')}
-              style={{ width: '100%' }}
-              useResizeHandler={true}
-            />
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-              No disk data available
-            </Box>
-          )}
-        </Box>
-
-        {/* Network Traffic */}
-        <Box>
-          {networkData.length > 0 ? (
-            <Plot
-              data={[createPlotData(networkData, 'Network Traffic', '#4caf50', ' B/s')]}
-              layout={createLayout('Network Traffic', 'Traffic (Bytes/s)', ' B/s')}
-              config={createPlotConfig('network_traffic')}
-              style={{ width: '100%' }}
-              useResizeHandler={true}
-            />
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-              No network data available
-            </Box>
-          )}
-        </Box>
+          );
+        })}
       </Box>
     </Paper>
   );

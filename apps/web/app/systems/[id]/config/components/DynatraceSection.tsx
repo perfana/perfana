@@ -21,6 +21,7 @@ import {
   Upload as UploadIcon,
   Search as SearchIcon,
   Link as LinkIcon,
+  ContentCopy as CopyIcon,
 } from '@mui/icons-material';
 
 // Types
@@ -36,6 +37,8 @@ import ImportDashboardDialog from './ImportDashboardDialog';
 import AddDynatraceQueryDialog from './AddDynatraceQueryDialog';
 import EditDynatraceQueryDialog from './EditDynatraceQueryDialog';
 import DynatraceDeeplinkSection from './DynatraceDeeplinkSection';
+import { CopyToScopeDialog, type CopyTarget } from './shared/CopyToScopeDialog';
+import { copyDynatraceQueries } from '@/lib/api/config-copy';
 
 export default function DynatraceSection({
   systemId,
@@ -44,6 +47,8 @@ export default function DynatraceSection({
   selectedWorkload,
 }: DynatraceSectionProps) {
   const [activeSubTab, setActiveSubTab] = useState(0);
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [copySuccess, setCopySuccess] = useState<string | null>(null);
 
   // Use the custom hook for all query-related state and handlers
   const dynatraceQueries = useDynatraceQueries({
@@ -52,6 +57,24 @@ export default function DynatraceSection({
     selectedEnvironment,
     selectedWorkload,
   });
+
+  const handleCopyQueries = async (target: CopyTarget) => {
+    const selected = dynatraceQueries.selectedQueryIds;
+    const result = await copyDynatraceQueries({
+      sourceSystemUnderTestId: systemId,
+      sourceTestEnvironment: selectedEnvironment ?? '',
+      sourceWorkload: selectedWorkload ?? '',
+      targetSystemUnderTestId: target.systemUnderTestId,
+      targetTestEnvironment: target.testEnvironment,
+      targetWorkload: target.workload || (selectedWorkload ?? ''),
+      conflictStrategy: target.conflictStrategy,
+      ids: selected.size > 0 ? Array.from(selected) : undefined,
+    });
+    setCopySuccess(
+      `Copied ${result.copied} quer${result.copied === 1 ? 'y' : 'ies'}` +
+        (result.skipped > 0 ? `, skipped ${result.skipped} existing` : ''),
+    );
+  };
 
   if (!selectedEnvironment || !selectedWorkload) {
     return (
@@ -117,6 +140,18 @@ export default function DynatraceSection({
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', gap: 1 }}>
+              {dynatraceQueries.queries.length > 0 && (
+                <Button
+                  variant="outlined"
+                  startIcon={<CopyIcon />}
+                  onClick={() => setCopyDialogOpen(true)}
+                  disabled={dynatraceQueries.loading}
+                >
+                  {dynatraceQueries.selectedQueryIds.size > 0
+                    ? `Copy ${dynatraceQueries.selectedQueryIds.size} to...`
+                    : 'Copy to...'}
+                </Button>
+              )}
               <Button
                 variant="outlined"
                 startIcon={<UploadIcon />}
@@ -139,6 +174,12 @@ export default function DynatraceSection({
           {dynatraceQueries.error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {dynatraceQueries.error}
+            </Alert>
+          )}
+
+          {copySuccess && (
+            <Alert severity="success" sx={{ mb: 2 }} onClose={() => setCopySuccess(null)}>
+              {copySuccess}
             </Alert>
           )}
 
@@ -254,6 +295,27 @@ export default function DynatraceSection({
         query={dynatraceQueries.editingQuery}
         loading={dynatraceQueries.editLoading}
         submitError={dynatraceQueries.actionError}
+      />
+
+      {/* Copy to Scope Dialog */}
+      <CopyToScopeDialog
+        open={copyDialogOpen}
+        onClose={() => setCopyDialogOpen(false)}
+        onCopy={handleCopyQueries}
+        currentScope={{
+          systemId,
+          systemName,
+          environment: selectedEnvironment,
+          workload: selectedWorkload,
+        }}
+        itemCount={dynatraceQueries.queries.length}
+        selectedCount={
+          dynatraceQueries.selectedQueryIds.size > 0
+            ? dynatraceQueries.selectedQueryIds.size
+            : undefined
+        }
+        itemType="Dynatrace queries"
+        supportsWorkload={true}
       />
 
       {/* Delete Confirmation Dialog */}

@@ -5,6 +5,7 @@ import { UpdateDynatraceConfigDto } from './dto/update-dynatrace-config.dto';
 import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
 import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
+import { CopyDynatraceDto, CopyResult } from './dto/copy-dynatrace.dto';
 import { HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, HostOverviewRow, HostReportRow, TimeSeriesData } from './dto/host.dto';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
@@ -36,6 +37,53 @@ function worseSeverity(current: string | null, candidate: string | null): string
   if (!candidate) return current;
   if (!current) return candidate;
   return (DT_SEVERITY_RANK[candidate] ?? -1) > (DT_SEVERITY_RANK[current] ?? -1) ? candidate : current;
+}
+
+/**
+ * The host metrics Perfana collects for a mapped HOST, and the exact same ones the
+ * Dynatrace card's host detail draws. ONE list, because a stored query and the live
+ * graph diverging is invisible until someone compares two screens: the card and the
+ * collected series carried the same disk selector for a year and still disagreed,
+ * because the card silently plotted only the first of several per-disk series.
+ *
+ * `transform` is everything after the host filter. Two rules behind the values:
+ *
+ * - Every `builtin:host.disk.*` metric carries a `dt.entity.disk` dimension, so it
+ *   returns one series PER DISK unless an explicit `splitBy()` folds them. These
+ *   queries are meant as a host-level summary, so they all fold; a user who wants
+ *   one disk can edit the query, or drop the `splitBy()` to get them all back.
+ * - Latencies average across disks, counts sum. Averaging IOPS across disks would
+ *   report a host doing 4000 IOPS on one volume and nothing on three others as 1000.
+ *
+ * Disk utilization time (`builtin:host.disk.utilTime`) is deliberately NOT here. It
+ * is the fraction of wall-clock time a device had at least one request in flight —
+ * iostat's %util — which saturates at 100% on any device that services requests in
+ * parallel (every SSD, every SAN volume) and then cannot distinguish 2x over
+ * capacity from 20x. Latency and IOPS are what move with load.
+ *
+ * ponytail: the two latency units are ASSUMED to be milliseconds. Dynatrace has
+ * shipped both ms and µs for these across versions and the local mock only stubs
+ * cpu.usage, so this is unverified — confirm with
+ * `GET /api/v2/metrics/builtin:host.disk.readTime` against a real tenant and fix
+ * `unit` here if it says MicroSecond. It only affects the axis suffix; a user can
+ * also change it per query in the edit dialog.
+ */
+const HOST_METRICS = [
+  { key: 'cpu', name: 'CPU Usage', metric: 'builtin:host.cpu.usage', transform: 'avg', unit: 'percent' },
+  { key: 'memory', name: 'Memory Usage', metric: 'builtin:host.mem.usage', transform: 'avg', unit: 'percent' },
+  { key: 'diskReadTime', name: 'Disk Read Latency', metric: 'builtin:host.disk.readTime', transform: 'splitBy():avg', unit: 'ms' },
+  { key: 'diskWriteTime', name: 'Disk Write Latency', metric: 'builtin:host.disk.writeTime', transform: 'splitBy():avg', unit: 'ms' },
+  { key: 'diskReadOps', name: 'Disk Read Operations', metric: 'builtin:host.disk.readOps', transform: 'splitBy():sum', unit: 'iops' },
+  { key: 'diskWriteOps', name: 'Disk Write Operations', metric: 'builtin:host.disk.writeOps', transform: 'splitBy():sum', unit: 'iops' },
+  { key: 'diskQueueLength', name: 'Disk Queue Length', metric: 'builtin:host.disk.queueLength', transform: 'splitBy():sum', unit: 'none' },
+  // Network traffic rejects :avg; splitBy() alone folds the NICs and leaves the
+  // metric's own default aggregation to do the rest.
+  { key: 'network', name: 'Network Traffic', metric: 'builtin:host.net.nic.traffic', transform: 'splitBy()', unit: 'bytes' },
+] as const satisfies readonly { key: keyof HostMetricsResponse['metrics']; name: string; metric: string; transform: string; unit: string }[];
+
+/** The metric selector for one HOST_METRICS entry, scoped to a single host. */
+function hostMetricSelector(spec: { metric: string; transform: string }, hostId: string): string {
+  return `${spec.metric}:filter(eq("dt.entity.host","${hostId}")):${spec.transform}`;
 }
 
 /**
@@ -1476,38 +1524,17 @@ export class DynatraceService {
     const from = startTime.toISOString();
     const to = endTime.toISOString();
 
-    // Define metric selectors for host metrics
-    const metrics = [
-      {
-        name: 'CPU Usage',
-        selector: `builtin:host.cpu.usage:filter(eq("dt.entity.host","${hostId}")):avg`,
-        unit: 'percent',
-        key: 'cpu' as const
-      },
-      {
-        name: 'Memory Usage',
-        selector: `builtin:host.mem.usage:filter(eq("dt.entity.host","${hostId}")):avg`,
-        unit: 'percent',
-        key: 'memory' as const
-      },
-      {
-        name: 'Disk Utilization',
-        selector: `builtin:host.disk.utilTime:filter(eq("dt.entity.host","${hostId}")):avg`,
-        unit: 'percent',
-        key: 'disk' as const
-      },
-      {
-        name: 'Network Traffic',
-        // Network traffic doesn't support :avg aggregation, use :splitBy() to get raw values
-        selector: `builtin:host.net.nic.traffic:filter(eq("dt.entity.host","${hostId}")):splitBy()`,
-        unit: 'bytes',
-        key: 'network' as const
-      },
-    ];
+    // Same list the stored collection queries are built from — see HOST_METRICS.
+    const metrics = HOST_METRICS.map((spec) => ({
+      ...spec,
+      selector: hostMetricSelector(spec, hostId),
+    }));
 
     const result: HostMetricsResponse = {
       entityId: hostId,
-      metrics: { cpu: [], memory: [], disk: [], network: [] },
+      metrics: Object.fromEntries(
+        HOST_METRICS.map((spec) => [spec.key, [] as TimeSeriesData[]]),
+      ) as unknown as HostMetricsResponse['metrics'],
     };
 
     const proxyOpts = await this.proxyOpts(config);
@@ -1986,15 +2013,7 @@ export class DynatraceService {
       workload
     );
 
-    const metrics = [
-      { name: 'CPU Usage', selector: 'builtin:host.cpu.usage', unit: 'percent', aggregation: 'avg' },
-      { name: 'Memory Usage', selector: 'builtin:host.mem.usage', unit: 'percent', aggregation: 'avg' },
-      { name: 'Disk Utilization', selector: 'builtin:host.disk.utilTime', unit: 'percent', aggregation: 'avg' },
-      // Network traffic doesn't support :avg aggregation, use :splitBy() to get raw values
-      { name: 'Network Traffic', selector: 'builtin:host.net.nic.traffic', unit: 'bytes', aggregation: 'splitBy()' },
-    ];
-
-    this.logger.log(`Creating ${metrics.length} metric queries for host ${hostDisplayName} (${hostId})`, {
+    this.logger.log(`Creating ${HOST_METRICS.length} metric queries for host ${hostDisplayName} (${hostId})`, {
       dynatraceConfigId,
       systemUnderTestId,
       testEnvironment,
@@ -2023,7 +2042,7 @@ export class DynatraceService {
     // Create all metric queries with the same dashboard ID
     // Panel title is the metric name (CPU Usage, Memory Usage, etc.)
     const results = [];
-    for (const metric of metrics) {
+    for (const metric of HOST_METRICS) {
       try {
         this.logger.log(`Creating query for metric: ${metric.name} on host ${hostDisplayName}`);
         const result = await this.createQuery({
@@ -2034,7 +2053,7 @@ export class DynatraceService {
           dashboardLabel,
           applicationDashboardId,
           panelTitle: metric.name,  // Metric name as panel title (CPU Usage, etc.)
-          query: `${metric.selector}:filter(eq("dt.entity.host","${hostId}")):${metric.aggregation}`,
+          query: hostMetricSelector(metric, hostId),
           metricUnit: metric.unit,
           metricName: metric.name,  // Explicit metric name (CPU Usage, etc.)
         }, userId, roles);
@@ -2049,7 +2068,7 @@ export class DynatraceService {
           applicationDashboardId,
           result.panelId,
           metric.name,
-          metric.selector
+          metric.metric,
         );
         this.logger.log(`Created ds_compare_config for ${metric.name}`);
       } catch (error) {
@@ -2060,5 +2079,225 @@ export class DynatraceService {
     }
 
     this.logger.log(`Successfully created ${results.length} metric queries for host ${hostDisplayName}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Copy to another scope
+  // ---------------------------------------------------------------------------
+
+  /**
+   * A Dynatrace query and an entity mapping both carry the Dynatrace connection
+   * they were made against. Copying them into a system that belongs to another
+   * organisation would leave rows pointing at a connection that org cannot see,
+   * so both copy paths refuse it up front rather than writing half of it.
+   *
+   * Returns the target system's organisation id. RLS scopes the lookup, so a
+   * system the caller cannot see is indistinguishable from one that is gone.
+   */
+  private async requireCopyTargetOrg(
+    targetSystemUnderTestId: string,
+    sourceOrgIds: Set<string | undefined>,
+  ): Promise<string> {
+    const targetOrgId = await this.repository.getSystemOrganizationId(targetSystemUnderTestId);
+    if (!targetOrgId) {
+      throw new NotFoundException(`System under test with ID ${targetSystemUnderTestId} not found`);
+    }
+    for (const orgId of sourceOrgIds) {
+      if (orgId && orgId !== targetOrgId) {
+        throw new BadRequestException(
+          'The Dynatrace connection behind these items belongs to a different organization than the target system',
+        );
+      }
+    }
+    return targetOrgId;
+  }
+
+  /**
+   * Copy Dynatrace queries into another system / environment / workload.
+   *
+   * The target gets its own artificial dashboard: `applicationDashboardId` is
+   * re-derived from the target scope, never carried over, or the copied queries
+   * would write their metrics onto the source's dashboard.
+   *
+   * Conflict key is `dashboardLabel` + `panelTitle` — the pair a user sees in the
+   * Queries tab.
+   */
+  async copyQueries(dto: CopyDynatraceDto, userId: string, roles: string[]): Promise<CopyResult> {
+    let sourceQueries = await this.repository.findQueryBySystemAndEnvironment(
+      dto.sourceSystemUnderTestId,
+      dto.sourceTestEnvironment,
+      dto.sourceWorkload,
+    );
+    if (dto.ids && dto.ids.length > 0) {
+      const idSet = new Set(dto.ids);
+      sourceQueries = sourceQueries.filter((q) => idSet.has(q.id));
+    }
+
+    const total = sourceQueries.length;
+    if (total === 0) return { copied: 0, skipped: 0, total: 0 };
+
+    await this.requireCopyTargetOrg(
+      dto.targetSystemUnderTestId,
+      new Set(sourceQueries.map((q) => q.organizationId)),
+    );
+
+    const existing = await this.repository.findQueryBySystemAndEnvironment(
+      dto.targetSystemUnderTestId,
+      dto.targetTestEnvironment,
+      dto.targetWorkload,
+    );
+    const existingByKey = new Map(existing.map((q) => [`${q.dashboardLabel}\u0000${q.panelTitle}`, q]));
+
+    let copied = 0;
+    let skipped = 0;
+
+    for (const source of sourceQueries) {
+      const conflict = existingByKey.get(`${source.dashboardLabel}\u0000${source.panelTitle}`);
+      if (conflict && dto.conflictStrategy === 'skip') {
+        skipped++;
+        continue;
+      }
+
+      const payload = {
+        query: source.query,
+        matchMetricPattern: source.matchMetricPattern,
+        omitGroupByVariableFromMetricName: source.omitGroupByVariableFromMetricName,
+        templateVariables: source.templateVariables,
+        metricUnit: source.metricUnit,
+        metricName: source.metricName,
+        enabled: source.enabled,
+      };
+
+      if (conflict) {
+        await this.updateQuery(conflict.id, payload, userId, roles);
+        copied++;
+        continue;
+      }
+
+      await this.createQuery(
+        {
+          ...payload,
+          dynatraceConfigId: source.dynatraceConfigId,
+          systemUnderTestId: dto.targetSystemUnderTestId,
+          testEnvironment: dto.targetTestEnvironment,
+          workload: dto.targetWorkload,
+          dashboardLabel: source.dashboardLabel,
+          applicationDashboardId: this.repository.generateDynatraceDashboardUuid(
+            dto.targetSystemUnderTestId,
+            dto.targetTestEnvironment,
+            source.dashboardLabel,
+            dto.targetWorkload,
+          ),
+          panelTitle: source.panelTitle,
+        },
+        userId,
+        roles,
+      );
+      copied++;
+    }
+
+    this.logger.log(`Copied ${copied} Dynatrace queries, skipped ${skipped} of ${total} total`);
+    return { copied, skipped, total };
+  }
+
+  /**
+   * Copy Dynatrace entity mappings into another system / environment / workload.
+   *
+   * A HOST mapping is not useful on its own — the four metric queries created
+   * beside it are what actually collect anything — so a copied HOST gets them
+   * too, exactly as adding the host by hand would. That is skipped when the
+   * target dashboard already holds queries, so a repeated copy does not
+   * duplicate them.
+   *
+   * Each mapping keeps its own `level`: a system-level mapping stays
+   * system-level in the target (no environment, no workload).
+   */
+  async copyEntityMappings(dto: CopyDynatraceDto, userId: string, roles: string[]): Promise<CopyResult> {
+    let sourceMappings = await this.repository.getEntityMappings(
+      dto.sourceSystemUnderTestId,
+      dto.sourceTestEnvironment,
+      dto.sourceWorkload,
+    );
+    if (dto.ids && dto.ids.length > 0) {
+      const idSet = new Set(dto.ids);
+      sourceMappings = sourceMappings.filter((m) => idSet.has(m.id));
+    }
+
+    const total = sourceMappings.length;
+    if (total === 0) return { copied: 0, skipped: 0, total: 0 };
+
+    await this.requireCopyTargetOrg(
+      dto.targetSystemUnderTestId,
+      new Set(sourceMappings.map((m) => m.organizationId)),
+    );
+
+    const existing = await this.repository.getEntityMappings(
+      dto.targetSystemUnderTestId,
+      dto.targetTestEnvironment,
+      dto.targetWorkload,
+    );
+
+    let copied = 0;
+    let skipped = 0;
+
+    for (const source of sourceMappings) {
+      // The unique index is (system, environment, workload, entity) with NULLs
+      // collapsed to '', so the conflict key has to be scoped the same way.
+      const testEnvironment = source.level === 'sut' ? undefined : dto.targetTestEnvironment;
+      const workload =
+        source.level === 'sut' || source.level === 'sut_testenv' ? undefined : dto.targetWorkload;
+
+      const conflict = existing.find(
+        (m) =>
+          m.entityId === source.entityId &&
+          (m.testEnvironment ?? undefined) === testEnvironment &&
+          (m.workload ?? undefined) === workload,
+      );
+      if (conflict) {
+        skipped++;
+        continue;
+      }
+
+      await this.createEntityMapping(
+        {
+          dynatraceConfigId: source.dynatraceConfigId,
+          systemUnderTestId: dto.targetSystemUnderTestId,
+          testEnvironment,
+          workload,
+          entityId: source.entityId,
+          entityDisplayName: source.entityDisplayName,
+          entityType: source.entityType,
+          level: source.level as CreateEntityMappingDto['level'],
+          labels: source.labels ?? [],
+        },
+        userId,
+        roles,
+      );
+      copied++;
+
+      if (source.entityType === 'HOST' && testEnvironment && workload) {
+        const applicationDashboardId = this.repository.generateDynatraceDashboardUuid(
+          dto.targetSystemUnderTestId,
+          testEnvironment,
+          hostDashboardLabel(source.entityDisplayName),
+          workload,
+        );
+        if ((await this.repository.countQueriesForDashboard(applicationDashboardId)) === 0) {
+          await this.createHostMetricQueries(
+            source.dynatraceConfigId,
+            dto.targetSystemUnderTestId,
+            testEnvironment,
+            workload,
+            source.entityId,
+            source.entityDisplayName,
+            userId,
+            roles,
+          );
+        }
+      }
+    }
+
+    this.logger.log(`Copied ${copied} Dynatrace entity mappings, skipped ${skipped} of ${total} total`);
+    return { copied, skipped, total };
   }
 }

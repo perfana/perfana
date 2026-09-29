@@ -96,6 +96,8 @@ describe('DynatraceService', () => {
     deleteHostMetricQueries: jest.fn().mockResolvedValue(0),
     updateEntityMappingLabels: jest.fn(),
     getDistinctEntityLabels: jest.fn(),
+    getSystemOrganizationId: jest.fn().mockResolvedValue('org-123'),
+    countQueriesForDashboard: jest.fn().mockResolvedValue(0),
   });
 
   beforeEach(async () => {
@@ -2023,6 +2025,223 @@ describe('DynatraceService', () => {
       expect(rows).toEqual([
         { hostId: 'HOST-B', displayName: 'web-2', labels: [], cpuAvg: null, cpuCores: 2, problemCount: 0, worstSeverity: null },
       ]);
+    });
+  });
+
+  describe('Host metric parity and copy-to-scope', () => {
+    const hostSpec = {
+      dynatraceConfigId: 'config-123',
+      systemUnderTestId: 'sys-123',
+      testEnvironment: 'production',
+      workload: 'load-test',
+    };
+
+    beforeEach(() => {
+      repository.findById.mockResolvedValue(mockDynatraceConfig as never);
+      authzService.getCapabilities.mockResolvedValue(GLOBAL_ADMIN_CAPABILITIES);
+      repository.ensureArtificialDashboardExists.mockResolvedValue(undefined as never);
+      repository.createQuery.mockImplementation((dto: { panelTitle: string }) =>
+        Promise.resolve({ id: `q-${dto.panelTitle}`, panelId: 1, ...dto }) as never,
+      );
+    });
+
+    // The bug this exists for: the card and the stored queries each had their own
+    // copy of the selector list and quietly disagreed. They now share HOST_METRICS,
+    // and nothing but this test notices if one side grows a private copy again.
+    it('collects exactly the selectors the host detail graphs query', async () => {
+      await service.createHostMetricQueries(
+        hostSpec.dynatraceConfigId,
+        hostSpec.systemUnderTestId,
+        hostSpec.testEnvironment,
+        hostSpec.workload,
+        'HOST-ABC',
+        'web-1',
+        mockUserId,
+        mockRoles,
+      );
+      const stored = repository.createQuery.mock.calls
+        .map(([dto]) => (dto as { query: string }).query)
+        .sort();
+
+      mockedAxios.get.mockResolvedValue({ data: { result: [] } });
+      await service.fetchHostMetrics(
+        'HOST-ABC',
+        new Date('2026-01-01T00:00:00Z'),
+        new Date('2026-01-01T01:00:00Z'),
+        hostSpec.dynatraceConfigId,
+        mockUserId,
+        mockRoles,
+      );
+      const drawn = mockedAxios.get.mock.calls
+        .map(([, cfg]) => (cfg as { params: { metricSelector: string } }).params.metricSelector)
+        .sort();
+
+      expect(stored).toEqual(drawn);
+      // Every disk metric carries a dt.entity.disk dimension, so it returns one
+      // series per disk without an explicit fold. Dropping the splitBy() is how the
+      // card came to plot one arbitrary disk labelled as the whole host.
+      const disk = stored.filter((q) => q.includes('builtin:host.disk.'));
+      expect(disk).toHaveLength(5);
+      expect(disk.every((q) => q.includes(':splitBy()'))).toBe(true);
+      expect(stored.some((q) => q.includes('utilTime'))).toBe(false);
+    });
+
+    describe('copyQueries', () => {
+      const copyDto = {
+        sourceSystemUnderTestId: 'sys-123',
+        sourceTestEnvironment: 'production',
+        sourceWorkload: 'load-test',
+        targetSystemUnderTestId: 'sys-456',
+        targetTestEnvironment: 'acceptance',
+        targetWorkload: 'soak',
+        conflictStrategy: 'skip' as const,
+      };
+
+      it('re-derives the target dashboard id instead of carrying the source one', async () => {
+        repository.findQueryBySystemAndEnvironment
+          .mockResolvedValueOnce([mockDynatraceQuery] as never)
+          .mockResolvedValueOnce([] as never);
+        repository.generateDynatraceDashboardUuid.mockReturnValue('target-dash-uuid');
+
+        const result = await service.copyQueries(copyDto, mockUserId, mockRoles);
+
+        expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
+        expect(repository.generateDynatraceDashboardUuid).toHaveBeenCalledWith(
+          'sys-456',
+          'acceptance',
+          mockDynatraceQuery.dashboardLabel,
+          'soak',
+        );
+        const [dto] = repository.createQuery.mock.calls[0] as [Record<string, unknown>];
+        expect(dto.applicationDashboardId).toBe('target-dash-uuid');
+        expect(dto.applicationDashboardId).not.toBe(mockDynatraceQuery.applicationDashboardId);
+        expect(dto.systemUnderTestId).toBe('sys-456');
+        expect(dto.workload).toBe('soak');
+      });
+
+      it('skips a dashboard-label + panel-title match, and overwrites on request', async () => {
+        const conflicting = { ...mockDynatraceQuery, id: 'query-target' };
+        repository.findQueryBySystemAndEnvironment
+          .mockResolvedValueOnce([mockDynatraceQuery] as never)
+          .mockResolvedValueOnce([conflicting] as never);
+
+        expect(await service.copyQueries(copyDto, mockUserId, mockRoles)).toEqual({
+          copied: 0, skipped: 1, total: 1,
+        });
+        expect(repository.createQuery).not.toHaveBeenCalled();
+
+        repository.findQueryBySystemAndEnvironment
+          .mockResolvedValueOnce([mockDynatraceQuery] as never)
+          .mockResolvedValueOnce([conflicting] as never);
+        repository.findQueryById.mockResolvedValue(conflicting as never);
+        repository.updateQuery.mockResolvedValue(conflicting as never);
+
+        expect(
+          await service.copyQueries({ ...copyDto, conflictStrategy: 'overwrite' }, mockUserId, mockRoles),
+        ).toEqual({ copied: 1, skipped: 0, total: 1 });
+        expect(repository.updateQuery).toHaveBeenCalledWith(
+          'query-target', expect.objectContaining({ query: mockDynatraceQuery.query }), expect.anything(),
+        );
+      });
+
+      it('refuses a target system in another organization', async () => {
+        repository.findQueryBySystemAndEnvironment.mockResolvedValueOnce([mockDynatraceQuery] as never);
+        repository.getSystemOrganizationId.mockResolvedValue('org-other');
+
+        await expect(service.copyQueries(copyDto, mockUserId, mockRoles)).rejects.toThrow(BadRequestException);
+        expect(repository.createQuery).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('copyEntityMappings', () => {
+      const hostMapping = {
+        id: 'map-1',
+        dynatraceConfigId: 'config-123',
+        systemUnderTestId: 'sys-123',
+        testEnvironment: 'production',
+        workload: 'load-test',
+        entityId: 'HOST-ABC',
+        entityDisplayName: 'web-1',
+        entityType: 'HOST',
+        level: 'sut_testenv_workload',
+        labels: ['appserver'],
+        organizationId: 'org-123',
+      };
+      const copyDto = {
+        sourceSystemUnderTestId: 'sys-123',
+        sourceTestEnvironment: 'production',
+        sourceWorkload: 'load-test',
+        targetSystemUnderTestId: 'sys-456',
+        targetTestEnvironment: 'acceptance',
+        targetWorkload: 'soak',
+        conflictStrategy: 'skip' as const,
+      };
+
+      it('copies a HOST into the target scope together with its metric queries', async () => {
+        repository.getEntityMappings
+          .mockResolvedValueOnce([hostMapping] as never)
+          .mockResolvedValueOnce([] as never);
+        repository.createEntityMapping.mockResolvedValue(hostMapping as never);
+
+        const result = await service.copyEntityMappings(copyDto, mockUserId, mockRoles);
+
+        expect(result).toEqual({ copied: 1, skipped: 0, total: 1 });
+        expect(repository.createEntityMapping).toHaveBeenCalledWith(
+          expect.objectContaining({
+            systemUnderTestId: 'sys-456',
+            testEnvironment: 'acceptance',
+            workload: 'soak',
+            entityId: 'HOST-ABC',
+            labels: ['appserver'],
+          }),
+          expect.anything(),
+        );
+        // The four-plus metric queries are what make a copied host collect anything.
+        expect(repository.createQuery).toHaveBeenCalled();
+      });
+
+      it('does not re-create host queries the target dashboard already holds', async () => {
+        repository.getEntityMappings
+          .mockResolvedValueOnce([hostMapping] as never)
+          .mockResolvedValueOnce([] as never);
+        repository.createEntityMapping.mockResolvedValue(hostMapping as never);
+        repository.countQueriesForDashboard.mockResolvedValue(8);
+
+        await service.copyEntityMappings(copyDto, mockUserId, mockRoles);
+
+        expect(repository.createQuery).not.toHaveBeenCalled();
+      });
+
+      it('keeps a system-level mapping system-level, with no environment or workload', async () => {
+        const sutMapping = {
+          ...hostMapping, id: 'map-2', level: 'sut', entityType: 'SERVICE',
+          testEnvironment: undefined, workload: undefined,
+        };
+        repository.getEntityMappings
+          .mockResolvedValueOnce([sutMapping] as never)
+          .mockResolvedValueOnce([] as never);
+        repository.createEntityMapping.mockResolvedValue(sutMapping as never);
+
+        await service.copyEntityMappings(copyDto, mockUserId, mockRoles);
+
+        expect(repository.createEntityMapping).toHaveBeenCalledWith(
+          expect.objectContaining({ testEnvironment: undefined, workload: undefined }),
+          expect.anything(),
+        );
+      });
+
+      it('skips an entity already mapped in the target scope', async () => {
+        repository.getEntityMappings
+          .mockResolvedValueOnce([hostMapping] as never)
+          .mockResolvedValueOnce([
+            { ...hostMapping, id: 'map-target', systemUnderTestId: 'sys-456', testEnvironment: 'acceptance', workload: 'soak' },
+          ] as never);
+
+        expect(await service.copyEntityMappings(copyDto, mockUserId, mockRoles)).toEqual({
+          copied: 0, skipped: 1, total: 1,
+        });
+        expect(repository.createEntityMapping).not.toHaveBeenCalled();
+      });
     });
   });
 });

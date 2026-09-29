@@ -26,6 +26,7 @@ import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { DynatraceQueryDto } from './dto/dynatrace-query.dto';
 import { CreateEntityMappingDto, UpdateEntityMappingLabelsDto } from './dto/create-entity-mapping.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
+import { CopyDynatraceDto } from './dto/copy-dynatrace.dto';
 import { StoreHostPropertiesDto, HostPropertiesResponse, HostMetricsResponse, HostProblemResponse, HostOverviewRow } from './dto/host.dto';
 
 @ApiTags('dynatrace')
@@ -510,6 +511,20 @@ export class DynatraceController {
     await this.dynatraceService.deleteQuery(id, ctx.userId, ctx.roles);
   }
 
+  @Post('queries/copy')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Copy Dynatrace queries to another system / environment / workload',
+    description:
+      'The copies get their own artificial dashboard, derived from the target scope. ' +
+      'Conflicts are matched on dashboard label + panel title.',
+  })
+  @ApiResponse({ status: 200, description: 'Copy finished; body reports copied/skipped/total' })
+  @ApiResponse({ status: 400, description: 'Target system belongs to a different organization' })
+  async copyQueries(@Body() dto: CopyDynatraceDto, @UserCtx() ctx: UserContext) {
+    return this.dynatraceService.copyQueries(dto, ctx.userId, ctx.roles);
+  }
+
   @Get('entities')
   @ApiOperation({ summary: 'Fetch entities from Dynatrace Environment API v2' })
   @ApiResponse({
@@ -666,6 +681,20 @@ export class DynatraceController {
   })
   async deleteEntityMapping(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     await this.dynatraceService.deleteEntityMapping(id, ctx.userId, ctx.roles);
+  }
+
+  @Post('entities/mappings/copy')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Copy Dynatrace entity mappings to another system / environment / workload',
+    description:
+      'A copied HOST also gets its four metric queries in the target scope, unless that ' +
+      "target dashboard already holds queries. Each mapping keeps its own level.",
+  })
+  @ApiResponse({ status: 200, description: 'Copy finished; body reports copied/skipped/total' })
+  @ApiResponse({ status: 400, description: 'Target system belongs to a different organization' })
+  async copyEntityMappings(@Body() dto: CopyDynatraceDto, @UserCtx() ctx: UserContext) {
+    return this.dynatraceService.copyEntityMappings(dto, ctx.userId, ctx.roles);
   }
 
   @Get(':host/request-attributes')

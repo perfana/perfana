@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.22] - 2026-09-29
+
+### Added
+- **Dynatrace entities and queries can be copied to another workload, environment or system.** Both tabs of a system's Dynatrace configuration now have a "Copy to..." button, the same one the deep links, SLOs, dashboards and report templates already had: pick a target scope, choose whether to skip or overwrite anything already there, and copy either everything in the current scope or just the rows you ticked. Copying a host brings its metric queries with it, so the host starts collecting in the target scope without any further setup; a host that already has queries there is left alone rather than given a second set. Copying into a system that belongs to a different organization is refused, because the Dynatrace connection behind the copied rows would not exist there.
+
+### Changed
+- **The metrics collected for a Dynatrace host now describe disk performance instead of disk busyness.** Disk Utilization has been replaced by Disk Read Latency, Disk Write Latency, Disk Read Operations, Disk Write Operations and Disk Queue Length. The metric it replaces measures the share of time a disk had any work outstanding, which reaches 100% on modern storage long before the disk is near its limit and then cannot say how far past it you are — latency and IOPS are what actually move with load and what shows up in response times. **Existing hosts keep the old Disk Utilization query and are not changed**, so nothing you have built on it breaks; re-adding a host, or copying it to another scope, writes the new set. Queries can still be edited by hand afterwards.
+- **The host detail graphs in the Dynatrace card now show every disk on the host.** They previously drew a single "Disk Utilization" line that was in fact one arbitrary disk out of however many the host has, labelled as though it were the host's — a host whose busy volume happened to sort second looked idle. The card now folds all disks into one figure per metric, and draws read and write on the same chart. The card and the stored collection queries are built from one list, so they can no longer drift apart.
+
 ## [0.2.96.21] - 2026-09-28
 
 ### Security

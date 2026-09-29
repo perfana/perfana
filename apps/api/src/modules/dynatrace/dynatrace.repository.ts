@@ -709,6 +709,24 @@ export class DynatraceRepository {
     return affected ?? 0;
   }
 
+  /**
+   * The organisation a system under test belongs to, or null when the caller
+   * cannot see that system at all — RLS scopes the read, so "invisible" and
+   * "missing" are the same answer here, which is what the copy endpoints want.
+   */
+  async getSystemOrganizationId(systemUnderTestId: string): Promise<string | null> {
+    const rows = await withRequestQuery(this.dataSource).query<Array<{ organization_id: string }>>(
+      `SELECT organization_id FROM systems_under_test WHERE id = $1`,
+      [systemUnderTestId],
+    );
+    return rows?.[0]?.organization_id ?? null;
+  }
+
+  /** How many queries already hang off an (artificial) dashboard. */
+  async countQueriesForDashboard(applicationDashboardId: string): Promise<number> {
+    return withRequestEm(this.queryRepo).count({ where: { applicationDashboardId } });
+  }
+
   private mapEntityMappingToDtoFields(entity: DynatraceEntityMapping) {
     return {
       id: entity.id,

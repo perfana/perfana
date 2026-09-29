@@ -23,6 +23,7 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Close as CloseIcon,
+  ContentCopy as CopyIcon,
 } from '@mui/icons-material';
 
 // Types
@@ -35,10 +36,12 @@ import { useDynatraceEntityMappings } from './dynatrace-deeplinks/hooks';
 import { EntityMappingsTable, AddEntityDialog, EditLabelsDialog } from './dynatrace-deeplinks/components';
 import DeleteConfirmationDialog from './DeleteConfirmationDialog';
 import { DynatraceEntityMapping } from './dynatrace-deeplinks/types';
+import { CopyToScopeDialog, type CopyTarget } from './shared/CopyToScopeDialog';
+import { copyDynatraceEntities } from '@/lib/api/config-copy';
 
 export default function DynatraceDeeplinkSection({
   systemId,
-  systemName: _systemName,
+  systemName,
   selectedEnvironment,
   selectedWorkload,
   onHostQueriesCreated,
@@ -113,7 +116,28 @@ export default function DynatraceDeeplinkSection({
   });
 
   const [labelFilter, setLabelFilter] = useState<string[]>([]);
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [copySuccess, setCopySuccess] = useState<string | null>(null);
   const [editingLabelsFor, setEditingLabelsFor] = useState<DynatraceEntityMapping | null>(null);
+
+  const handleCopyEntities = async (target: CopyTarget) => {
+    const result = await copyDynatraceEntities({
+      sourceSystemUnderTestId: systemId,
+      sourceTestEnvironment: selectedEnvironment,
+      sourceWorkload: selectedWorkload,
+      targetSystemUnderTestId: target.systemUnderTestId,
+      targetTestEnvironment: target.testEnvironment,
+      targetWorkload: target.workload || selectedWorkload,
+      conflictStrategy: target.conflictStrategy,
+      ids: selectedMappingIds.size > 0 ? Array.from(selectedMappingIds) : undefined,
+    });
+    setCopySuccess(
+      `Copied ${result.copied} entit${result.copied === 1 ? 'y' : 'ies'}` +
+        (result.skipped > 0 ? `, skipped ${result.skipped} existing` : ''),
+    );
+    // A copied HOST also gets its four metric queries, so the Queries tab is stale.
+    onHostQueriesCreated?.();
+  };
 
   // Every label in play, so the filter offers only labels that would match something.
   const labelOptions = useMemo(
@@ -168,20 +192,38 @@ export default function DynatraceDeeplinkSection({
             Configure Dynatrace entities at different levels
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={handleAddEntity}
-          disabled={loading}
-        >
-          Add Entity
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {filteredMappings.length > 0 && (
+            <Button
+              variant="outlined"
+              startIcon={<CopyIcon />}
+              onClick={() => setCopyDialogOpen(true)}
+              disabled={loading}
+            >
+              {selectedMappingIds.size > 0 ? `Copy ${selectedMappingIds.size} to...` : 'Copy to...'}
+            </Button>
+          )}
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={handleAddEntity}
+            disabled={loading}
+          >
+            Add Entity
+          </Button>
+        </Box>
       </Box>
 
       {/* Error Alert */}
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
+        </Alert>
+      )}
+
+      {copySuccess && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setCopySuccess(null)}>
+          {copySuccess}
         </Alert>
       )}
 
@@ -245,6 +287,23 @@ export default function DynatraceDeeplinkSection({
           />
         </>
       )}
+
+      {/* Copy to Scope Dialog */}
+      <CopyToScopeDialog
+        open={copyDialogOpen}
+        onClose={() => setCopyDialogOpen(false)}
+        onCopy={handleCopyEntities}
+        currentScope={{
+          systemId,
+          systemName,
+          environment: selectedEnvironment,
+          workload: selectedWorkload,
+        }}
+        itemCount={filteredMappings.length}
+        selectedCount={selectedMappingIds.size > 0 ? selectedMappingIds.size : undefined}
+        itemType="Dynatrace entities"
+        supportsWorkload={true}
+      />
 
       <EditLabelsDialog
         mapping={editingLabelsFor}

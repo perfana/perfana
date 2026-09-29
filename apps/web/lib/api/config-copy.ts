@@ -100,3 +100,36 @@ export async function copyReportTemplates(params: CopyReportTemplateParams): Pro
   }
   return response.json();
 }
+
+/**
+ * Copy Dynatrace queries from one scope to another.
+ */
+export async function copyDynatraceQueries(params: CopyConfigParams): Promise<CopyResult> {
+  const response = await authenticatedFetch('/dynatrace/queries/copy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error((data as { message?: string }).message || 'Failed to copy Dynatrace queries');
+  }
+  return response.json();
+}
+
+/**
+ * Copy Dynatrace entity mappings from one scope to another. A copied HOST also
+ * gets its four metric queries in the target scope.
+ */
+export async function copyDynatraceEntities(params: CopyConfigParams): Promise<CopyResult> {
+  const response = await authenticatedFetch('/dynatrace/entities/mappings/copy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error((data as { message?: string }).message || 'Failed to copy Dynatrace entities');
+  }
+  return response.json();
+}

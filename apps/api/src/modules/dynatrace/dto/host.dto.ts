@@ -38,7 +38,12 @@ export interface HostMetricsResponse {
   metrics: {
     cpu: TimeSeriesData[];
     memory: TimeSeriesData[];
-    disk: TimeSeriesData[];
+    /** Disk series are folded across every disk on the host — see HOST_METRICS. */
+    diskReadTime: TimeSeriesData[];
+    diskWriteTime: TimeSeriesData[];
+    diskReadOps: TimeSeriesData[];
+    diskWriteOps: TimeSeriesData[];
+    diskQueueLength: TimeSeriesData[];
     network: TimeSeriesData[];
   };
 }

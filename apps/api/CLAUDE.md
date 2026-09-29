@@ -372,6 +372,92 @@ and then fail the index build on rows it could not see. `up()` re-counts the dup
 after the dedupe and throws with that cause named rather than letting an opaque 23505 block the
 deploy.
 
+### The host metric list has ONE definition, and the disk metrics must fold explicitly
+
+`HOST_METRICS` in `modules/dynatrace/dynatrace.service.ts` is the single list behind both
+halves of the host-metrics feature: the stored `dynatrace_queries` rows
+`createHostMetricQueries` writes when a HOST is mapped, and the live series
+`fetchHostMetrics` draws in the Dynatrace card's host detail. They were separate inline
+arrays until v0.2.96.22 and had quietly disagreed for a year.
+
+Two things that are easy to get wrong here:
+
+1. **Every `builtin:host.disk.*` metric carries a `dt.entity.disk` dimension.**
+   `builtin:host.disk.X:filter(eq("dt.entity.host","HOST-…")):avg` therefore returns one
+   series PER DISK, not one for the host. The worker stored all of them (per-disk rows are
+   what anomaly detection showed), while the card read `response.data.result[0].data[0]` —
+   the **first** series — and labelled it as the host's. Nobody aggregated anything; the
+   card was plotting one arbitrary disk. Every disk entry now carries an explicit
+   `splitBy()` in its `transform`, so each key of `HostMetricsResponse.metrics` holds
+   exactly one folded series by construction and the card's `[0]` is safe.
+
+2. **Latencies average across disks, counts sum.** `splitBy():avg` for `readTime` /
+   `writeTime`, `splitBy():sum` for `readOps` / `writeOps` / `queueLength`. Averaging IOPS
+   would report a host doing 4000 IOPS on one volume and nothing on three others as 1000.
+
+**`builtin:host.disk.utilTime` was removed from the list in v0.2.96.22, deliberately.** It is
+iostat's `%util` — the fraction of wall-clock time a device had at least one request in
+flight — which saturates at 100% on any device that services requests in parallel (every SSD,
+every SAN volume) and then cannot distinguish 2x over capacity from 20x. It was replaced by
+`readTime`, `writeTime`, `readOps`, `writeOps` and `queueLength`, which do move with load.
+Three residues:
+
+- **Hosts mapped before that version keep their `Disk Utilization` query** and do not gain
+  the new ones. Nothing migrates them — an SLO or compare config may target that panel.
+  Re-adding the host, or copying it to the scope, writes the new set.
+- **The hosts overview table and the Dynatrace hosts report section still have a `disk`
+  column, still fed by `utilTime`.** That column set is `DYNATRACE_HOST_COLUMNS` in
+  `packages/shared/src/types/reports.types.ts` and is persisted inside saved report section
+  configs, so changing what `disk` means there silently rewrites existing templates. Left
+  alone on purpose.
+- **`packages/shared/src/constants/dynatrace-metrics.ts` still documents utilTime as *the*
+  disk metric.** Nothing imports that file — it is dead — so it was not updated; read
+  `HOST_METRICS` instead, and delete the constants file rather than "fixing" it.
+
+**The two latency units are assumed, not verified.** `unit: 'ms'` on `readTime` / `writeTime`
+is a guess: Dynatrace has shipped both ms and µs for these across versions, and the local
+mock (`infra/dynatrace-mock`) stubs only `cpu.usage`, so there was nothing to check against.
+`GET /api/v2/metrics/builtin:host.disk.readTime` on a real tenant returns the authoritative
+unit. It only drives the axis suffix, and a user can override it per query in the edit
+dialog.
+
+`dynatrace.service.spec.ts` asserts the two selector sets are equal, that all five disk
+selectors fold, and that no selector mentions `utilTime` (mutation-verified: removing one
+`splitBy()` fails it). That test is the only thing stopping a private copy of the list from
+reappearing.
+
+### Copying Dynatrace config to another scope
+
+`POST /dynatrace/queries/copy` and `POST /dynatrace/entities/mappings/copy` (v0.2.96.22) take
+the same body as the deep-links / SLO / dashboard copy endpoints, so the web app's one
+`CopyToScopeDialog` drives all of them. Four things specific to the Dynatrace pair:
+
+1. **`applicationDashboardId` is re-derived, never carried over.** A Dynatrace query hangs off
+   an artificial dashboard keyed on `(system, environment, workload, label)`. Copying the id
+   would point the target's metrics at the source's dashboard — see "`grafana_dashboards` is a
+   mixed table" in the root [CLAUDE.md](../../CLAUDE.md). `copyQueries` calls
+   `generateDynatraceDashboardUuid` against the target scope and `ensureArtificialDashboardExists`
+   creates the row.
+2. **A copied HOST mapping also gets its metric queries**, because the mapping alone collects
+   nothing. Skipped when `countQueriesForDashboard` says the target dashboard already holds
+   queries, so a repeated copy does not duplicate them.
+3. **Each mapping keeps its own `level`.** A `sut`-level mapping stays system-level in the
+   target (no environment, no workload), matching `idx_dynatrace_entity_mappings_unique`, which
+   collapses NULLs to `''`. The conflict probe has to scope itself the same way or it compares
+   the wrong rows.
+4. **Cross-organization copies are refused with a 400.** Both paths call
+   `requireCopyTargetOrg`, which compares the target system's organization against the one
+   behind every source row's Dynatrace connection. RLS would not catch this: the copied rows
+   carry the *config's* org, and `can_access_resource`'s `created_by` fallback admits any row
+   the caller is inserting — see "RLS does not backstop a caller-named `organization_id` on
+   create" above. `getSystemOrganizationId` reads through `withRequestQuery`, so a system the
+   caller cannot see and one that does not exist are the same 404.
+
+Conflict keys: `dashboardLabel` + `panelTitle` for queries (what the Queries tab shows), and
+`entityId` within the target scope for mappings. `overwrite` updates a conflicting query in
+place; for a mapping it is a no-op — the only mutable field is `labels` — so a mapping conflict
+always counts as `skipped`.
+
 ### The SUT export is large by default, and only Chrome and Edge can stream it to disk
 
 `SUT_TRANSFER_ENABLED` gates an admin-only export that streams a gzipped NDJSON bundle with no
