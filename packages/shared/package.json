@@ -56,11 +56,6 @@
       "development": "./src/constants/index.ts",
       "default": "./dist/constants/index.js"
     },
-    "./constants/dynatrace-metrics": {
-      "types": "./dist/constants/dynatrace-metrics.d.ts",
-      "development": "./src/constants/dynatrace-metrics.ts",
-      "default": "./dist/constants/dynatrace-metrics.js"
-    },
     "./services/grafana": {
       "types": "./dist/services/grafana/index.d.ts",
       "development": "./src/services/grafana/index.ts",

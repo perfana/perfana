@@ -415,9 +415,13 @@ Three residues:
   (`fetchHostsOverview`) has no disk column at all and never did.
   `dynatrace-hosts-renderer.spec.ts` pins both halves (mutation-verified: deleting `'disk'`
   from the list fails two cases).
-- **`packages/shared/src/constants/dynatrace-metrics.ts` still documents utilTime as *the*
-  disk metric.** Nothing imports that file — it is dead — so it was not updated; read
-  `HOST_METRICS` instead, and delete the constants file rather than "fixing" it.
+- **`packages/shared/src/constants/dynatrace-metrics.ts` is gone** (deleted in v0.2.96.22,
+  after the disk change). It was dead — zero importers — and documented panel ids 100-105, a
+  USE classification table and metric-name templates for a host metric set Perfana no longer
+  collects, with `DISK_UTILIZATION` carrying the very misconception this section exists to
+  correct. `HOST_METRICS` is the registry; there is no second one. Note the `./constants`
+  barrel survives, because `perf-test-profile` is exported through it and eight files use
+  that.
 
 **The two latency units are assumed, not verified.** `unit: 'ms'` on `readTime` / `writeTime`
 is a guess: Dynatrace has shipped both ms and µs for these across versions, and the local

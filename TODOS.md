@@ -996,26 +996,6 @@ read `unit` from the descriptor. Fix the two entries in `HOST_METRICS` if it say
 MicroSecond, and add the descriptor to the mock so the next person has a fixture. The
 `ponytail:` comment above the list names the same command.
 
-### `packages/shared/src/constants/dynatrace-metrics.ts` is dead and now actively wrong
-
-**Priority:** P4
-**Origin:** Found while replacing `utilTime` in `feat/dynatrace-copy-scope-and-disk-metrics`
-(2026-09-29, v0.2.96.22).
-**Why:** Nothing in the monorepo imports it — verified by grep across all apps and packages
-for `DYNATRACE_HOST_METRIC_PANEL_IDS`, `getDynatraceHostPanelId`,
-`DYNATRACE_METRIC_NAME_TEMPLATES`, `isDynatraceHostMetric` and
-`getDynatraceMetricClassification`, all zero hits outside the file itself. It documents
-panel ids 100-105, a USE classification table and metric-name templates for a host metric
-set Perfana no longer collects, and its comment on `DISK_UTILIZATION` ("high disk
-utilization indicates I/O bottleneck") is the misconception v0.2.96.22 removed. The risk is
-that someone finds it and treats it as the registry rather than `HOST_METRICS`.
-**What to do:** delete the file, its `export * from './dynatrace-metrics'` line in
-`packages/shared/src/constants/index.ts`, and the `"./constants/dynatrace-metrics"` key in
-`packages/shared/package.json`'s `exports` map — it is reachable both ways, so removing only
-one leaves it importable. Run `npm run check:workspace-exports` and `npx knip` after. If any
-of it turns out to be wanted, the USE classification table is the only part with content
-worth moving.
-
 ### The host details "Open in Dynatrace" link uses a SaaS route on a Managed cluster
 
 **Priority:** P3
