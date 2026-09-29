@@ -32,8 +32,11 @@ export interface ApplicationDashboard {
   id: string;
   system_under_test_id: string;
   test_environment: string;
-  grafana_instance_id: string;
-  grafana_dashboard_id: string;
+  // Optional on the API side, and genuinely absent on an artificial Dynatrace row:
+  // those carry no Grafana instance. See "An artificial Dynatrace dashboard is
+  // per-workload, but its unique constraint is not" in apps/api/CLAUDE.md.
+  grafana_instance_id?: string;
+  grafana_dashboard_id?: string;
   dashboard_name: string;
   dashboard_uid: string;
   dashboard_label: string;

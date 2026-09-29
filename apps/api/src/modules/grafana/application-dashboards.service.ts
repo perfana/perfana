@@ -625,8 +625,14 @@ export class ApplicationDashboardsService {
         {
           systemUnderTestId: dto.targetSystemUnderTestId,
           testEnvironment: dto.targetTestEnvironment,
-          grafanaInstanceId: dashboard.grafana_instance_id ?? '',
-          grafanaDashboardId: dashboard.grafana_dashboard_id ?? '',
+          // `?? undefined`, never `?? ''`: both columns are uuid, and Postgres rejects the
+          // empty string with 22P02 rather than treating it as NULL. Reachable since
+          // artificial Dynatrace dashboards stopped carrying a grafana_instance_id — and
+          // `create()` is called service-to-service here, so the DTO's `@IsOptional()
+          // @IsUUID()` never runs to catch it (and would not: @IsOptional skips null and
+          // undefined, not '').
+          grafanaInstanceId: dashboard.grafana_instance_id ?? undefined,
+          grafanaDashboardId: dashboard.grafana_dashboard_id ?? undefined,
           dashboardName: dashboard.dashboard_name,
           dashboardId: dashboard.dashboard_id,
           dashboardUid: dashboard.dashboard_uid ?? '',
