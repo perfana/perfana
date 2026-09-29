@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.23] - 2026-09-29
+
+### Fixed
+- **Copying Dynatrace entities or queries into a second workload no longer fails.** Copying a host into another workload of the same environment reported `null value in column "organization_id" of relation "ds_compare_config" violates not-null constraint` and copied nothing. The placeholder dashboard each workload needs could never be written: it was tagged with an arbitrary Grafana instance, which made the second workload look like a duplicate of the first, so the row was quietly dropped and everything built on top of it failed. Mapping a host by hand into a second workload of the same environment hit the same wall. Both work now, and the copy reports what it did.
+- **Importing a system that only uses Dynatrace no longer fails.** Such a system's export was missing the Grafana record its placeholder dashboards point at, so the import stopped partway with a foreign-key error. The export now includes it.
+- **Copying dashboards to another environment no longer fails on a system with a Dynatrace host.** The copy sent an empty value where the database expects a real identifier and the whole request errored.
+- **Importing the same set of Dynatrace queries twice no longer leaves stray dashboards behind.** Each import used to create another copy of the same placeholder dashboard, which inflated the data-collection coverage a run is judged against. Repeat imports now reuse the one that is already there.
+
 ## [0.2.96.22] - 2026-09-29
 
 ### Added

@@ -435,6 +435,84 @@ selectors fold, and that no selector mentions `utilTime` (mutation-verified: rem
 `splitBy()` fails it). That test is the only thing stopping a private copy of the list from
 reappearing.
 
+### An artificial Dynatrace dashboard is per-workload, but its unique constraint is not
+
+`generateDynatraceDashboardUuid` hashes `(system, environment, workload, label)`, so every
+workload gets its own `application_dashboards` row. `uq_application_dashboards_unique` is
+`(system_under_test_id, test_environment, grafana_instance_id, dashboard_uid, dashboard_label)` —
+**no workload**, and `generateDynatraceDashboardUid` builds the uid from the label alone. So for
+a second workload in the same environment the two disagree: a new id, an identical natural key.
+
+`ensureArtificialDashboardExists` filled `grafana_instance_id` with `SELECT id FROM
+grafana_instances LIMIT 1` — an arbitrary instance these rows have no relationship to — which made
+that collision real. Its `ON CONFLICT … DO NOTHING` then swallowed the insert, and the next
+statement, the `ds_compare_config` insert that reads the dashboard's `organization_id`, failed on
+the NOT NULL with `null value in column "organization_id" of relation "ds_compare_config"
+violates not-null constraint`. Nothing named the dashboard. Fixed in v0.2.96.23 by leaving the
+column NULL: NULLs never collide in a btree unique, so the per-workload row can be written.
+
+**The part that is easy to get wrong next:** once the column is NULL,
+`uq_application_dashboards_unique` cannot fire on these rows at all, and `ON CONFLICT (id) DO
+NOTHING` becomes their only dedupe. That is sound *only* while every caller passes a
+**deterministic** id from `generateDynatraceDashboardUuid`, which hashes the workload in.
+`createQuerySmart` and `bulkImportQuery` both used `randomUUID()` and were changed in the same
+version — with a random id the conflict target never matches, so each call inserted another
+`application_dashboards` row with an identical natural key, silently. (On the old code those two
+failed the other way: the natural key collided, the insert was swallowed, and the queries were
+written against a `sharedUuid` with no row behind it. Neither was ever right.) A new caller that
+reintroduces a random id gets the duplicate-row version with nothing to stop it.
+
+The worker has a near-twin of this insert in
+`apps/worker/src/pipelines/helpers/dynatrace-dashboard-manager.ts` that also omits the column.
+**Do not cite it as precedent:** nothing outside its own tests calls it — `DynatracePipeline` uses
+the stored `applicationDashboardId` instead — and its uuid formula (`…-${env}${workload ? '-' +
+workload : ''}-dynatrace-…`) differs from this one (`…-${env}-${workload}-dynatrace-…`) whenever
+the workload is empty, so the two do *not* always compute the same id.
+
+Three things that go with it:
+
+- **It was never only the copy path.** Mapping a host by hand into a second workload of the same
+  environment hit it too; the copy feature is just what made it easy to reach.
+- **The synthetic `grafana_dashboards` row stays**, and `application_dashboards.grafana_dashboard_id`
+  still points at it. The SLO dialog looks these up by uid (`GET /grafana/dashboards?uid=…`) — see
+  trap 1 of "`grafana_dashboards` is a mixed table" in the root [CLAUDE.md](../../CLAUDE.md) — so
+  dropping it would break creating an SLO on a Dynatrace host metric. Only
+  `application_dashboards.grafana_instance_id` is given up.
+- **That column has more readers than it looks, and one of them had to change with it.**
+  `grafana_dashboards.grafana_instance_id` is NOT NULL and FKs to `grafana_instances`, but the SUT
+  export reaches the two tables by different joins: instances through `ad.grafana_instance_id`,
+  dashboards through `ad.grafana_dashboard_id`. A Dynatrace-only SUT therefore exported the
+  synthetic dashboard with no instance to hang it on, and the import FK-violated —
+  `sut-resource-graph.ts` now unions in the instances reachable *through* `grafana_dashboards`.
+  The other readers are fine as they are, and two of them improve: the grafana-sync restore sweep
+  (`restore-dashboard.service.ts`) no longer counts an artificial row as a reference, and
+  `IncrementalCollectionScheduler` no longer classifies one as a Grafana collection source for an
+  instance it has no relationship to. `ApplicationDashboardsService` keeps an optional
+  `grafanaInstanceId` filter and **emits** the column (plus the joined `grafana_instance` object,
+  now `undefined`) in the application-dashboards response — both already optional, and the one UI
+  that would follow the link filters artificial rows out first via `isArtificialDashboard`.
+  `findByGrafanaInstance` / `deleteByGrafanaInstance` in `application-dashboard.repository.ts` are
+  currently uncalled but key on it too. One reader **fails open** and is worth knowing about:
+  `groupPanelsByGrafanaInstance` in `apps/worker/src/config/grafana-client-factory.ts` reads a NULL
+  as "the default Grafana singleton" rather than as "not a Grafana source" — the opposite of
+  `collectable-sources.ts`, which skips it. No production path feeds an artificial dashboard's
+  panels into it today; one that did would ask a Grafana for a Dynatrace panel.
+- **`ApplicationDashboardsService.copyToScope` had to change with it.** It rebuilt each row with
+  `grafana_instance_id ?? ''`, and `''` is not a NULL to Postgres — it is `22P02 invalid input
+  syntax for type uuid`, so the whole copy 500s the moment any source row has a NULL. `create()`
+  is called service-to-service there, so the DTO's `@IsOptional() @IsUUID()` never runs (and
+  `@IsOptional()` skips `null`/`undefined`, not `''`). It is `?? undefined` now. Its `makeKey`
+  still collapses every workload's artificial row for one host to a single key, since the key is
+  `instance|uid|label` and all three now match — see TODOS.md.
+- **Old rows keep their arbitrary instance id.** Nothing backfills them, so a deployment upgraded
+  into this version holds a mixed population indefinitely: dashboards written before it still match
+  `?grafanaInstanceId=<whichever instance was first>`, ones written after match no value of that
+  filter. Both are harmless; it is only confusing if you go looking.
+- **`createDsCompareConfigForMetric` reads the org in its own statement now**, not as a subquery
+  inside the INSERT. A missing or RLS-invisible dashboard says so by name instead of substituting
+  NULL and surfacing as the not-null violation above. Its existence probe is also scoped by
+  `(system, environment, workload)`, matching `uniq_ds_compare_config_panel`.
+
 ### Copying Dynatrace config to another scope
 
 `POST /dynatrace/queries/copy` and `POST /dynatrace/entities/mappings/copy` (v0.2.96.22) take
@@ -447,6 +525,9 @@ the same body as the deep-links / SLO / dashboard copy endpoints, so the web app
    mixed table" in the root [CLAUDE.md](../../CLAUDE.md). `copyQueries` calls
    `generateDynatraceDashboardUuid` against the target scope and `ensureArtificialDashboardExists`
    creates the row.
+
+   That row only became insertable in v0.2.96.23 — see "An artificial Dynatrace dashboard is
+   per-workload, but its unique constraint is not" above.
 2. **A copied HOST mapping also gets its metric queries**, because the mapping alone collects
    nothing. Skipped when `countQueriesForDashboard` says the target dashboard already holds
    queries, so a repeated copy does not duplicate them.

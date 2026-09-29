@@ -975,6 +975,159 @@ string-interpolating it, at all four sites at once.
 
 ## Dynatrace
 
+### The API and the worker write the same artificial dashboard row with different ownership
+
+**Priority:** P3
+**Origin:** Maintainability and testing review during /ship on
+`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29, v0.2.96.23). Found twice
+independently; deliberately deferred rather than folded into a bug fix.
+**Why:** `ensureArtificialDashboardExists`
+(`apps/api/src/modules/dynatrace/dynatrace.repository.ts`) inserts
+`(id, system_under_test_id, test_environment, grafana_dashboard_id, dashboard_name,
+dashboard_uid, dashboard_label, organization_id)` — no `team_id`. Its twin in the worker,
+`dynatrace-dashboard-manager.ts`, writes `organization_id, team_id, created_by, updated_by`
+from the SUT's ownership. The two compute the **same deterministic uuid**, so whichever runs
+first decides whether the row carries a team, and `createDsCompareConfigForMetric` now
+forwards that value to every `ds_compare_config` beneath it.
+**Why it is P3:** `can_access_resource(org, team, created_by)` checks the organization
+first and returns true for any org member; the team branch is an additional grant, not a
+restriction. A NULL team therefore denies nobody who is in the organization. The only
+affected principal is a user in a team but **not** in that team's organization, who sees the
+worker-written row and not the API-written one.
+**What to do:** thread `teamId` through `ensureArtificialDashboardExists` and its four
+callers (`createQuery`, `createQuerySmart`, `bulkImportQuery`, `createHostMetricQueries`),
+sourced from the SUT the way the worker's `getSutOwnership` does, and make the two inserts
+produce identical rows. Existing rows need a backfill or the population stays mixed. The
+spec case `forwards a NULL team_id unchanged — the API path never sets one` pins today's
+behaviour and should flip to asserting propagation.
+
+### A Dynatrace query can be created against another organization's system
+
+**Priority:** P2
+**Origin:** Security review during /ship on
+`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29). Pre-existing; the branch
+touches its blast radius but does not open it.
+**Why:** `requireDynatraceMutationCapability` resolves `organizationId` from the parent
+Dynatrace config and gates on it, so the **org** is never caller-supplied. But
+`dto.systemUnderTestId` and `dto.testEnvironment` come straight off
+`CreateDynatraceQueryDto` and are forwarded unvalidated into
+`ensureArtificialDashboardExists` (`dynatrace.service.ts` lines ~923, ~975, ~1035) and into
+`createDsCompareConfigForMetric` (~2082). Nothing checks the named SUT belongs to the parent
+config's organization. A caller with `IntegrationDynatraceUpdate` in org A can therefore
+write an `application_dashboards` row — and a `ds_compare_config` — carrying org B's
+`system_under_test_id` with `organization_id` = A. RLS does not backstop it: this is the
+documented "RLS does not backstop a caller-named `organization_id` on create" shape from
+[apps/api/CLAUDE.md](apps/api/CLAUDE.md), with `system_under_test_id` in the place of the org.
+**What the branch changed here:** nothing, except that filling `grafana_instance_id` used to
+make `uq_application_dashboards_unique` block the narrow sub-case where the attacker reused a
+label already present on org B's SUT in that environment. The primary case — a fresh label —
+was never blocked.
+**What to do:** apply the check the copy path already uses. `copyQueries` /
+`copyEntityMappings` call `requireCopyTargetOrg`, which compares
+`getSystemOrganizationId(targetSystemUnderTestId)` against the source org and 400s on a
+mismatch. The four create paths need the same guard before `ensureArtificialDashboardExists`.
+`getSystemOrganizationId` reads through `withRequestQuery`, so an invisible system and a
+nonexistent one stay indistinguishable to the caller.
+
+### Mapping a Dynatrace host answers 201 even when its metric queries failed
+
+**Priority:** P2
+**Origin:** API-contract review during /ship on
+`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29). Pre-existing.
+**Why:** on `POST /dynatrace/entities/mappings`, the catch around `createHostMetricQueries`
+in `dynatrace.controller.ts` logs and falls through with
+`// Don't fail the entity mapping creation if query creation fails`, then returns the
+mapping. So the endpoint answers **201 Created** for a HOST mapping that has no metric
+queries and no `ds_compare_config` rows, with nothing in the body to say so — the user gets a
+host that will silently never collect. The same catch swallows real `HttpException`s raised
+inside `createHostMetricQueries`, including the 403 from `requireDynatraceMutationCapability`
+in `createQuery`. That is the inverse of the anti-pattern documented in
+[apps/api/CLAUDE.md](apps/api/CLAUDE.md): instead of a deliberate 4xx becoming an opaque 500,
+it becomes an opaque 201.
+**Related, same shape:** `POST /dynatrace/entities/mappings/copy` calls
+`createHostMetricQueries` **unguarded** inside its per-mapping loop
+(`dynatrace.service.ts` ~2304), so one failure aborts the whole request with a 500 while every
+mapping copied before it stays written. `copied`/`skipped` are local counters and there is no
+enclosing transaction, so the caller cannot tell how much of the copy landed, and Swagger
+declares only 200 and 400.
+**What to do:** rethrow `HttpException` in the controller catch so an authorization refusal is
+never reported as success, and return a provisioning flag in the 201 body
+(`{ ...mapping, metricQueriesCreated: false, metricQueriesError }`) so the web client can say
+"mapping created, metric queries failed". For the copy path, record per-mapping failures
+instead of aborting and extend the response to `{ copied, skipped, total, failed: [...] }`,
+mirroring the skip reasons the bulk analysis-window apply already reports.
+
+### Copying application dashboards collides two per-workload Dynatrace rows
+
+**Priority:** P3
+**Origin:** Checklist pass during /ship on
+`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29). Pre-existing — the worker has
+always written NULL-instance rows — but the branch makes more rows take this shape.
+**Why:** `ApplicationDashboardsService.copyToScope` dedupes with
+`makeKey = ${grafana_instance_id ?? ''}|${dashboard_uid ?? ''}|${dashboard_label}`. Two
+artificial Dynatrace dashboards for different workloads in one (system, environment) share a
+uid and a label and now both have a NULL instance, so they collapse to one key: the
+`existingByKey` map keeps only the last, and an `overwrite` copy updates whichever that is.
+The row is scoped by system + environment only, so the key has no workload to tell them apart.
+**What to do:** either include something workload-distinguishing in the key, or — better —
+skip artificial rows in this copy entirely, the way `isArtificialDashboard` already does on the
+web side. They are recreated on demand by `ensureArtificialDashboardExists`, so copying them is
+not useful.
+
+### The artificial Dynatrace dashboard is stamped with an arbitrary Grafana instance
+
+**Priority:** P2
+**Origin:** Red-team and adversarial review during /ship on
+`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29). Pre-existing; the branch
+removed this value from `application_dashboards` but not from the synthetic
+`grafana_dashboards` row, so the pick still matters.
+**Why:** `ensureArtificialDashboardExists` opens with
+`SELECT id FROM grafana_instances LIMIT 1` — no `ORDER BY`, no organization filter, on the
+plain pooled (RLS-bypassing) connection. That instance is written to the synthetic
+`grafana_dashboards` row, whose own `grafana_instance_id` is NOT NULL. Three consequences:
+
+1. **Unstable.** Heap order changes after UPDATE/VACUUM, and the dev database has three
+   instances. The reuse probe on the next call is `WHERE uid = $1 AND grafana_instance_id = $2`,
+   so a call that draws a different instance **misses and inserts a second synthetic
+   `grafana_dashboards` row** for the same uid. There is no unique index on
+   `(grafana_instance_id, uid)` to refuse it.
+2. **Cross-organization.** The row is stamped with the caller's `organization_id` but FKs to an
+   instance that may belong to another org. This is the recurring first-instance-selection bug.
+3. **It reaches the SUT export.** `sut-resource-graph.ts` must pull that instance into the
+   bundle to satisfy the FK, and `grafana_instances` carries `api_key`, `username` and
+   `password`, exported verbatim by `row_to_json`. So a Dynatrace-only SUT's bundle contains a
+   Grafana credential for an instance it has no relationship to. **This is not new** — before
+   v0.2.96.23 the same instance id sat on `application_dashboards.grafana_instance_id` and the
+   export's original join picked it up identically — but the export arm added in that version
+   is what keeps it true, so fixing the pick is what removes it.
+4. **A Dynatrace-only deployment cannot map a host at all:** with no `grafana_instances` row
+   the method throws `No Grafana instances found in database`.
+
+**What to do:** the real fix is for the synthetic `grafana_dashboards` row to stop needing an
+instance — either relax `grafana_dashboards.grafana_instance_id` for artificial rows
+(`grafana_json IS NULL`), or stop creating the synthetic row and give the SLO dialog another way
+to resolve a Dynatrace panel by uid (it is the only reason the row exists — see trap 1 of
+"`grafana_dashboards` is a mixed table" in the root CLAUDE.md). Until then, at minimum scope the
+pick to the parent config's organization and add `ORDER BY id` so it is stable, and drop the
+synthetic dashboard from the export rather than following it to a credential.
+
+### The worker's copy of the artificial-dashboard insert has no spec
+
+**Priority:** P3
+**Origin:** Testing review during /ship on
+`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29).
+**Why:** the fix's stated contract is parity with the worker — the two sides compute the same
+deterministic uuid, so they must agree on whether it is insertable. The API side is pinned by
+`expect(sql).not.toContain('grafana_instance_id')` in `dynatrace.repository.spec.ts`. The
+worker side is pinned by nothing: `apps/worker/src/pipelines/helpers/dynatrace-dashboard-manager.ts`
+has no spec file at all, so if it ever regains that column the bug returns on the worker path
+with no test failing. Compare the `HOST_METRICS` parity test, which
+[apps/api/CLAUDE.md](apps/api/CLAUDE.md) itself calls "the only thing stopping a private copy
+of the list from reappearing" — that is exactly the pattern missing here.
+**What to do:** add `dynatrace-dashboard-manager.spec.ts` asserting the emitted
+`INSERT INTO application_dashboards` omits `grafana_instance_id`, and cross-reference the two
+tests in a comment on each.
+
 ### The Dynatrace disk latency unit is assumed, not verified
 
 **Priority:** P2
