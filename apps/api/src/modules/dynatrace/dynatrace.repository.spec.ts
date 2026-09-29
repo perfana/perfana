@@ -3,8 +3,8 @@ import { DynatraceRepository } from './dynatrace.repository';
 /**
  * Regression tests for the ds_compare_config INSERT gaining organization_id
  * (NOT NULL under RLS — a NULL row is invisible to every non-admin).
- * The org is resolved in SQL from the parent application_dashboards row, so
- * the parameter list must stay at 6 while the column list has 7 entries.
+ * The org is read from the parent application_dashboards row in its own
+ * statement, so a missing dashboard fails loudly instead of inserting NULL.
  */
 describe('DynatraceRepository — createDsCompareConfigForMetric', () => {
   let manager: { query: jest.Mock };
@@ -12,6 +12,17 @@ describe('DynatraceRepository — createDsCompareConfigForMetric', () => {
   let repository: DynatraceRepository;
 
   const stubRepo = () => ({}) as never;
+
+  const create = () =>
+    repository.createDsCompareConfigForMetric(
+      'sut-1',
+      'production',
+      'loadTest',
+      'ad-1',
+      42,
+      'CPU usage',
+      'builtin:host.cpu.usage',
+    );
 
   beforeEach(() => {
     manager = { query: jest.fn().mockResolvedValue([]) };
@@ -29,46 +40,254 @@ describe('DynatraceRepository — createDsCompareConfigForMetric', () => {
     );
   });
 
-  it('inserts with organization_id resolved from the application dashboard', async () => {
-    manager.query.mockResolvedValueOnce([]); // existence check: no config yet
+  it('inserts with organization_id and team_id read from the application dashboard', async () => {
+    manager.query
+      .mockResolvedValueOnce([]) // existence check: no config yet
+      .mockResolvedValueOnce([{ organization_id: 'org-1', team_id: 'team-1' }]);
 
-    await repository.createDsCompareConfigForMetric(
+    await create();
+
+    expect(manager.query).toHaveBeenCalledTimes(3);
+    const [sql, params] = manager.query.mock.calls[2] as [string, unknown[]];
+    expect(sql).toContain('INSERT INTO ds_compare_config');
+    expect(params).toEqual([
       'sut-1',
       'production',
       'loadTest',
       'ad-1',
       42,
-      'CPU usage',
-      'builtin:host.cpu.usage',
-    );
-
-    expect(manager.query).toHaveBeenCalledTimes(2);
-    const [sql, params] = manager.query.mock.calls[1] as [string, unknown[]];
-    expect(sql).toContain('INSERT INTO ds_compare_config');
-    expect(sql).toContain('organization_id');
-    // org comes from the dashboard row via subquery, not a (missing) parameter
-    expect(sql).toContain('(SELECT organization_id FROM application_dashboards WHERE id = $4)');
-    expect(params).toHaveLength(6);
+      expect.any(String),
+      'org-1',
+      'team-1',
+    ]);
     // placeholder/param drift guard: distinct placeholders must match the param list
     const distinctPlaceholders = new Set(sql.match(/\$\d+/g) as string[]).size;
-    expect(distinctPlaceholders).toBe(6);
+    expect(distinctPlaceholders).toBe(params.length);
   });
 
-  it('does not insert when the config already exists', async () => {
+  it('throws instead of inserting a NULL organization_id when the dashboard is missing', async () => {
+    manager.query
+      .mockResolvedValueOnce([]) // no config yet
+      .mockResolvedValueOnce([]); // dashboard row absent / invisible
+
+    await expect(create()).rejects.toThrow(/application_dashboard ad-1 does not exist/);
+    expect(manager.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('scopes the existence check by workload, like uniq_ds_compare_config_panel', async () => {
     manager.query.mockResolvedValueOnce([{ id: 'existing' }]);
+
+    await create();
+
+    expect(manager.query).toHaveBeenCalledTimes(1);
+    const [sql, params] = manager.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('SELECT id FROM ds_compare_config');
+    expect(sql).toContain('workload = $3');
+    expect(params).toEqual(['sut-1', 'production', 'loadTest', 'ad-1', 42]);
+  });
+
+  it('writes the USE_utilization / dynatrace-host config_data for an ordinary host metric', async () => {
+    manager.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ organization_id: 'org-1', team_id: 'team-1' }]);
+
+    await create();
+
+    const [, params] = manager.query.mock.calls[2] as [string, unknown[]];
+    expect(JSON.parse(params[5] as string)).toEqual({
+      metricClassification: { classification: 'USE_utilization', higherIsBetter: false },
+      thresholds: {
+        aggregation: 'mean',
+        percentageThreshold: 0.1,
+        iqrThreshold: 2.0,
+        absoluteThreshold: null,
+      },
+      ignore: false,
+      source: 'dynatrace-host',
+    });
+  });
+
+  it('marks Network Traffic informational (higherIsBetter null), not lower-is-better', async () => {
+    manager.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ organization_id: 'org-1', team_id: 'team-1' }]);
 
     await repository.createDsCompareConfigForMetric(
       'sut-1',
       'production',
       'loadTest',
       'ad-1',
-      42,
-      'CPU usage',
-      'builtin:host.cpu.usage',
+      43,
+      'Network Traffic',
+      'builtin:host.net.nic.traffic.rx',
     );
 
+    const [, params] = manager.query.mock.calls[2] as [string, unknown[]];
+    const configData = JSON.parse(params[5] as string) as {
+      metricClassification: { higherIsBetter: boolean | null };
+    };
+    expect(configData.metricClassification.higherIsBetter).toBeNull();
+  });
+
+  // The API's application_dashboards insert has no team_id column, so every dashboard it
+  // writes is team-less and every compare config under it inherits that. The worker's twin
+  // (dynatrace-dashboard-manager.ts) DOES stamp the SUT's team. That divergence predates
+  // this fix and is pinned here, not endorsed — see the TODOS.md entry. It costs nothing to
+  // an org member (can_access_resource checks the org first and team is an extra grant, not
+  // a restriction); it only shows for a user in a team but not in its organization.
+  it('forwards a NULL team_id unchanged — the API path never sets one (see TODOS.md)', async () => {
+    manager.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ organization_id: 'org-1', team_id: null }]);
+
+    await create();
+
+    const [, params] = manager.query.mock.calls[2] as [string, unknown[]];
+    expect(params[6]).toBe('org-1');
+    expect(params[7]).toBeNull();
+  });
+});
+
+/**
+ * A Dynatrace application_dashboard is per-workload (its id hashes the workload in),
+ * but uq_application_dashboards_unique is
+ * (system, environment, grafana_instance_id, dashboard_uid, dashboard_label) — no
+ * workload, and a uid built from the label alone. Setting grafana_instance_id made the
+ * second workload collide with the first, ON CONFLICT swallowed the insert, and the
+ * ds_compare_config that reads the row's organization_id then failed the NOT NULL.
+ */
+describe('DynatraceRepository — ensureArtificialDashboardExists', () => {
+  const stubRepo = () => ({}) as never;
+
+  const makeRepository = (manager: { query: jest.Mock }) =>
+    new DynatraceRepository(
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      {
+        transaction: jest.fn(async (fn: (m: unknown) => Promise<unknown>) => fn(manager)),
+      } as never,
+    );
+
+  const ensure = (repository: DynatraceRepository, label = 'Dynatrace host metrics host-a') =>
+    repository.ensureArtificialDashboardExists(
+      'sut-1',
+      'production',
+      'combitest',
+      label,
+      'ad-combitest',
+      'org-1',
+    );
+
+  /** The happy path: both parents resolved, the application_dashboard still to write. */
+  const managerWithDashboardAbsent = () => ({
+    query: jest
+      .fn()
+      .mockResolvedValueOnce([{ id: 'gi-1' }]) // grafana_instances LIMIT 1
+      .mockResolvedValueOnce([{ id: 'gd-1' }]) // synthetic grafana_dashboard exists
+      .mockResolvedValueOnce([]) // application_dashboard absent
+      .mockResolvedValueOnce([]),
+  });
+
+  it('leaves grafana_instance_id NULL so a second workload gets its own row', async () => {
+    const manager = managerWithDashboardAbsent();
+
+    await ensure(makeRepository(manager));
+
+    const [sql, params] = manager.query.mock.calls[3] as [string, unknown[]];
+    expect(sql).toContain('INSERT INTO application_dashboards');
+    expect(sql).not.toContain('grafana_instance_id');
+    expect(params).not.toContain('gi-1');
+    expect(params[0]).toBe('ad-combitest');
+    // The clause must survive, and must stay targeted: the check-then-insert above is
+    // not atomic, so a racing second caller has to be tolerated — but only on the id.
+    // A bare DO NOTHING would swallow every other constraint instead.
+    expect(sql).toContain('ON CONFLICT (id) DO NOTHING');
+  });
+
+  it('keeps the application_dashboards placeholder and parameter lists in step', async () => {
+    const manager = managerWithDashboardAbsent();
+
+    await ensure(makeRepository(manager));
+
+    const [sql, params] = manager.query.mock.calls[3] as [string, unknown[]];
+    const distinctPlaceholders = new Set(sql.match(/\$\d+/g) as string[]).size;
+    expect(distinctPlaceholders).toBe(params.length);
+    expect(params).toHaveLength(8);
+    // id, sut, env, grafana_dashboard_id, name, uid, label, organization_id
+    expect(params[3]).toBe('gd-1');
+    expect(params[7]).toBe('org-1');
+  });
+
+  it('throws when the deployment has no Grafana instance at all', async () => {
+    const manager = { query: jest.fn().mockResolvedValueOnce([]) };
+
+    await expect(ensure(makeRepository(manager))).rejects.toThrow(/No Grafana instances found/);
     expect(manager.query).toHaveBeenCalledTimes(1);
-    expect(manager.query.mock.calls[0][0]).toContain('SELECT id FROM ds_compare_config');
+  });
+
+  it('creates the synthetic grafana_dashboard when the uid is unseen, and links its new id', async () => {
+    const manager = {
+      query: jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'gi-1' }]) // grafana_instances LIMIT 1
+        .mockResolvedValueOnce([]) // no synthetic grafana_dashboard yet
+        .mockResolvedValueOnce([{ id: 'gd-new' }]) // INSERT ... RETURNING id
+        .mockResolvedValueOnce([]) // application_dashboard absent
+        .mockResolvedValueOnce([]),
+    };
+
+    await ensure(makeRepository(manager));
+
+    const [gdSql, gdParams] = manager.query.mock.calls[2] as [string, unknown[]];
+    expect(gdSql).toContain('INSERT INTO grafana_dashboards');
+    expect(gdParams[0]).toBe('gi-1');
+    // the 800000+ range that marks a Dynatrace placeholder
+    expect(gdParams[1]).toBeGreaterThanOrEqual(800000);
+    expect(gdParams[1]).toBeLessThan(900000);
+    expect(gdParams[4]).toBe('[]'); // empty panels, so it is never pushed to Grafana
+    expect(gdParams[5]).toBe('org-1');
+
+    // the application_dashboard must point at the row just created, not at the instance
+    const [adSql, adParams] = manager.query.mock.calls[4] as [string, unknown[]];
+    expect(adSql).toContain('INSERT INTO application_dashboards');
+    expect(adParams[3]).toBe('gd-new');
+  });
+
+  it('does not insert an application_dashboard when the workload already has one', async () => {
+    const manager = {
+      query: jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'gi-1' }])
+        .mockResolvedValueOnce([{ id: 'gd-1' }]) // synthetic dashboard reused, not recreated
+        .mockResolvedValueOnce([{ id: 'ad-combitest' }]), // row already present
+    };
+
+    await ensure(makeRepository(manager));
+
+    expect(manager.query).toHaveBeenCalledTimes(3);
+    const sqls = manager.query.mock.calls.map((c) => c[0] as string);
+    expect(sqls.some((sql) => sql.includes('INSERT INTO application_dashboards'))).toBe(false);
+    expect(sqls.some((sql) => sql.includes('INSERT INTO grafana_dashboards'))).toBe(false);
+  });
+
+  it('derives the dashboard uid from the label alone — which is why it cannot carry an instance id', async () => {
+    const manager = managerWithDashboardAbsent();
+
+    await ensure(makeRepository(manager), 'Dynatrace Host: host-a.example.com!');
+
+    const expectedUid = 'dynatrace-dynatrace-host-host-a-example-com';
+    const [, lookupParams] = manager.query.mock.calls[1] as [string, unknown[]];
+    expect(lookupParams).toEqual([expectedUid, 'gi-1']);
+
+    const [, insertParams] = manager.query.mock.calls[3] as [string, unknown[]];
+    // dashboard_name and dashboard_label keep the raw label; only the uid is sanitised
+    expect(insertParams[4]).toBe('Dynatrace Host: host-a.example.com!');
+    expect(insertParams[5]).toBe(expectedUid);
+    expect(insertParams[6]).toBe('Dynatrace Host: host-a.example.com!');
   });
 });
 

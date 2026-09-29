@@ -878,20 +878,41 @@ export class DynatraceRepository {
       );
 
       if (!appDashboardExists || appDashboardExists.length === 0) {
-        // Create application_dashboard
+        // grafana_instance_id is deliberately left NULL. A Dynatrace dashboard is
+        // per-workload — the id is derived from (system, environment, workload, label) —
+        // but uq_application_dashboards_unique is
+        // (system, environment, grafana_instance_id, dashboard_uid, dashboard_label),
+        // with no workload and a dashboard_uid built from the label alone. Filling the
+        // column with "the first Grafana instance" made the second workload's row collide
+        // with the first's, the ON CONFLICT swallowed it, and the ds_compare_config insert
+        // that reads its organization_id then failed the NOT NULL. NULL never collides in a
+        // btree unique, so the per-workload row can finally be written.
+        //
+        // The price is that `uq_application_dashboards_unique` no longer fires on these rows
+        // at all, and `ON CONFLICT (id)` becomes their ONLY dedupe. That is sound only while
+        // every caller passes a DETERMINISTIC id — `generateDynatraceDashboardUuid`, which
+        // hashes the workload in. `createQuerySmart` and `bulkImportQuery` used `randomUUID()`
+        // and were changed with this fix; a new caller that reintroduces one will silently
+        // insert a duplicate dashboard per call instead of raising. The target stays named for
+        // the same reason: a bare `DO NOTHING` would swallow every other constraint too,
+        // which is a quieter version of the bug this comment is about.
+        //
+        // (The worker has a near-twin of this insert in
+        // apps/worker/src/pipelines/helpers/dynatrace-dashboard-manager.ts that also omits the
+        // column, but it is NOT a precedent to lean on: nothing outside its own tests calls it
+        // — `DynatracePipeline` uses the stored `applicationDashboardId` instead — and its uuid
+        // formula differs from this one when the workload is empty.)
         await manager.query(
           `INSERT INTO application_dashboards (
             id, system_under_test_id, test_environment,
-            grafana_instance_id, grafana_dashboard_id,
+            grafana_dashboard_id,
             dashboard_name, dashboard_uid, dashboard_label, organization_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          ON CONFLICT (system_under_test_id, test_environment, grafana_instance_id, dashboard_uid, dashboard_label)
-          DO NOTHING`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (id) DO NOTHING`,
           [
             applicationDashboardId,
             systemUnderTestId,
             testEnvironment,
-            grafanaInstanceId,
             grafanaDashboardId,
             dashboardLabel,
             dashboardUid,
@@ -953,28 +974,53 @@ export class DynatraceRepository {
 
     // Use a transaction to ensure atomicity
     await this.dataSource.transaction(async (manager) => {
-      // Check if config already exists (unique on application_dashboard_id, panel_id, metric_name)
       const existingConfig = await manager.query(
+        // Scoped exactly like uniq_ds_compare_config_panel — (system, environment,
+        // workload, application_dashboard_id, panel_id) WHERE metric_name IS NULL. The
+        // dashboard id is per-workload today, but the index is what decides whether the
+        // insert below would collide.
         `SELECT id FROM ds_compare_config
-         WHERE application_dashboard_id = $1
-         AND panel_id = $2
+         WHERE system_under_test_id = $1
+         AND test_environment = $2
+         AND workload = $3
+         AND application_dashboard_id = $4
+         AND panel_id = $5
          AND metric_name IS NULL`,
-        [applicationDashboardId, panelId]
+        [systemUnderTestId, testEnvironment, workload, applicationDashboardId, panelId]
       );
 
       if (!existingConfig || existingConfig.length === 0) {
         // Ownership is inherited from the parent dashboard (which inherits from its SUT at
-        // creation). NOTE: this runs on the plain pooled connection, not withRequestEm — under
-        // a least-privilege deploy (no rolbypassrls) the subqueries would return zero rows and
-        // the insert would fail on the NOT NULL org column. Same deployment constraint as the
-        // documented api_keys carve-out in apps/api/CLAUDE.md.
+        // creation). Read it first rather than as a subquery in the INSERT: a missing or
+        // invisible dashboard then says so, instead of quietly substituting NULL and
+        // surfacing as `null value in column "organization_id" ... violates not-null`.
+        // NOTE: this runs on the plain pooled connection, not withRequestEm — under a
+        // least-privilege deploy (no rolbypassrls) the lookup would return zero rows. Same
+        // deployment constraint as the documented api_keys carve-out in apps/api/CLAUDE.md.
+        const owner = await manager.query<Array<{ organization_id: string; team_id: string | null }>>(
+          `SELECT organization_id, team_id FROM application_dashboards WHERE id = $1`,
+          [applicationDashboardId]
+        );
+        if (!owner || owner.length === 0) {
+          throw new Error(
+            `Cannot create ds_compare_config for ${panelTitle}: application_dashboard ${applicationDashboardId} does not exist`
+          );
+        }
+
         await manager.query(
+          // The probe above is not atomic under READ COMMITTED, so two concurrent
+          // createHostMetricQueries for one host (a double-clicked Add host, or a copy
+          // racing a manual add) both reach this insert. The conflict target is
+          // uniq_ds_compare_config_panel, partial index and all; the row already being
+          // there is the outcome this method wanted anyway.
           `INSERT INTO ds_compare_config (
             system_under_test_id, test_environment, workload,
             application_dashboard_id, panel_id, config_data, organization_id, team_id
-          ) VALUES ($1, $2, $3, $4, $5, $6,
-            (SELECT organization_id FROM application_dashboards WHERE id = $4),
-            (SELECT team_id FROM application_dashboards WHERE id = $4))`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (system_under_test_id, test_environment, workload,
+                       application_dashboard_id, panel_id)
+            WHERE metric_name IS NULL
+            DO NOTHING`,
           [
             systemUnderTestId,
             testEnvironment,
@@ -982,6 +1028,8 @@ export class DynatraceRepository {
             applicationDashboardId,
             panelId,
             JSON.stringify(configData),
+            owner[0]!.organization_id,
+            owner[0]!.team_id,
           ]
         );
 

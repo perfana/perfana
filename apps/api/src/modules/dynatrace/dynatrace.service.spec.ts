@@ -1126,6 +1126,32 @@ describe('DynatraceService', () => {
           mockDynatraceConfig.organizationId,
         );
       });
+
+      // Since the artificial dashboard row stopped carrying grafana_instance_id,
+      // `ON CONFLICT (id) DO NOTHING` is its only dedupe — uq_application_dashboards_unique
+      // has no workload column and NULLs never collide there. A randomUUID here would
+      // insert a fresh application_dashboards row on every repeat import of the same scope.
+      it('derives the shared UUID deterministically, so a repeat import reuses the row', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.bulkCreateQueryWithSharedUuid.mockResolvedValue([mockDynatraceQuery]);
+        repository.generateDynatraceDashboardUuid.mockReturnValue('deterministic-uuid');
+
+        await service.bulkImportQuery(dtoList, mockUserId, mockRoles, true);
+
+        expect(repository.generateDynatraceDashboardUuid).toHaveBeenCalledWith(
+          dtoList[0].systemUnderTestId,
+          dtoList[0].testEnvironment,
+          dtoList[0].dashboardLabel,
+          dtoList[0].workload,
+        );
+        const [, , , , passedId] = repository.ensureArtificialDashboardExists.mock.calls.at(-1);
+        expect(passedId).toBe('deterministic-uuid');
+        expect(repository.bulkCreateQueryWithSharedUuid).toHaveBeenCalledWith(
+          dtoList,
+          'deterministic-uuid',
+          expect.anything(),
+        );
+      });
     });
 
     describe('createHostMetricQueries', () => {

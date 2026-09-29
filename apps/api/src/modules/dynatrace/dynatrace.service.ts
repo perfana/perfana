@@ -964,12 +964,23 @@ export class DynatraceService {
 
     const existingUuid = await this.repository.findDashboardByLabel(dto.dashboardLabel);
 
-    let applicationDashboardId: string;
-    if (existingUuid) {
-      applicationDashboardId = existingUuid;
-    } else {
-      applicationDashboardId = randomUUID();
-    }
+    // The fallback must be the DETERMINISTIC id, not a fresh one. Since the artificial
+    // dashboard row stopped carrying grafana_instance_id, `ON CONFLICT (id) DO NOTHING` is
+    // the only thing deduplicating this insert — uq_application_dashboards_unique cannot
+    // do it, because it has no workload column and NULLs never collide there. A randomUUID
+    // therefore inserts a second row for the same logical dashboard on every call that
+    // misses the lookup above. See "An artificial Dynatrace dashboard is per-workload" in
+    // apps/api/CLAUDE.md.
+    const applicationDashboardId =
+      existingUuid ??
+      (dto.systemUnderTestId && dto.testEnvironment && dto.dashboardLabel
+        ? this.repository.generateDynatraceDashboardUuid(
+            dto.systemUnderTestId,
+            dto.testEnvironment,
+            dto.dashboardLabel,
+            dto.workload || '',
+          )
+        : randomUUID());
 
     if (dto.systemUnderTestId && dto.testEnvironment && dto.dashboardLabel && parentOrgId) {
       await this.repository.ensureArtificialDashboardExists(
@@ -1029,7 +1040,21 @@ export class DynatraceService {
     );
 
     if (generateSharedUuid) {
-      const sharedUuid = randomUUID();
+      // Deterministic, for the same reason as createQuerySmart above: `ON CONFLICT (id)`
+      // is the artificial dashboard's only dedupe now, so a randomUUID here made every
+      // repeat import of the same (system, environment, workload, label) insert another
+      // application_dashboards row. Deriving it also repairs an older failure on this
+      // path — the previous conflict target swallowed the insert instead, leaving these
+      // queries pointing at a sharedUuid with no row behind it.
+      const sharedUuid =
+        firstDto.systemUnderTestId && firstDto.testEnvironment && firstDto.dashboardLabel
+          ? this.repository.generateDynatraceDashboardUuid(
+              firstDto.systemUnderTestId,
+              firstDto.testEnvironment,
+              firstDto.dashboardLabel,
+              firstDto.workload || '',
+            )
+          : randomUUID();
 
       if (firstDto.systemUnderTestId && firstDto.testEnvironment && firstDto.dashboardLabel && parentOrgId) {
         await this.repository.ensureArtificialDashboardExists(
