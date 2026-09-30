@@ -25,13 +25,50 @@ const hostEntities = [
   },
 ];
 
-const testRun = { id: 'tr-1', start_time: '2026-07-22T10:00:00Z', end_time: '2026-07-22T10:30:00Z' } as never;
+const testRun = {
+  id: 'tr-1',
+  test_environment: 'acc',
+  workload: 'loadTest',
+  start_time: '2026-07-22T10:00:00Z',
+  end_time: '2026-07-22T10:30:00Z',
+} as never;
 const configs = [{ id: 'c1', label: 'DT' }] as never;
 
 describe('HostsTabContent', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     mockFetch.mockResolvedValue([]);
+  });
+
+  // A `sut`-level mapping carries NULL test_environment and workload by design, and
+  // mappings arrive ordered createdAt DESC — so the first one in the list is whichever
+  // was created last, not whichever is scoped like the run. Reading the scope off it sent
+  // `environment=&workload=`, which the endpoint rejects with a 400 before it calls
+  // Dynatrace at all: a blank table, once per host, on every poll.
+  it('takes the scope from the run, not from a system-level first mapping', async () => {
+    const hosts = [
+      // system-level, and first in the list
+      { ...hostEntities[0]!, id: 'm0', entityId: 'HOST-A', level: 'sut',
+        testEnvironment: undefined, workload: undefined },
+      { ...hostEntities[0]!, id: 'm1', entityId: 'HOST-B' },
+    ];
+
+    render(<HostsTabContent hostEntities={hosts} testRun={testRun} configs={configs} />);
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    for (const call of mockFetch.mock.calls) {
+      expect(call[1]).toBe('acc');
+      expect(call[2]).toBe('loadTest');
+    }
+  });
+
+  it('asks for nothing when the run has no environment or workload to scope by', async () => {
+    const scopeless = { ...(testRun as object), test_environment: '', workload: '' } as never;
+
+    render(<HostsTabContent hostEntities={hostEntities} testRun={scopeless} configs={configs} />);
+
+    // The endpoint requires all three; firing anyway is a guaranteed 400 per host per poll.
+    await waitFor(() => expect(mockFetch).not.toHaveBeenCalled());
   });
 
   it('queries each host separately and fills rows in as they arrive', async () => {

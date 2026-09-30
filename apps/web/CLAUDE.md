@@ -174,6 +174,42 @@ token in `alpha()` or hard-coding an rgba fails them. Hover tints are not assert
 applies `sx['&:hover']`.
 
 
+### The Hosts tab's scope comes from the run, not from `hostEntities[0]`
+
+`HostsTabContent` fans out one `GET /dynatrace/hosts/overview` per host, and that endpoint
+requires `systemId`, `environment` and `workload` — it answers 400 without all three, before it
+calls Dynatrace at all. The scope used to be read off the first entry of the mapping list:
+
+```ts
+const first = hostEntities[0];
+const testEnvironment = first?.testEnvironment ?? '';   // wrong
+```
+
+A **`sut`-level** mapping has `test_environment` and `workload` NULL on purpose — that is what
+"applies to the whole system" means, and `copyEntityMappings` preserves the level when copying.
+Mappings come back ordered `createdAt DESC`, so the moment the newest mapping was a system-level
+one, `?? ''` sent `environment=&workload=`, every host 400'd, and the table rendered empty with
+nothing in the browser console to explain it. Since v0.2.95.1 made it one request per host, that
+is four or five 400s per poll for anyone with the card open.
+
+The scope is now destructured from `testRun`, which the component already receives. That is also
+the more correct source: `DynatraceRepository.getEntityMappings` resolves **all three** mapping
+levels for a concrete scope, so passing the run's environment and workload returns a superset of
+what any single mapping's own scope would — the sut-level hosts come along.
+
+Two things worth keeping:
+
+- **`environment` and `workload` are in the effect's early-return guard.** Firing without them is
+  a guaranteed 400 per host per poll, so the component asks for nothing instead.
+- **The fixture in `HostsTabContent.test.tsx` had no `test_environment`/`workload` at all** — it is
+  cast `as never`, so TypeScript never objected, and every mapping in it carried a concrete scope.
+  That is why ten weeks of tests passed over this. The regression case puts a `sut`-level mapping
+  first in the list and asserts what `fetchHostsOverview` was actually called with.
+
+This is the repo's recurring **first-row-selection** shape — `configs[0]`, `LIMIT 1`, `take: 1`.
+The same commit that introduced this one got it right one line away, for the Dynatrace config:
+`configs.find((c) => c.id === selectedHost.dynatraceConfigId) ?? configs[0]`.
+
 ### There is one `CopyButton` — reach for it instead of hand-rolling the next one
 
 `apps/web/components/ui/copy-button.tsx` is the shared copy-to-clipboard icon button

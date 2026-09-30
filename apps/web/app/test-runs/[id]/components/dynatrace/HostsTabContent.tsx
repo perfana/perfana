@@ -43,17 +43,29 @@ export default function HostsTabContent({ hostEntities, testRun, configs }: Host
 
   const first = hostEntities[0];
   const systemUnderTestId = first?.systemUnderTestId;
-  const testEnvironment = first?.testEnvironment ?? '';
-  const workload = first?.workload ?? '';
+  // Scope comes from the RUN, never from hostEntities[0]. A `sut`-level mapping has
+  // test_environment and workload NULL by design — that is what "applies to the whole
+  // system" means — and mappings arrive ordered createdAt DESC, so one system-level
+  // mapping sorting to the front sent `environment=&workload=` and the endpoint answered
+  // 400 for every host, on every poll. The endpoint wants the concrete scope anyway:
+  // DynatraceRepository.getEntityMappings resolves all three levels for it, so the
+  // sut-level hosts come back too.
+  const {
+    test_environment: testEnvironment,
+    workload,
+    start_time: startTime,
+    end_time: endTime,
+  } = testRun;
   // Identity-stable dep: hostEntities is re-filtered on every parent render.
   const hostIdsKey = hostEntities.map((h) => h.entityId).join(',');
-  const { start_time: startTime, end_time: endTime } = testRun;
 
   // Fan out per host so the table fills in as answers arrive, rather than
   // blocking on one selector covering every host.
   useEffect(() => {
     setRows([]);
-    if (!systemUnderTestId || !startTime || !endTime || !hostIdsKey) return;
+    // environment and workload are in the guard too: the endpoint requires all three and
+    // answers 400 without them, so firing anyway would just be a 400 per host per poll.
+    if (!systemUnderTestId || !testEnvironment || !workload || !startTime || !endTime || !hostIdsKey) return;
 
     let cancelled = false;
     const queue = hostIdsKey.split(',');

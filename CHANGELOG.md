@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.24] - 2026-09-30
+
+### Fixed
+- **The Hosts tab of the Dynatrace card no longer comes up blank on systems that have a system-wide host mapping.** The tab worked out which environment and workload to ask about by looking at the first host in its own list, and a host mapped at system level has neither — it applies everywhere. When such a mapping happened to be the most recently created one, every request went out without an environment or a workload, was rejected before it reached Dynatrace, and the table showed nothing at all. It now uses the test run's own environment and workload, which is what the table is showing in the first place. Present since the Hosts tab shipped in v0.2.61.96; easier to run into since v0.2.96.22, because copying a host to another scope keeps it at the level it was mapped at.
+
 ## [0.2.96.23] - 2026-09-29
 
 ### Fixed
