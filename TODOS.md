@@ -973,6 +973,181 @@ so a crafted sampler name can restyle a hover label or put a clickable external 
 string-interpolating it, at all four sites at once.
 **Where:** `apps/web/app/test-runs/[id]/components/service-level-objectives/utils/slo-chart-utils.ts`.
 
+## First-row selection
+
+A sweep on 2026-09-30 (four parallel audits over `apps/api`, `apps/worker`, `apps/grafana-sync`,
+`packages/shared`, `apps/web`) found ~30 instances of one bug class: code picks index 0 /
+`LIMIT 1` / `take: 1` / the first `.find()` hit out of a collection that can legitimately hold
+more than one row, with no `ORDER BY` and no scoping predicate. Three recurring false premises
+underneath it: **"a name is unique"**, **"a uid is unique"**, **"there is one instance"** — the
+schema guarantees none of them.
+
+Two were fixed in v0.2.96.25 (the Grafana dashboard-by-uid cluster, and
+`findDashboardByLabel`); v0.2.96.23 and v0.2.96.24 fixed two more. The rest are below.
+
+**Priority note:** there are no multi-organization production deployments yet (confirmed
+2026-09-30), so everything whose trigger is "two organizations" is P3 housekeeping rather than
+urgent — but it has to be closed *before* the first multi-org deploy, not after. Items whose
+trigger is "two Grafana/Dynatrace instances" or "two workloads" are live today: the dev database
+has 3 Grafana instances, 2 Dynatrace configs and 20 duplicated dashboard uids.
+
+### Multi-instance: live today, no second organization needed
+
+**Priority:** P2
+
+- `apps/worker/src/pipelines/MetricsPipeline.ts:222` — Grafana collection loops over every
+  instance (`groupPanelsByGrafanaInstance`) but stamps `ds_metric_collection_status` with
+  `getGrafanaInstanceId()`, the cached singleton. On a run whose dashboards live on instance B
+  that writes a status row for the wrong source: the orphan sweep deletes it each analyze,
+  instance B's row never reaches complete, and `calculateCoverage` divides by a source that can
+  never finish — issue #21's symptom with a cause not yet listed there. `IncrementalMetricsPipeline`
+  already does this correctly with a per-job instance id; copy that.
+- `apps/api/.../test-runs-data-sources.service.ts:513, 622, 693` — `tracingServices[0]`.
+  `loadTracingServices` filters by SUT and loosely by environment, never by workload, and the
+  unique key is `(sut, env, workload, tracing_instance_id)`. Slow traces, error traces and trace
+  detail all query whichever Tempo came back first. Route them through the hierarchical
+  `findTracingService` the same module already has.
+- `apps/api/src/repositories/tracing-service.repository.ts:36-41, 121` — the read ignores
+  `tracing_instance_id`; worse, `createOrUpdate` calls `findByExactMatch` without it, so
+  configuring a **second** tracing instance for one scope overwrites the first row instead of
+  inserting the second the unique index was designed to allow.
+- `apps/api/.../dynatrace.service.ts:559-565` — `GET /dynatrace/entities` without a
+  `dynatraceConfigId` falls back to `configs[0]` from the **unfiltered** `repository.findAll()`
+  (`order: { host: 'ASC' }`), and uses that config's decrypted `apiToken`. The stale comment
+  above it still says the entity has no `organization_id`; it has been NOT NULL since Phase 4.
+  Make the parameter required, or resolve it from the caller's org and refuse when ambiguous.
+- `apps/api/.../dynatrace.repository.ts:826` — `SELECT id FROM grafana_instances LIMIT 1`.
+  Already filed under `## Dynatrace`; listed here so the class is complete in one place.
+- `apps/web/.../useGraphsPresets.ts` and `.../useBenchmarkForm.ts` — the two
+  `fetchGrafanaDashboardByUid` callers that still cannot pass an instance. The first needs a
+  field on the persisted `SeriesConfig` (and a migration of stored presets); the second needs an
+  instances list to resolve `grafanaLabel` → id, the way `useDashboardForm` does. Both now log
+  the ambiguity rather than hiding it.
+- `apps/web/.../useDynatraceEntityMappings.ts:231` — `setSelectedInstance(data[0].id)` on the
+  deep-links config tab. Default to the instance this SUT's existing mappings already reference.
+- `apps/api/.../metrics-sources.service.ts:160-180` — resolves a metrics source by
+  `external_ref = <dashboard uid>` with no SUT/environment/workload predicate, then `.getOne()`.
+  `application_dashboards.metrics_source_id` is the correct single-valued link and is right there.
+- `apps/api/.../benchmark-tag.helper.ts:76-83` — looks an application dashboard up by
+  `(sut, env, dashboard_uid)`, two columns short of the unique key, then inherits its tags. Tags
+  drive notification routing. Use the `application_dashboard_id` the benchmark already carries.
+- `apps/api/.../edit-slo/hooks/useEditSLOForm.ts:296` and
+  `components/reports/report-generation/MetricSelectionCascade.tsx:158` — the same
+  uid-/label-is-unique assumption on the web side.
+- `apps/api/.../dynatrace.repository.ts:88-102` — `ensureMetricsSourceExists` reads back with 5
+  of the upsert's 6 conflict columns (`displayName` omitted), so renaming a Dynatrace config
+  leaves two rows and the read-back picks arbitrarily.
+
+### Batch jobs where one run stands in for a heterogeneous set
+
+**Priority:** P2
+
+- `apps/worker/.../adapt/results-processor.ts:106, 343` — `testRunInfo[0]` after a
+  `SELECT DISTINCT sut, env, workload`; the `DISTINCT` is itself the admission that the batch can
+  span scopes. One arbitrary workload's compare-config cache is then applied to every run:
+  wrong thresholds, wrong `minSampleCount`, wrong ignore rules, plausible-looking verdicts.
+- `apps/worker/.../simple-orchestrate-reevaluate-batch.ts:410` — the `sut:env:workload` scope
+  lock is taken from `testRunIds[0]`, so runs from other workloads in the batch execute with **no**
+  lock, which is exactly the contention the lock exists to prevent.
+- `apps/api/.../bullmq-client.service.ts:346-352` — the compare-config *scope* (metric vs panel)
+  is decided from `testRunIds[0]` for the whole batch.
+
+Either reject a heterogeneous batch at the orchestrator, or group by `(sut, env, workload)` and
+do the work per group. `POST /reevaluate-batch` asserts per-run access but never homogeneity.
+
+### Arbitrary-but-stable picks worth tightening
+
+**Priority:** P3
+
+- `apps/worker/.../PerformanceTestMetricsPipeline.ts:738` — the workload Apdex threshold is a
+  `LIMIT 1` with no `ORDER BY` over a table that allows one apdex benchmark **per application
+  dashboard**, plus an `OR organization_id IS NULL` arm that widens it further. The same run
+  re-analysed twice can get different Apdex numbers. Masked whenever a `workload_apdex_thresholds`
+  row exists, which is unique on the scope.
+- `apps/worker/.../checks/DataAggregator.ts:322` — `panelAverage = values[0]` from an unordered
+  statistics query. The verdict is safe (only consumed when `average_all` is true) but the stored
+  and displayed `check_results.panel_average` is an unlabelled arbitrary series.
+- `apps/api/.../metrics.service.ts:155-161` — `firstDashboard` resolves a dashboard from
+  `(test_run_id, panel_id)`, and low panel ids recur on every dashboard a run collected.
+- `apps/api/.../test-runs-data-sources.service.ts:793` — `configs.find(...) ?? configs[0]` returns
+  another service's Pyroscope hotspots labelled as the requested one. Drop the fallback and let
+  the `NotFoundException` two lines below fire.
+- `apps/web/.../JobProgressBanner.tsx:34-35` — takes the system id from a list row while
+  environment and workload come from props; the list is filtered by system **name**.
+- `apps/api/.../report-data-fetcher.service.ts:2495` — a report graph section is titled and
+  united from `rows[0]`, which under `ORDER BY time ASC` means "earliest data point".
+- `apps/worker/.../simple-orchestrate-reevaluate-batch.ts:585` — `LIMIT 10` on
+  `grafana_instances` silently truncates an 11-instance deploy. Different class, noticed in passing.
+
+### Needs a second organization to fire — close before the first multi-org deploy
+
+**Priority:** P3 today, **P1 the moment a second organization exists in production**
+
+- `apps/grafana-sync/.../dashboard-finder.service.ts:53, 161, 193`,
+  `auto-config-updates.service.ts:111, 246`, `grafana-api.service.ts:319` — six sites resolving a
+  Grafana instance by `findOne({ where: { label } })`. **Verified: `grafana_instances.label` has
+  no unique constraint, and grafana-sync sets no RLS context anywhere**, so these see every
+  organization's rows. Duplicate labels across orgs are not an edge case — they are *required*
+  for one profile to auto-configure two orgs' systems. `insertApplicationDashboard` org-scopes the
+  SUT lookup and then resolves the instance org-blind, so org A's SUT can be given org B's
+  `grafana_instance_id`, and the dashboard builder is handed org B's `server_url` and API key.
+  Fix: thread the SUT's `organizationId` into every label lookup and fail closed on ambiguity;
+  longer term, a unique index on `(organization_id, label)`.
+- `apps/api/.../test-runs-config.service.ts` (11 sites), `test-runs-metrics.service.ts:86`,
+  `systems-under-test.service.ts:368`, `alerts.service.ts:128`, `events.service.ts:136` — a system
+  under test resolved by `name` alone. `uq_system_under_test_name_org` scopes the name **per
+  organization**. Several of these write and delete. `alerts.service.processAlert` is the sharpest:
+  it resolves by name and then reaches `checkAbortConditions`, which can abort running test runs.
+  Note the webhook is **not** public — it carries `@ApiBearerAuth()`, documents a 401 and is
+  guarded by default, so it needs a valid API key; and on an RLS-enabled deploy the lookup is
+  org-scoped. Neither is a reason to leave it: tenancy must not depend on RLS being on.
+  `test-run-lookup.service.ts:66` is the correct pattern to copy.
+- `apps/api/.../test-run-lookup.service.ts:243-246` — `getDefaultTeam()` is
+  `SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1` with **no organization predicate**,
+  and its result is stamped on every auto-created SUT. Org from the caller, team from whichever
+  organization was created first. `systems_under_test` RLS reads `can_access_resource(org, team,
+  created_by)`, so members of the owning org lose access to a system their own CI just created.
+  Reached from `/api/init` and on the first test run for any new SUT name.
+- `apps/api/.../metrics.service.ts:84-89, 1123-1129` — `resolveApplicationDashboardId` picks an
+  arbitrary `application_dashboards` row for a metrics source and uses it as the **authorization
+  subject**, and again at :1150 as the scoping run. One metrics source backs many dashboards
+  across systems, environments and teams. `ds_metrics` has no RLS policy of its own, which the
+  comment at :1116 says is precisely why this check is the only control.
+- `apps/worker/src/config/grafana-config-cache.ts:49` — the worker's default Grafana is
+  `ORDER BY created_at ASC LIMIT 1` over the whole table, cached process-wide. Stable but
+  org-blind. **Measured: the NULL-instance bucket on dev is 76 perf-test and 3 Dynatrace
+  artificial rows and zero real Grafana dashboards**, so the wrong-instance half is not currently
+  reachable. The half that IS real: `tryGetGrafanaConfig()` gates whole stages
+  (`PanelsPipeline`, `MetricsPipeline`), so one misconfigured legacy row fails panels-processing
+  and metrics-collection for **every** run, including runs whose dashboards live on a healthy
+  second instance. Make the gate a count over the run's own dashboards' instances.
+- `apps/web/app/settings/teams/page.tsx:77` — `organizations[0].id` when the org filter is "all"
+  and no org is selected, which is exactly the state `organization-context` leaves a multi-org
+  user in. Ask instead of guessing.
+
+### Latent — no callers today, shaped to be misused by the next one
+
+**Priority:** P4
+
+- `apps/api/src/repositories/application-dashboard.repository.ts:87-100` —
+  `findByGrafanaDashboardId` and `findByDashboardUid`, both unscoped `findOne`s. One
+  `grafana_dashboards` row is referenced by many application dashboards, and a uid is unique only
+  within an instance.
+- `apps/worker/src/common/database.service.ts:1241` — `getDynatraceConfigBySystemUnderTest`
+  returns the first entity mapping's config. `dynatrace_entity_mappings` holds one row per mapped
+  entity by construction.
+- `apps/worker/src/services/dynatrace/DynatraceRepository.ts:127-151, 157` — dead code
+  (`getDynatraceConfig(host)` on a non-unique `host` column), no caller anywhere.
+
+Delete them, or make them return the set and force the caller to choose.
+
+### The durable fix
+
+A lint rule is the only thing that closes the class. The shape to flag: an index-0 access, a
+`take: 1`, or a SQL `LIMIT 1` with no `ORDER BY`, on a query whose `where` omits a column of the
+table's unique key. Until then this list is the record, and the three premises at the top are the
+thing to keep in mind when reviewing.
+
 ## Dynatrace
 
 ### The API and the worker write the same artificial dashboard row with different ownership

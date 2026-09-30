@@ -174,6 +174,33 @@ token in `alpha()` or hard-coding an rgba fails them. Hover tints are not assert
 applies `sx['&:hover']`.
 
 
+### A Grafana dashboard uid needs its instance — use `fetchGrafanaDashboardByUid`
+
+`GET /grafana/dashboards?uid=` applies **no instance scope** (`grafana-dashboards.service.ts`,
+the `query.uid` arm) and orders by `gd.name`, which ties for two copies of one dashboard. A uid
+is unique only *within* a Grafana, and on the dev database **20 of 152 uids are duplicated across
+instances** — a dev copy and a prod copy of the same dashboard, with different panel sets and
+different panel ids.
+
+Five call sites each did `Array.isArray(data) ? data[0] : data`. The result: a panel picked for an
+SLO or a graph preset could be a panel id that does not exist on the dashboard the run collected
+from, so the SLO evaluates nothing. Nothing errors.
+
+`fetchGrafanaDashboardByUid(uid, grafanaInstanceId?)` in `lib/grafana-dashboards.ts` is the one
+way in. Pass the instance whenever it is in hand — an `ApplicationDashboard` carries
+`grafana_instance_id`. Without it the helper still returns the first row, but **logs that the uid
+was ambiguous and how many instances answered**, so the guess is visible rather than silent.
+
+Two callers cannot pass it yet and are filed in TODOS.md:
+
+- `useGraphsPresets` — `SeriesConfig` is a **persisted preset** shape with no instance field;
+  adding one means migrating stored presets.
+- `useBenchmarkForm` — a `ProfileDashboard` carries a Grafana **label**, and the endpoint takes an
+  id. The sibling `useDashboardForm` resolves label → instance from its `availableInstances` list;
+  the benchmark form has no such list.
+
+The pattern to copy is `useDashboardManagement`, which fetches per instance and matches on `d.id`.
+
 ### The Hosts tab's scope comes from the run, not from `hostEntities[0]`
 
 `HostsTabContent` fans out one `GET /dynatrace/hosts/overview` per host, and that endpoint

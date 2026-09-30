@@ -513,6 +513,24 @@ Three things that go with it:
   NULL and surfacing as the not-null violation above. Its existence probe is also scoped by
   `(system, environment, workload)`, matching `uniq_ds_compare_config_panel`.
 
+### `findDashboardByLabel` is scoped, and has to stay that way
+
+`createQuerySmart` reuses an existing artificial dashboard before deriving one. That lookup was
+`findOne({ where: { dashboardLabel } })` — `dynatrace_queries` has only a PK, no unique on the
+label, and `copyQueries` deliberately writes the same label into other scopes, so it matched any
+query anywhere and handed the new query another system's or workload's
+`application_dashboard_id`. Its metrics, `ds_compare_config` rows and ADAPT verdicts then landed
+on that scope's dashboard.
+
+Worse, it sits on the left of `existingUuid ?? generateDynatraceDashboardUuid(...)`, so a hit
+**short-circuited the deterministic id** — which is the only dedupe an artificial dashboard has
+left since it stopped carrying `grafana_instance_id` (see the section above). v0.2.96.23 fixed the
+fallback and left this arm; v0.2.96.25 scoped it to
+`(dashboardLabel, systemUnderTestId, testEnvironment, workload)`.
+
+Keep the reuse arm rather than always deriving: rows created before the deterministic scheme
+carry a `randomUUID` id, and dropping the lookup would orphan them.
+
 ### Copying Dynatrace config to another scope
 
 `POST /dynatrace/queries/copy` and `POST /dynatrace/entities/mappings/copy` (v0.2.96.22) take
