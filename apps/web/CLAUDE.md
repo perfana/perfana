@@ -191,13 +191,14 @@ way in. Pass the instance whenever it is in hand — an `ApplicationDashboard` c
 `grafana_instance_id`. Without it the helper still returns the first row, but **logs that the uid
 was ambiguous and how many instances answered**, so the guess is visible rather than silent.
 
-Two callers cannot pass it yet and are filed in TODOS.md:
+Two callers do not pass it yet, for different reasons — both filed in TODOS.md:
 
-- `useGraphsPresets` — `SeriesConfig` is a **persisted preset** shape with no instance field;
-  adding one means migrating stored presets.
-- `useBenchmarkForm` — a `ProfileDashboard` carries a Grafana **label**, and the endpoint takes an
-  id. The sibling `useDashboardForm` resolves label → instance from its `availableInstances` list;
-  the benchmark form has no such list.
+- `useGraphsPresets` — genuinely blocked. `SeriesConfig` is a **persisted preset** shape with no
+  instance field, so adding one means migrating stored presets.
+- `useBenchmarkForm` — **cheap, just not done here.** A `ProfileDashboard` carries a Grafana
+  *label* and the endpoint takes an id, but `settings/profiles/[id]/page.tsx` already holds
+  `grafanaData.instances` and hands them to the sibling `DashboardFormDialog` one line above
+  `BenchmarkFormDialog`. One prop to thread. Do not file it next to the blocked one.
 
 The pattern to copy is `useDashboardManagement`, which fetches per instance and matches on `d.id`.
 

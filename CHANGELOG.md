@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **SLOs, graph presets and metric pickers no longer read the wrong Grafana's panel list.** A dashboard's uid is only unique inside one Grafana, so a dashboard copied between a dev and a production Grafana shares its uid — and the panel lookup was not saying which one it meant. It took whichever copy came back first, so a panel chosen for an SLO could be a panel that does not exist on the dashboard the test run actually collected from, and the SLO then quietly measured nothing. Where the screen knows which Grafana it is working with, it now says so; where it genuinely cannot yet, the ambiguity is written to the browser console instead of being guessed at silently.
 - **A Dynatrace query added to one workload no longer attaches itself to another workload's dashboard.** Reusing an existing dashboard was matched on the dashboard label alone, and labels repeat across workloads and systems by design — copying a host to another scope creates exactly that. The lookup is now scoped to the system, environment and workload it is being created in.
 
+### Note for existing installations
+- The Dynatrace fix above changes what an existing setup reuses. A query written before this release whose matching dashboard belongs to a *different* workload will no longer be matched, so the next query added in that workload gets its own dashboard rather than borrowing the other one. That is the point of the fix, but the old and new dashboards both stay, and their metrics are not merged. Nothing needs doing unless you want the two combined, in which case remove the stale one by hand.
+
 ## [0.2.96.24] - 2026-09-30
 
 ### Fixed

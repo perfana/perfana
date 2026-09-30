@@ -1016,13 +1016,18 @@ has 3 Grafana instances, 2 Dynatrace configs and 20 duplicated dashboard uids.
   (`order: { host: 'ASC' }`), and uses that config's decrypted `apiToken`. The stale comment
   above it still says the entity has no `organization_id`; it has been NOT NULL since Phase 4.
   Make the parameter required, or resolve it from the caller's org and refuse when ambiguous.
-- `apps/api/.../dynatrace.repository.ts:826` — `SELECT id FROM grafana_instances LIMIT 1`.
+- `apps/api/.../dynatrace.repository.ts` — the `SELECT id FROM grafana_instances LIMIT 1` inside
+  `ensureArtificialDashboardExists` (cited by statement, not line: this file moves).
   Already filed under `## Dynatrace`; listed here so the class is complete in one place.
-- `apps/web/.../useGraphsPresets.ts` and `.../useBenchmarkForm.ts` — the two
-  `fetchGrafanaDashboardByUid` callers that still cannot pass an instance. The first needs a
-  field on the persisted `SeriesConfig` (and a migration of stored presets); the second needs an
-  instances list to resolve `grafanaLabel` → id, the way `useDashboardForm` does. Both now log
-  the ambiguity rather than hiding it.
+- `apps/web/.../useGraphsPresets.ts` — genuinely blocked: `SeriesConfig` is a **persisted** preset
+  shape with no instance field, so scoping it means migrating stored presets.
+- `apps/web/.../useBenchmarkForm.ts` — **cheap, not blocked.** `apps/settings/profiles/[id]/page.tsx`
+  already holds `grafanaData.instances` and passes them to the sibling `DashboardFormDialog` on the
+  line above `BenchmarkFormDialog`; it is one prop to thread, then resolve `grafanaLabel` → id. Copy
+  `useDashboardManagement` (fetch per instance, match on `d.id`) rather than `useDashboardForm`'s
+  `availableInstances.find(i => i.label === ...)`, which is itself a first-match on a label column
+  with no unique constraint.
+  Both log the ambiguity today rather than hiding it.
 - `apps/web/.../useDynatraceEntityMappings.ts:231` — `setSelectedInstance(data[0].id)` on the
   deep-links config tab. Default to the instance this SUT's existing mappings already reference.
 - `apps/api/.../metrics-sources.service.ts:160-180` — resolves a metrics source by
@@ -1031,9 +1036,13 @@ has 3 Grafana instances, 2 Dynatrace configs and 20 duplicated dashboard uids.
 - `apps/api/.../benchmark-tag.helper.ts:76-83` — looks an application dashboard up by
   `(sut, env, dashboard_uid)`, two columns short of the unique key, then inherits its tags. Tags
   drive notification routing. Use the `application_dashboard_id` the benchmark already carries.
-- `apps/api/.../edit-slo/hooks/useEditSLOForm.ts:296` and
-  `components/reports/report-generation/MetricSelectionCascade.tsx:158` — the same
-  uid-/label-is-unique assumption on the web side.
+- `apps/web/.../edit-slo/hooks/useEditSLOForm.ts` — `availableDashboards.find((d) => d.dashboard_uid === benchmark.dashboard_uid)`,
+  a first-match over a list that can hold the same uid on two instances. The panel-fetch half of
+  this file WAS fixed in v0.2.96.25; only this match remains, and note the fix made it quieter —
+  the instance it picks is now forwarded, so the scoped query returns one row and the ambiguity
+  warning never fires.
+- `apps/web/components/reports/report-generation/MetricSelectionCascade.tsx:158` — the same
+  label-is-unique assumption in the report cascade.
 - `apps/api/.../dynatrace.repository.ts:88-102` — `ensureMetricsSourceExists` reads back with 5
   of the upsert's 6 conflict columns (`displayName` omitted), so renaming a Dynatrace config
   leaves two rows and the read-back picks arbitrarily.
@@ -1175,35 +1184,6 @@ sourced from the SUT the way the worker's `getSutOwnership` does, and make the t
 produce identical rows. Existing rows need a backfill or the population stays mixed. The
 spec case `forwards a NULL team_id unchanged — the API path never sets one` pins today's
 behaviour and should flip to asserting propagation.
-
-### `findDashboardByLabel` matches a label across every system and environment
-
-**Priority:** P2
-**Origin:** Documentation review during /ship on
-`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29). Pre-existing.
-**Why:** `apps/api/src/modules/dynatrace/dynatrace.repository.ts`:
-
-```ts
-async findDashboardByLabel(dashboardLabel: string) {
-  const result = await withRequestEm(this.queryRepo).findOne({
-    where: { dashboardLabel },
-    ...
-```
-
-No system, no environment, no workload — it returns the `applicationDashboardId` of the
-first `dynatrace_queries` row anywhere with that label. `createQuerySmart` uses it as its
-reuse arm, so a query created for system A / acceptatie can be handed system B / productie's
-artificial dashboard id purely because the labels match, and its metrics then land on the
-other scope's dashboard. Labels like `Dynatrace host metrics <hostname>` are exactly the ones
-that repeat across systems. RLS narrows the blast radius to rows the caller can see, which is
-why this has not been loud.
-**The contrast is now in the same function.** v0.2.96.23 changed the *fallback* beside it to
-`generateDynatraceDashboardUuid(systemUnderTestId, testEnvironment, dashboardLabel, workload)`
-— scoped to all four. The reuse arm is the only unscoped half left.
-**What to do:** scope the lookup to `(systemUnderTestId, testEnvironment, workload,
-dashboardLabel)`. At that point it returns exactly what the deterministic derive would
-compute, so the cleaner end state is deleting it and always deriving — check first whether any
-caller depends on picking up a dashboard created under a different workload.
 
 ### A Dynatrace query can be created against another organization's system
 
@@ -2420,6 +2400,37 @@ Separately, `forRoutes('{*splat}')` under `setGlobalPrefix('api')` derives `['/a
 ---
 
 ## Completed
+
+### `findDashboardByLabel` matches a label across every system and environment
+
+**Priority:** P2
+**Origin:** Documentation review during /ship on
+`fix/dynatrace-artificial-dashboard-per-workload` (2026-09-29). Pre-existing.
+**Why:** `apps/api/src/modules/dynatrace/dynatrace.repository.ts`:
+
+```ts
+async findDashboardByLabel(dashboardLabel: string) {
+  const result = await withRequestEm(this.queryRepo).findOne({
+    where: { dashboardLabel },
+    ...
+```
+
+No system, no environment, no workload — it returns the `applicationDashboardId` of the
+first `dynatrace_queries` row anywhere with that label. `createQuerySmart` uses it as its
+reuse arm, so a query created for system A / acceptatie can be handed system B / productie's
+artificial dashboard id purely because the labels match, and its metrics then land on the
+other scope's dashboard. Labels like `Dynatrace host metrics <hostname>` are exactly the ones
+that repeat across systems. RLS narrows the blast radius to rows the caller can see, which is
+why this has not been loud.
+**The contrast is now in the same function.** v0.2.96.23 changed the *fallback* beside it to
+`generateDynatraceDashboardUuid(systemUnderTestId, testEnvironment, dashboardLabel, workload)`
+— scoped to all four. The reuse arm is the only unscoped half left.
+**What to do:** scope the lookup to `(systemUnderTestId, testEnvironment, workload,
+dashboardLabel)`. At that point it returns exactly what the deterministic derive would
+compute, so the cleaner end state is deleting it and always deriving — check first whether any
+caller depends on picking up a dashboard created under a different workload.
+**Completed:** v0.2.96.25 (2026-09-30) — scoped to (dashboardLabel, systemUnderTestId, testEnvironment, workload). The reuse arm was kept rather than always deriving: rows predating the deterministic scheme carry a randomUUID id and would be orphaned.
+
 
 ### Make the perf-test ticks write the rebuild's shape, so the rebuild can be skipped
 
