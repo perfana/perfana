@@ -53,6 +53,27 @@ describe('fetchGrafanaDashboardByUid', () => {
     expect(console.warn).not.toHaveBeenCalled();
   });
 
+  // The scoped query matching nothing means the application dashboard's instance id and the
+  // Grafana dashboard's disagree. Callers degrade to an empty panel list, which on its own
+  // is indistinguishable from "this dashboard has no supported panels".
+  it('warns when a SCOPED lookup finds nothing, not only when the uid is ambiguous', async () => {
+    mockFetch.mockResolvedValue(ok([]));
+
+    await fetchGrafanaDashboardByUid('abc', 'gi-stale');
+
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('No Grafana dashboard "abc" on instance gi-stale'),
+    );
+  });
+
+  it('does not warn about an empty result when no instance was supplied', async () => {
+    mockFetch.mockResolvedValue(ok([]));
+
+    await fetchGrafanaDashboardByUid('abc');
+
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
   it('returns null rather than undefined when nothing matches', async () => {
     mockFetch.mockResolvedValue(ok([]));
     await expect(fetchGrafanaDashboardByUid('nope', 'gi-1')).resolves.toBeNull();
@@ -62,6 +83,19 @@ describe('fetchGrafanaDashboardByUid', () => {
     mockFetch.mockResolvedValue(ok({ uid: 'abc', grafana_instance_id: 'gi-1' }));
     const result = await fetchGrafanaDashboardByUid('abc', 'gi-1');
     expect((result as { uid: string }).uid).toBe('abc');
+  });
+
+  it('escapes the uid, which three of the five converted call sites did not', async () => {
+    // Two sites interpolated the uid raw. A uid holding `&` or `=` split the query string
+    // and the instance scope alongside it; URLSearchParams closes that for every caller.
+    mockFetch.mockResolvedValue(ok([]));
+
+    await fetchGrafanaDashboardByUid('a&grafanaInstanceId=evil', 'gi-1');
+
+    const url = mockFetch.mock.calls[0]![0] as string;
+    expect(url).toContain('uid=a%26grafanaInstanceId%3Devil');
+    expect(url.match(/grafanaInstanceId=/g)).toHaveLength(1);
+    expect(url).toContain('grafanaInstanceId=gi-1');
   });
 
   it('throws on a failed response rather than returning null', async () => {
