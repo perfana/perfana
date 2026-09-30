@@ -34,7 +34,7 @@ interface SLOFormFieldsProps {
   environment: string;
   workload: string;
   handleSourceChange: (sourceValue: string) => void;
-  fetchDashboardPanels: (dashboardUid: string) => Promise<void>;
+  fetchDashboardPanels: (dashboardUid: string, grafanaInstanceId?: string) => Promise<void>;
   fetchPerfMetricsPanels: (dashboardUid: string) => Promise<void>;
   fetchDynatraceMetricsForSlo: (dashboardLabel: string) => Promise<void>;
 }
@@ -145,7 +145,7 @@ export function SLOFormFields({
       }
     } else if (!isDynatraceDashboard(original)) {
       if (newValue.sourceType === 'grafana' && original.dashboard_uid) {
-        fetchDashboardPanels(original.dashboard_uid);
+        fetchDashboardPanels(original.dashboard_uid, original.grafana_instance_id);
       } else if (newValue.sourceType === 'performance_test' && original.id) {
         fetchPerfMetricsPanels(original.id);
       }

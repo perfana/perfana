@@ -77,6 +77,49 @@ export async function fetchGrafanaDashboards(query?: GrafanaDashboardQuery): Pro
   return data.map(transformGrafanaDashboard);
 }
 
+/**
+ * Resolve ONE Grafana dashboard by uid.
+ *
+ * A dashboard uid is unique only WITHIN a Grafana instance — the same uid routinely exists
+ * on a dev and a prod Grafana with different panel sets and panel ids — and
+ * `GET /grafana/dashboards?uid=` applies no instance scope, so it answers with an array
+ * ordered by name, which ties for copies of one dashboard. Every caller used to take
+ * `[0]`, which silently bound SLOs and graph presets to another instance's panel ids.
+ *
+ * Pass `grafanaInstanceId` whenever it is in hand — an `ApplicationDashboard` carries it.
+ * Without it the answer is a guess, so this says so in the console rather than hiding it.
+ * Returns the raw API row (snake_case, `panels` included), not the camelCase
+ * `GrafanaDashboard` — the panel-reading callers want the payload as the API sends it.
+ */
+export async function fetchGrafanaDashboardByUid(
+  uid: string,
+  grafanaInstanceId?: string,
+): Promise<Record<string, unknown> | null> {
+  const params = new URLSearchParams({ uid });
+  if (grafanaInstanceId) params.set('grafanaInstanceId', grafanaInstanceId);
+
+  const response = await authenticatedFetch(`/grafana/dashboards?${params.toString()}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Grafana dashboard ${uid}: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  const rows: Record<string, unknown>[] = Array.isArray(data) ? data : data ? [data] : [];
+
+  if (rows.length > 1 && !grafanaInstanceId) {
+    console.warn(
+      `Ambiguous Grafana dashboard uid "${uid}": ${rows.length} rows across instances ` +
+        `[${rows.map((r) => r.grafana_instance_id ?? r.grafanaInstanceId).join(', ')}]. ` +
+        `Using the first. Pass grafanaInstanceId to resolve this.`,
+    );
+  }
+
+  return rows[0] ?? null;
+}
+
 export async function fetchGrafanaDashboard(id: string): Promise<GrafanaDashboard> {
   const response = await authenticatedFetch(`/grafana/dashboards/${id}`, {
     method: 'GET',

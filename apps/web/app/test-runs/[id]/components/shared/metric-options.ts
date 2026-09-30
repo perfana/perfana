@@ -14,6 +14,7 @@
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { getSourceType } from '@/lib/metrics-source-utils';
+import { fetchGrafanaDashboardByUid } from '@/lib/grafana-dashboards';
 import {
   ALL_AGGREGATED_OPTION,
   collapsePerfRtPanels,
@@ -30,6 +31,8 @@ export interface ApplicationDashboard {
   dashboard_label: string;
   dashboard_name: string;
   dashboard_uid: string;
+  /** A uid is unique only WITHIN a Grafana instance, so panel lookups must carry this. */
+  grafana_instance_id?: string;
   metrics_source_id?: string;
   source_type?: string;
   /** Dynatrace host dashboards only: the labels given to the host. */
@@ -246,13 +249,11 @@ export async function fetchPanelsForDashboard(
     }
 
     if (!dashboard.dashboard_uid) return [];
-    const res = await authenticatedFetch(
-      `/grafana/dashboards?uid=${encodeURIComponent(dashboard.dashboard_uid)}`,
-      { headers: { 'Content-Type': 'application/json' } },
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    const grafanaDashboard = Array.isArray(data) ? data[0] : data;
+    // Scoped by instance: a uid is unique only within one Grafana.
+    const grafanaDashboard = await fetchGrafanaDashboardByUid(
+      dashboard.dashboard_uid,
+      dashboard.grafana_instance_id,
+    ) as { panels?: Panel[] } | null;
     const panels: Panel[] = (grafanaDashboard?.panels ?? [])
       .filter((p: Panel) => (SUPPORTED_PANEL_TYPES as readonly string[]).includes(p.type))
       .map((p: Panel) => ({ ...p, yAxesFormat: p.yAxesFormat || extractYAxisFormat(p) }));

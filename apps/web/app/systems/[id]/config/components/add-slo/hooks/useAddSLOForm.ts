@@ -4,6 +4,7 @@ import { DynatraceDashboard, DynatraceMetric } from '@/lib/dynatrace';
 
 import { useState, useEffect, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
+import { fetchGrafanaDashboardByUid } from '@/lib/grafana-dashboards';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics, fetchDynatraceQueries } from '@/lib/dynatrace';
 import {
   SLOFormData,
@@ -172,27 +173,19 @@ export function useAddSLOForm({
   }, [systemId, environment]);
 
   // Fetch Grafana dashboard panels
-  const fetchDashboardPanels = useCallback(async (dashboardUid: string) => {
+  const fetchDashboardPanels = useCallback(async (dashboardUid: string, grafanaInstanceId?: string) => {
     if (!dashboardUid) return;
 
     try {
       setPanelsLoading(true);
-      const response = await authenticatedFetch(`/grafana/dashboards?uid=${dashboardUid}`, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const dashboardData = await response.json();
-        const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
-        const filteredPanels =
-          dashboard?.panels?.filter((panel: { type: string }) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
-        setAvailablePanels(filteredPanels);
-      } else {
-        console.warn('Failed to fetch dashboard panels:', response.statusText);
-        setAvailablePanels([]);
-      }
+      // Scoped by instance: a uid is unique only within one Grafana, so an unscoped
+      // lookup can return another instance's copy with different panel ids.
+      const dashboard = (await fetchGrafanaDashboardByUid(dashboardUid, grafanaInstanceId)) as
+        | { panels?: GrafanaPanel[] }
+        | null;
+      const filteredPanels =
+        dashboard?.panels?.filter((panel: GrafanaPanel) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
+      setAvailablePanels(filteredPanels);
     } catch (error) {
       console.error('Error fetching dashboard panels:', error);
       setAvailablePanels([]);

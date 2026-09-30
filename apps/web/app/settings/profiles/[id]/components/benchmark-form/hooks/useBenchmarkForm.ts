@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { authenticatedFetch } from '@/lib/api';
+import { fetchGrafanaDashboardByUid } from '@/lib/grafana-dashboards';
 import { getUnit } from '@/lib/units';
 import {
   CreateProfileBenchmarkData,
@@ -80,25 +80,17 @@ export function useBenchmarkForm({
 
     try {
       setPanelsLoading(true);
-      const response = await authenticatedFetch(
-        `/grafana/dashboards?uid=${dashboardUid}`,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (response.ok) {
-        const dashboardData = await response.json();
-        const dashboard = Array.isArray(dashboardData) ? dashboardData[0] : dashboardData;
-        const filteredPanels = dashboard?.panels?.filter((panel: GrafanaPanel) =>
-          SUPPORTED_PANEL_TYPES.includes(panel.type)
-        ) || [];
-        setAvailablePanels(filteredPanels);
-      } else {
-        setAvailablePanels([]);
-      }
+      // A ProfileDashboard carries a Grafana LABEL, not an instance id, and this endpoint
+      // takes the id — so the uid goes out unscoped and the helper reports the ambiguity
+      // rather than hiding it. The sibling useDashboardForm resolves label -> instance from
+      // its availableInstances list; this hook does not have one. See TODOS.md.
+      const grafanaDashboard = (await fetchGrafanaDashboardByUid(dashboardUid)) as
+        | { panels?: GrafanaPanel[] }
+        | null;
+      const filteredPanels = grafanaDashboard?.panels?.filter((panel: GrafanaPanel) =>
+        SUPPORTED_PANEL_TYPES.includes(panel.type)
+      ) || [];
+      setAvailablePanels(filteredPanels);
     } catch {
       setAvailablePanels([]);
     } finally {
