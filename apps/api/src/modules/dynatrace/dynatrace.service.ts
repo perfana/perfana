@@ -965,13 +965,17 @@ export class DynatraceService {
     // Scoped to this system/environment/workload: a label repeats across scopes by design
     // (copyQueries writes it), so an unscoped match borrowed another scope's dashboard and
     // bypassed the deterministic id below.
+    // All three scope fields, not two: TypeORM DROPS an undefined key from a `where`, so a
+    // caller that bypassed DTO validation would get the unscoped lookup back rather than no
+    // lookup. The DTO marks all three @IsNotEmpty, so this is unreachable from the one live
+    // caller — it exists so that stays true if an internal one appears.
     const existingUuid =
-      dto.systemUnderTestId && dto.testEnvironment
+      dto.systemUnderTestId && dto.testEnvironment && dto.workload
         ? await this.repository.findDashboardByLabel(
             dto.dashboardLabel,
             dto.systemUnderTestId,
             dto.testEnvironment,
-            dto.workload || '',
+            dto.workload,
           )
         : null;
 

@@ -31,11 +31,22 @@ Creating a `DynatraceQuery` writes two things, and they are separate columns on 
 
 ### UUID reuse (`POST /dynatrace/query/smart`, `POST /dynatrace/query/bulk-import`)
 
-Both endpoints reuse one `application_dashboard_id` across every query under the same dashboard label. `findDashboardByLabel` looks for an existing `dynatrace_queries` row with that label and reuses its id.
+`POST /dynatrace/query/smart` reuses one `application_dashboard_id` across queries in the SAME scope: `findDashboardByLabel` looks for an existing `dynatrace_queries` row with that label **under the same system, environment and workload** and reuses its id. `POST /dynatrace/query/bulk-import` does not consult it at all — it always derives.
 
 **When nothing matches, the id must be derived, never random.** The fallback is `generateDynatraceDashboardUuid(system, environment, label, workload)`. Since v0.2.96.23 the artificial `application_dashboards` row leaves `grafana_instance_id` NULL — which is what lets a second workload have its own row — and `ON CONFLICT (id) DO NOTHING` is then that insert's only dedupe. A `randomUUID()` here never matches the conflict target, so every call that missed the lookup inserted another dashboard row for the same logical dashboard, silently. Both endpoints used `randomUUID()` and were changed in that version. Full reasoning: "An artificial Dynatrace dashboard is per-workload, but its unique constraint is not" in `apps/api/CLAUDE.md`.
 
-Note what `findDashboardByLabel` actually matches: `where: { dashboardLabel }` on `dynatrace_queries`, with no system, environment or workload in the predicate. The reuse arm is therefore global across the table, while the derive arm is scoped to all four. Do not read the two as equivalent.
+Until v0.2.96.25 the reuse arm matched `where: { dashboardLabel }` alone — global across the
+table, while the derive arm beside it was scoped to all four columns — so a query created in one
+workload could be handed another scope's `application_dashboard_id`. It is scoped to all four now,
+with `order: { createdAt: 'ASC' }`: `dynatrace_queries` has only a primary key, so one scope can
+hold several rows, and while the lookup was unscoped they could hold *different* dashboard ids.
+
+**Consequence on an existing install.** A legacy row whose sibling lives under a different
+workload is no longer found, so the next create in that scope derives a fresh deterministic id and
+`ensureArtificialDashboardExists` writes a second artificial dashboard. The old queries keep
+pointing at the `randomUUID` row, the new ones at the derived row, and nothing reconciles them.
+That is the intended direction — the two scopes were never meant to share — but it is a fork, not
+a migration, and there is no backfill.
 
 ### HOST Entity Auto-Provisioning
 

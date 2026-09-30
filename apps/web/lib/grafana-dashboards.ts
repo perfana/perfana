@@ -78,6 +78,25 @@ export async function fetchGrafanaDashboards(query?: GrafanaDashboardQuery): Pro
 }
 
 /**
+ * One row of `GET /grafana/dashboards` as the API sends it: snake_case, `panels` included.
+ * Deliberately NOT the camelCase `GrafanaDashboard` above — the panel-reading callers want
+ * the raw payload, and `transformGrafanaDashboard` would only cost a pass. Named rather
+ * than `Record<string, unknown>` so a camelCase typo (`grafanaInstanceId`) is a compile
+ * error instead of a silent `undefined`.
+ */
+export interface GrafanaDashboardRow {
+  id?: string;
+  uid?: string;
+  name?: string;
+  grafana_instance_id?: string;
+  /** Panel shape varies by caller; narrow this, never the row. */
+  panels?: unknown[];
+}
+
+/** Warn once per uid: this is called per dashboard, per cascade render. */
+const ambiguousUidsWarned = new Set<string>();
+
+/**
  * Resolve ONE Grafana dashboard by uid.
  *
  * A dashboard uid is unique only WITHIN a Grafana instance — the same uid routinely exists
@@ -88,13 +107,13 @@ export async function fetchGrafanaDashboards(query?: GrafanaDashboardQuery): Pro
  *
  * Pass `grafanaInstanceId` whenever it is in hand — an `ApplicationDashboard` carries it.
  * Without it the answer is a guess, so this says so in the console rather than hiding it.
- * Returns the raw API row (snake_case, `panels` included), not the camelCase
- * `GrafanaDashboard` — the panel-reading callers want the payload as the API sends it.
+ * It also warns when a SCOPED lookup finds nothing, which means the row's instance id and
+ * the dashboard's do not agree — otherwise that surfaces only as an empty panel dropdown.
  */
 export async function fetchGrafanaDashboardByUid(
   uid: string,
   grafanaInstanceId?: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<GrafanaDashboardRow | null> {
   const params = new URLSearchParams({ uid });
   if (grafanaInstanceId) params.set('grafanaInstanceId', grafanaInstanceId);
 
@@ -107,13 +126,24 @@ export async function fetchGrafanaDashboardByUid(
   }
 
   const data = await response.json();
-  const rows: Record<string, unknown>[] = Array.isArray(data) ? data : data ? [data] : [];
+  const rows: GrafanaDashboardRow[] = Array.isArray(data) ? data : data ? [data] : [];
 
-  if (rows.length > 1 && !grafanaInstanceId) {
+  if (rows.length > 1 && !grafanaInstanceId && !ambiguousUidsWarned.has(uid)) {
+    ambiguousUidsWarned.add(uid);
     console.warn(
       `Ambiguous Grafana dashboard uid "${uid}": ${rows.length} rows across instances ` +
-        `[${rows.map((r) => r.grafana_instance_id ?? r.grafanaInstanceId).join(', ')}]. ` +
+        `[${rows.map((r) => r.grafana_instance_id).join(', ')}]. ` +
         `Using the first. Pass grafanaInstanceId to resolve this.`,
+    );
+  }
+
+  if (rows.length === 0 && grafanaInstanceId) {
+    // The scoped query matched nothing, so the application dashboard's instance id and the
+    // Grafana dashboard's disagree. Callers degrade to an empty panel list, which on its own
+    // looks like "this dashboard has no supported panels".
+    console.warn(
+      `No Grafana dashboard "${uid}" on instance ${grafanaInstanceId}. ` +
+        `The application dashboard's instance id may be stale.`,
     );
   }
 

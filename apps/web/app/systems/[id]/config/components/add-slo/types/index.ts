@@ -178,7 +178,7 @@ export interface UseAddSLOFormReturn {
   };
   availableOptions: AvailableOptions;
   dataSourceAvailability: DataSourceAvailability;
-  fetchDashboardPanels: (dashboardUid: string) => Promise<void>;
+  fetchDashboardPanels: (dashboardUid: string, grafanaInstanceId?: string) => Promise<void>;
   fetchPerfMetricsPanels: (dashboardUid: string) => Promise<void>;
   fetchSloApplicationDashboards: () => Promise<void>;
   fetchDynatraceDashboardsForSlo: () => Promise<void>;

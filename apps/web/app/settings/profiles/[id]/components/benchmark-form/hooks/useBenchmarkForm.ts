@@ -84,12 +84,10 @@ export function useBenchmarkForm({
       // takes the id — so the uid goes out unscoped and the helper reports the ambiguity
       // rather than hiding it. The sibling useDashboardForm resolves label -> instance from
       // its availableInstances list; this hook does not have one. See TODOS.md.
-      const grafanaDashboard = (await fetchGrafanaDashboardByUid(dashboardUid)) as
-        | { panels?: GrafanaPanel[] }
-        | null;
-      const filteredPanels = grafanaDashboard?.panels?.filter((panel: GrafanaPanel) =>
-        SUPPORTED_PANEL_TYPES.includes(panel.type)
-      ) || [];
+      const grafanaDashboard = await fetchGrafanaDashboardByUid(dashboardUid);
+      const filteredPanels = ((grafanaDashboard?.panels ?? []) as GrafanaPanel[]).filter((panel) =>
+        SUPPORTED_PANEL_TYPES.includes(panel.type),
+      );
       setAvailablePanels(filteredPanels);
     } catch {
       setAvailablePanels([]);

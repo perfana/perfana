@@ -122,11 +122,10 @@ export function useEditSLOForm({
       setPanelsLoading(true);
       // Scoped by instance: a uid is unique only within one Grafana, so an unscoped
       // lookup can return another instance's copy with different panel ids.
-      const dashboard = (await fetchGrafanaDashboardByUid(dashboardUid, grafanaInstanceId)) as
-        | { panels?: GrafanaPanel[] }
-        | null;
-      const filteredPanels =
-        dashboard?.panels?.filter((panel: GrafanaPanel) => SUPPORTED_PANEL_TYPES.includes(panel.type)) || [];
+      const dashboard = await fetchGrafanaDashboardByUid(dashboardUid, grafanaInstanceId);
+      const filteredPanels = ((dashboard?.panels ?? []) as GrafanaPanel[]).filter((panel) =>
+        SUPPORTED_PANEL_TYPES.includes(panel.type),
+      );
       setAvailablePanels(filteredPanels);
     } catch (error) {
       console.error('Error fetching dashboard panels:', error);

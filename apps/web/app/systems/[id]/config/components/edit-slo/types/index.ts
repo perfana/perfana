@@ -176,7 +176,7 @@ export interface UseEditSLOFormReturn {
   setShowSaveDialog: React.Dispatch<React.SetStateAction<boolean>>;
   saveDialogOption: SaveDialogOption;
   setSaveDialogOption: React.Dispatch<React.SetStateAction<SaveDialogOption>>;
-  fetchDashboardPanels: (dashboardUid: string) => Promise<void>;
+  fetchDashboardPanels: (dashboardUid: string, grafanaInstanceId?: string) => Promise<void>;
   fetchPerfMetricsPanels: (applicationDashboardId: string) => Promise<void>;
   fetchSloApplicationDashboards: () => Promise<void>;
   fetchDynatraceDashboardsForSlo: () => Promise<void>;

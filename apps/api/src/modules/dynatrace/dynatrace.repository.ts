@@ -388,6 +388,11 @@ export class DynatraceRepository {
   ) {
     const result = await withRequestEm(this.queryRepo).findOne({
       where: { dashboardLabel, systemUnderTestId, testEnvironment, workload },
+      // dynatrace_queries has only a PK, so one scope can hold several rows — and while
+      // the lookup was unscoped they could hold DIFFERENT applicationDashboardIds. Without
+      // an order the reuse arm would still return an arbitrary one of those, which looks
+      // scoped and correct. Oldest wins, so the answer is at least stable across calls.
+      order: { createdAt: 'ASC' },
       select: ['applicationDashboardId']
     });
     return result?.applicationDashboardId || null;

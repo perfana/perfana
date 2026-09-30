@@ -79,17 +79,19 @@ export function useGraphsPresets({
       // No instance to scope by: SeriesConfig is a PERSISTED preset shape and carries no
       // grafanaInstanceId, so adding one means migrating stored presets. The helper reports
       // the ambiguity instead of resolving it silently. See TODOS.md.
-      const dashboard = (await fetchGrafanaDashboardByUid(series.dashboardId)) as
-        | { panels?: (Parameters<typeof extractYAxisFormat>[0] & { id: number })[] }
-        | null;
+      const dashboard = await fetchGrafanaDashboardByUid(series.dashboardId);
 
       if (!dashboard) {
-        console.warn(`Failed to fetch dashboard for enrichment: ${series.dashboardId}`);
+        console.warn(
+          `No Grafana dashboard found for uid ${series.dashboardId} — the preset may reference a deleted or renamed dashboard`,
+        );
         return series;
       }
 
       // Find the matching panel
-      const panel = dashboard?.panels?.find((p: { id: number }) => p.id === series.panelId);
+      const panel = (
+        (dashboard?.panels ?? []) as (Parameters<typeof extractYAxisFormat>[0] & { id: number })[]
+      ).find((p) => p.id === series.panelId);
 
       if (!panel) {
         console.warn(`Panel ${series.panelId} not found in dashboard ${series.dashboardId}`);

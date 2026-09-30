@@ -253,8 +253,8 @@ export async function fetchPanelsForDashboard(
     const grafanaDashboard = await fetchGrafanaDashboardByUid(
       dashboard.dashboard_uid,
       dashboard.grafana_instance_id,
-    ) as { panels?: Panel[] } | null;
-    const panels: Panel[] = (grafanaDashboard?.panels ?? [])
+    );
+    const panels: Panel[] = ((grafanaDashboard?.panels ?? []) as Panel[])
       .filter((p: Panel) => (SUPPORTED_PANEL_TYPES as readonly string[]).includes(p.type))
       .map((p: Panel) => ({ ...p, yAxesFormat: p.yAxesFormat || extractYAxisFormat(p) }));
     return wrap(panels);
