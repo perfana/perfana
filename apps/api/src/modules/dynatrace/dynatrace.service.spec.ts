@@ -1002,6 +1002,26 @@ describe('DynatraceService', () => {
         applicationDashboardId: 'dash-123',
       };
 
+      // A dashboard label repeats across scopes by design — copyQueries writes the same
+      // label into another workload — so an unscoped match handed the new query another
+      // scope's application_dashboard_id AND bypassed the deterministic id beside it,
+      // which is the artificial dashboard's only dedupe since it lost grafana_instance_id.
+      it('scopes the label reuse lookup to this system, environment and workload', async () => {
+        repository.findById.mockResolvedValue(mockDynatraceConfig);
+        repository.findDashboardByLabel.mockResolvedValue(null);
+        repository.generateDynatraceDashboardUuid.mockReturnValue('derived-uuid');
+        repository.createQueryWithSharedUuid.mockResolvedValue(mockDynatraceQuery);
+
+        await service.createQuerySmart(createQueryDto, mockUserId, mockRoles);
+
+        expect(repository.findDashboardByLabel).toHaveBeenCalledWith(
+          createQueryDto.dashboardLabel,
+          createQueryDto.systemUnderTestId,
+          createQueryDto.testEnvironment,
+          createQueryDto.workload,
+        );
+      });
+
       it('should reuse existing UUID when dashboard label exists', async () => {
         const existingUuid = 'existing-uuid-123';
         repository.findById.mockResolvedValue(mockDynatraceConfig);
@@ -1011,7 +1031,12 @@ describe('DynatraceService', () => {
         const result = await service.createQuerySmart(createQueryDto, mockUserId, mockRoles);
 
         expect(result).toEqual(mockDynatraceQuery);
-        expect(repository.findDashboardByLabel).toHaveBeenCalledWith('Performance Dashboard');
+        expect(repository.findDashboardByLabel).toHaveBeenCalledWith(
+          'Performance Dashboard',
+          expect.any(String),
+          expect.any(String),
+          expect.any(String),
+        );
         expect(repository.createQueryWithSharedUuid).toHaveBeenCalledWith(
           createQueryDto,
           existingUuid,

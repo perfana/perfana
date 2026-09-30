@@ -962,7 +962,18 @@ export class DynatraceService {
       'create',
     );
 
-    const existingUuid = await this.repository.findDashboardByLabel(dto.dashboardLabel);
+    // Scoped to this system/environment/workload: a label repeats across scopes by design
+    // (copyQueries writes it), so an unscoped match borrowed another scope's dashboard and
+    // bypassed the deterministic id below.
+    const existingUuid =
+      dto.systemUnderTestId && dto.testEnvironment
+        ? await this.repository.findDashboardByLabel(
+            dto.dashboardLabel,
+            dto.systemUnderTestId,
+            dto.testEnvironment,
+            dto.workload || '',
+          )
+        : null;
 
     // The fallback must be the DETERMINISTIC id, not a fresh one. Since the artificial
     // dashboard row stopped carrying grafana_instance_id, `ON CONFLICT (id) DO NOTHING` is

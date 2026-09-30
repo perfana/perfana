@@ -149,6 +149,63 @@ describe('DynatraceRepository — createDsCompareConfigForMetric', () => {
 });
 
 /**
+ * `dynatrace_queries` has only a PK — no unique on dashboard_label — and copyQueries
+ * deliberately writes the same label into another scope. Keyed on the label alone this
+ * reused another system's or workload's application_dashboard_id, and short-circuited
+ * the deterministic id in createQuerySmart, which is the artificial dashboard's only
+ * dedupe since it stopped carrying grafana_instance_id.
+ */
+describe('DynatraceRepository — findDashboardByLabel', () => {
+  const stubRepo = () => ({}) as never;
+
+  it('scopes the lookup to system, environment and workload, not the label alone', async () => {
+    const queryRepo = { findOne: jest.fn().mockResolvedValue({ applicationDashboardId: 'ad-1' }) };
+    const repository = new DynatraceRepository(
+      stubRepo(),
+      queryRepo as never,
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      { transaction: jest.fn() } as never,
+    );
+
+    const id = await repository.findDashboardByLabel(
+      'Dynatrace host metrics host-a',
+      'sut-1',
+      'acc',
+      'combitest',
+    );
+
+    expect(id).toBe('ad-1');
+    const [args] = queryRepo.findOne.mock.calls[0] as [{ where: Record<string, unknown> }];
+    expect(args.where).toEqual({
+      dashboardLabel: 'Dynatrace host metrics host-a',
+      systemUnderTestId: 'sut-1',
+      testEnvironment: 'acc',
+      workload: 'combitest',
+    });
+  });
+
+  it('returns null when this scope has no query with that label', async () => {
+    const queryRepo = { findOne: jest.fn().mockResolvedValue(null) };
+    const repository = new DynatraceRepository(
+      stubRepo(),
+      queryRepo as never,
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      stubRepo(),
+      { transaction: jest.fn() } as never,
+    );
+
+    await expect(
+      repository.findDashboardByLabel('unseen', 'sut-1', 'acc', 'combitest'),
+    ).resolves.toBeNull();
+  });
+});
+
+/**
  * A Dynatrace application_dashboard is per-workload (its id hashes the workload in),
  * but uq_application_dashboards_unique is
  * (system, environment, grafana_instance_id, dashboard_uid, dashboard_label) — no
