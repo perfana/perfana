@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.26] - 2026-10-01
+
+### Fixed
+- **Expanding a transaction in Performance Analysis to see its requests is no longer slow.** On a large run it could take the better part of a minute — measured at 49 seconds on a four-million-request test. The lookup that labels each request with the controllers it ran under was supposed to read only the first few thousand rows of that transaction, but nothing was actually holding it to that: for a transaction with only a few hundred requests it ended up reading every request in the database, from every test run, going back months. It now reads only the rows it needs, and the same expand takes about ten milliseconds.
+
+### Note for existing installations
+- This release adds a database index to the request table, the busiest table in the system. It is built a chunk at a time so that incoming test data keeps flowing, but each chunk is still locked briefly as the build reaches it, and removing a now-redundant older index needs exclusive access to the table for a moment. On a large installation the build takes minutes, so run the upgrade outside a test window if you can. If it cannot get the access it needs within five seconds it stops and fails the upgrade rather than finishing halfway — re-running is safe, but read the message it prints first: if the index was left incomplete it names the one command to run before you retry.
+
 ## [0.2.96.25] - 2026-09-30
 
 ### Fixed

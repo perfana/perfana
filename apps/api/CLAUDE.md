@@ -249,6 +249,151 @@ Do not "restore the missing time index" on a hypertable that has a composite lea
 the column every query filters on. Verified on TimescaleDB 2.28.3: after the drop, a newly
 created chunk carries only `idx_virtual_users_test_run_id_time`.
 
+### The chain decoration on a transaction expand is bounded by an index, not by its LIMIT
+
+`attachParallelGroups` (`modules/test-runs/services/test-runs-performance-query.service.ts`)
+labels each sampler with the chain of controllers it ran under. The sampler rollup does not
+carry the chain, so it is a separate lookup against `requests_raw`, shaped as
+
+```sql
+... FROM requests_raw
+ WHERE test_run_id = $1 AND transaction_name = $2
+ ORDER BY time LIMIT 5000
+```
+
+Measured on production 2026-10-01, WERKNL-acceptatie-combitest-00006 /
+`WNL_AN_WZ_HP_02_DeWerkhoek` (680 rows in a 4,040,185-row run), warm:
+
+| | buffers | time | rows |
+|---|---|---|---|
+| with `transaction_name` | 3,887,755 | 19,270 ms | 680 |
+| without `transaction_name` | 2,364 | 13 ms | 5000 |
+| with `idx_requests_raw_run_tx_time` | 601 | 9.6 ms | 680 |
+
+**The LIMIT bounds nothing.** A comment on that query used to claim the bound was on rows
+*scanned* rather than rows *matched*, because the chain filter sits outside the subquery.
+Only the chain filter is outside; `transaction_name` sits **inside**, next to the LIMIT. A
+transaction with 680 rows never fills 5000, so `ORDER BY time` with no time predicate makes
+ChunkAppend walk every chunk of the hypertable — 22 of them, back four months. 19,263 ms of
+the 19,270 was a single node: today's uncompressed chunk, read through
+`_hyper_2_897_chunk_requests_raw_time_idx` (TimescaleDB's time-only default index) as an
+`Index Scan Backward` with `Rows Removed by Filter: 4,753,041` — every other nightly run
+sharing that day's chunk, fetched from the heap and discarded.
+
+Fixed in v0.2.96.26 by migration 1813: `idx_requests_raw_run_tx_time (test_run_id,
+transaction_name, time)`, paid for by dropping `idx_requests_raw_test_run_id_time`, which was
+an exact duplicate of `idx_requests_raw_test_run_time` (same columns, opposite direction, and
+btree scans either way). Net index count on the ingest path is unchanged.
+
+Four things worth keeping straight:
+
+1. **Dropping `requests_raw_time_idx` would not have fixed it.** That is the reflex this
+   repo already has — migration 1811 did exactly that for `virtual_users`, and this is the
+   same correlated-predicate underestimation (estimated 1161 rows, actual 680 after 4.75 M;
+   a time-ordered scan under a LIMIT looks almost free). But the fallback here is
+   `idx_requests_raw_test_run_time`, which index-conds `test_run_id` and then post-filters
+   `transaction_name` across all 4,040,185 of the run's rows. Only an index carrying **both**
+   equality columns turns this into a bounded ordered scan, and it wins on cost outright
+   rather than by a margin the planner can mis-estimate away. `requests_raw_time_idx` also
+   must stay for a second reason: the `requests_raw_5s` refresh policies scan it twice a
+   minute — see the sweep table in "`virtual_users` has no time-only index" above.
+2. **`idx_requests_raw_grouping` cannot serve it.** It is `(test_run_id, scenario_name,
+   transaction_name, sampler_name, time)`, and `scenario_name` sits between the two equality
+   columns while being unbound here.
+3. **The 21 compressed chunks are not the problem.** `ColumnarScan` reaches them through the
+   `compress_segmentby` key (`test_run_id`) and — since TimescaleDB started keeping sparse
+   bloom filters on the other columns — excludes `transaction_name` with
+   `bloom1_contains_any_hashes` before decompressing anything, at ~0.04 ms per chunk. Adding
+   a time window from the run would buy nothing measurable. It is the one uncompressed chunk
+   that carries the whole cost.
+
+   The flip side: at 22 chunks, planning this query (27.9 ms) now costs three times its
+   execution. That is the floor for any unbounded-time query on this hypertable and is not
+   worth chasing, but do not read a 30 ms expand as a regression.
+4. **Keep the chain filter outside the subquery.** A run with no tagged requests — every run
+   recorded before `source_element_path` existed — would otherwise scan the whole transaction
+   hunting for matches that cannot exist.
+
+**Adding an index to `requests_raw` has exactly one legal shape, and it is neither 1791's nor
+1807's.** This is the hottest write table in the deployment, so 1807's "plain CREATE INDEX, the
+table is small enough" does not transfer — a plain build holds a SHARE lock that blocks INSERTs on
+every chunk for the whole build. 1791's `COMMIT` + `CREATE INDEX CONCURRENTLY` is not available
+either. All four constraints were probed against TimescaleDB 2.28.3, the version production runs:
+
+| statement | result |
+|---|---|
+| `CREATE INDEX CONCURRENTLY` | `ERROR: hypertables do not support concurrent index creation` |
+| `WITH (timescaledb.transaction_per_chunk)` | works — built on all 6 dev chunks |
+| the same, inside a transaction block | `ERROR: cannot run inside a transaction block` |
+| `DROP INDEX CONCURRENTLY <parent>` | `ERROR: does not support dropping multiple objects` |
+
+So the shape is 1791's `COMMIT` escape followed by a **per-chunk** build, and a **plain** DROP.
+There is a second, independent reason a single-transaction build is wrong on this table, in the
+`max_locks_per_transaction` note in `docker-compose.infra.yml`: its 1-day chunks have no retention
+policy, one statement locks every chunk **plus its compressed twin**, and the lock table is
+`max_locks_per_transaction x max_connections`. The local stack raises that to 256; a deploy on the
+Postgres default of 64 hits `out of shared memory` once a few hundred chunks exist.
+
+**A partial per-chunk build is silent, self-masking, and lands on the worst possible chunk.** This
+is reproduced, not theorised — hold a conflicting `ROW EXCLUSIVE` lock on the live chunk with
+`lock_timeout` below the hold time and:
+
+1. the build takes the parent index and 5 of 6 chunks, then fails on the live chunk with
+   `canceling statement due to lock timeout`;
+2. re-running the **identical** statement prints `NOTICE: relation "..." already exists, skipping`
+   and then `CREATE INDEX` — it **reports success**;
+3. coverage is unchanged, and the chunk left uncovered is the live one, which is precisely the
+   chunk the 49 s report was about. The fix appears to deploy and the slow plan quietly survives
+   for the newest data.
+
+`IF NOT EXISTS` matches on the parent, so it cannot see missing chunks, which means the statement's
+own exit status is not evidence of anything — and on the retry it is actively misleading. Migration
+1813 therefore ends each build with `assertFullCoverage`, which compares chunk-level copies against
+`timescaledb_information.chunks` and throws naming the uncovered chunks. Recovery is `DROP INDEX
+<name>` then re-run; **not** `REINDEX`, which has nothing to work on for a chunk with no copy. Any
+future per-chunk build on this table needs the same assert — without it a half-built index is
+indistinguishable from a good one.
+
+`lock_timeout` must be session-scoped here, not `SET LOCAL` — `SET LOCAL` dies with the `COMMIT`
+above it, leaving the build waiting indefinitely behind a long-running read. It must then be reset
+in a `finally`, because the migration image runs `runMigrations()` with TypeORM's default
+`transaction: "all"` (see 1796's docblock), so a session `SET` left behind leaks into every later
+migration in the same deploy batch. It never reaches an application pool — `migrationsRun` is false
+everywhere and `perfana-migration` exits when done — so the batch is the consumer to reason about.
+
+**The DROP is the step most likely to fail, and that is the intended behaviour.** `DROP INDEX`
+needs ACCESS EXCLUSIVE on the table and every chunk index it cascades to — a mode that conflicts
+with plain `SELECT` — so against continuous ingest and the worker's minutes-long aggregations,
+losing the 5 s race is ordinary. It costs nothing: the performance fix is already live and
+coverage-verified by the time the DROP runs, a retry skips straight to it, and a thrown error is
+never recorded as applied (TypeORM's `insertExecutedMigration` is in the `.then()` of `up()`), so
+the next deploy retries it for free. **Do not raise `lock_timeout` to "give it more room"** —
+Postgres' lock queue is FIFO, so a *waiting* ACCESS EXCLUSIVE blocks every new reader behind it. A
+30 s timeout buys a 30 s stall of the busiest table, not a 30 s grace period.
+
+**A `COMMIT` inside a migration ends the whole batch's transaction, not just its own.** Under
+`transaction: "all"` (what `Dockerfile.migrations` runs) the executor opens one transaction for the
+entire batch, so the escape hatch 1791 and 1813 both use means every migration numbered above them
+in the same batch runs outside any shared transaction — the batch quietly stops being
+all-or-nothing from that point. TypeORM does not notice, because its `isTransactionActive` flag is
+only moved by the driver's own commit/rollback and never by inspecting raw SQL, so its later bare
+`COMMIT`/`ROLLBACK` are `WARNING: there is no transaction in progress` rather than errors. Nothing
+breaks; but a migration that is relying on the batch to roll back for it cannot do so if an earlier
+one in the same deploy used this pattern.
+
+One honest caveat on cost: net index **count** on the ingest path is unchanged, but net **width**
+is not. The new index's third column averages ~19 bytes, so its leaf entries run 35-40% larger than
+those of the 2-column index dropped alongside it, and WAL per insert on that one index rises to
+match.
+
+The check for this is the plan, not a unit test: `EXPLAIN (ANALYZE, BUFFERS)` the query and
+confirm `Index Cond` carries both `test_run_id` and `transaction_name`, with no
+million-row `Rows Removed by Filter`. Building the index on the single current chunk inside
+a rolled-back transaction is enough to prove it and takes seconds, where the hypertable-wide
+build takes minutes — but check afterwards that the probe index is actually gone. `CREATE
+INDEX` is transactional, so a `ROLLBACK` removes it; a client that autocommits each statement
+does not, and the leftover then sits on one chunk where no migration tracks it.
+
 ### The analysis-window overview reads the 5s CAGGs, and its bounds must be bind parameters
 
 `getSummaryTimeseries` (`modules/test-runs/services/test-runs-performance-query.service.ts`)

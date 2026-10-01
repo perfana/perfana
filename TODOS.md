@@ -2399,6 +2399,45 @@ Separately, `forRoutes('{*splat}')` under `setGlobalPrefix('api')` derives `['/a
 
 ---
 
+## requests_raw indexes
+
+### The chain-decoration scan now spends more time planning than executing
+
+**Priority:** P3
+**Origin:** pre-landing review of v0.2.96.26 (2026-10-01), performance specialist.
+**What:** `attachParallelGroups`' bounded scan
+(`apps/api/src/modules/test-runs/services/test-runs-performance-query.service.ts`) carries no
+time predicate, so ChunkAppend plans across every chunk of `requests_raw` — 22 on production.
+With `idx_requests_raw_run_tx_time` in place (migration 1813) execution fell to 9.6 ms while
+**planning is 27.9 ms**, so planning is now the dominant term and it scales with chunk count no
+matter how cheap each chunk's execution is. Measured on the dev DB's 6-chunk hypertable, adding
+`AND time >= $3 AND time <= $4` bound to the run's own start/end cut planning from 4.516 ms to
+1.728 ms (-62%) via chunk exclusion; reproduced independently at 4.855 ms unbounded. At 22 chunks
+the effect should be larger.
+**Why it was not done in 1813:** the reported bug was 49,321 ms and is now ~37 ms end to end, so
+this is a refinement, not the fix. It also needs the run's `start_time`/`end_time` threaded into
+`attachParallelGroups`, which today only receives `resolvedTestRunId` — either an extra lookup or
+a signature change. `getSummaryTimeseries` in the same file is the worked example of the
+resolve-then-pass-scalars pattern to copy, including its warning that a `run` CTE joined to the
+aggregate destroys chunk exclusion instead of enabling it.
+
+### `idx_requests_raw_transaction_name` looks like dead weight
+
+**Priority:** P4
+**Origin:** pre-landing review of v0.2.96.26 (2026-10-01), performance specialist (confidence 5).
+**What:** `idx_requests_raw_transaction_name (transaction_name) WHERE transaction_name IS NOT NULL`
+is a single-column partial index, and no query in the repo filters `requests_raw.transaction_name`
+without also filtering `test_run_id` — every such query is served better by
+`idx_requests_raw_run_tx_time` or `idx_requests_raw_grouping`. It is also exactly the shape that
+tempts the planner into the mistake migration 1811 documents. Pre-existing, not introduced by 1813.
+**Before dropping it,** give it the same evidence pass 1811 gave `virtual_users_time_idx`: check
+`pg_stat_user_indexes.idx_scan` on production, confirm nothing ad-hoc or external depends on it,
+and confirm no continuous-aggregate refresh policy scans it (the reason `requests_raw_time_idx`
+had to stay). Dropping an index on the strength of a grep is how the CAGG refreshes would have
+been broken.
+
+---
+
 ## Completed
 
 ### `findDashboardByLabel` matches a label across every system and environment
