@@ -49,6 +49,7 @@ export default function SoftBadge({
   return (
     <Box
       onClick={onClick}
+      data-color={color}
       sx={{
         display: 'inline-flex',
         alignItems: 'center',

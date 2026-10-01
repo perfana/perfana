@@ -89,6 +89,61 @@ export const apdexRating = (
   };
 };
 
+/**
+ * Above this percentage an error rate reads as a failure rather than noise.
+ *
+ * Lived in three places in `OverallTestMetrics` and a fourth in the collapsed view's
+ * badge, where a comment claimed parity it did not have — the collapsed badge warned
+ * amber under 5% while the expanded tile reported the same number in success green.
+ * One constant so the two views cannot disagree again.
+ */
+export const ERROR_RATE_WARN_PCT = 5;
+
+/**
+ * Pooled error rate: SUM(failed) / SUM(total), never the mean of per-row rates.
+ * Averaging the rates lets one failed execution in a quiet transaction count as 100%
+ * — the same mistake the perf-test error-rate SLO made before v0.2.96.1.
+ */
+export const computeErrorRate = (totalFailed: number, totalCount: number): number =>
+  totalCount > 0 ? (totalFailed / totalCount) * 100 : 0;
+
+/**
+ * How an error rate should be presented. `none` means there is nothing to report —
+ * callers hide the indicator entirely rather than rendering a rounded-to-zero "0.00%".
+ */
+export function errorRateSeverity(
+  totalFailed: number,
+  totalCount: number,
+): 'none' | 'below-threshold' | 'fail' {
+  // `NaN <= 0` and `undefined <= 0` are both false, so a comparison alone falls through
+  // to a badge reading "NaN% errors". These counts come straight off the API response
+  // and are typed, never validated, so that is one dropped field away.
+  if (!hasCountableFailures(totalFailed, totalCount)) return 'none';
+  return computeErrorRate(totalFailed, totalCount) > ERROR_RATE_WARN_PCT ? 'fail' : 'below-threshold';
+}
+
+/** Single source for "is there anything to report", so the two helpers cannot disagree. */
+function hasCountableFailures(totalFailed: number, totalCount: number): boolean {
+  return (
+    Number.isFinite(totalFailed) &&
+    Number.isFinite(totalCount) &&
+    totalFailed > 0 &&
+    totalCount > 0
+  );
+}
+
+/**
+ * Error rate for display. A non-zero rate that rounds to 0.00 is shown as `<0.01%`:
+ * three failures in 100k transactions is routine on a large run, and "0.00% errors"
+ * on an alarm-coloured badge asserts the one thing the badge exists to rule out.
+ */
+export function formatErrorRate(totalFailed: number, totalCount: number): string {
+  if (!hasCountableFailures(totalFailed, totalCount)) return '—';
+  const rate = computeErrorRate(totalFailed, totalCount);
+  if (rate < 0.01) return '<0.01%';
+  return `${rate.toFixed(2)}%`;
+}
+
 export interface ScenarioMetrics {
   totalRequests: number;
   totalFailed: number;

@@ -4,7 +4,12 @@ import { Alert, Box, Divider, Typography, Tooltip, Switch, FormControlLabel } fr
 import KPIDisplay from '../../shared/KPIDisplay';
 import SoftBadge from '../../shared/SoftBadge';
 import { TransactionStat, ThroughputStats, RollupPendingState } from '../types/performance-analysis.types';
-import { formatNumber, ApdexRating } from '../utils/performance-formatters';
+import {
+  formatNumber,
+  ApdexRating,
+  errorRateSeverity,
+  formatErrorRate,
+} from '../utils/performance-formatters';
 import { TestRun } from '@/types/test-runs';
 
 interface PerformanceAnalysisCollapsedViewProps {
@@ -126,10 +131,12 @@ export function PerformanceAnalysisCollapsedView({
         {!loading && !error && transactions.length > 0 && (() => {
           // Calculate metrics
           const uniqueScenarios = new Set(transactions.map(t => t.scenario_name)).size;
-          const totalRequests = transactions.reduce((sum, t) => sum + t.total_count, 0);
-          const weightedAvgResponseTime = totalRequests > 0
-            ? transactions.reduce((sum, t) => sum + (t.avg_response_time * t.total_count), 0) / totalRequests
+          const totalTransactions = transactions.reduce((sum, t) => sum + t.total_count, 0);
+          const weightedAvgResponseTime = totalTransactions > 0
+            ? transactions.reduce((sum, t) => sum + (t.avg_response_time * t.total_count), 0) / totalTransactions
             : 0;
+          const totalFailed = transactions.reduce((sum, t) => sum + t.failed_count, 0);
+          const errorSeverity = errorRateSeverity(totalFailed, totalTransactions);
 
           return (
             <>
@@ -154,6 +161,24 @@ export function PerformanceAnalysisCollapsedView({
                 label={`Avg: ${formatNumber(weightedAvgResponseTime)}ms`}
                 color="orange"
               />
+              {errorSeverity !== 'none' && (
+                <Tooltip
+                  title={`${totalFailed.toLocaleString()} of ${totalTransactions.toLocaleString()} transactions failed`}
+                  arrow
+                >
+                  {/* tabIndex makes the Tooltip keyboard-reachable: SoftBadge renders a
+                      plain div and MUI's onFocus never fires on a non-focusable element,
+                      so these counts were mouse-only. cursor:help matches the Apdex KPI
+                      wrapper above — in a row of six identical pills nothing else says
+                      this one is hoverable. */}
+                  <Box sx={{ display: 'inline-flex', cursor: 'help' }} tabIndex={0}>
+                    <SoftBadge
+                      label={`${formatErrorRate(totalFailed, totalTransactions)} errors`}
+                      color={errorSeverity === 'fail' ? 'red' : 'green'}  /* 'below-threshold' is green, matching the expanded tile */
+                    />
+                  </Box>
+                </Tooltip>
+              )}
               {hasPoorApdexTransactions && (
                 <SoftBadge
                   count={poorApdexTransactions.length}

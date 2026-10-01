@@ -3,7 +3,9 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 import { TransactionStat, VirtualUserStats, ThroughputStats } from '../types/performance-analysis.types';
-import { formatNumber, apdexRating, calculateScenarioMetrics } from '../utils/performance-formatters';
+import {
+  ERROR_RATE_WARN_PCT,
+  computeErrorRate, formatNumber, apdexRating, calculateScenarioMetrics } from '../utils/performance-formatters';
 
 interface OverallTestMetricsProps {
   transactions: TransactionStat[];
@@ -22,7 +24,7 @@ export default function OverallTestMetrics({
   const totalRequests = transactions.reduce((sum, t) => sum + t.total_count, 0);
   const _totalPassed = transactions.reduce((sum, t) => sum + t.passed_count, 0);
   const totalFailed = transactions.reduce((sum, t) => sum + t.failed_count, 0);
-  const errorRate = totalRequests > 0 ? (totalFailed / totalRequests) * 100 : 0;
+  const errorRate = computeErrorRate(totalFailed, totalRequests);
 
   // Weighted averages
   const weightedAvgResponseTime = totalRequests > 0
@@ -125,15 +127,15 @@ export default function OverallTestMetrics({
         <Box
           sx={{
             p: 2,
-            backgroundColor: errorRate > 5 ? 'rgba(244, 67, 54, 0.04)' : 'rgba(76, 175, 80, 0.04)',
+            backgroundColor: errorRate > ERROR_RATE_WARN_PCT ? 'rgba(244, 67, 54, 0.04)' : 'rgba(76, 175, 80, 0.04)',
             borderRadius: 2,
-            border: `1px solid ${errorRate > 5 ? 'rgba(244, 67, 54, 0.12)' : 'rgba(76, 175, 80, 0.12)'}`,
+            border: `1px solid ${errorRate > ERROR_RATE_WARN_PCT ? 'rgba(244, 67, 54, 0.12)' : 'rgba(76, 175, 80, 0.12)'}`,
           }}
         >
           <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase' }}>
             Transaction Error Rate
           </Typography>
-          <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 700, color: errorRate > 5 ? 'error.main' : 'success.main' }}>
+          <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 700, color: errorRate > ERROR_RATE_WARN_PCT ? 'error.main' : 'success.main' }}>
             {errorRate.toFixed(2)}%
           </Typography>
           <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
