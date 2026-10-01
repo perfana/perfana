@@ -86,6 +86,56 @@ Four things about it are load-bearing:
 jsdom has no `ResizeObserver`. `apps/web/jest.setup.js` stubs it so a component that observes its
 container mounts in tests at all.
 
+### Never `fetch()` a `data:` URL — copy a chart through `apps/web/lib/plotly.ts`
+
+The web app's CSP sets `connect-src 'self' <api> <keycloak> https: wss:`
+(`apps/web/next.config.js`), and `data:` is not in that list. So `fetch(dataUrl)` is blocked
+before it leaves the page and rejects with a bare `TypeError: Failed to fetch` — no CSP
+violation reaches the `catch`, nothing distinguishes it from a dead network. Every chart's
+"copy to clipboard" modebar button did `Plotly.toImage().then(fetch).then(r => r.blob())`, so
+the button failed on **every chart, in every browser, on localhost and in production alike**,
+and reported it as a network error. Fixed in v0.2.96.27.
+
+`apps/web/lib/plotly.ts` is now the one implementation. All eight modebar copy buttons go
+through it: `graphs/utils/chart-utils.ts`, `compare/components/ComparisonPlot.tsx`,
+`compare/current-test-run-chart/utils/current-test-run-chart-utils.ts`,
+`anomaly-detection/components/utils/trends-plot-utils.ts`, `trends/hooks/useTrendsPlot.ts`,
+`performance-analysis/RequestTimeSeriesModal.tsx`,
+`performance-analysis/transaction-graph-modal/utils/chart-config.ts`, and
+`service-level-objectives/utils/slo-chart-utils.ts`. A ninth button writes its own
+`toImage` chain at your peril.
+
+What the module owns, and why each piece is there:
+
+- **`dataUrlToPngBlob`** decodes Plotly's base64 with `atob`. No network, so no CSP. This is
+  the actual fix; everything else is consolidation.
+- **`copyPlotToClipboard(render, { fallbackFilename, notify })`** calls
+  `navigator.clipboard.write` in the same task as the click, handing `ClipboardItem` the
+  **unsettled** `Promise<Blob>`. That keeps the user-activation context Safari requires and
+  Chrome can withdraw on a slow render. It is wrapped in `try`/`catch`, not just `.catch`:
+  `new ClipboardItem(...)` and `write()` can throw synchronously on a UA that refuses a
+  Promise value, and from a bare click handler that throw escapes Plotly's modebar *and*
+  orphans the blob.
+- **The helper owns the download fallback and the blob's rejection**, so no call site can
+  forget either. Two of the eight previously did nothing at all on a clipboard refusal — no
+  file, no toast — and an unhandled rejection surfaced whenever the render failed on a
+  browser with no `ClipboardItem`.
+- **Pair `fallbackFilename` with `notify` wherever a toast is in scope.** A refusal
+  ("Document is not focused") is routine, and without a message the user gets a surprise file
+  in Downloads. `graphs/utils/chart-utils.ts` is the deliberate exception: its own suite pins
+  the silent download as a regression guard, and it sits beside an explicit "Download as PNG"
+  button.
+- **`downloadPng` revokes the object URL in a `setTimeout`, not inline.** Firefox and WebKit
+  abort a just-started blob download when the URL is revoked in the same task, and a
+  multi-megabyte PNG is exactly the case that loses that race.
+- **`plotSize(gd, fallback)`** reads Plotly's undocumented `_fullLayout`, the only place the
+  rendered pixel size lives. `PlotlyGraphDiv` / `PlotlyGlobal` / `getPlotly()` replace the
+  inline re-declarations and `unknown` casts each site used to carry.
+
+jsdom has no CSP, so the original bug was **not catchable in Jest** — `apps/web/__tests__/lib/plotly-clipboard.test.ts`
+covers the module's contract (fallback, toasts, rejection ownership), not the CSP itself. An
+end-to-end check of the eight adapters is filed in TODOS.md under "Charts".
+
 ### The Scenarios table earns its width back from the header labels, not from `minWidth`
 
 Performance Analysis scrolled sideways **at full width on a 16" MacBook** (1728px viewport,
@@ -280,3 +330,69 @@ Consequences worth knowing before editing either side:
   version winning on purpose, not a regression.
 - **The timestamp field copies ISO 8601 while displaying the local format.** What is on screen is
   for reading; what lands on the clipboard is for pasting into a query.
+
+### A graph preset's scope is a flag, not a missing `test_run_id`
+
+`SaveGraphPresetModal` always sends `test_run_id: currentTestRunId` now, for both scopes
+(v0.2.96.27). It used to send `undefined` for the Global option, which is where the whole
+class of bugs came from: the API derived the preset's owning system from the run, so a preset
+with no run was stamped with an arbitrary one, and the list treated "no run" as "belongs to
+every system".
+
+Three rules follow:
+
+- **Only `is_global` moves when the radio changes.** `handleScopeChange` no longer clears
+  `test_run_id`, and the radio's `value` is read from `is_global`, not from whether a run id
+  is set. Reintroducing the `test_run_id ? 'test_run' : 'global'` read brings the bug back.
+- **"Global" is called "All runs of this system"** because that is what it does: every run of
+  that system under test **and environment**, not every system. See "Graph presets are scoped
+  by their series' dashboards" in [apps/api/CLAUDE.md](../api/CLAUDE.md) for how the server
+  resolves it.
+- **Only ever upsert over a preset the caller owns.** `useGraphsPresets.handleSavePreset`
+  matches on `name && userId === currentUserId && isGlobal`. `presets` is what `findAll`
+  returned, which for a regular user is `own OR isGlobal` — so it contains other people's
+  global presets. Matching on name alone meant a name collision PATCHed someone else's row:
+  a 403 for a regular user, reported only as the generic failure toast, but a **global
+  admin's PATCH succeeded and silently overwrote it**.
+
+`UpdateGraphPresetRequest` deliberately omits `testRunId` (`apps/web/lib/graph-presets.ts`);
+the server's `UpdateGraphPresetDto` omits it too and the global `ValidationPipe` strips it, so
+sending it is a silent no-op that reads like a re-scope.
+
+### An SLO with no targets must not borrow the panel's series
+
+`useSLOMetricsChart` falls back to "every series on the panel" when a target matches no
+charted series — a deliberate fallback for a near-miss name. With **zero** targets that
+fallback draws a bar per transaction: numbers that are not the SLO's, beside a series table
+correctly reading "No values available for this SLO". The case in the wild is a trend SLO on a
+panel whose series hold one point each, so the worker records ERROR / "No targets found for
+processing" (see "A Trend SLO judges the slope of a series" in
+[apps/worker/CLAUDE.md](../worker/CLAUDE.md)) and the chart answered with fifteen unrelated
+bars.
+
+`SLOMetricsChart` now returns early on `!checkResult.targets?.length` (v0.2.96.27).
+`ChartEmptyState` takes an optional `message` and `detail`: the headline is written for the
+user, and the pipeline's own words go underneath as supporting text, capped at `60ch` so an
+arbitrary-length message is not set as one centred line across the chart.
+
+### The error rate has one threshold and one set of formatters
+
+`ERROR_RATE_WARN_PCT` (5), `computeErrorRate`, `errorRateSeverity` and `formatErrorRate` live
+in `performance-analysis/utils/performance-formatters.ts` and are shared by
+`OverallTestMetrics` and the collapsed `PerformanceAnalysisCollapsedView` badge
+(v0.2.96.27). Before that the threshold sat in three places in the expanded tile and a fourth
+in the badge, with a comment claiming a parity it did not have — the badge warned amber under
+5% while the tile reported the same number in success green.
+
+Three behaviours the helpers encode, so a new caller does not have to rediscover them:
+
+- **Pooled, never averaged.** `SUM(failed) / SUM(total)`. The mean of per-row rates lets one
+  failed execution in a quiet transaction count as 100% — the same mistake the perf-test
+  error-rate SLO made before v0.2.96.1.
+- **`errorRateSeverity` returns `'none'`** when there is nothing to report, and callers hide
+  the indicator rather than rendering an alarm-coloured "0.00%". It range-checks with
+  `Number.isFinite` first: `NaN <= 0` is false, so a comparison alone falls through to a badge
+  reading "NaN% errors", and these counts come off the API response typed but never validated.
+- **A non-zero rate that rounds to 0.00 renders as `<0.01%`.** Three failures in 100k
+  transactions is routine on a large run, and "0.00% errors" on a red badge asserts the one
+  thing the badge exists to rule out.

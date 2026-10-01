@@ -63,13 +63,17 @@ CustomGraphCard (parent component - to be implemented)
 
 4. User clicks "Save"
    └─> onSave(formData: GraphPresetFormData)
-       └─> GraphPresetsAPI.create(formData)
-           └─> authenticatedFetch('/graph-presets', POST)
+       └─> Does the caller already OWN a preset with this name and scope?
+           └─> yes: authenticatedFetch('/graph-presets/:id', PATCH)
+           └─> no:  authenticatedFetch('/graph-presets', POST)
                └─> Backend API
                    └─> Response: GraphPreset
-                       └─> Add to presets array
+                       └─> Refetch presets
                            └─> Show success toast
 ```
+
+The owner check is load-bearing: `findAll` returns other people's global presets, so a
+name match alone would PATCH a row the caller does not own.
 
 ### Loading Preset
 ```
@@ -161,6 +165,23 @@ POST /graph-presets
 a global preset is matched back to its system through its first series'
 application dashboard. `test_run_id` cannot be changed by a PATCH.
 
+### Update Preset Request
+```json
+PATCH /graph-presets/:id
+{
+  "name": "Response Time Analysis",
+  "description": "Key response time metrics across services",
+  "series_config": [...],
+  "is_global": true
+}
+```
+
+Every field is optional, and `test_run_id` is not accepted at all — the global
+`ValidationPipe` strips it, so sending it is a silent no-op. A preset belongs to the
+system it was saved from; re-scoping it is a delete and a re-save. `is_global: false`
+is refused on a legacy preset that has no `test_run_id`, because such a preset would
+then match no run and could not be widened again.
+
 ### Preset Response
 ```json
 {
@@ -185,9 +206,16 @@ application dashboard. `test_run_id` cannot be changed by a PATCH.
 - Automatic token refresh on 401 responses
 
 ### Authorization
-- Users can only delete their own presets
+- Users can only update or delete their own presets; global admins may do either to any
 - Delete button hidden if `preset.user_id !== currentUserId`
-- Backend enforces ownership check (403 on unauthorized delete)
+- Backend enforces ownership check (403 on unauthorized update or delete)
+- **Organization boundary first.** Every route resolves the caller's accessible
+  organizations and a preset outside them answers **404**, not 403 — a 403 would confirm
+  the id exists. `GET /graph-presets` without a `testRunId` is scoped to those
+  organizations too; it previously returned every global preset in the database.
+- The save flow upserts only over a preset the caller **owns**. `findAll` legitimately
+  returns other people's global presets, so matching on name alone let a name collision
+  overwrite someone else's row.
 - Global presets visible to all users
 - Test run-specific presets filtered by test run access
 

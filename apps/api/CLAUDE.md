@@ -783,3 +783,80 @@ Three things to keep straight in that same `SELECT`
 The general rule this is an instance of: when one endpoint's response field is another endpoint's
 exact-match lookup key, the two ends are a contract. Normalise for grouping in a separate column,
 never in place.
+
+### Graph presets are scoped by their series' dashboards, and `findAll` alone is half a fix
+
+`graph_presets` rows are owned resources, but the module had two independent scoping holes
+until v0.2.96.27. Both are worth reading before touching any list-and-by-id service pair.
+
+**1. `isGlobal` means "all runs of this system and environment", not "all systems".**
+`findAll`'s old SUT arm was `tr.system_under_test_id = … OR preset.testRunId IS NULL`, and the
+save dialog defaulted to Global with no run id — so every global preset was every preset, and
+they showed on every system. The owning system is now derived from the preset's **own first
+series' `dashboardId`**, matched against `application_dashboards` for that SUT and
+environment. Four details are load-bearing:
+
+- **The subselect is uncorrelated on purpose.** As a correlated `EXISTS` it re-ran per preset
+  row, and `application_dashboards` carries an RLS SELECT policy backed by a plpgsql function
+  — so the function ran once per (preset x dashboard) pair. Uncorrelated, Postgres hashes it
+  once.
+- **Derived, not stored, so it survives the run being pruned.** `test_run_id` has no foreign
+  key and a test-run delete leaves it dangling.
+- **`ad.id` is compared as text** (`IN (SELECT ad.id::text …)`). A legacy row whose
+  `dashboardId` is not a uuid would make a `::uuid` cast throw for the whole query instead of
+  simply not matching.
+- **A preset whose first series' dashboard was deleted drops off the list** while staying
+  reachable by id. That is the accepted trade; the alternative is a stored column that
+  nothing keeps in sync.
+
+`workload` is deliberately **not** part of the scope any more, and the non-global arm is an
+exact `preset.testRunId = :testRunId`. A "Test Run Specific" preset therefore appears on that
+run only — it used to appear on every run of the same SUT, environment and workload, which is
+not what the option said.
+
+**2. Filtering `findAll` by organization does not close a tenant leak.** The bare
+`GET /api/graph-presets` (no `testRunId`) returned every `is_global` preset in the database —
+other tenants' preset names, descriptions, dashboard labels and metric names — because the
+SUT block only runs when a run id is supplied. But the by-id routes were just as open:
+`findOne` served any global preset to any tenant, and `update`/`remove` authorized on `userId`
+alone. **There is no RLS backstop here**: `DB_ENABLE_RLS_ROLE` defaults to `'false'` and is
+set in none of the shipped compose files.
+
+The shape that fixes it, and the one to copy:
+
+- Every route resolves `accessibleOrgIds` once via `withOrgFilter` (`null` = global admin) and
+  passes it to the service. The controller's old `resolveIsAdmin` collapsed that to a boolean
+  and threw the list away.
+- `accessibleOrgIds` is a **required** parameter on `findAll`, not optional. As an optional
+  one, a forgotten argument silently restores the cross-tenant behaviour with no type error
+  and no log line.
+- The by-id guard (`assertTenantAccess`) answers **404, not 403**, for a preset outside the
+  caller's organizations. A 403 confirms the id exists, which is itself a cross-tenant
+  disclosure.
+- A non-admin with an empty org list returns `[]` early — `IN (:...orgs)` on an empty array is
+  rendered `IN ()`, a syntax error rather than an empty result.
+- **`create` authorizes the caller-supplied `testRunId` before inheriting its org.** Run ids
+  are human-readable and routinely pasted into CI logs and chat; without the check, naming
+  another tenant's run writes a preset into their organization, and `isGlobal: true` then puts
+  attacker-chosen name, description and series into their list. It refuses with the same
+  "Test run not found" message rather than confirming the run exists.
+
+**`testRunId` is now required on create and absent from update.** `UpdateGraphPresetDto` is
+`PartialType(OmitType(CreateGraphPresetDto, ['testRunId']))`, so a preset can never change
+which system it belongs to and `organization_id`/`team_id` stay consistent with the run it was
+created from. Re-scoping is a delete and a re-save. Two traps the new `PATCH /graph-presets/:id`
+(v0.2.96.27) had to handle:
+
+- **`PartialType` + class-validator's `@IsOptional()` skips `null` as well as `undefined`.**
+  `{"name": null}` passes the pipe, and an apply block keyed on `!== undefined` writes NULL
+  into a NOT NULL column — a 500 carrying raw Postgres text. `name`, `seriesConfig` and
+  `isGlobal` reject an explicit null; `description` is nullable, so a null legitimately clears
+  it.
+- **`isGlobal: false` on a legacy preset with no `test_run_id` is refused.** `findAll`'s
+  non-global arm is `preset.testRunId = :testRunId`, so narrowing such a preset matches no arm
+  on any run: it vanishes from every list, and since `testRunId` is not updatable the user
+  could never undo it through the API.
+
+Client side, see "A graph preset's scope is a flag, not a missing `test_run_id`" in
+[apps/web/CLAUDE.md](../web/CLAUDE.md) — in particular the rule that an upsert must match on
+owner, because `findAll` legitimately returns other people's global presets.

@@ -6,7 +6,12 @@ but aren't tied to a single in-flight PR. Format: one entry per item with
 priority (P0–P4), origin, and enough context that someone picking it up in
 3 months can act without re-deriving the motivation.
 
-When an item ships, move it to the `## Graph presets
+When an item ships, move it to the `## Completed` section at the bottom
+with the version it landed in.
+
+---
+
+## Graph presets
 
 ### Saved presets cannot carry their metrics source
 
@@ -91,11 +96,6 @@ The row reads blue (scenarios), green (txn/s), purple (req/s), orange (`Avg: Xms
 the error badge and `N poor Apdex`. `Avg` is a neutral readout tinted the same warm colour
 as the two badges that report a fault, so colour no longer encodes severity. Either move
 `Avg` to a neutral tint or differentiate the fault badges by weight or icon.
-
-## Completed` section at the bottom
-with the version it landed in.
-
----
 
 ## RBAC
 
@@ -1588,29 +1588,29 @@ Two ways to close this, in order of preference:
 2. Keep the field but stop aggregating the whole group for it: replace the `ARRAY_AGG(...)[1]`
    with a lateral `SELECT response_data ... ORDER BY time DESC LIMIT 1`.
 
-### 13 hand-rolled clipboard handlers left under `apps/web`
+### 11 hand-rolled clipboard handlers left under `apps/web`
 
 **Priority:** P4
 **Origin:** simplification review during /ship on `fix/unify-error-details-view` (2026-09-27).
 v0.2.96.17 extracted `CopyButton` (`apps/web/components/ui/copy-button.tsx`) — a Tooltip +
 IconButton + `navigator.clipboard.writeText` with a transient "Copied!" confirmation, an
 unmount-safe revert timer and a >=24px hit area — and converted two callers (the error-details
-dialog and `SamplerDetailsModal`). Thirteen files still hand-roll the same trio, most of them
+dialog and `SamplerDetailsModal`). Eleven files still hand-roll the same trio, most of them
 without the confirmation, several without the >=24px target, and none clearing their timer:
 
 `app/settings/hooks/useApiKeys.ts`, `app/test-runs/hooks/useTestRunsFilters.ts`,
 `deep-links/components/DeepLinkDialog.tsx`, `reporting/ReportCard.tsx`,
-`anomaly-detection/components/utils/trends-plot-utils.ts`,
 `test-run-details/components/TestRunDetailsCollapsedView.tsx`,
 `test-run-details/components/TestRunIdentitySection.tsx`,
 `performance-analysis/hooks/usePerformanceAnalysisHandlers.ts`,
-`compare/current-test-run-chart/utils/current-test-run-chart-utils.ts`,
 `awr/sql/SqlStatementCard.tsx`, `awr/sql/SqlTextViewer.tsx`,
 `systems/[id]/config/components/TemplateTable.tsx`, `components/reports/HtmlReportViewerModal.tsx`.
 
-Not a mechanical sweep: some are hooks that also raise a snackbar (`useApiKeys`), and
-`trends-plot-utils.ts` builds a Plotly modebar button that copies a PNG data URL — those two are
-not `CopyButton` shaped. The dozen that are plain icon-copies-text are.
+Not a mechanical sweep: some are hooks that also raise a snackbar (`useApiKeys`). The two Plotly
+modebar buttons that used to be on this list — `trends-plot-utils.ts` and
+`current-test-run-chart-utils.ts` — are off it as of v0.2.96.27: they copy a PNG rather than text,
+were never `CopyButton` shaped, and now share `copyPlotToClipboard` in `apps/web/lib/plotly.ts`
+with the other six chart copy buttons. The rest are plain icon-copies-text.
 
 ### `alpha()` on an already-transparent theme token, in four more places
 
