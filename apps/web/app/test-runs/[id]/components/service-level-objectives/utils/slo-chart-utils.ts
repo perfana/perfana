@@ -2,7 +2,7 @@
  * Utility functions for SLO Metrics Chart
  */
 
-import { PlotlyGraphDiv } from '@/lib/plotly';
+import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 import type { Theme } from '@mui/material';
 import type {
   MetricDataPoint,
@@ -555,7 +555,7 @@ export function buildChartConfig(metricName: string): Record<string, unknown> {
           transform: 'scale(0.8)',
         },
         click: function (gd: PlotlyGraphDiv) {
-          copyChartToClipboard(gd);
+          copyChartToClipboard(gd, metricName);
         },
       },
     ],
@@ -565,31 +565,16 @@ export function buildChartConfig(metricName: string): Record<string, unknown> {
 /**
  * Copy chart to clipboard as PNG
  */
-function copyChartToClipboard(gd: PlotlyGraphDiv): void {
-  const Plotly = (window as { Plotly?: typeof import('plotly.js') }).Plotly;
-  if (!Plotly) return;
-
-  Plotly.toImage(gd, {
-    format: 'png',
-    width: gd._fullLayout?.width || 800,
-    height: gd._fullLayout?.height || DEFAULT_CHART_HEIGHT,
-    scale: 2,
-  }).then((dataUrl: string) => {
-    fetch(dataUrl)
-      .then(res => res.blob())
-      .then(blob => {
-        if (navigator.clipboard && 'write' in navigator.clipboard) {
-          return navigator.clipboard.write([
-            new ClipboardItem({
-              'image/png': blob,
-            }),
-          ]);
-        } else {
-          throw new Error('Clipboard API not supported');
-        }
-      })
-      .catch((err: Error) => {
-        console.error('Failed to copy SLO chart to clipboard:', err);
-      });
-  });
+function copyChartToClipboard(
+  gd: PlotlyGraphDiv,
+  metricName: string,
+  notify?: (message: string) => void,
+): void {
+  copyPlotToClipboard(
+    () => plotlyPngBlob(gd, plotSize(gd, { width: 800, height: DEFAULT_CHART_HEIGHT })),
+    // No toast is threaded to this chart yet, and the helper's type refuses a download
+    // it cannot announce — so a refusal warns to the console rather than dropping an
+    // unexplained file in Downloads. Filed in TODOS.md.
+    notify ? { fallbackFilename: `${metricName}_slo_chart.png`, notify } : {},
+  );
 }

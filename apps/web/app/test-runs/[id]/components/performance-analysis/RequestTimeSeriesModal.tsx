@@ -26,6 +26,7 @@ import {
   ShowChart as ShowChartIcon,
 } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
+import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 
 // Dynamically import Plot to avoid SSR issues
 const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
@@ -318,39 +319,11 @@ export default function RequestTimeSeriesModal({
             path: 'M768 1664h896v-640h-416q-40 0-68-28t-28-68v-416h-384v1152zm256-1440v-64q0-13-9.5-22.5t-22.5-9.5h-704q-13 0-22.5 9.5t-9.5 22.5v64q0 13 9.5 22.5t22.5 9.5h704q13 0 22.5-9.5t9.5-22.5zm256 672h299l-299-299v299zm512 128v672q0 40-28 68t-68 28h-960q-40 0-68-28t-28-68v-160h-544q-40 0-68-28t-28-68v-1344q0-40 28-68t68-28h1088q40 0 68 28t28 68v328q21 13 36 28l408 408q28 28 48 76t20 88z',
             transform: 'scale(0.8)'
           },
-          click: function(gd: unknown) {
-            // Convert plot to PNG blob and copy to clipboard
-            const Plotly = (window as unknown as { Plotly?: { toImage: (gd: unknown, opts: Record<string, unknown>) => Promise<string> } }).Plotly;
-            if (!Plotly) return;
-            Plotly.toImage(gd, {
-              format: 'png',
-              width: (gd as { _fullLayout?: { width?: number } })._fullLayout?.width || 800,
-              height: (gd as { _fullLayout?: { height?: number } })._fullLayout?.height || 400,
-              scale: 2
-            }).then((dataUrl: string) => {
-              // Convert data URL to blob
-              fetch(dataUrl)
-                .then(res => res.blob())
-                .then(blob => {
-                  // Copy to clipboard using the modern Clipboard API
-                  if (navigator.clipboard && 'write' in navigator.clipboard) {
-                    return navigator.clipboard.write([
-                      new ClipboardItem({
-                        'image/png': blob
-                      })
-                    ]);
-                  } else {
-                    throw new Error('Clipboard API not supported');
-                  }
-                })
-                .then(() => {
-                  showToast('Graph copied to clipboard');
-                })
-                .catch((err: Error) => {
-                  console.error('Failed to copy to clipboard:', err);
-                  showToast('Failed to copy graph to clipboard');
-                });
-            });
+          click: function(gd: PlotlyGraphDiv) {
+            copyPlotToClipboard(
+              () => plotlyPngBlob(gd, plotSize(gd, { width: 800, height: 400 })),
+              { fallbackFilename: 'request_time_series.png', notify: showToast },
+            );
           }
         }
       ]

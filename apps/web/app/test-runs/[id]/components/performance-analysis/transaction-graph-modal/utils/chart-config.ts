@@ -2,7 +2,7 @@
  * Chart configuration utilities for TransactionGraphModal
  */
 
-import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
+import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 import type { Theme } from '@mui/material';
 import type { MetricType, MetricOption, AggregationOption, SamplerColor } from '../types';
 
@@ -174,33 +174,8 @@ export function buildPlotConfig(
 }
 
 function copyChartToClipboard(gd: PlotlyGraphDiv, showToast: (message: string) => void): void {
-  const plotly = getPlotly();
-  if (!plotly) return;
-  plotly.toImage(gd, {
-    format: 'png',
-    width: gd._fullLayout?.width || 800,
-    height: gd._fullLayout?.height || 400,
-    scale: 2
-  }).then((dataUrl: string) => {
-    fetch(dataUrl)
-      .then(res => res.blob())
-      .then(blob => {
-        if (navigator.clipboard && 'write' in navigator.clipboard) {
-          return navigator.clipboard.write([
-            new ClipboardItem({
-              'image/png': blob
-            })
-          ]);
-        } else {
-          throw new Error('Clipboard API not supported');
-        }
-      })
-      .then(() => {
-        showToast('Graph copied to clipboard');
-      })
-      .catch((err: Error) => {
-        console.error('Failed to copy to clipboard:', err);
-        showToast('Failed to copy graph to clipboard');
-      });
-  });
+  copyPlotToClipboard(
+    () => plotlyPngBlob(gd, plotSize(gd, { width: 800, height: 400 })),
+    { fallbackFilename: 'transaction_graph.png', notify: showToast },
+  );
 }

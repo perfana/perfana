@@ -1,4 +1,4 @@
-import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
+import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 import { Theme } from '@mui/material/styles';
 import { MetricTrendData } from '../../types';
 import { TrendsPlotData } from '../types';
@@ -415,106 +415,12 @@ function createCopyToClipboardButton(showToast: (message: string) => void) {
       transform: 'scale(0.8)'
     },
     click: function(gd: PlotlyGraphDiv) {
-      console.log('Navigator clipboard support:', !!navigator.clipboard);
-      console.log('Clipboard write support:', navigator.clipboard && 'write' in navigator.clipboard);
-      console.log('ClipboardItem support:', typeof ClipboardItem !== 'undefined');
-
-      // Convert plot to PNG and copy to clipboard
-      const plotly = getPlotly();
-      if (!plotly) return;
-      plotly.toImage(gd, {
-        format: 'png',
-        width: gd._fullLayout?.width || 800,
-        height: gd._fullLayout?.height || 400,
-        scale: 2
-      }).then((dataUrl: string) => {
-        console.log('Successfully generated image data URL, length:', dataUrl.length);
-
-        // Method 1: Try modern Clipboard API with blob
-        if (navigator.clipboard && 'write' in navigator.clipboard && typeof ClipboardItem !== 'undefined') {
-          console.log('Attempting modern Clipboard API with blob...');
-
-          fetch(dataUrl)
-            .then(res => {
-              console.log('Fetch response ok:', res.ok);
-              return res.blob();
-            })
-            .then(blob => {
-              console.log('Created blob, size:', blob.size, 'type:', blob.type);
-
-              return navigator.clipboard.write([
-                new ClipboardItem({
-                  'image/png': blob
-                })
-              ]);
-            })
-            .then(() => {
-              console.log('Successfully copied image to clipboard via modern API');
-              showToast('Graph copied to clipboard');
-            })
-            .catch((err: Error) => {
-              console.error('Modern clipboard API failed:', err);
-              // Fallback to text method
-              tryTextFallback(dataUrl, showToast);
-            });
-        } else {
-          console.log('Modern Clipboard API not supported, trying fallback...');
-          tryTextFallback(dataUrl, showToast);
-        }
-      }).catch((err: Error) => {
-        console.error('Failed to generate image:', err);
-        showToast('Failed to generate graph image');
-      });
+      // The old fallback copied the base64 data URL as TEXT and told the user to paste
+      // it into an image editor, which no editor accepts. The helper downloads instead.
+      copyPlotToClipboard(
+        () => plotlyPngBlob(gd, plotSize(gd, { width: 800, height: 400 })),
+        { fallbackFilename: 'trend_chart.png', notify: showToast },
+      );
     }
   };
-}
-
-/**
- * Fallback method: Copy data URL as text
- */
-function tryTextFallback(dataUrl: string, showToast: (message: string) => void) {
-  console.log('Attempting text fallback...');
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(dataUrl)
-      .then(() => {
-        console.log('Successfully copied data URL as text');
-        showToast('Graph data URL copied to clipboard (paste into image editor)');
-      })
-      .catch((err: Error) => {
-        console.error('Text clipboard failed:', err);
-        // Final fallback: Manual copy instructions
-        showFinalFallback(dataUrl, showToast);
-      });
-  } else {
-    console.log('No clipboard API available, showing final fallback...');
-    showFinalFallback(dataUrl, showToast);
-  }
-}
-
-/**
- * Final fallback: Show instructions to user
- */
-function showFinalFallback(dataUrl: string, showToast: (message: string) => void) {
-  console.log('Using final fallback method...');
-  // Create a temporary text area to select the data URL
-  const textarea = document.createElement('textarea');
-  textarea.value = dataUrl;
-  document.body.appendChild(textarea);
-  textarea.select();
-
-  try {
-    const successful = document.execCommand('copy');
-    if (successful) {
-      console.log('Successfully copied via document.execCommand');
-      showToast('Graph data URL copied to clipboard (paste into image editor)');
-    } else {
-      console.log('document.execCommand failed');
-      showToast('Please right-click the graph and select "Save image as..."');
-    }
-  } catch (err) {
-    console.error('document.execCommand failed:', err);
-    showToast('Please right-click the graph and select "Save image as..."');
-  }
-
-  document.body.removeChild(textarea);
 }

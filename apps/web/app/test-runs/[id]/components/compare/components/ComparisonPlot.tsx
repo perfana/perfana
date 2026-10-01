@@ -7,7 +7,7 @@ import type { Layout, Config } from 'plotly.js';
 import { GraphData, Panel, RelatedTestRun } from '../types/compare.types';
 import { TestRun } from '@/types/test-runs';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
-import { PlotlyGraphDiv, getPlotly } from '@/lib/plotly';
+import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 
 // Dynamically import Plotly to avoid SSR issues
 const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
@@ -343,49 +343,10 @@ function generatePlotProps(
           transform: 'scale(0.8)'
         },
         click: function(gd: PlotlyGraphDiv) {
-          // Convert plot to PNG blob and copy to clipboard
-          const plotly = getPlotly();
-          if (!plotly) return;
-          plotly.toImage(gd, {
-            format: 'png',
-            width: gd._fullLayout?.width || 800,
-            height: gd._fullLayout?.height || 480,
-            scale: 2
-          }).then((dataUrl: string) => {
-            // Convert data URL to blob
-            fetch(dataUrl)
-              .then(res => res.blob())
-              .then(blob => {
-                // Copy to clipboard using the modern Clipboard API
-                if (navigator.clipboard && 'write' in navigator.clipboard) {
-                  return navigator.clipboard.write([
-                    new ClipboardItem({
-                      'image/png': blob
-                    })
-                  ]);
-                } else {
-                  throw new Error('Clipboard API not supported');
-                }
-              })
-              .then(() => {
-                console.log('Chart copied to clipboard successfully');
-                showToast(`Chart "${metricName}" copied to clipboard`);
-              })
-              .catch((err: unknown) => {
-                console.warn('Failed to copy to clipboard:', err);
-                // Fallback: trigger download
-                const a = document.createElement('a');
-                a.href = dataUrl;
-                a.download = `${metricName}_comparison.png`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                showToast(`Clipboard not supported - Chart downloaded instead`);
-              });
-          }).catch((err: unknown) => {
-            console.error('Failed to generate image:', err);
-            showToast('Failed to copy chart - please try again');
-          });
+          copyPlotToClipboard(
+            () => plotlyPngBlob(gd, plotSize(gd, { width: 800, height: 480 })),
+            { fallbackFilename: `${metricName}_comparison.png`, notify: showToast },
+          );
         }
       }
     ]

@@ -61,6 +61,9 @@ describe('chart export branch selection', () => {
     // clicked, and the URL is released again.
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(anchorClick).toHaveBeenCalledTimes(1);
+    // Deferred one task on purpose: Firefox and WebKit can abort a just-started blob
+    // download when the object URL is revoked in the same turn as the click.
+    await new Promise((r) => setTimeout(r, 0));
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock');
     // Plotly's own downloader is the fallback only — it must not fire on success.
     expect(downloadImage).not.toHaveBeenCalled();

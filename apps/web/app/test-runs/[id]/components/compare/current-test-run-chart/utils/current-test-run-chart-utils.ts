@@ -2,7 +2,7 @@
  * Utility functions for CurrentTestRunChart component
  */
 
-import { PlotlyGraphDiv } from '@/lib/plotly';
+import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 import type { Theme } from '@mui/material';
 import { alpha } from '@mui/material';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
@@ -396,7 +396,7 @@ export function buildChartConfig(
             transform: 'scale(0.8)',
           },
           click: function (gd: PlotlyGraphDiv) {
-            copyChartToClipboard(gd, showToast);
+            copyChartToClipboard(gd, metricName, showToast);
           },
         },
       ]
@@ -428,89 +428,19 @@ export function buildChartConfig(
 }
 
 /**
- * Copy chart to clipboard as PNG with fallback methods
+ * Copy chart to clipboard as PNG, falling back to a download.
+ *
+ * The old fallback chain copied the base64 data URL as TEXT and told the user to paste
+ * it into an image editor, which no editor accepts. A download is the only fallback
+ * that produces the thing the user asked for.
  */
-function copyChartToClipboard(gd: PlotlyGraphDiv, showToast: (message: string) => void): void {
-  const Plotly = (window as { Plotly?: typeof import('plotly.js') }).Plotly;
-  if (!Plotly) {
-    showToast('Failed to generate graph image');
-    return;
-  }
-
-  Plotly.toImage(gd, {
-    format: 'png',
-    width: gd._fullLayout?.width || 800,
-    height: gd._fullLayout?.height || DEFAULT_CHART_HEIGHT,
-    scale: 2,
-  })
-    .then((dataUrl: string) => {
-      // Try modern Clipboard API with blob
-      if (
-        navigator.clipboard &&
-        'write' in navigator.clipboard &&
-        typeof ClipboardItem !== 'undefined'
-      ) {
-        fetch(dataUrl)
-          .then(res => res.blob())
-          .then(blob => {
-            return navigator.clipboard.write([
-              new ClipboardItem({
-                'image/png': blob,
-              }),
-            ]);
-          })
-          .then(() => {
-            showToast('Graph copied to clipboard');
-          })
-          .catch(() => {
-            tryTextFallback(dataUrl, showToast);
-          });
-      } else {
-        tryTextFallback(dataUrl, showToast);
-      }
-    })
-    .catch(() => {
-      showToast('Failed to generate graph image');
-    });
-}
-
-/**
- * Fallback: Copy data URL as text
- */
-function tryTextFallback(dataUrl: string, showToast: (message: string) => void): void {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard
-      .writeText(dataUrl)
-      .then(() => {
-        showToast('Graph data URL copied to clipboard (paste into image editor)');
-      })
-      .catch(() => {
-        showFinalFallback(dataUrl, showToast);
-      });
-  } else {
-    showFinalFallback(dataUrl, showToast);
-  }
-}
-
-/**
- * Final fallback: Use document.execCommand
- */
-function showFinalFallback(dataUrl: string, showToast: (message: string) => void): void {
-  const textarea = document.createElement('textarea');
-  textarea.value = dataUrl;
-  document.body.appendChild(textarea);
-  textarea.select();
-
-  try {
-    const successful = document.execCommand('copy');
-    if (successful) {
-      showToast('Graph data URL copied to clipboard (paste into image editor)');
-    } else {
-      showToast('Please right-click the graph and select "Save image as..."');
-    }
-  } catch {
-    showToast('Please right-click the graph and select "Save image as..."');
-  }
-
-  document.body.removeChild(textarea);
+function copyChartToClipboard(
+  gd: PlotlyGraphDiv,
+  metricName: string,
+  showToast: (message: string) => void,
+): void {
+  copyPlotToClipboard(
+    () => plotlyPngBlob(gd, plotSize(gd, { width: 800, height: DEFAULT_CHART_HEIGHT })),
+    { fallbackFilename: `${metricName}_current_test_run_chart.png`, notify: showToast },
+  );
 }

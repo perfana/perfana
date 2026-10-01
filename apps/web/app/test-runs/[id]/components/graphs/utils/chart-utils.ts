@@ -2,6 +2,7 @@ import { SeriesConfig, MetricDataPoint } from '../types';
 import { AxisAssignment, UnitConversion, ChartThemeColors, PlotTrace } from '../types/chart.types';
 import { TestRun } from '@/types/test-runs';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
+import { PlotlyGraphDiv, copyPlotToClipboard, downloadPng, plotlyPngBlob, plotSize } from '@/lib/plotly';
 
 /**
  * Extended color palette for automatic series color assignment
@@ -539,28 +540,8 @@ function exportFilename(chartName: string | undefined): string {
 }
 
 /** Trigger a browser download for an already-rendered blob. */
-function downloadBlob(blob: Blob | null, chartName: string | undefined): void {
-  if (!blob) return;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = exportFilename(chartName) + '.png';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-/** Convert Plotly's data-URL output into a Blob. */
-function dataUrlToBlob(dataUrl: string): Blob {
-  const parts = dataUrl.split(',');
-  const mime = parts[0]!.match(/:(.*?);/)?.[1] || 'image/png';
-  const raw = atob(parts[1]!);
-  const arr = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    arr[i] = raw.charCodeAt(i);
-  }
-  return new Blob([arr], { type: mime });
+function downloadBlob(blob: Blob, chartName: string | undefined): void {
+  downloadPng(blob, exportFilename(chartName) + '.png');
 }
 
 /** Last resort when both the export and its fallback fail, so it is never silent. */
@@ -574,23 +555,13 @@ function renderExportPng(
   chartName: string | undefined,
   size: { width: number; height: number }
 ): Promise<Blob> {
-  // Deferred so a missing window.Plotly rejects rather than throwing synchronously
-  // out of the modebar click handler. clipboard.write still gets its promise inline.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return Promise.resolve().then(() => (window as any).Plotly
-    .toImage(buildExportFigure(gd, chartName), { format: 'png', ...size, scale: 2 })
-    .then(dataUrlToBlob));
+  return plotlyPngBlob(buildExportFigure(gd, chartName), size);
 }
 
 /**
  * Build the Plotly config with copy to clipboard functionality
  */
 export function buildChartConfig(chartName: string | undefined): Record<string, unknown> {
-  const plotSize = (gd: unknown) => {
-    const full = (gd as { _fullLayout?: { width?: number; height?: number } })._fullLayout;
-    return { width: full?.width || 1200, height: full?.height || 600 };
-  };
-
   return {
     displayModeBar: true,
     // 'toImage' is removed and replaced below: the built-in download renders the live
@@ -641,23 +612,15 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
           path: 'M768 1664h896v-640h-416q-40 0-68-28t-28-68v-416h-384v1152zm256-1440v-64q0-13-9.5-22.5t-22.5-9.5h-704q-13 0-22.5 9.5t-9.5 22.5v64q0 13 9.5 22.5t22.5 9.5h704q13 0 22.5-9.5t9.5-22.5zm256 672h299l-299-299v299zm512 128v672q0 40-28 68t-68 28h-960q-40 0-68-28t-28-68v-160h-544q-40 0-68-28t-28-68v-1344q0-40 28-68t68-28h1088q40 0 68 28t28 68v328q21 13 36 28l408 408q28 28 48 76t20 88z',
           transform: 'scale(0.8)'
         },
-        click: function(gd: unknown) {
-          const blobPromise = renderExportPng(gd, chartName, plotSize(gd));
-          // If renderExportPng rejected, blobPromise is ALREADY rejected here — the
-          // fallback must carry its own .catch or the second rejection is unhandled.
-          const fallbackToDownload = () =>
-            blobPromise.then((blob) => downloadBlob(blob, chartName)).catch(warnExportFailed);
-
-          // clipboard.write must be called synchronously with the Promise<Blob> to
-          // keep the user-activation context, otherwise the browser treats it as a
-          // download instead.
-          if (navigator.clipboard && 'write' in navigator.clipboard && typeof ClipboardItem !== 'undefined') {
-            navigator.clipboard.write([
-              new ClipboardItem({ 'image/png': blobPromise })
-            ]).catch(fallbackToDownload);
-          } else {
-            fallbackToDownload();
-          }
+        click: function(gd: PlotlyGraphDiv) {
+          copyPlotToClipboard(
+            () => renderExportPng(gd, chartName, plotSize(gd, { width: 1200, height: 600 })),
+            // chart-export-fallbacks.test.ts pins this download as a regression guard —
+            // the ReferenceError era left the button doing nothing and downloading
+            // nothing. No toast is in scope, but the explicit "Download as PNG" button
+            // one icon to the left means a file appearing here is not a surprise.
+            { fallbackFilename: exportFilename(chartName) + '.png' },
+          );
         }
       }
     ]
