@@ -1,25 +1,20 @@
 /**
- * Unit tests for chart-utils.ts
+ * Unit tests for chart-utils.ts — what is left of it.
  *
- * Tests all exported utility functions for chart data transformation,
- * axis assignment, unit conversion, time formatting, and layout building.
+ * The palette, the axis assignment, the unit conversion, the trace builder and the layout
+ * builder moved to `@/lib/charts` (and are covered by `lib/charts/units.test.ts` and
+ * `lib/charts/format.test.ts`). What stays here is the part that is specific to the Graphs
+ * card: its sample-index x axis, the analysis-window boundary maths, and the PNG export.
  */
 
 import {
-  CHART_COLOR_PALETTE,
-  getChartSeriesColor,
-  assignSeriesToAxes,
-  getUnitConversion,
-  formatTimeLabel,
   buildTimestampMapping,
   calculateXAxisTicks,
   calculateAnalysisWindowIndices,
-  buildTrace,
-  buildChartLayout,
   buildChartConfig,
 } from '@/app/test-runs/[id]/components/graphs/utils/chart-utils';
+import { fmtHM } from '@/lib/charts';
 import { SeriesConfig, MetricDataPoint } from '@/app/test-runs/[id]/components/graphs/types';
-import { UnitConversion, ChartThemeColors } from '@/app/test-runs/[id]/components/graphs/types/chart.types';
 import { TestRun } from '@/types/test-runs';
 
 // ---------------------------------------------------------------------------
@@ -63,19 +58,6 @@ function makeTestRun(overrides: Partial<TestRun> = {}): TestRun {
   } as TestRun;
 }
 
-function makeThemeColors(): ChartThemeColors {
-  return {
-    textColor: '#000000',
-    textSecondary: '#666666',
-    bgColor: '#ffffff',
-    plotBgColor: '#f5f5f5',
-    gridColor: '#e0e0e0',
-    dividerColor: '#cccccc',
-    fontFamily: 'Roboto, sans-serif',
-    hoverBgColor: '#ffffff',
-  };
-}
-
 // ISO timestamps spaced 10 seconds apart
 const T0 = '2024-01-01T00:00:00.000Z';
 const T1 = '2024-01-01T00:00:10.000Z';
@@ -83,378 +65,10 @@ const T2 = '2024-01-01T00:00:20.000Z';
 const T3 = '2024-01-01T00:00:30.000Z';
 const T4 = '2024-01-01T00:00:40.000Z';
 
-// ---------------------------------------------------------------------------
-// getChartSeriesColor
-// ---------------------------------------------------------------------------
 
-describe('getChartSeriesColor', () => {
-  it('returns the first palette color for index 0', () => {
-    expect(getChartSeriesColor(0)).toBe(CHART_COLOR_PALETTE[0]);
-  });
 
-  it('returns the correct color for each index within palette length', () => {
-    CHART_COLOR_PALETTE.forEach((color, idx) => {
-      expect(getChartSeriesColor(idx)).toBe(color);
-    });
-  });
 
-  it('wraps around for indices exceeding palette length', () => {
-    const paletteLen = CHART_COLOR_PALETTE.length;
-    expect(getChartSeriesColor(paletteLen)).toBe(CHART_COLOR_PALETTE[0]);
-    expect(getChartSeriesColor(paletteLen + 1)).toBe(CHART_COLOR_PALETTE[1]);
-    expect(getChartSeriesColor(paletteLen * 2)).toBe(CHART_COLOR_PALETTE[0]);
-  });
 
-  it('handles large index values via modulo', () => {
-    const result = getChartSeriesColor(1000);
-    expect(CHART_COLOR_PALETTE).toContain(result);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// CHART_COLOR_PALETTE
-// ---------------------------------------------------------------------------
-
-describe('CHART_COLOR_PALETTE', () => {
-  it('contains 8 colors', () => {
-    expect(CHART_COLOR_PALETTE).toHaveLength(8);
-  });
-
-  it('all entries are valid hex color strings', () => {
-    CHART_COLOR_PALETTE.forEach(color => {
-      expect(color).toMatch(/^#[0-9A-Fa-f]{6}$/);
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// assignSeriesToAxes
-// ---------------------------------------------------------------------------
-
-describe('assignSeriesToAxes', () => {
-  describe('empty input', () => {
-    it('returns empty arrays when no series are provided', () => {
-      const result = assignSeriesToAxes([], new Map());
-      expect(result.leftAxisSeries).toEqual([]);
-      expect(result.rightAxisSeries).toEqual([]);
-    });
-  });
-
-  describe('single unit — all series on left axis', () => {
-    it('places all series on the left axis when they share the same unit', () => {
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: 'ms' });
-      const s2 = makeSeriesConfig({ id: 's2', yAxisFormat: 'ms' });
-      const data = new Map([
-        ['s1', [makeDataPoint(T0, 100), makeDataPoint(T1, 200)]],
-        ['s2', [makeDataPoint(T0, 150), makeDataPoint(T1, 180)]],
-      ]);
-
-      const result = assignSeriesToAxes([s1, s2], data);
-
-      expect(result.leftAxisSeries).toHaveLength(2);
-      expect(result.rightAxisSeries).toHaveLength(0);
-    });
-
-    it('handles series with no data — falls back to left axis', () => {
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: 'ms' });
-      const result = assignSeriesToAxes([s1], new Map());
-
-      expect(result.leftAxisSeries).toHaveLength(1);
-      expect(result.rightAxisSeries).toHaveLength(0);
-    });
-  });
-
-  describe('single unit — magnitude split', () => {
-    it('splits series across axes when max/min ratio exceeds 100', () => {
-      // s1 has small values (~1), s2 has large values (~200)
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: 'ms' });
-      const s2 = makeSeriesConfig({ id: 's2', yAxisFormat: 'ms' });
-      const data = new Map([
-        ['s1', [makeDataPoint(T0, 1), makeDataPoint(T1, 2)]],
-        ['s2', [makeDataPoint(T0, 200), makeDataPoint(T1, 210)]],
-      ]);
-
-      const result = assignSeriesToAxes([s1, s2], data);
-
-      // Total range: 1 to 210 → ratio 210 > 100 → magnitude split
-      expect(result.leftAxisSeries.length + result.rightAxisSeries.length).toBe(2);
-    });
-
-    it('does not split when max/min ratio is exactly 100', () => {
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: 'ms' });
-      const data = new Map([
-        ['s1', [makeDataPoint(T0, 1), makeDataPoint(T1, 100)]],
-      ]);
-
-      const result = assignSeriesToAxes([s1], data);
-
-      // Ratio = 100 which is NOT > 100, so no split
-      expect(result.leftAxisSeries).toHaveLength(1);
-      expect(result.rightAxisSeries).toHaveLength(0);
-    });
-
-    it('does not split when globalMin is 0 (would cause division-by-zero-like condition)', () => {
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: 'ms' });
-      const data = new Map([
-        ['s1', [makeDataPoint(T0, 0), makeDataPoint(T1, 10000)]],
-      ]);
-
-      const result = assignSeriesToAxes([s1], data);
-
-      // globalMin is 0, condition requires globalMin > 0 — no split
-      expect(result.leftAxisSeries).toHaveLength(1);
-      expect(result.rightAxisSeries).toHaveLength(0);
-    });
-  });
-
-  describe('multiple units', () => {
-    it('puts first unit on left axis and additional units on right axis', () => {
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: 'ms' });
-      const s2 = makeSeriesConfig({ id: 's2', yAxisFormat: 'bytes' });
-      const data = new Map([
-        ['s1', [makeDataPoint(T0, 100)]],
-        ['s2', [makeDataPoint(T0, 1024)]],
-      ]);
-
-      const result = assignSeriesToAxes([s1, s2], data);
-
-      expect(result.leftAxisSeries).toHaveLength(1);
-      expect(result.leftAxisSeries[0].id).toBe('s1');
-      expect(result.rightAxisSeries).toHaveLength(1);
-      expect(result.rightAxisSeries[0].id).toBe('s2');
-    });
-
-    it('groups multiple series with the same secondary unit on right axis', () => {
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: 'ms' });
-      const s2 = makeSeriesConfig({ id: 's2', yAxisFormat: 'bytes' });
-      const s3 = makeSeriesConfig({ id: 's3', yAxisFormat: 'bytes' });
-      const data = new Map([
-        ['s1', [makeDataPoint(T0, 100)]],
-        ['s2', [makeDataPoint(T0, 1024)]],
-        ['s3', [makeDataPoint(T0, 2048)]],
-      ]);
-
-      const result = assignSeriesToAxes([s1, s2, s3], data);
-
-      expect(result.leftAxisSeries).toHaveLength(1);
-      expect(result.rightAxisSeries).toHaveLength(2);
-    });
-
-    it('handles three different units — second and third unit go to right axis', () => {
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: 'ms' });
-      const s2 = makeSeriesConfig({ id: 's2', yAxisFormat: 's' });
-      const s3 = makeSeriesConfig({ id: 's3', yAxisFormat: 'bytes' });
-      const data = new Map();
-
-      const result = assignSeriesToAxes([s1, s2, s3], data);
-
-      expect(result.leftAxisSeries).toHaveLength(1);
-      expect(result.rightAxisSeries).toHaveLength(2);
-    });
-
-    it('treats missing yAxisFormat as "default" unit group', () => {
-      const s1 = makeSeriesConfig({ id: 's1', yAxisFormat: undefined });
-      const s2 = makeSeriesConfig({ id: 's2', yAxisFormat: undefined });
-      const data = new Map();
-
-      const result = assignSeriesToAxes([s1, s2], data);
-
-      expect(result.leftAxisSeries).toHaveLength(2);
-      expect(result.rightAxisSeries).toHaveLength(0);
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// getUnitConversion
-// ---------------------------------------------------------------------------
-
-describe('getUnitConversion', () => {
-  describe('undefined / short / none format', () => {
-    it('returns factor 1 and "Value" label for typical values', () => {
-      const data = [makeDataPoint(T0, 500)];
-      const result = getUnitConversion(undefined, data);
-      expect(result.factor).toBe(1);
-      expect(result.label).toBe('Value');
-    });
-
-    it('returns "Value (decimal)" label when max < 1', () => {
-      const data = [makeDataPoint(T0, 0.5)];
-      const result = getUnitConversion('short', data);
-      expect(result.label).toBe('Value (decimal)');
-      expect(result.factor).toBe(1);
-    });
-
-    it('returns "Value (thousands)" when max > 1000 and <= 1000000', () => {
-      const data = [makeDataPoint(T0, 5000)];
-      const result = getUnitConversion('none', data);
-      expect(result.label).toBe('Value (thousands)');
-      expect(result.factor).toBeCloseTo(1 / 1000);
-    });
-
-    it('returns "Value (millions)" when max > 1000000', () => {
-      const data = [makeDataPoint(T0, 2000000)];
-      const result = getUnitConversion(undefined, data);
-      expect(result.label).toBe('Value (millions)');
-      expect(result.factor).toBeCloseTo(1 / 1000000);
-    });
-  });
-
-  describe('percentunit format', () => {
-    it('multiplies by 100 and labels as Percentage (%)', () => {
-      const data = [makeDataPoint(T0, 0.75)];
-      const result = getUnitConversion('percentunit', data);
-      expect(result.factor).toBe(100);
-      expect(result.label).toBe('Percentage (%)');
-    });
-  });
-
-  describe('seconds format', () => {
-    it('converts to ms when all values < 1', () => {
-      const data = [makeDataPoint(T0, 0.3), makeDataPoint(T1, 0.7)];
-      const result = getUnitConversion('s', data);
-      expect(result.factor).toBe(1000);
-      expect(result.label).toBe('Time (ms)');
-    });
-
-    it('keeps seconds when max >= 1', () => {
-      const data = [makeDataPoint(T0, 5), makeDataPoint(T1, 10)];
-      const result = getUnitConversion('s', data);
-      expect(result.factor).toBe(1);
-      expect(result.label).toBe('Time (s)');
-    });
-  });
-
-  describe('milliseconds format', () => {
-    it('converts to seconds when all values > 1000', () => {
-      const data = [makeDataPoint(T0, 2000), makeDataPoint(T1, 3000)];
-      const result = getUnitConversion('ms', data);
-      expect(result.factor).toBeCloseTo(1 / 1000);
-      expect(result.label).toBe('Time (s)');
-    });
-
-    it('keeps milliseconds when min is not above 1000', () => {
-      const data = [makeDataPoint(T0, 500), makeDataPoint(T1, 1500)];
-      const result = getUnitConversion('ms', data);
-      expect(result.factor).toBe(1);
-      expect(result.label).toBe('Time (ms)');
-    });
-
-    it('keeps milliseconds for a single value of exactly 1000', () => {
-      // globalMin = 1000, condition is > 1000 which is false
-      const data = [makeDataPoint(T0, 1000)];
-      const result = getUnitConversion('ms', data);
-      expect(result.factor).toBe(1);
-      expect(result.label).toBe('Time (ms)');
-    });
-  });
-
-  describe('bytes format', () => {
-    it('converts to bytes with no conversion when max <= 1024', () => {
-      const data = [makeDataPoint(T0, 512)];
-      const result = getUnitConversion('bytes', data);
-      expect(result.factor).toBe(1);
-      expect(result.label).toBe('Size (bytes)');
-    });
-
-    it('converts to KB when max > 1024 and <= 1048576', () => {
-      const data = [makeDataPoint(T0, 2048)];
-      const result = getUnitConversion('bytes', data);
-      expect(result.factor).toBeCloseTo(1 / 1024);
-      expect(result.label).toBe('Size (KB)');
-    });
-
-    it('converts to MB when max > 1048576 and <= 1073741824', () => {
-      const data = [makeDataPoint(T0, 2 * 1048576)];
-      const result = getUnitConversion('bytes', data);
-      expect(result.factor).toBeCloseTo(1 / 1048576);
-      expect(result.label).toBe('Size (MB)');
-    });
-
-    it('converts to GB when max > 1073741824', () => {
-      const data = [makeDataPoint(T0, 2 * 1073741824)];
-      const result = getUnitConversion('bytes', data);
-      expect(result.factor).toBeCloseTo(1 / 1073741824);
-      expect(result.label).toBe('Size (GB)');
-    });
-  });
-
-  describe('reqps / rps format', () => {
-    it('returns Requests/sec label for reqps', () => {
-      const data = [makeDataPoint(T0, 100)];
-      expect(getUnitConversion('reqps', data).label).toBe('Requests/sec');
-    });
-
-    it('returns Requests/sec label for rps', () => {
-      const data = [makeDataPoint(T0, 100)];
-      expect(getUnitConversion('rps', data).label).toBe('Requests/sec');
-    });
-
-    it('uses factor of 1 for reqps', () => {
-      const data = [makeDataPoint(T0, 100)];
-      expect(getUnitConversion('reqps', data).factor).toBe(1);
-    });
-  });
-
-  describe('ops / iops format', () => {
-    it('returns Operations/sec for ops', () => {
-      const data = [makeDataPoint(T0, 50)];
-      expect(getUnitConversion('ops', data).label).toBe('Operations/sec');
-    });
-
-    it('returns Operations/sec for iops', () => {
-      const data = [makeDataPoint(T0, 50)];
-      expect(getUnitConversion('iops', data).label).toBe('Operations/sec');
-    });
-  });
-
-  describe('unknown / passthrough format', () => {
-    it('returns the raw format string as label and factor 1', () => {
-      const data = [makeDataPoint(T0, 100)];
-      const result = getUnitConversion('custom-unit', data);
-      expect(result.factor).toBe(1);
-      expect(result.label).toBe('custom-unit');
-    });
-  });
-
-  describe('empty data', () => {
-    it('handles empty data array without throwing', () => {
-      expect(() => getUnitConversion('ms', [])).not.toThrow();
-    });
-
-    it('returns a conversion result without throwing for empty data and ms format', () => {
-      // globalMin = Infinity (> 1000 is true), so ms-to-seconds conversion fires
-      const result = getUnitConversion('ms', []);
-      expect(result).toHaveProperty('factor');
-      expect(result).toHaveProperty('label');
-      expect(typeof result.factor).toBe('number');
-      expect(typeof result.label).toBe('string');
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// formatTimeLabel
-// ---------------------------------------------------------------------------
-
-describe('formatTimeLabel', () => {
-  it('returns a formatted time string', () => {
-    // The exact output depends on the test environment locale, but it must
-    // contain digits separated by colons in HH:MM:SS form.
-    const result = formatTimeLabel(T0);
-    expect(result).toMatch(/\d{1,2}:\d{2}:\d{2}/);
-  });
-
-  it('returns a non-empty string for a valid ISO timestamp', () => {
-    expect(formatTimeLabel(T1).length).toBeGreaterThan(0);
-  });
-
-  it('handles different timestamps producing different labels', () => {
-    const r0 = formatTimeLabel(T0);
-    const r1 = formatTimeLabel(T1); // 10 seconds later
-    expect(r0).not.toBe(r1);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // buildTimestampMapping
@@ -573,16 +187,25 @@ describe('calculateXAxisTicks', () => {
     const { tickValues, tickLabels } = calculateXAxisTicks(timestamps, 10);
 
     tickValues.forEach((idx, i) => {
-      expect(tickLabels[i]).toBe(formatTimeLabel(timestamps[idx]));
+      expect(tickLabels[i]).toBe(fmtHM(timestamps[idx]));
     });
   });
 
-  it('uses default targetTicks of 10', () => {
-    // 5 timestamps with default 10 ticks — every point becomes a tick
+  it('spans the data with the default target of ~6 ticks', () => {
     const timestamps = [T0, T1, T2, T3, T4];
     const { tickValues } = calculateXAxisTicks(timestamps);
     expect(tickValues).toContain(0);
     expect(tickValues).toContain(4);
+  });
+
+  it('labels ten-minute boundaries once the run is long enough to have several', () => {
+    // 40 minutes at one sample a minute: the ticks land on :00, :10, :20, :30, :40 rather
+    // than on every nth sample, so a reader can match them to a wall clock.
+    const base = new Date('2024-01-01T09:58:00.000Z').getTime();
+    const timestamps = Array.from({ length: 41 }, (_, i) => new Date(base + i * 60_000).toISOString());
+    const { tickLabels } = calculateXAxisTicks(timestamps);
+    expect(tickLabels.every((label) => /^\d{2}:\d{2}$/.test(label))).toBe(true);
+    expect(tickLabels.filter((label) => label.endsWith(':00')).length).toBeGreaterThan(0);
   });
 });
 
@@ -634,257 +257,7 @@ describe('calculateAnalysisWindowIndices', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildTrace
-// ---------------------------------------------------------------------------
 
-describe('buildTrace', () => {
-  const conversion: UnitConversion = { factor: 1, label: 'ms' };
-  const timestampToIndex = new Map([[T0, 0], [T1, 1], [T2, 2]]);
-  const baseColor = '#2E86AB';
-  const bgColor = '#ffffff';
-
-  it('returns a scatter trace with correct type and mode', () => {
-    const series = makeSeriesConfig({ id: 's1', panelTitle: 'P1', metricName: 'cpu' });
-    const data = [makeDataPoint(T0, 100), makeDataPoint(T1, 200)];
-
-    const trace = buildTrace(series, data, false, conversion, baseColor, bgColor, timestampToIndex);
-
-    expect(trace.type).toBe('scatter');
-    expect(trace.mode).toBe('lines+markers'); // < 50 data points
-  });
-
-  it('uses "lines" mode when data has 50 or more points', () => {
-    const series = makeSeriesConfig();
-    const data = Array.from({ length: 50 }, (_, i) =>
-      makeDataPoint(new Date(Date.UTC(2024, 0, 1, 0, 0, i)).toISOString(), i)
-    );
-    const tsIndex = new Map(data.map((d, i) => [d.time, i]));
-
-    const trace = buildTrace(series, data, false, conversion, baseColor, bgColor, tsIndex);
-
-    expect(trace.mode).toBe('lines');
-  });
-
-  it('applies unit conversion factor to y values', () => {
-    const factor2: UnitConversion = { factor: 2, label: 'x2' };
-    const series = makeSeriesConfig();
-    const data = [makeDataPoint(T0, 50)];
-
-    const trace = buildTrace(series, data, false, factor2, baseColor, bgColor, timestampToIndex);
-
-    expect(trace.y[0]).toBe(100); // 50 * 2
-  });
-
-  it('sets yaxis to "y2" for right-axis series', () => {
-    const series = makeSeriesConfig();
-    const data = [makeDataPoint(T0, 10)];
-    const trace = buildTrace(series, data, true, conversion, baseColor, bgColor, timestampToIndex);
-    expect(trace.yaxis).toBe('y2');
-  });
-
-  it('sets yaxis to "y" for left-axis series', () => {
-    const series = makeSeriesConfig();
-    const data = [makeDataPoint(T0, 10)];
-    const trace = buildTrace(series, data, false, conversion, baseColor, bgColor, timestampToIndex);
-    expect(trace.yaxis).toBe('y');
-  });
-
-  it('builds trace name from panelTitle and metricName', () => {
-    const series = makeSeriesConfig({ panelTitle: 'Panel A', metricName: 'my.metric' });
-    const data = [makeDataPoint(T0, 1)];
-    const trace = buildTrace(series, data, false, conversion, baseColor, bgColor, timestampToIndex);
-    expect(trace.name).toBe('Panel A - my.metric');
-  });
-
-  it('sorts data by time before building x/y arrays', () => {
-    const series = makeSeriesConfig();
-    // Provide data out-of-order
-    const data = [makeDataPoint(T2, 300), makeDataPoint(T0, 100), makeDataPoint(T1, 200)];
-    const trace = buildTrace(series, data, false, conversion, baseColor, bgColor, timestampToIndex);
-
-    expect(trace.x).toEqual([0, 1, 2]);
-    expect(trace.y).toEqual([100, 200, 300]);
-  });
-
-  it('uses the provided line color', () => {
-    const series = makeSeriesConfig();
-    const data = [makeDataPoint(T0, 1)];
-    const trace = buildTrace(series, data, false, conversion, '#FF0000', bgColor, timestampToIndex);
-    expect(trace.line.color).toBe('#FF0000');
-    expect(trace.marker.color).toBe('#FF0000');
-  });
-
-  it('sets marker line color to bgColor', () => {
-    const series = makeSeriesConfig();
-    const data = [makeDataPoint(T0, 1)];
-    const trace = buildTrace(series, data, false, conversion, baseColor, '#123456', timestampToIndex);
-    expect(trace.marker.line.color).toBe('#123456');
-  });
-
-  it('includes hovertemplate with series info', () => {
-    const series = makeSeriesConfig({ panelTitle: 'My Panel', metricName: 'req.rate' });
-    const data = [makeDataPoint(T0, 1)];
-    const trace = buildTrace(series, data, false, conversion, baseColor, bgColor, timestampToIndex);
-    expect(trace.hovertemplate).toContain('My Panel');
-    expect(trace.hovertemplate).toContain('req.rate');
-  });
-
-  it('sets connectgaps to true', () => {
-    const series = makeSeriesConfig();
-    const data = [makeDataPoint(T0, 1)];
-    const trace = buildTrace(series, data, false, conversion, baseColor, bgColor, timestampToIndex);
-    expect(trace.connectgaps).toBe(true);
-  });
-
-  it('handles empty data array', () => {
-    const series = makeSeriesConfig();
-    const trace = buildTrace(series, [], false, conversion, baseColor, bgColor, timestampToIndex);
-    expect(trace.x).toEqual([]);
-    expect(trace.y).toEqual([]);
-    expect(trace.text).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// buildChartLayout
-// ---------------------------------------------------------------------------
-
-describe('buildChartLayout', () => {
-  const themeColors = makeThemeColors();
-  const leftConversion: UnitConversion = { factor: 1, label: 'Time (ms)' };
-
-  it('returns an object with required layout keys', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Test Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, null, null, 800
-    );
-
-    expect(layout).toHaveProperty('xaxis');
-    expect(layout).toHaveProperty('yaxis');
-    expect(layout).toHaveProperty('legend');
-    expect(layout).toHaveProperty('hovermode', 'x unified');
-  });
-
-  it('does not set a plot title — the editable heading above the chart is the title', () => {
-    const layout = buildChartLayout(
-      themeColors, 'My Chart Title', leftConversion, null,
-      [], [], 0, null, null, 800
-    );
-    expect(layout).not.toHaveProperty('title');
-  });
-
-  it('uses leftConversion.label as the yaxis title', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [], [], 5, null, null, 800
-    );
-    const yaxis = layout.yaxis as { title: { text: string } };
-    expect(yaxis.title.text).toBe('Time (ms)');
-  });
-
-  it('adds yaxis2 when rightConversion is provided', () => {
-    const rightConversion: UnitConversion = { factor: 1, label: 'Size (MB)' };
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, rightConversion,
-      [], [], 5, null, null, 800
-    );
-    expect(layout).toHaveProperty('yaxis2');
-    const yaxis2 = layout.yaxis2 as { title: { text: string } };
-    expect(yaxis2.title.text).toBe('Size (MB)');
-  });
-
-  it('does not add yaxis2 when rightConversion is null', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [], [], 5, null, null, 800
-    );
-    expect(layout).not.toHaveProperty('yaxis2');
-  });
-
-  it('uses larger right margin when right axis is present', () => {
-    const rightConversion: UnitConversion = { factor: 1, label: 'MB' };
-    const withRight = buildChartLayout(
-      themeColors, 'Chart', leftConversion, rightConversion,
-      [], [], 5, null, null, 800
-    ) as { margin: { r: number } };
-    const withoutRight = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [], [], 5, null, null, 800
-    ) as { margin: { r: number } };
-
-    expect(withRight.margin.r).toBeGreaterThan(withoutRight.margin.r);
-  });
-
-  it('dims the leading region and draws a boundary line for the start offset', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, 3, null, 800
-    );
-    const shapes = layout.shapes as { type: string; x0: number; x1: number }[];
-    expect(shapes).toHaveLength(2);
-    expect(shapes[0]).toMatchObject({ type: 'rect', x0: 0, x1: 3 });
-    expect(shapes[1]).toMatchObject({ type: 'line', x0: 3, x1: 3 });
-  });
-
-  it('dims the trailing region and draws a boundary line for the end offset', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, null, 7, 800
-    );
-    const shapes = layout.shapes as { type: string; x0: number; x1: number }[];
-    expect(shapes).toHaveLength(2);
-    expect(shapes[0]).toMatchObject({ type: 'rect', x0: 7, x1: 9 });
-    expect(shapes[1]).toMatchObject({ type: 'line', x0: 7, x1: 7 });
-  });
-
-  it('draws both boundaries when the window is trimmed at each end', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, 2, 8, 800
-    );
-    expect(layout.shapes as unknown[]).toHaveLength(4);
-  });
-
-  it('emits no shapes when the window is untrimmed', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [0, 5], ['00:00:00', '00:00:05'], 10, null, null, 800
-    );
-    expect(layout.shapes as unknown[]).toHaveLength(0);
-  });
-
-  it('sets container width on the layout', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [], [], 5, null, null, 1200
-    );
-    expect(layout.width).toBe(1200);
-  });
-
-  it('applies theme colors to font, grid, and background', () => {
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      [], [], 5, null, null, 800
-    );
-    const font = layout.font as { color: string };
-    expect(font.color).toBe(themeColors.textColor);
-    expect(layout.plot_bgcolor).toBe(themeColors.plotBgColor);
-    expect(layout.paper_bgcolor).toBe(themeColors.bgColor);
-  });
-
-  it('sets tick values and labels on the xaxis', () => {
-    const tickValues = [0, 2, 4];
-    const tickLabels = ['00:00:00', '00:00:20', '00:00:40'];
-    const layout = buildChartLayout(
-      themeColors, 'Chart', leftConversion, null,
-      tickValues, tickLabels, 5, null, null, 800
-    );
-    const xaxis = layout.xaxis as { tickvals: number[]; ticktext: string[] };
-    expect(xaxis.tickvals).toEqual(tickValues);
-    expect(xaxis.ticktext).toEqual(tickLabels);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // buildChartConfig
@@ -985,9 +358,16 @@ describe('buildChartConfig', () => {
       expect(figure.layout.title.text).toBe('Custom Metrics Chart');
     });
 
-    it('leaves the live layout untouched — the title exists only on the export copy', async () => {
+    it('turns the legend on for the export, since the on-screen legend is an HTML table', async () => {
+      await clickButton('Download as PNG', 'Response times p95');
+      const figure = toImage.mock.calls[0][0] as { layout: { showlegend: boolean } };
+      expect(figure.layout.showlegend).toBe(true);
+    });
+
+    it('leaves the live layout untouched — neither title nor legend is on the live copy', async () => {
       await clickButton('Download as PNG', 'Response times p95');
       expect(gd.layout).not.toHaveProperty('title');
+      expect(gd.layout).not.toHaveProperty('showlegend');
     });
 
     it('carries the rest of the layout onto the export figure', async () => {

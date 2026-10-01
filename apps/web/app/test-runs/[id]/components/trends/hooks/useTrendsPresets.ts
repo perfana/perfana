@@ -146,7 +146,9 @@ export function useTrendsPresets({
             source: config.source || 'grafana',
             yAxisFormat: config.yAxisFormat,
             metricsSourceId: config.metricsSourceId,
-            isAggregated: config.isAggregated
+            isAggregated: config.isAggregated,
+            colorSlot: config.colorSlot,
+            hidden: config.hidden
           }));
           setAddedSeries(restoredSeries);
         }
@@ -189,7 +191,9 @@ export function useTrendsPresets({
           source: series.source,
           yAxisFormat: series.yAxisFormat,
           metricsSourceId: series.metricsSourceId,
-          isAggregated: series.isAggregated
+          isAggregated: series.isAggregated,
+          colorSlot: series.colorSlot,
+          hidden: series.hidden
         }));
 
       // If no series were added but we have a selected panel, fetch all available metrics

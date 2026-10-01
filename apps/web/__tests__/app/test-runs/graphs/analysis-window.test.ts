@@ -4,14 +4,12 @@
  * `chart-utils.test.ts` covers the common cases; this file covers the edges where
  * the two boundaries interact — a start offset that runs off the end of the data,
  * an end boundary that would land before the start, a single-sample run — and
- * exercises `buildAnalysisWindowShapes` directly rather than through the layout,
+ * exercises `analysisWindowShapes` directly rather than through the layout,
  * so the "nothing to dim" cases are pinned rather than inferred.
  */
 
-import {
-  calculateAnalysisWindowIndices,
-  buildAnalysisWindowShapes,
-} from '@/app/test-runs/[id]/components/graphs/utils/chart-utils';
+import { calculateAnalysisWindowIndices } from '@/app/test-runs/[id]/components/graphs/utils/chart-utils';
+import { analysisWindowShapes, chartTheme } from '@/lib/charts';
 import { TestRun } from '@/types/test-runs';
 
 function makeTestRun(overrides: Partial<TestRun> = {}): TestRun {
@@ -72,41 +70,54 @@ describe('calculateAnalysisWindowIndices — boundary interaction', () => {
   });
 });
 
-describe('buildAnalysisWindowShapes', () => {
-  const COLOR = '#e0e0e0';
+describe('analysisWindowShapes', () => {
+  const theme = chartTheme('light');
+  const empty = { shapes: [], annotations: [] };
 
-  // The both-null case is already covered through buildChartLayout.
+  // The both-null case is already covered through the layout builder.
   it('emits nothing for a start boundary already at the first sample', () => {
     // startIndex 0 means the window starts at sample 0 — there is no leading
-    // region to dim, and a zero-width rect would still paint a stray boundary line.
-    expect(buildAnalysisWindowShapes(0, null, 10, COLOR)).toEqual([]);
+    // region to wash, and a zero-width rect would still paint a stray boundary line.
+    expect(analysisWindowShapes(0, null, 10, theme)).toEqual(empty);
   });
 
   it('emits nothing for an end boundary already at the last sample', () => {
-    expect(buildAnalysisWindowShapes(null, 9, 10, COLOR)).toEqual([]);
+    expect(analysisWindowShapes(null, 9, 10, theme)).toEqual(empty);
   });
 
   it('emits nothing when there is nothing to draw on (0 or 1 samples)', () => {
-    expect(buildAnalysisWindowShapes(null, null, 0, COLOR)).toEqual([]);
-    expect(buildAnalysisWindowShapes(0, 0, 1, COLOR)).toEqual([]);
+    expect(analysisWindowShapes(null, null, 0, theme)).toEqual(empty);
+    expect(analysisWindowShapes(0, 0, 1, theme)).toEqual(empty);
   });
 
-  it('dims with the supplied colour and marks each boundary in amber dashes', () => {
-    const shapes = buildAnalysisWindowShapes(3, 7, 10, COLOR) as Array<Record<string, any>>;
+  it('washes each excluded region and names its edge in mono, with no amber anywhere', () => {
+    const { shapes, annotations } = analysisWindowShapes(3, 7, 10, theme) as {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      shapes: Array<Record<string, any>>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      annotations: Array<Record<string, any>>;
+    };
     expect(shapes).toHaveLength(4);
 
     const [leadRect, leadLine, tailRect, tailLine] = shapes;
     expect(leadRect).toMatchObject({
-      type: 'rect', x0: 0, x1: 3, yref: 'paper', fillcolor: COLOR, opacity: 0.3, layer: 'below',
+      type: 'rect', x0: 0, x1: 3, yref: 'paper', fillcolor: theme.excluded, layer: 'below',
     });
-    expect(tailRect).toMatchObject({ type: 'rect', x0: 7, x1: 9, fillcolor: COLOR, opacity: 0.3 });
+    expect(tailRect).toMatchObject({ type: 'rect', x0: 7, x1: 9, fillcolor: theme.excluded });
 
-    // Amber dashed, matching the SLO and Compare charts.
+    // A hairline at half opacity, in `faint`. The amber (#f59e0b) this replaces was the
+    // same colour the SLO charts used for a DATA series.
     for (const line of [leadLine, tailLine]) {
       expect(line.type).toBe('line');
-      expect(line.line).toMatchObject({ color: '#f59e0b', width: 1.5, dash: 'dash' });
+      expect(line.line).toMatchObject({ color: theme.faint, width: 1 });
+      expect(line.opacity).toBe(0.5);
+      expect(JSON.stringify(line)).not.toContain('f59e0b');
     }
     expect(leadLine).toMatchObject({ x0: 3, x1: 3 });
     expect(tailLine).toMatchObject({ x0: 7, x1: 7 });
+
+    expect(annotations.map((a) => a.text)).toEqual(['start', 'end']);
+    expect(annotations[0]).toMatchObject({ x: 3, xanchor: 'left' });
+    expect(annotations[1]).toMatchObject({ x: 7, xanchor: 'right' });
   });
 });

@@ -128,14 +128,18 @@ it('drops the panels and series of a dashboard that is cleared, and reports no p
   expect(onPrimaryChange).toHaveBeenLastCalledWith(null, null);
 });
 
-it('disables every picker below a level with nothing picked, and the dashboard button with nothing to pick', () => {
+it('prompts for each level with nothing picked, and disables every control with nothing to pick', () => {
   setup({ allDashboards: [] });
 
   expect(screen.getByText('0 available')).toBeInTheDocument();
-  expect(screen.getByLabelText('Panels')).toBeDisabled();
-  expect(screen.getByLabelText('Series')).toBeDisabled();
+  // The columns are inline now rather than popups, so a level with no parent shows its
+  // prompt instead of a disabled input.
+  expect(screen.getByText('Select a dashboard to see its panels')).toBeInTheDocument();
+  expect(screen.getByText('Select a panel to see its series')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Add series' })).toBeDisabled();
   expect(levelButton('Dashboards')).toBeDisabled();
+  expect(levelButton('Panels')).toBeDisabled();
+  expect(levelButton('Series')).toBeDisabled();
 });
 
 it('ignores a panel load that finishes after the dashboard was cleared', async () => {
@@ -183,8 +187,11 @@ it('greys out the synthetic "All aggregated" option once it is on the chart unde
   selectAll('Panels');
   await screen.findByText('2 available from 1 panel');
 
-  fireEvent.mouseDown(screen.getByLabelText('Series'));
-  const option = await screen.findByText('All aggregated');
-  expect(option.textContent).toContain('(already added)');
-  expect(screen.getByText('T01').textContent).not.toContain('(already added)');
+  // The series column is always on screen; its rows need no popup to be opened.
+  const added = (name: string) =>
+    screen.getByRole('checkbox', { name }).closest('.MuiBox-root')!.textContent;
+  expect(added('All aggregated')).toContain('added');
+  expect(added('T01')).not.toContain('added');
+  expect(screen.getByRole('checkbox', { name: 'All aggregated' })).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: 'T01' })).not.toBeDisabled();
 });

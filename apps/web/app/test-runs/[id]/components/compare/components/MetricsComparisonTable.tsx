@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Box, Typography, Chip, Collapse, CircularProgress, IconButton, ToggleButton, ToggleButtonGroup } from '@mui/material';
-import { ExpandMore, ExpandLess, BarChart, ArrowUpward, ArrowDownward, UnfoldMore } from '@mui/icons-material';
+import { ExpandMore, ExpandLess, ArrowUpward, ArrowDownward, UnfoldMore } from '@mui/icons-material';
 import {
   MetricComparison,
   RelatedTestRun,
@@ -445,15 +445,14 @@ export default function MetricsComparisonTable({
                       </Box>
                       <Collapse in={open} unmountOnExit>
                         <Box sx={{ p: 2, bgcolor: 'action.hover', borderBottom: '1px solid', borderColor: 'divider' }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, color: 'text.secondary' }}>
-                            <BarChart fontSize="small" />
-                            <Typography variant="caption">{row.metricName}</Typography>
-                          </Box>
                           <ComparisonPlot
                             metricName={row.metricName}
                             graphData={graphData[gKey]}
                             graphLoading={loading}
                             selectedMetric={selectedMetric}
+                            // The row's OWN unit. `selectedMetric` is the cascade's first
+                            // pick, which is the wrong panel whenever several are compared.
+                            panelUnit={row.yAxesFormat}
                             testRun={testRun}
                             relatedTestRuns={relatedTestRuns}
                             showToast={showToast}

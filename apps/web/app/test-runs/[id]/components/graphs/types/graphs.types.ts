@@ -1,30 +1,6 @@
 import { TestRun } from '@/types/test-runs';
 import type { PerfanaEvent } from '@/lib/events';
 
-/**
- * Common Grafana unit formats for Y-axis
- */
-export const GRAFANA_UNITS = [
-  { value: 'ms', label: 'Milliseconds (ms)' },
-  { value: 's', label: 'Seconds (s)' },
-  { value: 'µs', label: 'Microseconds (µs)' },
-  { value: 'ns', label: 'Nanoseconds (ns)' },
-  { value: 'short', label: 'Short (auto-scaled)' },
-  { value: 'percent', label: 'Percent (0-100)' },
-  { value: 'percentunit', label: 'Percent (0.0-1.0)' },
-  { value: 'bytes', label: 'Bytes' },
-  { value: 'kbytes', label: 'Kilobytes' },
-  { value: 'mbytes', label: 'Megabytes' },
-  { value: 'gbytes', label: 'Gigabytes' },
-  { value: 'reqps', label: 'Requests per second' },
-  { value: 'ops', label: 'Operations per second' },
-  { value: 'wps', label: 'Writes per second' },
-  { value: 'rps', label: 'Reads per second' },
-  { value: 'none', label: 'None' },
-] as const;
-
-export type GrafanaUnit = typeof GRAFANA_UNITS[number];
-
 export type DataSource = 'grafana' | 'dynatrace' | 'performance-metrics';
 
 export interface GraphsCardProps {
@@ -58,6 +34,16 @@ export interface SeriesConfig {
   source: DataSource;
   yAxisFormat?: string;
   metricsSourceId?: string;
+  /** The panel's own unit, so the series table can show that `yAxisFormat` overrides it. */
+  panelYAxisFormat?: string;
+  /**
+   * Which colour slot this series holds. Removing a series frees its slot, so the lines
+   * that stay keep the colour the reader has been following — the old index-based
+   * assignment recoloured every line below the one removed.
+   */
+  colorSlot?: number;
+  /** Hidden from the chart but kept in the table (and in the preset). */
+  hidden?: boolean;
 }
 
 export interface MetricDataPoint {
@@ -66,16 +52,4 @@ export interface MetricDataPoint {
   value: number;
   timestep: number;
   ramp_up?: boolean;
-}
-
-/**
- * Series color palette for chart visualization
- */
-export const SERIES_COLORS = ['#2E86AB', '#FF6B35', '#4CAF50', '#9C27B0', '#FF9800'] as const;
-
-/**
- * Get color for a series based on its index
- */
-export function getSeriesColor(index: number): string {
-  return SERIES_COLORS[index % SERIES_COLORS.length];
 }

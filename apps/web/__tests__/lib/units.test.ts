@@ -8,7 +8,7 @@
  * Based on Grafana unit formats for consistency across performance metrics.
  */
 
-import { getUnit, formatValueWithUnit, toUnitScale, unitLabel } from '@/lib/units';
+import { getUnit, formatValueWithUnit, toUnitScale, unitFactor, unitFamily, unitLabel } from '@/lib/units';
 
 describe('Unit Utilities', () => {
   describe('getUnit()', () => {
@@ -22,6 +22,8 @@ describe('Unit Utilities', () => {
           name: '%',
           id: 'percent',
           format: '%',
+          family: 'pct',
+          factor: 1,
         });
       });
 
@@ -34,6 +36,8 @@ describe('Unit Utilities', () => {
           name: 'milliseconds (ms)',
           id: 'ms',
           format: 'ms',
+          family: 'time',
+          factor: 0.001,
         });
       });
 
@@ -46,6 +50,8 @@ describe('Unit Utilities', () => {
           name: 'bytes(IEC)',
           id: 'bytes',
           format: 'B',
+          family: 'data',
+          factor: 1,
         });
       });
 
@@ -465,6 +471,35 @@ describe('Unit Utilities', () => {
       // Assert
       expect(unit.id).toBe('unknown');
       expect(formatted).toBe('42 unknown');
+    });
+  });
+
+  describe('unitFamily() / unitFactor()', () => {
+    it('groups the codes that measure the same quantity', () => {
+      expect(unitFamily('ms')).toBe('time');
+      expect(unitFamily('s')).toBe('time');
+      expect(unitFamily('percentunit')).toBe('pct');
+      expect(unitFamily('kbytes')).toBe('data');
+      expect(unitFamily('deckbytes')).toBe('data-si');
+    });
+
+    it('makes every rate, and every unknown code, its own family', () => {
+      // `reqps` and `ops` are both rates but are not interchangeable: sharing one axis
+      // would read as a single quantity.
+      expect(unitFamily('reqps')).toBe('reqps');
+      expect(unitFamily('ops')).toBe('ops');
+      expect(unitFamily('currencyUSD')).toBe('currencyUSD');
+      expect(unitFamily(undefined)).toBe('');
+    });
+
+    it('converts to the family base unit', () => {
+      expect(unitFactor('ms')).toBe(0.001);
+      expect(unitFactor('s')).toBe(1);
+      expect(unitFactor('percentunit')).toBe(100);
+      expect(unitFactor('mbytes')).toBe(1024 ** 2);
+      // A family of one needs no conversion, and neither does a code off the table.
+      expect(unitFactor('reqps')).toBe(1);
+      expect(unitFactor('currencyUSD')).toBe(1);
     });
   });
 });

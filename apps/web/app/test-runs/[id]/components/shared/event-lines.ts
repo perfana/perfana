@@ -1,4 +1,5 @@
 import type { PerfanaEvent } from '@/lib/events';
+import { eventShapes, type ChartTheme } from '@/lib/charts';
 
 // Manual events: orange dotted lines
 const EVENT_LINE_COLOR = 'rgba(255, 152, 0, 0.7)';
@@ -154,15 +155,35 @@ function findClosestIndex(eventMs: number, sortedMs: number[]): number | null {
 /**
  * Merge event annotations into an index-based chart layout.
  * sortedTimestamps: the chart's sorted timestamp strings from buildTimestampMapping.
+ *
+ * Pass `theme` to draw them in the Analyst style — a hairline in `muted` with a mono
+ * label haloed in the plot background — instead of the orange-and-cream callout boxes.
+ * Without it the original styling is kept, which is what the time-axis
+ * `mergeEventShapesIntoLayout` path (the transaction graph modal) still renders.
  */
 export function mergeEventShapesIntoIndexedLayout(
   layout: EventLayout,
   events: PerfanaEvent[],
   sortedTimestamps: string[],
+  theme?: ChartTheme,
 ): EventLayout {
   if (!events || events.length === 0 || sortedTimestamps.length === 0) return layout;
 
   const sortedMs = sortedTimestamps.map(ts => new Date(ts).getTime());
+
+  if (theme) {
+    const placed: Array<{ event: PerfanaEvent; x: number }> = [];
+    for (const event of events) {
+      const idx = findClosestIndex(new Date(event.timestamp).getTime(), sortedMs);
+      if (idx !== null) placed.push({ event, x: idx });
+    }
+    const styled = eventShapes(placed, theme);
+    return {
+      ...layout,
+      shapes: [...(layout.shapes || []), ...styled.shapes],
+      annotations: [...(layout.annotations || []), ...styled.annotations],
+    };
+  }
 
   const shapes: Record<string, unknown>[] = [];
   const annotations: Record<string, unknown>[] = [];

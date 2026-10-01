@@ -16,6 +16,10 @@ export interface TrendsSeriesConfig {
   metricsSourceId?: string;
   /** True when the series is the run-wide "All aggregated" pseudo-metric. */
   isAggregated?: boolean;
+  /** Colour slot the series held. Absent on presets saved before the chart standard. */
+  colorSlot?: number;
+  /** Whether the series was hidden from the chart when the preset was saved. */
+  hidden?: boolean;
 }
 
 export interface TrendsPreset {

@@ -124,18 +124,6 @@ export interface CompareSeries {
 }
 
 /**
- * Props for generating comparison plot
- */
-export interface ComparisonPlotProps {
-  metricName: string;
-  graphData: GraphData;
-  selectedMetric: Panel | null;
-  testRun: TestRun | null;
-  relatedTestRuns: RelatedTestRun[];
-  showToast: (message: string) => void;
-}
-
-/**
  * Props for the metrics comparison table
  */
 export interface MetricsComparisonTableProps {

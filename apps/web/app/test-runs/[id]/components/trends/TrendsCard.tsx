@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { Box, Typography, Card, CardContent, Collapse, CircularProgress } from '@mui/material';
 
 // Types
@@ -16,6 +16,7 @@ import SaveTrendsPresetModal from './SaveTrendsPresetModal';
 import ExpandableCardHeader, { kickPlotlyResize } from '../shared/ExpandableCardHeader';
 import PresetsAccordion from '../shared/PresetsAccordion';
 import type { SeriesPick } from '../shared/metric-options';
+import { SeriesCascadePanel } from '@/components/charts';
 
 export default function TrendsCard({
   testRun,
@@ -25,6 +26,9 @@ export default function TrendsCard({
   showToast
 }: TrendsCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+  // Which run the cursor is on. Lives here because both the chart (hover) and the plot
+  // hook (the table's cursor column) need it.
+  const [cursorIndex, setCursorIndex] = useState<number | null>(null);
 
   // Data hook
   const trendsData = useTrendsData({
@@ -57,6 +61,7 @@ export default function TrendsCard({
     trendsExpanded,
     addedSeries: trendsData.addedSeries,
     showToast,
+    cursorIndex,
   });
 
   const first = trendsData.addedSeries[0];
@@ -145,14 +150,9 @@ export default function TrendsCard({
             <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
               {/* Builder row, then the view controls that sit right above the chart */}
               <TrendsSelectionControls
-                allDashboards={trendsData.getAllDashboardsMerged()}
-                dashboardsLoading={trendsData.dashboardsLoading || trendsData.dynatraceDashboardsLoading}
-                testRun={testRun}
                 addedSeries={trendsData.addedSeries}
-                onAddSeries={handleAddSeries}
                 selectedDashboard={trendsData.selectedDashboard}
                 selectedMetric={trendsData.selectedMetric}
-                onPrimaryChange={trendsData.handlePrimaryChange}
                 timeRange={trendsData.timeRange}
                 onTimeRangeChange={trendsData.handleTimeRangeChange}
                 customTimeRange={trendsData.customTimeRange}
@@ -162,31 +162,39 @@ export default function TrendsCard({
                 onSavePresetClick={() => trendsPresets.setSavePresetModalOpen(true)}
               />
 
-              {trendsData.addedSeries.length === 0 && (
-                <Box sx={{
-                  p: 3,
-                  border: '1px dashed',
-                  borderColor: 'divider',
-                  borderRadius: 2,
-                  textAlign: 'center',
-                }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Pick dashboards, panels and series above, then add them to plot a trend.
-                  </Typography>
-                </Box>
-              )}
-
-              {/* Chart, with the series list directly under it */}
+              {/* Chart, with the series table as its legend */}
               <TrendsChart
+                title={`Trends (${trendsData.evaluateType})`}
                 addedSeries={trendsData.addedSeries}
-                metricsData={trendsData.metricsData}
                 metricsLoading={trendsData.metricsLoading}
                 plotData={trendsPlot.plotData}
                 plotLayout={trendsPlot.plotLayout}
                 plotConfig={trendsPlot.plotConfig}
+                rows={trendsPlot.rows}
+                runIds={trendsPlot.runIds}
+                traceIndexOf={trendsPlot.traceIndexOf}
+                lanesNote={trendsPlot.lanesNote}
+                cursorIndex={cursorIndex}
+                onCursorChange={setCursorIndex}
                 onRemoveSeries={trendsData.handleRemoveSeries}
                 onClearAllSeries={trendsData.handleClearAllSeries}
                 onUpdateSeriesUnit={trendsData.handleUpdateSeriesUnit}
+                onToggleSeriesVisibility={trendsData.handleToggleSeriesVisibility}
+                cascade={(close) => (
+                  <SeriesCascadePanel
+                    card="trends"
+                    allDashboards={trendsData.getAllDashboardsMerged()}
+                    dashboardsLoading={trendsData.dashboardsLoading || trendsData.dynatraceDashboardsLoading}
+                    testRun={testRun}
+                    addedSeries={trendsData.addedSeries}
+                    onAddSeries={handleAddSeries}
+                    onPrimaryChange={trendsData.handlePrimaryChange}
+                    // Every percentile panel is its own trend here, and the URL panels have
+                    // no per-run statistics to trend.
+                    panelListOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
+                    onCancel={close}
+                  />
+                )}
               />
 
               <PresetsAccordion

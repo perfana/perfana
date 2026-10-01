@@ -1,30 +1,6 @@
 import { TestRun } from '@/types/test-runs';
 
 /**
- * Common Grafana unit formats for Y-axis
- */
-export const GRAFANA_UNITS = [
-  { value: 'ms', label: 'Milliseconds (ms)' },
-  { value: 's', label: 'Seconds (s)' },
-  { value: 'µs', label: 'Microseconds (µs)' },
-  { value: 'ns', label: 'Nanoseconds (ns)' },
-  { value: 'short', label: 'Short (auto-scaled)' },
-  { value: 'percent', label: 'Percent (0-100)' },
-  { value: 'percentunit', label: 'Percent (0.0-1.0)' },
-  { value: 'bytes', label: 'Bytes' },
-  { value: 'kbytes', label: 'Kilobytes' },
-  { value: 'mbytes', label: 'Megabytes' },
-  { value: 'gbytes', label: 'Gigabytes' },
-  { value: 'reqps', label: 'Requests per second' },
-  { value: 'ops', label: 'Operations per second' },
-  { value: 'wps', label: 'Writes per second' },
-  { value: 'rps', label: 'Reads per second' },
-  { value: 'none', label: 'None' },
-] as const;
-
-export type GrafanaUnit = typeof GRAFANA_UNITS[number];
-
-/**
  * Time range options for trends chart
  */
 export const TIME_RANGE_OPTIONS = [
@@ -129,6 +105,12 @@ export interface TrendsSeries {
   metricsSourceId?: string;
   /** True when this series is the run-wide "All aggregated" pseudo-metric. */
   isAggregated?: boolean;
+  /** The panel's own unit, so the series table can show that `yAxisFormat` overrides it. */
+  panelYAxisFormat?: string;
+  /** Which colour slot this series holds; see `nextFreeSlot`. */
+  colorSlot?: number;
+  /** Hidden from the chart but kept in the table (and in the preset). */
+  hidden?: boolean;
 }
 
 /**

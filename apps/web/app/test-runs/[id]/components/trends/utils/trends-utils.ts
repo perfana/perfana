@@ -1,86 +1,11 @@
-import { GRAFANA_UNITS, TrendsSeries, MetricStatistic } from '../types';
+import { TrendsSeries, MetricStatistic } from '../types';
 
 /**
- * Get color for a series based on its index
- * Cycles through colors for different series
+ * `getSeriesColor`, `UNIT_SUFFIXES` and `getYAxisConfigs` used to live here. Colours come
+ * from `@/lib/charts` by slot now, and axes from `resolveAxes` — the old splitter put the
+ * first unit on the left and every other unit, however many, on one right axis labelled
+ * for whichever of them came first.
  */
-export function getSeriesColor(index: number): string {
-  const colors = ['#2E86AB', '#FF6B35', '#4CAF50', '#9C27B0', '#FF9800'];
-  return colors[index % colors.length];
-}
-
-const UNIT_SUFFIXES: Record<string, string> = {
-  'ms': ' ms',
-  's': ' s',
-  'µs': ' µs',
-  'ns': ' ns',
-  'percent': '%',
-  'percentunit': '',
-  'bytes': ' B',
-  'kbytes': ' KB',
-  'mbytes': ' MB',
-  'gbytes': ' GB',
-  'reqps': ' req/s',
-  'ops': ' ops/s',
-  'wps': ' w/s',
-  'rps': ' r/s',
-  'short': '',
-  'none': ''
-};
-
-export interface AxisConfig {
-  title: string;
-  ticksuffix: string;
-}
-
-function axisConfigForUnit(unit: string | undefined): AxisConfig {
-  if (!unit) {
-    return { title: 'Value', ticksuffix: '' };
-  }
-  return {
-    title: GRAFANA_UNITS.find(u => u.value === unit)?.label || 'Value',
-    ticksuffix: UNIT_SUFFIXES[unit] || ''
-  };
-}
-
-/**
- * Split the added series across a left and a right y-axis by unit, mirroring the
- * Graphs card: the first unit keeps the left axis and every other unit shares the
- * right one. Without this a percent series and a req/s series land on one axis and
- * the second one is drawn under the first one's label and tick suffix.
- *
- * `rightSeriesIds` holds the ids of the series that belong on the right axis, which is
- * what the traces are keyed by — not metric names, which repeat across panels.
- *
- * ponytail: three or more distinct units still share a single right axis, labelled
- * for the first of them. Give each unit its own axis if that combination shows up.
- */
-export function getYAxisConfigs(addedSeries: TrendsSeries[]): {
-  left: AxisConfig;
-  right: AxisConfig | null;
-  rightSeriesIds: Set<string>;
-} {
-  const groups = new Map<string, string[]>();
-  for (const series of addedSeries) {
-    const key = series.yAxisFormat || '';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(series.id);
-  }
-
-  const entries = Array.from(groups.entries());
-  const left = axisConfigForUnit(entries[0]?.[0] || undefined);
-
-  if (entries.length < 2) {
-    return { left, right: null, rightSeriesIds: new Set() };
-  }
-
-  const rightEntries = entries.slice(1);
-  return {
-    left,
-    right: axisConfigForUnit(rightEntries[0]![0] || undefined),
-    rightSeriesIds: new Set(rightEntries.flatMap(([, ids]) => ids))
-  };
-}
 
 /**
  * Legend/hover name for a series. The metric name alone, unless another added series

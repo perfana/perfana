@@ -1,200 +1,15 @@
 import { SeriesConfig, MetricDataPoint } from '../types';
-import { AxisAssignment, UnitConversion, ChartThemeColors, PlotTrace } from '../types/chart.types';
 import { TestRun } from '@/types/test-runs';
-import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
+import { MONO, SANS, fmtHM } from '@/lib/charts';
 import { PlotlyGraphDiv, copyPlotToClipboard, downloadPng, plotlyPngBlob, plotSize } from '@/lib/plotly';
 
 /**
- * Extended color palette for automatic series color assignment
- * Cycles through colors for each series in the chart
+ * What used to live here — `CHART_COLOR_PALETTE`, `assignSeriesToAxes`,
+ * `getUnitConversion`, `buildChartLayout`, `buildTrace` and `buildAnalysisWindowShapes` —
+ * is now `@/lib/charts`, shared with Compare and Trends. What is left is the part that is
+ * genuinely specific to the Graphs card: its x axis is a sample index that stands for
+ * wall-clock time, and its modebar exports a PNG.
  */
-export const CHART_COLOR_PALETTE = [
-  '#2E86AB', // Blue
-  '#FF6B35', // Orange
-  '#4CAF50', // Green
-  '#9C27B0', // Purple
-  '#F57C00', // Dark Orange
-  '#00897B', // Teal
-  '#E91E63', // Pink
-  '#3F51B5', // Indigo
-];
-
-/**
- * Get color for a chart series based on its index
- */
-export function getChartSeriesColor(index: number): string {
-  return CHART_COLOR_PALETTE[index % CHART_COLOR_PALETTE.length];
-}
-
-/**
- * Group series by their unit format and determine which axis to use
- *
- * Rules:
- * 1. Group by unit (yAxisFormat)
- * 2. If all same unit -> single Y-axis (left)
- * 3. If 2+ different units -> first unit on left, others on right
- * 4. If same unit but magnitude ratio > 100 -> split by magnitude
- */
-export function assignSeriesToAxes(
-  seriesConfig: SeriesConfig[],
-  seriesData: Map<string, MetricDataPoint[]>
-): AxisAssignment {
-  if (seriesConfig.length === 0) {
-    return { leftAxisSeries: [], rightAxisSeries: [] };
-  }
-
-  // Group series by unit
-  const unitGroups = new Map<string, SeriesConfig[]>();
-  seriesConfig.forEach(series => {
-    const unit = series.yAxisFormat || 'default';
-    if (!unitGroups.has(unit)) {
-      unitGroups.set(unit, []);
-    }
-    unitGroups.get(unit)!.push(series);
-  });
-
-  // Single unit - check for magnitude split
-  if (unitGroups.size === 1) {
-    const [, series] = Array.from(unitGroups.entries())[0];
-
-    // Calculate max/min values across all series with this unit
-    let globalMax = -Infinity;
-    let globalMin = Infinity;
-
-    series.forEach(s => {
-      const data = seriesData.get(s.id);
-      if (data) {
-        data.forEach(point => {
-          if (point.value > globalMax) globalMax = point.value;
-          if (point.value < globalMin) globalMin = point.value;
-        });
-      }
-    });
-
-    // Check magnitude ratio
-    if (globalMax > 0 && globalMin > 0 && (globalMax / globalMin > 100)) {
-      // Split by magnitude - series with values > midpoint go to right axis
-      const midpoint = (globalMax + globalMin) / 2;
-      const leftSeries: SeriesConfig[] = [];
-      const rightSeries: SeriesConfig[] = [];
-
-      series.forEach(s => {
-        const data = seriesData.get(s.id);
-        if (data && data.length > 0) {
-          const avgValue = data.reduce((sum, p) => sum + p.value, 0) / data.length;
-          if (avgValue > midpoint) {
-            rightSeries.push(s);
-          } else {
-            leftSeries.push(s);
-          }
-        } else {
-          leftSeries.push(s);
-        }
-      });
-
-      return { leftAxisSeries: leftSeries, rightAxisSeries: rightSeries };
-    }
-
-    // No magnitude split needed - all on left axis
-    return { leftAxisSeries: series, rightAxisSeries: [] };
-  }
-
-  // Multiple units - first unit on left, others on right
-  const unitEntries = Array.from(unitGroups.entries());
-  const leftAxisSeries = unitEntries[0][1];
-  const rightAxisSeries = unitEntries.slice(1).flatMap(([, series]) => series);
-
-  return { leftAxisSeries, rightAxisSeries };
-}
-
-/**
- * Apply unit conversions based on yAxisFormat and data characteristics
- * Returns conversion factor and adjusted label
- */
-export function getUnitConversion(
-  yAxisFormat: string | undefined,
-  dataPoints: MetricDataPoint[]
-): UnitConversion {
-  // Calculate global min/max
-  let globalMax = -Infinity;
-  let globalMin = Infinity;
-  dataPoints.forEach(point => {
-    if (point.value > globalMax) globalMax = point.value;
-    if (point.value < globalMin) globalMin = point.value;
-  });
-
-  if (!yAxisFormat || yAxisFormat === 'short' || yAxisFormat === 'none') {
-    // For short/none format, provide intelligent default based on value range
-    if (globalMax < 1) {
-      return { factor: 1, label: 'Value (decimal)' };
-    } else if (globalMax > 1000000) {
-      return { factor: 1/1000000, label: 'Value (millions)' };
-    } else if (globalMax > 1000) {
-      return { factor: 1/1000, label: 'Value (thousands)' };
-    }
-    return { factor: 1, label: 'Value' };
-  }
-
-  // Percentage conversion
-  if (yAxisFormat === 'percentunit') {
-    return { factor: 100, label: 'Percentage (%)' };
-  }
-
-  // Seconds to milliseconds (if all values < 1)
-  if (yAxisFormat === 's' && globalMax < 1) {
-    return { factor: 1000, label: 'Time (ms)' };
-  }
-
-  if (yAxisFormat === 's') {
-    return { factor: 1, label: 'Time (s)' };
-  }
-
-  // Milliseconds to seconds (if all values > 1000)
-  if (yAxisFormat === 'ms' && globalMin > 1000) {
-    return { factor: 1/1000, label: 'Time (s)' };
-  }
-
-  if (yAxisFormat === 'ms') {
-    return { factor: 1, label: 'Time (ms)' };
-  }
-
-  // Bytes conversions
-  if (yAxisFormat === 'bytes') {
-    if (globalMax > 1073741824) { // > 1GB
-      return { factor: 1/1073741824, label: 'Size (GB)' };
-    } else if (globalMax > 1048576) { // > 1MB
-      return { factor: 1/1048576, label: 'Size (MB)' };
-    } else if (globalMax > 1024) { // > 1KB
-      return { factor: 1/1024, label: 'Size (KB)' };
-    }
-    return { factor: 1, label: 'Size (bytes)' };
-  }
-
-  // Requests per second
-  if (yAxisFormat === 'reqps' || yAxisFormat === 'rps') {
-    return { factor: 1, label: 'Requests/sec' };
-  }
-
-  // Operations per second
-  if (yAxisFormat === 'ops' || yAxisFormat === 'iops') {
-    return { factor: 1, label: 'Operations/sec' };
-  }
-
-  // Default - no conversion, but provide readable label
-  return { factor: 1, label: yAxisFormat };
-}
-
-/**
- * Format time for display on hover and tick labels
- */
-export function formatTimeLabel(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
-}
 
 /**
  * Build sorted timestamps and index mapping from series data
@@ -220,37 +35,47 @@ export function buildTimestampMapping(
   return { sortedTimestamps, timestampToIndex };
 }
 
+const TEN_MINUTES_MS = 10 * 60 * 1000;
+
 /**
- * Calculate tick values and labels for x-axis
+ * Tick positions for the sample-index x axis, labelled with wall-clock `HH:MM`.
+ *
+ * A tick on each ten-minute boundary once the run is long enough to have several, so the
+ * labels fall on round times a reader can match to an incident; otherwise about six
+ * evenly spaced ones. Horizontal either way — the old −45° labels had to be read sideways
+ * for no gain once the labels are four characters.
  */
 export function calculateXAxisTicks(
   sortedTimestamps: string[],
-  targetTicks = 10
+  targetTicks = 6
 ): { tickValues: number[]; tickLabels: string[] } {
-  const totalDataPoints = sortedTimestamps.length;
-  const tickInterval = Math.max(1, Math.ceil(totalDataPoints / targetTicks));
+  const n = sortedTimestamps.length;
+  if (n === 0) return { tickValues: [], tickLabels: [] };
 
-  const tickValues: number[] = [];
-  const tickLabels: string[] = [];
+  const times = sortedTimestamps.map((ts) => new Date(ts).getTime());
+  const indices: number[] = [];
 
-  for (let i = 0; i < totalDataPoints; i += tickInterval) {
-    tickValues.push(i);
-    tickLabels.push(formatTimeLabel(sortedTimestamps[i]));
+  if (times[n - 1] - times[0] >= 3 * TEN_MINUTES_MS) {
+    let lastBucket = Number.NaN;
+    for (let i = 0; i < n; i += 1) {
+      const bucket = Math.floor(times[i] / TEN_MINUTES_MS);
+      if (bucket !== lastBucket) {
+        indices.push(i);
+        lastBucket = bucket;
+      }
+    }
   }
 
-  // Always include the last timestamp if not already included
-  const lastIndex = totalDataPoints - 1;
-  if (tickValues[tickValues.length - 1] !== lastIndex && lastIndex >= 0) {
-    tickValues.push(lastIndex);
-    tickLabels.push(formatTimeLabel(sortedTimestamps[lastIndex]));
+  // Either the run is short, or ten-minute buckets produced too many ticks to read.
+  if (indices.length === 0 || indices.length > targetTicks * 2) {
+    indices.length = 0;
+    const step = Math.max(1, Math.ceil(n / targetTicks));
+    for (let i = 0; i < n; i += step) indices.push(i);
+    if (indices[indices.length - 1] !== n - 1) indices.push(n - 1);
   }
 
-  return { tickValues, tickLabels };
+  return { tickValues: indices, tickLabels: indices.map((i) => fmtHM(sortedTimestamps[i])) };
 }
-
-// Amber dashed boundary, matching the SLO and Compare charts so the ADAPT
-// analysis window reads identically across every surface.
-const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
 
 /**
  * Analysis-window boundaries in sample-index space, derived from the test run's
@@ -286,237 +111,17 @@ export function calculateAnalysisWindowIndices(
 }
 
 /**
- * Dim the excluded leading/trailing regions and mark each boundary with an amber
- * dashed line. Mirrors `ComparisonPlot`'s overlay so both cards look the same.
- */
-export function buildAnalysisWindowShapes(
-  startIndex: number | null,
-  endIndex: number | null,
-  n: number,
-  excludedColor: string
-): Record<string, unknown>[] {
-  const shapes: Record<string, unknown>[] = [];
-  const dimRect = (x0: number, x1: number) => ({
-    type: 'rect' as const, x0, x1, y0: 0, y1: 1, yref: 'paper' as const,
-    line: { width: 0 }, fillcolor: excludedColor, layer: 'below' as const, opacity: 0.3,
-  });
-  const boundaryLine = (x: number) => ({
-    type: 'line' as const, x0: x, x1: x, y0: 0, y1: 1, yref: 'paper' as const,
-    line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const }, layer: 'below' as const,
-  });
-  if (startIndex !== null && startIndex > 0) {
-    shapes.push(dimRect(0, startIndex), boundaryLine(startIndex));
-  }
-  if (endIndex !== null && endIndex < n - 1) {
-    shapes.push(dimRect(endIndex, n - 1), boundaryLine(endIndex));
-  }
-  return shapes;
-}
-
-/**
- * Build a single trace for the chart
- */
-export function buildTrace(
-  series: SeriesConfig,
-  data: MetricDataPoint[],
-  isRightAxis: boolean,
-  conversion: UnitConversion,
-  color: string,
-  bgColor: string,
-  timestampToIndex: Map<string, number>
-): PlotTrace {
-  // Sort data by time to ensure proper line rendering
-  const sortedData = [...data].sort((a, b) =>
-    new Date(a.time).getTime() - new Date(b.time).getTime()
-  );
-
-  // Use sequential indices for X-axis
-  const xValues = sortedData.map(d => timestampToIndex.get(d.time) as number);
-  const yValues = sortedData.map(d => d.value * conversion.factor);
-
-  return {
-    x: xValues,
-    y: yValues,
-    type: 'scatter',
-    mode: sortedData.length < 50 ? 'lines+markers' : 'lines',
-    name: `${series.panelTitle} - ${series.metricName}`,
-    line: {
-      color,
-      width: 2.5,
-      shape: 'linear'
-    },
-    marker: {
-      size: 4,
-      color,
-      line: {
-        color: bgColor,
-        width: 1
-      }
-    },
-    yaxis: isRightAxis ? 'y2' : 'y',
-    connectgaps: true,
-    hovertemplate: `<b>${series.panelTitle}</b><br>` +
-      `${series.metricName}<br>` +
-      'Time: %{text}<br>' +
-      'Value: %{y:.2f}<br>' +
-      '<extra></extra>',
-    text: sortedData.map(d => formatTimeLabel(d.time))
-  };
-}
-
-/**
- * Build the Plotly layout configuration
- */
-export function buildChartLayout(
-  themeColors: ChartThemeColors,
-  _chartName: string | undefined,
-  leftConversion: UnitConversion,
-  rightConversion: UnitConversion | null,
-  tickValues: number[],
-  tickLabels: string[],
-  timestampCount: number,
-  analysisStartIndex: number | null,
-  analysisEndIndex: number | null,
-  containerWidth: number
-): Record<string, unknown> {
-  const layout: Record<string, unknown> = {
-    plot_bgcolor: themeColors.plotBgColor,
-    paper_bgcolor: themeColors.bgColor,
-    font: {
-      color: themeColors.textColor,
-      family: themeColors.fontFamily,
-    },
-    showlegend: true,
-    legend: {
-      x: 0.5,
-      y: -0.2,
-      xanchor: 'center',
-      yanchor: 'top',
-      orientation: 'h',
-      bgcolor: 'rgba(0,0,0,0)',
-      bordercolor: 'rgba(0,0,0,0)',
-      font: {
-        color: themeColors.textColor,
-        size: 11
-      }
-    },
-    xaxis: {
-      title: {
-        text: 'Time',
-        font: {
-          size: 12,
-          color: themeColors.textSecondary
-        }
-      },
-      tickvals: tickValues,
-      ticktext: tickLabels,
-      tickangle: -45,
-      range: [0, timestampCount - 1],
-      showgrid: true,
-      showline: true,
-      gridcolor: themeColors.gridColor,
-      linecolor: themeColors.dividerColor,
-      color: themeColors.textSecondary,
-      tickfont: {
-        size: 11,
-        color: themeColors.textSecondary
-      },
-      ticks: '',
-      zeroline: false,
-      automargin: true,
-    },
-    yaxis: {
-      title: {
-        text: leftConversion.label,
-        font: {
-          size: 12,
-          color: themeColors.textSecondary
-        }
-      },
-      rangemode: 'tozero',
-      showgrid: true,
-      showline: true,
-      gridcolor: themeColors.gridColor,
-      linecolor: themeColors.dividerColor,
-      color: themeColors.textSecondary,
-      tickfont: {
-        size: 11,
-        color: themeColors.textSecondary
-      },
-      ticks: '',
-      zeroline: true,
-      zerolinecolor: themeColors.gridColor,
-      zerolinewidth: 1,
-      automargin: true,
-      nticks: 5
-    },
-    hovermode: 'x unified',
-    hoverlabel: {
-      bgcolor: themeColors.hoverBgColor,
-      bordercolor: themeColors.dividerColor,
-      font: {
-        color: themeColors.textColor,
-        size: 12,
-        family: PLOTLY_HOVER_FONT_FAMILY
-      },
-      align: 'left',
-    },
-    margin: { t: 50, b: 100, l: 60, r: rightConversion ? 60 : 20 },
-    width: containerWidth,
-    height: 500,
-    shapes: buildAnalysisWindowShapes(
-      analysisStartIndex,
-      analysisEndIndex,
-      timestampCount,
-      themeColors.gridColor
-    )
-  };
-
-  // Add right Y-axis if needed
-  if (rightConversion) {
-    layout.yaxis2 = {
-      title: {
-        text: rightConversion.label,
-        font: {
-          size: 12,
-          color: themeColors.textSecondary
-        }
-      },
-      rangemode: 'tozero',
-      overlaying: 'y',
-      side: 'right',
-      showgrid: false,
-      showline: true,
-      linecolor: themeColors.dividerColor,
-      color: themeColors.textSecondary,
-      tickfont: {
-        size: 11,
-        color: themeColors.textSecondary
-      },
-      ticks: '',
-      zeroline: false,
-      automargin: true,
-      nticks: 5
-    };
-  }
-
-  return layout;
-}
-
-/**
- * Plotly renders an export from the live layout, which no longer carries a title —
- * the editable heading above the chart is the on-screen title now. An exported PNG
- * is a different context: once it leaves the app nothing else names it, so the title
- * goes back on for the image only. `toImage` accepts a figure object as well as a
- * graph div, so building one here never touches what is on screen.
- *
- * The layout already reserves `margin.t: 50`, so the title has room without shifting
- * the plot area between the on-screen and exported versions.
+ * Plotly renders an export from the live layout, which carries neither a title nor a
+ * legend — the heading above the chart is the title now, and the legend is an HTML table.
+ * An exported PNG is a different context: once it leaves the app nothing else names its
+ * series, so both go back on for the image only. `toImage` accepts a figure object as
+ * well as a graph div, so building one here never touches what is on screen.
  */
 function buildExportFigure(gd: unknown, chartName: string | undefined) {
   const graph = gd as { data?: unknown[]; layout?: Record<string, unknown> };
   const layout = graph.layout ?? {};
-  const font = (layout.font ?? {}) as { color?: string; family?: string };
+  const font = (layout.font ?? {}) as { color?: string };
+  const margin = (layout.margin ?? {}) as Record<string, number>;
 
   return {
     data: graph.data ?? [],
@@ -524,12 +129,26 @@ function buildExportFigure(gd: unknown, chartName: string | undefined) {
       ...layout,
       title: {
         text: chartName || 'Custom Metrics Chart',
-        font: { color: font.color, size: 16, family: font.family },
+        font: { color: font.color, size: 15, family: SANS },
         x: 0.5,
         xanchor: 'center',
-        y: 0.95,
+        y: 0.97,
         yanchor: 'top'
-      }
+      },
+      showlegend: true,
+      legend: {
+        x: 0.5,
+        y: -0.18,
+        xanchor: 'center',
+        yanchor: 'top',
+        orientation: 'h',
+        bgcolor: 'rgba(0,0,0,0)',
+        bordercolor: 'rgba(0,0,0,0)',
+        font: { color: font.color, size: 10, family: MONO }
+      },
+      // The on-screen layout is drawn tight against a card that supplies the title and
+      // the legend; the image has to carry both itself.
+      margin: { ...margin, t: 44, b: 80 }
     }
   };
 }
@@ -565,7 +184,8 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
   return {
     displayModeBar: true,
     // 'toImage' is removed and replaced below: the built-in download renders the live
-    // layout, which deliberately has no title, so its PNG would come out unlabelled.
+    // layout, which deliberately has no title and no legend, so its PNG would come out
+    // unlabelled.
     modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d', 'toImage'],
     displaylogo: false,
     responsive: true,

@@ -4,8 +4,17 @@
 
 import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 import type { Theme } from '@mui/material';
-import { alpha } from '@mui/material';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
+import {
+  SIZE,
+  analysisWindowBands,
+  chartTheme,
+  displayUnit,
+  toDisplay,
+  unitFactor,
+  unitFamily,
+  unitText,
+} from '@/lib/charts';
 import type {
   MetricDataPoint,
   Thresholds,
@@ -41,50 +50,44 @@ export function findDataRange(
 }
 
 /**
- * Calculate unit conversion based on unit type and data range
+ * Unit conversion, via the shared resolver.
+ *
+ * The four-branch `percentunit` / `s` / `ms` ladder this replaces was one of four
+ * diverging copies in the app; `displayUnit` auto-scales every family the units table
+ * knows about, and `factor` is the multiplier from the stored code to the drawn one.
  */
 export function calculateUnitConversion(
   unit: string,
-  globalMin: number | undefined,
+  _globalMin: number | undefined,
   globalMax: number | undefined
 ): UnitConversion {
-  let factor = 1;
-  let yAxisLabel = 'Value';
-
-  if (unit === 'percentunit') {
-    factor = 100;
-    yAxisLabel = 'Percentage (%)';
-  } else if (unit === 's' && globalMax && globalMax < 1) {
-    factor = 1000;
-    yAxisLabel = 'Time (ms)';
-  } else if (unit === 'ms' && globalMin && globalMin > 1000) {
-    factor = 1 / 1000;
-    yAxisLabel = 'Time (s)';
-  } else if (unit === 's') {
-    yAxisLabel = 'Time (s)';
-  } else if (unit === 'ms') {
-    yAxisLabel = 'Time (ms)';
-  }
-
-  return { factor, yAxisLabel };
+  const display = displayUnit(unitFamily(unit), (globalMax ?? 0) * unitFactor(unit), unit);
+  return {
+    factor: toDisplay(1, unit, display),
+    yAxisLabel: display.label || unitText(unit),
+  };
 }
 
 /**
- * Get chart theme colors from MUI theme
+ * Chart colours, from the one chart theme.
+ *
+ * The dark-mode `#121212` paper and `#1e1e1e` plot background that used to be hard-coded
+ * here sat inside a `#1e293b` card — three surfaces, three greys, one card.
  */
 export function getChartThemeColors(theme: Theme): ChartThemeColors {
-  const isDark = theme.palette.mode === 'dark';
+  const chart = chartTheme(theme.palette.mode === 'dark' ? 'dark' : 'light');
   return {
-    textColor: theme.palette.text.primary,
-    textSecondary: theme.palette.text.secondary,
-    bgColor: isDark ? '#121212' : theme.palette.background.paper,
-    plotBgColor: isDark ? '#1e1e1e' : theme.palette.grey[50],
-    gridColor: isDark ? 'rgba(255,255,255,0.12)' : '#e0e0e0',
-    dividerColor: theme.palette.divider,
-    rampUpColor: alpha(theme.palette.info.main, 0.08),
-    primaryColor: theme.palette.primary.main,
-    thresholdColor: 'rgba(76, 175, 80, 0.7)',
-    hoverBgColor: isDark ? '#1e293b' : theme.palette.background.paper,
+    textColor: chart.text,
+    textSecondary: chart.muted,
+    bgColor: chart.paper,
+    plotBgColor: chart.plotBg,
+    gridColor: chart.grid,
+    dividerColor: chart.divider,
+    rampUpColor: chart.excluded,
+    primaryColor: chart.primary,
+    // Red is the standard's only verdict colour, and a threshold is a verdict.
+    thresholdColor: chart.error,
+    hoverBgColor: chart.paper,
   };
 }
 
@@ -146,12 +149,12 @@ export function buildMetricTrace(
     connectgaps: true,
     line: {
       color: primaryColor,
-      width: 2.5,
+      width: SIZE.line,
       shape: 'linear' as const,
     },
     marker: {
       color: primaryColor,
-      size: 4,
+      size: 3,
     },
   };
 }
@@ -198,89 +201,40 @@ export function buildThresholdTraces(
       hoverinfo: 'skip' as const,
       showlegend: false,
     });
-
-    // Add filled ribbon between thresholds if both exist
-    if (thresholds.lower?.overall !== null && thresholds.lower?.overall !== undefined) {
-      const lowerThreshold = thresholds.lower.overall * conversionFactor;
-      traces.push({
-        x: [start, end, end, start],
-        y: [lowerThreshold, lowerThreshold, upperThreshold, upperThreshold],
-        fill: 'toself',
-        fillcolor: 'rgba(76, 175, 80, 0.1)',
-        line: { width: 0 },
-        name: 'Threshold Range',
-        hoverinfo: 'skip' as const,
-        showlegend: false,
-      });
-    }
   }
 
   return traces;
 }
 
 /**
- * Build chart layout configuration
- */
-// Amber dashed boundary, matching the SLO charts (slo-chart-utils.ts) so the
-// ADAPT analysis window reads identically across both surfaces.
-const ANALYSIS_BOUNDARY_COLOR = '#f59e0b';
-
-/**
- * Build the analysis-time-range shapes: shaded excluded regions for the leading
- * start offset and trailing end offset, plus a dashed boundary line at each edge.
- * Mirrors the SLO chart (service-level-objectives/utils/slo-chart-utils.ts) so
- * ADAPT and SLO show the same window. Offsets are in seconds from start/end.
+ * The analysis window, drawn by the shared builder: an `excluded` wash over the trimmed
+ * head and tail, a hairline at each edge, and mono `start` / `end` labels.
+ *
+ * The amber dashed boundary this replaces was the same colour the SLO charts used for a
+ * data series, so an analysis edge and a metric line read as the same thing.
  */
 function buildAnalysisWindowShapes(
   timeRange: TimeRange,
   analysisStartOffset: number | undefined,
   analysisEndOffset: number | undefined,
   colors: ChartThemeColors
-): Record<string, unknown>[] {
+): { shapes: Record<string, unknown>[]; annotations: Record<string, unknown>[] } {
   const { start, end } = timeRange;
-  const shapes: Record<string, unknown>[] = [];
-
   const startBoundary = new Date(start.getTime() + (analysisStartOffset ?? 0) * 1000);
   const endBoundary = new Date(end.getTime() - (analysisEndOffset ?? 0) * 1000);
   // Guard against the end boundary crossing before the start boundary.
   const safeEndBoundary =
     endBoundary.getTime() > startBoundary.getTime() ? endBoundary : startBoundary;
 
-  if (analysisStartOffset !== undefined && analysisStartOffset > 0) {
-    shapes.push({
-      type: 'rect' as const,
-      x0: start, y0: 0, x1: startBoundary, y1: 1,
-      xref: 'x' as const, yref: 'paper' as const,
-      line: { width: 0 }, fillcolor: colors.rampUpColor, layer: 'below' as const, opacity: 1,
-    });
-  }
-  if (analysisStartOffset !== undefined) {
-    shapes.push({
-      type: 'line' as const,
-      x0: startBoundary, y0: 0, x1: startBoundary, y1: 1,
-      xref: 'x' as const, yref: 'paper' as const,
-      line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const },
-      layer: 'above' as const,
-    });
-  }
-  if (analysisEndOffset !== undefined && analysisEndOffset > 0) {
-    shapes.push({
-      type: 'rect' as const,
-      x0: safeEndBoundary, y0: 0, x1: end, y1: 1,
-      xref: 'x' as const, yref: 'paper' as const,
-      line: { width: 0 }, fillcolor: colors.rampUpColor, layer: 'below' as const, opacity: 1,
-    });
-  }
-  if (analysisEndOffset !== undefined) {
-    shapes.push({
-      type: 'line' as const,
-      x0: safeEndBoundary, y0: 0, x1: safeEndBoundary, y1: 1,
-      xref: 'x' as const, yref: 'paper' as const,
-      line: { color: ANALYSIS_BOUNDARY_COLOR, width: 1.5, dash: 'dash' as const },
-      layer: 'above' as const,
-    });
-  }
-  return shapes;
+  return analysisWindowBands(
+    {
+      from: start,
+      start: analysisStartOffset ? startBoundary : null,
+      end: analysisEndOffset ? safeEndBoundary : null,
+      to: end,
+    },
+    { excluded: colors.rampUpColor, faint: colors.textSecondary },
+  );
 }
 
 export function buildChartLayout(
@@ -371,9 +325,9 @@ export function buildChartLayout(
       align: 'left' as const,
     },
     margin: { l: 50, r: 20, t: 40, b: 80 },
-    shapes: hasData
+    ...(hasData
       ? buildAnalysisWindowShapes(timeRange, analysisStartOffset, analysisEndOffset, colors)
-      : [],
+      : { shapes: [], annotations: [] }),
     height: DEFAULT_CHART_HEIGHT,
   };
 }

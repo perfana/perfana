@@ -27,6 +27,8 @@ export interface PlotlyGlobal {
     gd: PlotlyGraphDiv,
     opts: { format?: string; width?: number; height?: number; scale?: number },
   ) => Promise<string>;
+  /** Per-trace style update. An array value is distributed across the traces. */
+  restyle: (gd: PlotlyGraphDiv, update: Record<string, unknown>) => Promise<unknown>;
   Plots: {
     /**
      * Re-measure the graph div against its container and relayout. Rejects when the
@@ -169,6 +171,29 @@ export function plotSize(
     width: gd._fullLayout?.width || fallback.width,
     height: gd._fullLayout?.height || fallback.height,
   };
+}
+
+/**
+ * Fade every trace but one, so hovering a row of the series table picks its line out of
+ * a dense chart. `focus === null` restores all of them.
+ *
+ * `restyle` rather than a React re-render: the hover fires on every mouse move across the
+ * table, and rebuilding the figure for each one re-runs the whole layout.
+ */
+export function dimOtherTraces(
+  gd: HTMLElement | null | undefined,
+  traceCount: number,
+  focus: number | null,
+): void {
+  if (!gd || traceCount === 0) return;
+  const plotly = getPlotly();
+  if (!plotly?.restyle) return;
+  const opacity = Array.from({ length: traceCount }, (_, i) =>
+    focus === null || i === focus ? 1 : 0.18,
+  );
+  // Rejects when the div has been torn down mid-hover; nothing to do, and an unhandled
+  // rejection would surface as a page error.
+  plotly.restyle(gd as PlotlyGraphDiv, { opacity }).catch(() => undefined);
 }
 
 /** Trigger a browser download for an already-rendered blob — the clipboard fallback. */

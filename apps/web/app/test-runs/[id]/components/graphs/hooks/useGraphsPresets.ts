@@ -14,6 +14,9 @@ interface UseGraphsPresetsProps {
   testRunId: string;
   showToast: (message: string) => void;
   addedSeries: SeriesConfig[];
+  /** Overlay / split, saved into the preset's `chartOptions`. */
+  axisMode: 'overlay' | 'split';
+  setAxisMode: (mode: 'overlay' | 'split') => void;
   setAddedSeries: (series: SeriesConfig[] | ((prev: SeriesConfig[]) => SeriesConfig[])) => void;
   setSeriesData: (data: Map<string, MetricDataPoint[]> | ((prev: Map<string, MetricDataPoint[]>) => Map<string, MetricDataPoint[]>)) => void;
   setChartDataLoading: (loading: boolean) => void;
@@ -25,6 +28,8 @@ export function useGraphsPresets({
   testRunId,
   showToast,
   addedSeries,
+  axisMode,
+  setAxisMode,
   setAddedSeries,
   setSeriesData,
   setChartDataLoading,
@@ -125,6 +130,8 @@ export function useGraphsPresets({
 
       // Set the series
       setAddedSeries(enrichedSeries);
+      // Absent on presets saved before the standard: overlay is what they were drawn as.
+      setAxisMode(preset.chartOptions?.axisMode === 'split' ? 'split' : 'overlay');
 
       // Fetch data for all series
       setChartDataLoading(true);
@@ -145,7 +152,7 @@ export function useGraphsPresets({
     } finally {
       setChartDataLoading(false);
     }
-  }, [enrichSeriesWithFormat, setAddedSeries, setChartDataLoading, fetchSeriesData, setSeriesData, showToast]);
+  }, [enrichSeriesWithFormat, setAddedSeries, setAxisMode, setChartDataLoading, fetchSeriesData, setSeriesData, showToast]);
 
   /**
    * Handle saving a preset (with upsert logic)
@@ -189,6 +196,7 @@ export function useGraphsPresets({
             name: formData.name,
             description: formData.description,
             seriesConfig: seriesConfigDto,
+            chartOptions: { axisMode },
             isGlobal: formData.is_global
           }),
         });
@@ -203,6 +211,7 @@ export function useGraphsPresets({
             name: formData.name,
             description: formData.description,
             seriesConfig: seriesConfigDto,
+            chartOptions: { axisMode },
             testRunId: formData.test_run_id,
             isGlobal: formData.is_global
           }),
@@ -225,7 +234,7 @@ export function useGraphsPresets({
     } finally {
       setPresetSaving(false);
     }
-  }, [addedSeries, presets, currentUserId, showToast, fetchPresets]);
+  }, [addedSeries, axisMode, presets, currentUserId, showToast, fetchPresets]);
 
   /**
    * Handle deleting a preset

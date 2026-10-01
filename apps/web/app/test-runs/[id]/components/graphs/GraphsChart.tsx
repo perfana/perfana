@@ -1,52 +1,48 @@
 'use client';
 
 import type { PlotTrace } from './types/chart.types';
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import type { Config, Data, Layout } from 'plotly.js';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Box, useTheme } from '@mui/material';
-import dynamic from 'next/dynamic';
 
-// Types
+import { GraphsChartProps, SeriesConfig } from './types';
 import {
-  GraphsChartProps,
-  extractChartThemeColors,
-} from './types';
-
-// Utils
-import {
-  assignSeriesToAxes,
-  getUnitConversion,
-  getChartSeriesColor,
   buildTimestampMapping,
   calculateXAxisTicks,
   calculateAnalysisWindowIndices,
-  buildTrace,
-  buildChartLayout,
   buildChartConfig,
 } from './utils';
-
-// Components
 import { ChartLoadingState, ChartEmptyState } from './components';
-
-// Event lines
 import { mergeEventShapesIntoIndexedLayout } from '../shared/event-lines';
+import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
 
-// Dynamically import Plotly to avoid SSR issues
-const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
+import Plot from '@/components/ResponsivePlot';
+import { AnalystChartCard, ChartActions, SeriesTable, type SeriesRow } from '@/components/charts';
+import {
+  SIZE,
+  analysisWindowShapes,
+  axisBadge,
+  buildPlotLayout,
+  catColor,
+  chartTheme,
+  fmtClock,
+  groupLabels,
+  mergeOverlays,
+  resolveAxes,
+  toDisplay,
+  unitText,
+  windowStats,
+  type AxisGroup,
+} from '@/lib/charts';
+import { dimOtherTraces, type PlotlyGraphDiv } from '@/lib/plotly';
 
 /**
- * GraphsChart Component
+ * GraphsChart — the Analyst chart card for the Graphs builder.
  *
- * Renders multi-series time-series visualizations with intelligent
- * multi-axis support, unit conversions, and interactive features.
- *
- * Features:
- * - Automatic color assignment from palette
- * - Smart Y-axis assignment (single or dual axis)
- * - Unit conversion (s/ms, percentunit)
- * - Analysis time range (ADAPT window) markers
- * - Interactive hover with unified mode
- * - Copy to clipboard support
- * - Responsive design
+ * - one axis per unit family, lanes past two families (`resolveAxes`)
+ * - colours by slot, so removing a series never recolours the rest
+ * - the series table is the legend, the stats panel and the cursor readout
+ * - no floating tooltip: `hoverinfo: 'none'` plus a crosshair
  */
 export default function GraphsChart({
   testRun,
@@ -55,145 +51,260 @@ export default function GraphsChart({
   loading,
   chartName,
   events,
+  showToast,
+  titleNode,
+  actions,
+  cascade,
+  axisMode = 'overlay',
+  onAxisModeChange,
+  onRemoveSeries,
+  onUpdateSeriesUnit,
+  onToggleSeriesVisibility,
 }: GraphsChartProps) {
-  const theme = useTheme();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState<number>(800);
+  const muiTheme = useTheme();
+  const mode = muiTheme.palette.mode === 'dark' ? 'dark' : 'light';
+  const theme = chartTheme(mode);
 
-  // Measure container width on mount and window resize
-  useEffect(() => {
-    const updateWidth = () => {
-      if (containerRef.current) {
-        setContainerWidth(containerRef.current.offsetWidth);
-      }
-    };
+  const [cascadeOpen, setCascadeOpen] = useState(false);
+  const [cursorIndex, setCursorIndex] = useState<number | null>(null);
+  const graphRef = useRef<HTMLElement | null>(null);
+  // The actions live in the header, outside the plot, so they need a re-render when
+  // the graph div appears — a ref alone would leave them permanently disabled.
+  const [graphEl, setGraphEl] = useState<PlotlyGraphDiv | null>(null);
 
-    updateWidth();
-    window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
-  }, []);
+  const visible = useMemo(() => seriesConfig.filter((s) => !s.hidden), [seriesConfig]);
 
-  // Assign series to axes based on units and magnitude
-  const axisAssignment = useMemo(
-    () => assignSeriesToAxes(seriesConfig, seriesData),
-    [seriesConfig, seriesData]
-  );
+  /**
+   * `panelTitle · metricName`, except for the run-wide aggregate: its stored metric name
+   * already composes in the panel title ("All aggregated — Transaction RT Avg"), so the
+   * pair would read the title twice.
+   */
+  const rowName = (series: SeriesConfig) =>
+    (series.metricName.startsWith(ALL_AGGREGATED_OPTION)
+      ? series.metricName
+      : `${series.panelTitle} · ${series.metricName}`);
 
-  // Generate Plotly data and layout
-  const plotProps = useMemo(() => {
-    if (seriesConfig.length === 0 || seriesData.size === 0) {
-      return null;
-    }
+  const plot = useMemo(() => {
+    if (visible.length === 0 || seriesData.size === 0) return null;
 
-    // Extract theme colors
-    const themeColors = extractChartThemeColors(theme);
+    const { sortedTimestamps, timestampToIndex } = buildTimestampMapping(visible, seriesData);
+    if (sortedTimestamps.length === 0) return null;
 
-    // Combine all series for processing
-    const allSeries = [...axisAssignment.leftAxisSeries, ...axisAssignment.rightAxisSeries];
-
-    // Build timestamp mapping
-    const { sortedTimestamps, timestampToIndex } = buildTimestampMapping(allSeries, seriesData);
-
-    // Calculate tick values and labels
     const { tickValues, tickLabels } = calculateXAxisTicks(sortedTimestamps);
+    const { startIndex, endIndex } = calculateAnalysisWindowIndices(testRun, sortedTimestamps);
 
-    // Analysis time range (ADAPT window) boundaries in sample-index space
-    const { startIndex: analysisStartIndex, endIndex: analysisEndIndex } =
-      calculateAnalysisWindowIndices(testRun, sortedTimestamps);
+    // The axis scale is chosen from the WHOLE series; the table's stats are the analysis
+    // window only. A line is drawn outside the window too, so an axis sized to the window
+    // would clip the ramp-up.
+    const axisSeries = visible.map((series) => {
+      const data = seriesData.get(series.id) ?? [];
+      const values = data.map((d) => d.value).filter((v) => Number.isFinite(v));
+      return {
+        id: series.id,
+        unit: series.yAxisFormat,
+        name: series.metricName,
+        max: values.length ? Math.max(...values) : undefined,
+        min: values.length ? Math.min(...values) : undefined,
+      };
+    });
 
-    // Determine unit conversions for left and right axes
-    const leftAxisData = axisAssignment.leftAxisSeries.flatMap(s => seriesData.get(s.id) || []);
-    const rightAxisData = axisAssignment.rightAxisSeries.flatMap(s => seriesData.get(s.id) || []);
+    const { mode: axisLayoutMode, groups } = resolveAxes(axisSeries, {
+      split: axisMode === 'split',
+    });
+    const groupOf = new Map<string, AxisGroup<(typeof axisSeries)[number]>>();
+    for (const group of groups) for (const s of group.series) groupOf.set(s.id, group);
 
-    const leftAxisFormat = axisAssignment.leftAxisSeries[0]?.yAxisFormat;
-    const rightAxisFormat = axisAssignment.rightAxisSeries[0]?.yAxisFormat;
+    const traces: PlotTrace[] = [];
+    const traceIndexOf = new Map<string, number>();
 
-    const leftConversion = getUnitConversion(leftAxisFormat, leftAxisData);
-    const rightConversion = axisAssignment.rightAxisSeries.length > 0
-      ? getUnitConversion(rightAxisFormat, rightAxisData)
-      : null;
-
-    // Build traces for each series
-    const traces = allSeries.map((series, index) => {
+    visible.forEach((series) => {
       const data = seriesData.get(series.id);
-      if (!data || data.length === 0) return null;
+      const group = groupOf.get(series.id);
+      if (!data || data.length === 0 || !group) return;
 
-      const isRightAxis = axisAssignment.rightAxisSeries.includes(series);
-      const conversion = isRightAxis ? rightConversion! : leftConversion;
-      const color = getChartSeriesColor(index);
+      const sorted = [...data].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+      const color = catColor(series.colorSlot ?? seriesConfig.indexOf(series), mode);
 
-      return buildTrace(
-        series,
-        data,
-        isRightAxis,
-        conversion,
-        color,
-        themeColors.hoverBgColor,
-        timestampToIndex
-      );
-    }).filter(Boolean);
+      traceIndexOf.set(series.id, traces.length);
+      traces.push({
+        x: sorted.map((d) => timestampToIndex.get(d.time) as number),
+        y: sorted.map((d) => toDisplay(d.value, series.yAxisFormat, group.display)),
+        type: 'scatter',
+        mode: 'lines',
+        name: `${series.panelTitle} - ${series.metricName}`,
+        line: { color, width: SIZE.line, shape: 'linear' },
+        yaxis: group.axis,
+        connectgaps: true,
+        hoverinfo: 'none',
+      });
+    });
 
-    // Build layout
-    let layout = buildChartLayout(
-      themeColors,
-      chartName,
-      leftConversion,
-      rightConversion,
-      tickValues,
-      tickLabels,
-      sortedTimestamps.length,
-      analysisStartIndex,
-      analysisEndIndex,
-      containerWidth
+    const overlay = mergeOverlays(
+      analysisWindowShapes(startIndex, endIndex, sortedTimestamps.length, theme),
     );
 
-    // Merge event annotations into layout
+    let layout = buildPlotLayout(axisLayoutMode, {
+      theme,
+      groups,
+      x: {
+        tickvals: tickValues,
+        ticktext: tickLabels,
+        range: [0, Math.max(sortedTimestamps.length - 1, 1)],
+      },
+      overlay,
+    });
+
     if (events && events.length > 0) {
-      layout = mergeEventShapesIntoIndexedLayout(layout as Record<string, unknown>, events, sortedTimestamps);
+      layout = mergeEventShapesIntoIndexedLayout(layout, events, sortedTimestamps, theme);
     }
 
-    // Build config
-    const config = buildChartConfig(chartName);
+    return {
+      traces,
+      layout,
+      // Plotly's modebar floats over the plot and is styled by Plotly; the copy and
+      // download actions live in the card header instead (ChartActions).
+      config: { ...buildChartConfig(chartName), displayModeBar: false },
+      sortedTimestamps,
+      timestampToIndex,
+      groupOf,
+      groups,
+      axisLayoutMode,
+      startIndex,
+      endIndex,
+      traceIndexOf,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, seriesConfig, seriesData, testRun, mode, axisMode, chartName, events]);
 
-    // Series with no data map to null above; Plotly must never see them.
-    const data = traces.filter((t): t is PlotTrace => t !== null);
+  /**
+   * One row per configured series — hidden ones included, or a hidden series could never
+   * be shown again, and its stats would vanish rather than grey out.
+   */
+  const rows: SeriesRow[] = useMemo(() => {
+    return seriesConfig.map((series) => {
+      const data = seriesData.get(series.id) ?? [];
+      const group = plot?.groupOf.get(series.id);
+      const display = group?.display ?? { label: unitText(series.yAxisFormat), divisor: 1 };
 
-    return { data, layout, config };
-  }, [seriesData, seriesConfig, axisAssignment, testRun, theme, containerWidth, chartName, events]);
+      // min/mean/max are the analysis window only: a mean that includes the ramp-up is
+      // not the number ADAPT compared.
+      const windowed = plot
+        ? data.filter((d) => {
+            const i = plot.timestampToIndex.get(d.time);
+            if (i === undefined) return false;
+            if (plot.startIndex !== null && i < plot.startIndex) return false;
+            if (plot.endIndex !== null && i >= plot.endIndex) return false;
+            return true;
+          })
+        : data;
 
-  // Loading state
-  if (loading) {
-    return <ChartLoadingState />;
-  }
+      const cursorPoint =
+        cursorIndex !== null && plot
+          ? data.find((d) => plot.timestampToIndex.get(d.time) === cursorIndex)
+          : undefined;
 
-  // Empty state - no series configured
-  if (seriesConfig.length === 0) {
-    return <ChartEmptyState variant="no-series" />;
-  }
+      return {
+        id: series.id,
+        name: rowName(series),
+        source: series.source === 'performance-metrics' ? 'performance_test' : series.source,
+        sourceLabel: series.dashboardLabel,
+        color: catColor(series.colorSlot ?? seriesConfig.indexOf(series), mode),
+        unit: series.yAxisFormat,
+        panelUnit: series.panelYAxisFormat,
+        displayUnit: display.label,
+        hidden: series.hidden,
+        axis: plot ? axisBadge(plot.groups, series.id) : '—',
+        stats: windowStats(windowed.map((d) => d.value), series.yAxisFormat, display),
+        cursor: cursorPoint ? toDisplay(cursorPoint.value, series.yAxisFormat, display) : null,
+      } satisfies SeriesRow;
+    });
+  }, [seriesConfig, seriesData, plot, cursorIndex, mode]);
 
-  // Empty state - no data available
-  if (seriesData.size === 0 || !plotProps) {
-    return <ChartEmptyState variant="no-data" />;
-  }
+  const onHoverRow = useCallback(
+    (seriesId: string | null) => {
+      const gd = graphRef.current;
+      if (!gd || !plot) return;
+      const index = seriesId === null ? null : plot.traceIndexOf.get(seriesId) ?? null;
+      dimOtherTraces(gd, plot.traces.length, index);
+    },
+    [plot],
+  );
 
-  // Render chart
-  return (
-    <Box
-      ref={containerRef}
-      sx={{
-        height: 500,
-        width: '100%',
-        backgroundColor: 'background.paper',
-        borderRadius: 2,
-        overflow: 'hidden'
+  const lanesNote =
+    plot && plot.axisLayoutMode === 'lanes' && plot.groups.length > 2
+      ? `${plot.groups.length} unit families (${groupLabels(plot.groups).join(', ')}): more than two axes, so the chart is split into lanes`
+      : undefined;
+
+  const sources = new Set(seriesConfig.map((s) => s.dashboardLabel));
+  const summary = `${seriesConfig.length} series · ${sources.size} ${sources.size === 1 ? 'source' : 'sources'}`;
+
+  const body = loading ? (
+    <ChartLoadingState />
+  ) : seriesConfig.length === 0 ? (
+    <ChartEmptyState variant="no-series" />
+  ) : !plot ? (
+    <ChartEmptyState variant="no-data" />
+  ) : (
+    <Plot
+      data={plot.traces as unknown as Data[]}
+      layout={plot.layout as unknown as Partial<Layout>}
+      config={plot.config as unknown as Partial<Config>}
+      style={{ width: '100%', height: `${(plot.layout.height as number) ?? SIZE.overlayHeight}px` }}
+      onInitialized={(_fig, gd) => {
+        graphRef.current = gd as unknown as HTMLElement;
+        setGraphEl(gd as unknown as PlotlyGraphDiv);
       }}
+      onUpdate={(_fig, gd) => { graphRef.current = gd as unknown as HTMLElement; }}
+      onHover={(e) => setCursorIndex(Number(e.points?.[0]?.x ?? NaN))}
+      onUnhover={() => setCursorIndex(null)}
+    />
+  );
+
+  return (
+    <AnalystChartCard
+      mode={mode}
+      title={titleNode ?? chartName ?? 'Untitled graph'}
+      cursor={
+        plot && cursorIndex !== null && plot.sortedTimestamps[cursorIndex]
+          ? fmtClock(plot.sortedTimestamps[cursorIndex])
+          : ''
+      }
+      axisMode={onAxisModeChange ? axisMode : undefined}
+      onAxisModeChange={onAxisModeChange}
+      lanesNote={lanesNote}
+      actions={
+        <>
+          {actions}
+          <ChartActions
+            graph={graphEl}
+            mode={mode}
+            chartName={chartName}
+            notify={showToast}
+          />
+        </>
+      }
+      addSeries={
+        cascade
+          ? {
+              open: cascadeOpen,
+              onToggle: () => setCascadeOpen((open) => !open),
+              summary,
+              panel: cascade(() => setCascadeOpen(false)),
+            }
+          : undefined
+      }
+      table={
+        <SeriesTable
+          rows={rows}
+          mode={mode}
+          onUpdateUnit={onUpdateSeriesUnit}
+          onToggleVisibility={onToggleSeriesVisibility}
+          onRemove={onRemoveSeries}
+          onHoverRow={onHoverRow}
+        />
+      }
     >
-      <Plot
-        data={plotProps.data}
-        layout={plotProps.layout}
-        config={plotProps.config}
-        style={{ width: '100%', height: '100%' }}
-      />
-    </Box>
+      <Box sx={{ width: '100%' }}>{body}</Box>
+    </AnalystChartCard>
   );
 }

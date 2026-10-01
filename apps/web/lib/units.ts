@@ -7,25 +7,36 @@ interface Unit {
   name: string;
   id: string;
   format: string;
+  /**
+   * The unit family this code belongs to — the set of codes that measure the same
+   * quantity and therefore share ONE axis. A code with no family is its own family: a
+   * `reqps` series and an `ops` series are both rates but are not interchangeable, and
+   * stacking them on one axis reads as a single quantity that it is not.
+   */
+  family?: string;
+  /** Multiplier to the family's base unit (seconds for `time`, bytes for `data`, 0-100 for `pct`). */
+  factor?: number;
 }
+
+const KiB = 1024;
 
 const units: Unit[] = [
   { name: '', id: 'none', format: '' },
   { name: '', id: 'short', format: '' },
-  { name: '%', id: 'percent', format: '%' },
-  { name: 'Percent (0.0-1.0)', id: 'percentunit', format: '%' },
+  { name: '%', id: 'percent', format: '%', family: 'pct', factor: 1 },
+  { name: 'Percent (0.0-1.0)', id: 'percentunit', format: '%', family: 'pct', factor: 100 },
   { name: 'Humidity (%H)', id: 'humidity', format: '%H' },
   { name: 'Decibel', id: 'dB', format: 'dB' },
-  { name: 'bytes(IEC)', id: 'bytes', format: 'B' },
-  { name: 'bytes(SI)', id: 'decbytes', format: 'B' },
+  { name: 'bytes(IEC)', id: 'bytes', format: 'B', family: 'data', factor: 1 },
+  { name: 'bytes(SI)', id: 'decbytes', format: 'B', family: 'data-si', factor: 1 },
   { name: 'bits(IEC)', id: 'bits', format: 'b' },
   { name: 'bits(SI)', id: 'decbits', format: 'b' },
-  { name: 'kibibytes', id: 'kbytes', format: 'KiB' },
-  { name: 'kilobytes', id: 'deckbytes', format: 'KB' },
-  { name: 'mebibytes', id: 'mbytes', format: 'MiB' },
-  { name: 'megabytes', id: 'decmbytes', format: 'MB' },
-  { name: 'gibibytes', id: 'gbytes', format: 'GiB' },
-  { name: 'gigabytes', id: 'decgbytes', format: 'GB' },
+  { name: 'kibibytes', id: 'kbytes', format: 'KiB', family: 'data', factor: KiB },
+  { name: 'kilobytes', id: 'deckbytes', format: 'KB', family: 'data-si', factor: 1e3 },
+  { name: 'mebibytes', id: 'mbytes', format: 'MiB', family: 'data', factor: KiB ** 2 },
+  { name: 'megabytes', id: 'decmbytes', format: 'MB', family: 'data-si', factor: 1e6 },
+  { name: 'gibibytes', id: 'gbytes', format: 'GiB', family: 'data', factor: KiB ** 3 },
+  { name: 'gigabytes', id: 'decgbytes', format: 'GB', family: 'data-si', factor: 1e9 },
   { name: 'packets/sec', id: 'pps', format: 'p/s' },
   { name: 'bytes/sec(IEC)', id: 'binBps', format: 'B/s' },
   { name: 'bytes/sec(SI)', id: 'Bps', format: 'B/s' },
@@ -41,15 +52,15 @@ const units: Unit[] = [
   { name: 'Fahrenheit (°F)', id: 'fahrenheit', format: '°F' },
   { name: 'Kelvin (K)', id: 'kelvin', format: 'K' },
   { name: 'Hertz (Hz)', id: 'hertz', format: 'Hz' },
-  { name: 'nanoseconds (ns)', id: 'ns', format: 'ns' },
-  { name: 'microseconds (µs)', id: 'µs', format: 'µs' },
-  { name: 'milliseconds (ms)', id: 'ms', format: 'ms' },
-  { name: 'seconds (s)', id: 's', format: 's' },
-  { name: 'minutes (m)', id: 'm', format: 'm' },
-  { name: 'hours (h)', id: 'h', format: 'h' },
-  { name: 'days (d)', id: 'd', format: 'd' },
-  { name: 'duration (ms)', id: 'dtdurationms', format: 'ms' },
-  { name: 'duration (s)', id: 'dtdurations', format: 's' },
+  { name: 'nanoseconds (ns)', id: 'ns', format: 'ns', family: 'time', factor: 1e-9 },
+  { name: 'microseconds (µs)', id: 'µs', format: 'µs', family: 'time', factor: 1e-6 },
+  { name: 'milliseconds (ms)', id: 'ms', format: 'ms', family: 'time', factor: 1e-3 },
+  { name: 'seconds (s)', id: 's', format: 's', family: 'time', factor: 1 },
+  { name: 'minutes (m)', id: 'm', format: 'm', family: 'time', factor: 60 },
+  { name: 'hours (h)', id: 'h', format: 'h', family: 'time', factor: 3600 },
+  { name: 'days (d)', id: 'd', format: 'd', family: 'time', factor: 86400 },
+  { name: 'duration (ms)', id: 'dtdurationms', format: 'ms', family: 'time', factor: 1e-3 },
+  { name: 'duration (s)', id: 'dtdurations', format: 's', family: 'time', factor: 1 },
   { name: 'counts/sec (cps)', id: 'cps', format: 'c/s' },
   { name: 'ops/sec (ops)', id: 'ops', format: 'ops/s' },
   { name: 'requests/sec (rps)', id: 'reqps', format: 'req/s' },
@@ -100,6 +111,23 @@ const formatNumber = (value: number): string => {
     return parseFloat(value.toFixed(2)).toString();
   }
 };
+
+/**
+ * The family a unit code shares an axis with.
+ *
+ * An unknown or family-less code becomes its own family, keyed by the code itself, so
+ * `reqps` and `ops` never silently share one axis and a Grafana code this table has
+ * never heard of still gets an axis of its own rather than being lumped in with
+ * whatever came first.
+ */
+export const unitFamily = (unitId?: string | null): string => {
+  if (!unitId) return '';
+  return units.find((u) => u.id === unitId)?.family ?? unitId;
+};
+
+/** Multiplier from a unit code to its family's base unit. 1 for a family of one. */
+export const unitFactor = (unitId?: string | null): number =>
+  (unitId ? units.find((u) => u.id === unitId)?.factor ?? 1 : 1);
 
 /**
  * `percentunit` is stored 0.0-1.0 but always read as 0-100%. Every other unit is

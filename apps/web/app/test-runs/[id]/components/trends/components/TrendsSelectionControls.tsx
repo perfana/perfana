@@ -16,21 +16,19 @@ import {
   TIME_RANGE_OPTIONS,
   EVALUATE_TYPE_OPTIONS,
 } from '../types';
-import { TestRun } from '@/types/test-runs';
-import MetricSeriesCascade from '../../shared/MetricSeriesCascade';
-import type { SeriesPick } from '../../shared/metric-options';
 
+/**
+ * The view controls above the Trends chart: time range and aggregation.
+ *
+ * The dashboards → panels → series cascade used to sit here, permanently open above the
+ * chart. It is in the chart card's `+ add series` slot now, so the chart is the first
+ * thing on screen rather than the third.
+ */
 interface TrendsSelectionControlsProps {
-  // Dashboards → panels → series cascade
-  allDashboards: ApplicationDashboard[];
-  dashboardsLoading: boolean;
-  testRun: TestRun | null;
   addedSeries: TrendsSeries[];
-  onAddSeries: (picks: SeriesPick[]) => void;
   /** First picked dashboard/panel, kept for preset saving. */
   selectedDashboard: ApplicationDashboard | null;
   selectedMetric: Panel | null;
-  onPrimaryChange: (dashboard: ApplicationDashboard | null, panel: Panel | null) => void;
 
   // Time range
   timeRange: (typeof TIME_RANGE_OPTIONS)[number];
@@ -47,14 +45,9 @@ interface TrendsSelectionControlsProps {
 }
 
 export function TrendsSelectionControls({
-  allDashboards,
-  dashboardsLoading,
-  testRun,
   addedSeries,
-  onAddSeries,
   selectedDashboard,
   selectedMetric,
-  onPrimaryChange,
   timeRange,
   onTimeRangeChange,
   customTimeRange,
@@ -65,19 +58,6 @@ export function TrendsSelectionControls({
 }: TrendsSelectionControlsProps) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <MetricSeriesCascade
-        card="trends"
-        allDashboards={allDashboards}
-        dashboardsLoading={dashboardsLoading}
-        testRun={testRun}
-        addedSeries={addedSeries}
-        onAddSeries={onAddSeries}
-        onPrimaryChange={onPrimaryChange}
-        // Every percentile panel is its own trend here, and the URL panels have no
-        // per-run statistics to trend.
-        panelListOptions={{ collapseRtPanels: false, includeUrlPanels: false }}
-      />
-
       {/* Time Range and Evaluate Type Row */}
       {addedSeries.length > 0 && (
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'flex-start' }}>

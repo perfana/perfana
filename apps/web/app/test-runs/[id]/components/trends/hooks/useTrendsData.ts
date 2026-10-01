@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { TestRun } from '@/types/test-runs';
 import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
+import { nextFreeSlot } from '@/lib/charts';
 import {
   ALL_AGGREGATED_OPTION,
   isAllAggregatedDashboard,
@@ -324,6 +325,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
         metricName: isAggregated ? buildAggregatedMetricName(panel.title) : metricName,
         source: panel.source,
         yAxisFormat: panel.yAxesFormat,
+        panelYAxisFormat: panel.yAxesFormat,
         metricsSourceId: panel.metricsSourceId || dashboard.metrics_source_id,
         isAggregated,
       };
@@ -339,6 +341,12 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     );
 
     if (filteredNewSeries.length > 0) {
+      // Lowest free colour slot each, so removing one never recolours the others.
+      const taken = addedSeries.map(s => s.colorSlot);
+      for (const series of filteredNewSeries) {
+        series.colorSlot = nextFreeSlot(taken);
+        taken.push(series.colorSlot);
+      }
       setSelectedSource(filteredNewSeries[0]!.source);
       // Preset saving needs one dashboard/panel; the cascade may have been cleared since.
       setSelectedDashboard(prev => prev ?? picks[0]!.dashboard);
@@ -360,6 +368,12 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   }, []);
 
   // Handle updating series unit
+  const handleToggleSeriesVisibility = useCallback((seriesId: string) => {
+    setAddedSeries(prev => prev.map(series =>
+      series.id === seriesId ? { ...series, hidden: !series.hidden } : series
+    ));
+  }, []);
+
   const handleUpdateSeriesUnit = useCallback((seriesId: string, newUnit: string | null) => {
     setAddedSeries(prev => prev.map(series =>
       series.id === seriesId
@@ -419,6 +433,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     handleRemoveSeries,
     handleClearAllSeries,
     handleUpdateSeriesUnit,
+    handleToggleSeriesVisibility,
     handleTimeRangeChange,
     handleCustomTimeRangeChange,
     handleEvaluateTypeChange,

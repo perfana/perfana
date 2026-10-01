@@ -14,8 +14,8 @@ import {
 } from '../types';
 import { TestRun } from '@/types/test-runs';
 import { getTestRunDisplayText, getTestRunSecondaryInfo } from '../utils/compare-utils';
-import MetricSeriesCascade from '../../shared/MetricSeriesCascade';
 import type { PanelOption, SeriesPick } from '../utils/metric-options';
+import { SeriesCascadePanel } from '@/components/charts';
 
 export type { SeriesPick };
 
@@ -120,7 +120,7 @@ export function CompareSelectionPanel({
         </Typography>
       )}
 
-      <MetricSeriesCascade
+      <SeriesCascadePanel
         card="compare"
         allDashboards={allDashboards}
         dashboardsLoading={dashboardsLoading}

@@ -38,7 +38,9 @@ export function convertToSeriesConfigDto(series: SeriesConfig): APISeriesConfig 
     metricName: series.metricName,
     source: series.source,
     dashboardLabel: series.dashboardLabel,
-    yAxisFormat: series.yAxisFormat
+    yAxisFormat: series.yAxisFormat,
+    colorSlot: series.colorSlot,
+    hidden: series.hidden
   };
 }
 
@@ -55,6 +57,11 @@ export function convertFromAPISeriesConfig(apiSeries: APISeriesConfig): SeriesCo
     panelTitle: apiSeries.panelTitle,
     metricName: apiSeries.metricName || '',
     source: apiSeries.source || 'grafana',
-    yAxisFormat: apiSeries.yAxisFormat
+    yAxisFormat: apiSeries.yAxisFormat,
+    // The panel's own unit is not stored — a preset records the unit the user chose. With
+    // nothing to compare against, a loaded series shows no override dot until the panel
+    // is re-picked, which is better than claiming an override that may not exist.
+    colorSlot: apiSeries.colorSlot,
+    hidden: apiSeries.hidden
   };
 }

@@ -7,26 +7,26 @@
  *
  * One dashboard and one panel at a time was six trips through the dropdowns to plot
  * six panels, and each trip had to be finished with "Add series" before the next.
+ *
+ * Presentation is the Analyst standard's `SeriesCascadePanel`: three inline scrolling
+ * columns instead of three Autocomplete popups. The popups hid the levels behind each
+ * other — you could not see which panels a dashboard had while choosing the dashboard —
+ * and each one closed over the chart it was feeding. Every behaviour below is unchanged:
+ * the fetches, the card-link preselect and its once-per-page-load consumption, dropping
+ * child selections when a parent is unpicked, the already-added greying, and the counts.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import {
-  Box,
-  Typography,
-  Autocomplete,
-  TextField,
-  CircularProgress,
-  Button,
-  Chip,
-  ListSubheader,
-} from '@mui/material';
+import { Box, Typography, Checkbox, CircularProgress, Button } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
 import { getSourceDisplayInfo } from '@/lib/metrics-source-utils';
+import { MONO, SIZE, chartTheme, unitText, type ChartMode } from '@/lib/charts';
 import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName, isAllAggregatedDashboard, rtKeeperPanelId } from '@/lib/aggregated-perf-series';
 import HostLabelChips from '@/components/HostLabelChips';
 import {
   ApplicationDashboard,
+  PERFORMANCE_METRICS_PANEL_UNITS,
   PanelListOptions,
   PanelOption,
   SeriesOption,
@@ -61,16 +61,19 @@ interface MetricSeriesCascadeProps {
   panelListOptions?: PanelListOptions;
   /** Which card this is, so a `?card=…&dashboard=…&panel=…&metric=…` link preselects it. */
   card: LinkableCard;
+  /** Closes the panel without adding. Omitted where the cascade is always on screen. */
+  onCancel?: () => void;
+  mode?: ChartMode;
 }
-
-// Trends/Graphs use default-size inputs with 56px buttons; 92 stops "Select all" from
-// resizing when it toggles to "Clear".
-const PICKER_BUTTON_SX = { height: '56px', minWidth: 92, flexShrink: 0 } as const;
 
 // ponytail: a link is applied once per page load, not once per mount. The card unmounts on
 // every tab switch and collapse while the URL keeps its params, so without this the picks
 // the user cleared come back on re-expand. Module state resets on reload, which re-applies.
 const consumedLinks = new Set<string>();
+
+const COLUMN_HEIGHT = 208;
+
+const plural = (n: number, word: string) => `${word}${n === 1 ? '' : 's'}`;
 
 export function MetricSeriesCascade({
   allDashboards,
@@ -81,7 +84,10 @@ export function MetricSeriesCascade({
   onPrimaryChange,
   panelListOptions,
   card,
+  onCancel,
+  mode = 'light',
 }: MetricSeriesCascadeProps) {
+  const theme = chartTheme(mode);
   const [selectedDashboards, setSelectedDashboards] = useState<ApplicationDashboard[]>([]);
   const [panelOptions, setPanelOptions] = useState<PanelOption[]>([]);
   const [panelsLoading, setPanelsLoading] = useState(false);
@@ -171,6 +177,7 @@ export function MetricSeriesCascade({
       metricName: s.metricName,
     })));
     setSelectedSeries([]);
+    onCancel?.();
   };
 
   // Preselect from a row's "Open in …" link: one step per level, each as its options land,
@@ -230,231 +237,410 @@ export function MetricSeriesCascade({
     return counts;
   }, [panelOptions]);
 
+  const pickedDashboardIds = new Set(selectedDashboards.map((d) => d.id));
+  const pickedPanelKeys = new Set(selectedPanels.map(panelKey));
+  const pickedSeriesKeys = new Set(selectedSeries.map(seriesKey));
+
+  const toggleDashboard = (dashboard: ApplicationDashboard) => {
+    disarm();
+    pickDashboards(
+      pickedDashboardIds.has(dashboard.id)
+        ? selectedDashboards.filter((d) => d.id !== dashboard.id)
+        : [...selectedDashboards, dashboard],
+    );
+  };
+  const togglePanel = (panel: PanelOption) => {
+    disarm();
+    pickPanels(
+      pickedPanelKeys.has(panelKey(panel))
+        ? selectedPanels.filter((p) => panelKey(p) !== panelKey(panel))
+        : [...selectedPanels, panel],
+    );
+  };
+  const toggleSeries = (series: SeriesOption) => {
+    disarm();
+    setSelectedSeries(
+      pickedSeriesKeys.has(seriesKey(series))
+        ? selectedSeries.filter((s) => seriesKey(s) !== seriesKey(series))
+        : [...selectedSeries, series],
+    );
+  };
+
+  // Dashboards by source (Grafana / Dynatrace / Performance test), panels by dashboard,
+  // series by dashboard/panel — the same grouping the Autocompletes used.
+  const dashboardGroups = groupBy(allDashboards, (d) => getSourceDisplayInfo(d).groupLabel);
+  const panelGroups = groupBy(panelOptions, (p) => p.dashboardLabel);
+  const seriesGroups = groupBy(seriesOptions, (s) => `${s.panel.dashboardLabel} / ${s.panel.title}`);
+
+  const panelUnitOf = (panel: PanelOption) =>
+    unitText(
+      panel.yAxesFormat
+      ?? (panel.source === 'performance-metrics' ? PERFORMANCE_METRICS_PANEL_UNITS[panel.id] : undefined),
+    );
+
   return (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 1.5 }}>
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '2 1 260px' }}>
-        <Autocomplete
-          multiple
-          // Picking dashboards/panels/series is almost never one choice, and a popup that
-          // closes after each made "these six" six trips through the dropdown.
-          disableCloseOnSelect
-          limitTags={4}
-          options={allDashboards}
-          getOptionLabel={(option) => option.dashboard_label || ''}
-          isOptionEqualToValue={(option, value) => option.id === value.id}
-          value={selectedDashboards}
-          onChange={(_, newValue) => { disarm(); pickDashboards(newValue); }}
-          loading={dashboardsLoading}
-          groupBy={(option) => getSourceDisplayInfo(option).groupLabel}
-          sx={{ flex: 1 }}
-          renderGroup={(params) => {
-            const dashboardInGroup = allDashboards.find(
-              d => getSourceDisplayInfo(d).groupLabel === params.group
-            );
-            const color = dashboardInGroup
-              ? getSourceDisplayInfo(dashboardInGroup).color
-              : '#9E9E9E';
-            return (
-              <li key={params.key}>
-                <ListSubheader
-                  component="div"
-                  sx={{
-                    fontWeight: 700,
-                    color,
-                    backgroundColor: 'background.paper',
-                    lineHeight: '36px',
-                  }}
-                >
-                  {params.group}
-                </ListSubheader>
-                <ul style={{ padding: 0 }}>{params.children}</ul>
-              </li>
-            );
-          }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Dashboards"
-              variant="outlined"
-              fullWidth
-              helperText={dashboardsLoading ? 'Loading dashboards…' : `${allDashboards.length} available`}
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {dashboardsLoading ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key: _key, ...otherProps } = props;
-            const { color } = getSourceDisplayInfo(option);
-            return (
-              <Box component="li" key={option.id} {...otherProps} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box aria-hidden="true" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color, flexShrink: 0 }} />
-                <Typography variant="body2">{option.dashboard_label}</Typography>
-                <HostLabelChips labels={option.hostLabels} />
-              </Box>
-            );
-          }}
-        />
-        <Button
-          size="small"
-          onClick={() => pickDashboards(allDashboardsPicked ? [] : [...allDashboards])}
-          disabled={allDashboards.length === 0}
-          variant="outlined"
-          sx={PICKER_BUTTON_SX}
+    <Box
+      sx={{
+        border: `1px solid ${theme.divider}`,
+        borderRadius: `${SIZE.radius}px`,
+        overflow: 'hidden',
+        bgcolor: theme.paper,
+      }}
+    >
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.15fr' }}>
+        <Column
+          theme={theme}
+          label="Dashboards"
+          heading={`dashboards ${allDashboards.length}`}
+          caption={dashboardsLoading ? 'Loading dashboards…' : `${allDashboards.length} available`}
+          allPicked={allDashboardsPicked}
+          onToggleAll={() => { disarm(); pickDashboards(allDashboardsPicked ? [] : [...allDashboards]); }}
+          toggleDisabled={allDashboards.length === 0}
+          divider
         >
-          {allDashboardsPicked ? 'Clear' : 'Select all'}
-        </Button>
-      </Box>
-
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '2 1 260px' }}>
-        <Autocomplete
-          multiple
-          disableCloseOnSelect
-          limitTags={4}
-          options={panelOptions}
-          groupBy={(o) => o.dashboardLabel}
-          getOptionLabel={(o) => o.title}
-          isOptionEqualToValue={(o, v) => panelKey(o) === panelKey(v)}
-          value={selectedPanels}
-          onChange={(_, newValue) => { disarm(); pickPanels(newValue); }}
-          disabled={selectedDashboards.length === 0}
-          loading={panelsLoading}
-          sx={{ flex: 1 }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Panels"
-              variant="outlined"
-              fullWidth
-              helperText={
-                selectedDashboards.length === 0
-                  ? 'Select a dashboard to see its panels'
-                  : panelsLoading
-                    ? 'Loading panels…'
-                    : `${panelOptions.length} available across ${dashboardCounts.size} dashboard${dashboardCounts.size === 1 ? '' : 's'}`
-              }
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {panelsLoading ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
-          )}
-        />
-        <Button
-          size="small"
-          onClick={() => pickPanels(allPanelsPicked ? [] : [...panelOptions])}
-          disabled={panelOptions.length === 0}
-          variant="outlined"
-          sx={PICKER_BUTTON_SX}
-        >
-          {allPanelsPicked ? 'Clear' : 'Select all'}
-        </Button>
-      </Box>
-
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flex: '3 1 480px' }}>
-        <Autocomplete
-          multiple
-          disableCloseOnSelect
-          limitTags={8}
-          options={seriesOptions}
-          groupBy={(o) => `${o.panel.dashboardLabel} / ${o.panel.title}`}
-          getOptionLabel={(o) => o.metricName}
-          isOptionEqualToValue={(o, v) => seriesKey(o) === seriesKey(v)}
-          value={selectedSeries}
-          onChange={(_, newValue) => { disarm(); setSelectedSeries(newValue); }}
-          disabled={selectedPanels.length === 0}
-          loading={seriesLoading}
-          sx={{ flex: 1 }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Series"
-              variant="outlined"
-              fullWidth
-              helperText={
-                selectedPanels.length === 0
-                  ? 'Select a panel to see its series'
-                  : seriesLoading
-                    ? 'Loading series…'
-                    : `${seriesOptions.length} available from ${selectedPanels.length} panel${selectedPanels.length === 1 ? '' : 's'}`
-              }
-              InputProps={{
-                ...params.InputProps,
-                endAdornment: (
-                  <>
-                    {seriesLoading ? <CircularProgress size={20} /> : null}
-                    {params.InputProps.endAdornment}
-                  </>
-                ),
-              }}
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key, ...otherProps } = props;
-            const already = isAdded(option);
-            return (
-              <Box component="li" key={key} {...otherProps} sx={{
-                opacity: already ? 0.5 : 1,
-                backgroundColor: already ? 'action.disabledBackground' : 'inherit'
-              }}>
-                <Typography variant="body2">
-                  {option.metricName}
-                  {already && (
-                    <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-                      (already added)
-                    </Typography>
-                  )}
-                </Typography>
-              </Box>
-            );
-          }}
-          renderTags={(value, getTagProps) =>
-            value.map((option, index) => {
-              const tagProps = getTagProps({ index });
-              return (
-                // Default chip: the gradient version hardcoded primary.dark on a translucent
-                // blue, which is close to unreadable on the dark theme.
-                <Chip
-                  {...tagProps}
-                  key={seriesKey(option)}
-                  label={option.metricName}
-                  size="small"
+          {dashboardGroups.map(([group, dashboards]) => (
+            <Group key={group} label={group} color={getSourceDisplayInfo(dashboards[0]).color}>
+              {dashboards.map((dashboard) => (
+                <Row
+                  key={dashboard.id}
+                  theme={theme}
+                  checked={pickedDashboardIds.has(dashboard.id)}
+                  onToggle={() => toggleDashboard(dashboard)}
+                  label={dashboard.dashboard_label}
+                  trailing={
+                    <>
+                      <HostLabelChips labels={dashboard.hostLabels} />
+                      {dashboardCounts.has(dashboard.dashboard_label) && (
+                        <Hint theme={theme}>{dashboardCounts.get(dashboard.dashboard_label)}</Hint>
+                      )}
+                    </>
+                  }
                 />
-              );
-            })
+              ))}
+            </Group>
+          ))}
+        </Column>
+
+        <Column
+          theme={theme}
+          label="Panels"
+          heading={`panels ${panelOptions.length}`}
+          caption={
+            selectedDashboards.length === 0
+              ? 'Select a dashboard to see its panels'
+              : panelsLoading
+                ? 'Loading panels…'
+                : `${panelOptions.length} available across ${dashboardCounts.size} ${plural(dashboardCounts.size, 'dashboard')}`
           }
-        />
-        <Button
-          size="small"
-          onClick={() => setSelectedSeries(allSeriesPicked ? [] : [...seriesOptions])}
-          disabled={seriesOptions.length === 0}
-          variant="outlined"
-          sx={PICKER_BUTTON_SX}
+          allPicked={allPanelsPicked}
+          onToggleAll={() => { disarm(); pickPanels(allPanelsPicked ? [] : [...panelOptions]); }}
+          toggleDisabled={panelOptions.length === 0}
+          loading={panelsLoading}
+          empty={selectedDashboards.length === 0}
+          divider
         >
-          {allSeriesPicked ? 'Clear' : 'Select all'}
-        </Button>
-        <Button
-          variant="contained"
+          {panelGroups.map(([group, panels]) => (
+            <Group key={group} label={group} color={theme.faint}>
+              {panels.map((panel) => (
+                <Row
+                  key={panelKey(panel)}
+                  theme={theme}
+                  checked={pickedPanelKeys.has(panelKey(panel))}
+                  onToggle={() => togglePanel(panel)}
+                  label={panel.title}
+                  trailing={panelUnitOf(panel) ? <Hint theme={theme}>{panelUnitOf(panel)}</Hint> : null}
+                />
+              ))}
+            </Group>
+          ))}
+        </Column>
+
+        <Column
+          theme={theme}
+          label="Series"
+          heading={`series ${seriesOptions.length}`}
+          caption={
+            selectedPanels.length === 0
+              ? 'Select a panel to see its series'
+              : seriesLoading
+                ? 'Loading series…'
+                : `${seriesOptions.length} available from ${selectedPanels.length} ${plural(selectedPanels.length, 'panel')}`
+          }
+          allPicked={allSeriesPicked}
+          onToggleAll={() => { disarm(); setSelectedSeries(allSeriesPicked ? [] : [...seriesOptions]); }}
+          toggleDisabled={seriesOptions.length === 0}
+          loading={seriesLoading}
+          empty={selectedPanels.length === 0}
+        >
+          {seriesGroups.map(([group, options]) => (
+            <Group key={group} label={group} color={theme.faint}>
+              {options.map((option) => {
+                const already = isAdded(option);
+                return (
+                  <Row
+                    key={seriesKey(option)}
+                    theme={theme}
+                    checked={pickedSeriesKeys.has(seriesKey(option))}
+                    onToggle={() => toggleSeries(option)}
+                    disabled={already}
+                    label={option.metricName}
+                    trailing={already ? <Hint theme={theme}>added</Hint> : null}
+                  />
+                );
+              })}
+            </Group>
+          ))}
+        </Column>
+      </Box>
+
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1.5,
+          px: 1.25,
+          py: 0.75,
+          bgcolor: theme.plotBg,
+          borderTop: `1px solid ${theme.divider}`,
+        }}
+      >
+        <Typography sx={{ flex: 1, fontFamily: MONO, fontSize: 10, color: theme.faint }} noWrap>
+          {selectedDashboards.length} dashboards · {selectedPanels.length} panels ·{' '}
+          {selectedSeries.length} series selected
+        </Typography>
+        {onCancel && (
+          <Box
+            component="button"
+            type="button"
+            onClick={onCancel}
+            sx={{
+              border: 0,
+              bgcolor: 'transparent',
+              p: 0,
+              cursor: 'pointer',
+              fontFamily: MONO,
+              fontSize: 11,
+              color: theme.faint,
+              '&:hover': { color: theme.muted },
+            }}
+          >
+            cancel
+          </Box>
+        )}
+        <Box
+          component="button"
+          type="button"
           onClick={addPicked}
           disabled={selectedSeries.length === 0}
-          sx={{ height: '56px', px: 3, whiteSpace: 'nowrap', flexShrink: 0 }}
+          sx={{
+            height: 24,
+            px: 1.25,
+            borderRadius: '4px',
+            border: `1px solid ${selectedSeries.length === 0 ? theme.divider : theme.selectedBorder}`,
+            bgcolor: selectedSeries.length === 0 ? 'transparent' : theme.selectedBg,
+            cursor: selectedSeries.length === 0 ? 'default' : 'pointer',
+            fontFamily: MONO,
+            fontSize: 11,
+            fontWeight: 600,
+            color: selectedSeries.length === 0 ? theme.faint : theme.primary,
+          }}
         >
           Add {selectedSeries.length > 0 ? `${selectedSeries.length} ` : ''}series
-        </Button>
+        </Box>
       </Box>
     </Box>
   );
 }
+
+type Theme = ReturnType<typeof chartTheme>;
+
+function groupBy<T>(items: T[], key: (item: T) => string): Array<[string, T[]]> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const k = key(item);
+    const bucket = groups.get(k);
+    if (bucket) bucket.push(item);
+    else groups.set(k, [item]);
+  }
+  return Array.from(groups.entries());
+}
+
+function Column({
+  theme,
+  label,
+  heading,
+  caption,
+  allPicked,
+  onToggleAll,
+  toggleDisabled,
+  loading,
+  empty,
+  divider,
+  children,
+}: {
+  theme: Theme;
+  label: string;
+  heading: string;
+  caption: string;
+  allPicked: boolean;
+  onToggleAll: () => void;
+  toggleDisabled: boolean;
+  loading?: boolean;
+  empty?: boolean;
+  divider?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    // The aria-label is the handle every test and screen reader reaches this level by.
+    <Box
+      role="group"
+      aria-label={label}
+      sx={{
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        borderRight: divider ? `1px solid ${theme.divider}` : 'none',
+      }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1.25, pt: 0.75 }}>
+        <Typography sx={{ flex: 1, fontFamily: MONO, fontSize: 10, fontWeight: 600, color: theme.muted }} noWrap>
+          {heading}
+        </Typography>
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={onToggleAll}
+          disabled={toggleDisabled}
+          sx={{
+            minWidth: 0,
+            px: 0.75,
+            py: 0,
+            border: 0,
+            fontFamily: MONO,
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: 'none',
+            color: theme.primary,
+            '&:hover': { border: 0, bgcolor: theme.hover },
+          }}
+        >
+          {allPicked ? 'Clear' : 'Select all'}
+        </Button>
+      </Box>
+      <Typography sx={{ px: 1.25, pb: 0.5, fontFamily: MONO, fontSize: 10, color: theme.faint }} noWrap>
+        {caption}
+      </Typography>
+      <Box sx={{ height: COLUMN_HEIGHT, overflowY: 'auto', overflowX: 'hidden', px: 0.5, pb: 0.5 }}>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', pt: 2 }}>
+            <CircularProgress size={16} />
+          </Box>
+        ) : empty ? null : (
+          children
+        )}
+      </Box>
+    </Box>
+  );
+}
+
+function Group({
+  label,
+  color,
+  children,
+}: {
+  label: string;
+  color: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Box sx={{ mb: 0.5 }}>
+      <Typography
+        sx={{
+          px: 0.75,
+          fontFamily: MONO,
+          fontSize: 9,
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+          color,
+        }}
+        noWrap
+        title={label}
+      >
+        {label}
+      </Typography>
+      {children}
+    </Box>
+  );
+}
+
+function Row({
+  theme,
+  checked,
+  onToggle,
+  label,
+  trailing,
+  disabled,
+}: {
+  theme: Theme;
+  checked: boolean;
+  onToggle: () => void;
+  label: string;
+  trailing?: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.5,
+        px: 0.5,
+        borderRadius: '3px',
+        opacity: disabled ? 0.45 : 1,
+        '&:hover': { bgcolor: disabled ? 'transparent' : theme.hover },
+      }}
+    >
+      <Checkbox
+        size="small"
+        checked={checked}
+        disabled={disabled}
+        onChange={onToggle}
+        inputProps={{ 'aria-label': label }}
+        sx={{ p: 0.25, color: theme.faint, '&.Mui-checked': { color: theme.primary } }}
+      />
+      <Typography
+        onClick={disabled ? undefined : onToggle}
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          fontFamily: MONO,
+          fontSize: 11,
+          color: theme.text,
+          cursor: disabled ? 'default' : 'pointer',
+        }}
+        noWrap
+        title={label}
+      >
+        {label}
+      </Typography>
+      {trailing}
+    </Box>
+  );
+}
+
+function Hint({ theme, children }: { theme: Theme; children: React.ReactNode }) {
+  return (
+    <Typography
+      component="span"
+      sx={{ flexShrink: 0, fontFamily: MONO, fontSize: 9, color: theme.faint }}
+    >
+      {children}
+    </Typography>
+  );
+}
+
+/** The Analyst standard's name for the same component. */
+export const SeriesCascadePanel = MetricSeriesCascade;
 
 export default MetricSeriesCascade;

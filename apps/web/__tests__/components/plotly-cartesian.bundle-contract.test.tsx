@@ -220,7 +220,12 @@ describe('plotly cartesian bundle — source sweep', () => {
 
   it('finds the call sites it claims to be sweeping', () => {
     // A sweep that silently matches nothing passes forever. Anchor it.
-    const withPlot = FILES.filter((f) => /@\/components\/plotly-cartesian/.test(f.text));
+    //
+    // Either import counts: `ResponsivePlot` is a thin wrapper that pulls in the same
+    // cartesian module through `next/dynamic`, and the Analyst chart cards reach Plotly
+    // through it rather than importing the bundle themselves.
+    const withPlot = FILES.filter((f) =>
+      /@\/components\/(plotly-cartesian|ResponsivePlot)/.test(f.text));
     expect(withPlot.length).toBeGreaterThanOrEqual(10);
 
     const withTraceTypes = FILES.filter((f) => /\btype\s*:\s*['"](scatter|bar)['"]/.test(f.text));
