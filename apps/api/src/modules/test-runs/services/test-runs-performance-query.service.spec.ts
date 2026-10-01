@@ -1605,6 +1605,39 @@ const chainRow = (
         expect(limitAt).toBeGreaterThan(-1);
         expect(filterAt).toBeGreaterThan(limitAt);
       });
+
+      it('keeps transaction_name inside the bounded subquery, next to the LIMIT', async () => {
+        // What actually bounds this scan is idx_requests_raw_run_tx_time (test_run_id,
+        // transaction_name, time) — see migration 1813. That only holds if both equality
+        // predicates stay INSIDE the innermost `FROM requests_raw` subquery, next to
+        // ORDER BY time / LIMIT. Moving transaction_name out to a post-filter (the way the
+        // parallel_group/chain filter deliberately sits outside) would make the LIMIT bound
+        // nothing: a transaction with few rows in a huge run never fills the LIMIT, so
+        // ORDER BY time with no predicate scans every chunk of the hypertable hunting for
+        // matches.
+        mockQuerySequence([RAW_SAMPLER_ROW], []);
+
+        await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
+
+        const groupQuery = (testRunRepo.query as jest.Mock).mock.calls
+          .map((c) => String(c[0]))
+          .find((sql) => sql.includes('parent_controllers')) as string;
+        expect(groupQuery).toBeDefined();
+
+        const fromAt = groupQuery.indexOf('FROM requests_raw');
+        const transactionNameAt = groupQuery.indexOf('transaction_name = $2');
+        const limitAt = groupQuery.indexOf('LIMIT');
+        const closeAt = groupQuery.indexOf(') rr');
+
+        expect(fromAt).toBeGreaterThan(-1);
+        expect(transactionNameAt).toBeGreaterThan(-1);
+        expect(closeAt).toBeGreaterThan(-1);
+        // transaction_name sits between the inner FROM and its own LIMIT/closing paren —
+        // i.e. it is an index condition on the bounded scan, not an outer post-filter.
+        expect(transactionNameAt).toBeGreaterThan(fromAt);
+        expect(transactionNameAt).toBeLessThan(limitAt);
+        expect(limitAt).toBeLessThan(closeAt);
+      });
     });
 
     describe('sinceMinutes window filter', () => {

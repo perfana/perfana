@@ -366,7 +366,7 @@ export class TestRunsPerformanceQueryService {
    * so a row arriving outside the recorded window (the 36s-late case above) is
    * one the rollup would aggregate but a bounded probe would miss, stranding
    * the run on the slow path. Unbounded is cheap here — `test_run_id` LEADS
-   * `idx_requests_raw_test_run_id_time` and is the `compress_segmentby` key, so
+   * `idx_requests_raw_test_run_time` and is the `compress_segmentby` key, so
    * a miss is an index-only descent (measured 1.9ms, `Heap Fetches: 0`), not
    * the every-chunk scan the "LIMIT bounds rows matched, not scanned" pitfall
    * describes — that one applies to a filter with no leading index.
@@ -1478,13 +1478,24 @@ export class TestRunsPerformanceQueryService {
       // Bounded scan. A plain DISTINCT over requests_raw would scan every row this
       // transaction produced — the raw-hypertable cost the rollup and CAGG paths exist to
       // avoid (60s+ on a 10M-row run). The chain is a property of the test plan, so it is
-      // identical in every iteration: the first slice of rows, walked along the
-      // (test_run_id, time) index, names every chain the transaction has.
+      // identical in every iteration: the first slice of rows names every chain the
+      // transaction has.
       //
-      // The LIMIT sits INSIDE the subquery and the chain filter OUTSIDE it, so the bound is on
-      // rows *scanned*, not rows *matched*. Filtering first would make a run with no tagged
-      // requests — every run recorded before this column existed — scan the whole transaction
-      // hunting for matches that do not exist.
+      // WHAT BOUNDS THIS IS THE INDEX, NOT THE LIMIT. `idx_requests_raw_run_tx_time`
+      // (test_run_id, transaction_name, time) makes both equality predicates index
+      // conditions and hands back rows already ordered by time, so the scan touches only
+      // this transaction's rows. Without it the LIMIT bounds nothing: `transaction_name`
+      // sits INSIDE the subquery next to the LIMIT, a transaction can hold 680 rows in a
+      // 4-million-row run, so the LIMIT never fills and `ORDER BY time` with no time
+      // predicate sends ChunkAppend through every chunk of the hypertable — measured at
+      // 19,270 ms and 3.9 M buffers against 13 ms once the predicate is index-served
+      // (production, 2026-10-01; see migration 1813). An earlier version of this comment
+      // claimed the bound was on rows *scanned* because the chain filter sits outside the
+      // subquery; only the chain filter is outside, and it is not what costs anything.
+      //
+      // Keep the chain filter outside. A run with no tagged requests — every run recorded
+      // before this column existed — would otherwise scan the whole transaction hunting for
+      // matches that do not exist.
       //
       // Two shapes, one result. `source_element_path` is where the request sits in the plan and
       // ENDS AT THE SAMPLER, so its last entry is dropped here — the table already has a row for
