@@ -157,9 +157,17 @@ export function useGraphsPresets({
       // Convert series config to DTO format (camelCase for API validation)
       const seriesConfigDto = addedSeries.map(convertToSeriesConfigDto);
 
-      // Check if a preset with the same name and scope already exists
+      // Check if a preset with the same name and scope already exists.
+      //
+      // `presets` is what findAll returned, which for a regular user is
+      // `own OR isGlobal` — so it contains OTHER people's global presets. Matching on
+      // name alone meant saving a global preset whose name collided with someone
+      // else's PATCHed their row: a 403 for a regular user (reported only as the
+      // generic failure toast), but a global admin's PATCH succeeded and silently
+      // overwrote it. Only ever upsert over a preset the caller owns.
       const existingPreset = presets.find(p =>
         p.name === formData.name &&
+        p.userId === currentUserId &&
         p.isGlobal === formData.is_global &&
         (formData.is_global || p.testRunId === formData.test_run_id)
       );
@@ -175,11 +183,12 @@ export function useGraphsPresets({
           headers: {
             'Content-Type': 'application/json',
           },
+          // No testRunId: UpdateGraphPresetDto omits it, so sending it is a silent
+          // no-op that reads like a re-scope.
           body: JSON.stringify({
             name: formData.name,
             description: formData.description,
             seriesConfig: seriesConfigDto,
-            testRunId: formData.test_run_id,
             isGlobal: formData.is_global
           }),
         });
@@ -216,7 +225,7 @@ export function useGraphsPresets({
     } finally {
       setPresetSaving(false);
     }
-  }, [addedSeries, presets, showToast, fetchPresets]);
+  }, [addedSeries, presets, currentUserId, showToast, fetchPresets]);
 
   /**
    * Handle deleting a preset

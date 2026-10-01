@@ -67,7 +67,7 @@ export default function SaveGraphPresetModal({
     name: '',
     description: '',
     series_config: [],
-    test_run_id: undefined,
+    test_run_id: currentTestRunId,
     is_global: true
   });
 
@@ -84,11 +84,13 @@ export default function SaveGraphPresetModal({
         name: suggestedName,
         description: suggestedDescription,
         series_config: currentSeriesConfig,
-        test_run_id: undefined,
+        // Always sent, even for a global preset: the API resolves the owning system
+        // from it, and a preset with no run used to be stamped with an arbitrary one.
+        test_run_id: currentTestRunId,
         is_global: true
       });
     }
-  }, [open, currentSeriesConfig, defaultName]);
+  }, [open, currentSeriesConfig, defaultName, currentTestRunId]);
 
   const handleInputChange = (field: keyof GraphPresetFormData, value: unknown) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -99,11 +101,10 @@ export default function SaveGraphPresetModal({
   };
 
   const handleScopeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const isTestRunSpecific = event.target.value === 'test_run';
+    // test_run_id is always the current run now — only the scope flag moves.
     setFormData(prev => ({
       ...prev,
-      test_run_id: isTestRunSpecific ? currentTestRunId : undefined,
-      is_global: !isTestRunSpecific
+      is_global: event.target.value !== 'test_run'
     }));
   };
 
@@ -140,7 +141,7 @@ export default function SaveGraphPresetModal({
       name: '',
       description: '',
       series_config: [],
-      test_run_id: undefined,
+      test_run_id: currentTestRunId,
       is_global: true
     });
     setErrors({});
@@ -208,7 +209,7 @@ export default function SaveGraphPresetModal({
                 </Typography>
               </FormLabel>
               <RadioGroup
-                value={formData.test_run_id ? 'test_run' : 'global'}
+                value={formData.is_global ? 'global' : 'test_run'}
                 onChange={handleScopeChange}
               >
                 <FormControlLabel
@@ -217,10 +218,10 @@ export default function SaveGraphPresetModal({
                   label={
                     <Box>
                       <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        Global
+                        All runs of this system
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        Available for all test runs - reusable across your entire project
+                        Available for all test runs of this system under test and environment
                       </Typography>
                     </Box>
                   }

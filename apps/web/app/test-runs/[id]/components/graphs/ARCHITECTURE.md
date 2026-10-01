@@ -151,10 +151,15 @@ POST /graph-presets
       "source": "grafana"
     }
   ],
-  "test_run_id": "optional-test-run-id",
+  "test_run_id": "required-test-run-id",
   "is_global": true
 }
 ```
+
+`test_run_id` is required: it is what the API derives the preset's owning system from.
+`is_global: true` means **every run of that system and environment**, not every system —
+a global preset is matched back to its system through its first series'
+application dashboard. `test_run_id` cannot be changed by a PATCH.
 
 ### Preset Response
 ```json
@@ -163,7 +168,7 @@ POST /graph-presets
   "name": "Response Time Analysis",
   "description": "Key response time metrics across services",
   "series_config": [...],
-  "test_run_id": null,
+  "test_run_id": "the-run-it-was-saved-from",
   "is_global": true,
   "user_id": "user-uuid",
   "created_at": "2024-12-06T17:00:00Z",

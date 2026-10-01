@@ -44,14 +44,20 @@ export interface CreateGraphPresetRequest {
   name: string;
   description?: string;
   seriesConfig: SeriesConfig[];
-  testRunId?: string;
+  testRunId: string;
   isGlobal: boolean;
 }
 
 /**
  * Request payload for updating an existing graph preset
  */
-export interface UpdateGraphPresetRequest extends Partial<CreateGraphPresetRequest> {}
+/**
+ * `testRunId` is deliberately absent: it is what derives a preset's owning system, so
+ * the server's UpdateGraphPresetDto omits it and the global ValidationPipe strips it.
+ * Sending it is a silent no-op, which is worse than not offering it.
+ */
+export interface UpdateGraphPresetRequest
+  extends Partial<Omit<CreateGraphPresetRequest, 'testRunId'>> {}
 
 /**
  * API client for managing graph presets

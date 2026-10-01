@@ -120,11 +120,14 @@ import { GraphPresetsAPI } from '@/lib/graph-presets';
 const presets = await GraphPresetsAPI.getAll(testRunId);
 
 // Create new preset
+// testRunId is required — it is what the preset's owning system is derived from.
+// isGlobal: true means every run of THAT system and environment, not every system.
 const newPreset = await GraphPresetsAPI.create({
   name: 'Response Time Analysis',
   description: 'Key response time metrics',
-  series_config: currentSeries,
-  is_global: true
+  seriesConfig: currentSeries,
+  testRunId,
+  isGlobal: true
 });
 
 // Delete preset
