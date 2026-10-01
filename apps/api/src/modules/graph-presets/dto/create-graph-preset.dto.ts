@@ -1,4 +1,4 @@
-import { IsString, IsBoolean, IsOptional, IsArray, IsEnum, ValidateNested, IsNumber, MaxLength } from 'class-validator';
+import { IsString, IsBoolean, IsOptional, IsArray, IsEnum, ValidateNested, IsNumber, MaxLength, IsNotEmpty } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -79,13 +79,13 @@ export class CreateGraphPresetDto {
   @MaxLength(1000)
   description?: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     description: 'Test run ID to associate with this preset',
     example: '550e8400-e29b-41d4-a716-446655440000'
   })
   @IsString()
-  @IsOptional()
-  testRunId?: string;
+  @IsNotEmpty()
+  testRunId!: string;
 
   @ApiProperty({
     description: 'Array of series configurations',

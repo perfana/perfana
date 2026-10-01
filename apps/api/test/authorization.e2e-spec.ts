@@ -389,11 +389,42 @@ describe('Authorization E2E Tests', () => {
 
   describe('Graph Presets with Authorization', () => {
     let presetId: string;
+    let presetTestRunId: string;
+
+    // A preset inherits its organization from this run, so the run has to exist and be
+    // one the caller can reach. The suite truncates test_runs between tests, so seed it
+    // here rather than referencing a bare literal.
+    beforeEach(async () => {
+      presetTestRunId = generateTestRunId('graph-preset');
+      await context.request
+        .post('/api/test')
+        .set(getUserOrg1Headers())
+        .send({
+          systemUnderTest: 'TestService1',
+          testEnvironment: 'production',
+          workload: 'loadTest',
+          testRunId: presetTestRunId,
+          completed: false,
+        })
+        .expect(HttpStatus.OK);
+    });
 
     it('should allow user to create a graph preset', async () => {
+      // `metrics` was never a property of CreateGraphPresetDto; seriesConfig has always
+      // been required, and testRunId became required when a preset gained an owning
+      // system. This suite is not in the preflight gate, so the fixture drifted unnoticed
+      // — it is the only executable statement of this endpoint's contract.
       const preset = {
         name: 'Auth Test Preset',
-        metrics: ['cpu', 'memory', 'latency'],
+        testRunId: presetTestRunId,
+        seriesConfig: [
+          {
+            dashboardId: '550e8400-e29b-41d4-a716-446655440000',
+            dashboardLabel: 'Auth Test Dashboard',
+            panelId: 1,
+            panelTitle: 'Response Time',
+          },
+        ],
         isGlobal: false,
       };
 
@@ -409,8 +440,10 @@ describe('Authorization E2E Tests', () => {
     });
 
     it('should allow user to retrieve their own preset', async () => {
+      // Fail loudly: this used to `return` early, so a create that 400'd left the
+      // following assertions unevaluated and the suite reported green.
       if (!presetId) {
-        return; // Skip if preset wasn't created
+        throw new Error('preset was not created — the create test must run first');
       }
 
       const response = await context.request
@@ -431,14 +464,16 @@ describe('Authorization E2E Tests', () => {
     });
 
     it('should allow user to delete their own preset', async () => {
+      // Fail loudly: this used to `return` early, so a create that 400'd left the
+      // following assertions unevaluated and the suite reported green.
       if (!presetId) {
-        return; // Skip if preset wasn't created
+        throw new Error('preset was not created — the create test must run first');
       }
 
       await context.request
         .delete(`/api/graph-presets/${presetId}`)
         .set(getUserOrg1Headers())
-        .expect(HttpStatus.OK);
+        .expect(HttpStatus.NO_CONTENT);
 
       // Verify it's deleted
       await context.request
