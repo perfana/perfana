@@ -83,15 +83,21 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * migration in the same deploy batch. (It never reaches an application pool:
  * `migrationsRun` is false everywhere and `perfana-migration` exits when done.)
  *
- * ── THE DROP IS THE STEP MOST LIKELY TO FAIL, AND THAT IS FINE ───────────────────
+ * ── THE DROP LOOKS LIKE THE RISKIEST STATEMENT HERE, AND MEASURES OTHERWISE ──────
  * `DROP INDEX` needs ACCESS EXCLUSIVE on `requests_raw` and on every chunk index it
- * cascades to. That mode conflicts with plain `SELECT`, so on a table with continuous
- * ingest and read transactions that can legitimately run for minutes (the worker's
- * heavy aggregations budget 540 s; the SUT export streams for GB) losing the 5 s race
- * is an ordinary outcome, not a crisis. Expect this migration to fail on a busy
- * deployment and succeed on a re-run in a quieter window.
+ * cascades to, a mode that conflicts with plain `SELECT`. On paper that makes it the
+ * riskiest statement here, because the worker's heavy aggregations budget 540 s and
+ * the SUT export streams for GB, and either would block it outright.
  *
- * Three reasons that is acceptable, and why the DROP is deliberately LAST:
+ * Measured, it is not the problem it looks like: a probe taking that exact lock on
+ * production **while a test was running** reported ACQUIRED after 0.45 ms
+ * (2026-10-01). Write transactions on this table are short — a JDBC INSERT was caught
+ * `idle in transaction` at 28 ms — so the conflicting windows are brief and the 5 s
+ * budget has three orders of magnitude of headroom under live ingest. Do not read the
+ * paragraphs below as "expect this to fail"; expect it to succeed, and know what
+ * happens if it does not.
+ *
+ * Three reasons a failure would be acceptable anyway, and why the DROP is LAST:
  *
  *   1. **The user-facing fix is already live** the moment `CREATE INDEX` commits.
  *      A failing DROP delays the removal of a redundant index; it does not delay the

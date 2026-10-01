@@ -361,10 +361,13 @@ in a `finally`, because the migration image runs `runMigrations()` with TypeORM'
 migration in the same deploy batch. It never reaches an application pool — `migrationsRun` is false
 everywhere and `perfana-migration` exits when done — so the batch is the consumer to reason about.
 
-**The DROP is the step most likely to fail, and that is the intended behaviour.** `DROP INDEX`
+**The DROP looks like the step most likely to fail, and measurement says otherwise.** `DROP INDEX`
 needs ACCESS EXCLUSIVE on the table and every chunk index it cascades to — a mode that conflicts
-with plain `SELECT` — so against continuous ingest and the worker's minutes-long aggregations,
-losing the 5 s race is ordinary. It costs nothing: the performance fix is already live and
+with plain `SELECT` — and the worker's minutes-long aggregations would block it outright. But a
+probe taking that exact lock **while a test was running** got it in **0.45 ms** (production,
+2026-10-01): write transactions here are short (a JDBC `INSERT` observed `idle in transaction` at
+28 ms), so the conflicting windows are brief. Treat a failure as unlikely rather than expected.
+If it does happen it costs nothing: the performance fix is already live and
 coverage-verified by the time the DROP runs, a retry skips straight to it, and a thrown error is
 never recorded as applied (TypeORM's `insertExecutedMigration` is in the `.then()` of `up()`), so
 the next deploy retries it for free. **Do not raise `lock_timeout` to "give it more room"** —
