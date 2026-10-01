@@ -6,7 +6,93 @@ but aren't tied to a single in-flight PR. Format: one entry per item with
 priority (P0–P4), origin, and enough context that someone picking it up in
 3 months can act without re-deriving the motivation.
 
-When an item ships, move it to the `## Completed` section at the bottom
+When an item ships, move it to the `## Graph presets
+
+### Saved presets cannot carry their metrics source
+
+**Priority:** P2
+**Origin:** api-contract review of v0.2.96.27 (confidence 8/10).
+
+`SeriesConfigDto` (`apps/api/src/modules/graph-presets/dto/create-graph-preset.dto.ts`)
+declares no `metricsSourceId`, but the web's own series type does
+(`apps/web/lib/graph-presets.ts`) and the read path uses it — `useGraphsData` sets
+`metricsSourceId` as a query param when present. With `whitelist: true` the field would
+be stripped from the nested object anyway, and `convertToSeriesConfigDto`
+(`graph-formatters.ts`) does not send it. Net effect: a saved preset can never carry its
+metrics source, so a reloaded series queries `ds-metrics` unscoped — the ambiguous-source
+class this repo keeps hitting. Now that presets are editable in place via PATCH, a
+round-trip through the editor cannot restore it either.
+
+Fix: add `@IsString() @IsOptional() metricsSourceId?: string` to `SeriesConfigDto`, the
+matching field to `packages/shared` `GraphPreset.SeriesConfig`, and include it in
+`convertToSeriesConfigDto`.
+
+### `SeriesConfig.source` is missing a value the API and the web both have
+
+**Priority:** P4
+**Origin:** api-contract review of v0.2.96.27 (confidence 6/10).
+
+`packages/shared/src/entities/graph-preset.entity.ts` types `source` as
+`'grafana' | 'dynatrace'`, while `DataSource` in the API DTO and the web's own type both
+carry `'performance-metrics'`. The persisted value is correct — only the shared type
+lies — which is why `update()` and `mapToDto` both write through
+`as unknown as SeriesConfig[]`. Adding the third member lets both casts go away.
+
+### The preset save dialog's disabled state does not reach the radio
+
+**Priority:** P3
+**Origin:** test-coverage audit of v0.2.96.27. Pre-existing; current behaviour is pinned
+in `SaveGraphPresetModal.scope.test.tsx` rather than fixed.
+
+`disabled={!currentTestRunId}` sits on the `FormControlLabel`, so the rendered `<input>`
+carries no `disabled` attribute. With no run id a user can still choose "Test Run
+Specific", and the save now lands as a 400 ("testRunId is required") that the dialog
+never surfaces. Put the prop on the `Radio`, and surface the server message.
+
+### The graphs hook hand-rolls fetch instead of using the typed client
+
+**Priority:** P4
+**Origin:** maintainability review of v0.2.96.27 (confidence 8/10).
+
+`useGraphsPresets.handleSavePreset` builds its own `authenticatedFetch` POST and PATCH,
+while `GraphPresetsAPI.create` / `.update` already exist and carry the 403/404 error
+mapping the hand-rolled copy lacks — it falls back to a generic message for every status.
+Two client paths to one endpoint, and the typed one is the unused one for this flow.
+
+### No controller spec for the graph-presets routes
+
+**Priority:** P3
+**Origin:** testing review of v0.2.96.27 (confidence 8/10).
+
+`graph-presets` has only service specs, so the new `@Patch(':id')` route's wiring and its
+`resolveIsAdmin` resolution are untested, as is the `UpdateGraphPresetDto` guarantee that
+`testRunId` is stripped. A `plainToInstance` + `validate` test would pin the DTO half;
+re-adding `testRunId` to it currently leaves every test green.
+
+## Charts
+
+### The eight chart copy buttons have no end-to-end test
+
+**Priority:** P3
+**Origin:** test-coverage and testing reviews of v0.2.96.27.
+
+`apps/web/lib/plotly.ts` is well covered, but the eight modebar adapters that call it are
+not: no test asserts the filename, the toast, or that the download fallback fires. jsdom
+has no CSP, so the original bug could not have been caught there either — this wants one
+representative integration test (`transaction-graph-modal/utils/chart-config.ts` has a
+pure `buildPlotConfig`, so it is the cheapest site) or a browser-level check.
+
+### The collapsed Performance Analysis badge row uses orange for two different meanings
+
+**Priority:** P4
+**Origin:** design review of v0.2.96.27 (confidence 7/10).
+
+The row reads blue (scenarios), green (txn/s), purple (req/s), orange (`Avg: Xms`), then
+the error badge and `N poor Apdex`. `Avg` is a neutral readout tinted the same warm colour
+as the two badges that report a fault, so colour no longer encodes severity. Either move
+`Avg` to a neutral tint or differentiate the fault badges by weight or icon.
+
+## Completed` section at the bottom
 with the version it landed in.
 
 ---

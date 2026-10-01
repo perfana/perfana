@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.27] - 2026-10-01
+
+### Fixed
+- **Copying a graph to the clipboard works again, on every chart in the app.** The button had been failing everywhere — on every chart, in every browser — and reported it as a network error, which it never was. Rendering the picture produced a `data:` address, and the app's own content-security policy does not allow fetching one, so the step that turned the picture into something the clipboard could take was blocked before it started. The picture is now decoded directly instead of being fetched, and all eight copy buttons share one implementation. If the clipboard is unavailable or refused, every one of them now saves the image to your downloads and says so — two of them previously did nothing at all, with no message either way.
+- **The Graphs card no longer lists presets that belong to a different system under test.** A preset saved with the default scope was stored with no test run attached, and the list treated anything in that state as belonging to every system — so one system's saved graphs appeared on all of them. A preset's scope is now read from the dashboards its series actually point at, so it appears only on the system and environment it was built for. The scope option is also named for what it does: "All runs of this system", not "Global".
+- **A preset can no longer be saved against an arbitrary, unrelated system.** Saving without a test run looked up "any test run at all" and stamped the preset with whichever one came back, including its owner. Saving now requires the run it was built from.
+- **Graph presets were visible across organizations.** Listing presets without naming a test run returned every shared preset in the database, including the names, descriptions and dashboard labels belonging to other organizations. The list is now always restricted to the organizations you belong to.
+- **Editing a saved preset no longer fails silently.** The app has always sent edits to the server, but the endpoint that receives them did not exist, so saving over an existing preset did nothing. Editing also used to be able to overwrite a preset belonging to someone else whose name happened to match; it now only ever updates your own.
+- **An invalid SLO no longer shows a chart of unrelated numbers.** When an SLO could not be evaluated, the panel still drew a bar for every series on it — figures that were not the SLO's, next to a table correctly reporting that it had no values. It now explains why there is nothing to show.
+- **The Performance Analysis card shows the error rate at a glance.** The collapsed card now carries the share of transactions that failed, with the count behind it on hover. It stays green up to 5% and turns red above, matching the Transaction Error Rate figure you see when you expand the card, and it is left off entirely when nothing failed rather than reporting "0.00%".
+
+### Note for existing installations
+- A preset saved as "Test Run Specific" now appears on that run only. It previously
+  appeared on every run of the same system, environment and workload, which did not match
+  what the option said. Nothing is lost — such a preset is still on the run it was saved
+  from — but it will no longer show up on a neighbouring run.
+- Presets saved before this release keep working: a preset's system is worked out from the dashboards it already references, so nothing needs migrating. One case to be aware of — a preset whose first series points at a dashboard that has since been deleted will no longer appear in the Graphs card list, though it remains reachable directly. On the database shipped with this release there are none.
+
 ## [0.2.96.26] - 2026-10-01
 
 ### Fixed
