@@ -37,6 +37,22 @@ export default function SLOMetricsChart({
     isVisible,
   });
 
+  // An SLO with no targets has nothing to chart. Without this the hook falls back to
+  // "every series on the panel" (a deliberate fallback for a target that matches no
+  // charted series) and draws a bar per transaction — numbers that are not this SLO's,
+  // beside a series table that correctly reads "No values available for this SLO". The
+  // case in the wild: a trend SLO on a panel whose series hold one point each, so the
+  // worker finds no slope to judge and records ERROR / "No targets found for
+  // processing", and the chart answered with fifteen unrelated bars.
+  if (!checkResult.targets || checkResult.targets.length === 0) {
+    return (
+      <ChartEmptyState
+        message="This SLO produced no values to chart"
+        detail={checkResult.message}
+      />
+    );
+  }
+
   if (loading) {
     return <ChartLoadingState />;
   }

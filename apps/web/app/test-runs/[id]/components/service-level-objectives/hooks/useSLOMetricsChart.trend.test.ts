@@ -42,6 +42,11 @@ const BASE_CHECK_RESULT = {
   created_at: '2026-09-22T00:00:00Z',
   panel_id: 1,
   metric_unit: '',
+  // A check result that got far enough to chart always has targets; only an ERROR row
+  // has none, and the hook now skips the fetch for those (SLOMetricsChart renders the
+  // reason instead). Tests that want the "target matches no charted series" fallback
+  // still need a target to exist — that is the real-world shape of that case.
+  targets: [{ target: 'real-a', value: 1, meets_requirement: true }],
 } as unknown as CheckResult;
 
 const TEST_RUN: TestRunInfo = {

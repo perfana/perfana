@@ -70,7 +70,13 @@ export function useSLOMetricsChart({
       setLoading(true);
       setError(null);
 
-      if (checkResult.panel_id === null || checkResult.panel_id === undefined) {
+      // Nothing is drawn for a check result with no targets (SLOMetricsChart renders the
+      // reason instead), so don't pay for the panel's metrics on every expand of one.
+      if (
+        checkResult.panel_id === null ||
+        checkResult.panel_id === undefined ||
+        !checkResult.targets?.length
+      ) {
         setMetricsData(null);
         setLoading(false);
         return;
@@ -120,7 +126,7 @@ export function useSLOMetricsChart({
     } finally {
       setLoading(false);
     }
-  }, [testRunId, checkResult.panel_id, checkResult.application_dashboard_id, checkResult.benchmark_id]);
+  }, [testRunId, checkResult.panel_id, checkResult.application_dashboard_id, checkResult.benchmark_id, checkResult.targets?.length]);
 
   const createPlotlyGraph = useCallback(() => {
     if (!metricsData) return;
