@@ -2430,11 +2430,32 @@ is a single-column partial index, and no query in the repo filters `requests_raw
 without also filtering `test_run_id` — every such query is served better by
 `idx_requests_raw_run_tx_time` or `idx_requests_raw_grouping`. It is also exactly the shape that
 tempts the planner into the mistake migration 1811 documents. Pre-existing, not introduced by 1813.
-**Before dropping it,** give it the same evidence pass 1811 gave `virtual_users_time_idx`: check
-`pg_stat_user_indexes.idx_scan` on production, confirm nothing ad-hoc or external depends on it,
-and confirm no continuous-aggregate refresh policy scans it (the reason `requests_raw_time_idx`
-had to stay). Dropping an index on the strength of a grep is how the CAGG refreshes would have
-been broken.
+**Before dropping it,** give it the same evidence pass 1811 gave `virtual_users_time_idx`:
+confirm nothing ad-hoc or external depends on it, and confirm no continuous-aggregate refresh
+policy scans it (the reason `requests_raw_time_idx` had to stay). Dropping an index on the
+strength of a grep is how the CAGG refreshes would have been broken.
+
+**Do not read usage off the parent relation.** `pg_stat_user_indexes WHERE relname =
+'requests_raw'` reports every index at 8192 bytes with `idx_scan = 0` on a 32 GB table — the
+hypertable's parent indexes are empty stubs and carry no counters. Measured that way on
+production 2026-10-01 and it looks exactly like "nothing uses any of these", which is false for
+all eight. Aggregate over the chunks instead:
+
+```sql
+SELECT regexp_replace(i.indexrelname, '^_hyper_\d+_\d+_chunk_', '') AS parent_index,
+       count(*) AS chunk_copies,
+       pg_size_pretty(sum(pg_relation_size(i.indexrelid))) AS total_size,
+       sum(i.idx_scan) AS idx_scan, sum(i.idx_tup_read) AS idx_tup_read
+  FROM pg_stat_all_indexes i
+  JOIN timescaledb_information.chunks c
+    ON c.chunk_schema = i.schemaname AND c.chunk_name = i.relname
+ WHERE c.hypertable_name = 'requests_raw'
+ GROUP BY 1 ORDER BY sum(i.idx_scan) DESC;
+```
+
+Compressed chunks keep their own indexes on the `compress_hyper_*` tables, which this query
+deliberately leaves out — scan counts for reads of compressed data land there, so a low count
+here on an old-data index is not proof either.
 
 ---
 
