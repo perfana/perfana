@@ -1,6 +1,6 @@
 # 2026-09-17 — Top 10 requests tab: 314 serial calls x ~3 s of raw scan each
 
-**Status: fixed in v0.2.95.40** (one `GET /test-runs/:id/samplers` read off the sampler rollup; both Top 10 tabs use it and fall back to the per-transaction loop only when the run has no rollup). Item 3 below — the row-expand's ~3 s chain walk — is deliberately left. Source: `perfana-api-top10-request-log.txt`, 17:25–18:01
+**Status: fixed in v0.2.95.40** (one `GET /test-runs/:id/samplers` read off the sampler rollup; both Top 10 tabs use it and fall back to the per-transaction loop only when the run has no rollup). Item 3 below — the row-expand's ~3 s chain walk — was deliberately left at the time, then fixed in v0.2.96.26 by exactly the index this log predicted: migration `1813000000000-AddRequestsRawTransactionTimeIndex` adds `(test_run_id, transaction_name, time)` on `requests_raw`. See "The chain decoration on a transaction expand is bounded by an index, not by its LIMIT" in `apps/api/CLAUDE.md`. Source: `perfana-api-top10-request-log.txt`, 17:25–18:01
 local, run `WERKNL-acceptatie-loadtest_perfana-00009` (3 h, ~4.5 M requests, 314 transactions).
 
 ## What the tab does
