@@ -11,7 +11,7 @@
 # 2. Copy shared to this directory: cp -r ../../packages/shared ./shared
 # 3. Update package.json to use local path: "@perfana/shared": "file:./shared"
 
-FROM node:20-alpine
+FROM node:24-alpine
 
 # Install Chromium and dependencies for Puppeteer
 RUN apk upgrade --no-cache \

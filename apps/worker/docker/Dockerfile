@@ -2,7 +2,7 @@
 # NOTE: This Dockerfile must be built from the monorepo root context
 # Example: docker build -f apps/worker/docker/Dockerfile -t perfana-worker .
 
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -44,7 +44,7 @@ RUN npm run build --workspace=@perfana/worker
 # ================================================================================================
 # Production stage
 # ================================================================================================
-FROM node:20-alpine AS production
+FROM node:24-alpine AS production
 
 WORKDIR /app
 

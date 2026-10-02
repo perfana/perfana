@@ -46,7 +46,7 @@
     "url": "https://github.com/perfana/perfana/issues"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=24.0.0 <25.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.0",
