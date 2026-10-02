@@ -242,3 +242,4 @@ export const resolvePresetDashboardId = (filters: {
   if (picked && !picked.startsWith('dynatrace-')) return picked;
   return filters.addedSeries?.[0]?.dashboardId || undefined;
 };
+

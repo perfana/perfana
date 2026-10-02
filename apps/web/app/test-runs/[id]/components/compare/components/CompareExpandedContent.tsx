@@ -5,6 +5,7 @@ import {
   Box,
   Typography,
   CircularProgress,
+  Button,
 } from '@mui/material';
 import {
   ApplicationDashboard,
@@ -20,7 +21,6 @@ import type { PanelOption } from '../utils/metric-options';
 import {
   CompareSelectionPanel,
   CompareDiffTable,
-  AddedSeriesDisplay,
 } from './index';
 import ComparePresetsTable from '../ComparePresetsTable';
 import { ComparePreset } from '../ComparePresetsTable';
@@ -134,14 +134,8 @@ export function CompareExpandedContent({
             testRun={testRun}
             addedSeries={addedSeries}
             onAddSeries={onAddSeries}
-            onPrimaryChange={onPrimarySelectionChange}
-          />
-
-          {/* Added Series Display */}
-          <AddedSeriesDisplay
-            addedSeries={addedSeries}
             onRemoveSeries={onRemoveSeries}
-            onClearAll={onClearAllSeries}
+            onPrimaryChange={onPrimarySelectionChange}
           />
 
           {/* Prompt to add series */}
@@ -154,7 +148,7 @@ export function CompareExpandedContent({
               textAlign: 'center',
             }}>
               <Typography variant="body2" color="text.secondary">
-                Pick dashboards, panels and series above, then add them to compare metrics.
+                Pick a dashboard and a panel above, then tick the series you want to compare.
               </Typography>
             </Box>
           )}
@@ -162,9 +156,17 @@ export function CompareExpandedContent({
           {/* Metrics Comparison Table */}
           {selectedTestRun && addedSeries.length > 0 && (
             <Box>
-              <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                Metrics Comparison ({addedSeries.length} series)
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <Typography variant="subtitle2" sx={{ flex: 1, fontWeight: 600 }}>
+                  Metrics Comparison ({addedSeries.length} series)
+                </Typography>
+                {/* The only way to drop series the picker is not currently showing: its
+                    series column lists the selected panels' series, so a comparison built
+                    across five dashboards cannot be emptied from there. */}
+                <Button size="small" color="inherit" onClick={onClearAllSeries} sx={{ textTransform: 'none' }}>
+                  Clear all
+                </Button>
+              </Box>
 
               <CompareDiffTable
                 metricComparisons={metricComparisons}

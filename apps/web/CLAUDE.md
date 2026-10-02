@@ -288,6 +288,39 @@ This is the repo's recurring **first-row-selection** shape — `configs[0]`, `LI
 The same commit that introduced this one got it right one line away, for the Dynatrace config:
 `configs.find((c) => c.id === selectedHost.dynatraceConfigId) ?? configs[0]`.
 
+### The add-series cascade is app-typed, and the chart inside it is not
+
+`MetricSeriesCascade` (`app/test-runs/[id]/components/shared/`) and its presentation half
+`components/charts/CascadeColumns.tsx` are the three-column series picker behind the
+Graphs, Compare and Trends cards and the report section configs. They deliberately follow
+two different type systems from the charts they feed.
+
+**No `fontFamily` anywhere below the cascade's root.** Every `Typography` and MUI control
+inherits `theme.typography.fontFamily`, so the picker reads as part of the app. The charts
+themselves are the opposite — `MONO` from `lib/charts/tokens.ts` on every tick, value and
+table cell — because a column of numbers that do not line up is unreadable, and a dialog
+of labels set in JetBrains Mono looks like a terminal someone embedded. The rule is: a
+measurement is mono, a label is the app face. Sizes come from the app (11/12/13px, 32px
+rows), not from `SIZE`.
+
+**The palette still comes from `chartTheme`**, because the picker sits inside the chart
+card and has to match the surface it is on. It derives its own mode from
+`useTheme().palette.mode` rather than taking it as a prop: two of the three call sites
+never passed one, so a `mode = 'light'` default rendered a white panel with black text
+inside a dark card. A new caller must not have to know.
+
+`CascadeColumns` holds the presentation (`CascadeFrame`, `CascadeColumn`, `CascadeGroup`,
+`CascadeRow`, the filter input, `cascadeGroupBy`) and `MetricSeriesCascade` holds the
+selection logic, so the report-side `MetricSelectionCascade` can reuse the first without
+inheriting the second.
+
+**Checked means added, when the caller can remove.** Passing `onRemoveSeries` puts the
+cascade in *instant* mode: a series is added the moment its box is ticked and removed when
+it is unticked, and the "already added" affordance is suppressed because the checkbox now
+carries that state. Without `onRemoveSeries` it is a staged picker whose selection is
+applied on confirm. One prop, two behaviours — `MetricSeriesCascade.instant.test.tsx` pins
+the first and `MetricSeriesCascade.test.tsx` the second.
+
 ### There is one `CopyButton` — reach for it instead of hand-rolling the next one
 
 `apps/web/components/ui/copy-button.tsx` is the shared copy-to-clipboard icon button

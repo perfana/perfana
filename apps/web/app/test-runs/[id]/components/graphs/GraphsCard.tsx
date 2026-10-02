@@ -72,6 +72,10 @@ export default function GraphsCard({
     graphsData.handleRemoveSeries(seriesId, showToast);
   };
 
+  const handleClearAllSeries = () => {
+    graphsData.handleClearAllSeries(showToast);
+  };
+
   return (
     <Box sx={{
       ...(graphsExpanded ? {
@@ -157,6 +161,7 @@ export default function GraphsCard({
               onRemoveSeries={handleRemoveSeries}
               onUpdateSeriesUnit={graphsData.handleUpdateSeriesUnit}
               onToggleSeriesVisibility={graphsData.handleToggleSeriesVisibility}
+              onClearAllSeries={handleClearAllSeries}
               axisMode={graphsData.axisMode}
               onAxisModeChange={graphsData.setAxisMode}
               events={events}

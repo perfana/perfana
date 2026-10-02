@@ -56,8 +56,6 @@ export default function TrendsCard({
   // Plot hook
   const trendsPlot = useTrendsPlot({
     metricsData: trendsData.metricsData,
-    selectedMetric: trendsData.selectedMetric,
-    evaluateType: trendsData.evaluateType,
     trendsExpanded,
     addedSeries: trendsData.addedSeries,
     showToast,

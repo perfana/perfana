@@ -16,6 +16,7 @@ import { TestRun } from '@/types/test-runs';
 import { getTestRunDisplayText, getTestRunSecondaryInfo } from '../utils/compare-utils';
 import type { PanelOption, SeriesPick } from '../utils/metric-options';
 import { SeriesCascadePanel } from '@/components/charts';
+import type { AddedSeriesKey } from '../../shared/MetricSeriesCascade';
 
 export type { SeriesPick };
 
@@ -34,6 +35,8 @@ interface CompareSelectionPanelProps {
 
   addedSeries: CompareSeries[];
   onAddSeries: (picks: SeriesPick[]) => void;
+  /** Takes the series' own id — the cascade speaks in dashboard/panel/metric, so adapt. */
+  onRemoveSeries: (seriesId: string) => void;
   /**
    * The first picked dashboard/panel, mirrored up for preset saving — a preset stores one
    * application_dashboard_id/panel_id and names itself after them.
@@ -64,8 +67,21 @@ export function CompareSelectionPanel({
   testRun,
   addedSeries,
   onAddSeries,
+  onRemoveSeries,
   onPrimaryChange,
 }: CompareSelectionPanelProps) {
+  /**
+   * The cascade identifies a series by what the user picked; the card identifies it by the
+   * `id` it minted on add (which carries a `Date.now()` and so cannot be rederived). This
+   * is the one place that knows both.
+   */
+  const removeByKey = ({ dashboardId, panelId, metricName }: AddedSeriesKey) => {
+    const match = addedSeries.find(
+      (s) => s.dashboardId === dashboardId && s.panelId === panelId && s.metricName === metricName,
+    );
+    if (match) onRemoveSeries(match.id);
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* Test Run Selection */}
@@ -127,6 +143,8 @@ export function CompareSelectionPanel({
         testRun={testRun}
         addedSeries={addedSeries}
         onAddSeries={onAddSeries}
+        // Present = instant mode: checking a series adds it, unchecking removes it.
+        onRemoveSeries={removeByKey}
         onPrimaryChange={onPrimaryChange}
       />
     </Box>

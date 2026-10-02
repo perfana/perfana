@@ -2,15 +2,15 @@
 
 import type { Config, Data, Layout } from 'plotly.js';
 import { useMemo } from 'react';
-import dynamic from 'next/dynamic';
 import { Box, useTheme } from '@mui/material';
+// Observes its own container: this chart lives in a dialog that resizes without the
+// window, which left the hover label measured against the old box.
+import Plot from '@/components/ResponsivePlot';
 import type { TimeSeriesResponse, MetricType } from '../types';
 import type { PerfanaEvent } from '@/lib/events';
 import { generatePlotlyData, getMetricLabel, buildPlotLayout, buildPlotConfig } from '../utils';
 import { mergeEventShapesIntoLayout } from '../../../shared/event-lines';
 
-// Dynamically import Plot to avoid SSR issues
-const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
 
 interface TransactionChartProps {
   data: TimeSeriesResponse;
@@ -30,11 +30,12 @@ export function TransactionChart({
   events,
 }: TransactionChartProps) {
   const theme = useTheme();
+  const mode = theme.palette.mode === 'dark' ? 'dark' : 'light';
   const metricLabel = getMetricLabel(selectedMetric);
 
   const plotData = useMemo(
-    () => generatePlotlyData(data, transactionName, selectedMetric, aggregationSeconds),
-    [data, transactionName, selectedMetric, aggregationSeconds]
+    () => generatePlotlyData(data, transactionName, selectedMetric, aggregationSeconds, mode),
+    [data, transactionName, selectedMetric, aggregationSeconds, mode]
   );
 
   const plotLayout = useMemo(

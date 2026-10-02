@@ -3,7 +3,9 @@
  */
 
 import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
+import { alpha } from '@mui/material';
 import type { Theme } from '@mui/material';
+import { MONO, SIZE, catColor, chartTheme, type ChartMode } from '@/lib/charts';
 import type { MetricType, MetricOption, AggregationOption, SamplerColor } from '../types';
 
 // Must list every value the API's server-side ladder can return, or the Select
@@ -28,109 +30,98 @@ export const METRIC_OPTIONS: MetricOption[] = [
   { value: 'p99_response_time', label: 'P99' },
 ];
 
-// Tableau 10 palette - colorblind-safe and perceptually uniform
-export const SAMPLER_COLORS: SamplerColor[] = [
-  { fill: 'rgba(31, 119, 180, 0.25)', border: 'rgba(31, 119, 180, 0.6)' },    // Strong Blue
-  { fill: 'rgba(255, 127, 14, 0.25)', border: 'rgba(255, 127, 14, 0.6)' },    // Orange
-  { fill: 'rgba(44, 160, 44, 0.25)', border: 'rgba(44, 160, 44, 0.6)' },      // Green
-  { fill: 'rgba(214, 39, 40, 0.25)', border: 'rgba(214, 39, 40, 0.6)' },      // Red
-  { fill: 'rgba(148, 103, 189, 0.25)', border: 'rgba(148, 103, 189, 0.6)' },  // Purple
-  { fill: 'rgba(140, 86, 75, 0.25)', border: 'rgba(140, 86, 75, 0.6)' },      // Brown
-  { fill: 'rgba(227, 119, 194, 0.25)', border: 'rgba(227, 119, 194, 0.6)' },  // Pink
-  { fill: 'rgba(127, 127, 127, 0.25)', border: 'rgba(127, 127, 127, 0.6)' },  // Gray
-  { fill: 'rgba(188, 189, 34, 0.25)', border: 'rgba(188, 189, 34, 0.6)' },    // Olive
-  { fill: 'rgba(23, 190, 207, 0.25)', border: 'rgba(23, 190, 207, 0.6)' },    // Cyan
-  { fill: 'rgba(255, 152, 150, 0.25)', border: 'rgba(255, 152, 150, 0.6)' },  // Light Red
-  { fill: 'rgba(197, 176, 213, 0.25)', border: 'rgba(197, 176, 213, 0.6)' },  // Light Purple
-];
+/**
+ * A stacked sampler's fill and border, by colour SLOT.
+ *
+ * Replaces a private Tableau-10 table of rgba pairs — the sixth chart palette in the app.
+ * `catColor` is mode-aware, which the fixed table was not: its mid-tones at 25% over the
+ * dark plot background came out muddy. `alpha()` is safe on these because they are opaque
+ * hex (see the `alpha()` warning in apps/web/CLAUDE.md, which is about translucent tokens).
+ */
+export function samplerColor(slot: number, mode: ChartMode): SamplerColor {
+  const base = catColor(slot, mode);
+  return { fill: alpha(base, 0.25), border: alpha(base, 0.6) };
+}
 
 export function getMetricLabel(metric: MetricType): string {
   return METRIC_OPTIONS.find(m => m.value === metric)?.label || 'Average';
 }
 
+/**
+ * The chart's layout, in the Analyst standard.
+ *
+ * What changed from the hand-rolled version: the colours come from `chartTheme` instead of
+ * seven hex literals (the dark `#121212` paper and `#1e1e1e` plot sat inside a `#1e293b`
+ * dialog — three greys, one surface), ticks are mono, the vertical gridlines are gone in
+ * favour of the dotted crosshair spike, and the in-plot title is gone because the dialog
+ * header already names the transaction and the metric.
+ */
 export function buildPlotLayout(metricLabel: string, theme?: Theme): Record<string, unknown> {
-  const isDark = theme?.palette.mode === 'dark';
-  const textColor = theme?.palette.text.primary ?? 'inherit';
-  const textSecondary = theme?.palette.text.secondary ?? 'inherit';
-  const gridColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0, 0, 0, 0.05)';
-  const plotBgColor = isDark ? '#1e1e1e' : 'rgba(250, 250, 250, 1)';
-  const paperBgColor = isDark ? '#121212' : 'white';
-  const legendBgColor = isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)';
-  const legendBorderColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-  const hoverBgColor = isDark ? '#1e293b' : 'white';
+  const chart = chartTheme(theme?.palette.mode === 'dark' ? 'dark' : 'light');
+  const axisTitle = { family: MONO, size: SIZE.axisLabelFont, color: chart.faint };
+  const tickfont = { family: MONO, size: SIZE.tickFont, color: chart.faint };
 
   return {
-    title: {
-      text: `${metricLabel} Response Time`,
-      font: {
-        size: 18,
-        weight: 600,
-        family: 'Roboto, sans-serif',
-        color: textColor,
-      },
-      x: 0.05,
-    },
     xaxis: {
-      title: {
-        text: 'Time',
-        font: { size: 14, weight: 500, color: textSecondary },
-      },
       type: 'date' as const,
-      gridcolor: gridColor,
-      linecolor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
-      color: textSecondary,
-      tickfont: { color: textSecondary },
+      showgrid: false,
+      showline: false,
+      zeroline: false,
+      color: chart.muted,
+      tickfont,
+      ticks: '',
+      automargin: true,
+      showspikes: true,
+      spikemode: 'across' as const,
+      spikesnap: 'cursor' as const,
+      spikecolor: chart.faint,
+      spikethickness: 1,
+      spikedash: 'dot' as const,
     },
     yaxis: {
-      title: {
-        text: 'Response Time (ms)',
-        font: { size: 14, weight: 500, color: textSecondary },
-      },
-      gridcolor: gridColor,
-      linecolor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
-      color: textSecondary,
-      tickfont: { color: textSecondary },
+      title: { text: 'Response Time (ms)', font: axisTitle },
+      gridcolor: chart.grid,
+      showline: false,
+      zeroline: false,
+      color: chart.muted,
+      tickfont,
       side: 'left' as const,
+      automargin: true,
     },
     yaxis2: {
-      title: {
-        text: 'Transactions/s',
-        font: { size: 14, weight: 500, color: textSecondary },
-      },
+      title: { text: 'Transactions/s', font: axisTitle },
       overlaying: 'y' as const,
       side: 'right' as const,
       showgrid: false,
-      color: textSecondary,
-      tickfont: { color: textSecondary },
+      zeroline: false,
+      color: chart.muted,
+      tickfont,
     },
-    hovermode: 'x unified' as const,
+    // `x`, not `x unified`: the stack can hold nineteen samplers, and a unified box lists
+    // every one of them at every hover.
+    hovermode: 'x' as const,
     hoverlabel: {
-      bgcolor: hoverBgColor,
-      bordercolor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
-      font: { color: textColor },
+      bgcolor: chart.paper,
+      bordercolor: chart.divider,
+      font: { family: MONO, size: SIZE.valueFont, color: chart.text },
     },
+    // Kept: a stacked band is unreadable without the names, and this chart has no series
+    // table beside it.
     showlegend: true,
     legend: {
       orientation: 'v' as const,
       x: 1.01,
       y: 1,
-      font: { size: 12, color: textColor },
-      bgcolor: legendBgColor,
-      bordercolor: legendBorderColor,
-      borderwidth: 1,
+      font: { family: MONO, size: SIZE.tableFont, color: chart.faint },
+      bgcolor: 'rgba(0,0,0,0)',
+      borderwidth: 0,
     },
-    margin: {
-      l: 70,
-      r: 220,
-      t: 80,
-      b: 70,
-    },
+    // `t` drops from 80 to 24: the in-plot title it was leaving room for is gone.
+    margin: { l: 70, r: 220, t: 24, b: 70 },
     autosize: true,
-    plot_bgcolor: plotBgColor,
-    paper_bgcolor: paperBgColor,
-    font: {
-      color: textColor,
-    },
+    plot_bgcolor: chart.plotBg,
+    paper_bgcolor: chart.paper,
+    font: { family: MONO, size: SIZE.tickFont, color: chart.muted },
   };
 }
 

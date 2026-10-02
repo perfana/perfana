@@ -147,11 +147,3 @@ export interface MetricsComparisonTableProps {
   addedSeries: CompareSeries[];
 }
 
-/**
- * Props for added series display component
- */
-export interface AddedSeriesDisplayProps {
-  addedSeries: CompareSeries[];
-  onRemoveSeries: (seriesId: string) => void;
-  onClearAll: () => void;
-}

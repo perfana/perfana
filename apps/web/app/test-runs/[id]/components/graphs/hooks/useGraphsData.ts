@@ -248,6 +248,27 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   }, []);
 
   /**
+   * Empty the chart: both the series list and the fetched points behind it.
+   *
+   * Looping handleRemoveSeries would fire one toast and one render per series — 17 of
+   * each on the chart this was asked for — so it is its own handler.
+   *
+   * axisMode is deliberately kept. chartName is NOT kept, and not by choice here: the
+   * effect below regenerates it from `addedSeries` on every change, so clearing resets
+   * it to ''. That effect also overwrites a title the user typed as soon as they add or
+   * remove a series — pre-existing, and filed in TODOS.md rather than fixed inside a
+   * clear-all handler.
+   */
+  const handleClearAllSeries = useCallback((showToast: (message: string) => void) => {
+    // Read the count from this render, NOT from inside the setState updater: the updater
+    // has not run by the time the toast fires, so that reported "0 series removed".
+    const cleared = addedSeries.length;
+    setAddedSeries([]);
+    setSeriesData(new Map());
+    showToast(cleared === 1 ? 'Series removed' : `${cleared} series removed`);
+  }, [addedSeries.length]);
+
+  /**
    * Handle updating the unit for a series
    */
   const handleUpdateSeriesUnit = useCallback((seriesId: string, newUnit: string | null) => {
@@ -337,6 +358,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     getAllDashboardsMerged,
     handleAddSeries,
     handleRemoveSeries,
+    handleClearAllSeries,
     handleUpdateSeriesUnit,
     handleToggleSeriesVisibility,
   };

@@ -43,27 +43,61 @@ function exportFilename(chartName: string | undefined): string {
 }
 
 /**
- * Plotly renders an export from the LIVE layout, which deliberately carries no title —
- * the editable heading above the chart is the on-screen title. Once a PNG leaves the app
- * nothing else names it, so the title goes back on for the image only. `toImage` accepts
- * a figure object as well as a graph div, so this never touches what is on screen.
+ * Plotly renders an export from the LIVE layout, which deliberately carries neither a
+ * title nor a legend — the editable heading above the chart is the title, and the
+ * `SeriesTable` below it is the legend (`lib/charts/layout.ts` sets `showlegend: false`).
+ * Both are HTML, so neither is on the canvas Plotly rasterises: without this the copied
+ * PNG is an unlabelled chart with unnamed lines.
+ *
+ * Both go back on for the image only. `toImage` accepts a figure object as well as a
+ * graph div, so this never touches what is on screen.
  */
-function exportFigure(graph: PlotlyGraphDiv, chartName: string | undefined, titleColor: string) {
+function exportFigure(
+  graph: PlotlyGraphDiv,
+  chartName: string | undefined,
+  theme: { text: string; muted: string; paper: string },
+  size: { width: number; height: number },
+) {
   const g = graph as unknown as { data?: unknown[]; layout?: Record<string, unknown> };
   const layout = g.layout ?? {};
+  const margin = (layout.margin ?? {}) as { b?: number };
+
+  // The traces already carry `name` — only `showlegend` was off. Room has to be ADDED
+  // rather than taken from the plot area, or a chart with many series squeezes to a
+  // sliver. Names here are `panel - metric`, so roughly three fit per row at 1200px.
+  const seriesCount = (g.data ?? []).length;
+  const legendRows = Math.max(1, Math.ceil(seriesCount / 3));
+  const legendPad = legendRows * 18 + 12;
+  const titlePad = 24;
+
   return {
-    data: g.data ?? [],
-    layout: {
-      ...layout,
-      title: {
-        text: chartName?.trim() || 'Chart',
-        font: { color: titleColor, size: 13 },
-        x: 0.5,
-        xanchor: 'center',
+    figure: {
+      data: g.data ?? [],
+      layout: {
+        ...layout,
+        height: size.height + legendPad + titlePad,
+        title: {
+          text: chartName?.trim() || 'Chart',
+          font: { color: theme.text, size: 13 },
+          x: 0.5,
+          xanchor: 'center',
+        },
+        showlegend: true,
+        legend: {
+          orientation: 'h',
+          xanchor: 'left',
+          x: 0,
+          yanchor: 'top',
+          y: -0.08,
+          font: { size: 10, color: theme.muted },
+          bgcolor: 'rgba(0,0,0,0)',
+          borderwidth: 0,
+        },
+        // The live layout reserves room for neither.
+        margin: { ...margin, t: 44, b: (margin.b ?? 24) + legendPad },
       },
-      // The live layout reserves no room for a title it does not draw.
-      margin: { ...(layout.margin as object), t: 44 },
     },
+    size: { width: size.width, height: size.height + legendPad + titlePad },
   };
 }
 
@@ -72,10 +106,13 @@ export default function ChartActions({ graph, mode, chartName, notify }: ChartAc
 
   const render = () => {
     if (!graph) return Promise.reject(new Error('Chart is not ready yet'));
-    return plotlyPngBlob(
-      exportFigure(graph, chartName, theme.text),
+    const { figure, size } = exportFigure(
+      graph,
+      chartName,
+      theme,
       plotSize(graph, { width: 1200, height: 600 }),
     );
+    return plotlyPngBlob(figure, size);
   };
 
   const onCopy = () => {

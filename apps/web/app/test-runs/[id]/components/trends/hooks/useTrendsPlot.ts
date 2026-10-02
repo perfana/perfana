@@ -2,16 +2,11 @@
 
 import type { PlotData } from 'plotly.js';
 
-/**
- * Plotly accepts objects in `customdata` so hovertemplate can read
- * `%{customdata.field}`, but @types/plotly.js narrows it to Datum. Widen just
- * that field and keep the rest of the library's typing.
- */
-type TrendsTrace = Omit<Partial<PlotData>, 'customdata'> & { customdata?: unknown[] };
+type TrendsTrace = Partial<PlotData>;
 import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 import { useMemo } from 'react';
 import { useTheme } from '@mui/material';
-import { MetricStatistic, TrendsSeries, Panel } from '../types';
+import { MetricStatistic, TrendsSeries } from '../types';
 import { trendsSeriesLabel } from '../utils';
 import type { SeriesRow } from '@/components/charts';
 import {
@@ -20,7 +15,9 @@ import {
   buildPlotLayout,
   catColor,
   chartTheme,
-  groupLabels,
+  fmtDay,
+  fmtDayHM,
+  lanesNote,
   resolveAxes,
   toDisplay,
   unitText,
@@ -29,8 +26,6 @@ import {
 
 interface UseTrendsPlotProps {
   metricsData: MetricStatistic[];
-  selectedMetric: Panel | null;
-  evaluateType: string;
   trendsExpanded: boolean;
   addedSeries: TrendsSeries[];
   showToast: (message: string) => void;
@@ -42,8 +37,6 @@ interface PlotDataPoint {
   x: string;
   y: number;
   created_at: string;
-  version?: string | null;
-  annotations?: string | null;
   is_changepoint?: boolean;
   consolidated_result?: {
     overall?: boolean;
@@ -54,14 +47,14 @@ interface PlotDataPoint {
 /**
  * The Trends chart in the Analyst standard.
  *
- * The x axis is one position per run, in `created_at` order, labelled with the run id —
- * runs are discrete events, not samples on a clock, so the line gets markers and a failed
- * run keeps its red cross. Red is reserved for exactly that kind of verdict.
+ * The x axis is one position per run, in `created_at` order, labelled with the run's
+ * DATE — runs are discrete events, not samples on a clock, so positions stay evenly
+ * spaced (a linear axis over run index, never a date axis) while the tick text answers
+ * "when". The line gets markers and a failed run keeps its red cross; red is reserved for
+ * exactly that kind of verdict.
  */
 export function useTrendsPlot({
   metricsData,
-  selectedMetric: _selectedMetric,
-  evaluateType: _evaluateType,
   trendsExpanded,
   addedSeries,
   showToast,
@@ -91,8 +84,6 @@ export function useTrendsPlot({
         x: item.test_run_id,
         y: item.value,
         created_at: item.created_at,
-        version: item.version,
-        annotations: item.annotations,
         is_changepoint: item.is_changepoint,
         consolidated_result: item.consolidated_result,
       });
@@ -189,20 +180,31 @@ export function useTrendsPlot({
       annotations: [] as Record<string, unknown>[],
     };
 
-    const tickStep = Math.max(1, Math.ceil(runIds.length / 8));
+    // Ticks are the run's DATE, not its id. A reader asks "when did this regress", and a
+    // run id answers that only if you have the naming convention memorised. The id is not
+    // lost: hovering a point puts it in the card header's cursor readout.
+    //
+    // 12 rather than the 8 a run id needed — `04 Oct` is a sixth of the width.
+    const tickStep = Math.max(1, Math.ceil(runIds.length / 12));
     const tickRuns = runIds
       .map((id, index) => ({ id, index }))
       .filter(({ index }) => index % tickStep === 0);
+    // Nightly runs are one a day and want the bare date. A workload run several times in
+    // one day would otherwise label two positions identically, so the clock goes on ALL
+    // of them — a mixed axis is harder to read than a uniformly longer one.
+    const tickTimes = tickRuns.map(({ id }) => runOrder.get(id) ?? '');
+    const dayLabels = tickTimes.map(fmtDay);
+    const fmtTick = new Set(dayLabels).size < dayLabels.length ? fmtDayHM : fmtDay;
 
     const plotLayout = buildPlotLayout(axisLayoutMode, {
       theme,
       groups,
       x: {
         type: 'linear',
-        // A run id is long, so label at most every nth position: a 40-run trend would
-        // otherwise be a solid band of overlapping text.
+        // Label at most every nth position: a 40-run trend would otherwise be a solid
+        // band of overlapping text.
         tickvals: tickRuns.map(({ index }) => index),
-        ticktext: tickRuns.map(({ id }) => id),
+        ticktext: tickTimes.map(fmtTick),
         range: [-0.5, Math.max(runIds.length - 0.5, 0.5)],
       },
       overlay: changepointOverlay,
@@ -265,11 +267,9 @@ export function useTrendsPlot({
       } satisfies SeriesRow;
     });
 
-    const lanesNote =
-      axisLayoutMode === 'lanes' && groups.length > 2
-        ? `${groups.length} unit families (${groupLabels(groups).join(', ')}): more than two axes, so the chart is split into lanes`
-        : undefined;
-
-    return { plotData: traces, plotLayout, plotConfig, rows, runIds, traceIndexOf, lanesNote };
+    return {
+      plotData: traces, plotLayout, plotConfig, rows, runIds, traceIndexOf,
+      lanesNote: lanesNote(groups, axisLayoutMode),
+    };
   }, [metricsData, trendsExpanded, addedSeries, mode, showToast, cursorIndex]);
 }

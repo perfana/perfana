@@ -27,8 +27,6 @@ it('draws one trace per series, not per metric name', () => {
   // Stable references: the hook's effect keys on these, and fresh ones per render loop it.
   const props = {
     metricsData: [row(rt, '10', 280), row(err, '10', 0), row(rt, '12', 300), row(err, '12', 0.01)],
-    selectedMetric: null,
-    evaluateType: 'avg',
     trendsExpanded: true,
     addedSeries: [rt, err],
     showToast: jest.fn(),
@@ -47,8 +45,6 @@ it('draws one trace per series, not per metric name', () => {
 it('names a series in its trace and in its table row, so the two cannot disagree', () => {
   const props = {
     metricsData: [row(err, '10', 0)],
-    selectedMetric: null,
-    evaluateType: 'q95',
     trendsExpanded: true,
     addedSeries: [rt, err],
     showToast: jest.fn(),
@@ -71,8 +67,6 @@ it('names a series in its trace and in its table row, so the two cannot disagree
 it('clears the plot when the card is collapsed or has no data', () => {
   const props = {
     metricsData: [row(rt, '10', 280)],
-    selectedMetric: null,
-    evaluateType: 'avg',
     trendsExpanded: false,
     addedSeries: [rt],
     showToast: jest.fn(),

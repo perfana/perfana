@@ -244,7 +244,7 @@ export const buildPlotLayout = (mode: AxisMode, spec: LayoutSpec): Rec =>
   (mode === 'lanes' ? buildLanesLayout(spec) : buildTimeSeriesLayout(spec));
 
 function emptyGroup(): AxisGroup {
-  return { key: '', family: '', series: [], display: { label: '', divisor: 1 }, side: 'L', axis: 'y' };
+  return { key: '', series: [], display: { label: '', divisor: 1 }, side: 'L', axis: 'y' };
 }
 
 /**

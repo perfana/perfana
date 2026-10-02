@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import dynamic from 'next/dynamic';
 import type { Config } from 'plotly.js';
 import {
   Dialog,
@@ -27,9 +26,11 @@ import {
 } from '@mui/icons-material';
 import { authenticatedFetch } from '@/lib/api';
 import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
+import { MONO, SIZE, chartTheme } from '@/lib/charts';
 
-// Dynamically import Plot to avoid SSR issues
-const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false });
+// Observes its own container: this chart lives in a dialog that resizes without the
+// window, which left the hover label measured against the old box.
+import Plot from '@/components/ResponsivePlot';
 
 interface TimeSeriesDataPoint {
   time_bucket: string;
@@ -218,83 +219,74 @@ export default function RequestTimeSeriesModal({
 
   const selectedMetricLabel = METRIC_OPTIONS.find(m => m.value === selectedMetric)?.label || 'Average';
 
-  const textColor = theme.palette.text.primary;
-  const textSecondary = theme.palette.text.secondary;
-  const gridColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0, 0, 0, 0.05)';
-  const hoverBgColor = isDark ? '#1e293b' : 'white';
+  // The Analyst standard's palette and type, replacing seven hex literals — the dark
+  // `#121212` paper and `#1e1e1e` plot sat inside a `#1e293b` dialog, three greys on one
+  // surface. The in-plot title is gone: the dialog header already names the request.
+  const chart = chartTheme(isDark ? 'dark' : 'light');
+  const axisTitle = { family: MONO, size: SIZE.axisLabelFont, color: chart.faint };
+  const tickfont = { family: MONO, size: SIZE.tickFont, color: chart.faint };
 
   const plotLayout = {
-    title: {
-      text: `${selectedMetricLabel} Response Time`,
-      font: {
-        size: 18,
-        weight: 600,
-        family: 'Roboto, sans-serif',
-        color: textColor,
-      },
-      x: 0.05,
-    },
     xaxis: {
-      title: {
-        text: 'Time',
-        font: { size: 14, weight: 500, color: textSecondary },
-      },
       type: 'date' as const,
-      gridcolor: gridColor,
-      linecolor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
-      color: textSecondary,
-      tickfont: { color: textSecondary },
+      // Vertical gridlines off in favour of the dotted crosshair spike, which is the
+      // vertical line that means something.
+      showgrid: false,
+      showline: false,
+      zeroline: false,
+      color: chart.muted,
+      tickfont,
+      ticks: '',
+      automargin: true,
+      showspikes: true,
+      spikemode: 'across' as const,
+      spikesnap: 'cursor' as const,
+      spikecolor: chart.faint,
+      spikethickness: 1,
+      spikedash: 'dot' as const,
     },
     yaxis: {
-      title: {
-        text: 'Response Time (ms)',
-        font: { size: 14, weight: 500, color: textSecondary },
-      },
-      gridcolor: gridColor,
-      linecolor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
-      color: textSecondary,
-      tickfont: { color: textSecondary },
+      title: { text: 'Response Time (ms)', font: axisTitle },
+      gridcolor: chart.grid,
+      showline: false,
+      zeroline: false,
+      color: chart.muted,
+      tickfont,
       side: 'left' as const,
+      automargin: true,
     },
     yaxis2: {
-      title: {
-        text: 'Requests/s',
-        font: { size: 14, weight: 500, color: textSecondary },
-      },
+      title: { text: 'Requests/s', font: axisTitle },
       overlaying: 'y' as const,
       side: 'right' as const,
       showgrid: false,
-      color: textSecondary,
-      tickfont: { color: textSecondary },
+      zeroline: false,
+      color: chart.muted,
+      tickfont,
     },
-    hovermode: 'x unified' as const,
+    hovermode: 'x' as const,
     hoverlabel: {
-      bgcolor: hoverBgColor,
-      bordercolor: isDark ? 'rgba(255,255,255,0.2)' : undefined,
-      font: { color: textColor },
+      bgcolor: chart.paper,
+      bordercolor: chart.divider,
+      font: { family: MONO, size: SIZE.valueFont, color: chart.text },
     },
+    // Kept: this chart has no series table beside it, so the legend is the only thing
+    // naming its lines.
     showlegend: true,
     legend: {
       orientation: 'v' as const,
       x: 1.01,
       y: 1,
-      font: { size: 12, color: textColor },
-      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-      bordercolor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-      borderwidth: 1,
+      font: { family: MONO, size: SIZE.tableFont, color: chart.faint },
+      bgcolor: 'rgba(0,0,0,0)',
+      borderwidth: 0,
     },
-    margin: {
-      l: 70,
-      r: 180,
-      t: 80,
-      b: 70,
-    },
+    // `t` drops from 80 to 24 with the in-plot title.
+    margin: { l: 70, r: 180, t: 24, b: 70 },
     autosize: true,
-    plot_bgcolor: isDark ? '#1e1e1e' : 'rgba(250, 250, 250, 1)',
-    paper_bgcolor: isDark ? '#121212' : 'white',
-    font: {
-      color: textColor,
-    },
+    plot_bgcolor: chart.plotBg,
+    paper_bgcolor: chart.paper,
+    font: { family: MONO, size: SIZE.tickFont, color: chart.muted },
   };
 
   const plotConfig = {

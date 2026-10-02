@@ -12,6 +12,7 @@
  */
 
 import { unitFactor, unitFamily, unitLabel } from '@/lib/units';
+import { EMPTY } from './format';
 
 /**
  * Re-exported so a caller never has to know whether a unit fact lives in `lib/units`
@@ -43,7 +44,6 @@ export interface AxisSeries {
 export interface AxisGroup<T extends AxisSeries = AxisSeries> {
   /** The unit family — also the group's identity. */
   key: string;
-  family: string;
   series: T[];
   display: DisplayUnit;
   /** `L`/`R` in overlay mode; the 1-based lane number in lanes mode. */
@@ -176,7 +176,6 @@ export function resolveAxes<T extends AxisSeries>(
 
   const groups = entries.map(([key, series], index) => ({
     key,
-    family: key,
     series,
     display: displayUnit(key, maxInBase(series), series[0]?.unit),
     side: (mode === 'lanes' ? index + 1 : index === 0 ? 'L' : 'R') as 'L' | 'R' | number,
@@ -279,9 +278,21 @@ export const groupLabels = (groups: AxisGroup[]): string[] =>
   groups.map((g) => g.display.label || unitText(g.key) || 'no unit');
 
 /** Where a series ended up, for the series table's axis column. */
+/**
+ * The sentence under a lanes chart, or nothing when the chart is not in lanes.
+ *
+ * Shared by Graphs and Trends: it was the same string in both, and it carries a rule
+ * (`> 2`, not `>= 2` — two families are a left and a right axis, not two lanes) that the
+ * two would eventually disagree on.
+ */
+export const lanesNote = (groups: AxisGroup[], axisLayoutMode: AxisMode): string | undefined =>
+  axisLayoutMode === 'lanes' && groups.length > 2
+    ? `${groups.length} unit families (${groupLabels(groups).join(', ')}): more than two axes, so the chart is split into lanes`
+    : undefined;
+
 export function axisBadge(groups: AxisGroup[], seriesId: string): string {
   for (const group of groups) {
     if (group.series.some((s) => s.id === seriesId)) return String(group.side);
   }
-  return '—';
+  return EMPTY;
 }

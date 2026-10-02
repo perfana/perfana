@@ -456,12 +456,25 @@ export function GenerateReportDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      maxWidth="lg"
+      // `lg` (1200px) left ~380px of gutter either side of a 1900px screen while the
+      // section configuration below — a palette column plus a three-column metric picker —
+      // was squeezed into about 900px. Width is taken from the VIEWPORT instead, with a
+      // ceiling so the dialog does not stretch to a silly measure on an ultrawide.
+      maxWidth={false}
       fullWidth
       PaperProps={{
         sx: {
-          height: '90vh',
-          maxHeight: 900,
+          // Every value budgets for MUI's own 32px paper margin, which `maxWidth={false}`
+          // normally guards with `calc(100% - 64px)` — overriding that guard with a bare
+          // `96vw` / `92vh` makes the outer box 96vw + 64px, so it overflowed the viewport
+          // on anything under 1600px wide and put a horizontal scrollbar on a centred flex
+          // item, with the left overhang unreachable.
+          width: 'min(1800px, calc(100vw - 64px))',
+          maxWidth: 'none',
+          // No fixed pixel cap: `maxHeight: 900` threw away the bottom third of a 1440px
+          // screen, which is exactly where the long section list needs the room.
+          height: 'calc(100vh - 64px)',
+          maxHeight: 'calc(100vh - 64px)',
         },
       }}
     >

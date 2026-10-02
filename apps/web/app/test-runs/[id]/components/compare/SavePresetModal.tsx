@@ -21,6 +21,7 @@ import {
 import { Save } from '@mui/icons-material';
 import { CompareSeriesConfig } from '@/lib/compare-presets';
 import { DisplayConfig, resolvePresetDashboardId } from './utils/compare-utils';
+import { composeSeriesName } from '@/lib/series-name';
 
 /**
  * Represents a series added for comparison (matching TrendsCard pattern)
@@ -102,10 +103,12 @@ export default function SavePresetModal({
   const generatePresetName = (): string => {
     const parts: string[] = [];
 
-    // Include series count if series are added
-    const seriesCount = currentFilters.addedSeries?.length || 0;
-    if (seriesCount > 0) {
-      parts.push(`${seriesCount} Series`);
+    // What the preset actually holds: `dashboard · panel · metric`. The old name was the
+    // series COUNT ("3 Series"), which told a reader nothing and made every preset on a
+    // system sort together under the same handful of names.
+    const composed = composeSeriesName(currentFilters.addedSeries ?? []);
+    if (composed) {
+      parts.push(composed);
     } else if (currentFilters.selectedMetric?.title) {
       parts.push(currentFilters.selectedMetric.title);
     }

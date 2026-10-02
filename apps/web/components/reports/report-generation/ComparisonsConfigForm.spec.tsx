@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { ComparisonsConfigForm } from './SectionConfigs';
 // The sentinel by name, not the literal 'previous' — a rename becomes a compile error here
@@ -22,6 +22,10 @@ const CANDIDATES = [
 jest.mock('@/lib/api', () => ({
   authenticatedFetch: jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve(CANDIDATES) })),
 }));
+
+/** `2 available` reads the same in two columns, so every count assertion is scoped. */
+const column = (name: 'Dashboards' | 'Panels' | 'Series') =>
+  within(screen.getByRole('group', { name }));
 
 // Tests below re-point the fetch mock; reset it so each starts from the default answer.
 beforeEach(() => {
@@ -77,7 +81,7 @@ it('keeps the preview button disabled when no baseline is chosen at all', async 
   await waitFor(() => expect(screen.getByRole('button', { name: /preview/i })).toBeDisabled());
 });
 
-it('keeps the dashboards and panels popups open while picking several', async () => {
+it('picks several dashboards and panels without a popup to reopen', async () => {
   cascadeFetch();
   // Mirrors how the dialog owns the config: every pick re-renders the form with a new object.
   const Harness = () => {
@@ -98,19 +102,17 @@ it('keeps the dashboards and panels popups open while picking several', async ()
   render(<Harness />);
   await waitFor(() => expect(screen.getByText(/2 available/)).toBeInTheDocument());
 
-  const dashboardsInput = screen.getByLabelText(/^dashboards$/i);
-  fireEvent.mouseDown(dashboardsInput);
-  fireEvent.click(await screen.findByText('JVM'));
-  expect(screen.queryByRole('listbox')).toBeInTheDocument();   // still open after the first pick
-  fireEvent.click(screen.getByText('Docker'));
-  expect(screen.queryByRole('listbox')).toBeInTheDocument();
-  fireEvent.keyDown(dashboardsInput, { key: 'Escape' });
+  // The rows are on screen, so picking six is six clicks and no popup — which is the
+  // whole reason the Autocompletes went. Nothing should open a listbox at all.
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'JVM' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Docker' }));
+  expect(screen.getByRole('checkbox', { name: 'JVM' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Docker' })).toBeChecked();
 
-  await waitFor(() => expect(screen.getByLabelText(/^panels$/i)).toBeEnabled());
-  fireEvent.mouseDown(screen.getByLabelText(/^panels$/i));
-  // Both dashboards carry a "Heap" panel — that is the point of grouping them
-  fireEvent.click((await screen.findAllByText('Heap'))[0]!);
-  expect(screen.queryByRole('listbox')).toBeInTheDocument();
+  // Both dashboards carry a "Heap" panel — that is the point of grouping them by dashboard.
+  await waitFor(() => expect(screen.getAllByRole('checkbox', { name: 'Heap' })).toHaveLength(2));
+  fireEvent.click(screen.getAllByRole('checkbox', { name: 'Heap' })[0]!);
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 });
 
 it('renders the threshold fields', () => {
@@ -152,7 +154,11 @@ it('renders the baseline dropdown as a rich Autocomplete (compare-card style)', 
 
 // The three cascade buttons in order: dashboards, panels, series. Each reads
 // "Select all" or "Clear" depending on whether everything is already selected.
-const cascadeButtons = () => screen.getAllByRole('button', { name: /select all|^clear$/i });
+// By accessible name, which CascadeColumns sets per column ("Select all panels" /
+// "Clear panels"). Anchored to the three level names so the per-column "Clear <level>
+// filter" buttons are not picked up as well.
+const cascadeButtons = () =>
+  screen.getAllByRole('button', { name: /^(select all|clear) (dashboards|panels|series)$/i });
 
 // A fetch mock that answers each cascade endpoint with its own shape.
 const cascadeFetch = () => (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
@@ -223,7 +229,9 @@ it('selects every series of every selected panel at once', async () => {
       workload="loadTest"
     />
   );
-  await waitFor(() => expect(screen.getByText(/2 available — leave empty to include every series/)).toBeInTheDocument());
+  await waitFor(() => expect(column('Series').getByText('2 available')).toBeInTheDocument());
+  // The scope rule itself is now one sentence in the footer, not three helper texts.
+  expect(screen.getByText(/Every series of the picked panels is included/)).toBeInTheDocument();
   fireEvent.click(cascadeButtons()[2]!);
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
     series: [
@@ -268,9 +276,11 @@ it('shows the dashboard → panels cascade for grafana source, panels disabled u
       workload="loadTest"
     />
   );
-  expect(screen.getByLabelText(/dashboards/i)).toBeInTheDocument();
-  expect(screen.getByLabelText(/panels/i)).toBeDisabled();
-  expect(screen.getByLabelText(/series/i)).toBeDisabled();
+  // Three inline columns, so "not available yet" is an empty column with a caption
+  // saying what to do, not a disabled input.
+  expect(screen.getByRole('group', { name: 'Dashboards' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Panels' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Series' })).toBeInTheDocument();
   expect(screen.getByText(/select a dashboard to see its panels/i)).toBeInTheDocument();
   expect(screen.getByText(/select a panel to see its series/i)).toBeInTheDocument();
 });
@@ -309,10 +319,10 @@ it('names the dashboards and panels that a partial selection leaves out', async 
     />
   );
 
+  // One sentence, from `metricSelectionScopeNote`, so both warnings cannot drift apart.
   await waitFor(() =>
-    expect(screen.getByText(/no panel picked on Docker, so it is left out/)).toBeInTheDocument());
-  await waitFor(() =>
-    expect(screen.getByText(/no series picked on GC Pause, so it is left out/)).toBeInTheDocument());
+    expect(screen.getByText(/No panel picked on Docker, so it is left out\./)).toBeInTheDocument());
+  expect(screen.getByText(/No series picked on GC Pause, so it is left out\./)).toBeInTheDocument();
 });
 
 it('collapses the redundant per-percentile RT panels, like the compare card does', async () => {
@@ -343,14 +353,11 @@ it('collapses the redundant per-percentile RT panels, like the compare card does
 
   // 5 panels in, 2 out: the three percentile duplicates of 101 are dropped.
   // The five virtual URL panels are injected alongside them.
-  await waitFor(() => expect(screen.getByText(/7 available — leave empty to include every panel/)).toBeInTheDocument());
+  await waitFor(() => expect(column('Panels').getByText('7 available')).toBeInTheDocument());
 
-  fireEvent.mouseDown(screen.getByLabelText(/panels/i));
-  await waitFor(() => {
-    expect(screen.getByText('Transaction RT')).toBeInTheDocument();      // relabelled keeper
-    expect(screen.getByText('Transaction Error Rate')).toBeInTheDocument();
-    expect(screen.queryByText('Transaction RT P95')).not.toBeInTheDocument();
-  });
+  expect(column('Panels').getByText('Transaction RT')).toBeInTheDocument();   // relabelled keeper
+  expect(column('Panels').getByText('Transaction Error Rate')).toBeInTheDocument();
+  expect(column('Panels').queryByText('Transaction RT P95')).not.toBeInTheDocument();
 });
 
 it('offers "All aggregated" as a series of a response-time panel, and no toggle for it', async () => {
@@ -381,9 +388,8 @@ it('offers "All aggregated" as a series of a response-time panel, and no toggle 
   );
 
   // Two stored series plus the run-wide aggregate
-  await waitFor(() => expect(screen.getByText(/3 available — leave empty to include every series/)).toBeInTheDocument());
-  fireEvent.mouseDown(screen.getByLabelText(/series/i));
-  await waitFor(() => expect(screen.getByText('All aggregated')).toBeInTheDocument());
+  await waitFor(() => expect(column('Series').getByText('3 available')).toBeInTheDocument());
+  expect(column('Series').getByText('All aggregated')).toBeInTheDocument();
 
   // The section-level toggle it replaces is gone
   expect(screen.queryByLabelText(/include 'all aggregated' row/i)).not.toBeInTheDocument();
@@ -417,12 +423,10 @@ it('offers the URL panels and lists a run\'s URLs as their series', async () => 
   );
 
   // The five virtual URL panels join the dashboard's own panel
-  await waitFor(() => expect(screen.getByText(/6 available — leave empty to include every panel/)).toBeInTheDocument());
+  await waitFor(() => expect(column('Panels').getByText('6 available')).toBeInTheDocument());
   // ...and the selected URL panel's series are the run's URLs
-  await waitFor(() => expect(screen.getByText(/2 available — leave empty to include every series/)).toBeInTheDocument());
-
-  fireEvent.mouseDown(screen.getByLabelText(/series/i));
-  await waitFor(() => expect(screen.getByText('/checkout')).toBeInTheDocument());
+  await waitFor(() => expect(column('Series').getByText('2 available')).toBeInTheDocument());
+  expect(column('Series').getByText('/checkout')).toBeInTheDocument();
 });
 
 it('offers the same cascade for performance-metrics — its metrics live in dashboards too', () => {
@@ -435,9 +439,11 @@ it('offers the same cascade for performance-metrics — its metrics live in dash
       workload="loadTest"
     />
   );
-  expect(screen.getByLabelText(/dashboards/i)).toBeInTheDocument();
-  expect(screen.getByLabelText(/panels/i)).toBeDisabled();
-  expect(screen.getByLabelText(/series/i)).toBeDisabled();
+  // Three inline columns, so "not available yet" is an empty column with a caption
+  // saying what to do, not a disabled input.
+  expect(screen.getByRole('group', { name: 'Dashboards' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Panels' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Series' })).toBeInTheDocument();
 });
 
 it('adds a dashboard mapping row for grafana source (dropdown-based, not dynatrace-only)', () => {
@@ -458,4 +464,31 @@ it('renders mapping rows as dropdowns (current + baseline dashboard autocomplete
   );
   expect(screen.getByLabelText(/current dashboard/i)).toBeInTheDocument();
   expect(screen.getByLabelText(/baseline dashboard/i)).toBeInTheDocument();
+});
+
+/**
+ * The per-row graphs toggle. Off is the shipped default and has to stay so: on, the
+ * section renders one inline SVG per changed row into a document that is stored in
+ * Postgres, served over share links and turned into a PDF.
+ */
+it('offers the row-graphs toggle, off by default, and writes the flag', () => {
+  const onChange = jest.fn();
+  render(<ComparisonsConfigForm config={{}} onChange={onChange} />);
+
+  const toggle = screen.getByRole('switch', { name: /show a graph per changed row/i });
+  expect(toggle).not.toBeChecked();
+  expect(screen.getByText(/the section is the comparison table only/i)).toBeInTheDocument();
+
+  fireEvent.click(toggle);
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ showRowGraphs: true }));
+});
+
+it('says what the graphs will be, and that a PDF prints them open', () => {
+  render(<ComparisonsConfigForm config={{ showRowGraphs: true }} onChange={jest.fn()} />);
+  expect(screen.getByRole('switch', { name: /show a graph per changed row/i })).toBeChecked();
+  // The three things a reader cannot see from the toggle: where the graph goes, which rows
+  // get one, and the print behaviour.
+  expect(screen.getByText(/expandable row under each changed row/i)).toBeInTheDocument();
+  expect(screen.getByText(/outside the good band, worst first, at most 20/i)).toBeInTheDocument();
+  expect(screen.getByText(/a PDF prints them all open/i)).toBeInTheDocument();
 });

@@ -19,6 +19,7 @@ import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
 import Plot from '@/components/ResponsivePlot';
 import { AnalystChartCard, ChartActions, SeriesTable, type SeriesRow } from '@/components/charts';
 import {
+  EMPTY,
   SIZE,
   analysisWindowShapes,
   axisBadge,
@@ -26,8 +27,7 @@ import {
   catColor,
   chartTheme,
   fmtClock,
-  groupLabels,
-  mergeOverlays,
+  lanesNote,
   resolveAxes,
   toDisplay,
   unitText,
@@ -131,7 +131,11 @@ export default function GraphsChart({
         y: sorted.map((d) => toDisplay(d.value, series.yAxisFormat, group.display)),
         type: 'scatter',
         mode: 'lines',
-        name: `${series.panelTitle} - ${series.metricName}`,
+        // The SAME name the series table shows. ChartActions turns the legend back on for
+        // an exported PNG, so a second spelling here means the copied chart's legend
+        // disagrees with the table beside it — including the double-titled
+        // "All aggregated" case `rowName` exists to avoid.
+        name: rowName(series),
         line: { color, width: SIZE.line, shape: 'linear' },
         yaxis: group.axis,
         connectgaps: true,
@@ -139,9 +143,7 @@ export default function GraphsChart({
       });
     });
 
-    const overlay = mergeOverlays(
-      analysisWindowShapes(startIndex, endIndex, sortedTimestamps.length, theme),
-    );
+    const overlay = analysisWindowShapes(startIndex, endIndex, sortedTimestamps.length, theme);
 
     let layout = buildPlotLayout(axisLayoutMode, {
       theme,
@@ -213,7 +215,7 @@ export default function GraphsChart({
         panelUnit: series.panelYAxisFormat,
         displayUnit: display.label,
         hidden: series.hidden,
-        axis: plot ? axisBadge(plot.groups, series.id) : '—',
+        axis: plot ? axisBadge(plot.groups, series.id) : EMPTY,
         stats: windowStats(windowed.map((d) => d.value), series.yAxisFormat, display),
         cursor: cursorPoint ? toDisplay(cursorPoint.value, series.yAxisFormat, display) : null,
       } satisfies SeriesRow;
@@ -230,10 +232,7 @@ export default function GraphsChart({
     [plot],
   );
 
-  const lanesNote =
-    plot && plot.axisLayoutMode === 'lanes' && plot.groups.length > 2
-      ? `${plot.groups.length} unit families (${groupLabels(plot.groups).join(', ')}): more than two axes, so the chart is split into lanes`
-      : undefined;
+  const note = plot ? lanesNote(plot.groups, plot.axisLayoutMode) : undefined;
 
   const sources = new Set(seriesConfig.map((s) => s.dashboardLabel));
   const summary = `${seriesConfig.length} series · ${sources.size} ${sources.size === 1 ? 'source' : 'sources'}`;
@@ -271,7 +270,7 @@ export default function GraphsChart({
       }
       axisMode={onAxisModeChange ? axisMode : undefined}
       onAxisModeChange={onAxisModeChange}
-      lanesNote={lanesNote}
+      lanesNote={note}
       actions={
         <>
           {actions}

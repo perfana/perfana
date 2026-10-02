@@ -11,7 +11,6 @@ export type {
   DataSource,
   CompareSeries,
   MetricsComparisonTableProps,
-  AddedSeriesDisplayProps,
 } from './compare.types';
 
 // Constants for panel types

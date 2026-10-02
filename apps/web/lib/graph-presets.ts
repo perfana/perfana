@@ -1,4 +1,5 @@
 import { authenticatedFetch } from './api';
+import { composeSeriesName } from './series-name';
 
 /**
  * Represents a single time series configuration for custom graphs
@@ -210,19 +211,9 @@ export const GraphPresetUtils = {
    * @returns Suggested preset name
    */
   generatePresetName: (seriesConfig: SeriesConfig[]): string => {
-    if (seriesConfig.length === 0) {
-      return 'Custom Graph';
-    }
-
-    if (seriesConfig.length === 1) {
-      return seriesConfig[0].panelTitle;
-    }
-
-    if (seriesConfig.length <= 3) {
-      return seriesConfig.map(s => s.panelTitle).join(' + ');
-    }
-
-    return `Multi-metric Analysis (${seriesConfig.length} series)`;
+    // Shared with the chart name and with Compare, so all three name a selection the same
+    // way. Only reached when the chart has no name of its own.
+    return composeSeriesName(seriesConfig) || 'Custom Graph';
   },
 
   /**

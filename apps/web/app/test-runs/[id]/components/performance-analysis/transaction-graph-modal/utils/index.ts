@@ -1,7 +1,7 @@
 export {
   AGGREGATION_OPTIONS,
   METRIC_OPTIONS,
-  SAMPLER_COLORS,
+  samplerColor,
   getMetricLabel,
   buildPlotLayout,
   buildPlotConfig,

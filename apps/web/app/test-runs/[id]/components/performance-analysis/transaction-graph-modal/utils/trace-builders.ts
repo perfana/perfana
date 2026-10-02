@@ -3,13 +3,19 @@
  */
 
 import type { TimeSeriesResponse, MetricType } from '../types';
-import { SAMPLER_COLORS } from './chart-config';
+import { samplerColor } from './chart-config';
+import { SIZE, chartTheme, type ChartMode } from '@/lib/charts';
 
 export function buildTransactionTrace(
   data: TimeSeriesResponse,
   transactionName: string,
-  selectedMetric: MetricType
+  selectedMetric: MetricType,
+  mode: ChartMode,
 ): Record<string, unknown> {
+  // The reference line, so it takes the foreground ink rather than a fixed near-black:
+  // `rgb(20, 20, 20)` on the dark plot background (`#172033`) is about 1.1:1 — the most
+  // important series on the chart, invisible.
+  const color = chartTheme(mode).text;
   return {
     x: data.transaction_data.map(d => new Date(d.time_bucket)),
     y: data.transaction_data.map(d => d[selectedMetric]),
@@ -17,13 +23,13 @@ export function buildTransactionTrace(
     type: 'scatter',
     mode: 'lines+markers',
     line: {
-      width: 2,
-      color: 'rgb(20, 20, 20)',
+      width: SIZE.line,
+      color,
       dash: 'dash',
     },
     marker: {
       size: 4,
-      color: 'rgb(20, 20, 20)',
+      color,
     },
     connectgaps: false,
     hovertemplate:
@@ -36,7 +42,8 @@ export function buildTransactionTrace(
 
 export function buildPassedTrace(
   data: TimeSeriesResponse,
-  aggregationSeconds: number
+  aggregationSeconds: number,
+  mode: ChartMode,
 ): Record<string, unknown> {
   return {
     x: data.transaction_data.map(d => new Date(d.time_bucket)),
@@ -45,8 +52,8 @@ export function buildPassedTrace(
     type: 'scatter',
     mode: 'lines',
     line: {
-      width: 2,
-      color: 'rgb(76, 175, 80)', // Green
+      width: SIZE.line,
+      color: chartTheme(mode).success,
     },
     hovertemplate:
       '<b>Passed</b><br>' +
@@ -58,7 +65,8 @@ export function buildPassedTrace(
 
 export function buildFailedTrace(
   data: TimeSeriesResponse,
-  aggregationSeconds: number
+  aggregationSeconds: number,
+  mode: ChartMode,
 ): Record<string, unknown> {
   return {
     x: data.transaction_data.map(d => new Date(d.time_bucket)),
@@ -67,8 +75,8 @@ export function buildFailedTrace(
     type: 'scatter',
     mode: 'lines',
     line: {
-      width: 2,
-      color: 'rgb(244, 67, 54)', // Red
+      width: SIZE.line,
+      color: chartTheme(mode).error,
     },
     hovertemplate:
       '<b>Failed</b><br>' +
@@ -80,7 +88,9 @@ export function buildFailedTrace(
 
 export function buildSamplerTraces(
   data: TimeSeriesResponse,
-  selectedMetric: MetricType
+  selectedMetric: MetricType,
+  /** Light or dark, for the stack's colours. Required — see `generatePlotlyData`. */
+  mode: ChartMode,
 ): unknown[] {
   const traces: unknown[] = [];
   let colorIndex = 0;
@@ -101,7 +111,7 @@ export function buildSamplerTraces(
   const gridX = grid.map(t => new Date(t));
 
   Object.entries(data.sampler_data).forEach(([samplerName, samplerData]) => {
-    const colors = SAMPLER_COLORS[colorIndex % SAMPLER_COLORS.length];
+    const colors = samplerColor(colorIndex, mode);
     colorIndex++;
 
     // Defensive: with no grid (a run with no usable end_time returns both
@@ -129,7 +139,7 @@ export function buildSamplerTraces(
       hovertemplate:
         `<b>${samplerName}</b><br>` +
         '<span style="font-size: 13px; font-weight: 500;">%{y:.2f} ms</span><br>' +
-        '<span style="font-size: 11px; color: #666;">%{x|%H:%M:%S}</span><br>' +
+        `<span style="font-size: 11px; color: ${chartTheme(mode).muted};">%{x|%H:%M:%S}</span><br>` +
         '<extra></extra>',
       yaxis: 'y',
     });
@@ -142,7 +152,14 @@ export function generatePlotlyData(
   data: TimeSeriesResponse | null,
   transactionName: string,
   selectedMetric: MetricType,
-  aggregationSeconds: number
+  aggregationSeconds: number,
+  /**
+   * Light or dark. Deliberately NOT defaulted: `aggregationSeconds` was added to this
+   * signature at the same time with no default, so no pre-existing caller could compile
+   * either way — and a default would let the next caller silently draw the light palette
+   * over the dark plot, which is the exact bug this conversion fixed.
+   */
+  mode: ChartMode,
 ): unknown[] {
   if (!data) return [];
 
@@ -150,14 +167,14 @@ export function generatePlotlyData(
 
   // Transaction-level traces
   if (data.transaction_data && data.transaction_data.length > 0) {
-    traces.push(buildTransactionTrace(data, transactionName, selectedMetric));
-    traces.push(buildPassedTrace(data, aggregationSeconds));
-    traces.push(buildFailedTrace(data, aggregationSeconds));
+    traces.push(buildTransactionTrace(data, transactionName, selectedMetric, mode));
+    traces.push(buildPassedTrace(data, aggregationSeconds, mode));
+    traces.push(buildFailedTrace(data, aggregationSeconds, mode));
   }
 
   // Sampler-level traces (stacked area chart)
   if (data.sampler_data && Object.keys(data.sampler_data).length > 0) {
-    traces.push(...buildSamplerTraces(data, selectedMetric));
+    traces.push(...buildSamplerTraces(data, selectedMetric, mode));
   }
 
   return traces;

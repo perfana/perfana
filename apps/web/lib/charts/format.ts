@@ -75,3 +75,21 @@ export const fmtHM = (time: string | number | Date): string => {
     ? ''
     : date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 };
+
+/**
+ * `04 Oct` — x-axis ticks in Trends, where a position is a run rather than an instant.
+ * `en-GB` pins day-before-month, so a reader never has to guess whether `04/10` is
+ * October or April.
+ */
+export const fmtDay = (time: string | number | Date): string => {
+  const date = new Date(time);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+};
+
+/** `04 Oct 14:30` — the same tick when one day holds more than one run. */
+export const fmtDayHM = (time: string | number | Date): string => {
+  const date = new Date(time);
+  return Number.isNaN(date.getTime()) ? '' : `${fmtDay(date)} ${fmtHM(date)}`;
+};

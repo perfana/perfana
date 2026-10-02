@@ -1,28 +1,3 @@
-// Perfana's color system - error-focused palette
-export const CHART_COLORS = [
-  '#f44336',  // Red
-  '#e91e63',  // Pink
-  '#9c27b0',  // Purple
-  '#673ab7',  // Deep Purple
-  '#3f51b5',  // Indigo
-  '#2196f3',  // Blue
-  '#03a9f4',  // Light Blue
-  '#00bcd4',  // Cyan
-  '#009688',  // Teal
-  '#4caf50',  // Green
-  '#ff9800',  // Orange
-  '#ff5722',  // Deep Orange
-];
-
-/**
- * Map error codes to specific colors for consistency
- * Uses a simple hash function to consistently assign colors
- */
-export const getColorForErrorCode = (code: string): string => {
-  const hash = code.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return CHART_COLORS[hash % CHART_COLORS.length];
-};
-
 /**
  * Truncate URL to specified max length with ellipsis
  */

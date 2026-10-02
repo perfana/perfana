@@ -8,18 +8,36 @@
  * "everything under the level above it" — so the common case, compare/trend these two
  * dashboards, stays one click. Pick anything at a level and only the picks count: a
  * dashboard with no panel picked, or a panel with no series picked, drops out. The
- * renderer reads the same rule (section-selections.ts), and the helper text below names
- * whatever is dropping out, because silently reporting on it is the older bug.
+ * renderer reads the same rule (section-selections.ts), and `metricSelectionScopeNote`
+ * below names whatever is dropping out, because silently reporting on it is the older bug.
+ *
+ * Presentation is the same three inline scrolling columns as the test-run cards' series
+ * picker — `CascadeColumns`, shared by both. It replaced three MUI Autocompletes, which
+ * hid the levels behind each other (you could not see which panels a dashboard had while
+ * choosing the dashboard) and made "select these six" six trips through a popup. What is
+ * NOT shared is everything below the chrome: this one loads per metrics source for a
+ * system/environment rather than from a run, and stores labels rather than picks, because
+ * a report config outlives the run it was written against.
  */
 
 import { useEffect, useState } from 'react';
-import { Autocomplete, Box, Button, TextField } from '@mui/material';
+import { Typography, useTheme } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceDashboards, fetchDynatraceMetrics } from '@/lib/dynatrace';
 import { isGrafana, isPerformanceTest } from '@/lib/metrics-source-utils';
 import { ALL_AGGREGATED_OPTION, collapsePerfRtPanels, getAggregateSpec } from '@/lib/aggregated-perf-series';
 import { buildUrlPanels, fetchUrlDistinctNames, isUrlPanel } from '@/lib/url-perf-panels';
 import HostLabelChips from '@/components/HostLabelChips';
+import { chartTheme } from '@/lib/charts';
+import {
+  CascadeColumn,
+  CascadeFrame,
+  CascadeGroup,
+  CascadeRow,
+  cascadeCountLabel,
+  cascadeGroupBy,
+  cascadeMatchesQuery,
+} from '@/components/charts/CascadeColumns';
 
 export type MetricSource = 'performance-metrics' | 'grafana' | 'dynatrace';
 
@@ -93,6 +111,55 @@ export function useSourceDashboards(
   return dashboards;
 }
 
+/** `JVM, Heap` → `JVM and Heap`; the Oxford-less join a sentence wants. */
+function andList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+export interface MetricSelectionScope {
+  dashboards: string[];
+  /** Dashboards with at least one panel picked, when any panel is picked at all. */
+  droppedDashboards: string[];
+  panelsPicked: number;
+  /** Titles of picked panels with no series picked, when any series is picked at all. */
+  droppedPanels: string[];
+  seriesPicked: number;
+}
+
+/**
+ * What the current selection actually covers, in a sentence.
+ *
+ * This is not decoration. "A level left empty means everything below it" is generous in
+ * the direction that surprises people — a config that picks two dashboards and no panels
+ * reports on every panel they have — and the older bug was reporting on a dashboard the
+ * user thought they had excluded by picking panels only on its sibling. So the note
+ * always says which way each empty level is being read, and names anything being
+ * dropped.
+ */
+export function metricSelectionScopeNote(scope: MetricSelectionScope): string {
+  if (scope.dashboards.length === 0) return 'Nothing in scope yet — pick a dashboard.';
+
+  const parts: string[] = [];
+  if (scope.droppedDashboards.length > 0) {
+    const they = scope.droppedDashboards.length === 1 ? 'it is' : 'they are';
+    parts.push(`No panel picked on ${andList(scope.droppedDashboards)}, so ${they} left out.`);
+  }
+  if (scope.droppedPanels.length > 0) {
+    const they = scope.droppedPanels.length === 1 ? 'it is' : 'they are';
+    parts.push(`No series picked on ${andList(scope.droppedPanels)}, so ${they} left out.`);
+  }
+
+  if (scope.panelsPicked === 0) {
+    parts.push('Every panel and series of the picked dashboards is included.');
+  } else if (scope.seriesPicked === 0) {
+    parts.push('Every series of the picked panels is included.');
+  } else {
+    parts.push('Exactly the picked series is included.');
+  }
+  return parts.join(' ');
+}
+
 interface MetricSelectionCascadeProps {
   source: MetricSource;
   dashboards: SourceDashboardOption[];
@@ -127,6 +194,12 @@ export function MetricSelectionCascade({
   const [panelsLoading, setPanelsLoading] = useState(false);
   const [seriesOptions, setSeriesOptions] = useState<SeriesOption[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
+  // One query per column. Deliberately NOT reset when the selection changes: narrowing
+  // dashboards to "docker" and then stepping through their panels is the flow this is for.
+  const [dashboardQuery, setDashboardQuery] = useState('');
+  const [panelQuery, setPanelQuery] = useState('');
+  const [seriesQuery, setSeriesQuery] = useState('');
+  const theme = chartTheme(useTheme().palette.mode === 'dark' ? 'dark' : 'light');
 
   // Configs saved before multi-select carried one dashboard; read it as a list of one.
   const selectedDashboards = value.dashboardLabels ?? (value.dashboardLabel ? [value.dashboardLabel] : []);
@@ -269,159 +342,178 @@ export function MetricSelectionCascade({
     onChange({ dashboardLabels: selectedDashboards, panels: selectedPanels, series });
   };
 
+  // Visible = what the column's filter leaves. Select all / Clear operate on THIS set,
+  // not the whole list: with 90 dashboards loaded, a "Select all" that ignored a query and
+  // picked all 90 would be a trap rather than a shortcut.
+  const visibleDashboards = dashboards.filter((d) => cascadeMatchesQuery(dashboardQuery, d.label));
+  const visiblePanels = panelOptions.filter((o) => cascadeMatchesQuery(panelQuery, o.title, o.dashboardLabel));
+  const visibleSeries = seriesOptions.filter((o) =>
+    cascadeMatchesQuery(seriesQuery, o.metricName, o.panelTitle, o.dashboardLabel));
+
+  const pickedDashboards = new Set(selectedDashboards);
+  const panelKey = (p: { id: number; dashboardLabel?: string }) => `${panelDashboard(p)}\u0000${p.id}`;
+  const pickedPanels = new Set(selectedPanels.map(panelKey));
+  const seriesKey = (sr: { dashboardLabel: string; panelId: number; metricName: string }) =>
+    `${sr.dashboardLabel}\u0000${sr.panelId}\u0000${sr.metricName}`;
+  const pickedSeries = new Set(selectedSeries.map(seriesKey));
+
+  const allVisibleDashboardsPicked =
+    visibleDashboards.length > 0 && visibleDashboards.every((d) => pickedDashboards.has(d.label));
+  const allVisiblePanelsPicked =
+    visiblePanels.length > 0 && visiblePanels.every((o) => pickedPanels.has(panelKey(o)));
+  const allVisibleSeriesPicked =
+    visibleSeries.length > 0 && visibleSeries.every((o) => pickedSeries.has(seriesKey(o)));
+
+  const asPanel = (o: PanelOption) => ({ id: o.id, title: o.title, dashboardLabel: o.dashboardLabel });
+  const asSeries = (o: SeriesOption) =>
+    ({ dashboardLabel: o.dashboardLabel, panelId: o.panelId, metricName: o.metricName });
+
+  const panelGroups = cascadeGroupBy(visiblePanels, (o) => o.dashboardLabel);
+  const seriesGroups = cascadeGroupBy(visibleSeries, (o) => `${o.dashboardLabel} / ${o.panelTitle}`);
+
   return (
-    <>
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-        <Autocomplete
-          multiple
-          // Picking a dashboard/panel/series is almost never a single choice, and the popup
-          // closing after each one made "select these six" six trips through the dropdown.
-          disableCloseOnSelect
-          limitTags={4}
-          options={dashboards.map((d) => d.label)}
-          value={selectedDashboards}
-          onChange={(_, v) => setDashboards(v)}
-          size="small"
-          sx={{ flex: 1 }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Dashboards"
-              variant="outlined"
-              fullWidth
-              helperText={`${dashboards.length} available`}
-            />
-          )}
-          renderOption={(props, option) => {
-            const { key, ...rest } = props as React.HTMLAttributes<HTMLLIElement> & { key?: string };
-            const hostLabels = dashboards.find((d) => d.label === option)?.hostLabels;
-            return (
-              <Box component="li" key={key ?? option} {...rest} sx={{ display: 'flex', gap: 1 }}>
-                <span>{option}</span>
-                <HostLabelChips labels={hostLabels} />
-              </Box>
-            );
-          }}
-        />
-        <Button
-          size="small"
-          onClick={() => setDashboards(
-            selectedDashboards.length === dashboards.length ? [] : dashboards.map((d) => d.label),
-          )}
-          disabled={dashboards.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
-        >
-          {selectedDashboards.length === dashboards.length && dashboards.length > 0 ? 'Clear' : 'Select all'}
-        </Button>
-      </Box>
+    <CascadeFrame
+      theme={theme}
+      footer={
+        <Typography sx={{ fontSize: 12, color: theme.muted }}>
+          {metricSelectionScopeNote({
+            dashboards: selectedDashboards,
+            droppedDashboards,
+            panelsPicked: selectedPanels.length,
+            droppedPanels: droppedPanels.map((p) => p.title),
+            seriesPicked: selectedSeries.length,
+          })}
+        </Typography>
+      }
+    >
+      <CascadeColumn
+        theme={theme}
+        label="Dashboards"
+        heading={cascadeCountLabel('Dashboards', visibleDashboards.length, dashboards.length)}
+        caption={
+          visibleDashboards.length === 0 && dashboardQuery.trim()
+            ? `No dashboards match "${dashboardQuery.trim()}"`
+            : `${dashboards.length} available`
+        }
+        allPicked={allVisibleDashboardsPicked}
+        onToggleAll={() => setDashboards(
+          allVisibleDashboardsPicked
+            // Clear only what is on screen; a selection hidden by the query stays.
+            ? selectedDashboards.filter((l) => !visibleDashboards.some((d) => d.label === l))
+            : [...selectedDashboards, ...visibleDashboards.filter((d) => !pickedDashboards.has(d.label)).map((d) => d.label)],
+        )}
+        toggleDisabled={visibleDashboards.length === 0}
+        query={dashboardQuery}
+        onQueryChange={setDashboardQuery}
+        queryPlaceholder="filter dashboards"
+        divider
+      >
+        {visibleDashboards.map((d) => (
+          <CascadeRow
+            key={d.label}
+            theme={theme}
+            checked={pickedDashboards.has(d.label)}
+            onToggle={() => setDashboards(
+              pickedDashboards.has(d.label)
+                ? selectedDashboards.filter((l) => l !== d.label)
+                : [...selectedDashboards, d.label],
+            )}
+            label={d.label}
+            trailing={<HostLabelChips labels={d.hostLabels} />}
+          />
+        ))}
+      </CascadeColumn>
 
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-        <Autocomplete
-          multiple
-          // Picking a dashboard/panel/series is almost never a single choice, and the popup
-          // closing after each one made "select these six" six trips through the dropdown.
-          disableCloseOnSelect
-          limitTags={4}
-          options={panelOptions}
-          groupBy={(o) => o.dashboardLabel}
-          getOptionLabel={(o) => o.title}
-          isOptionEqualToValue={(o, v) => o.id === v.id && o.dashboardLabel === (v.dashboardLabel ?? o.dashboardLabel)}
-          value={selectedPanels.map((p) =>
-            panelOptions.find((o) => o.id === p.id && o.dashboardLabel === panelDashboard(p))
-              ?? { id: p.id, title: p.title, dashboardLabel: panelDashboard(p), appDashboardId: '' },
-          )}
-          onChange={(_, v) => setPanels(v.map((o) => ({ id: o.id, title: o.title, dashboardLabel: o.dashboardLabel })))}
-          disabled={selectedDashboards.length === 0}
-          loading={panelsLoading}
-          size="small"
-          sx={{ flex: 1 }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Panels"
-              variant="outlined"
-              fullWidth
-              helperText={
-                selectedDashboards.length === 0
-                  ? 'Select a dashboard to see its panels'
-                  : panelsLoading
-                    ? 'Loading panels…'
-                    : droppedDashboards.length > 0
-                      ? `${panelOptions.length} available — no panel picked on ${droppedDashboards.join(', ')}, so ${droppedDashboards.length === 1 ? 'it is' : 'they are'} left out`
-                      : `${panelOptions.length} available — leave empty to include every panel`
-              }
-            />
-          )}
-        />
-        <Button
-          size="small"
-          onClick={() => setPanels(
-            selectedPanels.length === panelOptions.length
-              ? []
-              : panelOptions.map((o) => ({ id: o.id, title: o.title, dashboardLabel: o.dashboardLabel })),
-          )}
-          disabled={panelOptions.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
-        >
-          {selectedPanels.length === panelOptions.length && panelOptions.length > 0 ? 'Clear' : 'Select all'}
-        </Button>
-      </Box>
+      <CascadeColumn
+        theme={theme}
+        label="Panels"
+        heading={cascadeCountLabel('Panels', visiblePanels.length, panelOptions.length)}
+        caption={
+          selectedDashboards.length === 0
+            ? 'Select a dashboard to see its panels'
+            : panelsLoading
+              ? 'Loading panels…'
+              : visiblePanels.length === 0 && panelQuery.trim()
+                ? `No panels match "${panelQuery.trim()}"`
+                : `${panelOptions.length} available`
+        }
+        allPicked={allVisiblePanelsPicked}
+        onToggleAll={() => setPanels(
+          allVisiblePanelsPicked
+            ? selectedPanels.filter((p) => !visiblePanels.some((o) => panelKey(o) === panelKey(p)))
+            : [...selectedPanels, ...visiblePanels.filter((o) => !pickedPanels.has(panelKey(o))).map(asPanel)],
+        )}
+        toggleDisabled={visiblePanels.length === 0}
+        loading={panelsLoading}
+        empty={selectedDashboards.length === 0}
+        query={panelQuery}
+        onQueryChange={setPanelQuery}
+        queryPlaceholder="filter panels"
+        divider
+      >
+        {panelGroups.map(([group, panels]) => (
+          <CascadeGroup key={group} label={group} color={theme.faint}>
+            {panels.map((o) => (
+              <CascadeRow
+                key={panelKey(o)}
+                theme={theme}
+                checked={pickedPanels.has(panelKey(o))}
+                onToggle={() => setPanels(
+                  pickedPanels.has(panelKey(o))
+                    ? selectedPanels.filter((p) => panelKey(p) !== panelKey(o))
+                    : [...selectedPanels, asPanel(o)],
+                )}
+                label={o.title}
+              />
+            ))}
+          </CascadeGroup>
+        ))}
+      </CascadeColumn>
 
-      <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-        <Autocomplete
-          multiple
-          // Picking a dashboard/panel/series is almost never a single choice, and the popup
-          // closing after each one made "select these six" six trips through the dropdown.
-          disableCloseOnSelect
-          limitTags={6}
-          options={seriesOptions}
-          groupBy={(o) => `${o.dashboardLabel} / ${o.panelTitle}`}
-          getOptionLabel={(o) => o.metricName}
-          isOptionEqualToValue={(o, v) =>
-            o.metricName === v.metricName && o.panelId === v.panelId && o.dashboardLabel === v.dashboardLabel}
-          value={selectedSeries.map((sr) =>
-            seriesOptions.find((o) =>
-              o.metricName === sr.metricName && o.panelId === sr.panelId && o.dashboardLabel === sr.dashboardLabel,
-            ) ?? { ...sr, panelTitle: '' },
-          )}
-          onChange={(_, v) => setSeries(
-            v.map((o) => ({ dashboardLabel: o.dashboardLabel, panelId: o.panelId, metricName: o.metricName })),
-          )}
-          disabled={selectedPanels.length === 0}
-          loading={seriesLoading}
-          size="small"
-          sx={{ flex: 1 }}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Series"
-              variant="outlined"
-              fullWidth
-              helperText={
-                selectedPanels.length === 0
-                  ? 'Select a panel to see its series'
-                  : seriesLoading
-                    ? 'Loading series…'
-                    : droppedPanels.length > 0
-                      ? `${seriesOptions.length} available — no series picked on ${droppedPanels.map((p) => p.title).join(', ')}, so ${droppedPanels.length === 1 ? 'it is' : 'they are'} left out`
-                      : `${seriesOptions.length} available — leave empty to include every series`
-              }
-            />
-          )}
-        />
-        <Button
-          size="small"
-          onClick={() => setSeries(
-            selectedSeries.length === seriesOptions.length
-              ? []
-              : seriesOptions.map((o) => ({ dashboardLabel: o.dashboardLabel, panelId: o.panelId, metricName: o.metricName })),
-          )}
-          disabled={seriesOptions.length === 0}
-          sx={{ mt: 0.5, flexShrink: 0 }}
-        >
-          {selectedSeries.length === seriesOptions.length && seriesOptions.length > 0 ? 'Clear' : 'Select all'}
-        </Button>
-      </Box>
-    </>
+      <CascadeColumn
+        theme={theme}
+        label="Series"
+        heading={cascadeCountLabel('Series', visibleSeries.length, seriesOptions.length)}
+        caption={
+          selectedPanels.length === 0
+            ? 'Select a panel to see its series'
+            : seriesLoading
+              ? 'Loading series…'
+              : visibleSeries.length === 0 && seriesQuery.trim()
+                ? `No series match "${seriesQuery.trim()}"`
+                : `${seriesOptions.length} available`
+        }
+        allPicked={allVisibleSeriesPicked}
+        onToggleAll={() => setSeries(
+          allVisibleSeriesPicked
+            ? selectedSeries.filter((sr) => !visibleSeries.some((o) => seriesKey(o) === seriesKey(sr)))
+            : [...selectedSeries, ...visibleSeries.filter((o) => !pickedSeries.has(seriesKey(o))).map(asSeries)],
+        )}
+        toggleDisabled={visibleSeries.length === 0}
+        loading={seriesLoading}
+        empty={selectedPanels.length === 0}
+        query={seriesQuery}
+        onQueryChange={setSeriesQuery}
+        queryPlaceholder="filter series"
+      >
+        {seriesGroups.map(([group, options]) => (
+          <CascadeGroup key={group} label={group} color={theme.faint}>
+            {options.map((o) => (
+              <CascadeRow
+                key={seriesKey(o)}
+                theme={theme}
+                checked={pickedSeries.has(seriesKey(o))}
+                onToggle={() => setSeries(
+                  pickedSeries.has(seriesKey(o))
+                    ? selectedSeries.filter((sr) => seriesKey(sr) !== seriesKey(o))
+                    : [...selectedSeries, asSeries(o)],
+                )}
+                label={o.metricName}
+              />
+            ))}
+          </CascadeGroup>
+        ))}
+      </CascadeColumn>
+    </CascadeFrame>
   );
 }

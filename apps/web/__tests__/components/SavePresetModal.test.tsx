@@ -124,7 +124,7 @@ describe('SavePresetModal', () => {
   });
 
   describe('Auto-Generation of Preset Name', () => {
-    it('should generate name from series count', () => {
+    it('should generate the name from the dashboard, panel and metric', () => {
       render(
         <SavePresetModal
           open={true}
@@ -135,7 +135,7 @@ describe('SavePresetModal', () => {
       );
 
       const nameInput = screen.getByLabelText(/Preset Name/i) as HTMLInputElement;
-      expect(nameInput.value).toBe('1 Series');
+      expect(nameInput.value).toBe('Performance Dashboard · CPU Usage · cpu_usage_percent');
     });
 
     it('should include series search text in name when present', () => {
@@ -625,7 +625,7 @@ describe('SavePresetModal', () => {
       // Wait for auto-generation to complete
       await waitFor(() => {
         const nameInput = screen.getByLabelText(/Preset Name/i) as HTMLInputElement;
-        expect(nameInput.value).toBe('1 Series');
+        expect(nameInput.value).toBe('Performance Dashboard · CPU Usage · cpu_usage_percent');
       });
 
       const nameInput = screen.getByLabelText(/Preset Name/i) as HTMLInputElement;
@@ -659,7 +659,7 @@ describe('SavePresetModal', () => {
       // Should have regenerated name when reopened
       await waitFor(() => {
         const newNameInput = screen.getByLabelText(/Preset Name/i) as HTMLInputElement;
-        expect(newNameInput.value).toBe('1 Series');
+        expect(newNameInput.value).toBe('Performance Dashboard · CPU Usage · cpu_usage_percent');
       });
     });
   });
@@ -753,7 +753,7 @@ describe('SavePresetModal', () => {
       // Wait for form to initialize
       await waitFor(() => {
         const nameInput = screen.getByLabelText(/Preset Name/i) as HTMLInputElement;
-        expect(nameInput.value).toBe('1 Series');
+        expect(nameInput.value).toBe('Dynatrace Dashboard · Dynatrace Metric · dt_cpu');
       });
 
       const saveButton = screen.getByRole('button', { name: /Save Preset/i });
@@ -831,7 +831,7 @@ describe('SavePresetModal', () => {
       // Wait for form to initialize
       await waitFor(() => {
         const nameInput = screen.getByLabelText(/Preset Name/i) as HTMLInputElement;
-        expect(nameInput.value).toBe('1 Series');
+        expect(nameInput.value).toBe('Performance Dashboard · CPU Usage · cpu_usage_percent');
       });
 
       const saveButton = screen.getByRole('button', { name: /Save Preset/i });
@@ -862,7 +862,7 @@ describe('SavePresetModal', () => {
       // Wait for form to initialize
       await waitFor(() => {
         const nameInput = screen.getByLabelText(/Preset Name/i) as HTMLInputElement;
-        expect(nameInput.value).toBe('1 Series');
+        expect(nameInput.value).toBe('Performance Dashboard · CPU Usage · cpu_usage_percent');
       });
 
       const saveButton = screen.getByRole('button', { name: /Save Preset/i });

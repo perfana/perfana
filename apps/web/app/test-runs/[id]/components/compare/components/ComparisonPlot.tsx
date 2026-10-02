@@ -146,7 +146,7 @@ export default function ComparisonPlot({
       name,
       line: {
         color: isBaseline ? theme.baseline : theme.primary,
-        width: isBaseline ? SIZE.line : SIZE.line,
+        width: SIZE.line,
         shape: 'linear' as const,
         ...(isBaseline ? { dash: SIZE.baselineDash } : {}),
       },

@@ -1,30 +1,20 @@
 import { SeriesConfig } from '../types';
+import { composeSeriesName } from '@/lib/series-name';
 import { SeriesConfig as APISeriesConfig } from '@/lib/graph-presets';
 
 export { extractYAxisFormat } from '../../shared/metric-options';
 
 /**
- * Generate chart name based on added series
+ * The chart's name, and — because `GraphsCard` passes it to the save dialog as
+ * `defaultName` — the suggested preset name with it.
+ *
+ * `composeSeriesName` is shared with the Compare card so the two name a selection the
+ * same way. It replaces a first-two-then-"(+N more)" rule that named a chart after
+ * whichever two series happened to be added first and said nothing about where they came
+ * from.
  */
 export function generateChartName(seriesList: SeriesConfig[]): string {
-  if (seriesList.length === 0) {
-    return '';
-  }
-
-  if (seriesList.length === 1) {
-    return seriesList[0].metricName || seriesList[0].panelTitle;
-  }
-
-  if (seriesList.length === 2) {
-    const name1 = seriesList[0].metricName || seriesList[0].panelTitle;
-    const name2 = seriesList[1].metricName || seriesList[1].panelTitle;
-    return `${name1} vs ${name2}`;
-  }
-
-  // For 3+ series, use first two + indicator of more
-  const name1 = seriesList[0].metricName || seriesList[0].panelTitle;
-  const name2 = seriesList[1].metricName || seriesList[1].panelTitle;
-  return `${name1} vs ${name2} (+${seriesList.length - 2} more)`;
+  return composeSeriesName(seriesList);
 }
 
 /**
@@ -58,9 +48,10 @@ export function convertFromAPISeriesConfig(apiSeries: APISeriesConfig): SeriesCo
     metricName: apiSeries.metricName || '',
     source: apiSeries.source || 'grafana',
     yAxisFormat: apiSeries.yAxisFormat,
-    // The panel's own unit is not stored — a preset records the unit the user chose. With
-    // nothing to compare against, a loaded series shows no override dot until the panel
-    // is re-picked, which is better than claiming an override that may not exist.
+    // `panelYAxisFormat` is deliberately NOT set here: the panel's own unit is not stored,
+    // a preset records only the unit the user chose. With nothing to compare against, a
+    // loaded series shows no override dot until the panel is re-picked, which is better
+    // than claiming an override that may not exist.
     colorSlot: apiSeries.colorSlot,
     hidden: apiSeries.hidden
   };

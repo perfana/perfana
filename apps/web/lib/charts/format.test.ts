@@ -1,5 +1,5 @@
-import { EMPTY, fmtClock, ft, fv, niceStep, tickValues } from './format';
-import { catColor, nextFreeSlot, seqColor } from './tokens';
+import { EMPTY, fmtClock, fmtDay, fmtDayHM, fmtHM, ft, fv, niceStep, tickValues } from './format';
+import { catColor, nextFreeSlot } from './tokens';
 
 describe('fv — series-table values', () => {
   it('picks decimals by magnitude so a column lines up', () => {
@@ -83,17 +83,49 @@ describe('colour slots', () => {
     expect(nextFreeSlot([])).toBe(0);
     expect(nextFreeSlot([undefined, 0])).toBe(1);
   });
-
-  it('runs an ordered palette light → dark', () => {
-    expect(seqColor(0, 4, 'light')).toBe('#93c5fd');
-    expect(seqColor(3, 4, 'light')).toBe('#172554');
-    expect(seqColor(0, 1, 'light')).toBe('#172554');
-  });
 });
 
 describe('fmtClock', () => {
   it('is HH:MM:SS, and an em dash for an unparseable time', () => {
     expect(fmtClock('2026-01-02T03:04:05Z')).toMatch(/^\d{2}:\d{2}:\d{2}$/);
     expect(fmtClock('not a time')).toBe(EMPTY);
+  });
+});
+
+/**
+ * The date tick formatters the Trends axis uses. `trends-plot-x-axis.test.ts` asserts
+ * their SHAPE through the hook, because the label is rendered in the viewer's timezone and
+ * an exact string would pass only where the suite happens to run. What is pinned here is
+ * what does NOT depend on a timezone: `en-GB` ordering, the padded day, and the fact that
+ * an unparseable date is a BLANK tick rather than the em dash `fv` would print.
+ */
+describe('fmtHM / fmtDay / fmtDayHM', () => {
+  it('is HH:MM, day-before-month, with a padded day', () => {
+    expect(fmtHM('2026-10-04T14:30:00Z')).toMatch(/^\d{2}:\d{2}$/);
+    // `04 Oct`, never `10/04` — a reader must not have to guess October from April.
+    expect(fmtDay('2026-10-04T12:00:00Z')).toMatch(/^\d{2} [A-Z][a-z]{2,3}$/);
+    expect(fmtDay('2026-01-04T12:00:00Z')).toMatch(/^04 Jan$/);
+  });
+
+  it('puts the date before the clock, separated by one space', () => {
+    const label = fmtDayHM('2026-10-04T14:30:00Z');
+    expect(label).toMatch(/^\d{2} [A-Z][a-z]{2,3} \d{2}:\d{2}$/);
+    expect(label.startsWith(fmtDay('2026-10-04T14:30:00Z'))).toBe(true);
+  });
+
+  it('is a BLANK tick for an unparseable time, not an em dash', () => {
+    // An axis with an em dash on it reads as a data point; a blank reads as no label.
+    for (const f of [fmtHM, fmtDay, fmtDayHM]) {
+      expect(f('not a time')).toBe('');
+      expect(f(NaN)).toBe('');
+    }
+    // ...whereas the table formatter does print one. The two are deliberately different.
+    expect(fv(NaN)).toBe(EMPTY);
+  });
+
+  it('accepts a Date, a number and a string alike', () => {
+    const t = Date.UTC(2026, 9, 4, 14, 30);
+    expect(fmtDay(new Date(t))).toBe(fmtDay(t));
+    expect(fmtDay(new Date(t).toISOString())).toBe(fmtDay(t));
   });
 });

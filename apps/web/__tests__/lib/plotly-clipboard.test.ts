@@ -13,6 +13,7 @@ import {
   CHART_COPY_FAILED,
   copyPlotToClipboard,
   dataUrlToPngBlob,
+  dimOtherTraces,
   downloadPng,
   plotSize,
   plotlyPngBlob,
@@ -329,5 +330,66 @@ describe('dataUrlToPngBlob edge cases', () => {
     const blob = dataUrlToPngBlob('data:;base64,AAAA');
 
     expect(blob.type).toBe('image/png');
+  });
+});
+
+/**
+ * Fading the other lines when a series row is hovered.
+ *
+ * This fires on every mouse move across the series table of three charts (Graphs, Trends,
+ * Compare), so each guard is about not throwing from a bare pointer handler: a torn-down
+ * graph div, a figure with no traces yet, a Plotly global that loaded without `restyle`,
+ * and a `restyle` that rejects because the div went away mid-hover. An unhandled rejection
+ * there surfaces as a page error, which is why the `.catch` exists.
+ */
+describe('dimOtherTraces', () => {
+  const withPlotly = (plotly: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).Plotly = plotly;
+  };
+  afterEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (window as any).Plotly;
+  });
+
+  it('fades every trace but the focused one, and restores them all on null', () => {
+    const restyle = jest.fn().mockResolvedValue(undefined);
+    withPlotly({ restyle });
+
+    dimOtherTraces({} as HTMLElement, 3, 1);
+    expect(restyle.mock.calls[0]![1]).toEqual({ opacity: [0.18, 1, 0.18] });
+
+    dimOtherTraces({} as HTMLElement, 3, null);
+    expect(restyle.mock.calls[1]![1]).toEqual({ opacity: [1, 1, 1] });
+  });
+
+  it('focuses trace 0, which a falsy check would treat as no focus', () => {
+    const restyle = jest.fn().mockResolvedValue(undefined);
+    withPlotly({ restyle });
+
+    dimOtherTraces({} as HTMLElement, 2, 0);
+    expect(restyle.mock.calls[0]![1]).toEqual({ opacity: [1, 0.18] });
+  });
+
+  it('does nothing without a graph div, without traces, or without restyle', () => {
+    const restyle = jest.fn().mockResolvedValue(undefined);
+    withPlotly({ restyle });
+
+    dimOtherTraces(null, 3, 0);
+    dimOtherTraces(undefined, 3, 0);
+    dimOtherTraces({} as HTMLElement, 0, 0);
+    expect(restyle).not.toHaveBeenCalled();
+
+    withPlotly({});
+    expect(() => dimOtherTraces({} as HTMLElement, 3, 0)).not.toThrow();
+  });
+
+  it('swallows a rejected restyle rather than leaving an unhandled rejection', async () => {
+    const restyle = jest.fn().mockRejectedValue(new Error('div is gone'));
+    withPlotly({ restyle });
+
+    expect(() => dimOtherTraces({} as HTMLElement, 3, 0)).not.toThrow();
+    await flush();
+    expect(restyle).toHaveBeenCalledTimes(1);
   });
 });

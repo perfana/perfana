@@ -15,7 +15,7 @@
 
 import React, { useState } from 'react';
 import { Box, Typography } from '@mui/material';
-import { MONO, SIZE, SOURCE_COLOR, chartTheme, fv, unitText, type ChartMode } from '@/lib/charts';
+import { EMPTY, MONO, SIZE, SOURCE_COLOR, chartTheme, fv, unitText, type ChartMode } from '@/lib/charts';
 import type { SeriesStats } from '@/lib/charts';
 import type { SourceType } from '@/lib/metrics-source-utils';
 import UnitPicker from './UnitPicker';
@@ -54,7 +54,6 @@ interface SeriesTableProps {
   /** Hovering a row dims the other traces; null on leave. */
   onHoverRow?: (seriesId: string | null) => void;
   /** Named in the unit picker's footer: "Panel unit from {this}". */
-  panelSourceLabel?: string;
 }
 
 const COLUMNS = '22px 1fr 92px 34px 52px 52px 52px 60px 22px';
@@ -66,7 +65,6 @@ export default function SeriesTable({
   onToggleVisibility,
   onRemove,
   onHoverRow,
-  panelSourceLabel,
 }: SeriesTableProps) {
   const theme = chartTheme(mode);
   const [picker, setPicker] = useState<{ el: HTMLElement; row: SeriesRow } | null>(null);
@@ -231,7 +229,7 @@ export default function SeriesTable({
             <Typography
               sx={{ fontFamily: MONO, fontSize: SIZE.tableFont, color: theme.faint, textAlign: 'center' }}
             >
-              {row.hidden ? '—' : row.axis}
+              {row.hidden ? EMPTY : row.axis}
             </Typography>
 
             <Value theme={theme} value={row.stats?.min} />
@@ -276,7 +274,7 @@ export default function SeriesTable({
           title={`Unit · ${picker.row.name}`}
           value={picker.row.unit}
           panelUnit={picker.row.panelUnit}
-          panelSource={panelSourceLabel ?? picker.row.sourceLabel}
+          panelSource={picker.row.sourceLabel}
           onSelect={(unitId) => onUpdateUnit(picker.row.id, unitId)}
         />
       )}
@@ -293,8 +291,17 @@ function Value({
   value: number | null | undefined;
   emphasis?: boolean;
 }) {
+  const text = fv(value);
   return (
     <Typography
+      noWrap
+      // The numeric columns are 52px — about eight mono characters at 10px — and `fv`
+      // prints a grouped integer from 1000 up. `units.ts` auto-scales only the time,
+      // percent and data families, so an unscaled count or rate in the millions is
+      // `1,234,567`: nine characters, which would wrap to a second line inside the row and
+      // break the table's vertical rhythm. Clipped with the full value on hover instead,
+      // the way the name cell already does it.
+      title={text}
       sx={{
         fontFamily: MONO,
         fontSize: SIZE.tableFont,
@@ -303,7 +310,7 @@ function Value({
         fontVariantNumeric: 'tabular-nums',
       }}
     >
-      {fv(value)}
+      {text}
     </Typography>
   );
 }

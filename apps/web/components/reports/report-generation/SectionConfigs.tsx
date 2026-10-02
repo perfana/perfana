@@ -1668,6 +1668,12 @@ export interface ComparisonsConfig {
   // grafana/dynatrace only: pair current-run dashboards with differently named
   // dashboards from the baseline run's environment
   dashboardMap?: { current: string; baseline: string }[];
+  /**
+   * Draw a current-vs-baseline graph under the table for the rows that moved, each in a
+   * collapsed disclosure. Off by default: it is one inline SVG per row in a document that
+   * is stored, shared and printed.
+   */
+  showRowGraphs?: boolean;
 }
 
 interface ComparisonsConfigFormProps {
@@ -1831,6 +1837,23 @@ export function ComparisonsConfigForm({ config, onChange, text, onTextChange, te
         helperText="Changes smaller than this (in the metric's units, e.g. ms) are treated as no difference. Leave empty to disable."
         inputProps={{ min: 0 }}
       />
+
+      {/* Sits under the thresholds because they decide WHICH rows get a graph: the ones
+          outside the good band. */}
+      <FormControlLabel
+        control={
+          <Switch
+            checked={config.showRowGraphs ?? false}
+            onChange={(e) => onChange({ ...config, showRowGraphs: e.target.checked })}
+          />
+        }
+        label="Show a graph per changed row"
+      />
+      <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+        {config.showRowGraphs
+          ? 'Current vs baseline in an expandable row under each changed row — the ones outside the good band, worst first, at most 20. Collapsed by default; a PDF prints them all open.'
+          : 'Off: the section is the comparison table only.'}
+      </Typography>
 
       {/* Dashboard-map editor (grafana + dynatrace): pair a current-run dashboard
           with a differently named dashboard from the baseline run's environment */}

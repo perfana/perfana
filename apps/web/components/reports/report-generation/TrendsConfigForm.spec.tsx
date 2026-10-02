@@ -44,9 +44,12 @@ it('offers an oldest-run picker and the dashboards → panels → series cascade
   renderForm();
   expect(screen.getByLabelText(/oldest test run/i)).toBeInTheDocument();
   expect(screen.queryByLabelText(/number of runs/i)).not.toBeInTheDocument();
-  expect(screen.getByLabelText(/^dashboards$/i)).toBeInTheDocument();
-  expect(screen.getByLabelText(/^panels$/i)).toBeDisabled();
-  expect(screen.getByLabelText(/^series$/i)).toBeDisabled();
+  // The cascade is three inline columns now, so "not available yet" is an empty column
+  // with a caption saying what to do, not a disabled input.
+  expect(screen.getByRole('group', { name: 'Dashboards' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Panels' })).toBeInTheDocument();
+  expect(screen.getByText('Select a dashboard to see its panels')).toBeInTheDocument();
+  expect(screen.getByText('Select a panel to see its series')).toBeInTheDocument();
 });
 
 it('defaults the window to the most recent change point', () => {
@@ -83,7 +86,7 @@ it('selects every dashboard at once', async () => {
   cascadeFetch();
   const onChange = renderForm();
   await waitFor(() => expect(screen.getByText(/1 available/)).toBeInTheDocument());
-  fireEvent.click(screen.getAllByRole('button', { name: /select all|^clear$/i })[0]!);
+  fireEvent.click(screen.getAllByRole('button', { name: /^(select all|clear) (dashboards|panels|series)$/i })[0]!);
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
     dashboardLabels: ['Performance test metrics Checkout'],
   }));
@@ -101,4 +104,35 @@ it('clears the cascade when the source changes — the dashboards belong to one 
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
     source: 'dynatrace', dashboardLabels: undefined, panels: undefined, series: undefined,
   }));
+});
+
+/**
+ * The column filters the picker gained with the three-column layout. The rule that is not
+ * obvious from the UI: filtering is a view concern, so Select all must not reach past the
+ * query, and a pick hidden by a query stays picked.
+ */
+it('filters a column, and selects only what the filter leaves', async () => {
+  (authenticatedFetch as jest.Mock).mockImplementation((url: string) => {
+    const body = url.includes('/grafana/application-dashboards')
+      ? [
+          { id: 'ad-1', dashboard_label: 'JVM heap', source_type: 'grafana' },
+          { id: 'ad-2', dashboard_label: 'Docker cpu', source_type: 'grafana' },
+        ]
+      : [];
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+  });
+  const onChange = renderForm({ source: 'grafana' });
+
+  await waitFor(() => expect(screen.getByRole('checkbox', { name: 'JVM heap' })).toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText('Filter dashboards'), { target: { value: 'docker' } });
+
+  expect(screen.queryByRole('checkbox', { name: 'JVM heap' })).not.toBeInTheDocument();
+  expect(screen.getByText('Dashboards 1 / 2')).toBeInTheDocument();
+
+  // Select all while filtered takes the one visible row, not both.
+  const selectAll = screen
+    .getByRole('group', { name: 'Dashboards' })
+    .querySelector('button.MuiButton-outlined')!;
+  fireEvent.click(selectAll);
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ dashboardLabels: ['Docker cpu'] }));
 });

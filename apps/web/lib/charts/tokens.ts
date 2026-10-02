@@ -2,9 +2,14 @@
  * Chart design tokens — the "Analyst" chart standard.
  *
  * One palette, one theme, one set of sizes for every chart in the app. Nothing outside
- * `lib/charts` should define a chart colour: four palettes (`CHART_COLOR_PALETTE`,
- * `METRIC_COLOR_PALETTE`, `SERIES_COLORS`, `--color-metric-*`) and three copies of the
- * dark-mode paper/plot colours is what this replaces.
+ * `lib/charts` should define a chart colour.
+ *
+ * Migrated so far: Graphs, Compare, Trends, the transaction graph modal, the errors
+ * chart. That removed three palettes (`CHART_COLOR_PALETTE`, `SERIES_COLORS`,
+ * `--color-metric-*`) and three copies of the dark-mode paper/plot colours. Still
+ * outstanding, and tracked in TODOS.md: the SLO and anomaly-detection charts, which keep
+ * `METRIC_COLOR_PALETTE` and their own `#121212`/`#1e1e1e` surfaces in
+ * `service-level-objectives/utils/slo-chart-utils.ts`.
  *
  * Colours are assigned BY SLOT, not by index — see `catColor`. Removing a series frees
  * its slot, so the remaining lines keep the colour the user has been reading.
@@ -18,12 +23,6 @@ export type ChartMode = 'light' | 'dark';
 export const CAT = {
   light: ['#2563eb', '#0d9488', '#c026d3', '#ea580c', '#7c3aed', '#65a30d', '#db2777', '#0891b2'],
   dark: ['#60a5fa', '#2dd4bf', '#e879f9', '#fb923c', '#a78bfa', '#a3e635', '#f472b6', '#22d3ee'],
-} as const;
-
-/** Ordered series (percentiles p50 → p99, or any series the caller marks ordered). */
-export const SEQ = {
-  light: ['#93c5fd', '#3b82f6', '#1d4ed8', '#172554'],
-  dark: ['#1e40af', '#2563eb', '#60a5fa', '#dbeafe'],
 } as const;
 
 export interface ChartTheme {
@@ -67,7 +66,13 @@ const LIGHT: ChartTheme = {
   plotBg: '#f8fafc',
   text: 'rgba(0,0,0,0.87)',
   muted: 'rgba(0,0,0,0.6)',
-  faint: 'rgba(0,0,0,0.45)',
+  // 0.58, not 0.45. `faint` paints ~28 sites of 9-11px text — the series table's column
+  // headers and its unit/axis columns, the axis ticks, the window's start/end labels, the
+  // cascade's group headings, the inactive half of the overlay/split toggle. At 0.45 it
+  // resolves to #8c8c8c: 3.36:1 on `paper` and 3.17:1 on `plotBg`, under the 4.5:1 floor
+  // for text below 18.66px. 0.58 is ~5.6:1 and still clearly below `muted`. The dark
+  // value needs no change (~5.1:1).
+  faint: 'rgba(0,0,0,0.58)',
   divider: 'rgba(0,0,0,0.12)',
   grid: 'rgba(15,23,42,0.07)',
   excluded: 'rgba(15,23,42,0.04)',
@@ -94,9 +99,6 @@ export const MONO = "'JetBrains Mono', 'Fira Code', Monaco, 'Cascadia Code', 'Ro
 /** Titles and prose. Matches `theme.typography.fontFamily`. */
 export const SANS = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
-/** How many colour slots exist before the palette wraps. */
-export const CAT_SLOTS = CAT.light.length;
-
 /** The colour of a slot. Wraps once the palette is exhausted. */
 export function catColor(slot: number, mode: ChartMode): string {
   const palette = CAT[mode];
@@ -104,14 +106,6 @@ export function catColor(slot: number, mode: ChartMode): string {
   // which Plotly draws as its own default blue — silently off-palette.
   const i = Number.isFinite(slot) ? Math.abs(Math.trunc(slot)) : 0;
   return palette[i % palette.length];
-}
-
-/** The colour of position `i` of `n` ordered series (p50 → p99 reads light → dark). */
-export function seqColor(i: number, n: number, mode: ChartMode): string {
-  const palette = SEQ[mode];
-  if (n <= 1) return palette[palette.length - 1];
-  const t = Math.min(Math.max(i / (n - 1), 0), 1);
-  return palette[Math.round(t * (palette.length - 1))];
 }
 
 /**
@@ -142,8 +136,14 @@ export const SIZE = {
   overlayHeight: 300,
   laneHeight: 140,
   laneGap: 30,
-  compareHeight: 150,
-  trendsHeight: 160,
+  /**
+   * Compare and Trends read as full charts, not sparklines, so both match the Graphs
+   * overlay. They stay separate knobs: Compare draws one of these per expanded table row
+   * and several can be open at once, so it is the one most likely to want its own value
+   * back.
+   */
+  compareHeight: 300,
+  trendsHeight: 300,
   /** Type scale. Everything numeric is mono. */
   tickFont: 10,
   axisLabelFont: 10,

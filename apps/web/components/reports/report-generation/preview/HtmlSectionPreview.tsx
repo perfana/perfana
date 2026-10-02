@@ -148,7 +148,12 @@ export default function HtmlSectionPreview({ testRunId, sectionType, config, tex
           srcDoc={htmlContent}
           style={{
             width: '100%',
-            height: '600px',
+            // Viewport-relative, not a flat 600px: that cut a comparison table off
+            // mid-row, and `sandbox=""` means nothing inside can scroll the rest into
+            // view. `height: 100%` is not an option — this sits in an auto-height
+            // scrolling column, where a percentage height resolves to zero.
+            height: '70vh',
+            minHeight: 400,
             border: 'none',
             display: 'block',
           }}

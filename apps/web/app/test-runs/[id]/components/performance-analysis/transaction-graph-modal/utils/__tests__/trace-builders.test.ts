@@ -39,7 +39,7 @@ describe('buildSamplerTraces', () => {
       aggregation_seconds: 5,
     };
 
-    const [trace] = asTraces(buildSamplerTraces(data, 'avg_response_time'));
+    const [trace] = asTraces(buildSamplerTraces(data, 'avg_response_time', 'light'));
     expect(trace!.x).toHaveLength(4);
     // The two idle buckets must exist as explicit vertices, not be absent.
     expect(trace!.y).toEqual([10, null, null, 20]);
@@ -56,7 +56,7 @@ describe('buildSamplerTraces', () => {
       aggregation_seconds: 5,
     };
 
-    const traces = asTraces(buildSamplerTraces(data, 'avg_response_time'));
+    const traces = asTraces(buildSamplerTraces(data, 'avg_response_time', 'light'));
     expect(traces).toHaveLength(2);
     for (const t of traces) {
       expect(t.x.map(d => d.toISOString())).toEqual([B(0), B(1), B(2)]);
@@ -72,7 +72,7 @@ describe('buildSamplerTraces', () => {
       aggregation_seconds: 5,
     };
 
-    const [trace] = asTraces(buildSamplerTraces(data, 'avg_response_time'));
+    const [trace] = asTraces(buildSamplerTraces(data, 'avg_response_time', 'light'));
     expect(trace!.x).toHaveLength(1);
     expect(trace!.y).toEqual([10]);
   });
@@ -84,7 +84,7 @@ describe('buildSamplerTraces', () => {
       aggregation_seconds: 5,
     };
 
-    const [trace] = asTraces(buildSamplerTraces(data, 'p95_response_time'));
+    const [trace] = asTraces(buildSamplerTraces(data, 'p95_response_time', 'light'));
     expect(trace!.y).toEqual([99, null]);
   });
 });

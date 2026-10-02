@@ -5,7 +5,7 @@
  * every unit after the first sharing `y2`, and a single unit split across both axes on a
  * 100× magnitude ratio.
  */
-import { displayUnit, groupLabels, resolveAxes, toDisplay, unitText, windowStats } from './units';
+import { axisBadge, displayUnit, groupLabels, resolveAxes, toDisplay, unitText, windowStats } from './units';
 import type { AxisSeries } from './units';
 
 const s = (id: string, unit?: string, max?: number, min?: number): AxisSeries => ({ id, unit, max, min });
@@ -137,5 +137,30 @@ describe('windowStats', () => {
     expect(windowStats([NaN, 5], 'ms', display)).toEqual({ min: 5, mean: 5, max: 5 });
     expect(windowStats([NaN], 'ms', display)).toBeNull();
     expect(windowStats([], 'ms', display)).toBeNull();
+  });
+});
+
+/**
+ * `axisBadge` is the series table's axis column: the one place a reader learns WHICH of
+ * two scales a line is drawn against. An empty or wrong badge there makes a two-axis
+ * chart unreadable, and nothing else in the UI reports it.
+ */
+describe('axisBadge', () => {
+  it('reports L and R in overlay mode', () => {
+    const { groups } = resolveAxes([s('a', 'ms', 100), s('b', 'req/s', 50)]);
+    expect(axisBadge(groups, 'a')).toBe('L');
+    expect(axisBadge(groups, 'b')).toBe('R');
+  });
+
+  it('reports the lane number in lanes mode', () => {
+    const { groups } = resolveAxes([s('a', 'ms', 1), s('b', 'req/s', 1), s('c', 'percent', 1)]);
+    expect(axisBadge(groups, 'a')).toBe('1');
+    expect(axisBadge(groups, 'c')).toBe('3');
+  });
+
+  it('is an em dash for a series on no axis — a hidden one, or one already removed', () => {
+    const { groups } = resolveAxes([s('a', 'ms', 1)]);
+    expect(axisBadge(groups, 'gone')).toBe('—');
+    expect(axisBadge([], 'a')).toBe('—');
   });
 });

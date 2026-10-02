@@ -164,3 +164,106 @@ it('answers an empty series when the panel request fails, without dropping the s
   expect(result.current.seriesData.get(result.current.addedSeries[0]!.id)).toEqual([]);
   expect(showToast).toHaveBeenCalledWith('Added 1 metric(s) with data');
 });
+
+/**
+ * Clear all. The part worth pinning is that it empties the fetched-points map as well as
+ * the series list: leaving the map behind would keep every cleared series' data in memory
+ * for the life of the card, and re-adding one would plot the stale points instead of
+ * refetching.
+ */
+describe('handleClearAllSeries', () => {
+  it('empties both the series list and the points behind them, and says how many went', async () => {
+    routeFetch({ '101': [point('T01', 280), point('T02', 300)], '5': [point('used', 1)] });
+    const { result, showToast } = setup();
+
+    await act(async () => {
+      await result.current.handleAddSeries([
+        { dashboard: perfDashboard, panel: panelOf(perfDashboard, 101, 'Transaction RT Avg', 'ms'), metricName: 'T01' },
+        { dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap', 'bytes'), metricName: 'used' },
+      ], showToast);
+    });
+    await waitFor(() => expect(result.current.addedSeries).toHaveLength(2));
+    await waitFor(() => expect(result.current.seriesData.size).toBeGreaterThan(0));
+
+    act(() => { result.current.handleClearAllSeries(showToast); });
+
+    expect(result.current.addedSeries).toEqual([]);
+    expect(result.current.seriesData.size).toBe(0);
+    expect(showToast).toHaveBeenLastCalledWith('2 series removed');
+  });
+
+  // Pins the real behaviour, which is not the behaviour you would want: the auto-naming
+  // effect regenerates chartName from addedSeries, so clearing empties it — and a title
+  // the user typed is overwritten on any add or remove. See TODOS.md.
+  it('resets the auto-generated chart name, since the name is derived from the series', async () => {
+    routeFetch({ '5': [point('used', 1)] });
+    const { result, showToast } = setup();
+
+    await act(async () => {
+      await result.current.handleAddSeries(
+        [{ dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap'), metricName: 'used' }],
+        showToast,
+      );
+    });
+    await waitFor(() => expect(result.current.chartName).not.toBe(''));
+
+    act(() => { result.current.handleClearAllSeries(showToast); });
+
+    await waitFor(() => expect(result.current.chartName).toBe(''));
+    expect(showToast).toHaveBeenLastCalledWith('Series removed');
+  });
+});
+
+/**
+ * Hide and show. The swatch is a toggle, not a delete, and that distinction is the whole
+ * point: `SeriesTable` deliberately keeps hidden rows so a hidden series stays
+ * recoverable. A regression that removed the row instead would strand a series the user
+ * can neither see nor restore — and it is persisted, so the next load would be missing it
+ * with nothing to say so.
+ */
+describe('handleToggleSeriesVisibility', () => {
+  it('flips the flag both ways and leaves the series in the list', async () => {
+    routeFetch({ '5': [point('used', 1)] });
+    const { result, showToast } = setup();
+
+    await act(async () => {
+      await result.current.handleAddSeries([
+        { dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap', 'bytes'), metricName: 'used' },
+      ], showToast);
+    });
+    await waitFor(() => expect(result.current.addedSeries).toHaveLength(1));
+    const id = result.current.addedSeries[0]!.id;
+    // Not hidden until something hides it — `undefined`, not `false`, is what a newly
+    // added series carries, and the preset round trip keeps that distinction.
+    expect(result.current.addedSeries[0]!.hidden).toBeFalsy();
+
+    act(() => { result.current.handleToggleSeriesVisibility(id); });
+    expect(result.current.addedSeries[0]!.hidden).toBe(true);
+    expect(result.current.addedSeries).toHaveLength(1);
+    // The points stay fetched: hiding is a chart-side decision, not a reason to refetch.
+    expect(result.current.seriesData.has(id)).toBe(true);
+
+    act(() => { result.current.handleToggleSeriesVisibility(id); });
+    expect(result.current.addedSeries[0]!.hidden).toBe(false);
+    expect(result.current.addedSeries).toHaveLength(1);
+  });
+
+  it('touches only the series named, and ignores an id it does not hold', async () => {
+    routeFetch({ '5': [point('used', 1)], '101': [point('T01', 280)] });
+    const { result, showToast } = setup();
+
+    await act(async () => {
+      await result.current.handleAddSeries([
+        { dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap', 'bytes'), metricName: 'used' },
+        { dashboard: perfDashboard, panel: panelOf(perfDashboard, 101, 'Transaction RT Avg', 'ms'), metricName: 'T01' },
+      ], showToast);
+    });
+    await waitFor(() => expect(result.current.addedSeries).toHaveLength(2));
+
+    act(() => { result.current.handleToggleSeriesVisibility(result.current.addedSeries[0]!.id); });
+    expect(result.current.addedSeries.map((s) => Boolean(s.hidden))).toEqual([true, false]);
+
+    act(() => { result.current.handleToggleSeriesVisibility('not-a-series'); });
+    expect(result.current.addedSeries.map((s) => Boolean(s.hidden))).toEqual([true, false]);
+  });
+});
