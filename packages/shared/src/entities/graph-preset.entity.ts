@@ -11,7 +11,13 @@ export interface SeriesConfig {
 }
 
 export interface ChartOptions {
-  // Future customization options
+  /**
+   * How the Graphs card laid the Y axes out when the preset was saved: one overlaid pair,
+   * or a lane per unit family. Absent on every preset saved before the chart standard, and
+   * read back as `overlay`.
+   */
+  axisMode?: 'overlay' | 'split';
+  /** Room for the next chart-level option without a migration. */
   [key: string]: unknown;
 }
 

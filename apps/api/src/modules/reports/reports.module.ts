@@ -29,6 +29,7 @@ import { RegressionsRenderer } from './renderers/regressions-renderer';
 import { AwrRenderer } from './renderers/awr-renderer';
 import { TrendsRenderer } from './renderers/trends-renderer';
 import { ComparisonsRenderer } from './renderers/comparisons-renderer';
+import { ChartSvgService } from './renderers/chart-svg.service';
 import { GraphsRenderer } from './renderers/graphs-renderer';
 import { Top10ListsRenderer } from './renderers/top-10-lists-renderer';
 import { ErrorAnalysisRenderer } from './renderers/error-analysis-renderer';
@@ -71,6 +72,7 @@ import { IndexRenderer } from './renderers/index-renderer';
     AwrRenderer,
     TrendsRenderer,
     ComparisonsRenderer,
+    ChartSvgService,
     GraphsRenderer,
     Top10ListsRenderer,
     ErrorAnalysisRenderer,

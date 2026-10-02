@@ -235,6 +235,11 @@ export interface BaselineComparisonRow {
   label: string;    // transaction_name | metric_name
   /** Which dashboard the row came from — a section can span several, so it gets its own table. */
   dashboardLabel?: string;
+  /**
+   * The panel's id. `panelTitle` is for READING — the perf-test panels are renamed for
+   * display — so anything that has to find this row's data again needs the id.
+   */
+  panelId?: number;
   panelTitle?: string;
   /** Normalized URL behind a request row (Request RT panels only) — shown as sub-text under the label. */
   url?: string;
@@ -371,8 +376,25 @@ export interface MetricTrendSeries {
 /** Panel selector for metrics time-series queries */
 export interface MetricsPanelSelector {
   dashboardLabel?: string;
+  /**
+   * The panel's id, which is its stable identity. Set this where the TITLE in hand may not
+   * be the stored one: the perf-test panels are renamed for display (`perfPanelTitle`
+   * collapses `Transaction RT Avg/P90/P95/P99` to one `Transaction RT`), so selecting by
+   * title silently matches nothing. When both are given, the id filters and the title is
+   * only echoed back on the result, so a caller keeps the name it asked under.
+   */
+  panelId?: number;
   panelTitle?: string;
   metricName?: string;
+  /**
+   * Opaque correlation token, echoed back untouched on the matching result.
+   *
+   * Results come back only for panels that HAD rows, so a caller cannot pair them up
+   * positionally, and reconstructing a key from the echoed fields does not work either: a
+   * display title collapses four panels into one name, and a dashboard-mapped baseline is
+   * selected by title with no id to echo. Set this and match on it.
+   */
+  key?: string;
   /**
    * Set when the series is the SYNTHETIC run-wide aggregate: it has no ds_metrics rows,
    * so it is computed from the raw tables instead (see presetAggregateSpec).
@@ -433,6 +455,8 @@ export interface MetricsTimeSeriesPanel {
   metricName: string;
   unit: string;
   dataPoints: MetricsDataPoint[];
+  /** The selector's `key`, echoed back so the caller can pair this panel with its request. */
+  key?: string;
 }
 
 /** Raw metrics row from database query */

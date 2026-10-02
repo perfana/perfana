@@ -50,6 +50,43 @@ const PILL_FILLS: Record<PillKind, { bg: string; fg: string }> = {
   neutral: { bg: '#f1f1f3', fg: '#7a828b' },
 };
 
+/**
+ * `<details>` disclosure, used by the comparisons section's per-row graphs.
+ *
+ * Collapsed is the on-screen default — twenty expanded charts would bury the table they
+ * belong to. Paper has no disclosure triangle to click, so print forces every one open:
+ * `display` alone is not enough in Chrome, which hides a closed `details`' content with
+ * `content-visibility` on an internal slot, and Chrome is what Puppeteer prints with.
+ *
+ * Deliberately NOT in `report-interactivity.ts`: that file's CSS only ever matters when its
+ * script ran, and this needs no script at all — which is the reason the graphs use
+ * `<details>` rather than a JS expander in the first place.
+ */
+export const REPORT_DETAILS_CSS = `
+    details > summary {
+      list-style: revert;
+    }
+
+    details > summary:hover {
+      background: #f8fafc;
+    }
+
+    @media print {
+      details > summary {
+        display: none;
+      }
+
+      details > *:not(summary) {
+        display: block !important;
+        content-visibility: visible !important;
+      }
+
+      details {
+        break-inside: avoid;
+      }
+    }
+`;
+
 export const escapeHtml = (text: string): string => {
   if (!text) return '';
   const map: Record<string, string> = {

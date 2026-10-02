@@ -35,6 +35,7 @@ import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { DynatraceHostsRenderer } from '../renderers/dynatrace-hosts-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import { IndexRenderer } from '../renderers/index-renderer';
+import { REPORT_DETAILS_CSS } from '../renderers/report-style';
 import {
   REPORT_INTERACTIVITY_CSS,
   REPORT_INTERACTIVITY_SCRIPT,
@@ -1155,6 +1156,8 @@ export class ReportHtmlCompilerService {
       /* No @page rule: Puppeteer owns the margins, and Chrome 142 *does* honour
          @bottom-right, which duplicated the footerTemplate page counter. */
     }
+
+    ${REPORT_DETAILS_CSS}
 
     ${REPORT_INTERACTIVITY_CSS}
 

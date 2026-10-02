@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, BaselineComparisonRow } from '../services/report-data-fetcher.service';
+import {
+  BaselineComparisonRow,
+  MetricsTimeSeriesPanel,
+  ReportDataFetcherService,
+} from '../services/report-data-fetcher.service';
+import { ChartSeries, ChartSvgService, NO_WINDOW } from './chart-svg.service';
 import { buildSelections } from './section-selections';
 import { bandColor, gatedDiffPercent, DiffThresholds } from './comparison-bands';
 import {
@@ -55,7 +60,160 @@ export class ComparisonsRenderer {
   constructor(
     private readonly utils: ReportUtilsService,
     private readonly dataFetcher: ReportDataFetcherService,
+    private readonly chartSvg: ChartSvgService,
   ) {}
+
+  /**
+   * How many rows get a graph. One chart is one inline SVG in a document that is also
+   * stored in Postgres and turned into a PDF, so the section charts the rows a reader
+   * would look at — the ones outside the good band, worst first — and stops. Charting
+   * everything on a 400-row comparison is how a report becomes megabytes.
+   */
+  private static readonly MAX_ROW_CHARTS = 20;
+
+  /** Enough to read a shape, small enough to stack twenty of them. */
+  private static readonly ROW_CHART = { width: 900, height: 260 };
+
+  /** `dashboard\u0000panel\u0000metric` — how a chart is matched back to its table row. */
+  private static rowKey(r: BaselineComparisonRow): string {
+    return `${r.dashboardLabel ?? ''}\u0000${r.panelId ?? ''}\u0000${r.label}`;
+  }
+
+  /**
+   * Current-vs-baseline graphs for the rows that moved, as one collapsed `<details>` per
+   * row, keyed by `rowKey` so the caller can put each one under the row it belongs to.
+   *
+   * It goes in a DETAIL ROW — `<tr><td colspan=N>` immediately after the data row — not in
+   * a block after the table. `report-interactivity.ts` recognises a single-cell spanning
+   * row as belonging to the row above it (`collectUnits`), so the graph travels with its
+   * row when a column is sorted and hides with it when a band chip or the filter box
+   * excludes it. The SLO section's failing-targets block is the same shape. A block after
+   * the table would have been detached from the row it describes the moment anyone sorted.
+   *
+   * `<details>` and not a script: the in-app viewer and the public share page render the
+   * report in an iframe with no `allow-scripts` (see `report-interactivity.ts`), so a
+   * JS-driven expander would be dead in the two places people actually read reports.
+   * Native disclosure works in that sandbox with no permissions at all.
+   *
+   * Only rows carrying a dashboard AND a panel can be charted: those identify the series
+   * for `getMetricsTimeSeries`. The perf-test fallback path pairs rows straight out of
+   * `transactions` by scenario and transaction name and carries neither, so that shape
+   * silently gets no graphs rather than wrong ones.
+   */
+  private async renderRowCharts(
+    rows: BaselineComparisonRow[],
+    testRun: TestRun,
+    baselineId: string,
+    dashboardMap: { current: string; baseline: string }[] | undefined,
+    userId: string,
+    roles: string[],
+  ): Promise<Map<string, string>> {
+    const charts = new Map<string, string>();
+    const chartable = rows.filter((r) => r.dashboardLabel && r.panelId != null && r.label);
+    if (chartable.length === 0) return charts;
+
+    // The baseline's own dashboard name, which a dashboardMap can make different from the
+    // current run's — the whole point of that mapping. Selecting the baseline series by the
+    // current name would return nothing and the graph would show one line.
+    const baselineDashboard = (current: string): string =>
+      (dashboardMap ?? []).find((m) => m.current === current)?.baseline ?? current;
+
+    /**
+     * Identify the panel by ID, and send the title only to be echoed back.
+     *
+     * The row's `panelTitle` is a DISPLAY name: `perfPanelTitle` collapses
+     * `Transaction RT Avg/P90/P95/P99` into one `Transaction RT`, which matches no stored
+     * panel_title at all — selecting on it returned nothing and every graph silently
+     * vanished. The id filters; `key` is what pairs the result back to its row, because the
+     * echoed title cannot (all four of those panels echo the same one).
+     */
+    const selector = (r: BaselineComparisonRow, dashboard: string) => ({
+      dashboardLabel: dashboard,
+      // A panel id belongs to ONE dashboard. Where a dashboardMap sends the baseline to a
+      // differently named dashboard, the current run's id identifies nothing there, and the
+      // id wins over the title in the fetcher — so the mapped side goes by title alone, and
+      // a perf-test panel (whose title is a display rename) simply gets no baseline line.
+      panelId: baselineDashboard(r.dashboardLabel!) === dashboard ? r.panelId : undefined,
+      panelTitle: r.panelTitle ?? undefined,
+      metricName: r.label,
+      key: ComparisonsRenderer.rowKey(r),
+    });
+
+    // Two round trips per row, both batched into one await each. `getMetricsTimeSeries`
+    // issues one query per selector, so this is 2N queries for N charted rows — bounded by
+    // MAX_ROW_CHARTS, which is what keeps that number small.
+    const [current, baseline] = await Promise.all([
+      this.dataFetcher.getMetricsTimeSeries(
+        testRun.testRunId,
+        chartable.map((r) => selector(r, r.dashboardLabel!)),
+        false, userId, roles,
+      ),
+      this.dataFetcher.getMetricsTimeSeries(
+        baselineId,
+        chartable.map((r) => selector(r, baselineDashboard(r.dashboardLabel!))),
+        false, userId, roles,
+      ),
+    ]);
+
+    // Paired on the echoed `key`, never on the echoed fields: `perfPanelTitle` collapses
+    // panels 101-104 to one display title, so a (dashboard, title, metric) key puts all four
+    // of a transaction's rows on whichever one came back last.
+    const index = (panels: MetricsTimeSeriesPanel[]) =>
+      new Map(panels.filter((p) => p.key).map((p) => [p.key!, p]));
+    const curBy = index(current);
+    const baseBy = index(baseline);
+
+    /**
+     * Both runs on one x axis, measured from each run's own first point.
+     *
+     * Two runs happened at two different times, so plotting absolute clocks would put them
+     * side by side instead of on top of each other. Rebasing to elapsed time is what makes
+     * the comparison readable — and it is what the Compare card's chart does.
+     */
+    const rebase = (panel: MetricsTimeSeriesPanel): MetricsTimeSeriesPanel => {
+      // `getMetricsTimeSeries` orders by time, so the first point is the earliest. Spreading
+      // every timestamp into `Math.min` would blow the argument limit on a long run.
+      const t0 = panel.dataPoints[0]?.time.getTime() ?? 0;
+      return {
+        ...panel,
+        dataPoints: panel.dataPoints.map((dp) => ({ ...dp, time: new Date(dp.time.getTime() - t0) })),
+      };
+    };
+
+    for (const r of chartable) {
+      const cur = curBy.get(ComparisonsRenderer.rowKey(r));
+      const base = baseBy.get(ComparisonsRenderer.rowKey(r));
+      const series: ChartSeries[] = [];
+      // Current first, so it takes the solid line and the first colour slot.
+      if (cur) series.push({ ...rebase(cur), color: ACCENT });
+      if (base) series.push({ ...rebase(base), color: REPORT_COLORS.mutedInk, dashed: true });
+      if (series.length === 0) continue;
+      const chart = this.chartSvg.renderTimeSeriesChart(
+        [r.dashboardLabel, r.panelTitle, r.label].filter(Boolean).join(' · '),
+        series,
+        0,
+        ComparisonsRenderer.ROW_CHART.width,
+        ComparisonsRenderer.ROW_CHART.height,
+        // No window shading: the two runs have their own analysis ranges, and shading one
+        // of them over both would label the other run's data with a window it never had.
+        NO_WINDOW,
+        true,
+        { xLabelOf: (dp) => `${Math.round(dp.time.getTime() / 60000)}m` },
+      );
+      // The summary is the whole row's width and says what the graph is; the row above
+      // already names the metric, so this only has to say "graph" and flag a missing
+      // baseline.
+      charts.set(ComparisonsRenderer.rowKey(r), `<details style="margin:0;">
+        <summary style="cursor:pointer; font-size:12px; color:${REPORT_COLORS.mutedInk};">
+          Graph &middot; current solid, baseline dashed, both from their own start
+          ${base ? '' : '<span style="color:' + REPORT_COLORS.faintInk + ';"> &mdash; baseline has no series for this metric</span>'}
+        </summary>
+        <div style="padding:8px 0 4px;">${chart}</div>
+      </details>`);
+    }
+
+    return charts;
+  }
 
   /**
    * The baseline this report should compare against: whatever the template pinned, or the run
@@ -275,6 +433,37 @@ export class ComparisonsRenderer {
       ${minAbsNote}
     </div>`;
 
+    // Opt-in: one SVG per row in a document that is stored, shared and printed, so the
+    // author asks for it. Off keeps the section byte-for-byte what it was.
+    const rowCharts = config.showRowGraphs === true && testRun && baselineId
+      ? await this.renderRowCharts(
+          data.rows
+            // Only what moved — a row inside the good band has nothing for a reader to see.
+            .filter((r) => worstRank(r) > 0)
+            .sort((a, b) => worstRank(b) - worstRank(a))
+            .slice(0, ComparisonsRenderer.MAX_ROW_CHARTS),
+          testRun,
+          baselineId,
+          dashboardMap,
+          userId,
+          roles,
+        )
+      : new Map<string, string>();
+
+    /**
+     * The graph's own row, under the row it belongs to.
+     *
+     * One cell spanning the table is what makes `report-interactivity.ts` treat it as a
+     * DETAIL row of the one above (`collectUnits`): it then travels with that row through
+     * a sort and hides with it through a filter. Two cells, or a colspan of 1, and it
+     * becomes an independent row that a sort scatters.
+     */
+    const chartRow = (row: BaselineComparisonRow, background: string): string => {
+      const chart = rowCharts.get(ComparisonsRenderer.rowKey(row));
+      if (!chart) return '';
+      return `<tr style="background:${background};"><td colspan="${metrics.length + 1}" style="padding:0 16px 12px; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${chart}</td></tr>`;
+    };
+
     let bodyHtml: string;
 
     // ---- DYNATRACE / GRAFANA source: ONE merged table (single-source) ----
@@ -341,9 +530,10 @@ export class ComparisonsRenderer {
               if (parsed.host) hostName = parsed.host;
               metric = parsed.metric;
             }
-            return `<tr data-band="${BAND_FOR_RANK[rank]}" style="background:${rowBackground(rank, idx)};">
+            const background = rowBackground(rank, idx);
+            return `<tr data-band="${BAND_FOR_RANK[rank]}" style="background:${background};">
               ${labelCell(metric, rank, row.url)}
-              ${cells}</tr>`;
+              ${cells}</tr>${chartRow(row, background)}`;
           }).join('');
 
           // The panel heads its own table, so neither it nor the unit is repeated down a column.

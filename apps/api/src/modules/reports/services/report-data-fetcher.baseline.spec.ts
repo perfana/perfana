@@ -368,3 +368,64 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     expect(row.metrics[0]!.diffPercent).toBeCloseTo(20);
   });
 });
+
+/**
+ * The row carries its panel's ID, not only its display title.
+ *
+ * `panelTitle` is for READING: the perf-test panels are renamed on the way out
+ * (`perfPanelTitle` collapses `Transaction RT Avg/P90/P95/P99` into one `Transaction RT`),
+ * so anything that has to find this row's data again — the comparisons section's per-row
+ * graphs ask `getMetricsTimeSeries` for it — cannot use the title. The id is the only
+ * stable handle, and it reaches the renderer through this field alone.
+ */
+describe('ReportDataFetcherService.getBaselineRunComparison — the row carries its panel id', () => {
+  const makeSvc = (rows: unknown[]) =>
+    new ReportDataFetcherService(
+      {} as any,
+      {} as any,
+      { query: jest.fn().mockResolvedValue(rows) } as any,
+    );
+
+  it('puts panel_id on the row alongside the DISPLAY title', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T03', mean: 300, q95: 400, q99: 500, unit: 'ms' },
+      { test_run_id: 'base', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'T03', mean: 100, q95: 200, q99: 250, unit: 'ms' },
+    ];
+    const data = await makeSvc(rows).getBaselineRunComparison('cur', 'base', 'performance-metrics',
+      // A selection is what sends this down the rollup branch rather than `transactions`,
+      // which is the only branch that has a panel at all.
+      { metrics: ['avg'], userId: 'u', roles: [], selections: [{ dashboardLabel: 'Perf' }] });
+
+    const row = data!.rows[0]!;
+    expect(row.panelId).toBe(101);
+    // The two really do disagree — that is the whole reason the id is here. The display
+    // name spells the collapsed panel out; no `panel_title` in `ds_metric_statistics`
+    // equals it, so selecting the series by this string matches nothing.
+    expect(row.panelTitle).toBe('Transaction Response Times');
+    expect(row.panelTitle).not.toBe('Transaction RT Avg');
+  });
+
+  it('carries the id on a grafana row too, where the title happens to match', async () => {
+    const rows = [
+      { test_run_id: 'cur', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 3, metric_name: 'used', mean: 110, q95: 220, q99: 300, unit: 'bytes' },
+      { test_run_id: 'base', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 3, metric_name: 'used', mean: 100, q95: 200, q99: 250, unit: 'bytes' },
+    ];
+    const data = await makeSvc(rows).getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: [] });
+    expect(data!.rows[0]!.panelId).toBe(3);
+  });
+
+  it('leaves panelId undefined rather than null when the source has no panel', async () => {
+    // The perf-test fallback shape, paired straight out of `transactions`: no dashboard and
+    // no panel, so the renderer must be able to tell it apart and draw no graph.
+    const repo = { query: jest.fn().mockResolvedValue([
+      { test_run_id: 'cur', scenario_name: 'checkout', transaction_name: 'login', avg_ms: '110', p95_ms: '220', p99_ms: '300' },
+      { test_run_id: 'base', scenario_name: 'checkout', transaction_name: 'login', avg_ms: '100', p95_ms: '200', p99_ms: '250' },
+    ]) } as any;
+    const svc = new ReportDataFetcherService(repo, {} as any, {} as any);
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics',
+      { metrics: ['avg'], userId: '', roles: [] });
+    expect(data!.rows[0]!.panelId).toBeUndefined();
+    expect(data!.rows[0]!.panelTitle).toBeUndefined();
+  });
+});

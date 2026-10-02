@@ -2453,7 +2453,13 @@ export class ReportDataFetcherService {
           params.push(panel.dashboardLabel);
           paramIdx++;
         }
-        if (panel.panelTitle) {
+        // Id wins over title: a display title can be a rename (see `panelId` on
+        // MetricsPanelSelector), and filtering on both would match nothing.
+        if (panel.panelId != null) {
+          conditions.push(`dm.panel_id = $${paramIdx}`);
+          params.push(panel.panelId);
+          paramIdx++;
+        } else if (panel.panelTitle) {
           conditions.push(`dm.panel_title = $${paramIdx}`);
           params.push(panel.panelTitle);
           paramIdx++;
@@ -2503,6 +2509,7 @@ export class ReportDataFetcherService {
             dashboardLabel,
             metricName,
             unit,
+            key: panel.key,
             dataPoints: rows.map((row) => ({
               time: new Date(row.time),
               value: row.value !== null && row.value !== undefined ? parseFloat(String(row.value)) : null,
@@ -3086,6 +3093,7 @@ export class ReportDataFetcherService {
             : `${c.dashboard_label ?? 'Other'} / ${panelTitle}`.trim(),
         label: c.metric_name ?? '',
         dashboardLabel: c.dashboard_label ?? 'Other',
+        panelId: c.panel_id ?? undefined,
         panelTitle,
         ...(c.metric_name && urlByMetricName[c.metric_name] ? { url: urlByMetricName[c.metric_name] } : {}),
         unit: c.unit,

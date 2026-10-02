@@ -4,6 +4,8 @@ import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
 import { percentDiffScaled } from './comparison-bands';
+// The real chart builder: the SVG assertions below are what prove a graph was drawn.
+import { ChartSvgService } from './chart-svg.service';
 
 const makeSection = (
   overrides?: Partial<ReportSectionConfig>,
@@ -27,6 +29,7 @@ describe('ComparisonsRenderer', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ComparisonsRenderer,
+        ChartSvgService,
         ReportUtilsService,
         {
           provide: ReportDataFetcherService,
@@ -36,6 +39,7 @@ describe('ComparisonsRenderer', () => {
             getAggregatedScalars: jest.fn(),
             getPreviousTestRun: jest.fn().mockResolvedValue(null),
             previousRunSloMiss: jest.fn().mockResolvedValue('none'),
+            getMetricsTimeSeries: jest.fn().mockResolvedValue([]),
           },
         },
       ],
@@ -842,6 +846,7 @@ describe('ComparisonsRenderer previous-run baseline', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ComparisonsRenderer,
+        ChartSvgService,
         ReportUtilsService,
         {
           provide: ReportDataFetcherService,
@@ -983,5 +988,379 @@ describe('ComparisonsRenderer previous-run baseline', () => {
     expect(dataFetcher.getPreviousTestRun).not.toHaveBeenCalled();
     expect(dataFetcher.getBaselineRunComparison).not.toHaveBeenCalled();
     expect(html).toContain('no baseline run is configured for this section');
+  });
+});
+
+/**
+ * Per-row current-vs-baseline graphs (`showRowGraphs`).
+ *
+ * Three things here are not obvious from the markup and each has a cost if it breaks:
+ * the graphs are opt-in (one inline SVG per row in a document that is stored, shared and
+ * printed), they cover only the rows that MOVED, and the baseline series is selected by
+ * the baseline's OWN dashboard name — which a `dashboardMap` makes different from the
+ * current run's.
+ */
+describe('ComparisonsRenderer row graphs', () => {
+  let renderer: ComparisonsRenderer;
+  let dataFetcher: jest.Mocked<ReportDataFetcherService>;
+
+  /** One point a minute, so the rebased x labels are readable minutes. */
+  const points = (base: number) =>
+    [0, 1, 2].map((i) => ({ time: new Date(1_700_000_000_000 + i * 60_000), value: base + i }));
+
+  const panel = (dashboardLabel: string, panelTitle: string, metricName: string, base: number, key?: string) =>
+    ({ dashboardLabel, panelTitle, metricName, unit: 'ms', dataPoints: points(base), key });
+
+  /**
+   * Echo the selector's `key` back, exactly as `getMetricsTimeSeries` does.
+   *
+   * The renderer pairs a returned panel with its table row on this token and nothing else,
+   * because the echoed title cannot: `perfPanelTitle` collapses panels 101-104 into one
+   * display name. A mock that drops the key either returns no graphs at all or, worse,
+   * lets a key built from the echoed fields look like it works.
+   */
+  const keyed = <T>(panels: { key?: string }[], make: (sel: { key?: string }, i: number) => T) =>
+    panels.map((sel, i) => ({ ...make(sel, i), key: sel.key }));
+
+  /** A regression row and a row inside the good band, both chartable. */
+  const rows = [
+    {
+      group: 'JVM / Heap', label: 'used', dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', unit: 'ms',
+      metrics: [{ key: 'avg' as const, current: 300, baseline: 100, diffPercent: 200 }],
+    },
+    {
+      group: 'JVM / Heap', label: 'committed', dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', unit: 'ms',
+      metrics: [{ key: 'avg' as const, current: 101, baseline: 100, diffPercent: 1 }],
+    },
+  ];
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ComparisonsRenderer,
+        ChartSvgService,
+        ReportUtilsService,
+        {
+          provide: ReportDataFetcherService,
+          useValue: {
+            getBaselineRunComparison: jest.fn().mockResolvedValue({ source: 'grafana', rows }),
+            getDynatraceHostLabels: jest.fn().mockResolvedValue({}),
+            getAggregatedScalars: jest.fn(),
+            getPreviousTestRun: jest.fn().mockResolvedValue(null),
+            previousRunSloMiss: jest.fn().mockResolvedValue('none'),
+            getMetricsTimeSeries: jest.fn().mockImplementation((runId: string, panels: { key?: string; metricName: string }[]) =>
+              Promise.resolve(keyed(panels, (sel) =>
+                panel('JVM', 'Heap', (sel as { metricName: string }).metricName, runId === 'run-001' ? 300 : 100)))),
+          },
+        },
+      ],
+    }).compile();
+    renderer = module.get(ComparisonsRenderer);
+    dataFetcher = module.get(ReportDataFetcherService);
+  });
+
+  const render = (config: Record<string, unknown>) =>
+    renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'run-000', source: 'grafana', ...config } }) as never,
+      makeTestRun(),
+    );
+
+  it('draws nothing, and asks for no series, unless the author turned it on', async () => {
+    const html = await render({});
+    expect(html).not.toContain('<details');
+    // The cost is the point: no toggle, no queries.
+    expect(dataFetcher.getMetricsTimeSeries).not.toHaveBeenCalled();
+  });
+
+  it('draws a collapsed disclosure per changed row, with both runs in one SVG', async () => {
+    const html = await render({ showRowGraphs: true });
+    expect(html).toContain('<details');
+    // Collapsed: no `open` attribute. Print CSS is what opens them on paper.
+    expect(html).not.toContain('<details open');
+    expect(html).toContain('<svg');
+    // Current solid, baseline dashed — the only thing telling two runs of one metric apart
+    // in a greyscale print.
+    expect(html).toContain('stroke-dasharray="6,4"');
+  });
+
+  it('charts only the rows outside the good band', async () => {
+    const html = await render({ showRowGraphs: true });
+    // `used` moved 200%; `committed` moved 1% and is not worth a picture. One graph, so
+    // one detail row.
+    expect(html.match(/<details/g)).toHaveLength(1);
+    const selectors = (dataFetcher.getMetricsTimeSeries.mock.calls[0]![1] as unknown[]);
+    expect(selectors).toEqual([
+      { dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', metricName: 'used', key: 'JVM\u00003\u0000used' },
+    ]);
+  });
+
+  /**
+   * The graph is a DETAIL ROW of the row it describes, which is what makes it survive the
+   * report's own table interactivity: `collectUnits` in `report-interactivity.ts` treats a
+   * single spanning cell as belonging to the row above, so the graph travels with that row
+   * through a sort and hides with it through a band chip or the filter box. Two cells, or a
+   * colspan of 1, and a sort scatters it away from its data.
+   */
+  it('puts the graph in a detail row directly under its own row', async () => {
+    const html = await render({ showRowGraphs: true, metrics: ['avg', 'p95'] });
+
+    // Immediately after the data row, and nothing between them.
+    expect(html).toMatch(/<\/tr><tr style="background:[^"]*"><td colspan="3"/);
+    // colspan spans the label column plus every metric column, and it is the ONLY cell.
+    const detail = /<td colspan="3"[^>]*>([\s\S]*?)<\/td><\/tr>/.exec(html);
+    expect(detail).not.toBeNull();
+    expect(detail![1]).toContain('<details');
+    expect(detail![1]).not.toContain('<td');
+  });
+
+  it('spans the label column plus however many metric columns there are', async () => {
+    const one = await render({ showRowGraphs: true, metrics: ['avg'] });
+    const four = await render({ showRowGraphs: true, metrics: ['avg', 'p90', 'p95', 'p99'] });
+    expect(one).toContain('colspan="2"');
+    expect(four).toContain('colspan="5"');
+  });
+
+  it('asks each run once, not once per row', async () => {
+    await render({ showRowGraphs: true });
+    expect(dataFetcher.getMetricsTimeSeries).toHaveBeenCalledTimes(2);
+    expect(dataFetcher.getMetricsTimeSeries.mock.calls.map((c) => c[0])).toEqual(['run-001', 'run-000']);
+  });
+
+  it('selects the baseline series by the BASELINE dashboard name when a map renames it', async () => {
+    await render({
+      showRowGraphs: true,
+      dashboardMap: [{ current: 'JVM', baseline: 'JVM (acc)' }],
+    });
+    const [[, curSel], [, baseSel]] = dataFetcher.getMetricsTimeSeries.mock.calls as unknown as
+      [[string, { dashboardLabel: string }[]], [string, { dashboardLabel: string }[]]];
+    expect(curSel[0]!.dashboardLabel).toBe('JVM');
+    // Asking the baseline run for 'JVM' would return nothing and the graph would show one line.
+    expect(baseSel[0]!.dashboardLabel).toBe('JVM (acc)');
+  });
+
+  it('still draws the current run when the baseline has no series for that metric', async () => {
+    dataFetcher.getMetricsTimeSeries.mockImplementation((runId: string, panels: { key?: string }[]) =>
+      Promise.resolve(runId === 'run-001' ? keyed(panels, () => panel('JVM', 'Heap', 'used', 300)) : []));
+    const html = await render({ showRowGraphs: true });
+    expect(html).toContain('<svg');
+    expect(html).toContain('baseline has no series for this metric');
+  });
+
+  it('draws no graph block at all when neither run has any series', async () => {
+    dataFetcher.getMetricsTimeSeries.mockResolvedValue([]);
+    const html = await render({ showRowGraphs: true });
+    expect(html).not.toContain('<details');
+  });
+
+  it('skips rows that carry no dashboard and panel — they cannot name a series', async () => {
+    // The perf-test fallback shape: paired straight out of `transactions`.
+    dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      source: 'performance-metrics',
+      rows: [{
+        group: 'default', label: 'T01', unit: 'ms',
+        metrics: [{ key: 'avg', current: 300, baseline: 100, diffPercent: 200 }],
+      }],
+    } as never);
+    const html = await render({ showRowGraphs: true, source: 'performance-metrics' });
+    expect(html).not.toContain('<details');
+    expect(dataFetcher.getMetricsTimeSeries).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The bug that shipped first: the perf-test panels are RENAMED for display —
+ * `perfPanelTitle` collapses `Transaction RT Avg/P90/P95/P99` into one `Transaction RT` —
+ * so selecting the series by the row's title matched no stored `panel_title` and every
+ * graph silently vanished. Nothing errored; the section simply had no Graphs block.
+ *
+ * The row carries the panel id for exactly this reason, and the selector must send it.
+ */
+describe('ComparisonsRenderer row graphs — a renamed panel', () => {
+  let renderer: ComparisonsRenderer;
+  let dataFetcher: jest.Mocked<ReportDataFetcherService>;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ComparisonsRenderer,
+        ChartSvgService,
+        ReportUtilsService,
+        {
+          provide: ReportDataFetcherService,
+          useValue: {
+            getBaselineRunComparison: jest.fn().mockResolvedValue({
+              source: 'performance-metrics',
+              rows: [{
+                group: 'Perf / Transaction RT',
+                label: 'T03_Search_Products',
+                dashboardLabel: 'Perf',
+                // 101 is stored as "Transaction RT Avg"; the row shows the collapsed name.
+                panelId: 101,
+                panelTitle: 'Transaction RT',
+                unit: 'ms',
+                metrics: [{ key: 'avg', current: 300, baseline: 100, diffPercent: 200 }],
+              }],
+            }),
+            getDynatraceHostLabels: jest.fn().mockResolvedValue({}),
+            getAggregatedScalars: jest.fn(),
+            getPreviousTestRun: jest.fn().mockResolvedValue(null),
+            previousRunSloMiss: jest.fn().mockResolvedValue('none'),
+            // Answers only a selector that asks by ID — which is what the real query does
+            // once `panelId` is set, because a title filter would never match.
+            getMetricsTimeSeries: jest.fn().mockImplementation((_run, panels: { panelId?: number; key?: string }[]) =>
+              Promise.resolve(panels
+                .filter((sel) => sel.panelId === 101)
+                .map((sel) => ({
+                  dashboardLabel: 'Perf', panelTitle: 'Transaction RT',
+                  metricName: 'T03_Search_Products', unit: 'ms',
+                  key: sel.key,
+                  dataPoints: [0, 1].map((i) => ({ time: new Date(1_700_000_000_000 + i * 60_000), value: 100 + i })),
+                })))),
+          },
+        },
+      ],
+    }).compile();
+    renderer = module.get(ComparisonsRenderer);
+    dataFetcher = module.get(ReportDataFetcherService);
+  });
+
+  it('finds the series of a panel whose display title is a rename', async () => {
+    const html = await renderer.renderComparisonsSection(
+      makeSection({
+        config: {
+          baselineTestRunId: 'run-000', source: 'performance-metrics', showRowGraphs: true,
+        },
+      }) as never,
+      makeTestRun(),
+    );
+
+    const selectors = dataFetcher.getMetricsTimeSeries.mock.calls[0]![1] as { panelId?: number }[];
+    expect(selectors[0]!.panelId).toBe(101);
+    // And the graph is actually there, under the name the table used.
+    expect(html).toContain('<details');
+    expect(html).toContain('<svg');
+  });
+
+  /**
+   * Four rows of one transaction share a display title, so the title cannot pair them.
+   *
+   * `perfPanelTitle` collapses panels 101-104 (`Transaction RT Avg/P90/P95/P99`) to one
+   * `Transaction RT`, and `metric_name` is the transaction name on all four — so a
+   * (dashboard, title, metric) lookup key is IDENTICAL for the four rows. Keyed that way,
+   * `new Map` keeps the last entry and every row drew whichever panel came back last. The
+   * selector's `key` is what distinguishes them.
+   */
+  it('gives each of a transaction\'s four panels its own series, not the last one four times', async () => {
+    const panelIds = [101, 102, 103, 104];
+    dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      source: 'performance-metrics',
+      rows: panelIds.map((panelId) => ({
+        group: 'Perf / Transaction RT',
+        label: 'T03_Search_Products',
+        dashboardLabel: 'Perf',
+        panelId,
+        panelTitle: 'Transaction RT',
+        unit: 'ms',
+        metrics: [{ key: 'avg', current: 300, baseline: 100, diffPercent: 200 }],
+      })),
+    } as never);
+    // One distinguishable value per panel, so a mis-pairing is visible in the markup.
+    dataFetcher.getMetricsTimeSeries.mockImplementation((_run, panels: { panelId?: number; key?: string }[]) =>
+      Promise.resolve(panels.map((sel) => ({
+        dashboardLabel: 'Perf', panelTitle: 'Transaction RT', metricName: 'T03_Search_Products',
+        unit: 'ms', key: sel.key,
+        dataPoints: [0, 1].map((i) => ({
+          time: new Date(1_700_000_000_000 + i * 60_000),
+          value: sel.panelId! * 10 + i,
+        })),
+      }))) as never);
+
+    const html = await renderer.renderComparisonsSection(
+      makeSection({
+        config: { baselineTestRunId: 'run-000', source: 'performance-metrics', showRowGraphs: true },
+      }) as never,
+      makeTestRun(),
+    );
+
+    expect(html.match(/<details/g)).toHaveLength(4);
+    // Every panel's own maximum is printed on its own chart's axis. Keyed on the title,
+    // all four charts carried panel 104's.
+    for (const panelId of panelIds) {
+      expect(html).toContain(String(panelId * 10 + 1));
+    }
+  });
+});
+
+/**
+ * The cap, and the order it keeps.
+ *
+ * One chart is one inline SVG in a document that is stored in Postgres, served over share
+ * links and printed to PDF. Charting all 400 rows of a wide comparison is how a report
+ * becomes megabytes, so the section charts the rows a reader would actually look at —
+ * outside the good band, worst first — and stops at twenty. Both halves matter: without
+ * the sort the twenty are whichever rows the query happened to return first.
+ */
+describe('ComparisonsRenderer row graphs — the cap', () => {
+  let renderer: ComparisonsRenderer;
+  let dataFetcher: jest.Mocked<ReportDataFetcherService>;
+
+  /** 25 rows that all moved, by increasing amounts: `m24` is the worst. */
+  const rows = Array.from({ length: 25 }, (_, i) => ({
+    group: 'JVM / Heap', label: `m${i}`, dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', unit: 'ms',
+    metrics: [{ key: 'avg' as const, current: 100 + i * 10, baseline: 100, diffPercent: i * 10 + 10 }],
+  }));
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ComparisonsRenderer,
+        ChartSvgService,
+        ReportUtilsService,
+        {
+          provide: ReportDataFetcherService,
+          useValue: {
+            getBaselineRunComparison: jest.fn().mockResolvedValue({ source: 'grafana', rows }),
+            getDynatraceHostLabels: jest.fn().mockResolvedValue({}),
+            getAggregatedScalars: jest.fn(),
+            getPreviousTestRun: jest.fn().mockResolvedValue(null),
+            previousRunSloMiss: jest.fn().mockResolvedValue('none'),
+            // Answer every selector it is asked for, so nothing but the cap limits the count.
+            getMetricsTimeSeries: jest.fn().mockImplementation((_run, panels: { metricName: string; key?: string }[]) =>
+              Promise.resolve(panels.map((p) => ({
+                dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: p.metricName, unit: 'ms',
+                key: p.key,
+                dataPoints: [0, 1].map((i) => ({ time: new Date(1_700_000_000_000 + i * 60_000), value: 100 + i })),
+              })))),
+          },
+        },
+      ],
+    }).compile();
+    renderer = module.get(ComparisonsRenderer);
+    dataFetcher = module.get(ReportDataFetcherService);
+  });
+
+  it('charts at most twenty rows, however many moved', async () => {
+    const html = await renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'run-000', source: 'grafana', showRowGraphs: true } }) as never,
+      makeTestRun(),
+    );
+
+    expect(html.match(/<details/g)).toHaveLength(20);
+    // And it does not ASK for the other five either — the queries are the expensive part.
+    const selectors = dataFetcher.getMetricsTimeSeries.mock.calls[0]![1] as unknown[];
+    expect(selectors).toHaveLength(20);
+  });
+
+  it('keeps the worst rows, not the first twenty the query returned', async () => {
+    await renderer.renderComparisonsSection(
+      makeSection({ config: { baselineTestRunId: 'run-000', source: 'grafana', showRowGraphs: true } }) as never,
+      makeTestRun(),
+    );
+
+    const names = (dataFetcher.getMetricsTimeSeries.mock.calls[0]![1] as { metricName: string }[])
+      .map((s) => s.metricName);
+    // The five smallest movers are the ones dropped.
+    for (const dropped of ['m0', 'm1', 'm2', 'm3', 'm4']) expect(names).not.toContain(dropped);
+    expect(names).toContain('m24');
   });
 });

@@ -127,8 +127,8 @@ export class CreateGraphPresetDto {
   seriesConfig!: SeriesConfigDto[];
 
   @ApiPropertyOptional({
-    description: 'Chart customization options (for future use)',
-    example: { showLegend: true, lineWidth: 2 }
+    description: 'Chart-level options stored with the preset. `axisMode` is persisted and read back on load; other keys are accepted and round-tripped untouched.',
+    example: { axisMode: 'overlay' }
   })
   @IsOptional()
   chartOptions?: Record<string, unknown>;

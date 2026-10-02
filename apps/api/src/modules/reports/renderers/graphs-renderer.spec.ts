@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { GraphsRenderer } from './graphs-renderer';
+// The real chart builder, not a mock: every SVG assertion below is what guards the
+// move of `renderChart` out of this renderer and into `ChartSvgService`.
+import { ChartSvgService } from './chart-svg.service';
 import { ReportUtilsService } from '../services/report-utils.service';
 import {
   ReportDataFetcherService,
@@ -59,6 +62,7 @@ describe('GraphsRenderer', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         GraphsRenderer,
+        ChartSvgService,
         ReportUtilsService,
         {
           provide: ReportDataFetcherService,
