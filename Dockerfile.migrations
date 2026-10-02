@@ -6,7 +6,7 @@
 # Usage: docker build -f Dockerfile.migrations -t perfana/perfana-migration:0.1.0 .
 # ================================================================================================
 
-ARG NODE_VERSION=20
+ARG NODE_VERSION=24
 # Builder is alpine (needs apk for node-gyp toolchain); the final stage is distroless.
 ARG ALPINE_VERSION=3.22
 
@@ -70,7 +70,7 @@ RUN apt-get update \
 # ================================================================================================
 # Distroless: no shell, no package manager. Pure-JS TypeORM runner only needs
 # node. distroless ships the `nonroot` user (uid 65532).
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS migrations
+FROM gcr.io/distroless/nodejs24-debian12:nonroot AS migrations
 
 # Overlay patched libssl3 (see openssl-patch stage above)
 COPY --from=openssl-patch /patch/ /

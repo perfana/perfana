@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.96.28] - 2026-10-02
+
+### Changed
+- **Perfana now runs on Node 24.** Node 20 stopped receiving security patches on 30 April 2026, so the runtime behind every service had been unmaintained for five months. Node 24 is the current long-term support release and is patched until April 2028. Nothing about how Perfana behaves changes; this is the platform underneath it.
+
+### Note for existing installations
+- The published images carry the new runtime, so a normal upgrade is all that is needed. If you build Perfana yourself, you now need Node 24 — the build refuses to start on anything else rather than producing an image that differs from the one that was tested. A `.nvmrc` is included so the right version is picked up automatically.
+- The move also brings a newer OpenSSL (3.0 to 3.5), which is stricter about outdated TLS. If Perfana talks to a Grafana or Dynatrace endpoint over an old TLS configuration, check that connection after upgrading.
+
 ## [0.2.96.27] - 2026-10-01
 
 ### Fixed
