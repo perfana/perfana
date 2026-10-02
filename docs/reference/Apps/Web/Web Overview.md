@@ -67,7 +67,7 @@ RootLayout
 - Test run comparison
 - Graph visualizations
 
-**Deep link into a card** (v0.2.96.5): `/test-runs/[id]?card=graphs|compare|trends&dashboard=<label>&panel=<id>&metric=<name>` opens the Reporting tab with that card expanded and its Dashboards → Panels → Series pickers preselected. The row context menus' **Open in Graphs / Compare / Trends** items build these links (`components/shared/metric-card-links.tsx`); the shared `MetricSeriesCascade` reads the three series params once per page load, so clearing a preselected pick is not undone by collapsing and re-expanding the card.
+**Deep link into a card** (v0.2.96.5): `/test-runs/[id]?card=graphs|compare|trends&dashboard=<label>&panel=<id>&metric=<name>` opens the Reporting tab with that card expanded and the named series **already plotted** — since v0.2.97.1 the link adds outright rather than preselecting a draft the user still had to confirm, because Graphs and Trends open their picker from a `+ add series` button and a staged pick behind a closed panel could not be committed. The row context menus' **Open in Graphs / Compare / Trends** items build these links (`components/shared/metric-card-links.tsx`); the shared `MetricSeriesCascade` reads the three series params once per page load, so removing a landed series is not undone by collapsing and re-expanding the card. Omit `panel` and `metric` and the link is a wildcard over the whole dashboard, capped at 50 series with a toast. The card's add-series panel therefore stays **mounted while closed** — the walk lives in the cascade's effects; see "The add-series cascade is app-typed, and the chart inside it is not" in [apps/web/CLAUDE.md](../../../../apps/web/CLAUDE.md).
 
 ### Settings
 

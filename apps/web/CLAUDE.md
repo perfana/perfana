@@ -321,6 +321,50 @@ carries that state. Without `onRemoveSeries` it is a staged picker whose selecti
 applied on confirm. One prop, two behaviours — `MetricSeriesCascade.instant.test.tsx` pins
 the first and `MetricSeriesCascade.test.tsx` the second.
 
+**A card link is an instruction, not a draft — and that is why the panel stays mounted.**
+The cascade is also what walks an `?card=…&dashboard=…&panel=…&metric=…` link
+(`metric-card-links.tsx` builds them; see "Deep link into a card" in
+`docs/reference/Apps/Web/Web Overview.md`). Two rules fall out of that, both of which fail
+silently when broken — v0.2.97.0 broke the first and v0.2.97.1 is the repair:
+
+- **`AnalystChartCard` keeps the add-series panel mounted while the picker is closed**, hidden
+  with `display: none` rather than unmounted. The walk lives in the cascade's effects, so a
+  card whose picker starts closed — Graphs and Trends both do, behind `+ add series` — would
+  never run it: the link opened the right card, expanded it, and then the chart just stayed
+  empty, with nothing logged. Compare was unaffected throughout because its cascade is always
+  on screen, which is exactly why this shipped unnoticed. `AnalystChartCard.test.tsx` asserts
+  the panel is in the DOM while closed; `MetricSeriesCascade.closedPicker.test.tsx` asserts
+  the walk completes without the picker ever being opened.
+- **The price of that, and it is real:** a closed picker renders every dashboard row on every
+  render of the card, so the caller must hand `addSeries.panel` a *stable* element. `GraphsChart`
+  and `TrendsChart` both `useMemo` it against a `useCallback`'d close handler, because their
+  Plotly cursor state re-renders the chart on every pointer move — inline, that was the whole
+  dashboard list rebuilt per hover. The walk also *fetches* (panels for the linked dashboard,
+  then series for each of its panels) with the picker never opened.
+
+**The link adds outright in both modes, and a dashboard-only link is capped.** It used to tick
+checkboxes and wait for "Add N series", which only works while the picker is visible. Three
+details that are load-bearing:
+
+- A **dashboard-only** link (`?dashboard=` with no `panel` and no `metric`) is a wildcard —
+  every panel, every series — and is capped at `LINK_WILDCARD_MAX_SERIES` (50) with a toast.
+  `dynatraceHostSeriesRef` emits that shape at 19-35 series, but the label is guessable and the
+  URL is shareable, and a hand-typed perf-test dashboard label is one series per transaction
+  (586 on a small demo run, each its own `ds_metrics` fetch in `useGraphsData`). The optional
+  `showToast` prop exists only for that one message — the cards own every other toast — and is
+  wired at all three call sites.
+- **An empty pick list must not reach `onAddSeries`.** The fetch writes a fresh `[]` for a
+  dashboard whose panels recorded nothing, which lands in the effect with the link still armed,
+  and the cards answer a zero-length add with "All selected metrics are already added" — a toast
+  the user did nothing to earn.
+- **The effect is single-shot by construction**: `disarm()` runs synchronously in the same tick,
+  so it reads `isAdded` without listing it as a dependency. Anything that makes it re-enter has
+  to revisit those deps, or a second armed run dedupes against a stale snapshot.
+  `MetricSeriesCascade.preselect.test.tsx` pins both modes.
+
+**Cancel drops the draft.** Because the panel survives a close, a cancelled selection would
+otherwise still be ticked — with an armed "Add 3 series" — the next time the picker is opened.
+
 ### There is one `CopyButton` — reach for it instead of hand-rolling the next one
 
 `apps/web/components/ui/copy-button.tsx` is the shared copy-to-clipboard icon button

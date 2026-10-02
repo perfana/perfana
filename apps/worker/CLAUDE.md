@@ -435,7 +435,9 @@ per-bucket series. Five things about it are deliberate:
    composes the label (`Performance test metrics <scenario>`, NULL scenario `default`) and the
    `transaction.sampler` name for the row menus' "Open in Graphs / Compare / Trends" links
    (v0.2.96.5). Its failure mode is just as silent: the cascade disarms at the first level it
-   cannot match and the series picker stays empty. `metric-card-links.test.ts` pins the prefix rule;
+   cannot match, and since v0.2.97.1 the link adds outright, so on Graphs and Trends — whose
+   picker stays closed — the only symptom is a chart that never gets a series.
+   `metric-card-links.test.ts` pins the prefix rule;
    change `samplerMetricNameSql` or `generateScenarioDashboardLabel` and change that mirror too.
 5. **It inherits the rollup's stale states.** The verdict is now pinned to a table that can be
    *partial* (a sampler half written while `requests_raw` was still ingesting) or *behind* (an
