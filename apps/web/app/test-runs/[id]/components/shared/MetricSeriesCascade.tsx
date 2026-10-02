@@ -82,6 +82,8 @@ interface MetricSeriesCascadeProps {
   panelListOptions?: PanelListOptions;
   /** Which card this is, so a `?card=…&dashboard=…&panel=…&metric=…` link preselects it. */
   card: LinkableCard;
+  /** Only used to report a capped wildcard link; the cards own every other message. */
+  showToast?: (message: string) => void;
   /** Closes the panel without adding. Omitted where the cascade is always on screen. */
   onCancel?: () => void;
   /**
@@ -99,6 +101,16 @@ interface MetricSeriesCascadeProps {
 // the user cleared come back on re-expand. Module state resets on reload, which re-applies.
 const consumedLinks = new Set<string>();
 
+/**
+ * Ceiling on what a DASHBOARD-ONLY link (`?dashboard=…` with no panel and no metric) may add
+ * by itself. That shape is a wildcard — every panel, every series — and only
+ * `dynatraceHostSeriesRef` emits it, which is 19-35 series. A hand-typed label naming a
+ * perf-test dashboard is one series per transaction instead: 586 on a small demo run, each
+ * one its own `ds_metrics` fetch in `useGraphsData`. The link is shareable and the label is
+ * guessable, so the ceiling is what keeps a pasted URL from locking the tab.
+ */
+const LINK_WILDCARD_MAX_SERIES = 50;
+
 const plural = (n: number, word: string) => `${word}${n === 1 ? '' : 's'}`;
 
 export function MetricSeriesCascade({
@@ -110,6 +122,7 @@ export function MetricSeriesCascade({
   onPrimaryChange,
   panelListOptions,
   card,
+  showToast,
   onCancel,
   onRemoveSeries,
 }: MetricSeriesCascadeProps) {
@@ -269,17 +282,28 @@ export function MetricSeriesCascade({
   useEffect(() => {
     const want = preselect.current;
     if (!want || selectedPanels.length === 0 || seriesFor.current !== panelsKey) return;
-    // In instant mode a selection is not a thing the user can then commit, so a link's
-    // series has to be added outright or it would light up a checkbox and do nothing.
-    if (want.metricName === undefined) {
-      if (instant) onAddSeries(seriesOptions.filter((s) => !isAdded(s)).map(pickOf));
-      else setSelectedSeries([...seriesOptions]);
-    } else {
-      const series = seriesOptions.find((s) => s.metricName === want.metricName);
-      if (series) {
-        if (instant) { if (!isAdded(series)) onAddSeries([pickOf(series)]); }
-        else setSelectedSeries([series]);
-      }
+    // A link is an instruction, not a draft: it adds outright in both modes. Ticking the
+    // checkbox and waiting for Add worked only while the picker was on screen; Graphs and
+    // Trends open theirs from `+ add series`, so there the chart would just stay empty.
+    //
+    // Single-shot by construction: `disarm()` below runs synchronously in this same tick, so
+    // the effect can never fire a second time while armed. That is what lets it read
+    // `isAdded` without listing it as a dependency — a second armed run would dedupe against
+    // a stale snapshot. Anything that makes this re-enter has to revisit the deps.
+    const picks = want.metricName === undefined
+      ? seriesOptions.filter((s) => !isAdded(s)).map(pickOf)
+      : seriesOptions.filter((s) => s.metricName === want.metricName && !isAdded(s)).map(pickOf);
+    if (want.metricName === undefined && picks.length > LINK_WILDCARD_MAX_SERIES) {
+      onAddSeries(picks.slice(0, LINK_WILDCARD_MAX_SERIES));
+      showToast?.(
+        `That link named a whole dashboard: added the first ${LINK_WILDCARD_MAX_SERIES} of ${picks.length} series. Add the rest from the picker.`,
+      );
+    } else if (picks.length > 0) {
+      // Guarded, because an empty list is not an add: the fetch writes a fresh `[]` for a
+      // dashboard whose panels recorded nothing, which lands here with the link still armed,
+      // and the cards answer a zero-length add with a toast ("All selected metrics are
+      // already added") that the user did nothing to earn.
+      onAddSeries(picks);
     }
     disarm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -375,7 +399,16 @@ export function MetricSeriesCascade({
             {instant ? `${addedSeries.length} series added` : `${selectedSeries.length} series selected`}
           </Typography>
           {onCancel && (
-            <Button size="small" variant="text" color="inherit" onClick={onCancel} sx={CASCADE_BUTTON}>
+            // Drops the draft as well as closing. The panel stays mounted while closed (the
+            // card-link walk needs it), so without this a cancelled selection would still be
+            // ticked — with an armed "Add 3 series" — the next time the picker is opened.
+            <Button
+              size="small"
+              variant="text"
+              color="inherit"
+              onClick={() => { setSelectedSeries([]); onCancel(); }}
+              sx={CASCADE_BUTTON}
+            >
               Cancel
             </Button>
           )}

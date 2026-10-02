@@ -136,6 +136,7 @@ export function CompareExpandedContent({
             onAddSeries={onAddSeries}
             onRemoveSeries={onRemoveSeries}
             onPrimaryChange={onPrimarySelectionChange}
+            showToast={showToast}
           />
 
           {/* Prompt to add series */}

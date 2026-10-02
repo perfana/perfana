@@ -181,6 +181,7 @@ export default function TrendsCard({
                 cascade={(close) => (
                   <SeriesCascadePanel
                     card="trends"
+                    showToast={showToast}
                     allDashboards={trendsData.getAllDashboardsMerged()}
                     dashboardsLoading={trendsData.dashboardsLoading || trendsData.dynatraceDashboardsLoading}
                     testRun={testRun}

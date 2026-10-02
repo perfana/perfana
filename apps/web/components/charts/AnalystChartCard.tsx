@@ -203,7 +203,17 @@ export default function AnalystChartCard({
         </Box>
       )}
 
-      {addSeries?.open && <Box sx={{ px: '14px', pb: 1 }}>{addSeries.panel}</Box>}
+      {/* ponytail: mounted while closed, hidden rather than unmounted. The cascade is what
+          walks an "Open in Graphs / Trends" link's ?dashboard/panel/metric params, and a
+          card whose picker starts closed would never run that walk.
+          What that costs, stated honestly: a closed picker renders every dashboard row on
+          every render of THIS card, so the caller must hand `panel` a stable element (see
+          the memo in GraphsChart/TrendsChart) or a hover-driven re-render repeats that work
+          per pointer move. And the walk itself does fetch — panels for the linked dashboard,
+          then series for each of its panels — with the picker never opened. */}
+      {addSeries && (
+        <Box sx={{ px: '14px', pb: 1, display: addSeries.open ? undefined : 'none' }}>{addSeries.panel}</Box>
+      )}
 
       <Box sx={{ px: '6px' }}>{children}</Box>
 

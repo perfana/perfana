@@ -35,6 +35,8 @@ interface CompareSelectionPanelProps {
 
   addedSeries: CompareSeries[];
   onAddSeries: (picks: SeriesPick[]) => void;
+  /** Only used to report a capped wildcard card-link; every other message is the card's. */
+  showToast?: (message: string) => void;
   /** Takes the series' own id — the cascade speaks in dashboard/panel/metric, so adapt. */
   onRemoveSeries: (seriesId: string) => void;
   /**
@@ -69,6 +71,7 @@ export function CompareSelectionPanel({
   onAddSeries,
   onRemoveSeries,
   onPrimaryChange,
+  showToast,
 }: CompareSelectionPanelProps) {
   /**
    * The cascade identifies a series by what the user picked; the card identifies it by the
@@ -138,6 +141,7 @@ export function CompareSelectionPanel({
 
       <SeriesCascadePanel
         card="compare"
+        showToast={showToast}
         allDashboards={allDashboards}
         dashboardsLoading={dashboardsLoading}
         testRun={testRun}

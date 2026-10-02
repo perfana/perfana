@@ -283,3 +283,33 @@ describe('column filters', () => {
     expect(screen.getByLabelText('Perf')).toBeChecked();
   });
 });
+
+it('drops the staged selection on Cancel, not just the panel it was staged in', async () => {
+  // The panel stays MOUNTED while the picker is closed — the card-link walk needs it — so a
+  // Cancel that only closed would leave the abandoned ticks and an armed "Add 3 series"
+  // waiting behind `+ add series`, and the next open would commit a selection from last time.
+  const onCancel = jest.fn();
+  setup({ onCancel });
+
+  selectAll('Dashboards');
+  await screen.findByText('2 available across 2 dashboards');
+  selectAll('Panels');
+  await screen.findByText('3 available from 2 panels');
+  selectAll('Series');
+  await screen.findByRole('button', { name: 'Add 3 series' });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: 'Add series' })).toBeDisabled();
+  // The option lists are kept: re-opening lands back where the user was, minus the draft.
+  expect(screen.getByText('3 available from 2 panels')).toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: 'T01' })).not.toBeChecked();
+});
+
+it('has no Cancel where the cascade is always on screen', () => {
+  // Compare passes no `onCancel` — there is nothing to close, so a Cancel there would read
+  // as "undo my comparison".
+  setup();
+  expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+});

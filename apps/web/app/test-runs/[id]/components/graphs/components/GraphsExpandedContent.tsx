@@ -171,6 +171,7 @@ export function GraphsExpandedContent({
         cascade={(close) => (
           <SeriesCascadePanel
             card="graphs"
+            showToast={showToast}
             allDashboards={allDashboards}
             dashboardsLoading={dashboardsLoading}
             testRun={testRun}
