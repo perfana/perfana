@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.1] - 2026-10-03
+
+### Fixed
+- **"Open in Graphs" and "Open in Trends" work again.** The context-menu links on anomaly rows, SLO rows, Top 10 lists, Performance Analysis and Dynatrace hosts open the card with the series already on the chart, as they did before the new series pickers landed. The pickers moved behind a "+ add series" button in 0.2.97.0, and the part of the card that reads the link out of the URL only existed while that panel was open — so the link opened the right card and then did nothing. "Open in Compare" was unaffected and still works as it did.
+- **A link now adds its series outright instead of leaving them ticked for you to confirm.** Previously the link filled in the dropdowns and waited for a click on "Add series", which made sense while the picker stood permanently above the chart. It no longer does, so the link finishes the job.
+
+### Changed
+- **A link that names a whole dashboard adds at most 50 series**, and says so, pointing you at the picker for the rest. That shape is produced by the Dynatrace host rows, which carry twenty or so series; typed by hand against a performance-test dashboard it would be one series per transaction — several hundred on a small run, each its own query — which locked the tab.
+- **"Cancel" in the series picker now discards what you ticked**, rather than only closing the panel. The panel stays loaded in the background now, so without this a selection you abandoned would still be waiting, ticked, the next time you opened it.
+
+### Note for existing installations
+- Nothing to do. No configuration, stored data, collection or analysis behaviour changes in this release.
+
 ## [0.2.97.0] - 2026-10-02
 
 ### Added

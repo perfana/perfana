@@ -1871,6 +1871,68 @@ are unaffected. Either scope `unmountOnExit` to the Apdex branch or give the cha
 
 ## Web charts
 
+### A landed card-link cannot be recovered after a tab switch
+
+**Priority:** P2
+**Origin:** adversarial review of v0.2.97.1 (`fix/card-deeplinks-series-picker`). Pre-existing —
+the fix only made it reachable, because before it the link did not land in Graphs/Trends at all.
+**Why:** `consumedLinks` in `apps/web/app/test-runs/[id]/components/shared/MetricSeriesCascade.tsx`
+is module state keyed on `card + query string`, so a link applies once per page load. The Reporting
+tab is rendered as `{activeTab === 2 && (…)}` (`page.tsx`), so leaving the tab unmounts
+`useGraphsData`/`useTrendsData` **and** the cascade together. Coming back: `addedSeries` is gone with
+the hook state, the key is still in `consumedLinks`, so `preselect` initialises to `null` and the
+chart is permanently empty with no recovery but a full page reload.
+**Also wrong in the same place:** the comment defending `consumedLinks` says the card unmounts "on
+every tab switch and collapse". The collapse half is false — `GraphsCard`/`TrendsCard` use
+`<Collapse in={…}>` with no `unmountOnExit`, so collapsing unmounts nothing. And the tab half no
+longer argues for the guard, since the picks it claims to protect die with the hook state anyway.
+**What to do:** either key the Set on something whose lifetime matches the card's own state, or drop
+it for a per-card ref and let the link re-apply on remount. Decide what a second application should
+mean first — the original worry was a cleared selection coming back on re-expand, which the Collapse
+finding says cannot happen.
+
+### The `consumedLinks` key omits the test run id
+
+**Priority:** P4
+**Origin:** same review. Low realism, silent failure, one-token fix.
+**Why:** `const linkKey = \`${card}?${searchParams.toString()}\`` — the run id lives in the path, not
+the query. Two different runs reached by soft navigation with identical query strings share a key,
+and the second link silently no-ops. Not reachable today because `buildCardLink` always opens
+`target="_blank"`, which is a fresh document with fresh module state.
+**What to do:** fold `useParams().id` into the key. Not a memory leak — growth is bounded by distinct
+query strings per document, at most three per page load.
+
+### A card-link that resolves nothing fails silently, with the picker closed
+
+**Priority:** P3
+**Origin:** same review.
+**Why:** all three preselect effects `disarm()` on a miss and say nothing. A metric name that has
+drifted (a collapsed percentile twin, a `transaction.sampler` composite, a renamed sampler) gives the
+user a new tab, an empty chart, a **closed** picker and no indication the link failed. Before
+v0.2.97.0 the picker was on screen, so the half-filled dropdowns were at least a clue; that clue is
+gone by design now. The cascade has a `showToast` prop as of v0.2.97.1 (added for the wildcard cap),
+so the channel already exists.
+**What to do:** toast on each `disarm()`-without-match path, naming which level failed ("that
+dashboard is not on this run", "that panel no longer exists", "that series was not recorded").
+
+### The Trends cascade still re-renders on every chart hover
+
+**Priority:** P3
+**Origin:** adversarial review of v0.2.97.1; measured at 20 parent updates → 20 renders of the
+closed panel.
+**Why:** the add-series panel is now mounted while closed (the card-link walk needs it), so it
+re-renders whenever its chart does. `GraphsChart` is fixed — `cursorIndex` lives inside it, so the
+`cascade` prop from `GraphsExpandedContent` is stable across hover and the `useMemo` added in
+v0.2.97.1 holds. `TrendsChart` is not: `cursorIndex` lives in **`TrendsCard`**, which also builds
+`cascade={(close) => …}` inline, so every Plotly hover gives the memo a new input and it rebuilds.
+The work repeated is the full dashboard column — every dashboard on the system, 22 here and 371 on
+one field system per the note in `metric-options.ts`.
+**What to do:** move `cursorIndex` down into `TrendsChart` the way `GraphsChart` already holds it.
+Wrapping the `cascade` prop in `useCallback` instead is the trap — its deps include
+`trendsData.getAllDashboardsMerged()`, which returns a fresh array per call, and a memo that never
+invalidates would serve a stale dashboard list.
+
+
 ### Nine Plotly call sites still resize on `window` only
 
 **Priority:** P3
