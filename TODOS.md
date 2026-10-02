@@ -76,6 +76,30 @@ re-adding `testRunId` to it currently leaves every test green.
 
 ## Charts
 
+### A typed graph title is overwritten whenever a series is added or removed
+
+**Priority:** P3
+**Origin:** found while adding Clear all to the Graphs card (v0.2.96.28+).
+
+`useGraphsData` has an effect that regenerates `chartName` from `addedSeries` on every
+change:
+
+```ts
+useEffect(() => {
+  setChartName(generateChartName(addedSeries));
+}, [addedSeries]);
+```
+
+The card's title is an editable `InputBase`, so a user can type a name — and then loses it
+the moment they add or remove one series. Clearing all series empties it entirely, which is
+how this surfaced. The auto-name is useful as a *default*; it should stop applying once the
+user has edited the field (track a `nameIsUserEdited` flag, or only generate while the name
+is still the previously generated one).
+
+Pinned as current behaviour in
+`__tests__/app/test-runs/graphs/useGraphsData.addSeries.test.ts` so a fix has to update
+that test deliberately.
+
 ### The eight chart copy buttons have no end-to-end test
 
 **Priority:** P3
@@ -86,6 +110,117 @@ not: no test asserts the filename, the toast, or that the download fallback fire
 has no CSP, so the original bug could not have been caught there either — this wants one
 representative integration test (`transaction-graph-modal/utils/chart-config.ts` has a
 pure `buildPlotConfig`, so it is the cheapest site) or a browser-level check.
+
+### The chart standard has three export paths and one of them is the standard
+
+**Priority:** P2
+**Origin:** maintainability, testing and design reviews of the chart standard (v0.2.96.28).
+
+`components/charts/ChartActions.tsx` documents the rule — copy and download are card
+chrome, not Plotly modebar buttons, because the modebar floats over the plot and is styled
+by Plotly — and exactly one card follows it. `GraphsChart.tsx` sets
+`displayModeBar: false` and mounts `ChartActions`; `ComparisonPlot.tsx` and
+`useTrendsPlot.ts` keep `displayModeBar: true` with a hand-rolled Copy button and no
+download at all. So one card chrome reads three ways.
+
+Three things travel with it, and they should move together:
+
+- **Two export-figure builders.** `ChartActions.exportFigure` and `buildExportFigure` in
+  `graphs/utils/chart-utils.ts` do the same job (put the chart name back on, turn the
+  legend on for the export only, leave the live layout alone) and differ silently in title
+  text, font, legend geometry and margins. Their `exportFilename` twins have **different
+  contracts** — one returns `name.png`, the other `name` with callers appending `.png` — so
+  mixing them gives `name.png.png` or no extension.
+- **The modebar config is built and then disabled.** `buildChartConfig` assembles two
+  custom buttons with 600-character SVG paths for a card that sets
+  `displayModeBar: false`. Its only remaining consumer is `ErrorsOverTimeChart`. Split it
+  into the base config and the buttons.
+- **A ninth copy of `COPY_ICON`.** The same ~600-character path literal is now in
+  `ComparisonPlot.tsx`, `graphs/utils/chart-utils.ts`, `useTrendsPlot.ts`,
+  `chart-config.ts`, `slo-chart-utils.ts`, `trends-plot-utils.ts`,
+  `RequestTimeSeriesModal.tsx` and `current-test-run-chart-utils.ts`. It belongs in
+  `lib/plotly.ts` beside `dataUrlToPngBlob`.
+
+`ChartActions` also has no test — the modebar path it replaces has an 11-case suite — so
+whichever way this lands, the assertions that suite pins (`showlegend: true` on the export
+only, the live layout untouched) need a home.
+
+### Two chart palettes never made it onto the standard
+
+**Priority:** P3
+**Origin:** maintainability review of the chart standard (v0.2.96.28).
+
+`lib/charts/tokens.ts` claims it replaced four palettes and three copies of the dark-mode
+surfaces. Three of the four are gone; `METRIC_COLOR_PALETTE` in
+`service-level-objectives/utils/slo-chart-utils.ts` is still live (used by
+`useSLOMetricsChart`), and that file still hard-codes `#121212` / `#1e1e1e` for its dark
+surfaces. `calculateUnitConversion` has a second, unmigrated copy there too, with its own
+four-branch ms/s/percentunit ladder.
+
+The SLO and anomaly-detection charts are the two surfaces the standard has not reached.
+The tokens header was reworded in v0.2.96.28 to name what is actually migrated; this is
+the work that would let it make the stronger claim.
+
+### Three cards, three words for the same destructive action
+
+**Priority:** P4
+**Origin:** design review of the chart standard (v0.2.96.28).
+
+Graphs says "Clear all" behind a two-click armed confirm that self-disarms after 3 s;
+Trends says "Remove all" and fires on the first click; Compare says "Clear all" and also
+fires immediately. The Graphs confirm is defended on the grounds that assembling 17 series
+is real work to lose, which is equally true of the other two — Compare's button exists
+precisely because the picker cannot reach series it is not currently showing. Pick one
+word and one behaviour, and lift it into `AnalystChartCard` so the next card inherits it.
+
+### An event label and an axis-unit caption can land on the same pixels
+
+**Priority:** P4
+**Origin:** design review of the chart standard (v0.2.96.28), confidence 3/10 — wants a
+visual check with an event near each end of a run.
+
+In `lib/charts/layout.ts`, `unitAnnotation` places the axis unit at `y: 1.02` anchored at
+`x: 0` and `x: 1`; `eventShapes` places every event title at `y: 1`, `xanchor: 'left'`. An
+event in the first or last few percent of a run therefore sits on top of a unit caption,
+and a late event's label grows rightward into the paper edge against `margin.r` of 16.
+Fix is a different band for the event labels plus a right anchor past ~0.9 of the x range.
+
+### Plotly redraws on every mousemove where a chart tracks a cursor
+
+**Priority:** P3
+**Origin:** performance review of the chart standard (v0.2.96.28).
+
+`cursorIndex` is in the dependency array of the plot `useMemo` in `ComparisonPlot.tsx` and
+`useTrendsPlot.ts`, and of the rows memo in `GraphsChart.tsx`. Hovering a chart therefore
+rebuilds the whole figure per pointer event. The cursor readout only needs the *values* at
+an index, so the fix is to split the memo: the figure keyed on the data, the readout keyed
+on the index. Not taken in v0.2.96.28 because it is a real regression risk on three charts
+at once and the charts are not visibly slow today.
+
+### Small controls in the chart card chrome are below touch-target guidance
+
+**Priority:** P4
+**Origin:** design review of the chart standard (v0.2.96.28).
+
+The overlay/split toggle is 20px tall, `ChartActions`' buttons are 22x20, the unit chip is
+18px, the visibility swatch is 14px, and the series row's remove `x` has `p: 0` around a
+12px glyph (~8x12 of hit area). Defensible density on a desktop analyst surface, but the
+`x` is the one destructive control per row and the smallest target on the card. Growing the
+hit areas with padding costs nothing visually (`p: 0.5` + `inline-flex` on the `x` and the
+swatch gives ~22x22).
+
+### The Errors Over Time card is converted inside and not outside
+
+**Priority:** P4
+**Origin:** design review of the chart standard (v0.2.96.28).
+
+`ErrorsOverTimeChart`'s plot moved onto the standard — mono ticks, `catColor` by slot, no
+vertical gridlines, `ResponsivePlot` — but its card is still `Paper elevation={2}` with a
+`borderLeft: '4px solid #f44336'` accent tab, where every Analyst card is
+`boxShadow: 'none'` + a 1px divider border. `RequestTimeSeriesModal` is the same thing in
+the other direction: its layout is fully on `chartTheme` while its three traces still carry
+Plotly's Tableau blue and two fixed green/red hexes that do not move with the theme, and
+its hovertemplates hard-code `color: #666` against a now-theme-aware label background.
 
 ### The collapsed Performance Analysis badge row uses orange for two different meanings
 

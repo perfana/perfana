@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.0] - 2026-10-02
+
+### Added
+- **Test comparison report sections can now carry a graph under each row.** Turn on "row graphs" and every row that moved outside the good band gets a collapsed graph of the current run against its baseline — current solid, baseline dashed, both measured from their own start so the two runs sit on top of each other rather than side by side. They stay closed until you click one, and a printed PDF opens every one of them. The twenty rows furthest outside the band are charted, worst first; a report of four hundred rows would otherwise be tens of megabytes. A row whose baseline has no matching series still draws the current run and says so.
+- **Report sections now use the same three-column metric picker as the Graphs and Compare cards.** Dashboards, panels and series side by side, each column with its own filter and its own select-all, instead of a stack of dropdowns to open and reopen. The section says in a sentence what the selection covers, including what a partial selection leaves out.
+- **Checking a series in the Compare card adds it immediately.** Unchecking removes it. The separate "added series" list is gone — the checkboxes are the picture of what is being compared, so there is one place to look instead of two.
+- **Saved Compare and Graphs presets are named for what they contain**, as `dashboard · panel · metric`, instead of needing a name typed from scratch. A level that is the same across every series is not repeated, and more than two of anything is counted rather than listed.
+
+### Changed
+- **The Graphs, Compare and Trends cards now draw their charts the same way.** One palette, one set of type sizes, and a table of series beneath each chart carrying each one's unit, axis, minimum, mean, maximum and the value under your cursor. Colours are assigned per series and stay put: removing one series no longer recolours the rest. Series with different units get their own axes — up to two side by side, and above that the chart splits into stacked lanes, which is named under the chart rather than left to guess at. Hovering a row in the table fades the other lines so you can pick one out of a crowded chart. A series can be hidden without removing it, and its unit overridden per series.
+- **The Trends chart is labelled with dates.** It previously showed run identifiers, which are long and tell you nothing about when a run happened. Runs stay evenly spaced, because they are events rather than samples on a clock; the time of day is added only when two labelled runs fall on the same day. The chart is also the same height as the Graphs card now, rather than a third of it.
+- **The Performance Analysis charts match the rest of the app.** The transaction graph and the errors-over-time chart used three different greys on one surface and a fixed colour table that went muddy in dark mode. Error codes now take distinct colours from the shared palette rather than being hashed into one, which could give two codes the same colour.
+- **The report specification dialog is much larger**, and its preview grows with the window rather than sitting at a fixed height. The three-column picker and the section list no longer share about 900 pixels between them.
+
+### Fixed
+- **The metric picker in the Compare and Trends cards was unreadable in dark mode** — a white panel with black text and invisible borders inside a dark card. It now follows the app theme wherever it is used.
+- **Small text on and around charts was too faint to read in light mode.** The column headers, axis labels, unit captions and group headings in the new chart chrome sat below the contrast floor for text that size. They are darker now; dark mode is unchanged.
+- **The dashed total line on the transaction graph was effectively invisible in dark mode** — near-black on a near-black plot. It takes the foreground colour of whichever theme is active, as the rest of that chart already did.
+- **The report specification dialog overflowed the screen on anything narrower than about 1600 pixels**, putting a horizontal scrollbar on the page with part of the dialog unreachable.
+
+### Note for existing installations
+- Graph and Trends presets saved before this release keep working. They gain two new remembered details — which colour each series was drawn in, and whether it was hidden — and a preset saved earlier simply has neither, so it loads the way it always did.
+- Hosts and panels are unaffected; nothing in this release changes what is collected or how it is analysed.
+
 ## [0.2.96.28] - 2026-10-02
 
 ### Changed
