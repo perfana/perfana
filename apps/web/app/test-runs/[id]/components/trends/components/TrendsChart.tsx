@@ -1,7 +1,7 @@
 'use client';
 
 import type { Config, Data, Layout } from 'plotly.js';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Box, Typography, CircularProgress, Button, useTheme } from '@mui/material';
 import Plot from '@/components/ResponsivePlot';
 import { TrendsSeries } from '../types';
@@ -74,6 +74,12 @@ export function TrendsChart({
   const theme = chartTheme(mode);
   const [cascadeOpen, setCascadeOpen] = useState(false);
   const graphRef = useRef<HTMLElement | null>(null);
+  // Built once, not per render — the card keeps this panel MOUNTED while the picker is
+  // closed (the card-link walk needs it), and the cursor state in TrendsCard re-renders this
+  // component on every Plotly hover. An element rebuilt inline would re-render the whole
+  // dashboard list on each pointer move.
+  const closeCascade = useCallback(() => setCascadeOpen(false), []);
+  const cascadePanel = useMemo(() => cascade?.(closeCascade), [cascade, closeCascade]);
 
   const onHoverRow = useCallback(
     (seriesId: string | null) => {
@@ -137,12 +143,12 @@ export function TrendsChart({
         </Button>
       }
       addSeries={
-        cascade
+        cascadePanel
           ? {
               open: cascadeOpen,
               onToggle: () => setCascadeOpen((open) => !open),
               summary: `${addedSeries.length} series`,
-              panel: cascade(() => setCascadeOpen(false)),
+              panel: cascadePanel,
             }
           : undefined
       }

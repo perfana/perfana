@@ -67,6 +67,12 @@ export default function GraphsChart({
 
   const [cascadeOpen, setCascadeOpen] = useState(false);
   const [cursorIndex, setCursorIndex] = useState<number | null>(null);
+  // Built once, not per render. The card keeps this panel MOUNTED while the picker is
+  // closed (the card-link walk needs it), and `cursorIndex` below re-renders this component
+  // on every Plotly hover — so an element rebuilt inline would re-render the whole dashboard
+  // list, which is every dashboard on the system, on each pointer move across the chart.
+  const closeCascade = useCallback(() => setCascadeOpen(false), []);
+  const cascadePanel = useMemo(() => cascade?.(closeCascade), [cascade, closeCascade]);
   const graphRef = useRef<HTMLElement | null>(null);
   // The actions live in the header, outside the plot, so they need a re-render when
   // the graph div appears — a ref alone would leave them permanently disabled.
@@ -283,12 +289,12 @@ export default function GraphsChart({
         </>
       }
       addSeries={
-        cascade
+        cascadePanel
           ? {
               open: cascadeOpen,
               onToggle: () => setCascadeOpen((open) => !open),
               summary,
-              panel: cascade(() => setCascadeOpen(false)),
+              panel: cascadePanel,
             }
           : undefined
       }
