@@ -198,18 +198,64 @@ describe('ErrorAnalysisRenderer', () => {
       expect(html).not.toContain('Set-Cookie');
     });
   });
+
+  describe('errors over time — hover', () => {
+    it('pairs each legend row with its line through data-series', async () => {
+      const html = await renderer.renderErrorAnalysisSection(makeSection(), makeTestRun());
+
+      // Both halves count: without the wrapper class the rule has nothing to scope to,
+      // and without the groups there is nothing for a hovered row to dim.
+      expect(html).toContain('class="chart-hover"');
+      // Every index, not just 0 — index 0 matches under any ordering, so a drift at N>0
+      // would pass. The sequences have to be identical, in order.
+      const groups = [...html.matchAll(/<g data-series="(\d+)">/g)].map((m) => m[1]);
+      const rows = [...html.matchAll(/role="row" data-series="(\d+)"/g)].map((m) => m[1]);
+      expect(groups.length).toBeGreaterThan(1);
+      expect(rows).toEqual(groups);
+    });
+
+    it('indexes each group like its legend row, which is all the pairing is', async () => {
+      // `data-series` is an INDEX, matched by equality — nothing else ties a row to a line.
+      // So the Nth group and the Nth row have to be the same response code, and the only
+      // evidence of that in the markup is their colour: the chart draws 5xx red and 4xx
+      // amber (`codeColor`), and a legend ordered differently from `lines` would pair the
+      // reader's hover with the other code's line while looking perfectly correct.
+      const html = await renderer.renderErrorAnalysisSection(makeSection(), makeTestRun());
+
+      // Two codes have over-time rows (500 and 404); the third has none and is not a line.
+      const groups = [...html.matchAll(/<g data-series="(\d+)"><path [^>]*stroke="([^"]+)"/g)]
+        .map((m) => ({ index: m[1]!, color: m[2]! }));
+      const swatches = [...html.matchAll(/role="row" data-series="(\d+)"[\s\S]*?background:([^;]+);/g)]
+        .map((m) => ({ index: m[1]!, color: m[2]! }));
+
+      expect(groups.map((g) => g.index)).toEqual(['0', '1']);
+      expect(swatches.map((s) => s.index)).toEqual(['0', '1']);
+      expect(groups.map((g) => g.color)).toEqual(swatches.map((s) => s.color));
+      // And the two are genuinely different colours, or the assertion above proves nothing.
+      expect(groups[0]!.color).not.toBe(groups[1]!.color);
+    });
+  });
+
   /**
    * The errors-over-time chart's legend, which is now the app's series table.
    *
-   * The chart has no hover and no tooltip, so these three numbers per code are the only way
-   * a reader gets a value off it. The reading they have to agree with is the LINE's: a
-   * bucket with no row for a code had no errors of that code, which is a zero and not a gap
-   * — so a code that was quiet for a minute must report a min of 0, not a min of its
+   * The chart has no cursor readout (only the shared `chart-svg.service.ts` charts do), so
+   * these three numbers per code are the only way a reader gets a value off it. The reading
+   * they have to agree with is the LINE's: a bucket with no row for a code had no errors of
+   * that code, which is a zero and not a gap — so a code that was quiet for a minute must report a min of 0, not a min of its
    * smallest non-zero minute.
    */
   describe('errors over time — the series table', () => {
-    /** The legend precedes the chart card, and nothing before it carries table roles. */
-    const legendOf = (html: string) => html.slice(0, html.indexOf('<svg'));
+    /**
+     * The legend FOLLOWS the chart card, so everything after the SVG is it. Throws rather
+     * than slicing from -1, which would return the document's last character and make every
+     * matcher below report `[]` for the wrong reason.
+     */
+    const legendOf = (html: string) => {
+      const at = html.indexOf('</svg>');
+      if (at < 0) throw new Error('no chart in output — legendOf has nothing to slice');
+      return html.slice(at);
+    };
     const legendStats = (html: string) =>
       [...legendOf(html).matchAll(/role="cell" style="[^"]*text-align:right;[^"]*">([^<]*)</g)]
         .map((m) => m[1]!);
@@ -228,7 +274,7 @@ describe('ErrorAnalysisRenderer', () => {
     it('names the unit so a bare count is not read as a rate', async () => {
       const html = await renderer.renderErrorAnalysisSection(makeSection(), makeTestRun());
 
-      // Once per row in the legend's unit column, and once above the axis.
+      // Once in each row's unit column — the axis caption is inside the SVG, above.
       expect((legendOf(html).match(/>errors</g) ?? []).length).toBe(2);
       expect(html).toMatch(/font-weight="600"[^>]*>errors</);
     });

@@ -25,6 +25,7 @@ import {
   chartCard,
   chartColor,
   chartSeriesTable,
+  hoverSlot,
   gridLine,
   legendStats,
   tickLabel,
@@ -312,15 +313,20 @@ export class TransactionResponseTimesRenderer {
 
       // `markedLine`, not `line`: this chart draws a marker on every point below, and the
       // standard pairs the two — a 2.5px dot on a 1.25px stroke reads as a bead chain.
-      linesAndPoints.push(`<path d="${pathData}" stroke="${color}" stroke-width="${CHART_SIZE.markedLine}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`);
-
-      // Add data point circles
-      points.forEach((value: number, i: number) => {
+      const line = `<path d="${pathData}" stroke="${color}" stroke-width="${CHART_SIZE.markedLine}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+      // Data point circles
+      const markers = points.map((value: number, i: number) => {
         const x = padding.left + (chartWidth / (timePoints - 1)) * i;
         const normalizedValue = (value - yMin) / (yMax - yMin);
         const y = padding.top + chartHeight - (normalizedValue * chartHeight);
-        linesAndPoints.push(`<circle cx="${x}" cy="${y}" r="${CHART_SIZE.marker}" fill="${color}"/>`);
-      });
+        return `<circle cx="${x}" cy="${y}" r="${CHART_SIZE.marker}" fill="${color}"/>`;
+      }).join('');
+
+      // One group per transaction, indexed like its series-table row: that attribute is
+      // the whole dim-the-others pairing — see CHART_HOVER_CSS. Built as ONE string: an
+      // open and a close pushed ten lines apart drift the moment anything returns early,
+      // and an unbalanced <g> corrupts the rest of the SVG.
+      linesAndPoints.push(`<g${hoverSlot(txnIdx)}>${line}${markers}</g>`);
     });
     const lines = linesAndPoints.join('');
 
@@ -331,8 +337,9 @@ export class TransactionResponseTimesRenderer {
       return tickLabel(label, x, yPos, 'end', `transform="rotate(-45 ${x} ${yPos})"`);
     }).join('');
 
-    // The legend is the app's series table: per transaction, the min/mean/max of the
-    // response times drawn. A bucket the transaction did not run in reads as 0 in the
+    // The legend is the app's series table, below the chart: per transaction, the
+    // min/mean/max of the response times drawn. Its row order is `dataPoints`' order, which
+    // is what `data-series` pairs on. A bucket the transaction did not run in reads as 0 in the
     // line (see `dataPoints` above), so the stats skip those rather than reporting a
     // minimum of zero for every transaction.
     const legendRows: ChartLegendRow[] = scenarioData.transactions.map(
@@ -348,9 +355,8 @@ export class TransactionResponseTimesRenderer {
     );
 
     return `
-      <div style="margin: 24px 0;">
+      <div class="chart-hover" style="margin: 24px 0;">
         ${groupHeader(chartTitle)}
-        ${chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text))}
         ${chartCard(`
           <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
             <!-- The plot area. A fill, not a frame: the standard has no plot border. -->
@@ -370,6 +376,7 @@ export class TransactionResponseTimesRenderer {
             ${xLabels}
           </svg>
         `)}
+        ${chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text))}
       </div>
     `;
   }

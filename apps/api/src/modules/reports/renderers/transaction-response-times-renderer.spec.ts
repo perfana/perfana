@@ -437,9 +437,57 @@ describe('TransactionResponseTimesRenderer', () => {
    * so the line has a coordinate there, and reporting that as the transaction's MINIMUM
    * would make every intermittent transaction read "min 0 ms".
    */
+  describe('chart — hover', () => {
+    it('pairs each legend row with its line through data-series', async () => {
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      // Both halves count: without the wrapper class the rule has nothing to scope to,
+      // and without the groups there is nothing for a hovered row to dim.
+      expect(html).toContain('class="chart-hover"');
+      // Every index, not just 0: here the two sides come from independent index spaces —
+      // `dataPoints` pushed per transaction, `legendRows` mapped over the same list — and
+      // nothing but this asserts they stay aligned.
+      const groups = [...html.matchAll(/<g data-series="(\d+)">/g)].map((m) => m[1]);
+      const rows = [...html.matchAll(/role="row" data-series="(\d+)"/g)].map((m) => m[1]);
+      expect(groups.length).toBeGreaterThan(1);
+      expect(rows).toEqual(groups);
+      // Each group closes itself, so an early return can never leave an unbalanced <g>.
+      expect((html.match(/<g data-series=/g) ?? []).length)
+        .toBe((html.match(/<\/g>/g) ?? []).length);
+    });
+
+    it('closes each transaction\'s group with its markers inside it', async () => {
+      // This chart pushes its `<g>` open and closed as two separate strings around a loop,
+      // so the balance is not something the shape of the code guarantees. An unclosed group
+      // nests the next transaction inside this one and the dim rule then hides both at
+      // once; markers left OUTSIDE the group stay bright while their line dims.
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+      const svg = html.slice(html.indexOf('<svg'), html.indexOf('</svg>'));
+
+      // One group per transaction in the series table — the one with no buckets included,
+      // since its legend row exists and `data-series` is matched by index.
+      expect(svg.match(/<g data-series="\d+">/g) ?? []).toEqual([
+        '<g data-series="0">', '<g data-series="1">',
+      ]);
+      expect((svg.match(/<\/g>/g) ?? []).length).toBe(2);
+      // Each group holds its own path and a marker per bucket: three in the fixture.
+      const first = svg.slice(svg.indexOf('<g data-series="0">'), svg.indexOf('</g>'));
+      expect((first.match(/<path /g) ?? []).length).toBe(1);
+      expect((first.match(/<circle /g) ?? []).length).toBe(3);
+    });
+  });
+
   describe('chart — the series table legend', () => {
-    /** The legend precedes the chart card; nothing before it carries table roles. */
-    const legendOf = (html: string) => html.slice(0, html.indexOf('<svg'));
+    /**
+     * The legend FOLLOWS the chart card, so everything after the SVG is it. Throws rather
+     * than slicing from -1, which would return the document's last character and make every
+     * matcher below report `[]` for the wrong reason.
+     */
+    const legendOf = (html: string) => {
+      const at = html.indexOf('</svg>');
+      if (at < 0) throw new Error('no chart in output — legendOf has nothing to slice');
+      return html.slice(at);
+    };
     const legendStats = (html: string) =>
       [...legendOf(html).matchAll(/role="cell" style="[^"]*text-align:right;[^"]*">([^<]*)</g)]
         .map((m) => m[1]!);

@@ -29,6 +29,7 @@ import {
   chartCard,
   chartColor,
   chartSeriesTable,
+  hoverSlot,
   gridLine,
   legendStats,
   tickLabel,
@@ -204,8 +205,9 @@ export class ErrorAnalysisRenderer {
       xLabels.push(tickLabel(label, x, y, 'end', `transform="rotate(-30 ${x} ${y})"`));
     }
 
-    // The legend is the app's series table: per response code, the min/mean/max of its
-    // per-bucket error count. A bucket with no row for a code is a zero, not a gap — the
+    // The legend is the app's series table, below the chart: per response code, the
+    // min/mean/max of its per-bucket error count. Its row order is `lines`' order, which is
+    // what `data-series` pairs on — see CHART_HOVER_CSS. A bucket with no row for a code is a zero, not a gap — the
     // same reading the line takes — so the stats are over every bucket.
     const legendRows: ChartLegendRow[] = lines.map(({ code, color }) => {
       const counts = points.map((p) => p.countsByCode[code] ?? 0);
@@ -218,18 +220,18 @@ export class ErrorAnalysisRenderer {
     });
 
     return `
-      <div style="margin: 24px 0;">
+      <div class="chart-hover" style="margin: 24px 0;">
         ${groupHeader('Errors over time', [chip('per minute', 'neutral')])}
-        ${chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text))}
         ${chartCard(`
           <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
             <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="${CHART_INK.plotBg}"/>
             ${axisUnitLabel('errors', padding.left, padding.top - 8, 'start')}
             ${gridLines.join('')}
-            ${lines.map(({ color, path }) => `<path d="${path}" stroke="${color}" stroke-width="${CHART_SIZE.line}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}
+            ${lines.map(({ color, path }, i) => `<g${hoverSlot(i)}><path d="${path}" stroke="${color}" stroke-width="${CHART_SIZE.line}" fill="none" stroke-linecap="round" stroke-linejoin="round"/></g>`).join('')}
             ${xLabels.join('')}
           </svg>
         `)}
+        ${chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text))}
       </div>
     `;
   }
