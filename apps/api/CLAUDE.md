@@ -569,7 +569,45 @@ about that arrangement are easy to get wrong:
    under `body { zoom: 0.8 }`, so the table's 10px would reach paper at 8px — smaller than
    the 9pt legend it replaced. The SVG needs no such allowance: its text scales with the
    viewBox, not the zoom.
-8. **`npm run preflight` runs the drift spec** (`test:chart-tokens`, 0.3 s). Before that it
+8. **The legend sits BELOW its chart, and hover is CSS, not script.** `CHART_HOVER_CSS`
+   (`chart-tokens.ts`) does two things the viewer's script-less iframe would otherwise rule
+   out: hovering a series-table row dims every other line, and hovering the plot shows a
+   crosshair with each series' value there. All three builders put the table below the
+   chart and emit `class="chart-hover"` + `data-series` groups; the **cursor readout exists
+   only in `chart-svg.service.ts`** (so it covers Graphs, Comparisons and Trends), because
+   the other two would each need their own copy of the band machinery. Six things:
+
+   - **The pairing is `data-series="<row index>"` on both the table row and the SVG group**,
+     and `:has()` is what lets a row *below* the chart reach back up into it. One rule per
+     slot is generated because nothing selects "the element whose attribute equals the
+     hovered one's" — so **the attribute itself is gated** on `HOVER_SERIES_SLOTS` through
+     `hoverSlot()`. A series past the last slot must carry no attribute at all: with the
+     attribute and no un-dim rule, hovering it fades the whole chart to 15% and highlights
+     nothing, which is the inverse of the feature. A JMeter scenario with 300 transactions
+     is one series each, so this is reachable, not theoretical.
+   - **Both compiler entry points need the CSS.** `compileHtml` AND `compilePreviewHtml` —
+     the section preview renders the same chart markup in a `sandbox=""` iframe, so its own
+     `<style>` is all it gets, and without the block every band's readout is visible at
+     once, ~40 boxes stacked across the plot. It shipped that way for about an hour.
+   - **Everything constant about a readout is painted from the stylesheet**, which ships
+     once per document: the crosshair's stroke, the box's fill and the 80-character mono
+     font stack were 51% of the hover layer's bytes when they were per band (29.4 KB →
+     19.2 KB on a 3-series chart). Only geometry and the per-series colour stay inline.
+     Two attributes deliberately stay on the elements: `fill="transparent"` on the band
+     rect (without the stylesheet a bare rect is BLACK, not invisible) and `opacity="0"` on
+     the readout group (so a consumer missing the stylesheet degrades to "no hover").
+   - **A reading has to lie inside its own band**, tested as the band's interval rather than
+     a distance from its centre. The intervals tile exactly; a half-band *distance* test
+     loses the common case, because a regularly sampled series puts every point exactly
+     half a band from the nearest centre. This is what stops one readout printing a
+     timestamp over values measured a full band apart.
+   - **Non-finite times and values are filtered with the nulls.** `Math.abs(NaN - t) > span`
+     is FALSE, so an Invalid Date fails the band guard OPEN and is read as that series'
+     value in *every* band on the chart.
+   - **The band pitch (~22px, 48 max) is a size budget, not a precision dial**, and the
+     readout sheds rows into "+N more" to fit the plot's height. Print hides the whole
+     band, not just the readout — `opacity: 0` still lays a group out and embeds it.
+9. **`npm run preflight` runs the drift spec** (`test:chart-tokens`, 0.3 s). Before that it
    was a spec nothing executed: preflight is lint + type-check + two check scripts + the RLS
    suite, and `.github/workflows/pr-quality-gate.yml` is `workflow_dispatch` only, so a
    palette edit in `apps/web` could merge with the guard never running.

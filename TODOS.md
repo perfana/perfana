@@ -2022,6 +2022,22 @@ stored in Postgres, emailed and run through Puppeteer, so this lands against mai
 **What:** cap both the drawn series and the legend rows at a top-N with a "+N more" row, the
 way `comparisons-renderer.ts` caps itself at `MAX_ROW_CHARTS = 20`. Re-measure after the cap.
 
+### The graphs section emits one chart per panel with no cap, and each now carries a hover layer
+
+**Priority:** P2
+**Origin:** performance + adversarial reviews during /ship on `feat/report-chart-hover-legend`
+(2026-10-03).
+**Why:** `graphs-renderer.ts` auto-discovery maps `timeSeriesData` to one chart per panel with
+no `slice`, where `comparisons-renderer.ts` caps itself at `MAX_ROW_CHARTS = 20`. Each chart
+now also carries up to 48 pre-rendered cursor readouts. Measured after the constants moved into
+`CHART_HOVER_CSS`: **19.2 KB of hover layer on a 3-series chart** (was 29.4 KB), rising with the
+series count because each band names up to ten of them. At 200 charts that is megabytes of HTML
+in a document stored in Postgres, served from the share page and run through Puppeteer, and
+nothing guards the total — `report-generation.service.ts` only *records* the byte length.
+**What:** cap the charts a graphs section may emit (and say so in the section, the way the
+50-series link cap does), then re-measure. Related: the uncapped series table below, next item.
+**Not** by making the bands coarser — 22px is a usability dial and halving it only buys ~9 KB.
+
 ### `Math.max` of an all-zero scenario renders `-Infinity` on the y axis
 
 **Priority:** P3

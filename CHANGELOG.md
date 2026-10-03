@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.3] - 2026-10-03
+
+### Added
+- **A report's charts now answer the pointer.** Hovering anywhere on a chart shows a crosshair with the time and every series' value at that point, and hovering a row in the table below a chart fades the other lines so you can follow one series through a crowded plot. This works in the report viewer, in a downloaded HTML file and on a shared link — all three render the report with scripts switched off, so the whole thing is done in CSS and pre-rendered marks. A printed report and a PDF are unchanged: paper has no pointer.
+
+### Changed
+- **A chart's series table moved below the chart**, where a legend belongs, in every report section that draws one: Graphs, Comparisons, Trends, Errors over time and Response times over time.
+
+### Note for existing installations
+- Nothing to do. Reports generated before this release are unchanged; the new behaviour applies to reports generated from now on. No configuration, stored data, collection or analysis behaviour changes.
+
 ## [0.2.97.2] - 2026-10-03
 
 ### Changed
