@@ -2035,7 +2035,8 @@ series count because each band names up to ten of them. At 200 charts that is me
 in a document stored in Postgres, served from the share page and run through Puppeteer, and
 nothing guards the total — `report-generation.service.ts` only *records* the byte length.
 **What:** cap the charts a graphs section may emit (and say so in the section, the way the
-50-series link cap does), then re-measure. Related: the uncapped series table below, next item.
+50-series link cap does), then re-measure. Related: the uncapped series table in the
+previous item.
 **Not** by making the bands coarser — 22px is a usability dial and halving it only buys ~9 KB.
 
 ### `Math.max` of an all-zero scenario renders `-Infinity` on the y axis
