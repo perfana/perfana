@@ -529,7 +529,7 @@ is no Plotly: every chart in every section is server-rendered SVG. Three builder
 `transaction-response-times-renderer.ts` — and until v0.2.97.2 each answered "what colour, how
 thick, which gridlines" differently, none of them the way the app does.
 
-They now read `chart-tokens.ts`, a hand copy of `apps/web/lib/charts/tokens.ts`. Five things
+They now read `chart-tokens.ts`, a hand copy of `apps/web/lib/charts/tokens.ts`. Eight things
 about that arrangement are easy to get wrong:
 
 1. **The copy is guarded, not trusted.** `chart-tokens.spec.ts` reads the web file off disk

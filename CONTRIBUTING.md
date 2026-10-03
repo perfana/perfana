@@ -193,9 +193,11 @@ npm run preflight
 `npm run preflight` runs, in order: lint + type-check across the monorepo,
 `check:entity-migrations` (an `@Column` added with no migration to carry it to
 existing installs), `check:workspace-exports` (an import naming an undeclared
-`@perfana/shared/...` subpath), then the API RLS test suite. It is wired to
-`git push` via `.githooks/pre-push`, which is installed automatically when you
-run `npm install` (via the `prepare` script).
+`@perfana/shared/...` subpath), then the API RLS test suite and the
+chart-tokens drift spec (`test:chart-tokens` — the report's hand copy of
+`apps/web/lib/charts/tokens.ts`, which `apps/api` cannot import). It is wired
+to `git push` via `.githooks/pre-push`, which is installed automatically when
+you run `npm install` (via the `prepare` script).
 
 If you must bypass the gate, use `git push --no-verify` — but do so sparingly,
 and only when you understand why it would otherwise fail.

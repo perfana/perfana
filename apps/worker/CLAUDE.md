@@ -569,7 +569,7 @@ Seven things a future reader will otherwise "fix":
    **synthetic** dropdown entry since v0.2.61 — offered on ten response-time panels only, and
    answered by `GET /test-runs/:id/aggregated-metric-timeseries`, which computes a run-wide figure on
    the fly precisely because no stored row existed for it. On the new dashboard the identical string
-   is an ordinary `ds_metrics` / `ds_metric_statistics` row, on *every* panel. Four guards keep them
+   is an ordinary `ds_metrics` / `ds_metric_statistics` row, on *every* panel. Five guards keep them
    apart and each one fails silently if removed:
    - `shouldOfferAllAggregated(source, panelId, existingNames)` — the third parameter is **required
      and must stay required**. Defaulting it to `[]` reads as "the name is not already there, so
@@ -600,6 +600,15 @@ Seven things a future reader will otherwise "fix":
      `useGraphsData`'s restore path, which does not either — a Grafana panel in the 101-105/201-205
      range whose series is named `All aggregated …` is misrouted identically in both, so the report
      agrees with the card. Fixing that means fixing both sides at once; see TODOS.md.
+   - `seriesRowName(panelTitle, metricName)` in `aggregated-perf-series.ts` (v0.2.97.2) — the name a
+     card's series table and its exported PNG legend both show. It matches the **composed** prefix
+     `All aggregated — `, off a shared `AGGREGATED_PREFIX` constant, because a bare
+     `startsWith(ALL_AGGREGATED_OPTION)` reads a real series on this dashboard as the synthetic one
+     and drops the panel title. `GraphsChart` did exactly that: Transaction RT Avg/P90/P95/P99 added
+     off this dashboard gave four rows all reading `All aggregated`, four identically-named traces in
+     an exported legend, and no way to tell which line was the p99. Display-only, which is why it
+     outlived the other four. Change the separator in `buildAggregatedMetricName` and the match
+     silently stops — sharing the one constant is what prevents that.
 
    The dashboard label and uid are **duplicated as literals** in `aggregated-perf-series.ts` and
    `url-perf-panels.ts` rather than imported from the worker: the worker derives both from
