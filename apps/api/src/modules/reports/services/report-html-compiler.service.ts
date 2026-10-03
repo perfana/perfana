@@ -36,6 +36,7 @@ import { DynatraceHostsRenderer } from '../renderers/dynatrace-hosts-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import { IndexRenderer } from '../renderers/index-renderer';
 import { REPORT_DETAILS_CSS } from '../renderers/report-style';
+import { CHART_HOVER_CSS } from '../renderers/chart-tokens';
 import {
   REPORT_INTERACTIVITY_CSS,
   REPORT_INTERACTIVITY_SCRIPT,
@@ -539,6 +540,12 @@ export class ReportHtmlCompilerService {
       color: var(--text-primary);
       font-family: 'Monaco', 'Menlo', monospace;
     }
+
+    /* The preview renders the SAME chart markup as the report, so it needs the same
+       hover rules. Without them every band's cursor readout is visible at once —
+       ~40 stacked boxes across the plot — because the only thing that hides them is
+       this block. The preview iframe is sandbox="" , so its own <style> is all it gets. */
+    ${CHART_HOVER_CSS}
 
     ${customCss}
   </style>
@@ -1158,6 +1165,8 @@ export class ReportHtmlCompilerService {
     }
 
     ${REPORT_DETAILS_CSS}
+
+    ${CHART_HOVER_CSS}
 
     ${REPORT_INTERACTIVITY_CSS}
 
