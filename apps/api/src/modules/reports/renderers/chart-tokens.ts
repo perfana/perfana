@@ -186,8 +186,13 @@ export function legendStats(
  *
  * The app replaced the chart legend with a table because a legend that also carries
  * min/mean/max cannot be drawn inside a canvas. A report has the same problem for the same
- * reason — the chart is an SVG with no hover — and the same answer, minus the cursor
- * column: there is no pointer to read a value under.
+ * reason — a report has no chart library — and the same answer, minus the cursor column:
+ * the pointer reads its values off the chart itself, from the crosshair readout
+ * `chart-svg.service.ts` draws into the SVG (see `CHART_HOVER_CSS`).
+ *
+ * The table sits BELOW its chart, as a legend does, and each row carries its series index
+ * as `data-series` so hovering it can dim every other line — the one thing the row needs
+ * from outside itself.
  *
  * **A CSS grid with table roles, not an HTML `<table>`, and that is load-bearing.** The
  * comparisons section draws a chart inside a detail row of its own data table, and
@@ -217,7 +222,7 @@ export function chartSeriesTable(
   // Type, colour and the font stacks are declared ONCE and inherited. Repeating them per
   // cell cost ~1.9 KB per series row in a document that is stored in Postgres, mailed and
   // run through Puppeteer.
-  const TABLE = `${GRID} margin:0 0 12px; font-family:${CHART_MONO};`
+  const TABLE = `${GRID} margin:12px 0 0; font-family:${CHART_MONO};`
     + ` font-size:${CHART_SIZE.legendFont}px; color:${CHART_INK.muted};`;
   const head = (align: 'left' | 'right') =>
     `font-size:${CHART_SIZE.tableFont}px; font-weight:600; color:${CHART_INK.faint};`
@@ -246,8 +251,8 @@ export function chartSeriesTable(
   return `
       <div role="table" style="${TABLE}${units ? '' : ' grid-template-columns:minmax(0,1fr) auto auto auto;'}">
         <div role="row" style="display:contents;">${headerCells}</div>
-        ${rows.map((row) => `
-        <div role="row" style="display:contents;">
+        ${rows.map((row, index) => `
+        <div role="row"${hoverSlot(index)} style="display:contents;">
           <div role="cell" style="${cell('left')} color:${CHART_INK.text};">
             ${swatch(row.color, row.dashed === true)}
             <span style="font-family:${CHART_SANS}; margin-left:8px;">${escape(row.name)}</span>
@@ -302,3 +307,110 @@ export function chartCard(innerHtml: string): string {
   return `<div style="background:${CHART_INK.paper}; border:1px solid ${CHART_INK.divider};`
     + ` border-radius:${CHART_SIZE.radius}px; padding:14px;">${innerHtml}</div>`;
 }
+
+/**
+ * How many series slots the dim-on-hover rule covers. One rule per slot is the price of
+ * pairing a legend row with its line in pure CSS: nothing selects "the element whose
+ * attribute equals the hovered one's", so the pairing has to be written out.
+ *
+ * 64 covers a wildcard graph preset's 50-series cap
+ * (`LINK_WILDCARD_MAX_SERIES` in `apps/web/app/test-runs/[id]/components/shared/MetricSeriesCascade.tsx`)
+ * with room left. It is NOT a bound on what a renderer can draw — a JMeter scenario with
+ * 300 transactions is one series each — so **the slot attribute itself is gated on this
+ * number** (`hoverSlot` below). A series past the last slot simply does not take part in
+ * the hover: it keeps its opacity while the others dim, rather than dimming with no rule
+ * left to bring it back, which is the inverse of the feature.
+ */
+export const HOVER_SERIES_SLOTS = 64;
+
+/**
+ * The `data-series` attribute for the series at `index`, or '' past the last slot.
+ *
+ * Every emitter of a hoverable series goes through this — the series table here, and the
+ * `<g>` per line in the three chart builders — so the legend side and the chart side
+ * cannot disagree about where the slots run out.
+ */
+export function hoverSlot(index: number): string {
+  return index < HOVER_SERIES_SLOTS ? ` data-series="${index}"` : '';
+}
+
+/**
+ * Hover affordances for the report's SVG charts.
+ *
+ * CSS only, and that is the constraint, not a preference: the in-app viewer and the public
+ * share page load the report into an iframe with no allow-scripts, so
+ * report-interactivity.ts never runs there — see its header. Styles do apply, which is why
+ * these two behaviours work in the viewer, the downloaded file and the share page alike.
+ *
+ * 1. Hovering a legend row dims every other series on that chart. :has() is what lets a
+ *    row that sits BELOW the chart reach back up into the SVG. Hovering the LINE does the
+ *    same on the two band-less charts (errors over time, response times over time); on a
+ *    chart-svg.service.ts chart the hover bands tile the plot and win the hit test, by
+ *    design — they are what makes behaviour 2 possible.
+ * 2. Hovering the plot area shows a crosshair and the series' values there. The readout is
+ *    pre-rendered per hover band by chart-svg.service.ts; this only reveals one.
+ *
+ * **Everything constant about a readout is painted from here, and that is a size decision.**
+ * A chart carries up to 48 bands and each one used to repeat the crosshair's stroke, the
+ * box's fill and the 80-character mono font stack: 51% of the hover layer's bytes, ~13 KB
+ * per chart, in a document that is stored in Postgres, mailed and run through Puppeteer.
+ * This block ships ONCE per document. Only geometry and the per-series colour stay inline.
+ * The same rule chartSeriesTable follows for its cells.
+ *
+ * The one attribute that stays on the element is the group's own `opacity="0"`: a consumer
+ * that renders this markup without the stylesheet (the section preview did, before
+ * v0.2.97.3) would otherwise show every band's readout at once, stacked across the plot.
+ *
+ * Paper has neither: a print has no pointer, so the dim rule cannot fire. The print rule
+ * hides the whole BAND, not just the readout — `opacity: 0` still lays a group out and
+ * still embeds it, and the band's hit-test rect is not inside the readout at all, so
+ * hiding only `.chart-cursor` left ~48 transparent rects per chart in the PDF's layout.
+ */
+export const CHART_HOVER_CSS = `
+    .chart-hover:has([data-series]:hover) svg [data-series] {
+      opacity: 0.15;
+    }
+
+${Array.from(
+  { length: HOVER_SERIES_SLOTS },
+  (_, slot) => `    .chart-hover:has([data-series="${slot}"]:hover) svg [data-series="${slot}"] { opacity: 1; }`,
+).join('\n')}
+
+    .chart-cursor-band > rect {
+      pointer-events: all;
+    }
+
+    .chart-cursor {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .chart-cursor-band:hover .chart-cursor {
+      opacity: 1;
+    }
+
+    .chart-cursor line {
+      stroke: ${CHART_INK.faint};
+      stroke-width: 1;
+      /* The crosshair's own dash, NOT CHART_SIZE.gridDash (2,3): it has to read as a
+         cursor against the gridlines it crosses, not as another one of them. */
+      stroke-dasharray: 3,3;
+    }
+
+    .chart-cursor rect {
+      fill: ${CHART_INK.paper};
+      fill-opacity: 0.94;
+      stroke: ${CHART_INK.divider};
+    }
+
+    .chart-cursor text {
+      font-family: ${CHART_MONO};
+      font-size: ${CHART_SIZE.tickFont}px;
+    }
+
+    @media print {
+      .chart-cursor-band {
+        display: none;
+      }
+    }
+`;

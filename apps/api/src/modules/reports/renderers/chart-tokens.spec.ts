@@ -209,7 +209,9 @@ describe('chart-tokens', () => {
       // "12.4" and "1,234.56" then land at different x and `text-align:right` aligns nothing.
       const html = chartSeriesTable([row(), row({ name: 'B', min: '1,234.56' })], escape);
       expect((html.match(/grid-template-columns/g) ?? []).length).toBe(1);
-      expect((html.match(/role="row" style="display:contents;"/g) ?? []).length).toBe(3);
+      // Three rows: the header, plus one per series carrying its `data-series` index.
+      expect((html.match(/role="row"[^>]*style="display:contents;"/g) ?? []).length).toBe(3);
+      expect(html).toContain('role="row" data-series="1"');
     });
 
     it('lets a series name wrap but never a number', () => {
