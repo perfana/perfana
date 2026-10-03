@@ -134,9 +134,17 @@ export function normaliseLegacyAggregatedSeries<
   };
 }
 
+/**
+ * What `buildAggregatedMetricName` puts in front of the panel title, and the ONLY way to
+ * recognise its output. Shared so the two cannot drift: change the separator in one place
+ * and `seriesRowName` silently stops matching, which is the exact bug it was extracted to
+ * prevent — no error, just a row that reads its panel twice.
+ */
+const AGGREGATED_PREFIX = `${ALL_AGGREGATED_OPTION} — `;
+
 /** Readable, per-panel-unique legend/row name so two aggregated panels don't collide. */
 export function buildAggregatedMetricName(panelTitle: string): string {
-  return `${ALL_AGGREGATED_OPTION} — ${panelTitle}`;
+  return `${AGGREGATED_PREFIX}${panelTitle}`;
 }
 
 /**
@@ -155,7 +163,7 @@ export function buildAggregatedMetricName(panelTitle: string): string {
  * which line was the p99.
  */
 export function seriesRowName(panelTitle: string, metricName: string): string {
-  return metricName.startsWith(`${ALL_AGGREGATED_OPTION} — `)
+  return metricName.startsWith(AGGREGATED_PREFIX)
     ? metricName
     : `${panelTitle} · ${metricName}`;
 }

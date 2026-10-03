@@ -11,6 +11,7 @@ import {
   chartColor,
   chartSeriesTable,
   gridLine,
+  legendStats,
   safeChartColor,
   tickLabel,
   type ChartLegendRow,
@@ -137,11 +138,17 @@ export class ChartSvgService {
     // left axis belongs to the first series drawn.
     const unitsInOrder = [...new Set(drawn.map((s) => s.unit || ''))];
     const range = (points: MetricsDataPoint[]) => {
-      const values = points.map((dp) => dp.value!);
       // A unit whose series all fall outside the window would give Infinity here.
-      if (values.length === 0) return { yMin: 0, yMax: 1 };
-      const minVal = Math.min(...values);
-      const maxVal = Math.max(...values);
+      if (points.length === 0) return { yMin: 0, yMax: 1 };
+      // Looped for the same reason as the x range above: this runs over every point of
+      // every series sharing the unit.
+      let minVal = Infinity;
+      let maxVal = -Infinity;
+      for (const dp of points) {
+        const v = dp.value!;
+        if (v < minVal) minVal = v;
+        if (v > maxVal) maxVal = v;
+      }
       const pad = (maxVal - minVal || 1) * 0.1;
       return { yMin: Math.max(0, minVal - pad), yMax: maxVal + pad };
     };
@@ -193,9 +200,16 @@ export class ChartSvgService {
     const unit = axes.length === 1 ? axes[0]!.unit : '';
 
     // Compute X-axis range
-    const times = allPoints.map((dp) => dp.time.getTime());
-    const dataMin = Math.min(...times);
-    const dataMax = Math.max(...times);
+    // A loop, not `Math.min(...times)`: `allPoints` is every point of every series, which on
+    // a long run is the array that would throw `RangeError: Maximum call stack size exceeded`
+    // first. `comparisons-renderer.ts` carries the same warning about its own timestamps.
+    let dataMin = Infinity;
+    let dataMax = -Infinity;
+    for (const dp of allPoints) {
+      const t = dp.time.getTime();
+      if (t < dataMin) dataMin = t;
+      if (t > dataMax) dataMax = t;
+    }
     let tMin = dataMin;
     let tMax = dataMax;
     if (style.categorical) {
@@ -358,9 +372,7 @@ export class ChartSvgService {
         name: s.panelTitle ? `${s.panelTitle} · ${s.metricName}` : s.metricName,
         color,
         unit: s.unit || axis.unit,
-        min: values.length ? stat(Math.min(...values)) : '—',
-        mean: values.length ? stat(values.reduce((sum, v) => sum + v, 0) / values.length) : '—',
-        max: values.length ? stat(Math.max(...values)) : '—',
+        ...legendStats(values, stat),
         dashed,
       };
     });

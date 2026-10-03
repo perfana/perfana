@@ -2,7 +2,11 @@
  * Chart design tokens — the "Analyst" chart standard.
  *
  * One palette, one theme, one set of sizes for every chart in the app. Nothing outside
- * `lib/charts` should define a chart colour.
+ * `lib/charts` should define a chart colour — with one sanctioned mirror:
+ * `apps/api/src/modules/reports/renderers/chart-tokens.ts` hand-copies the LIGHT values for
+ * the report's server-rendered SVG charts (apps/api cannot import from apps/web).
+ * `chart-tokens.spec.ts` pins that copy against THIS file and runs in `npm run preflight`,
+ * so changing a value here without updating it there fails the pre-push gate.
  *
  * Migrated so far: Graphs, Compare, Trends, the transaction graph modal, the errors
  * chart. That removed three palettes (`CHART_COLOR_PALETTE`, `SERIES_COLORS`,

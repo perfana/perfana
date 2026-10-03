@@ -3,6 +3,7 @@ import { TransactionResponseTimesRenderer } from './transaction-response-times-r
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ScenarioData } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
+import { CHART_INK, CHART_SIZE } from './chart-tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -428,4 +429,92 @@ describe('TransactionResponseTimesRenderer', () => {
       expect(html).toContain('&lt;b&gt;bold&lt;/b&gt;');
     });
   });
+  /**
+   * The response-times chart under the Analyst standard.
+   *
+   * The legend is the app's series table, and its stats have one rule that is specific to
+   * this chart: a bucket a transaction did not run in is written as a 0 into `dataPoints`
+   * so the line has a coordinate there, and reporting that as the transaction's MINIMUM
+   * would make every intermittent transaction read "min 0 ms".
+   */
+  describe('chart — the series table legend', () => {
+    /** The legend precedes the chart card; nothing before it carries table roles. */
+    const legendOf = (html: string) => html.slice(0, html.indexOf('<svg'));
+    const legendStats = (html: string) =>
+      [...legendOf(html).matchAll(/role="cell" style="[^"]*text-align:right;[^"]*">([^<]*)</g)]
+        .map((m) => m[1]!);
+    const legendNames = (html: string) =>
+      [...legendOf(html).matchAll(/margin-left:8px;">([^<]*)</g)].map((m) => m[1]!);
+    const legendUnits = (html: string) =>
+      [...legendOf(html).matchAll(/role="cell" style="[^"]*padding-left:14px;">([^<]*)</g)]
+        .map((m) => m[1]!);
+
+    it('carries the min, mean and max of each transaction, in ms', async () => {
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      // Login ran in all three buckets: 100.5, 110.2, 95.8. Search has no series at all.
+      expect(legendNames(html)).toEqual(['Login', 'Search']);
+      expect(legendStats(html).slice(0, 3)).toEqual(['95.8', '102.17', '110.2']);
+      expect(legendUnits(html)).toEqual(['ms', 'ms']);
+    });
+
+    it('reads an em dash for a transaction that never ran in any bucket', async () => {
+      // `Math.min(...[])` is Infinity and `0/0` is NaN — both would reach the page.
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(legendStats(html).slice(3)).toEqual(['—', '—', '—']);
+      expect(html).not.toContain('Infinity');
+      expect(html).not.toContain('NaN');
+    });
+
+    it('skips the zero-filled buckets of a transaction that ran in only some', async () => {
+      // The zero is a drawing artefact, not a 0 ms response: Search is one 300 ms sample in
+      // the first bucket, so all three of its stats are 300.
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({
+        timeSeries: [
+          { transaction_name: 'Login', time_bucket: '2025-06-01T10:00:00Z', avg_response_time: '100.5' },
+          { transaction_name: 'Login', time_bucket: '2025-06-01T10:01:00Z', avg_response_time: '110.2' },
+          { transaction_name: 'Search', time_bucket: '2025-06-01T10:00:00Z', avg_response_time: '300' },
+        ],
+      }));
+
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(legendStats(html).slice(3)).toEqual(['300', '300', '300']);
+    });
+
+    it('heads the chart left-aligned and names the unit above the axis', async () => {
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      // The report's ONE heading treatment — `groupHeader`, the same <h3> with the accent
+      // rule the other two charts use. A private 13px div here left this chart out of the
+      // document outline and two sizes apart from its siblings.
+      expect(html).toMatch(/<h3[^>]*border-left:4px solid[^>]*>Response Times Over Time/);
+      expect(html).not.toContain('text-align: center; font-weight: 600;');
+      // The unit is named once above the axis; the rotated titles are gone, ticks and all.
+      expect(html).toMatch(/font-weight="600"[^>]*>ms</);
+      expect(html).not.toContain('Response Time (ms)');
+      expect(html).not.toContain('rotate(-90');
+      // Fill, not frame, and the standard's hairline.
+      expect(html).toContain(`fill="${CHART_INK.plotBg}"`);
+      expect(html).not.toContain('stroke="#999"');
+      // `markedLine`, not `line`: this chart marks every point, and the standard pairs the
+      // two — a 2.5px dot on a 1.25px stroke reads as a bead chain, not a line.
+      expect(html).toContain(`stroke-width="${CHART_SIZE.markedLine}"`);
+    });
+
+    it('puts the no-time-series message in the standard\'s card', async () => {
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({ timeSeries: [] }));
+
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('No time series data available');
+      // The chart card, not the old grey `#f5f5f5` outer box.
+      expect(html).toContain(`border-radius:${CHART_SIZE.radius}px`);
+      expect(html).not.toContain('background: #f5f5f5');
+      // No empty legend above it: an all-dash series table would be worse than none.
+      expect(html).not.toContain('role="columnheader"');
+    });
+  });
+
 });

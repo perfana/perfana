@@ -30,6 +30,7 @@ import {
   chartColor,
   chartSeriesTable,
   gridLine,
+  legendStats,
   tickLabel,
   type ChartLegendRow,
 } from './chart-tokens';
@@ -212,9 +213,7 @@ export class ErrorAnalysisRenderer {
         name: code,
         color,
         unit: 'errors',
-        min: formatInt(Math.min(...counts)),
-        mean: formatNum(counts.reduce((sum, n) => sum + n, 0) / counts.length),
-        max: formatInt(Math.max(...counts)),
+        ...legendStats(counts, (n) => (Number.isInteger(n) ? formatInt(n) : formatNum(n))),
       };
     });
 

@@ -91,6 +91,12 @@ export interface MetricStatistic {
 }
 
 /**
+ * What the cursor readout adds to a run id when the run has it. Both fields are the
+ * per-run columns `MetricStatistic` already carries, so they cannot drift apart.
+ */
+export type RunMeta = Pick<MetricStatistic, 'version' | 'annotations'>;
+
+/**
  * Represents a series added to the trends chart
  */
 export interface TrendsSeries {

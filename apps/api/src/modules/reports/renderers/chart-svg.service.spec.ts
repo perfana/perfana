@@ -94,7 +94,8 @@ describe('ChartSvgService', () => {
         series({ metricName: 'rate', unit: 'req/s' }),
       ]);
       // One right-hand spine for the second unit, in the standard's divider ink.
-      expect((html.match(/stroke="rgba\(0,0,0,0\.12\)"/g) ?? []).length).toBe(1);
+      const divider = CHART_INK.divider.replace(/[()]/g, '\\$&');
+      expect((html.match(new RegExp(`stroke="${divider}"`, 'g')) ?? []).length).toBe(1);
       expect(warn).not.toHaveBeenCalled();
     });
 
@@ -292,4 +293,120 @@ describe('ChartSvgService', () => {
       expect(html).not.toContain('NaN');
     });
   });
+  /**
+   * The series table that replaced the swatch-and-name legend.
+   *
+   * It is the only place a report reader gets a NUMBER off a chart — the SVG has no hover
+   * — so the min/mean/max are load-bearing, and they follow the same rule the app's
+   * `windowStats` follows: under "analysis range only" they describe the window, not the
+   * whole run. `chart-tokens.spec.ts` covers the markup the table is made of; what is
+   * tested here is which values go into it.
+   */
+  describe('the series table legend', () => {
+    const base = 1_700_000_000_000;
+    /** The legend precedes the chart card, so everything before the `<svg` is it. */
+    const legendOf = (html: string) => html.slice(0, html.indexOf('<svg'));
+    /** The right-aligned data cells, min/mean/max per row, in row order. */
+    const legendStats = (html: string) =>
+      [...legendOf(html).matchAll(/role="cell" style="[^"]*text-align:right;[^"]*">([^<]*)</g)]
+        .map((m) => m[1]!);
+    /** The series name of each row, in row order. */
+    const legendNames = (html: string) =>
+      [...legendOf(html).matchAll(/margin-left:8px;">([^<]*)</g)].map((m) => m[1]!);
+    /** The unit column of each row — the only cell padded on the left. */
+    const legendUnits = (html: string) =>
+      [...legendOf(html).matchAll(/role="cell" style="[^"]*padding-left:14px;">([^<]*)</g)]
+        .map((m) => m[1]!);
+
+    it('carries the min, mean and max of the series, formatted in its unit', () => {
+      // 10/20/30 ms: the mean is the third number, not a repeat of the max.
+      expect(legendStats(render([series()]))).toEqual(['10 ms', '20 ms', '30 ms']);
+    });
+
+    it('names each row panel-then-metric, with the unit in its own column', () => {
+      const html = render([series(), series({ metricName: 'committed', unit: 's' })]);
+      expect(legendNames(html)).toEqual(['Heap · used', 'Heap · committed']);
+      // The unit is a column, so the name is not "used (ms)".
+      expect(legendUnits(html)).toEqual(['ms', 's']);
+      expect(legendNames(html)[0]).not.toContain('(ms)');
+    });
+
+    it('drops the unit column when the whole chart is unitless, and dashes the odd one out', () => {
+      // One unit per chart is named above the axis, so a column repeating it is noise.
+      expect(render([series({ unit: '' })])).not.toContain('>Unit<');
+      // A mixed chart keeps the column, and the series with no unit reads as a dash.
+      expect(legendUnits(render([series({ unit: 'ms' }), series({ metricName: 'b', unit: '' })])))
+        .toEqual(['ms', '—']);
+    });
+
+    it('computes the stats over the WINDOW in analysis-only mode, not the whole run', () => {
+      // A ramp-up spike of 10 000 in the first minute, then a flat band at 20..23. A legend
+      // that kept reporting the whole run would print a max the reader cannot see on the
+      // chart in front of them, and a mean two orders of magnitude off the band.
+      const spiky = series({ unit: '', dataPoints: points([10_000, 20, 21, 22, 23]) });
+      const whole = render([spiky], { window: { from: base + 60_000, to: null, only: false } });
+      const only = render([spiky], { window: { from: base + 60_000, to: null, only: true } });
+
+      expect(legendStats(whole)).toEqual(['20', '2.02K', '10K']);
+      expect(legendStats(only)).toEqual(['20', '21.5', '23']);
+    });
+
+    it('prints an em dash for a series with no point inside the window', () => {
+      // Analysis-only is on because the FIRST series has points in the window; the second
+      // one has none, and `Math.min(...[])` would otherwise put Infinity on the page.
+      const inside = series({ unit: '', metricName: 'inside', dataPoints: points([5, 6, 7], base) });
+      const outside = series({
+        unit: '', metricName: 'outside', dataPoints: points([99], base + 86_400_000),
+      });
+      const html = render([inside, outside], {
+        window: { from: base, to: base + 120_000, only: true },
+      });
+
+      expect(legendStats(html)).toEqual(['5', '6', '7', '—', '—', '—']);
+      expect(html).not.toContain('Infinity');
+      expect(html).not.toContain('NaN');
+    });
+
+    it('marks a dashed baseline in its swatch, so the table reads like the chart', () => {
+      const html = render([series(), series({ metricName: 'baseline', dashed: true })]);
+      // One dashed swatch, not two: `dashed` is per series, as it is on the line.
+      expect((legendOf(html).match(/border-top:2px dashed/g) ?? []).length).toBe(1);
+    });
+
+    it('renders no series table at all when the section turned the legend off', () => {
+      // The old assertion keyed on the swatch's `border-radius: 2px`, which no longer
+      // exists anywhere in the chart — so it passed whether or not the legend was drawn.
+      const html = render([series(), series({ metricName: 'committed' })], { legend: false });
+      expect(html).toContain('<svg');
+      expect(html).not.toContain('role="table"');
+      expect(html).not.toContain('role="columnheader"');
+    });
+  });
+
+  describe('the standard\'s marks', () => {
+    it('draws a time series as a hairline, and a run-over-run chart thicker and marked', () => {
+      expect(render([series()])).toContain(`stroke-width="${CHART_SIZE.line}"`);
+      const marked = render([series()], { style: { markers: true } });
+      expect(marked).toContain(`stroke-width="${CHART_SIZE.markedLine}"`);
+      expect(marked).toContain(`r="${CHART_SIZE.marker}"`);
+    });
+
+    it('captions every axis above the plot instead of rotating a y-axis title', () => {
+      const html = render([series({ unit: 'ms' }), series({ metricName: 'rate', unit: 'req/s' })]);
+      // One caption per axis — the left one included, which used to be the rotated title.
+      expect((html.match(/font-weight="600"/g) ?? []).length).toBe(2);
+      expect(html).toMatch(/font-weight="600"[^>]*>ms</);
+      expect(html).toMatch(/font-weight="600"[^>]*>req\/s</);
+      // Nothing is rotated by 90 degrees any more.
+      expect(html).not.toContain('rotate(-90');
+    });
+
+    it('fills the plot area instead of framing it', () => {
+      const html = render([series()]);
+      expect(html).toContain(`fill="${CHART_INK.plotBg}"`);
+      // The grey `#999` frame was the loudest mark on the old report charts.
+      expect(html).not.toContain('stroke="#999"');
+    });
+  });
+
 });

@@ -6,7 +6,7 @@ type TrendsTrace = Partial<PlotData>;
 import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 import { useMemo } from 'react';
 import { useTheme } from '@mui/material';
-import { MetricStatistic, TrendsSeries } from '../types';
+import { MetricStatistic, RunMeta, TrendsSeries } from '../types';
 import { trendsSeriesLabel } from '../utils';
 import type { SeriesRow } from '@/components/charts';
 import {
@@ -31,12 +31,6 @@ interface UseTrendsPlotProps {
   showToast: (message: string) => void;
   /** Which run the cursor is on, so the table's cursor column can be filled. */
   cursorIndex: number | null;
-}
-
-/** What the cursor readout adds to a run id when the run has it. */
-export interface RunMeta {
-  version?: string | null;
-  annotations?: string | null;
 }
 
 interface PlotDataPoint {

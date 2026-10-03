@@ -551,11 +551,28 @@ about that arrangement are easy to get wrong:
    analysis-window boundary keeps amber (`ANALYSIS_BOUNDARY_COLOR`) where the Graphs card
    draws a `theme.faint` hairline, and the excluded band uses `CHART_INK.excludedPrint` (10%)
    rather than the app's `excluded` (4%), which is invisible on paper.
-5. **Tick labels keep their unit, so the left gutter stays wide.** The app converts values
-   once and names the display unit above the axis; the report's `formatValue` rescales per
-   value, so one axis can legitimately read `900 ms` and `1.2 s`. Dropping the unit from the
-   ticks would make those two numbers incomparable. `padding.left` is sized for `287.36 ms`,
-   not for `287.36`.
+5. **In `chart-svg.service.ts` only, tick labels keep their unit, so its left gutter stays
+   wide.** That chart's `formatValue` rescales per value, so one axis can legitimately read
+   `900 ms` and `1.2 s`; dropping the unit would make those two numbers incomparable, and
+   `padding.left` is sized for `287.36 ms`, not for `287.36`. The other two builders carry a
+   single fixed unit, name it in the axis caption and keep a narrow gutter (56-62px) with
+   bare numeric ticks — do not "fix" those to match.
+6. **The series table is one grid, and its rows are `display:contents`.** Re-declaring
+   `grid-template-columns` per row makes every row its own grid sized to its own content,
+   and then the number columns do not line up and `text-align:right` aligns nothing — which
+   is the entire point of replacing a swatch legend with a table. The app's `SeriesTable`
+   survives per-row grids only because its tracks are fixed pixel widths; a report's numbers
+   are formatted per unit, so the tracks have to be content-sized. Type and colour are
+   declared once on the container and inherited: repeating them per cell cost ~1.9 KB per
+   series row in a document that is stored in Postgres, mailed and run through Puppeteer.
+7. **`CHART_SIZE.legendFont` is 11px and is NOT mirrored from the app.** The compiler prints
+   under `body { zoom: 0.8 }`, so the table's 10px would reach paper at 8px — smaller than
+   the 9pt legend it replaced. The SVG needs no such allowance: its text scales with the
+   viewBox, not the zoom.
+8. **`npm run preflight` runs the drift spec** (`test:chart-tokens`, 0.3 s). Before that it
+   was a spec nothing executed: preflight is lint + type-check + two check scripts + the RLS
+   suite, and `.github/workflows/pr-quality-gate.yml` is `workflow_dispatch` only, so a
+   palette edit in `apps/web` could merge with the guard never running.
 
 Deliberately **not** mirrored: the dark palette (there is no dark report), and the y-axis
 domain. The app pins a non-negative axis to `[0, niceTop]`; the report keeps its padded

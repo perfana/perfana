@@ -24,6 +24,11 @@ interface AnalystChartCardProps {
   axisMode?: AxisDisplayMode;
   onAxisModeChange?: (next: AxisDisplayMode) => void;
   /** Right of the header: the hovered time, sample or run id. Blank when not hovering. */
+  /**
+   * Right of the header: the hovered time, sample, or run id plus its release and
+   * annotations. Capped at 55% of the header and ellipsized, with the full string on the
+   * element's `title` — an annotation is free text with no length bound.
+   */
   cursor?: string;
   /** Compare's panel-unit chip, which applies to baseline and current together. */
   headerExtra?: React.ReactNode;
@@ -152,6 +157,9 @@ export default function AnalystChartCard({
             textAlign: 'right',
           }}
           noWrap
+          // The readout truncates, and the Analyst standard has no tooltip to recover it
+          // from: a free-text annotation is exactly the part the ellipsis eats.
+          title={cursor ?? ''}
         >
           {cursor ?? ''}
         </Typography>

@@ -3,6 +3,8 @@ import { ErrorAnalysisRenderer } from './error-analysis-renderer';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ReportErrorAnalysis } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
+import { REPORT_COLORS } from './report-style';
+import { CHART_INK, CHART_SIZE, chartColor } from './chart-tokens';
 
 const makeSection = (overrides?: Partial<ReportSectionConfig>): ReportSectionConfig => ({
   type: 'error_analysis',
@@ -196,4 +198,68 @@ describe('ErrorAnalysisRenderer', () => {
       expect(html).not.toContain('Set-Cookie');
     });
   });
+  /**
+   * The errors-over-time chart's legend, which is now the app's series table.
+   *
+   * The chart has no hover and no tooltip, so these three numbers per code are the only way
+   * a reader gets a value off it. The reading they have to agree with is the LINE's: a
+   * bucket with no row for a code had no errors of that code, which is a zero and not a gap
+   * — so a code that was quiet for a minute must report a min of 0, not a min of its
+   * smallest non-zero minute.
+   */
+  describe('errors over time — the series table', () => {
+    /** The legend precedes the chart card, and nothing before it carries table roles. */
+    const legendOf = (html: string) => html.slice(0, html.indexOf('<svg'));
+    const legendStats = (html: string) =>
+      [...legendOf(html).matchAll(/role="cell" style="[^"]*text-align:right;[^"]*">([^<]*)</g)]
+        .map((m) => m[1]!);
+    const legendNames = (html: string) =>
+      [...legendOf(html).matchAll(/margin-left:8px;">([^<]*)</g)].map((m) => m[1]!);
+
+    it('carries each code\'s per-bucket min, mean and max', async () => {
+      const html = await renderer.renderErrorAnalysisSection(makeSection(), makeTestRun());
+
+      // 500 is in every bucket: 4, 12, 2. 404 is missing from the middle one, which is a
+      // zero — so its min is 0 and its mean is (1 + 0 + 3) / 3, not (1 + 3) / 2.
+      expect(legendNames(html)).toEqual(['500', '404']);
+      expect(legendStats(html)).toEqual(['2', '6', '12', '0', '1.33', '3']);
+    });
+
+    it('names the unit so a bare count is not read as a rate', async () => {
+      const html = await renderer.renderErrorAnalysisSection(makeSection(), makeTestRun());
+
+      // Once per row in the legend's unit column, and once above the axis.
+      expect((legendOf(html).match(/>errors</g) ?? []).length).toBe(2);
+      expect(html).toMatch(/font-weight="600"[^>]*>errors</);
+    });
+
+    it('lists the codes worst-first, and gives a non-numeric code a palette slot', async () => {
+      dataFetcher.getErrorAnalysis.mockResolvedValue(makeData({
+        overTime: [
+          { time: new Date('2026-08-20T10:00:00Z'), countsByCode: { '500': 10, 'Assertion failed': 1 } },
+          { time: new Date('2026-08-20T10:01:00Z'), countsByCode: { '500': 20, 'Assertion failed': 3 } },
+        ],
+      }));
+
+      const html = await renderer.renderErrorAnalysisSection(makeSection(), makeTestRun());
+
+      // Ordered by total volume, so the busiest code reads first in the legend.
+      expect(legendNames(html)).toEqual(['500', 'Assertion failed']);
+      // A 5xx keeps its HTTP-class red; a code with no class takes the Analyst slot for its
+      // position, which used to be a four-colour list of its own.
+      expect(html).toContain(`stroke="${REPORT_COLORS.dot.bad}"`);
+      expect(html).toContain(`stroke="${chartColor(1)}"`);
+    });
+
+    it('fills the plot area instead of framing it, and rotates no axis title', async () => {
+      const html = await renderer.renderErrorAnalysisSection(makeSection(), makeTestRun());
+
+      expect(html).toContain(`fill="${CHART_INK.plotBg}"`);
+      expect(html).not.toContain('stroke="#999"');
+      expect(html).not.toContain('rotate(-90');
+      // The line is the standard's hairline, not the old 2px.
+      expect(html).toContain(`stroke-width="${CHART_SIZE.line}"`);
+    });
+  });
+
 });

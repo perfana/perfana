@@ -35,18 +35,31 @@ describe('chart-tokens', () => {
     }
   })();
 
+  /**
+   * The slice from a named anchor to the end of the file.
+   *
+   * It THROWS on a missing anchor rather than returning something: `indexOf` gives -1 there
+   * and `slice(-1)` is the file's last character, which would make every comparison below
+   * fail with a mystery instead of naming the renamed declaration.
+   */
+  const from = (marker: string): string => {
+    const at = (webTokens ?? '').indexOf(marker);
+    if (at < 0) {
+      throw new Error(`chart-tokens drift guard: "${marker}" not found in apps/web/lib/charts/tokens.ts`);
+    }
+    return (webTokens ?? '').slice(at);
+  };
+
   /** `faint: 'rgba(0,0,0,0.58)',` inside the LIGHT theme literal. */
   const lightValue = (key: string): string | undefined => {
     if (!webTokens) return undefined;
-    const light = webTokens.slice(webTokens.indexOf('const LIGHT: ChartTheme = {'));
-    return new RegExp(`\\n  ${key}: '([^']+)'`).exec(light)?.[1];
+    return new RegExp(`\\n  ${key}: '([^']+)'`).exec(from('const LIGHT: ChartTheme = {'))?.[1];
   };
 
   /** `line: 1.25,` or `gridDash: '2 3',` inside the SIZE literal. */
   const sizeValue = (key: string): string | undefined => {
     if (!webTokens) return undefined;
-    const size = webTokens.slice(webTokens.indexOf('export const SIZE = {'));
-    return new RegExp(`\\n  ${key}: '?([^,']+)'?,`).exec(size)?.[1];
+    return new RegExp(`\\n  ${key}: '?([^,']+)'?,`).exec(from('export const SIZE = {'))?.[1];
   };
 
   describe('mirrors apps/web/lib/charts/tokens.ts', () => {
@@ -97,7 +110,9 @@ describe('chart-tokens', () => {
       // inline `style="…"` attribute, which a double-quoted family name would close.
       const quoteless = (stack: string) => stack.replace(/["']/g, '');
       const webMono = /export const MONO = "([^"]+)"/.exec(webTokens ?? '')?.[1];
-      const webSans = /export const SANS = '([^']+)'/.exec(webTokens ?? '')?.[1];
+      // Quote-agnostic: the point of the case is that quoting does NOT matter, so pinning
+      // the web file's outer quote style here would fail on a prettier re-quote.
+      const webSans = /export const SANS = ['"](.+?)['"];/.exec(webTokens ?? '')?.[1];
       expect(webMono).toBeDefined();
       expect(webSans).toBeDefined();
       expect(quoteless(CHART_MONO)).toBe(quoteless(webMono!));
@@ -175,8 +190,37 @@ describe('chart-tokens', () => {
       expect(html).not.toContain('<script>');
     });
 
-    it('shows a dash for a unitless series rather than an empty column', () => {
-      expect(chartSeriesTable([row({ unit: undefined })], escape)).toContain('—');
+    it('drops the Unit column when no series has a unit, and keeps it when one does', () => {
+      // A chart whose series share one unit names it once above the axis; a column of
+      // identical cells would only compete with the numbers in a table that prints small.
+      const none = chartSeriesTable([row({ unit: undefined }), row({ name: 'B', unit: undefined })], escape);
+      expect(none).not.toContain('Unit');
+      expect((none.match(/role="columnheader"/g) ?? []).length).toBe(4);
+
+      // Mixed: the column earns its place, and the row without a unit says so.
+      const mixed = chartSeriesTable([row({ unit: 'ms' }), row({ name: 'B', unit: undefined })], escape);
+      expect(mixed).toContain('Unit');
+      expect((mixed.match(/role="columnheader"/g) ?? []).length).toBe(5);
+      expect(mixed).toContain('—');
+    });
+
+    it('shares ONE grid across all rows, so the number columns line up', () => {
+      // Each row re-declaring the template makes it its own grid, sized to its own content:
+      // "12.4" and "1,234.56" then land at different x and `text-align:right` aligns nothing.
+      const html = chartSeriesTable([row(), row({ name: 'B', min: '1,234.56' })], escape);
+      expect((html.match(/grid-template-columns/g) ?? []).length).toBe(1);
+      expect((html.match(/role="row" style="display:contents;"/g) ?? []).length).toBe(3);
+    });
+
+    it('lets a series name wrap but never a number', () => {
+      // The report has no hover and, on paper, no cursor: an ellipsized series name is lost.
+      const html = chartSeriesTable([row({ name: 'A very long panel title · a very long metric name' })], escape);
+      const cells = [...html.matchAll(/<div role="cell" style="([^"]*)"/g)].map((m) => m[1]!);
+      expect(cells.length).toBe(5);
+      // The two left cells (name, unit) wrap; the three numbers never do.
+      expect(cells.slice(0, 2).every((c) => c.includes('overflow-wrap:anywhere'))).toBe(true);
+      expect(cells.slice(0, 2).some((c) => c.includes('white-space:nowrap'))).toBe(false);
+      expect(cells.slice(2).every((c) => c.includes('white-space:nowrap'))).toBe(true);
     });
 
     it('marks a dashed series in its swatch too, so it survives a greyscale print', () => {

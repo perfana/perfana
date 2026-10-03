@@ -4,8 +4,16 @@
  * Mirror of `apps/web/lib/charts/tokens.ts`, light mode only — a report is read on white
  * and printed on paper, and has no theme switch. Copied rather than imported: `apps/api`
  * has no path into `apps/web`, and this is eight hex strings and a handful of numbers.
- * `chart-tokens.spec.ts` pins every value against the web file, so a drift is a failing
- * test rather than two subtly different blues in two places the same person reads.
+ * `chart-tokens.spec.ts` pins every value against the web file — and `npm run preflight`
+ * runs that spec — so a drift is a failing gate rather than two subtly different blues in
+ * two places the same person reads.
+ *
+ * `packages/shared` WAS the other option: both apps already depend on it, and these values
+ * have no React coupling. It was not taken because the shared route costs a new `exports`
+ * subpath (`check:workspace-exports`) and makes `apps/api` type-check against
+ * `packages/shared/dist`, so every token edit needs a shared rebuild before the API sees it
+ * — more moving parts than a 40-line mirror with a gate on it. Revisit if a third consumer
+ * appears.
  *
  * The four rules this file exists to enforce, which the report's three hand-rolled SVG
  * charts each used to answer differently:
@@ -44,6 +52,7 @@ export const CHART_INK = {
   faint: 'rgba(0,0,0,0.58)',
   divider: 'rgba(0,0,0,0.12)',
   grid: 'rgba(15,23,42,0.07)',
+  /** Mirror-only: no report reads this — use `excludedPrint`. Here so the drift spec can pin it. */
   excluded: 'rgba(15,23,42,0.04)',
   /**
    * The excluded-band fill, for a report.
@@ -53,6 +62,7 @@ export const CHART_INK = {
    * (see `ANALYSIS_BOUNDARY_COLOR`), so the report uses the same hue at 10%.
    */
   excludedPrint: 'rgba(15,23,42,0.10)',
+  /** Mirror-only, as above: pinned against the web file, not drawn by any renderer yet. */
   baseline: '#94a3b8',
   error: '#dc2626',
 } as const;
@@ -71,6 +81,13 @@ export const CHART_SIZE = {
   axisLabelFont: 10,
   tableFont: 10,
   titleFont: 13,
+  /**
+   * The series table's own body size. NOT mirrored from the app, and a point larger than
+   * `tableFont` on purpose: `report-html-compiler.service.ts` prints the document under
+   * `body { zoom: 0.8 }`, so 10px reaches paper at 8px — smaller than the 9pt legend this
+   * table replaced. The SVG is unaffected; its text scales with the viewBox, not the zoom.
+   */
+  legendFont: 11,
   radius: 8,
 } as const;
 
@@ -125,11 +142,43 @@ export interface ChartLegendRow {
   dashed?: boolean;
 }
 
-/** The swatch: a line, dashed when the series is, because that is how it reads on paper. */
+/**
+ * The swatch: a line, dashed when the series is, because that is how it reads on paper.
+ *
+ * The colour is re-checked here rather than trusted from the row. It lands in a `style=`
+ * attribute on a page served without authentication, and a shared helper that documents an
+ * invariant its callers must keep is one refactor away from not having it.
+ */
 function swatch(color: string, dashed: boolean): string {
+  const safe = safeChartColor(color, CHART_CAT[0]);
   return dashed
-    ? `<span style="display:inline-block; width:14px; height:0; border-top:2px dashed ${color}; vertical-align:middle;"></span>`
-    : `<span style="display:inline-block; width:14px; height:2px; background:${color}; border-radius:1px; vertical-align:middle;"></span>`;
+    ? `<span style="display:inline-block; width:14px; height:0; border-top:2px dashed ${safe}; vertical-align:middle;"></span>`
+    : `<span style="display:inline-block; width:14px; height:2px; background:${safe}; border-radius:1px; vertical-align:middle;"></span>`;
+}
+
+/**
+ * min / mean / max over a series, already formatted.
+ *
+ * One loop, not `Math.min(...values)`: a report chart is handed one row per `ds_metrics`
+ * point and the spread form throws `RangeError: Maximum call stack size exceeded` somewhere
+ * north of 100k arguments. (`chart-svg.service.ts` has two older spreads over larger arrays
+ * that would blow first — they are fixed alongside this, so the ceiling is gone rather than
+ * moved.) An empty series reads as em dashes, never `Infinity` or `NaN` on the page.
+ */
+export function legendStats(
+  values: readonly number[],
+  format: (value: number) => string,
+): Pick<ChartLegendRow, 'min' | 'mean' | 'max'> {
+  if (values.length === 0) return { min: '—', mean: '—', max: '—' };
+  let lo = Infinity;
+  let hi = -Infinity;
+  let sum = 0;
+  for (const value of values) {
+    if (value < lo) lo = value;
+    if (value > hi) hi = value;
+    sum += value;
+  }
+  return { min: format(lo), mean: format(sum / values.length), max: format(hi) };
 }
 
 /**
@@ -156,33 +205,54 @@ export function chartSeriesTable(
   escape: (text: string) => string,
 ): string {
   if (rows.length === 0) return '';
+
+  // ONE grid, on the container. The rows are `display:contents`, so every cell is a direct
+  // grid item of that single grid and the five tracks are shared — which is the whole point
+  // of a table of numbers. Re-declaring the template per row makes each row its own grid
+  // sized to its own content, and then `text-align:right` aligns nothing: "12.3 ms" and
+  // "1,234.56 ms" land at different x and the mono font buys nothing. The app's
+  // `SeriesTable` gets away with per-row grids only because its tracks are fixed pixel
+  // widths; a report's numbers are formatted per unit, so the tracks have to be content-sized.
   const GRID = 'display:grid; grid-template-columns:minmax(0,1fr) auto auto auto auto; align-items:center;';
+  // Type, colour and the font stacks are declared ONCE and inherited. Repeating them per
+  // cell cost ~1.9 KB per series row in a document that is stored in Postgres, mailed and
+  // run through Puppeteer.
+  const TABLE = `${GRID} margin:0 0 12px; font-family:${CHART_MONO};`
+    + ` font-size:${CHART_SIZE.legendFont}px; color:${CHART_INK.muted};`;
   const head = (align: 'left' | 'right') =>
-    `font-family:${CHART_MONO}; font-size:9px; font-weight:600; text-transform:uppercase;`
-    + ` letter-spacing:0.06em; color:${CHART_INK.faint}; text-align:${align}; padding:0 0 6px ${align === 'left' ? '0' : '14px'};`
-    + ' white-space:nowrap;';
+    `font-size:${CHART_SIZE.tableFont}px; font-weight:600; color:${CHART_INK.faint};`
+    + ` text-align:${align}; padding:0 0 6px ${align === 'left' ? '0' : '14px'}; white-space:nowrap;`;
   const cell = (align: 'left' | 'right') =>
-    `font-family:${CHART_MONO}; font-size:${CHART_SIZE.tableFont}px;`
-    + ` color:${align === 'left' ? CHART_INK.text : CHART_INK.muted}; text-align:${align};`
-    + ` padding:3px 0 3px ${align === 'left' ? '0' : '14px'}; border-top:1px solid ${CHART_INK.divider};`
-    + ' white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+    `text-align:${align}; padding:3px 0 3px ${align === 'left' ? '0' : '14px'};`
+    + ` border-top:1px solid ${CHART_INK.divider};`
+    // A number must not wrap; a series name must, because this is the only place it is
+    // written and a report has no hover to recover an ellipsis from — on paper, not even a
+    // cursor. The names here are the product's longest strings ("panel · metric", raw
+    // JMeter transaction names).
+    + (align === 'right' ? ' white-space:nowrap;' : ' overflow-wrap:anywhere;');
+
+  // A chart whose series all share one unit names it once, above the axis; a Unit column of
+  // identical cells would just compete with the numbers. Only a mixed-unit chart earns it.
+  const units = rows.some((row) => row.unit);
+
+  const headerCells = [
+    `<div role="columnheader" style="${head('left')}">Series</div>`,
+    units ? `<div role="columnheader" style="${head('left')} padding-left:14px;">Unit</div>` : '',
+    `<div role="columnheader" style="${head('right')}">Min</div>`,
+    `<div role="columnheader" style="${head('right')}">Mean</div>`,
+    `<div role="columnheader" style="${head('right')}">Max</div>`,
+  ].join('');
 
   return `
-      <div role="table" style="${GRID} margin:0 0 12px;">
-        <div role="row" style="${GRID} grid-column:1/-1;">
-          <div role="columnheader" style="${head('left')}">Series</div>
-          <div role="columnheader" style="${head('left')} padding-left:14px;">Unit</div>
-          <div role="columnheader" style="${head('right')}">Min</div>
-          <div role="columnheader" style="${head('right')}">Mean</div>
-          <div role="columnheader" style="${head('right')}">Max</div>
-        </div>
+      <div role="table" style="${TABLE}${units ? '' : ' grid-template-columns:minmax(0,1fr) auto auto auto;'}">
+        <div role="row" style="display:contents;">${headerCells}</div>
         ${rows.map((row) => `
-        <div role="row" style="${GRID} grid-column:1/-1;">
-          <div role="cell" style="${cell('left')}">
+        <div role="row" style="display:contents;">
+          <div role="cell" style="${cell('left')} color:${CHART_INK.text};">
             ${swatch(row.color, row.dashed === true)}
-            <span style="font-family:${CHART_SANS}; font-size:${CHART_SIZE.tableFont}px; margin-left:8px;">${escape(row.name)}</span>
+            <span style="font-family:${CHART_SANS}; margin-left:8px;">${escape(row.name)}</span>
           </div>
-          <div role="cell" style="${cell('left')} color:${CHART_INK.faint}; padding-left:14px;">${escape(row.unit || '—')}</div>
+          ${units ? `<div role="cell" style="${cell('left')} color:${CHART_INK.faint}; padding-left:14px;">${escape(row.unit || '—')}</div>` : ''}
           <div role="cell" style="${cell('right')}">${escape(row.min)}</div>
           <div role="cell" style="${cell('right')}">${escape(row.mean)}</div>
           <div role="cell" style="${cell('right')}">${escape(row.max)}</div>

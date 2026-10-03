@@ -26,6 +26,7 @@ import {
   chartColor,
   chartSeriesTable,
   gridLine,
+  legendStats,
   tickLabel,
   type ChartLegendRow,
 } from './chart-tokens';
@@ -245,7 +246,7 @@ export class TransactionResponseTimesRenderer {
     if (timePoints === 0) {
       return `
         <div style="margin: 24px 0;">
-          ${this.chartHeading(chartTitle)}
+          ${groupHeader(chartTitle)}
           ${chartCard(`<div style="padding: 40px; text-align: center; font-family: ${CHART_SANS}; font-size: 10pt; color: ${CHART_INK.faint};">
             No time series data available for this scenario.
           </div>`)}
@@ -309,7 +310,9 @@ export class TransactionResponseTimesRenderer {
         })
         .join(' ');
 
-      linesAndPoints.push(`<path d="${pathData}" stroke="${color}" stroke-width="${CHART_SIZE.line}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`);
+      // `markedLine`, not `line`: this chart draws a marker on every point below, and the
+      // standard pairs the two — a 2.5px dot on a 1.25px stroke reads as a bead chain.
+      linesAndPoints.push(`<path d="${pathData}" stroke="${color}" stroke-width="${CHART_SIZE.markedLine}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`);
 
       // Add data point circles
       points.forEach((value: number, i: number) => {
@@ -339,16 +342,14 @@ export class TransactionResponseTimesRenderer {
           name: txn.name,
           color: chartColor(idx),
           unit: 'ms',
-          min: sampled.length ? formatNum(Math.min(...sampled)) : '—',
-          mean: sampled.length ? formatNum(sampled.reduce((sum, v) => sum + v, 0) / sampled.length) : '—',
-          max: sampled.length ? formatNum(Math.max(...sampled)) : '—',
+          ...legendStats(sampled, formatNum),
         };
       },
     );
 
     return `
       <div style="margin: 24px 0;">
-        ${this.chartHeading(chartTitle)}
+        ${groupHeader(chartTitle)}
         ${chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text))}
         ${chartCard(`
           <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
@@ -371,15 +372,6 @@ export class TransactionResponseTimesRenderer {
         `)}
       </div>
     `;
-  }
-
-  /**
-   * A chart's own heading. Left-aligned sans at the standard's title size — the charts
-   * used to centre a grey 10pt h3, which is not how any other heading in the report reads.
-   */
-  private chartHeading(title: string): string {
-    return `<div style="font-family: ${CHART_SANS}; font-size: ${CHART_SIZE.titleFont}px; font-weight: 600;`
-      + ` color: ${CHART_INK.text}; margin: 0 0 10px;">${this.utils.escapeHtml(title)}</div>`;
   }
 
   /**
