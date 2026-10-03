@@ -14,7 +14,7 @@ import {
 } from './utils';
 import { ChartLoadingState, ChartEmptyState } from './components';
 import { mergeEventShapesIntoIndexedLayout } from '../shared/event-lines';
-import { ALL_AGGREGATED_OPTION } from '@/lib/aggregated-perf-series';
+import { seriesRowName } from '@/lib/aggregated-perf-series';
 
 import Plot from '@/components/ResponsivePlot';
 import { AnalystChartCard, ChartActions, SeriesTable, type SeriesRow } from '@/components/charts';
@@ -80,15 +80,7 @@ export default function GraphsChart({
 
   const visible = useMemo(() => seriesConfig.filter((s) => !s.hidden), [seriesConfig]);
 
-  /**
-   * `panelTitle · metricName`, except for the run-wide aggregate: its stored metric name
-   * already composes in the panel title ("All aggregated — Transaction RT Avg"), so the
-   * pair would read the title twice.
-   */
-  const rowName = (series: SeriesConfig) =>
-    (series.metricName.startsWith(ALL_AGGREGATED_OPTION)
-      ? series.metricName
-      : `${series.panelTitle} · ${series.metricName}`);
+  const rowName = (series: SeriesConfig) => seriesRowName(series.panelTitle, series.metricName);
 
   const plot = useMemo(() => {
     if (visible.length === 0 || seriesData.size === 0) return null;

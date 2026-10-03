@@ -140,6 +140,27 @@ export function buildAggregatedMetricName(panelTitle: string): string {
 }
 
 /**
+ * The name a chart's series table and its exported legend both show for a series.
+ *
+ * `panelTitle · metricName`, except for the SYNTHETIC run-wide aggregate, whose metric name
+ * is already `buildAggregatedMetricName(panelTitle)` and would otherwise read its panel
+ * twice.
+ *
+ * The test is that composed prefix, never a bare `startsWith(ALL_AGGREGATED_OPTION)`. The
+ * `Performance test metrics all aggregated` dashboard carries a REAL series named exactly
+ * `All aggregated` on every one of its panels — that is why `shouldOfferAllAggregated`
+ * suppresses the synthetic one there — so the loose test dropped the panel title from all of
+ * them: adding Transaction RT Avg/P90/P95/P99 off that dashboard gave four rows reading
+ * "All aggregated", four identically-named traces in an exported legend, and no way to tell
+ * which line was the p99.
+ */
+export function seriesRowName(panelTitle: string, metricName: string): string {
+  return metricName.startsWith(`${ALL_AGGREGATED_OPTION} — `)
+    ? metricName
+    : `${panelTitle} · ${metricName}`;
+}
+
+/**
  * Fetch the run-wide aggregate for one panel spec across the given runs.
  * `value` is the spec's own stat; `values` carries every stat (avg/p50/p90/
  * p95/p99/max) — the API computes them all in one pass, so Compare can fill
