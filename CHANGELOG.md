@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.2] - 2026-10-03
+
+### Changed
+- **Report charts now look like the charts in the app.** Every chart in a generated report — Graphs, Comparisons, Trends, Errors over time, Response times over time — is drawn with the same palette, line weight and gridlines as the corresponding card on screen: one categorical palette instead of three, a thin line, hairline horizontal gridlines, no heavy box around the plot, and numbers set in the same monospaced face. The unit is named once above its axis instead of sideways down the left edge.
+- **A chart's legend now carries its numbers.** Where a report used to show a row of coloured dashes, it shows the series table the app shows: the series, its unit, and its minimum, mean and maximum over the window the chart is drawing. Under "analysis range only" those numbers are the window's, not the whole run's.
+- **The hovered run's release and annotations appear in the Trends card.** Hovering a point on a trend names the run, its application release and its annotations in the card header, so a jump in the line can be read against what changed. Clicking the point opens that run in a new tab.
+
+### Fixed
+- **Four "All aggregated" series on the Graphs card no longer share one name.** Adding Transaction RT Avg, P90, P95 and P99 from the "Performance test metrics all aggregated" dashboard produced four rows all reading "All aggregated", in the series table and in an exported image's legend, with no way to tell which line was which. Each row now names its panel.
+- **A long annotation no longer pushes the chart card's header around**, and the full text is available by hovering the readout.
+
+### Note for existing installations
+- Nothing to do. Reports generated before this release are unchanged; the new look applies to reports generated from now on. No configuration, stored data, collection or analysis behaviour changes.
+
 ## [0.2.97.1] - 2026-10-03
 
 ### Fixed

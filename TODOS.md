@@ -2005,6 +2005,48 @@ scroll container, which may make the shared hook unnecessary; check before reach
 
 ## Reports
 
+### A chart's series table is uncapped, and one chart can carry 300 legend rows
+
+**Priority:** P2
+**Origin:** performance specialist during /ship on `feat/chart-standard-sweep` (2026-10-03).
+**Why:** `transaction-response-times-renderer.ts` maps `scenarioData.transactions` with no
+slice, `error-analysis-renderer.ts` maps every distinct response code, and
+`graphs-renderer.ts` has one chart per preset with uncapped series. The series table replaced
+a swatch strip and carries five cells per row, so the HTML per chart grew even after the
+inheritance fix in this release (type and colour declared once on the container rather than
+per cell). A JMeter scenario with 300 transactions therefore emits a 300-row legend — which
+is also 300 lines on the chart above it, so the readability problem predates the legend.
+**Measured before the inheritance fix:** 1 series 4,028 B, 10 series 23,216 B, 30 series
+65,876 B, against 440 B / 3,473 B / 10,233 B for the strip it replaced. The report HTML is
+stored in Postgres, emailed and run through Puppeteer, so this lands against mail size limits.
+**What:** cap both the drawn series and the legend rows at a top-N with a "+N more" row, the
+way `comparisons-renderer.ts` caps itself at `MAX_ROW_CHARTS = 20`. Re-measure after the cap.
+
+### `Math.max` of an all-zero scenario renders `-Infinity` on the y axis
+
+**Priority:** P3
+**Origin:** coverage audit during /ship on `feat/chart-standard-sweep` (2026-10-03). Pre-existing,
+not introduced by that branch.
+**Why:** `transaction-response-times-renderer.ts` computes
+`Math.max(...dataPoints.flat().filter((v) => v > 0))`. If every bucket of every transaction in a
+scenario is 0 — or parses to 0 via `parseFloat(...) || 0` — that is `-Infinity`, `yMax` is
+`-Infinity`, and the tick labels render the literal string `-Infinity`.
+**What:** fall back to a sensible axis (`yMax = 1`) when the filtered set is empty, the way
+`chart-svg.service.ts`'s `range()` already does for a unit with no in-window points.
+
+### The Unit column repeats a unit the values already carry
+
+**Priority:** P4
+**Origin:** design specialist during /ship on `feat/chart-standard-sweep` (2026-10-03).
+**Why:** `chart-svg.service.ts` formats its stats through `formatValue`, which suffixes ms/s/%,
+so a row reads `287.36 ms` next to a Unit column reading `ms`. The column is NOT redundant for
+every unit — `req/s` and other unsuffixed units are only named there — and the stats legitimately
+rescale per value (`900 ms` and `1.2 s` on one axis), so it was left alone rather than half-fixed.
+**What:** decide one display unit per series table, strip the per-value suffix, and let the Unit
+column carry it. Only worth doing together with the cap above, since both are about the width of
+that table.
+
+
 ### Prose `{perfana-previous-*}` and a `previous-successful` comparison name different runs
 
 **Priority:** P2
