@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { CHART_INK, CHART_SIZE, chartColor } from './chart-tokens';
+import { CHART_INK, CHART_SIZE, HOVER_SERIES_SLOTS, chartColor } from './chart-tokens';
 import { ChartSvgService, NO_WINDOW, ChartSeries } from './chart-svg.service';
 
 /**
@@ -93,9 +93,10 @@ describe('ChartSvgService', () => {
         series({ unit: 'ms' }),
         series({ metricName: 'rate', unit: 'req/s' }),
       ]);
-      // One right-hand spine for the second unit, in the standard's divider ink.
+      // One right-hand spine for the second unit, in the standard's divider ink. Matched
+      // on the <line> specifically: the cursor readouts box themselves in the same ink.
       const divider = CHART_INK.divider.replace(/[()]/g, '\\$&');
-      expect((html.match(new RegExp(`stroke="${divider}"`, 'g')) ?? []).length).toBe(1);
+      expect((html.match(new RegExp(`<line[^>]*stroke="${divider}"`, 'g')) ?? []).length).toBe(1);
       expect(warn).not.toHaveBeenCalled();
     });
 
@@ -268,6 +269,21 @@ describe('ChartSvgService', () => {
       expect((sparse.match(/<circle /g) ?? []).length).toBe(3);
       expect(dense).not.toContain('<circle ');
     });
+
+    it('rounds a marker\'s coordinates like the path\'s, to 0.1px', () => {
+      // A marker per point on a trend over many runs is as much payload as the path, and
+      // full float precision is ~17 characters per coordinate that renders identically in
+      // a document stored in Postgres, mailed, and run through Puppeteer.
+      const runs = Array.from({ length: 7 }, (_, i) => ({ time: new Date(i), value: i * 3 + 1 }));
+      const html = render([series({ unit: '', dataPoints: runs })], {
+        style: { markers: true, categorical: { pointNoun: 'runs' } },
+      });
+      const coords = [...html.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)"/g)].flatMap((m) => [m[1]!, m[2]!]);
+
+      expect(coords.length).toBe(14);
+      // At most one decimal place on every one of them.
+      expect(coords.filter((c) => /\.\d{2}/.test(c))).toEqual([]);
+    });
   });
 
   describe('tick labels', () => {
@@ -304,8 +320,18 @@ describe('ChartSvgService', () => {
    */
   describe('the series table legend', () => {
     const base = 1_700_000_000_000;
-    /** The legend precedes the chart card, so everything before the `<svg` is it. */
-    const legendOf = (html: string) => html.slice(0, html.indexOf('<svg'));
+    /**
+     * The legend FOLLOWS the chart card, so everything after `</svg>` is it.
+     *
+     * Throws rather than slicing from -1: on a render with no chart that would return the
+     * document's LAST CHARACTER, and every matcher below would then report `[]` for the
+     * wrong reason — a passing assertion about a legend that was never drawn.
+     */
+    const legendOf = (html: string) => {
+      const at = html.indexOf('</svg>');
+      if (at < 0) throw new Error('no chart in output — legendOf has nothing to slice');
+      return html.slice(at);
+    };
     /** The right-aligned data cells, min/mean/max per row, in row order. */
     const legendStats = (html: string) =>
       [...legendOf(html).matchAll(/role="cell" style="[^"]*text-align:right;[^"]*">([^<]*)</g)]
@@ -380,6 +406,273 @@ describe('ChartSvgService', () => {
       expect(html).toContain('<svg');
       expect(html).not.toContain('role="table"');
       expect(html).not.toContain('role="columnheader"');
+    });
+  });
+
+  /**
+   * Hover, on a chart that is read where no script runs. Both halves are markup the CSS in
+   * `CHART_HOVER_CSS` only reveals, so what is testable here is the pairing and the bands.
+   */
+  describe('hover', () => {
+    /*
+     * These cases are MARKUP-ONLY, and deliberately so: jsdom evaluates no CSS, so nothing
+     * here can witness `:has()` resolving out of the series table into the SVG, `:hover`
+     * matching a `display: contents` row, or the band rects winning the hit test. Those
+     * three were verified by hand in Chrome against a generated report on 2026-10-03 (both
+     * behaviours, before and after the paint moved into CHART_HOVER_CSS). Same structural
+     * limit as REPORT_DETAILS_CSS — see the `data:`-URL CSP note in apps/api/CLAUDE.md for
+     * the last time a browser-only rule shipped broken past a green suite.
+     */
+    it('pairs each legend row with its line through data-series', () => {
+      const html = render([series(), series({ metricName: 'committed' })]);
+      // The row index IS the group index — the whole dim-the-others mechanism.
+      expect(html).toContain('role="row" data-series="0"');
+      expect(html).toContain('role="row" data-series="1"');
+      expect(html).toContain('<g data-series="0">');
+      expect(html).toContain('<g data-series="1">');
+      // The legend follows the chart, so a hover on it has to reach back up via :has().
+      expect(html.indexOf('</svg>')).toBeLessThan(html.indexOf('role="table"'));
+    });
+
+    it('pre-renders a cursor readout per band, naming every series and its value', () => {
+      const html = render([series(), series({ metricName: 'committed', unit: 's' })]);
+      expect(html).toContain('class="chart-cursor-band"');
+      // A readout carries the time, then one coloured line per series at that point.
+      expect(html).toMatch(/<tspan[^>]*>\d{2}:\d{2}:\d{2}<\/tspan>/);
+      expect(html).toMatch(/<tspan[^>]*>used {2}\d/);
+      expect(html).toMatch(/<tspan[^>]*>committed {2}\d/);
+      // Bands are the hover target, so they must sit above the lines.
+      expect(html.indexOf('class="chart-cursor-band"')).toBeGreaterThan(html.indexOf('<g data-series="0">'));
+    });
+
+    it('names at most ten series in a readout, and counts the rest', () => {
+      // The cap is what keeps the box inside the plot. Without the overflow line the
+      // readout silently stops at ten and the reader cannot tell.
+      const many = Array.from({ length: 14 }, (_, i) => series({ metricName: `m${i}`, unit: '' }));
+      const html = render(many);
+      const band = html.slice(html.indexOf('class="chart-cursor-band"'));
+      const firstReadout = band.slice(0, band.indexOf('</text>'));
+
+      // One head line, ten readings, one overflow line.
+      expect((firstReadout.match(/<tspan /g) ?? []).length).toBe(12);
+      expect(firstReadout).toContain('+4 more');
+    });
+
+    it('trims a long series name in the readout but leaves a 28-character one whole', () => {
+      // Only the READOUT truncates — the series table below the chart is the one place the
+      // full name is written, so the assertions are scoped to the band markup.
+      // The bands to the end of the SVG — NOT to the end of the document, which would
+      // include the series table and its full-length names.
+      const readoutOf = (html: string) =>
+        html.slice(html.indexOf('class="chart-cursor-band"'), html.indexOf('</svg>'));
+      const keep = 'a'.repeat(28);
+      const cut = 'b'.repeat(29);
+
+      expect(readoutOf(render([series({ metricName: keep, unit: '' })]))).toContain(keep);
+      const html = render([series({ metricName: cut, unit: '' })]);
+      expect(readoutOf(html)).toContain(`${'b'.repeat(27)}\u2026`);
+      expect(readoutOf(html)).not.toContain(cut);
+      // …and the table still carries it whole.
+      expect(html).toContain(cut);
+    });
+
+    it('emits no negative geometry however narrow the chart is configured', () => {
+      // `chartWidth` comes from a section config with no DTO validation, and a negative
+      // `width` on a rect is an error value: the readout's box silently does not render.
+      for (const width of [120, 126, 130, 200, 400]) {
+        expect(render([series()], { width })).not.toMatch(/(width|height)="-/);
+      }
+    });
+
+    it('stops pairing past the last hover slot, instead of dimming with no way back', () => {
+      // The un-dim rules are generated per slot, so a series past the last one must not
+      // carry the attribute at all — the generic dim rule would fade it with nothing left
+      // to restore it, which is the inverse of the feature.
+      const many = Array.from(
+        { length: HOVER_SERIES_SLOTS + 6 }, (_, i) => series({ metricName: `m${i}`, unit: '' }),
+      );
+      const html = render(many);
+      const slots = [...html.matchAll(/<g data-series="(\d+)">/g)].map((m) => Number(m[1]));
+
+      expect(slots).toHaveLength(HOVER_SERIES_SLOTS);
+      expect(Math.max(...slots)).toBe(HOVER_SERIES_SLOTS - 1);
+      expect(html).not.toContain(`data-series="${HOVER_SERIES_SLOTS}"`);
+    });
+
+    it('reads the point nearest the band even when the series arrives out of order', () => {
+      // A monotone walk over unsorted points parks on the wrong one and reports its value
+      // against another timestamp. The renderer sorts first; this is the proof.
+      const base = 1_700_000_000_000;
+      const shuffled = series({ unit: '', dataPoints: [
+        { time: new Date(base + 120_000), value: 30 },
+        { time: new Date(base), value: 10 },
+        { time: new Date(base + 60_000), value: 20 },
+      ] });
+      const sorted = series({ unit: '', dataPoints: points([10, 20, 30]) });
+      const readouts = (html: string) => html.match(/<tspan[^>]*>used {2}[^<]*</g) ?? [];
+
+      expect(readouts(render([shuffled]))).toEqual(readouts(render([sorted])));
+      expect(readouts(render([shuffled])).length).toBeGreaterThan(0);
+    });
+
+    it('writes an ampersand in a name once, not escaped twice', () => {
+      // The readout used to escape text that was already escaped, so `Search & Browse`
+      // reached the PDF and the share page as `Search &amp; Browse` — and the box was
+      // measured from the shorter string, so a name with a few of them overflowed it.
+      const html = render([series({ metricName: 'Search & Browse <1s', unit: '' })]);
+      const readout = html.slice(html.indexOf('class="chart-cursor-band"'), html.indexOf('</svg>'));
+
+      expect(readout).toContain('Search &amp; Browse &lt;1s');
+      expect(readout).not.toContain('&amp;amp;');
+    });
+
+    it('keeps the readout inside the plot on the shortest chart it renders', () => {
+      // A full readout is 12 cells; the `low` quality preset's plot is 152px. The box has
+      // to be clamped, not placed at a constant offset.
+      const many = Array.from({ length: 14 }, (_, i) => series({ metricName: `m${i}`, unit: '' }));
+      const html = render(many, { width: 700, height: 240 });
+      const plotBottom = 240 - 60;
+
+      const boxes = [...html.matchAll(/<rect x="[\d.]+" y="(\d+)" width="[\d.]+" height="(\d+)" rx="4"/g)];
+      expect(boxes.length).toBeGreaterThan(0);
+      for (const [, y, h] of boxes) expect(Number(y) + Number(h)).toBeLessThanOrEqual(plotBottom);
+    });
+
+    it('drops a point whose timestamp is not a number instead of reading it in every band', () => {
+      // `Math.abs(NaN - t) > span` is FALSE, so an Invalid Date used to pass the band guard
+      // and print `NaN` as that series' value on the whole chart.
+      const base = 1_700_000_000_000;
+      const html = render([series({ unit: '', dataPoints: [
+        { time: new Date(base), value: 10 },
+        { time: new Date('nonsense'), value: 20 },
+        { time: new Date(base + 60_000), value: 30 },
+      ] })]);
+
+      expect(html).not.toContain('NaN');
+      expect(html).not.toContain('Invalid');
+    });
+
+    it('leaves a series out of a band it has no point in, rather than repeating a stale value', () => {
+      const base = 1_700_000_000_000;
+      // `short` stops after three points; `long` runs on. The bands past the gap must name
+      // only `long` — a tooltip that keeps reporting the last value invents data.
+      const short = series({ unit: '', metricName: 'short' });
+      const long = series({
+        unit: '',
+        metricName: 'long',
+        dataPoints: Array.from({ length: 40 }, (_, i) => ({ time: new Date(base + i * 60_000), value: i })),
+      });
+      const html = render([short, long]);
+      expect((html.match(/<tspan[^>]*>long {2}/g) ?? []).length)
+        .toBeGreaterThan((html.match(/<tspan[^>]*>short {2}/g) ?? []).length);
+    });
+
+    /**
+     * The readouts are inside the SVG and the series table is after it, so anything matched
+     * on the slice up to `</svg>` is a readout and not the legend repeating the same name.
+     */
+    const readouts = (html: string) => html.slice(0, html.indexOf('</svg>'));
+
+    /** Every band's crosshair x and the box it carries, in band order. */
+    const bands = (html: string) =>
+      [...html.matchAll(/<g class="chart-cursor-band">[\s\S]*?<line x1="([\d.]+)"[\s\S]*?<rect x="([\d.]+)" y="\d+" width="([\d.]+)"/g)]
+        .map((m) => ({ cx: +m[1]!, boxX: +m[2]!, boxWidth: +m[3]! }));
+
+    it('trims a long series name instead of widening the box past the chart', () => {
+      // 40 a's. The box is sized from a character count (mono type), so an untrimmed
+      // JMeter transaction name would be a readout wider than the plot it sits in.
+      const html = render([series({ metricName: 'a'.repeat(40) })]);
+      expect(readouts(html)).toMatch(/<tspan[^>]*>a{27}… {2}\d/);
+      // ...and the full name is still written once, in the legend, where it can wrap.
+      expect(html.slice(html.indexOf('</svg>'))).toContain('a'.repeat(40));
+    });
+
+    it('counts the series past the tenth rather than growing a box taller than the plot', () => {
+      // 13 series at the same timestamps: ten are named, three are a count. An SVG tooltip
+      // cannot scroll, so a 13-line box would simply overhang the chart.
+      const many = Array.from({ length: 13 }, (_, i) => series({ metricName: `m${i}`, unit: '' }));
+      const svg = readouts(render(many));
+
+      expect(svg).toMatch(/<tspan[^>]*>\+3 more<\/tspan>/);
+      expect(svg).toMatch(/<tspan[^>]*>m0 {2}/);
+      // The eleventh onwards are not in the readout at all — not drawn behind the count.
+      expect(svg).not.toMatch(/<tspan[^>]*>m12 {2}/);
+    });
+
+    it('heads a readout with the chart\'s own x label, taken from a real sample', () => {
+      // A trend chart's x-axis is runs, so `xLabelOf` has to be handed a data point — which
+      // is why the band keeps an anchor instead of labelling its synthetic centre time.
+      const svg = readouts(render([series()], { style: { xLabelOf: (dp) => `run-${dp.value}` } }));
+
+      // The head is the first cell of the readout: the one `tspan` with an absolute `y`.
+      expect(svg).toMatch(/<tspan x="[\d.]+" y="\d+"[^>]*>run-10<\/tspan>/);
+      // And no clock reading anywhere: that would be the band centre, not a run.
+      expect(svg).not.toMatch(/<tspan[^>]*y="\d+"[^>]*>\d{2}:\d{2}:\d{2}</);
+    });
+
+    it('spaces the bands by width on a time axis and by run on a categorical one', () => {
+      const dense = (width: number) => {
+        const html = render([series({ dataPoints: points(Array.from({ length: 200 }, (_, i) => i)) })], { width });
+        return (html.match(/class="chart-cursor-band"/g) ?? []).length;
+      };
+      // ~22px per band: 900 wide leaves a 782px plot, so 36 — not one band per point, which
+      // is the markup this layer is already the second-largest cost in the chart for.
+      expect(dense(900)).toBe(36);
+      // Clamped at both ends: 48 bands however wide, 6 however narrow.
+      expect(dense(2000)).toBe(48);
+      expect(dense(220)).toBe(6);
+
+      // A categorical chart gets one band per run instead — a run IS the reading there.
+      const runs = [0, 1, 2, 3].map((i) => ({ time: new Date(i), value: i * 10 }));
+      const cat = render([series({ unit: '', dataPoints: runs })], {
+        style: { categorical: { pointNoun: 'runs' }, markers: true },
+      });
+      expect((cat.match(/class="chart-cursor-band"/g) ?? []).length).toBe(4);
+    });
+
+    it('keeps every readout inside the plot, flipping it to the near side past the midpoint', () => {
+      // 900 wide, one unit: the plot runs from x=78 to x=860. A box that ran off the right
+      // edge would be clipped by the SVG, so the reader would lose the values they pointed at.
+      const html = render([series({ dataPoints: points(Array.from({ length: 200 }, (_, i) => i)) })]);
+      const [left, right] = [78, 860];
+      const all = bands(html);
+      expect(all.length).toBeGreaterThan(1);
+
+      for (const band of all) {
+        expect(band.boxX).toBeGreaterThanOrEqual(left);
+        expect(band.boxX + band.boxWidth).toBeLessThanOrEqual(right);
+        // Past the midpoint the box sits entirely left of the crosshair, and before it
+        // entirely right — otherwise it covers the half of the chart being read.
+        if (band.cx > left + (right - left) / 2) {
+          expect(band.boxX + band.boxWidth).toBeLessThanOrEqual(band.cx);
+        } else {
+          expect(band.boxX).toBeGreaterThanOrEqual(band.cx);
+        }
+      }
+    });
+
+    it('escapes a series name into the readout, which is SVG text and not markup', () => {
+      // The name comes from `ds_metrics` and lands in a `<tspan>`; the legend's escaping
+      // does not cover this copy of it.
+      const svg = readouts(render([series({ metricName: '<b>&x' })]));
+      expect(svg).toContain('&lt;b&gt;&amp;x');
+      expect(svg).not.toContain('<b>&x');
+    });
+
+    it('names a series by its panel when the metric has no name of its own', () => {
+      // `metricName || panelTitle`: an empty name would otherwise put a bare value in the
+      // readout with nothing to say which line it belongs to.
+      const svg = readouts(render([series({ metricName: '', panelTitle: 'Heap', unit: '' })]));
+      expect(svg).toMatch(/<tspan[^>]*>Heap {2}\d/);
+    });
+
+    it('still draws the readouts when the section turned the legend off', () => {
+      // The two halves are independent: no table means no row to hover and nothing to dim,
+      // but the plot is still the only place a value can be read off this chart.
+      const html = render([series()], { legend: false });
+      expect(html).not.toContain('role="table"');
+      expect(html).toContain('class="chart-cursor-band"');
+      expect(html).toContain('<g data-series="0">');
     });
   });
 
