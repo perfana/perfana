@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ReportUtilsService } from '../services/report-utils.service';
+import { CHART_INK, CHART_SIZE, chartColor } from './chart-tokens';
 import { ChartSvgService, NO_WINDOW, ChartSeries } from './chart-svg.service';
 
 /**
@@ -92,8 +93,8 @@ describe('ChartSvgService', () => {
         series({ unit: 'ms' }),
         series({ metricName: 'rate', unit: 'req/s' }),
       ]);
-      // One right-hand spine for the second unit.
-      expect((html.match(/stroke="#ccc"/g) ?? []).length).toBe(1);
+      // One right-hand spine for the second unit, in the standard's divider ink.
+      expect((html.match(/stroke="rgba\(0,0,0,0\.12\)"/g) ?? []).length).toBe(1);
       expect(warn).not.toHaveBeenCalled();
     });
 
@@ -126,7 +127,9 @@ describe('ChartSvgService', () => {
 
     it('dims the excluded head and marks it with the amber boundary', () => {
       const html = render([spiky], { window: { from: windowFrom, to: null, only: false } });
-      expect(html).toContain('fill="#9e9e9e"');
+      // The dim band is the standard's slate, at the opacity that survives a print.
+      expect(html).toContain(`fill="${CHART_INK.excludedPrint}"`);
+      // Amber is kept deliberately: a faint grey hairline does not print.
       expect(html).toContain('stroke="#f59e0b"');
     });
 
@@ -202,12 +205,13 @@ describe('ChartSvgService', () => {
       expect(html).toContain('stroke="#2f6fed"');
       expect(html).toContain('stroke="#8a8a8a"');
       // One dashed line, not two: `dashed` is per series.
-      expect((html.match(/stroke-dasharray="6,4"/g) ?? []).length).toBe(1);
+      expect((html.match(new RegExp(`stroke-dasharray="${CHART_SIZE.baselineDash}"`, 'g')) ?? []).length).toBe(1);
     });
 
     it('falls back to the palette at the caller offset when no colour is given', () => {
-      expect(render([series()], { offset: 0 })).toContain('stroke="#4285f4"');
-      expect(render([series()], { offset: 1 })).toContain('stroke="#ea8c55"');
+      // The Analyst palette, by slot — `chart-tokens.spec.ts` pins the hexes themselves.
+      expect(render([series()], { offset: 0 })).toContain(`stroke="${chartColor(0)}"`);
+      expect(render([series()], { offset: 1 })).toContain(`stroke="${chartColor(1)}"`);
       // Wraps rather than emitting `stroke="undefined"`.
       expect(render([series()], { offset: 99 })).not.toContain('stroke="undefined"');
     });

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ComparisonsRenderer } from './comparisons-renderer';
 import { ReportUtilsService } from '../services/report-utils.service';
+import { CHART_SIZE } from './chart-tokens';
 import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
 import { percentDiffScaled } from './comparison-bands';
@@ -1080,7 +1081,7 @@ describe('ComparisonsRenderer row graphs', () => {
     expect(html).toContain('<svg');
     // Current solid, baseline dashed — the only thing telling two runs of one metric apart
     // in a greyscale print.
-    expect(html).toContain('stroke-dasharray="6,4"');
+    expect(html).toContain(`stroke-dasharray="${CHART_SIZE.baselineDash}"`);
   });
 
   it('charts only the rows outside the good band', async () => {

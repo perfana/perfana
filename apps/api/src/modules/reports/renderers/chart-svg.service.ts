@@ -1,7 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MetricsDataPoint, MetricsTimeSeriesPanel } from '../services/report-data-fetcher.service';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { REPORT_COLORS, emptyState, formatInt, formatNum, groupHeader } from './report-style';
+import { emptyState, formatInt, formatNum, groupHeader } from './report-style';
+import {
+  CHART_INK,
+  CHART_MONO,
+  CHART_SIZE,
+  axisUnitLabel,
+  chartCard,
+  chartColor,
+  chartSeriesTable,
+  gridLine,
+  safeChartColor,
+  tickLabel,
+  type ChartLegendRow,
+} from './chart-tokens';
 import { formatValueWithUnit } from './unit-format';
 
 /**
@@ -18,12 +31,6 @@ import { formatValueWithUnit } from './unit-format';
  * axes would not fit), analysis-window aware, and optionally categorical for a
  * trend whose x-axis is runs rather than time.
  */
-
-/** Default series colours, assigned by index from the caller's `colorOffset`. */
-const CHART_COLORS = [
-  '#4285f4', '#ea8c55', '#db524e', '#6aa84f', '#9c50b6', '#46bdc6', '#ea6c3d',
-  '#f4b400', '#0f9d58', '#ab47bc', '#00acc1', '#ff7043',
-];
 
 /** The run's analysis time range, as epoch milliseconds. `null` = that end is not trimmed. */
 export interface ChartWindow {
@@ -65,17 +72,6 @@ export const NO_WINDOW: ChartWindow = { from: null, to: null, only: false };
  * that way in a greyscale print too.
  */
 export type ChartSeries = MetricsTimeSeriesPanel & { color?: string; dashed?: boolean };
-
-/**
- * A series colour, or the palette default if it is not a plain hex.
- *
- * `color` lands unescaped in a `stroke=` and in the legend's `background:`, and a report is
- * served from the public share page with no authentication, so this is the one place that
- * has to refuse `" onload=` rather than trust its callers. Both current callers pass a
- * constant from `report-style`; this is about the next one.
- */
-const safeColor = (color: string | undefined, fallback: string): string =>
-  color && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color) ? color : fallback;
 
 /** How a chart labels and marks its x-axis; the default is the time-series reading. */
 export interface ChartStyle {
@@ -180,11 +176,15 @@ export class ChartSvgService {
     // clipPath id would make every chart use the first one's plot rectangle.
     const clipId = `plot-clip-${colorOffset}-${Math.abs(this.hashString(chartTitle))}`;
 
+    // `top` carries the unit captions the standard prints above each axis, in place of the
+    // rotated axis title it removes. `left` stays wide: unlike the app, a tick here carries
+    // its own unit (`formatValue` rescales per value — 900 ms and 1.2 s can be two ticks of
+    // one axis), so the labels are "287.36 ms", not "287.36".
     const padding = {
-      top: 20,
+      top: 28,
       right: collapse ? 40 : wanted,
       bottom: 60,
-      left: 80,
+      left: 78,
     };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
@@ -226,7 +226,7 @@ export class ChartSvgService {
 
     // One path per series, each in its own colour, each on its unit's axis
     const lines = drawn.map((s, i) => {
-      const color = safeColor(s.color, CHART_COLORS[(colorOffset + i) % CHART_COLORS.length]!);
+      const color = safeChartColor(s.color, chartColor(colorOffset + i));
       const axis = axisFor(s);
       // Coordinates to 0.1px, and consecutive duplicates dropped. A 3-hour run is tens of
       // thousands of points on a 900px-wide chart, where full float precision is ~17
@@ -252,7 +252,7 @@ export class ChartSvgService {
     const analysisShapes: string[] = [];
     const clampX = (t: number) => Math.min(Math.max(scaleX(t), padding.left), padding.left + chartWidth);
     const dimBand = (x0: number, x1: number) =>
-      `<rect x="${x0}" y="${padding.top}" width="${Math.max(0, x1 - x0)}" height="${chartHeight}" fill="#9e9e9e" opacity="0.18"/>`;
+      `<rect x="${x0}" y="${padding.top}" width="${Math.max(0, x1 - x0)}" height="${chartHeight}" fill="${CHART_INK.excludedPrint}"/>`;
     const boundary = (x: number) =>
       `<line x1="${x}" y1="${padding.top}" x2="${x}" y2="${padding.top + chartHeight}" stroke="${ANALYSIS_BOUNDARY_COLOR}" stroke-width="1.5" stroke-dasharray="4,3"/>`;
     if (window.from !== null && window.from > tMin) {
@@ -271,10 +271,7 @@ export class ChartSvgService {
     const gridLines: string[] = [];
     for (let i = 0; i <= numGridLines; i++) {
       const y = padding.top + (chartHeight / numGridLines) * i;
-      gridLines.push(`
-        <line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}"
-              stroke="#e0e0e0" stroke-width="1" stroke-dasharray="2,2"/>
-      `);
+      gridLines.push(gridLine(padding.left, padding.left + chartWidth, y));
       for (const axis of axes) {
         const value = axis.yMax - ((axis.yMax - axis.yMin) / numGridLines) * i;
         const label = this.formatValue(value, axis.unit);
@@ -282,26 +279,32 @@ export class ChartSvgService {
         // A second axis is tinted with its own series' colour so the reader can
         // tell at a glance which line it scales.
         const tint = axis.side === 'left'
-          ? '#666'
-          : (lines.find((l) => l.axis === axis)?.color ?? '#666');
-        gridLines.push(`
-          <text x="${axis.side === 'left' ? x - 10 : x + 8}" y="${y + 4}"
-                text-anchor="${axis.side === 'left' ? 'end' : 'start'}"
-                font-size="9" fill="${tint}">${this.utils.escapeHtml(label)}</text>
-        `);
+          ? CHART_INK.faint
+          : (lines.find((l) => l.axis === axis)?.color ?? CHART_INK.faint);
+        gridLines.push(tickLabel(
+          this.utils.escapeHtml(label),
+          axis.side === 'left' ? x - 10 : x + 8,
+          y + 4,
+          axis.side === 'left' ? 'end' : 'start',
+          '',
+          tint,
+        ));
       }
     }
 
-    // Axis titles: the left one keeps its rotated label, each right one gets
-    // its unit above the plot where there is room for it.
-    const rightAxisTitles = axes
-      .filter((axis) => axis.side === 'right' && axis.unit)
-      .map((axis) => {
-        const tint = lines.find((l) => l.axis === axis)?.color ?? '#666';
-        return `<text x="${axisX(axis) + 8}" y="${padding.top - 6}"
-                      text-anchor="start" font-size="9" font-weight="600"
-                      fill="${tint}">${this.utils.escapeHtml(axis.unit)}</text>`;
-      })
+    // Axis unit captions: every axis names its unit once, above itself. The standard has
+    // no rotated axis title — the left axis is captioned the same way the right ones are.
+    const axisUnitLabels = axes
+      .filter((axis) => axis.unit)
+      .map((axis) => axisUnitLabel(
+        this.utils.escapeHtml(axis.unit),
+        axis.side === 'left' ? padding.left : axisX(axis) + 8,
+        padding.top - 8,
+        'start',
+        axis.side === 'left'
+          ? CHART_INK.muted
+          : (lines.find((l) => l.axis === axis)?.color ?? CHART_INK.muted),
+      ))
       .join('');
 
     // X-axis labels (up to 6 evenly spaced). Drawn from the points inside the
@@ -329,11 +332,7 @@ export class ChartSvgService {
             second: '2-digit',
             hour12: false,
           });
-      xLabels.push(`
-        <text x="${x}" y="${yPos}"
-              text-anchor="end" font-size="9" fill="#666"
-              transform="rotate(-30 ${x} ${yPos})">${timeLabel}</text>
-      `);
+      xLabels.push(tickLabel(timeLabel, x, yPos, 'end', `transform="rotate(-30 ${x} ${yPos})"`));
     }
 
     const unitLabel = unit ? ` (${this.utils.escapeHtml(unit)})` : '';
@@ -346,24 +345,36 @@ export class ChartSvgService {
     const subtitle = drawn.length === 1
       ? `${this.utils.escapeHtml(drawn[0]!.metricName)}${unitLabel} &middot; ${pointCount}`
       : `${formatInt(drawn.length)} series${unitLabel} &middot; ${pointCount}`;
-    const legend = !showLegend ? '' : `
-      <div style="display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 12px;">
-        ${lines.map(({ series: s, color }) => `
-          <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 9pt; color: ${REPORT_COLORS.mutedInk};">
-            <span style="width: 12px; height: 3px; border-radius: 2px; background: ${color}; display: inline-block;"></span>
-            ${this.utils.escapeHtml(s.panelTitle ? `${s.panelTitle} · ${s.metricName}` : s.metricName)}${axes.length > 1 && s.unit ? ` <span style="color:${REPORT_COLORS.faintInk};">(${this.utils.escapeHtml(s.unit)})</span>` : ''}
-          </span>`).join('')}
-      </div>`;
+    // The legend is the app's series table: a swatch, the name, the unit and the
+    // min/mean/max of what is drawn. Computed over the points the line actually shows —
+    // under "analysis range only" that is the window, not the whole run, which is the
+    // same rule `windowStats` follows in the app.
+    const legendRows: ChartLegendRow[] = lines.map(({ series: s, color, axis, dashed }) => {
+      const values = s.dataPoints
+        .filter((dp) => !analysisOnly || inWindow(dp.time.getTime()))
+        .map((dp) => dp.value!);
+      const stat = (n: number) => this.formatValue(n, axis.unit || s.unit || '');
+      return {
+        name: s.panelTitle ? `${s.panelTitle} · ${s.metricName}` : s.metricName,
+        color,
+        unit: s.unit || axis.unit,
+        min: values.length ? stat(Math.min(...values)) : '—',
+        mean: values.length ? stat(values.reduce((sum, v) => sum + v, 0) / values.length) : '—',
+        max: values.length ? stat(Math.max(...values)) : '—',
+        dashed,
+      };
+    });
+    const legend = !showLegend ? '' : chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text));
 
     return `
-      <div style="margin: 24px 0; padding: 20px; background: #f5f5f5; border-radius: 4px;">
+      <div style="margin: 24px 0;">
         ${groupHeader(chartTitle)}
-        <div style="font-size: 9pt; color: ${REPORT_COLORS.mutedInk}; margin: -6px 0 12px;">
+        <div style="font-family: ${CHART_MONO}; font-size: ${CHART_SIZE.tableFont}px; color: ${CHART_INK.faint}; margin: -6px 0 12px;">
           ${subtitle}
         </div>
         ${legend}
 
-        <div style="background: white; border-radius: 4px; border: 1px solid #e0e0e0; padding: 10px;">
+        ${chartCard(`
           <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
             <!-- Series are clipped to the plot area: with the x-domain narrowed to the
                  analysis range, the points outside it still have coordinates, and an
@@ -374,44 +385,39 @@ export class ChartSvgService {
               </clipPath>
             </defs>
 
-            <!-- Chart border -->
+            <!-- The plot area. A fill, not a frame: the standard has no plot border. -->
             <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}"
-                  fill="none" stroke="#999" stroke-width="1"/>
+                  fill="${CHART_INK.plotBg}"/>
 
             <!-- Analysis time range: excluded bands and their boundaries -->
             ${analysisShapes.join('')}
 
             <!-- Grid lines and axis labels -->
             ${gridLines.join('')}
-            ${rightAxisTitles}
+            ${axisUnitLabels}
 
             <!-- A spine per right-hand axis, so its labels read as an axis -->
-            ${axes.filter((a) => a.side === 'right').map((a) => `<line x1="${axisX(a)}" y1="${padding.top}" x2="${axisX(a)}" y2="${padding.top + chartHeight}" stroke="#ccc" stroke-width="1"/>`).join('')}
+            ${axes.filter((a) => a.side === 'right').map((a) => `<line x1="${axisX(a)}" y1="${padding.top}" x2="${axisX(a)}" y2="${padding.top + chartHeight}" stroke="${CHART_INK.divider}" stroke-width="1"/>`).join('')}
 
             <!-- Data lines -->
             <g clip-path="url(#${clipId})">
-            ${lines.map(({ color, path, dashed }) => `<path d="${path}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashed ? ' stroke-dasharray="6,4"' : ''}/>`).join('')}
+            ${lines.map(({ color, path, dashed }) => `<path d="${path}" stroke="${color}" stroke-width="${style.markers ? CHART_SIZE.markedLine : CHART_SIZE.line}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dashed ? ` stroke-dasharray="${CHART_SIZE.baselineDash}"` : ''}/>`).join('')}
 
             <!-- Data points: only worth drawing on a sparse single-series chart, or when asked -->
             ${style.markers
               ? lines.map(({ series: s, color, axis }) => s.dataPoints.map((dp) =>
-                  `<circle cx="${scaleX(dp.time.getTime())}" cy="${scaleYOn(axis, dp.value!)}" r="2.5" fill="${color}"/>`).join('')).join('')
+                  `<circle cx="${scaleX(dp.time.getTime())}" cy="${scaleYOn(axis, dp.value!)}" r="${CHART_SIZE.marker}" fill="${color}"/>`).join('')).join('')
               : drawn.length === 1 && dataPoints.length <= 50 ? dataPoints.map((dp) => {
               const cx = scaleX(dp.time.getTime());
               const cy = scaleY(dp.value!);
-              return `<circle cx="${cx}" cy="${cy}" r="2.5" fill="${lines[0]!.color}"/>`;
+              return `<circle cx="${cx}" cy="${cy}" r="${CHART_SIZE.marker}" fill="${lines[0]!.color}"/>`;
             }).join('') : ''}
             </g>
 
             <!-- X-axis labels -->
             ${xLabels.join('')}
-
-            <!-- Y-axis label -->
-            <text x="15" y="${padding.top + chartHeight / 2}"
-                  text-anchor="middle" font-size="10" fill="#666" font-weight="600"
-                  transform="rotate(-90 15 ${padding.top + chartHeight / 2})">${this.utils.escapeHtml(axes[0]!.unit || 'Value')}</text>
           </svg>
-        </div>
+        `)}
       </div>
     `;
   }

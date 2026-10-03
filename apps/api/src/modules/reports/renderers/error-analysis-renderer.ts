@@ -22,6 +22,17 @@ import {
   sectionText,
   statCard,
 } from './report-style';
+import {
+  CHART_INK,
+  CHART_SIZE,
+  axisUnitLabel,
+  chartCard,
+  chartColor,
+  chartSeriesTable,
+  gridLine,
+  tickLabel,
+  type ChartLegendRow,
+} from './chart-tokens';
 
 /** Default number of rows in the per-transaction table before it is capped. */
 const DEFAULT_TOP_N = 20;
@@ -133,7 +144,7 @@ export class ErrorAnalysisRenderer {
 
     const width = 1000;
     const height = 260;
-    const padding = { top: 16, right: 40, bottom: 56, left: 70 };
+    const padding = { top: 28, right: 40, bottom: 56, left: 56 };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
 
@@ -175,11 +186,10 @@ export class ErrorAnalysisRenderer {
     for (let i = 0; i <= 4; i++) {
       const y = padding.top + (chartHeight / 4) * i;
       const value = yMax - (yMax / 4) * i;
-      gridLines.push(`
-        <line x1="${padding.left}" y1="${y}" x2="${padding.left + chartWidth}" y2="${y}"
-              stroke="#e0e0e0" stroke-width="1" stroke-dasharray="2,2"/>
-        <text x="${padding.left - 10}" y="${y + 4}" text-anchor="end" font-size="9" fill="#666">${formatInt(Math.round(value))}</text>
-      `);
+      gridLines.push(
+        gridLine(padding.left, padding.left + chartWidth, y)
+        + tickLabel(formatInt(Math.round(value)), padding.left - 10, y + 4, 'end'),
+      );
     }
 
     const xLabelCount = Math.min(6, points.length);
@@ -190,29 +200,37 @@ export class ErrorAnalysisRenderer {
       const x = scaleX(point.time.getTime());
       const y = padding.top + chartHeight + 10;
       const label = point.time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-      xLabels.push(`<text x="${x}" y="${y}" text-anchor="end" font-size="9" fill="#666" transform="rotate(-30 ${x} ${y})">${label}</text>`);
+      xLabels.push(tickLabel(label, x, y, 'end', `transform="rotate(-30 ${x} ${y})"`));
     }
+
+    // The legend is the app's series table: per response code, the min/mean/max of its
+    // per-bucket error count. A bucket with no row for a code is a zero, not a gap — the
+    // same reading the line takes — so the stats are over every bucket.
+    const legendRows: ChartLegendRow[] = lines.map(({ code, color }) => {
+      const counts = points.map((p) => p.countsByCode[code] ?? 0);
+      return {
+        name: code,
+        color,
+        unit: 'errors',
+        min: formatInt(Math.min(...counts)),
+        mean: formatNum(counts.reduce((sum, n) => sum + n, 0) / counts.length),
+        max: formatInt(Math.max(...counts)),
+      };
+    });
 
     return `
       <div style="margin: 24px 0;">
         ${groupHeader('Errors over time', [chip('per minute', 'neutral')])}
-        <div style="display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 12px;">
-          ${lines.map(({ code, color }) => `
-            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 9pt; color: ${REPORT_COLORS.mutedInk};">
-              <span style="width: 12px; height: 3px; border-radius: 2px; background: ${color}; display: inline-block;"></span>
-              ${this.utils.escapeHtml(code)}
-            </span>`).join('')}
-        </div>
-        <div style="background: white; border-radius: 4px; border: 1px solid #e0e0e0; padding: 10px;">
+        ${chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text))}
+        ${chartCard(`
           <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-            <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#999" stroke-width="1"/>
+            <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}" fill="${CHART_INK.plotBg}"/>
+            ${axisUnitLabel('errors', padding.left, padding.top - 8, 'start')}
             ${gridLines.join('')}
-            ${lines.map(({ color, path }) => `<path d="${path}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}
+            ${lines.map(({ color, path }) => `<path d="${path}" stroke="${color}" stroke-width="${CHART_SIZE.line}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}
             ${xLabels.join('')}
-            <text x="14" y="${padding.top + chartHeight / 2}" text-anchor="middle" font-size="10" fill="#666" font-weight="600"
-                  transform="rotate(-90 14 ${padding.top + chartHeight / 2})">Errors</text>
           </svg>
-        </div>
+        `)}
       </div>
     `;
   }
@@ -306,6 +324,6 @@ export class ErrorAnalysisRenderer {
     const numeric = parseInt(code, 10);
     if (numeric >= 500) return REPORT_COLORS.dot.bad;
     if (numeric >= 400) return REPORT_COLORS.dot.warn;
-    return ['#4285f4', '#9c50b6', '#46bdc6', '#ea8c55'][index % 4]!;
+    return chartColor(index);
   }
 }

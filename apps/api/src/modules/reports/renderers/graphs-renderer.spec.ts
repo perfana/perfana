@@ -10,10 +10,21 @@ import {
   MetricsPanelSelector,
 } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
+import { CHART_INK, CHART_SIZE } from './chart-tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * How many right-hand axes a chart drew.
+ *
+ * Keyed on the axis spine, which only a right-hand axis has. `text-anchor="start"` used to
+ * be the tell and no longer is: under the Analyst standard every axis — the left one
+ * included — names its unit in a start-anchored caption above the plot.
+ */
+const rightHandSpines = (html: string): number =>
+  (html.match(new RegExp(`<line [^>]*stroke="${CHART_INK.divider.replace(/[()]/g, '\\$&')}"`, 'g')) ?? []).length;
 
 const makeSection = (
   overrides?: Partial<ReportSectionConfig>,
@@ -506,9 +517,10 @@ describe('GraphsRenderer', () => {
         makeSection({ config: { graphPresetIds: ['p1'] } }), makeTestRun(),
       );
 
-      // One plot area, one right-hand spine for the second unit
+      // One plot area, one right-hand spine for the second unit. Keyed on the spine, not
+      // on `text-anchor="start"` — every axis' unit caption is start-anchored now.
       expect((html.match(/<svg /g) ?? []).length).toBe(1);
-      expect(html).toContain('text-anchor="start"'); // right-hand axis labels
+      expect(rightHandSpines(html)).toBe(1);
       // Both units are named — on the axis and in the legend
       expect(html).toContain('ms');
       expect(html).toContain('short');
@@ -529,7 +541,7 @@ describe('GraphsRenderer', () => {
       );
 
       // No right-hand axis: nothing to scale differently
-      expect(html).not.toContain('text-anchor="start"');
+      expect(rightHandSpines(html)).toBe(0);
     });
 
     it('gives each preset its own chart', async () => {
@@ -840,7 +852,7 @@ describe('GraphsRenderer', () => {
       );
 
       expect(boundaries(html)).toBe(2);
-      expect(html).toContain('opacity="0.18"');
+      expect(html).toContain(`fill="${CHART_INK.excludedPrint}"`);
       expect(pointCount(html)).toBe(10);
     });
 
@@ -961,7 +973,7 @@ describe('GraphsRenderer', () => {
 
     /** The numeric labels on the left Y axis, biggest first. */
     const yAxisLabels = (html: string): number[] =>
-      [...html.matchAll(/font-size="9" fill="#666">([^<]+)</g)]
+      [...html.matchAll(new RegExp(`font-size="${CHART_SIZE.tickFont}" fill="${CHART_INK.faint.replace(/[()]/g, '\\$&')}">([^<]+)<`, 'g'))]
         .map((m) => m[1]!)
         .filter((t) => !t.includes(':')) // drop the x-axis clock labels
         .map((t) => Number(t.replace(/[^0-9.-]/g, '')))

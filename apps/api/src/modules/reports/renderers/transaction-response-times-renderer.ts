@@ -17,6 +17,18 @@ import {
   formatPercent,
   markerChip,
 } from './report-style';
+import {
+  CHART_INK,
+  CHART_SANS,
+  CHART_SIZE,
+  axisUnitLabel,
+  chartCard,
+  chartColor,
+  chartSeriesTable,
+  gridLine,
+  tickLabel,
+  type ChartLegendRow,
+} from './chart-tokens';
 
 /**
  * What a band is telling the reader. `transaction` is unlabelled: the band is already inside a
@@ -189,25 +201,13 @@ export class TransactionResponseTimesRenderer {
    */
   renderResponseTimesChart(scenarioData: ScenarioData): string {
     const chartTitle = `Response Times Over Time - ${scenarioData.scenario}`;
-    const colors = ['#4285f4', '#ea8c55', '#db524e', '#6aa84f', '#9c50b6', '#46bdc6', '#ea6c3d'];
-
-    // Generate legend items for each transaction
-    const legendItems = scenarioData.transactions
-      .map((txn: ReportTransaction, idx: number) => {
-        const color = colors[idx % colors.length];
-        return `
-          <span style="display: inline-flex; align-items: center; margin-right: 16px; font-size: 9pt; color: #666;">
-            <span style="width: 12px; height: 12px; border-radius: 50%; background: ${color}; display: inline-block; margin-right: 6px;"></span>
-            ${this.utils.escapeHtml(txn.name)}
-          </span>
-        `;
-      })
-      .join('');
 
     // Chart dimensions
     const width = 1000;
     const height = 320;
-    const padding = { top: 20, right: 40, bottom: 90, left: 80 };
+    // `top` holds the unit caption the standard prints above the axis, in place of the
+    // rotated axis title; `left` no longer has to hold that rotated text.
+    const padding = { top: 28, right: 40, bottom: 90, left: 62 };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
 
@@ -244,11 +244,11 @@ export class TransactionResponseTimesRenderer {
     // If no time series data, show message
     if (timePoints === 0) {
       return `
-        <div style="margin: 24px 0; padding: 20px; background: #f5f5f5; border-radius: 4px;">
-          <h3 style="margin: 0 0 12px 0; font-size: 10pt; color: #666; text-align: center; font-weight: 600;">${this.utils.escapeHtml(chartTitle)}</h3>
-          <div style="padding: 40px; text-align: center; color: #999;">
+        <div style="margin: 24px 0;">
+          ${this.chartHeading(chartTitle)}
+          ${chartCard(`<div style="padding: 40px; text-align: center; font-family: ${CHART_SANS}; font-size: 10pt; color: ${CHART_INK.faint};">
             No time series data available for this scenario.
-          </div>
+          </div>`)}
         </div>
       `;
     }
@@ -287,18 +287,16 @@ export class TransactionResponseTimesRenderer {
     for (let i = 0; i <= numGridLines; i++) {
       const y = padding.top + (chartHeight / numGridLines) * i;
       const value = yMax - ((yMax - yMin) / numGridLines) * i;
-      gridLines.push(`
-        <line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}"
-              stroke="#e0e0e0" stroke-width="1" stroke-dasharray="2,2"/>
-        <text x="${padding.left - 10}" y="${y + 4}"
-              text-anchor="end" font-size="10" fill="#666">${Math.round(value)} ms</text>
-      `);
+      gridLines.push(
+        gridLine(padding.left, width - padding.right, y)
+        + tickLabel(String(Math.round(value)), padding.left - 10, y + 4, 'end'),
+      );
     }
 
     // Generate lines and data points for each transaction
     const linesAndPoints: string[] = [];
     dataPoints.forEach((points, txnIdx) => {
-      const color = colors[txnIdx % colors.length];
+      const color = chartColor(txnIdx);
 
       // Generate line path
       const pathData = points
@@ -311,14 +309,14 @@ export class TransactionResponseTimesRenderer {
         })
         .join(' ');
 
-      linesAndPoints.push(`<path d="${pathData}" stroke="${color}" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`);
+      linesAndPoints.push(`<path d="${pathData}" stroke="${color}" stroke-width="${CHART_SIZE.line}" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`);
 
       // Add data point circles
       points.forEach((value: number, i: number) => {
         const x = padding.left + (chartWidth / (timePoints - 1)) * i;
         const normalizedValue = (value - yMin) / (yMax - yMin);
         const y = padding.top + chartHeight - (normalizedValue * chartHeight);
-        linesAndPoints.push(`<circle cx="${x}" cy="${y}" r="3" fill="${color}"/>`);
+        linesAndPoints.push(`<circle cx="${x}" cy="${y}" r="${CHART_SIZE.marker}" fill="${color}"/>`);
       });
     });
     const lines = linesAndPoints.join('');
@@ -327,28 +325,39 @@ export class TransactionResponseTimesRenderer {
     const xLabels = timeLabels.map((label, i) => {
       const x = padding.left + (chartWidth / (timePoints - 1)) * i;
       const yPos = padding.top + chartHeight + 10;
-      return `
-        <text x="${x}" y="${yPos}"
-              text-anchor="end" font-size="9" fill="#666"
-              transform="rotate(-45 ${x} ${yPos})">${label}</text>
-      `;
+      return tickLabel(label, x, yPos, 'end', `transform="rotate(-45 ${x} ${yPos})"`);
     }).join('');
 
+    // The legend is the app's series table: per transaction, the min/mean/max of the
+    // response times drawn. A bucket the transaction did not run in reads as 0 in the
+    // line (see `dataPoints` above), so the stats skip those rather than reporting a
+    // minimum of zero for every transaction.
+    const legendRows: ChartLegendRow[] = scenarioData.transactions.map(
+      (txn: ReportTransaction, idx: number) => {
+        const sampled = (dataPoints[idx] ?? []).filter((v) => v > 0);
+        return {
+          name: txn.name,
+          color: chartColor(idx),
+          unit: 'ms',
+          min: sampled.length ? formatNum(Math.min(...sampled)) : '—',
+          mean: sampled.length ? formatNum(sampled.reduce((sum, v) => sum + v, 0) / sampled.length) : '—',
+          max: sampled.length ? formatNum(Math.max(...sampled)) : '—',
+        };
+      },
+    );
+
     return `
-      <div style="margin: 24px 0 24px 0; padding: 20px 20px 20px 24px; background: #f5f5f5; border-radius: 4px;">
-        <h3 style="margin: 0 0 12px 0; font-size: 10pt; color: #666; text-align: center; font-weight: 600;">${this.utils.escapeHtml(chartTitle)}</h3>
-
-        <!-- Legend -->
-        <div style="margin-bottom: 12px; text-align: center; padding: 8px;">
-          ${legendItems}
-        </div>
-
-        <!-- SVG Chart -->
-        <div style="background: white; border-radius: 4px; border: 1px solid #e0e0e0; padding: 10px; width: 100%;">
+      <div style="margin: 24px 0;">
+        ${this.chartHeading(chartTitle)}
+        ${chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text))}
+        ${chartCard(`
           <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
-            <!-- Chart border/axes -->
+            <!-- The plot area. A fill, not a frame: the standard has no plot border. -->
             <rect x="${padding.left}" y="${padding.top}" width="${chartWidth}" height="${chartHeight}"
-                  fill="none" stroke="#999" stroke-width="1"/>
+                  fill="${CHART_INK.plotBg}"/>
+
+            <!-- The unit, named once above its own axis -->
+            ${axisUnitLabel('ms', padding.left, padding.top - 8, 'start')}
 
             <!-- Grid lines -->
             ${gridLines.join('')}
@@ -358,19 +367,19 @@ export class TransactionResponseTimesRenderer {
 
             <!-- X-axis labels -->
             ${xLabels}
-
-            <!-- Y-axis label -->
-            <text x="15" y="${padding.top + chartHeight / 2}"
-                  text-anchor="middle" font-size="10" fill="#666" font-weight="600"
-                  transform="rotate(-90 15 ${padding.top + chartHeight / 2})">Response Time (ms)</text>
-
-            <!-- X-axis label -->
-            <text x="${padding.left + chartWidth / 2}" y="${height - 15}"
-                  text-anchor="middle" font-size="10" fill="#666" font-weight="600">Time</text>
           </svg>
-        </div>
+        `)}
       </div>
     `;
+  }
+
+  /**
+   * A chart's own heading. Left-aligned sans at the standard's title size — the charts
+   * used to centre a grey 10pt h3, which is not how any other heading in the report reads.
+   */
+  private chartHeading(title: string): string {
+    return `<div style="font-family: ${CHART_SANS}; font-size: ${CHART_SIZE.titleFont}px; font-weight: 600;`
+      + ` color: ${CHART_INK.text}; margin: 0 0 10px;">${this.utils.escapeHtml(title)}</div>`;
   }
 
   /**
