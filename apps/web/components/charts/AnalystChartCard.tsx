@@ -144,10 +144,14 @@ export default function AnalystChartCard({
             fontSize: SIZE.valueFont,
             color: theme.muted,
             flexShrink: 0,
-            // Reserve the width so the header does not jitter as the cursor moves.
+            // Reserve the width so the header does not jitter as the cursor moves. The
+            // readout can carry a release and annotations too, so cap it rather than let
+            // it push the title.
             minWidth: 72,
+            maxWidth: '55%',
             textAlign: 'right',
           }}
+          noWrap
         >
           {cursor ?? ''}
         </Typography>

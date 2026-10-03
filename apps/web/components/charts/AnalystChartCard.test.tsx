@@ -82,3 +82,26 @@ it('renders neither the toggle nor a panel for a card with no add-series slot', 
   expect(screen.queryByRole('button', { name: '+ add series' })).not.toBeInTheDocument();
   expect(screen.queryByTestId('cascade')).not.toBeInTheDocument();
 });
+
+it('caps the cursor readout and keeps it on one line, so it cannot push the title', () => {
+  // The readout started as a run id alone, which is why `minWidth: 72` was the whole
+  // sizing story. Trends now appends the run's release AND its annotations — free text —
+  // so an uncapped, wrapping readout would either shove the title out of the header or
+  // grow it to two lines on every hover.
+  render(
+    <AnalystChartCard
+      title="Trends"
+      mode="light"
+      cursor="WEBSHOP-acc-loadTest-00021 · 1.2.3 · cache disabled, db restored from the nightly dump"
+    >
+      <div />
+    </AnalystChartCard>,
+  );
+
+  const readout = screen.getByText(/WEBSHOP-acc-loadTest-00021/);
+  expect(readout).toHaveStyle({ maxWidth: '55%', minWidth: '72px', whiteSpace: 'nowrap' });
+  // Capped and nowrap is only half of it: the overflow has to be elided rather than spill.
+  expect(readout).toHaveStyle({ overflow: 'hidden', textOverflow: 'ellipsis' });
+  // The title keeps its own line and is still readable beside it.
+  expect(screen.getByText('Trends')).toBeInTheDocument();
+});

@@ -33,6 +33,12 @@ interface UseTrendsPlotProps {
   cursorIndex: number | null;
 }
 
+/** What the cursor readout adds to a run id when the run has it. */
+export interface RunMeta {
+  version?: string | null;
+  annotations?: string | null;
+}
+
 interface PlotDataPoint {
   x: string;
   y: number;
@@ -72,9 +78,19 @@ export function useTrendsPlot({
       rows: [] as SeriesRow[],
       runIds: [] as string[],
       traceIndexOf: new Map<string, number>(),
+      runMeta: new Map<string, RunMeta>(),
       lanesNote: undefined as string | undefined,
     };
     if (!trendsExpanded || metricsData.length === 0) return empty;
+
+    // Release and annotations are per-run, repeated on every row of that run; keep the
+    // first row that actually carries one.
+    const runMeta = new Map<string, RunMeta>();
+    for (const item of metricsData) {
+      if ((item.version || item.annotations) && !runMeta.has(item.test_run_id)) {
+        runMeta.set(item.test_run_id, { version: item.version, annotations: item.annotations });
+      }
+    }
 
     // Group by series (not metric_name — two panels can share one) and sort by created_at.
     const bySeries = new Map<string, PlotDataPoint[]>();
@@ -268,7 +284,7 @@ export function useTrendsPlot({
     });
 
     return {
-      plotData: traces, plotLayout, plotConfig, rows, runIds, traceIndexOf,
+      plotData: traces, plotLayout, plotConfig, rows, runIds, traceIndexOf, runMeta,
       lanesNote: lanesNote(groups, axisLayoutMode),
     };
   }, [metricsData, trendsExpanded, addedSeries, mode, showToast, cursorIndex]);

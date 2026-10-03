@@ -5,6 +5,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Box, Typography, CircularProgress, Button, useTheme } from '@mui/material';
 import Plot from '@/components/ResponsivePlot';
 import { TrendsSeries } from '../types';
+import type { RunMeta } from '../hooks/useTrendsPlot';
 import { AnalystChartCard, SeriesTable, type SeriesRow } from '@/components/charts';
 import { SIZE, chartTheme } from '@/lib/charts';
 import { dimOtherTraces } from '@/lib/plotly';
@@ -20,6 +21,8 @@ interface TrendsChartProps {
   /** Run ids in x order, so hovering position n can name the run. */
   runIds: string[];
   traceIndexOf: Map<string, number>;
+  /** Release and annotations per run, for the cursor readout. Absent for a run with neither. */
+  runMeta?: Map<string, RunMeta>;
   onCursorChange: (index: number | null) => void;
   cursorIndex: number | null;
   onRemoveSeries: (seriesId: string) => void;
@@ -60,6 +63,7 @@ export function TrendsChart({
   rows,
   runIds,
   traceIndexOf,
+  runMeta,
   onCursorChange,
   cursorIndex,
   onRemoveSeries,
@@ -80,6 +84,14 @@ export function TrendsChart({
   // dashboard list on each pointer move.
   const closeCascade = useCallback(() => setCascadeOpen(false), []);
   const cascadePanel = useMemo(() => cascade?.(closeCascade), [cascade, closeCascade]);
+
+  // The run id, plus its release and annotations when it has them: the Analyst standard
+  // has no floating tooltip, so the header readout is where a hover answers "which run".
+  const cursorRun = cursorIndex !== null ? runIds[cursorIndex] ?? '' : '';
+  const cursorMeta = cursorRun ? runMeta?.get(cursorRun) : undefined;
+  const cursorText = [cursorRun, cursorMeta?.version, cursorMeta?.annotations]
+    .filter(Boolean)
+    .join(' · ');
 
   const onHoverRow = useCallback(
     (seriesId: string | null) => {
@@ -123,6 +135,10 @@ export function TrendsChart({
       onUpdate={(_fig, gd) => { graphRef.current = gd as unknown as HTMLElement; }}
       onHover={(e) => onCursorChange(Number(e.points?.[0]?.x ?? NaN))}
       onUnhover={() => onCursorChange(null)}
+      onClick={(e) => {
+        const runId = runIds[Number(e.points?.[0]?.x ?? NaN)];
+        if (runId) window.open(`/test-runs/${encodeURIComponent(runId)}`, '_blank', 'noopener,noreferrer');
+      }}
     />
   );
 
@@ -131,7 +147,7 @@ export function TrendsChart({
       mode={mode}
       title={title}
       subtitle={`${runIds.length} ${runIds.length === 1 ? 'run' : 'runs'}`}
-      cursor={cursorIndex !== null ? runIds[cursorIndex] ?? '' : ''}
+      cursor={cursorText}
       lanesNote={lanesNote}
       actions={
         <Button

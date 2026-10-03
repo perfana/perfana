@@ -171,6 +171,7 @@ export default function TrendsCard({
                 rows={trendsPlot.rows}
                 runIds={trendsPlot.runIds}
                 traceIndexOf={trendsPlot.traceIndexOf}
+                runMeta={trendsPlot.runMeta}
                 lanesNote={trendsPlot.lanesNote}
                 cursorIndex={cursorIndex}
                 onCursorChange={setCursorIndex}
