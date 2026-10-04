@@ -1915,6 +1915,37 @@ so the channel already exists.
 **What to do:** toast on each `disarm()`-without-match path, naming which level failed ("that
 dashboard is not on this run", "that panel no longer exists", "that series was not recorded").
 
+### The report's transactions table is a legend that cannot repeat its header in print
+
+**Priority:** P3
+**Origin:** adversarial review of v0.2.97.4 (confidence 7/10). Pre-existing omission, newly
+load-bearing now that this table is the Response times chart's legend.
+**Why:** `renderTransactionsTable` emits `<table style="width: 100%; border-collapse: collapse;">`
+with no `class="data-table"`, so the two print rules in `report-html-compiler.service.ts`
+(~1144-1149) — `.data-table thead { display: table-header-group }` and
+`.data-table tr { page-break-inside: avoid }` — do not apply. On paper a 60-transaction
+scenario's legend spans several pages with neither the chart nor the column headers in sight.
+**Why it was not just fixed:** adding that class is not cosmetic-free. `.data-table th` repaints
+the header with `background-color: ${primaryColor}` and `.data-table tr:nth-child(even)` adds its
+own striping on top of the inline per-row backgrounds this table already sets, so the table would
+change appearance on screen as well as on paper.
+**What to do:** either lift the two print rules onto a new class that carries no screen styling,
+or reconcile this table with `.data-table` deliberately (apdex and trends already use it).
+
+### A series can be both drafted and already added, and the two look identical
+
+**Priority:** P4
+**Origin:** adversarial review of v0.2.97.4 (confidence 6/10).
+**Why:** `seriesChecked` in `MetricSeriesCascade.tsx` is `pickedSeriesKeys.has(...) || isAdded(s)`
+in draft mode, so a row that is in the draft AND already on the chart renders exactly like an
+added-only row — checked and disabled — while only the former is counted by the footer's
+"selected" half and re-sent by Add. `disabled` means the checkbox cannot clear it; only unpicking
+the panel can. Reachable because Graphs and Trends keep the picker mounted while closed
+(v0.2.97.1), so a card link can add a series while a draft already holds it.
+**What to do:** drop a drafted series from `selectedSeries` once it becomes added — an effect on
+the `addedKeys` memo doing `setSelectedSeries((prev) => prev.filter((s) => !isAdded(s)))` — so the
+two states cannot coexist. That also makes `selectableSeries` exact rather than approximately right.
+
 ### The Trends cascade still re-renders on every chart hover
 
 **Priority:** P3

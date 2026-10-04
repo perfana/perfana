@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.4] - 2026-10-04
+
+### Fixed
+- **A series opened from "Open in Graphs" or "Open in Trends" now shows as ticked in the series picker.** The link puts the series on the chart straight away, but the picker still drew an empty checkbox beside it, so opening the picker to add a second series said nothing was selected while the chart was already drawing one. An already-charted series is now ticked and greyed, the way it reads on the Compare card.
+- **"Select all" in the series column no longer re-adds series that are already on the chart.** It staged every visible row, so pressing Add answered with "all selected metrics are already added" instead of adding the ones you wanted. With nothing left to select the button is disabled rather than offering a "Clear" that does nothing.
+- **The series picker's footer counts what is on the chart as well as what you have ticked.** After following a link it read "0 series selected" under rows that were plainly ticked.
+- **The chart and the table in a report's Response times section no longer disagree.** The legend under the chart reported a mean taken from the per-minute averages, so a quiet minute counted as much as a busy one, and the table a few centimetres below reported the real average over every request: two different numbers for the same transaction. There is now one table.
+
+### Changed
+- **The transactions table in a report's Response times section is the chart's legend.** Each row carries the colour of its line, and hovering a row still fades the others. Under the chart there is now a plain colour key naming each line — it stays complete when you filter the table, which the chart cannot follow. The legend that carried a second set of numbers is gone, and with it the per-minute minimum and maximum; the table's average, 95th and 99th percentiles, pass, fail and error rate are the numbers that remain.
+
+### Note for existing installations
+- Nothing to do. Reports generated before this release are unchanged; the new layout applies to reports generated from now on. No configuration, stored data, collection or analysis behaviour changes.
+
 ## [0.2.97.3] - 2026-10-03
 
 ### Added
