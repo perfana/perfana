@@ -566,6 +566,14 @@ about that arrangement are easy to get wrong:
    therefore outside the filter, so every line always has a name on the page. It carries no
    numbers on purpose — a second set of numbers is the bug this section started with.
 
+   **The swatches follow what the chart GOT, not what the section asked for.** `includeChart`
+   is the section's configuration; `drew` is `includeChart && timeSeries.length > 0`, and with
+   no time buckets `renderResponseTimesChart` emits a "no time series data" card with no
+   `<svg>` in it at all. Only `drew` may put swatches in the rows, `data-series` on the `<tr>`
+   or a `.chart-hover` around the pair — otherwise a colour key keys nothing and the wrapper
+   scopes a hover that can never fire. The table's second parameter is that answer, hoisted
+   out of the chart builder so the table can see it; do not wire it back to `includeChart`.
+
    Do not copy the table-as-legend to the other two builders: they draw series that have no
    data table of their own.
 4. **Two marks stay louder than the app's on purpose, because a report prints.** The

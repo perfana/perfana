@@ -321,6 +321,29 @@ carries that state. Without `onRemoveSeries` it is a staged picker whose selecti
 applied on confirm. One prop, two behaviours — `MetricSeriesCascade.instant.test.tsx` pins
 the first and `MetricSeriesCascade.test.tsx` the second.
 
+**In draft mode a tick means drafted OR already on the chart (v0.2.97.4), and three things
+had to move together for that to be honest.** An added series used to render as an *empty*
+disabled checkbox, which since v0.2.97.1 reads as a lie: a card link adds its series
+outright, so the picker claimed nothing was selected while the chart was already drawing it.
+It is now ticked and disabled — but `seriesChecked` is no longer the same question as "what
+would Add send", so anything that asked it the second question had to stop:
+
+- **Select all / Clear follows the DRAFT, not the ticks** (`selectableSeries` = visible minus
+  already-added). Folding the added rows in made the button read "Clear" over an empty draft
+  on the very render after an Add or a card link — live, and a no-op. `toggleDisabled` keys
+  on the same set, so the column disables when nothing is actually selectable.
+- **Select all skips the already-added**, because their rows are disabled: a draft entry for
+  one can only be cleared by unpicking the whole panel, and Add answers it with "already
+  added".
+- **The footer counts both halves** — `N on chart · M selected` — since they are two
+  different states on screen (ticked-and-greyed vs ticked-and-live). Counting only the draft
+  put "0 series selected" under two ticked rows, the same contradiction the ticks removed.
+
+Instant mode is untouched: there the checkbox *is* the membership. One state is still
+reachable and still looks wrong — a series both drafted and added renders identically to an
+added-only one while only the draft half is counted and re-sent; it is filed in TODOS.md
+("A series can be both drafted and already added").
+
 **A card link is an instruction, not a draft — and that is why the panel stays mounted.**
 The cascade is also what walks an `?card=…&dashboard=…&panel=…&metric=…` link
 (`metric-card-links.tsx` builds them; see "Deep link into a card" in

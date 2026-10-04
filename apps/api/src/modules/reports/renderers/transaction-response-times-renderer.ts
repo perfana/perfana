@@ -419,8 +419,9 @@ export class TransactionResponseTimesRenderer {
    * legend's numbers are the authoritative ones (avg/p95/p99 over every request, pass, fail,
    * error rate), and the swatch sits in the row the reader is already looking at.
    *
-   * `withSwatches` is `includeChart`: a colour key with no chart to key is noise, and the
-   * section can be configured without one.
+   * `withSwatches` is the caller's `drew` — `includeChart` AND a chart that actually came out
+   * with an `<svg>` in it. Not `includeChart` alone: a colour key with no chart to key is
+   * noise, and the section can be configured without one OR hold no time buckets to draw.
    */
   renderTransactionsTable(scenarioData: ScenarioData, withSwatches: boolean = true): string {
     const { transactions } = scenarioData;
