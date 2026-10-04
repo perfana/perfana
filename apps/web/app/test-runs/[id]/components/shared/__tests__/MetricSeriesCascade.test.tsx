@@ -194,6 +194,61 @@ it('greys out the synthetic "All aggregated" option once it is on the chart unde
   expect(added('T01')).not.toContain('added');
   expect(screen.getByRole('checkbox', { name: 'All aggregated' })).toBeDisabled();
   expect(screen.getByRole('checkbox', { name: 'T01' })).not.toBeDisabled();
+  // Ticked as well as greyed: a card link adds its series outright, so an empty box said
+  // nothing was selected while the chart was already drawing it.
+  expect(screen.getByRole('checkbox', { name: 'All aggregated' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'T01' })).not.toBeChecked();
+  // And the footer agrees with the ticks: a ticked row with "0 selected" under it was the
+  // same contradiction in a different widget.
+  expect(screen.getByText(/1 on chart · 0 selected/)).toBeInTheDocument();
+});
+
+it('select-all in the series column skips an already-added row, so Add never re-adds it', async () => {
+  // Before this fix, Select all staged every visible row into the draft regardless of
+  // `isAdded`, so pressing Add re-sent an already-charted series to the card.
+  (fetchSeriesForPanels as jest.Mock).mockImplementation(async (panels: PanelOption[]) =>
+    panels.map((p) => seriesOf(p, 'All aggregated', 'T01')));
+  const { onAddSeries } = setup({
+    allDashboards: [perf],
+    addedSeries: [{ dashboardId: 'dash-1', panelId: 101, metricName: 'All aggregated — Transaction RT Avg' }],
+  });
+  selectAll('Dashboards');
+  await screen.findByText('1 available across 1 dashboard');
+  selectAll('Panels');
+  await screen.findByText('2 available from 1 panel');
+
+  selectAll('Series');
+
+  // Only the un-added row is staged, and the footer says both halves: one already on the
+  // chart, one drafted. The Add button counts the draft alone.
+  expect(screen.getByText(/1 on chart · 1 selected/)).toBeInTheDocument();
+  const add = await screen.findByRole('button', { name: 'Add 1 series' });
+  fireEvent.click(add);
+
+  expect(onAddSeries).toHaveBeenCalledWith([
+    { dashboard: perf, panel: rtPanel, metricName: 'T01' },
+  ]);
+});
+
+it('disables the series toggle once every visible row is already on the chart', async () => {
+  // The toggle follows the DRAFT, not the checkboxes. Keyed on the checkboxes it read
+  // "Clear" with an empty draft behind it — a live-looking button that did nothing — which
+  // is the state every card link and every press of Add lands in.
+  (fetchSeriesForPanels as jest.Mock).mockImplementation(async (panels: PanelOption[]) =>
+    panels.map((p) => seriesOf(p, 'T01')));
+  setup({
+    allDashboards: [perf],
+    addedSeries: [{ dashboardId: 'dash-1', panelId: 101, metricName: 'T01' }],
+  });
+  selectAll('Dashboards');
+  await screen.findByText('1 available across 1 dashboard');
+  selectAll('Panels');
+  await screen.findByText('1 available from 1 panel');
+
+  const toggle = screen.getByLabelText('Series').closest('.MuiBox-root')!
+    .querySelector('button.MuiButton-outlined') as HTMLButtonElement;
+  expect(toggle).toBeDisabled();
+  expect(toggle.textContent).toBe('Select all');
 });
 
 /**

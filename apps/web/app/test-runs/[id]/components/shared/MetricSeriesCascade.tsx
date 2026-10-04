@@ -336,9 +336,14 @@ export function MetricSeriesCascade({
         : [...selectedPanels, panel],
     );
   };
-  /** What a series row's checkbox shows: membership in instant mode, a draft otherwise. */
+  /**
+   * What a series row's checkbox shows: membership in instant mode, a draft OR an existing
+   * membership otherwise. An added series is ticked-and-greyed rather than empty-and-greyed:
+   * a card link adds its series outright, so with an empty box the picker claimed nothing was
+   * selected while the chart was already drawing it.
+   */
   const seriesChecked = (s: SeriesOption) =>
-    instant ? isAdded(s) : pickedSeriesKeys.has(seriesKey(s));
+    instant ? isAdded(s) : pickedSeriesKeys.has(seriesKey(s)) || isAdded(s);
 
   const toggleSeries = (series: SeriesOption) => {
     disarm();
@@ -374,7 +379,12 @@ export function MetricSeriesCascade({
     visibleDashboards.length > 0 && visibleDashboards.every((d) => pickedDashboardIds.has(d.id));
   const allVisiblePanelsPicked =
     visiblePanels.length > 0 && visiblePanels.every((p) => pickedPanelKeys.has(panelKey(p)));
-  const allVisibleSeriesPicked = visibleSeries.length > 0 && visibleSeries.every(seriesChecked);
+  // What Select all / Clear operates on. In draft mode an added row is checked but disabled,
+  // so folding it into this made the button read "Clear" with an empty draft behind it — live,
+  // and a no-op — on the very next render after Add, and after any card link. The button
+  // follows the DRAFT; instant mode is unchanged, there the checkbox is the membership.
+  const selectableSeries = instant ? visibleSeries : visibleSeries.filter((o) => !isAdded(o));
+  const allVisibleSeriesPicked = selectableSeries.length > 0 && selectableSeries.every(seriesChecked);
 
   // Dashboards by source (Grafana / Dynatrace / Performance test), panels by dashboard,
   // series by dashboard/panel — the same grouping the Autocompletes used.
@@ -396,7 +406,13 @@ export function MetricSeriesCascade({
           <Typography sx={{ flex: 1, fontSize: 13, color: theme.muted }} noWrap>
             {selectedDashboards.length} {plural(selectedDashboards.length, 'dashboard')} ·{' '}
             {selectedPanels.length} {plural(selectedPanels.length, 'panel')} ·{' '}
-            {instant ? `${addedSeries.length} series added` : `${selectedSeries.length} series selected`}
+            {instant
+              // Draft mode counts BOTH, because the two are different states on screen: an
+              // added row is ticked-and-greyed, a drafted one is ticked and live. Counting
+              // only the draft put "0 series selected" under two ticked rows after a card
+              // link — the same contradiction the ticks were added to remove.
+              ? `${addedSeries.length} series added`
+              : `${addedSeries.length} on chart · ${selectedSeries.length} selected`}
           </Typography>
           {onCancel && (
             // Drops the draft as well as closing. The panel stays mounted while closed (the
@@ -548,10 +564,13 @@ export function MetricSeriesCascade({
             setSelectedSeries(
               allVisibleSeriesPicked
                 ? selectedSeries.filter((o) => !visibleSeriesKeys.has(seriesKey(o)))
-                : [...selectedSeries, ...visibleSeries.filter((o) => !pickedSeriesKeys.has(seriesKey(o)))],
+                // Skip the already-added: their rows are disabled, so a draft entry for one
+                // can only be cleared by unpicking the panel, and Add answers it with
+                // "already added".
+                : [...selectedSeries, ...visibleSeries.filter((o) => !pickedSeriesKeys.has(seriesKey(o)) && !isAdded(o))],
             );
           }}
-          toggleDisabled={visibleSeries.length === 0}
+          toggleDisabled={selectableSeries.length === 0}
           loading={seriesLoading}
           empty={selectedPanels.length === 0}
           query={seriesQuery}
