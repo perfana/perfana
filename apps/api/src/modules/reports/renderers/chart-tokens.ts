@@ -148,6 +148,11 @@ export interface ChartLegendRow {
  * The colour is re-checked here rather than trusted from the row. It lands in a `style=`
  * attribute on a page served without authentication, and a shared helper that documents an
  * invariant its callers must keep is one refactor away from not having it.
+ *
+ * Exported since v0.2.97.4 for the two legends that are not a `chartSeriesTable`: the
+ * response-times section's transactions table and the name-only key above it. That re-check
+ * is why exporting it is safe, and it is the condition of calling it — a caller that wants
+ * an arbitrary colour in the markup must not reach for this, because it will not get one.
  */
 export function swatch(color: string, dashed: boolean): string {
   const safe = safeChartColor(color, CHART_CAT[0]);
