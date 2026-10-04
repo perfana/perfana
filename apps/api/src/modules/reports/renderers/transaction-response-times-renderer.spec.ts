@@ -3,7 +3,7 @@ import { TransactionResponseTimesRenderer } from './transaction-response-times-r
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService, ScenarioData } from '../services/report-data-fetcher.service';
 import { ReportSectionConfig, TestRun } from '@perfana/shared';
-import { CHART_INK, CHART_SIZE } from './chart-tokens';
+import { CHART_INK, CHART_SIZE, HOVER_SERIES_SLOTS, chartColor } from './chart-tokens';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -445,10 +445,10 @@ describe('TransactionResponseTimesRenderer', () => {
       // and without the groups there is nothing for a hovered row to dim.
       expect(html).toContain('class="chart-hover"');
       // Every index, not just 0: here the two sides come from independent index spaces —
-      // `dataPoints` pushed per transaction, `legendRows` mapped over the same list — and
-      // nothing but this asserts they stay aligned.
+      // `dataPoints` pushed per transaction, the table's rows mapped over the same list —
+      // and nothing but this asserts they stay aligned.
       const groups = [...html.matchAll(/<g data-series="(\d+)">/g)].map((m) => m[1]);
-      const rows = [...html.matchAll(/role="row" data-series="(\d+)"/g)].map((m) => m[1]);
+      const rows = [...html.matchAll(/<tr style="[^"]*" data-series="(\d+)">/g)].map((m) => m[1]);
       expect(groups.length).toBeGreaterThan(1);
       expect(rows).toEqual(groups);
       // Each group closes itself, so an early return can never leave an unbalanced <g>.
@@ -464,8 +464,8 @@ describe('TransactionResponseTimesRenderer', () => {
       const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
       const svg = html.slice(html.indexOf('<svg'), html.indexOf('</svg>'));
 
-      // One group per transaction in the series table — the one with no buckets included,
-      // since its legend row exists and `data-series` is matched by index.
+      // One group per transaction in the table — the one with no buckets included, since its
+      // row exists and `data-series` is matched by index.
       expect(svg.match(/<g data-series="\d+">/g) ?? []).toEqual([
         '<g data-series="0">', '<g data-series="1">',
       ]);
@@ -477,58 +477,54 @@ describe('TransactionResponseTimesRenderer', () => {
     });
   });
 
-  describe('chart — the series table legend', () => {
-    /**
-     * The legend FOLLOWS the chart card, so everything after the SVG is it. Throws rather
-     * than slicing from -1, which would return the document's last character and make every
-     * matcher below report `[]` for the wrong reason.
-     */
-    const legendOf = (html: string) => {
-      const at = html.indexOf('</svg>');
-      if (at < 0) throw new Error('no chart in output — legendOf has nothing to slice');
-      return html.slice(at);
-    };
-    const legendStats = (html: string) =>
-      [...legendOf(html).matchAll(/role="cell" style="[^"]*text-align:right;[^"]*">([^<]*)</g)]
-        .map((m) => m[1]!);
-    const legendNames = (html: string) =>
-      [...legendOf(html).matchAll(/margin-left:8px;">([^<]*)</g)].map((m) => m[1]!);
-    const legendUnits = (html: string) =>
-      [...legendOf(html).matchAll(/role="cell" style="[^"]*padding-left:14px;">([^<]*)</g)]
+  describe('the transactions table IS the legend', () => {
+    /** The swatch `chartSeriesTable` used to draw, now in the transaction's own row. */
+    const swatches = (html: string) =>
+      [...html.matchAll(/<span style="display:inline-block; width:14px; height:2px; background:(#[0-9a-f]{3,6});/g)]
         .map((m) => m[1]!);
 
-    it('carries the min, mean and max of each transaction, in ms', async () => {
+    it('keys each row with its line colour and draws no second series table', async () => {
       const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
 
-      // Login ran in all three buckets: 100.5, 110.2, 95.8. Search has no series at all.
-      expect(legendNames(html)).toEqual(['Login', 'Search']);
-      expect(legendStats(html).slice(0, 3)).toEqual(['95.8', '102.17', '110.2']);
-      expect(legendUnits(html)).toEqual(['ms', 'ms']);
+      // Two swatches per transaction: one in the unfilterable key under the chart, one in
+      // the table row. Both in the transaction's own colour, both in `dataPoints` order.
+      expect(swatches(html)).toEqual([
+        chartColor(0), chartColor(1), // the key under the chart
+        chartColor(0), chartColor(1), // the table rows
+      ]);
+      // The swatch sits beside the name, not instead of it.
+      expect(html).toMatch(/vertical-align:middle;"><\/span> Login</);
+      // The separate min/mean/max legend is gone: one table cannot disagree with itself.
+      expect(html).not.toContain('role="columnheader"');
+      expect(html).not.toContain('>Mean<');
     });
 
-    it('reads an em dash for a transaction that never ran in any bucket', async () => {
-      // `Math.min(...[])` is Infinity and `0/0` is NaN — both would reach the page.
+    it('names every line in a key the row filter cannot reach', async () => {
+      // `report-interactivity.ts` enhances every `.table-scroll table`, and its filter hides
+      // rows with display:none while the chart keeps drawing their lines. This key is plain
+      // markup outside that table, so a filtered-out transaction still has a name on the page.
       const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+      const key = html.slice(html.indexOf('</svg>'), html.indexOf('<table'));
 
-      expect(legendStats(html).slice(3)).toEqual(['—', '—', '—']);
-      expect(html).not.toContain('Infinity');
-      expect(html).not.toContain('NaN');
+      expect(key).toContain('Login');
+      expect(key).toContain('Search');
+      // Names only — a second set of NUMBERS is what this section had before, and the two
+      // disagreed. Nothing here can disagree with the table.
+      expect(key).not.toContain('120.5');
+      expect(key).not.toContain('Mean');
     });
 
-    it('skips the zero-filled buckets of a transaction that ran in only some', async () => {
-      // The zero is a drawing artefact, not a 0 ms response: Search is one 300 ms sample in
-      // the first bucket, so all three of its stats are 300.
-      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({
-        timeSeries: [
-          { transaction_name: 'Login', time_bucket: '2025-06-01T10:00:00Z', avg_response_time: '100.5' },
-          { transaction_name: 'Login', time_bucket: '2025-06-01T10:01:00Z', avg_response_time: '110.2' },
-          { transaction_name: 'Search', time_bucket: '2025-06-01T10:00:00Z', avg_response_time: '300' },
-        ],
-      }));
+    it('drops the swatches and the pairing when the section is configured without a chart', async () => {
+      // A colour key with no chart to key is noise, and a `data-series` row with no <g> to
+      // pair with would dim nothing while still being a hover target.
+      const html = await renderer.renderTransactionResponseTimesSection(
+        makeSection({ config: { includeChart: false } }),
+        makeTestRun(),
+      );
 
-      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
-
-      expect(legendStats(html).slice(3)).toEqual(['300', '300', '300']);
+      expect(html).not.toContain('<svg');
+      expect(swatches(html)).toEqual([]);
+      expect(html).not.toContain('data-series');
     });
 
     it('heads the chart left-aligned and names the unit above the axis', async () => {
@@ -549,6 +545,45 @@ describe('TransactionResponseTimesRenderer', () => {
       // `markedLine`, not `line`: this chart marks every point, and the standard pairs the
       // two — a 2.5px dot on a 1.25px stroke reads as a bead chain, not a line.
       expect(html).toContain(`stroke-width="${CHART_SIZE.markedLine}"`);
+    });
+
+    it('stops tagging rows past the last hover slot, instead of dimming with no way back', async () => {
+      // Mirrors chart-svg.service.spec.ts's ceiling test for the chart's own `<g>` groups:
+      // a row past HOVER_SERIES_SLOTS must carry no `data-series` attribute at all, or
+      // hovering it would dim the chart and highlight nothing — the inverse of the feature.
+      // A JMeter scenario with 300 transactions is one row each, so this is reachable.
+      const many = Array.from({ length: HOVER_SERIES_SLOTS + 6 }, (_, i) => ({
+        name: `T${i}`, avgMs: 10, p95Ms: 20, p99Ms: 30, pass: 1, fail: 0, errPct: 0,
+      }));
+      // Each one needs a bucket: with no time series the chart is not DRAWN, and then the
+      // rows carry no swatch and no pairing at all (the case below).
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({
+        transactions: many,
+        timeSeries: many.map((t) => ({
+          transaction_name: t.name, time_bucket: '2025-06-01T10:00:00Z', avg_response_time: '10',
+        })),
+      }));
+
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+      const rows = [...html.matchAll(/<tr style="[^"]*" data-series="(\d+)">/g)].map((m) => Number(m[1]));
+
+      expect(rows).toHaveLength(HOVER_SERIES_SLOTS);
+      expect(Math.max(...rows)).toBe(HOVER_SERIES_SLOTS - 1);
+      expect(html).not.toContain(`data-series="${HOVER_SERIES_SLOTS}"`);
+    });
+
+    it('drops the swatches and the hover scope when the chart asked for was not drawn', async () => {
+      // `includeChart` is the request, not the outcome: with no time buckets the chart is a
+      // "no time series data" card with no <svg>, so a colour key keys nothing and
+      // `.chart-hover` would scope a hover that can never fire.
+      dataFetcher.getScenarioDataFromDatabase.mockResolvedValue(makeScenarioData({ timeSeries: [] }));
+
+      const html = await renderer.renderTransactionResponseTimesSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('No time series data available');
+      expect(swatches(html)).toEqual([]);
+      expect(html).not.toContain('data-series');
+      expect(html).not.toContain('chart-hover');
     });
 
     it('puts the no-time-series message in the standard\'s card', async () => {

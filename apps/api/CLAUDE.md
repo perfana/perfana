@@ -541,12 +541,33 @@ about that arrangement are easy to get wrong:
    A report sets fonts through inline `style="…"` attributes, so `"Inter"` closes the
    attribute and the rest of the declaration lands in the markup as stray text. The drift
    spec compares the two stacks with quotes normalised, so they still cannot diverge.
-3. **The legend is a CSS grid with table roles, never an HTML `<table>`.** The comparisons
-   section draws a chart inside a detail row of its own data table, and
+3. **A `chartSeriesTable` legend is a CSS grid with table roles, never an HTML `<table>`.**
+   The comparisons section draws a chart inside a detail row of its own data table, and
    `report-interactivity.ts` enhances every `.table-scroll table` on the page — a real
    `<table>` there would be given sortable headers and its own "Filter rows..." box inside
    the chart card, and would put `<td>`s inside a detail cell that `collectUnits` requires to
    be the row's only cell.
+
+   **One builder has no `chartSeriesTable` at all, by design.** Response times over time
+   (`transaction-response-times-renderer.ts`) uses its own transactions data table as the
+   legend (v0.2.97.4): the swatch sits in the row, and `data-series` rides the `<tr>`. It had
+   both, and they disagreed — the grid's Mean was the mean of the per-minute bucket means
+   while the table's Avg was `AVG(response_time)` over every request, so one transaction
+   carried two numbers two centimetres apart.
+
+   The real `<table>` works HERE because it is top-level markup, not a chart nested in
+   another table's detail row. **Sort is safe and filter is not**, and the difference is
+   worth knowing: the pairing survives a sort because `data-series` rides the row it belongs
+   to (verified against the real `REPORT_INTERACTIVITY_SCRIPT` in jsdom), but the injected
+   "Filter rows..." box hides rows with `display:none` (`report-interactivity.ts`) while the
+   chart keeps drawing their lines — so a filtered row takes its line's only colour key with
+   it, and the iframe has no scripts with which to hide the line too. That is what
+   `renderChartKey` is for: a name-only swatch row under the chart, outside the table and
+   therefore outside the filter, so every line always has a name on the page. It carries no
+   numbers on purpose — a second set of numbers is the bug this section started with.
+
+   Do not copy the table-as-legend to the other two builders: they draw series that have no
+   data table of their own.
 4. **Two marks stay louder than the app's on purpose, because a report prints.** The
    analysis-window boundary keeps amber (`ANALYSIS_BOUNDARY_COLOR`) where the Graphs card
    draws a `theme.faint` hairline, and the excluded band uses `CHART_INK.excludedPrint` (10%)
@@ -572,8 +593,10 @@ about that arrangement are easy to get wrong:
 8. **The legend sits BELOW its chart, and hover is CSS, not script.** `CHART_HOVER_CSS`
    (`chart-tokens.ts`) does two things the viewer's script-less iframe would otherwise rule
    out: hovering a series-table row dims every other line, and hovering the plot shows a
-   crosshair with each series' value there. All three builders put the table below the
-   chart and emit `class="chart-hover"` + `data-series` groups; the **cursor readout exists
+   crosshair with each series' value there. All three builders put their legend below the
+   chart and emit `class="chart-hover"` + `data-series` groups — for response times that
+   legend is the transactions table itself (item 3), wrapped with the chart in one
+   `.chart-hover`; the **cursor readout exists
    only in `chart-svg.service.ts`** (so it covers Graphs, Comparisons and Trends), because
    the other two would each need their own copy of the band machinery. Six things:
 

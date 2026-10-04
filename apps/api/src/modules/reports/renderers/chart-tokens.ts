@@ -149,7 +149,7 @@ export interface ChartLegendRow {
  * attribute on a page served without authentication, and a shared helper that documents an
  * invariant its callers must keep is one refactor away from not having it.
  */
-function swatch(color: string, dashed: boolean): string {
+export function swatch(color: string, dashed: boolean): string {
   const safe = safeChartColor(color, CHART_CAT[0]);
   return dashed
     ? `<span style="display:inline-block; width:14px; height:0; border-top:2px dashed ${safe}; vertical-align:middle;"></span>`

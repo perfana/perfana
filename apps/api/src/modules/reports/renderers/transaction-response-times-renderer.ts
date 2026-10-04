@@ -24,12 +24,10 @@ import {
   axisUnitLabel,
   chartCard,
   chartColor,
-  chartSeriesTable,
   hoverSlot,
   gridLine,
-  legendStats,
+  swatch,
   tickLabel,
-  type ChartLegendRow,
 } from './chart-tokens';
 
 /**
@@ -133,11 +131,21 @@ export class TransactionResponseTimesRenderer {
 
         ${sectionText(text)}
 
-        ${blocks.map((data) => `
-          ${named ? groupHeader(data.scenario, [chip(`${formatInt(data.transactions.length)} transactions`, 'neutral')]) : ''}
-          ${includeChart ? this.renderResponseTimesChart(data) : ''}
-          ${this.renderTransactionsTable(data)}
-        `).join('\n')}
+        ${blocks.map((data) => {
+          // `includeChart` is what the section ASKED for; `drew` is what it GOT. With no time
+          // buckets `renderResponseTimesChart` emits a "no time series data" card and no
+          // <svg> at all, and then a colour key keys nothing and `.chart-hover` scopes a
+          // hover that can never fire. Same emptiness test the chart makes, hoisted so the
+          // table can see the answer.
+          const drew = includeChart && (data.timeSeries ?? []).length > 0;
+          const head = named ? groupHeader(data.scenario, [chip(`${formatInt(data.transactions.length)} transactions`, 'neutral')]) : '';
+          const chart = includeChart ? this.renderResponseTimesChart(data) : '';
+          const table = this.renderTransactionsTable(data, drew);
+          return `
+          ${head}
+          ${drew ? `<div class="chart-hover">${chart}${table}</div>` : `${chart}${table}`}
+        `;
+        }).join('\n')}
       </section>
     `;
   }
@@ -268,8 +276,15 @@ export class TransactionResponseTimesRenderer {
       dataPoints.push(points);
     });
 
-    // Find max value for Y-axis scaling
-    const maxValue = Math.max(...dataPoints.flat().filter((v) => v > 0));
+    // Find max value for Y-axis scaling. A loop, not `Math.max(...dataPoints.flat())`: the
+    // argument count is transactions x buckets, and the spread form throws `RangeError:
+    // Maximum call stack size exceeded` north of ~100k — a 300-transaction JMeter scenario
+    // over a long run reaches that and takes the whole section down rather than degrading.
+    // Same rule `legendStats` carries in chart-tokens.ts; this is the last spread here.
+    let maxValue = 0;
+    for (const points of dataPoints) {
+      for (const value of points) if (value > maxValue) maxValue = value;
+    }
     const yMin = 0;
     const yMax = Math.ceil(maxValue / 20) * 20 + 20; // Round up to nearest 20 and add buffer
 
@@ -322,7 +337,8 @@ export class TransactionResponseTimesRenderer {
         return `<circle cx="${x}" cy="${y}" r="${CHART_SIZE.marker}" fill="${color}"/>`;
       }).join('');
 
-      // One group per transaction, indexed like its series-table row: that attribute is
+      // One group per transaction, indexed like its row in the transactions table below
+      // (which IS this chart's legend — there is no separate series table): that attribute is
       // the whole dim-the-others pairing — see CHART_HOVER_CSS. Built as ONE string: an
       // open and a close pushed ten lines apart drift the moment anything returns early,
       // and an unbalanced <g> corrupts the rest of the SVG.
@@ -337,25 +353,8 @@ export class TransactionResponseTimesRenderer {
       return tickLabel(label, x, yPos, 'end', `transform="rotate(-45 ${x} ${yPos})"`);
     }).join('');
 
-    // The legend is the app's series table, below the chart: per transaction, the
-    // min/mean/max of the response times drawn. Its row order is `dataPoints`' order, which
-    // is what `data-series` pairs on. A bucket the transaction did not run in reads as 0 in the
-    // line (see `dataPoints` above), so the stats skip those rather than reporting a
-    // minimum of zero for every transaction.
-    const legendRows: ChartLegendRow[] = scenarioData.transactions.map(
-      (txn: ReportTransaction, idx: number) => {
-        const sampled = (dataPoints[idx] ?? []).filter((v) => v > 0);
-        return {
-          name: txn.name,
-          color: chartColor(idx),
-          unit: 'ms',
-          ...legendStats(sampled, formatNum),
-        };
-      },
-    );
-
     return `
-      <div class="chart-hover" style="margin: 24px 0;">
+      <div style="margin: 24px 0;">
         ${groupHeader(chartTitle)}
         ${chartCard(`
           <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
@@ -376,24 +375,68 @@ export class TransactionResponseTimesRenderer {
             ${xLabels}
           </svg>
         `)}
-        ${chartSeriesTable(legendRows, (text) => this.utils.escapeHtml(text))}
+        ${this.renderChartKey(scenarioData)}
       </div>
     `;
   }
 
   /**
-   * Render transactions table with blue header styling
+   * The colour key: swatch and name, nothing else.
+   *
+   * The numbers live in the transactions table below, which is also a legend — it carries the
+   * swatches too, and hovering one of its rows dims the other lines. This exists because that
+   * table is enhanced by `report-interactivity.ts` like every other `.table-scroll table` on
+   * the page, and its row filter hides rows with `display:none` while the chart keeps drawing
+   * their lines. Filter it and the key for those lines goes with it. This one cannot be
+   * filtered, so a line always has a name somewhere on the page.
+   *
+   * Names only, deliberately: a second set of NUMBERS is exactly what this section had before
+   * (a mean of per-minute means above an average over every request, disagreeing by a few ms),
+   * and nothing here can disagree with anything.
    */
-  renderTransactionsTable(scenarioData: ScenarioData): string {
+  private renderChartKey(scenarioData: ScenarioData): string {
+    const items = scenarioData.transactions.map((txn: ReportTransaction, idx: number) => `
+      <span${hoverSlot(idx)} style="display:inline-flex; align-items:center; gap:6px;">
+        ${swatch(chartColor(idx), false)}${this.utils.escapeHtml(txn.name)}
+      </span>`).join('');
+    return `
+      <div style="display:flex; flex-wrap:wrap; gap:4px 18px; margin:10px 0 0;
+                  font-family:${CHART_SANS}; font-size:${CHART_SIZE.legendFont}px; color:${CHART_INK.muted};">
+        ${items}
+      </div>`;
+  }
+
+  /**
+   * The transactions table — which is also the chart's legend.
+   *
+   * There is no separate series table under this chart. There was, and it carried the min,
+   * mean and max of the drawn buckets while this table carried the run's own average two
+   * centimetres below: two numbers for one transaction, differing because a mean of
+   * per-minute averages weights a quiet minute like a busy one. One table cannot disagree
+   * with itself.
+   *
+   * What that costs: the per-bucket min and max are gone from the page. What it buys: the
+   * legend's numbers are the authoritative ones (avg/p95/p99 over every request, pass, fail,
+   * error rate), and the swatch sits in the row the reader is already looking at.
+   *
+   * `withSwatches` is `includeChart`: a colour key with no chart to key is noise, and the
+   * section can be configured without one.
+   */
+  renderTransactionsTable(scenarioData: ScenarioData, withSwatches: boolean = true): string {
     const { transactions } = scenarioData;
 
     const tableRows = transactions
       .map(
         (txn: ReportTransaction, idx: number) => {
           const rowBg = txn.fail > 0 ? '#fff8f8' : (idx % 2 === 1 ? '#fbfcfd' : '#ffffff');
+          // `data-series` pairs the row with its line, the same contract the series table
+          // had — and it rides on the <tr>, so `report-interactivity`'s sort keeps the
+          // pairing when it moves the row. Only the first HOVER_SERIES_SLOTS rows get one;
+          // `hoverSlot` is what enforces that, and a row past the ceiling must carry no
+          // attribute at all or hovering it dims the chart and highlights nothing.
           return `
-      <tr style="background: ${rowBg};">
-        <td style="padding: 12px 16px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${this.utils.escapeHtml(txn.name)}</td>
+      <tr style="background: ${rowBg};"${withSwatches ? hoverSlot(idx) : ''}>
+        <td style="padding: 12px 16px; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${withSwatches ? `${swatch(chartColor(idx), false)} ` : ''}${this.utils.escapeHtml(txn.name)}</td>
         <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatNum(txn.avgMs)}</td>
         <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatNum(txn.p95Ms)}</td>
         <td style="padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid ${REPORT_COLORS.rowBorder};">${formatNum(txn.p99Ms)}</td>
