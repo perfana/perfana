@@ -1,5 +1,5 @@
 import { formatValueWithUnit } from '@/lib/units';
-import { MetricTrendData, ConfigSourceInfo } from './types';
+import { AnomalyData, MetricTrendData, ConfigSourceInfo } from './types';
 import { PLOTLY_HOVER_FONT_FAMILY } from '@/lib/plotly-fonts';
 
 // Data formatting functions
@@ -688,4 +688,33 @@ export const generateThresholdData = (drawerData: Record<string, unknown>, unit?
   }
 
   return thresholds;
+};
+/**
+ * The (dashboard, panel) pairs a scope `all-dashboards` save has to write.
+ *
+ * `ds_compare_config.application_dashboard_id` and `panel_id` are both NOT NULL, so
+ * "this panel on every dashboard" cannot be one wildcard row — it is one panel-level
+ * row per dashboard. Panels are matched on title: panel ids are per Grafana dashboard,
+ * so panel 12 is "CPU usage" on one dashboard and something unrelated on the next.
+ *
+ * The run's own anomaly rows are the source, so the targets are exactly the dashboards
+ * this test run collected from.
+ */
+export const collectPanelTargets = (
+  rows: Pick<AnomalyData, 'application_dashboard_id' | 'panel_id' | 'panel_title' | 'metrics_source_id'>[],
+  panelTitle: string,
+): Pick<AnomalyData, 'application_dashboard_id' | 'panel_id' | 'metrics_source_id'>[] => {
+  const byTarget = new Map<string, Pick<AnomalyData, 'application_dashboard_id' | 'panel_id' | 'metrics_source_id'>>();
+  for (const row of rows) {
+    if (row.panel_title !== panelTitle) continue;
+    const key = `${row.application_dashboard_id}_${row.panel_id}`;
+    if (!byTarget.has(key)) {
+      byTarget.set(key, {
+        application_dashboard_id: row.application_dashboard_id,
+        panel_id: row.panel_id,
+        metrics_source_id: row.metrics_source_id,
+      });
+    }
+  }
+  return Array.from(byTarget.values());
 };

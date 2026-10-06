@@ -165,6 +165,16 @@ export interface TrendsData {
   [key: string]: MetricTrendData[];
 }
 
+/**
+ * Which rows a compare-config save writes.
+ * - `metric`: this metric on this panel.
+ * - `panel`: every metric on this panel of this dashboard (metric_name NULL).
+ * - `all-dashboards`: same as `panel`, repeated for every dashboard in the run
+ *   that has a panel with this panel title. ds_compare_config.application_dashboard_id
+ *   and panel_id are NOT NULL, so there is no wildcard row — it fans out.
+ */
+export type ConfigScope = 'metric' | 'panel' | 'all-dashboards';
+
 /** The ADAPT compare-config form, as edited in the anomaly row drawer. */
 export interface ConfigFormData {
   ignore?: boolean;
