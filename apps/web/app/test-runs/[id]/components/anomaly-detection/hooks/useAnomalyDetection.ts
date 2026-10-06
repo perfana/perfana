@@ -6,8 +6,9 @@ import { TestRun } from '@/types/test-runs';
 import { authenticatedFetch } from '@/lib/api';
 import { generateConfigHash } from '@/lib/config-hash';
 import { deleteAnomalyData, DeleteAnomalyRequest } from '@/lib/anomaly-api';
-import { AnomalyData, AnomalySummary, MetricTrendData, ConfigFormData, AdaptConclusion, DrawerData } from '../types';
+import { AnomalyData, AnomalySummary, MetricTrendData, ConfigFormData, AdaptConclusion, DrawerData, ConfigScope } from '../types';
 import { useUpdateAdaptConfig } from './useUpdateAdaptConfig';
+import { collectPanelTargets } from '../utils';
 
 // Known classification values - anything not in this list shows as "Unclassified"
 const KNOWN_CLASSIFICATIONS = new Set([
@@ -163,7 +164,7 @@ interface UseAnomalyDetectionReturn {
   handleRowToggle: (rowKey: string) => void;
   handleDrawerToggle: (rowKey: string) => void;
   handleConfigFormToggle: (rowKey: string) => void;
-  handleConfigSave: (rowKey: string, configData: ConfigFormData, scope: 'metric' | 'panel') => Promise<void>;
+  handleConfigSave: (rowKey: string, configData: ConfigFormData, scope: ConfigScope) => Promise<void>;
   handleDeleteAnomaly: (anomaly: AnomalyData, options: { scope: 'metric' | 'panel'; range: 'current-test-run' | 'all-test-runs' }) => Promise<void>;
   handleAcceptResults: () => void;
   handleDenyResults: () => void;
@@ -579,7 +580,7 @@ export function useAnomalyDetection({
     setShowConfigForm(prev => ({ ...prev, [rowKey]: !prev[rowKey] }));
   }, []);
 
-  const handleConfigSave = useCallback(async (rowKey: string, configData: ConfigFormData, scope: 'metric' | 'panel') => {
+  const handleConfigSave = useCallback(async (rowKey: string, configData: ConfigFormData, scope: ConfigScope) => {
     try {
       const rowIndex = parseInt(rowKey.split('_').pop() || '0');
       const item = paginatedData[rowIndex];
@@ -588,8 +589,10 @@ export function useAnomalyDetection({
         throw new Error('Could not find metric data for configuration');
       }
 
+      // Stored as a panel-level config either way — `all-dashboards` only decides how
+      // many dashboards get one, not what kind of row it is.
       const configDataPayload = {
-        source: scope,
+        source: scope === 'metric' ? 'metric' : 'panel',
         ignore: configData.ignore,
         metricClassification: {
           classification: configData.metricClassification.classification,
@@ -606,33 +609,66 @@ export function useAnomalyDetection({
 
       const configHash = generateConfigHash(configDataPayload);
 
-      const payload = {
-        systemUnderTestId: testRun?.system_under_test_id,
-        testEnvironment: testRun?.test_environment,
-        workload: testRun?.workload,
-        applicationDashboardId: item.application_dashboard_id,
-        ...(item.metrics_source_id && { metricsSourceId: item.metrics_source_id }),
-        panelId: item.panel_id.toString(),
-        metricName: scope === 'metric' ? item.metric_name : undefined,
-        configData: {
-          ...configDataPayload,
-          config_hash: configHash
+      const targets = scope === 'all-dashboards'
+        ? collectPanelTargets(anomalyData, item.panel_title)
+        : [item];
+
+      // allSettled, not all: the server writes each target independently and nothing rolls back, so
+      // a rejection partway through leaves a subset written. `all` would report that as one opaque
+      // error and hide how much landed.
+      const results = await Promise.allSettled(targets.map(async (target) => {
+        const payload = {
+          systemUnderTestId: testRun?.system_under_test_id,
+          testEnvironment: testRun?.test_environment,
+          workload: testRun?.workload,
+          applicationDashboardId: target.application_dashboard_id,
+          ...(target.metrics_source_id && { metricsSourceId: target.metrics_source_id }),
+          panelId: target.panel_id.toString(),
+          metricName: scope === 'metric' ? item.metric_name : undefined,
+          configData: {
+            ...configDataPayload,
+            config_hash: configHash
+          }
+        };
+
+        const response = await authenticatedFetch('/test-runs/ds-compare-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || `Failed to save configuration: ${response.status}`);
         }
-      };
+      }));
 
-      const response = await authenticatedFetch('/test-runs/ds-compare-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      const saved = results.length - failed.length;
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Failed to save configuration: ${response.status}`);
+      // A total failure is an error, not a partial success — and a single-target save (metric or
+      // panel scope) only ever has one result, so it reports through this same branch.
+      if (saved === 0) {
+        const reason = failed[0]?.reason;
+        throw reason instanceof Error ? reason : new Error('Failed to save configuration');
       }
 
       setShowConfigForm(prev => ({ ...prev, [rowKey]: false }));
-      showToast(`Configuration saved successfully (${scope} level)`);
+      if (failed.length > 0) {
+        // Name the count that landed and the count that did not: re-saving is safe (each target is
+        // an upsert), so the user needs to know a retry is worth it rather than guessing.
+        showToast(
+          `Configuration saved on ${saved} of ${results.length} dashboards — ${failed.length} failed: ${
+            failed[0]?.reason instanceof Error ? failed[0].reason.message : 'unknown error'
+          }`
+        );
+      } else {
+        showToast(
+          scope === 'all-dashboards'
+            ? `Configuration saved for panel "${item.panel_title}" on ${targets.length} dashboard${targets.length === 1 ? '' : 's'}`
+            : `Configuration saved successfully (${scope} level)`
+        );
+      }
 
       if (drawerData[rowKey]) {
         setTimeout(() => {
@@ -647,7 +683,7 @@ export function useAnomalyDetection({
         : 'Failed to save configuration';
       showToast(`Error: ${errorMessage}`);
     }
-  }, [paginatedData, testRun, showToast, drawerData, fetchDrawerData]);
+  }, [paginatedData, anomalyData, testRun, showToast, drawerData, fetchDrawerData]);
 
   const handleDeleteAnomaly = useCallback(async (
     anomaly: AnomalyData,

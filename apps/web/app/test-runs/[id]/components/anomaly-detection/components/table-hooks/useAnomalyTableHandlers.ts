@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import { AnomalyData } from '../../types';
+import type { ConfigScope } from '../../types';
 import { DeleteOptions } from '../DeleteAnomalyDialog';
 import { TestRun } from '@/types/test-runs';
 
@@ -12,7 +13,7 @@ interface UseAnomalyTableHandlersProps {
   showToast?: (message: string) => void;
   onRefreshAnomalyData?: () => void;
   onDeleteAnomaly?: (anomaly: AnomalyData, options: DeleteOptions) => Promise<void>;
-  onConfigSave?: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => void;
+  onConfigSave?: (rowKey: string, data: unknown, scope: ConfigScope) => void;
 }
 
 export function useAnomalyTableHandlers({
@@ -37,7 +38,7 @@ export function useAnomalyTableHandlers({
   const [pendingConfigSave, setPendingConfigSave] = useState<{
     rowKey: string;
     data: unknown;
-    scope: 'metric' | 'panel';
+    scope: ConfigScope;
   } | null>(null);
   const [configSaveLoading, setConfigSaveLoading] = useState(false);
 
@@ -186,7 +187,7 @@ export function useAnomalyTableHandlers({
   }, [testRun, testRunId, showToast, pollJobCompletion]);
 
   // Config save with dialog
-  const handleConfigSave = useCallback((rowKey: string, data: unknown, scope: 'metric' | 'panel') => {
+  const handleConfigSave = useCallback((rowKey: string, data: unknown, scope: ConfigScope) => {
     setPendingConfigSave({ rowKey, data, scope });
     setConfigSaveDialogOpen(true);
   }, []);

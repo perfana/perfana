@@ -104,7 +104,26 @@ describe('MetricConfigForm', () => {
       render(<MetricConfigForm {...defaultProps} />);
 
       expect(screen.getByText('Entire Panel')).toBeInTheDocument();
-      expect(screen.getByText(/Apply to all metrics in: Response Time Panel/)).toBeInTheDocument();
+      // Exact, not a regex: the all-dashboards caption extends this one word for word, so a
+      // substring match finds both and the query throws on multiple elements.
+      expect(screen.getByText('Apply to all metrics in: Response Time Panel')).toBeInTheDocument();
+    });
+
+    it('should show the all-dashboards scope option', () => {
+      render(<MetricConfigForm {...defaultProps} />);
+
+      expect(screen.getByText('This Panel On All Dashboards')).toBeInTheDocument();
+      expect(screen.getByText(/Response Time Panel, on every dashboard of this workload/)).toBeInTheDocument();
+    });
+
+    it('should report the all-dashboards scope to onSave', async () => {
+      render(<MetricConfigForm {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole('radio', { name: /This Panel On All Dashboards/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Save Configuration/ }));
+
+      await waitFor(() => expect(mockOnSave).toHaveBeenCalled());
+      expect(mockOnSave.mock.calls[0][2]).toBe('all-dashboards');
     });
 
     it('should disable metric scope when metricName is not available', () => {

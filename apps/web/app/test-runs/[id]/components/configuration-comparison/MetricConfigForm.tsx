@@ -18,6 +18,7 @@ import {
   Grid
 } from '@mui/material';
 import {} from '@/lib/api';
+import type { ConfigScope } from '../anomaly-detection/types';
 
 export interface MetricConfigData {
   rowKey: string;
@@ -61,7 +62,7 @@ interface MetricConfigFormProps {
         absoluteThreshold: number | null;
       };
     },
-    scope: 'metric' | 'panel'
+    scope: ConfigScope
   ) => Promise<void>;
   onCancel: () => void;
 }
@@ -101,7 +102,7 @@ export default function MetricConfigForm({
   onCancel,
 }: MetricConfigFormProps) {
   // Form state - determine scope based on existing config source or metricName availability
-  const [scope, setScope] = useState<'metric' | 'panel'>(() => {
+  const [scope, setScope] = useState<ConfigScope>(() => {
     // If we have existing config, use its source to determine scope
     // The stored values are 'metric' or 'panel' directly
     const configSource = configData?.currentConfig?.configSource;
@@ -238,7 +239,7 @@ export default function MetricConfigForm({
         <FormControl component="fieldset">
           <RadioGroup
             value={scope}
-            onChange={(e) => setScope(e.target.value as 'metric' | 'panel')}
+            onChange={(e) => setScope(e.target.value as ConfigScope)}
           >
             <FormControlLabel
               value="metric"
@@ -265,6 +266,20 @@ export default function MetricConfigForm({
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
                     Apply to all metrics in: {configData?.panelTitle}
+                  </Typography>
+                </Box>
+              }
+            />
+            <FormControlLabel
+              value="all-dashboards"
+              control={<Radio size="small" />}
+              label={
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    This Panel On All Dashboards
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Apply to all metrics in: {configData?.panelTitle}, on every dashboard of this workload
                   </Typography>
                 </Box>
               }

@@ -18,6 +18,7 @@ import {
 } from '@mui/icons-material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { AnomalyData, MetricTrendData, DrawerData } from '../../types';
+import type { ConfigScope } from '../../types';
 import { TestRun } from '@/types/test-runs';
 import CurrentTestRunChart from '../../../compare/CurrentTestRunChart';
 import type { AggregatedMetricSource } from '../../../compare/current-test-run-chart/types';
@@ -68,7 +69,7 @@ interface AnomalyExpandedContentProps {
   selectedTestRunIdForRow?: string;
   onDrawerToggle: () => void;
   onConfigFormToggle: () => void;
-  onConfigSave: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => Promise<void>;
+  onConfigSave: (rowKey: string, data: unknown, scope: ConfigScope) => Promise<void>;
   onSelectTestRun: (testRunId: string) => void;
   onResetSelectedTestRun: () => void;
 }

@@ -1,4 +1,4 @@
-import type { DrawerData } from '../../types';
+import type { ConfigScope, DrawerData } from '../../types';
 import { AnomalyData, MetricTrendData } from '../../types';
 import { TestRun } from '@/types/test-runs';
 import { DeleteOptions } from '../DeleteAnomalyDialog';
@@ -52,7 +52,7 @@ export interface AnomalyDetectionTableProps {
   showConfigForm?: Record<string, boolean>;
   configFormData?: Record<string, unknown>;
   onConfigFormToggle?: (rowKey: string) => void;
-  onConfigSave?: (rowKey: string, data: unknown, scope: 'metric' | 'panel') => Promise<void>;
+  onConfigSave?: (rowKey: string, data: unknown, scope: ConfigScope) => Promise<void>;
 
   // Re-analysis functionality
   onRefreshAnomalyData?: () => void;
