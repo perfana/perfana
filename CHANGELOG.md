@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.5] - 2026-10-06
+
+### Added
+- **A metric's settings can now be applied to the same panel on every dashboard at once.** The Configuration Scope choice in an anomaly row's settings view had two options, Single Metric and Entire Panel, and both stopped at the dashboard you opened. A third option, **This Panel On All Dashboards**, applies the classification and thresholds to every metric of every panel with that title across the workload — so one edit covers all forty hosts sharing a "CPU Usage" panel instead of forty. Panels are matched by title, because a panel id means something different on each dashboard. If some dashboards cannot be saved, the message names how many were saved and how many were not, and saving again is safe.
+
+### Fixed
+- **Provisioned classification templates now reach Dynatrace host panels.** A template covering, say, every `CPU Usage` panel on every `dynatrace-*` dashboard was written, matched the dashboards and resolved the panels, and then quietly did nothing: mapping a host already writes a placeholder configuration for each of its panels, and that placeholder looked like a configuration someone had edited by hand, so the template stepped around it. Measured on a development database, all 56 panels such a template targets were skipped on every run. The placeholder is now recognised for what it is and the template's thresholds are merged into it, while a configuration you actually edited is still left alone.
+
+### Note for existing installations
+- Nothing to do. The template fix applies the next time each run is analysed; host panels configured before this release keep their current thresholds until then, and re-analysing a run applies them immediately. Nothing changes for a panel whose configuration you edited yourself.
+
 ## [0.2.97.4] - 2026-10-04
 
 ### Fixed

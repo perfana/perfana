@@ -1671,6 +1671,51 @@ implementation.
 
 ## Test run detail tables
 
+### An anomaly row's settings form is keyed by list position, not by the row
+
+**Priority:** P3
+**Origin:** inline adversarial pass during /ship on `feat/anomaly-all-dashboards-scope` (2026-10-06).
+Pre-existing; v0.2.97.5 amplified the blast radius without introducing the defect.
+
+`handleConfigSave` resolves which metric it is saving with
+`paginatedData[parseInt(rowKey.split('_').pop() || '0')]`
+(`apps/web/app/test-runs/[id]/components/anomaly-detection/hooks/useAnomalyDetection.ts`), and the
+expanded-form state is keyed on that same `rowKey` string (`showConfigForm[rowKey]`). Sorting,
+filtering or paging the table re-derives `paginatedData` while the key stays put, so a form opened
+before the change saves against whatever row now occupies that index — silently, with a success
+toast. Every row handler in the file shares the resolution (`handleRowToggle`, `handleDrawerToggle`,
+`handleConfigFormToggle`), so a drawer can also show one row's statistics under another row's
+heading.
+
+The new `all-dashboards` scope makes the consequence worse rather than more likely: a mis-resolved
+row now writes a panel-level config to every dashboard sharing the *wrong* panel's title instead of
+to one panel.
+
+Fix by keying rows on identity rather than position — `${application_dashboard_id}|${panel_id}|${metric_name}`
+is unique per row and already available on `AnomalyData` — and resolving the item by that key via a
+`Map` instead of indexing `paginatedData`. The `rowKey` format is internal to this feature (built in
+`AnomalyTableRow`/`AnomalyDetectionTable` and consumed only by these handlers), so no stored data or
+API payload carries it.
+
+### "This Panel On All Dashboards" does not check that the targets share a unit
+
+**Priority:** P4
+**Origin:** inline adversarial pass during /ship on `feat/anomaly-all-dashboards-scope` (2026-10-06).
+Accepted characteristic of title matching, recorded so the choice is visible rather than discovered.
+
+The scope matches panels by **title** across every dashboard of the workload, deliberately: a panel
+id means something different on each dashboard, and reaching a differently-named dashboard with the
+same panel is the point ("CPU Usage" on a Grafana node dashboard and on a `dynatrace-*` host
+dashboard). But `collectPanelTargets` compares nothing except the title, so a generic title can span
+panels whose series carry different units, and one `absoluteThreshold` then means 5 ms on one target
+and 5 % on another. `ds_metric_statistics.unit` and `ds_panels` both carry the unit per panel.
+
+Worth a confirmation step rather than a silent refusal: resolve the units of the matched targets and,
+when they disagree, name the mismatch in the dialog before writing. A hard block would be wrong —
+applying one percentage threshold across differently-united panels is still legitimate when the
+threshold is a percentage.
+
+
 ### The error-details lookup is coarser than the row that opens it
 
 **Priority:** P3
