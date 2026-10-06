@@ -167,7 +167,10 @@ export function MetricSeriesCascade({
     }
     let cancelled = false;
     setPanelsLoading(true);
-    fetchPanelsForDashboards(picked, testRun, panelListOptions)
+    // `allDashboards`, not `picked`: the run-wide rows merge two dashboards that share a
+    // label whether or not both are selected, so the ambiguity has to be judged over the
+    // whole list. See `ambiguousLabels`.
+    fetchPanelsForDashboards(picked, testRun, panelListOptions, allDashboards)
       .then((lists) => { if (!cancelled) { panelsFor.current = dashboardsKey; setPanelOptions(lists.flat()); } })
       .finally(() => { if (!cancelled) setPanelsLoading(false); });
     return () => { cancelled = true; };

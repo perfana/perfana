@@ -58,6 +58,12 @@ export interface PanelOption extends Panel {
   dashboard: ApplicationDashboard;
   dashboardLabel: string;
   source: DataSource;
+  /**
+   * The run's series for this panel, when the panel list already learned them from
+   * `/ds-metrics/available/:run`. Present means `fetchSeriesForPanel` needs no request;
+   * absent means it asks `/ds-metrics/distinct-names` as before.
+   */
+  metricNames?: string[];
 }
 
 /** One selectable series: a metric name plus the panel it belongs to. */
@@ -177,12 +183,92 @@ export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) =>
 export const OPTION_FETCH_CONCURRENCY = 6;
 
 /** One row of `/metrics/ds-metrics/available/:testRunId`: a panel the run recorded. */
-interface AvailablePanelRow { dashboard_label: string; panel_title: string; panel_id: number; unit?: string }
+interface AvailablePanelRow {
+  dashboard_label: string;
+  panel_title: string;
+  panel_id: number;
+  unit?: string;
+  /** Every series the run recorded on this panel — see `seriesFromAvailableRows`. */
+  metric_names?: string[];
+}
+
+/**
+ * Dashboard labels that more than one selected dashboard answers to.
+ *
+ * `uq_application_dashboards_unique` is `(system_under_test_id, test_environment,
+ * grafana_instance_id, dashboard_uid, dashboard_label)` — the LABEL is not unique within a
+ * system and environment. The same Grafana dashboard mapped from two instances carries one
+ * label and, sharing a uid, the same panel ids; 20 of 152 uids are duplicated across
+ * instances on the dev database (root CLAUDE.md item 43). A forked artificial Dynatrace
+ * dashboard (item 44) is the other way in.
+ *
+ * That matters here and did not before, because `/distinct-names` was scoped by
+ * `application_dashboard_id` while `/ds-metrics/available` groups by label. Left alone, two
+ * such dashboards collapse onto one key and each is offered the union of both their series —
+ * pick the stranger's name and the chart draws nothing, with nothing logged.
+ *
+ * So the ambiguous labels are dropped from the map and those panels keep asking per panel,
+ * which is both correct and what they did before this change. Resolved client-side rather
+ * than by adding `application_dashboard_id` to the endpoint's GROUP BY: that column is not in
+ * `idx_ds_metrics_panel_lookup`, so adding it costs the index-only scan over the run's 2 M
+ * entries and makes the panel list slower — the opposite of the point.
+ *
+ * **Judge this over every dashboard on the system, not over the selection.** The merge is
+ * done by the server's `GROUP BY dashboard_label, panel_title, panel_id, unit`, so it has
+ * already happened whether or not both twins are picked: selecting only one of them still
+ * yields a row carrying both dashboards' series. Computed from the selection alone, the guard
+ * would catch the obvious case and miss exactly the quiet one.
+ */
+function ambiguousLabels(dashboards: ApplicationDashboard[]): Set<string> {
+  const seen = new Set<string>();
+  const duplicated = new Set<string>();
+  for (const d of dashboards) {
+    if (seen.has(d.dashboard_label)) duplicated.add(d.dashboard_label);
+    seen.add(d.dashboard_label);
+  }
+  return duplicated;
+}
+
+/**
+ * The series each panel recorded, keyed by `panelKey` (dashboard label + panel id).
+ *
+ * `/ds-metrics/available/:run` has always returned `metric_names` per panel and the cascade
+ * has always discarded it, then asked `/ds-metrics/distinct-names` for the same names once
+ * per panel — 625 requests on a select-all over a production run with 62 perf-test
+ * dashboards, three database round trips each (the access check is two of them), for an
+ * answer already in hand. Both read `ds_metrics` scoped to the run, so they agree by
+ * construction, and neither normalises the column.
+ *
+ * A panel can appear on more than one row when its rows carry different `unit`s, so the
+ * names are unioned rather than overwritten.
+ */
+function seriesFromAvailableRows(
+  rows: AvailablePanelRow[],
+  skipLabels: Set<string>,
+): Map<string, string[]> {
+  const byPanel = new Map<string, string[]>();
+  for (const row of rows) {
+    if (!row.metric_names?.length) continue;
+    if (skipLabels.has(row.dashboard_label)) continue;
+    const key = panelKey({ id: row.panel_id, dashboardLabel: row.dashboard_label });
+    const existing = byPanel.get(key);
+    if (existing) {
+      for (const name of row.metric_names) if (!existing.includes(name)) existing.push(name);
+    } else {
+      byPanel.set(key, [...row.metric_names]);
+    }
+  }
+  return byPanel;
+}
 
 /**
  * The run's recorded panels, for every performance-test dashboard at once. The endpoint
  * answers for the whole run (~1 s on a large one), so a select-all over K scenario
  * dashboards must ask once and partition, not K times.
+ *
+ * It carries two things, not one: the perf-test panel list, and `metric_names` per panel —
+ * the series of whatever the run recorded, whichever source it came from. The caller is what
+ * decides when to ask for it; see `fetchPanelsForDashboards`.
  */
 async function fetchAvailablePanelRows(testRun: TestRun): Promise<AvailablePanelRow[]> {
   const res = await authenticatedFetch(
@@ -272,9 +358,20 @@ export async function fetchSeriesForPanel(
   if (!testRun) return [];
   const asOptions = (names: string[]): SeriesOption[] => names.map((metricName) => ({ metricName, panel }));
 
+  /** The run-wide aggregate is a series no panel has a row for; offered where it means something. */
+  const withAllAggregated = (names: string[]): SeriesOption[] =>
+    asOptions(shouldOfferAllAggregated(panel.source, panel.id, names)
+      ? [ALL_AGGREGATED_OPTION, ...names]
+      : names);
+
   try {
     if (isUrlPanel(panel.id)) {
       return asOptions(await fetchUrlDistinctNames(testRun.test_run_id));
+    }
+
+    // Already known from the panel list's one run-wide fetch — no request at all.
+    if (panel.metricNames) {
+      return withAllAggregated(panel.metricNames);
     }
 
     const params = new URLSearchParams({
@@ -295,11 +392,7 @@ export async function fetchSeriesForPanel(
       { headers: { 'Content-Type': 'application/json' } },
     );
     if (!res.ok) return [];
-    const names: string[] = await res.json();
-    // The run-wide aggregate is a series no panel has a row for; offered where it means something.
-    return asOptions(shouldOfferAllAggregated(panel.source, panel.id, names)
-      ? [ALL_AGGREGATED_OPTION, ...names]
-      : names);
+    return withAllAggregated(await res.json());
   } catch (error) {
     console.error(`Error fetching series for panel ${panel.title}:`, error);
     return [];
@@ -317,13 +410,42 @@ export const fetchPanelsForDashboards = async (
   dashboards: ApplicationDashboard[],
   testRun: TestRun | null,
   options?: PanelListOptions,
+  /**
+   * Every dashboard the picker lists, when the caller has it. Only `ambiguousLabels` reads
+   * it, and only to widen what it considers — see that function for why the selection alone
+   * is the wrong population. Omitted, the guard falls back to the selection, which is the
+   * safe-but-narrower answer rather than a wrong one.
+   */
+  allDashboards?: ApplicationDashboard[],
 ): Promise<PanelOption[][]> => {
   // One run-wide request serves every performance-test dashboard in the batch.
   // A failed run-wide fetch hands nothing down, so each dashboard retries on its own.
+  //
+  // Still gated on the batch containing a perf-test dashboard, deliberately. Widening it to
+  // every selection looks like a win — one call replacing N — and is not, because the series
+  // step is LAZY: `MetricSeriesCascade` asks for series only for the panels the user actually
+  // ticks, not for every panel it lists. At 895 ms warm / 5958 ms cold for this call against
+  // ~10 ms for a scoped /distinct-names, breakeven is around 90 ticked panels, and the effect
+  // re-runs on every dashboard toggle with nothing cached. The 625-request trace this change
+  // comes from is a select-all over a perf-test run — exactly the case where these rows are
+  // fetched for the panel list anyway, so reading their series out costs nothing extra.
   const rows = testRun && dashboards.some((d) => sourceOf(d) === 'performance-metrics')
     ? await fetchAvailablePanelRows(testRun).catch(() => undefined)
     : undefined;
-  return mapLimit(dashboards, OPTION_FETCH_CONCURRENCY, (d) => fetchPanelsForDashboard(d, testRun, options, rows));
+  const lists = await mapLimit(dashboards, OPTION_FETCH_CONCURRENCY,
+    (d) => fetchPanelsForDashboard(d, testRun, options, rows));
+  if (!rows) return lists;
+
+  // Series are attached here rather than inside `fetchPanelsForDashboard` so the map is built
+  // once per batch instead of once per dashboard, and so the per-dashboard loader stays
+  // concerned only with panels. Every source in the batch benefits, not just the perf-test
+  // ones that paid for the call: the rows cover whatever the run recorded, and a panel they
+  // do not mention simply keeps asking.
+  const knownSeries = seriesFromAvailableRows(rows, ambiguousLabels(allDashboards ?? dashboards));
+  return lists.map((panels) => panels.map((p) => ({
+    ...p,
+    metricNames: knownSeries.get(panelKey(p)),
+  })));
 };
 
 /** Series for many panels, same bound. */

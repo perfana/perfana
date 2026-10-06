@@ -77,7 +77,7 @@ it('loads the panels of every picked dashboard with the card\'s options, then th
   const { onPrimaryChange } = setup();
 
   selectAll('Dashboards');
-  await waitFor(() => expect(fetchPanelsForDashboards).toHaveBeenCalledWith([perf, jvm], testRun, { collapseRtPanels: false, includeUrlPanels: false }));
+  await waitFor(() => expect(fetchPanelsForDashboards).toHaveBeenCalledWith([perf, jvm], testRun, { collapseRtPanels: false, includeUrlPanels: false }, [perf, jvm]));
   await screen.findByText('2 available across 2 dashboards');
   expect(onPrimaryChange).toHaveBeenLastCalledWith(perf, null);
 
@@ -316,7 +316,7 @@ describe('column filters', () => {
     fireEvent.change(filterFor('Dashboards'), { target: { value: 'jvm' } });
     selectAll('Dashboards');
 
-    await waitFor(() => expect(fetchPanelsForDashboards).toHaveBeenCalledWith([jvm], testRun, expect.anything()));
+    await waitFor(() => expect(fetchPanelsForDashboards).toHaveBeenCalledWith([jvm], testRun, expect.anything(), expect.anything()));
 
     fireEvent.click(screen.getByLabelText('Clear dashboards filter'));
     expect(screen.getByLabelText('JVM')).toBeChecked();

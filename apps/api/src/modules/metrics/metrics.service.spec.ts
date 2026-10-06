@@ -2123,6 +2123,20 @@ describe('MetricsService', () => {
       expect(params).toEqual(['run-18']);
     });
 
+    it('projects metric_names, which two clients consume', async () => {
+      // `rows` only round-trips the mock, so nothing above proves the real SELECT list.
+      // Drop this projection and both consumers degrade SILENTLY: the web cascade's
+      // `if (!row.metric_names?.length) continue` sends it back to one
+      // /ds-metrics/distinct-names per panel, and MCP's `get_available_metrics` stops
+      // naming any series. Neither logs anything.
+      metricsRepo.query.mockResolvedValue([ROW]);
+
+      await service.getAvailableDashboards('run-18', 'user-1', ['user']);
+
+      const [sql] = metricsRepo.query.mock.calls[0];
+      expect(sql).toMatch(/ARRAY_AGG\(metric_name ORDER BY metric_name\) AS metric_names/);
+    });
+
     it('reads ds_metrics, not ds_metric_statistics', async () => {
       // ds_metric_statistics has two writers on different schedules and excludes
       // ramp-up-only metrics, so it is not a valid source for this picker.
