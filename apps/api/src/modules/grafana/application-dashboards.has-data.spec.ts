@@ -75,10 +75,46 @@ describe('ApplicationDashboardsService.findAll — hasData', () => {
     const rows = await service.findAll('user-1', ['super-admin'], { hasData: true });
 
     expect(rows.map((r) => r.id)).toEqual([LIVE]);
-    // One statement, scoped to the ids already in hand — not an EXISTS per dashboard.
+    // One statement and one round trip, scoped to the ids already in hand — an EXISTS
+    // probe per id driven off `unnest`, not an EXISTS re-planned per dashboard row.
     expect(repoQuery).toHaveBeenCalledTimes(1);
     expect(repoQuery.mock.calls[0]![0]).toMatch(/ds_metric_statistics/);
     expect(repoQuery.mock.calls[0]![1]).toEqual([[LIVE, DEAD]]);
+  });
+
+  it('asks for the ids as rows, under the column name it then reads back', async () => {
+    // The caller does `found.map((r) => r.application_dashboard_id)`. The rewrite from
+    // `SELECT DISTINCT application_dashboard_id` to a probe over `unnest` has to keep that
+    // alias: drop it and every row reads `undefined`, the Set holds one stray entry and
+    // EVERY dashboard disappears from the picker, with nothing logged and no error.
+    await service.findAll('user-1', ['super-admin'], { hasData: true });
+
+    const sql = repoQuery.mock.calls[0]![0] as string;
+    expect(sql).toMatch(/AS\s+application_dashboard_id/i);
+    expect(sql).toMatch(/unnest\(\$1::uuid\[\]\)/i);
+    expect(sql).toMatch(/WHERE\s+EXISTS/i);
+    // A probe that stops at the first row — never a DISTINCT over every matching entry.
+    expect(sql).not.toMatch(/SELECT\s+DISTINCT/i);
+  });
+
+  it('keeps the page order and ignores an id the probe answers with that was not on the page', async () => {
+    const STRANGER = '33333333-3333-3333-3333-333333333333';
+    repoQuery.mockResolvedValueOnce([
+      { application_dashboard_id: DEAD },
+      { application_dashboard_id: STRANGER },
+      { application_dashboard_id: LIVE },
+    ]);
+
+    const rows = await service.findAll('user-1', ['super-admin'], { hasData: true });
+
+    // The probe's order is the planner's business; the page's order is the query builder's.
+    expect(rows.map((r) => r.id)).toEqual([LIVE, DEAD]);
+  });
+
+  it('keeps nothing when the probe finds no rows for any dashboard on the page', async () => {
+    repoQuery.mockResolvedValueOnce([]);
+
+    expect(await service.findAll('user-1', ['super-admin'], { hasData: true })).toEqual([]);
   });
 
   it('lists everything when the flag is absent, so the management view can still find the dead ones', async () => {

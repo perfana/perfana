@@ -89,11 +89,17 @@ export interface ApplicationDashboardQuery {
   /**
    * Keep only dashboards that some run has actually recorded metrics for.
    *
-   * The pickers that choose metrics — the compare card, a report's comparison and trends
-   * sections, the add/edit SLO dialogs — read their panel list from ds_metric_statistics. A
-   * dashboard with no rows there offers no panels, so it is an unselectable dead end that
-   * nothing can be built from, and on a long-lived system there are hundreds of them: dashboards
-   * for workloads and spans that no longer exist, kept because the row was never deleted.
+   * What a `ds_metric_statistics` row proves is that some COMPLETED analysis recorded metrics
+   * for this dashboard. The pickers do not read that table — `/ds-metrics/available` reads
+   * `ds_metrics`, Grafana dashboard JSON or Dynatrace (and says so, at length, in
+   * `MetricsService.getAvailableDashboards`). But a dashboard no analysis ever measured offers
+   * no panels either way, so it is an unselectable dead end, and on a long-lived system there
+   * are hundreds of them: dashboards for workloads and spans that no longer exist, kept because
+   * the row was never deleted.
+   *
+   * One consequence of using that table as the proxy: during a RUNNING test only
+   * `upsertPerfTestStatistics` has written to it, so `hasData=true` transiently hides Grafana
+   * and Dynatrace dashboards whose series `/ds-metrics/available` would happily return.
    *
    * Opt-in, because the management view in the system's configuration MUST keep listing them —
    * that is where they are found and deleted.
@@ -138,22 +144,39 @@ export class ApplicationDashboardsService {
   /**
    * Narrow a page of dashboards to the ones ds_metric_statistics has rows for.
    *
-   * One statement, scoped to the ids already in hand, rather than an EXISTS per dashboard: the
-   * unique index on ds_metric_statistics leads with test_run_id, so a per-dashboard probe is not
-   * a leading-column match and would repeat that cost once per row. Deliberately NOT accompanied
-   * by a new index — ds_metric_statistics is one of the largest tables in the schema, and
-   * building an index on it inside a start-up migration is the kind of lock this codebase has
-   * already been bitten by. Measure first; add it CONCURRENTLY, out of band, if the measurement
-   * asks for it.
+   * An EXISTS per dashboard id, which is the opposite of what this used to do. The earlier
+   * form — `SELECT DISTINCT application_dashboard_id ... WHERE id = ANY($1)` — avoided the
+   * per-dashboard probe because no index led with `application_dashboard_id`, so a probe was
+   * not a leading-column match. Migration 1814 adds that index, which inverts the choice:
+   * the DISTINCT form has to read every matching entry (110,263 of them per parallel worker
+   * on production, 213,726 heap fetches, 235,391 buffers, 932 ms warm and up to 23.6 s cold),
+   * while a probe stops at the first row per id.
+   *
+   * `unnest` rather than `= ANY`: the ids have to be rows for the planner to drive a
+   * semi-join off them, and this keeps the whole thing one statement and one round trip.
+   * Every page of dashboards is small — 148 ids on the system in the production trace — so
+   * this is ~150 index probes, each bounded by the EXISTS.
+   *
+   * Safe if the API reaches a database the migration has not run on yet: the fallback is one
+   * bounded pass, never 148 table scans, so it degrades to roughly the old cost rather than
+   * off a cliff — the two halves do not have to land in lockstep. The exact plan depends on
+   * the server version, which is worth knowing before reading an EXPLAIN: on PG15 (what
+   * `docker-compose.infra.yml` pins) it is a hash semi-join over a full sequential scan; on
+   * PG18 it is a nested loop of btree skip-scans on the non-leading column, measured at 25.6 ms
+   * against the DISTINCT form's 287 ms on the same data. The PG15 shape reads the whole
+   * 1258 MB heap per picker open, which is the buffer-cache-eviction pattern of issue #34 —
+   * so on a deploy that skips the migration runner this is permanent, not transitional.
    */
   private async filterToDashboardsWithData(rows: ApplicationDashboardEntity[]): Promise<ApplicationDashboardEntity[]> {
     if (rows.length === 0) return rows;
 
     const ids = rows.map((r) => r.id);
     const found: Array<{ application_dashboard_id: string }> = await withRequestEm(this.appDashboardRepo).query(
-      `SELECT DISTINCT application_dashboard_id
-         FROM ds_metric_statistics
-        WHERE application_dashboard_id = ANY($1::uuid[])`,
+      `SELECT d.id AS application_dashboard_id
+         FROM unnest($1::uuid[]) AS d(id)
+        WHERE EXISTS (
+          SELECT 1 FROM ds_metric_statistics s WHERE s.application_dashboard_id = d.id
+        )`,
       [ids],
     );
 
