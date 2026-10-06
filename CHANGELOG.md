@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.6] - 2026-10-06
+
+### Fixed
+- **The series picker opens quickly again on systems with a lot of dashboards.** Choosing metrics for the Graphs, Trends or Compare card begins with a list of dashboards, and building that list meant reading the whole metric-statistics table every time it was opened — 1.2 million rows to answer a question about roughly 150 dashboards. On production it took between two and twenty-four seconds, and twice the browser gave up before the answer arrived. The same question is now asked of an index, one lookup per dashboard.
+- **Picking panels on a performance-test run no longer fires hundreds of requests.** After choosing dashboards and panels, the picker asked the server for the list of series on each panel separately — on one run that is 625 requests, six at a time, for names the server had already sent with the panel list and the page then discarded. They are read from the answer that is already in hand. A panel the run recorded nothing for, and a dashboard whose name is shared with another, still ask individually, so nothing is guessed.
+
+### Note for existing installations
+- This release adds a database index to `ds_metric_statistics`. It is created during the normal migration step and needs no action. On a busy deployment the migration may have to wait for a running analysis to finish before it can build; it retries for up to half a minute and reports clearly if it cannot, in which case re-running the deploy is safe.
+
 ## [0.2.97.5] - 2026-10-06
 
 ### Added

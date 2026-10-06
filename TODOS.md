@@ -2492,6 +2492,68 @@ stops pulling the whole run to render one dashboard's panels. `ds_metric_statist
 answer — see the comment in `getAvailableDashboards` for why it is both faster and wrong.
 **Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getAvailableDashboards`),
 `apps/web/app/test-runs/[id]/components/{graphs,trends}/hooks/`.
+**Constraint added in v0.2.97.6:** the narrowing parameter must be **additive** — default to
+today's whole-run answer, and always include `metric_names` for every panel of the requested
+scope. The cascade now reads its series dropdown out of that field, and its fallback is silent:
+`if (!row.metric_names?.length) continue` sends it straight back to one `/distinct-names` per
+panel with nothing logged. Prefer `applicationDashboardId` over `dashboardLabel` — it would also
+close the ambiguity below for free, where the label cannot.
+
+### `/ds-metrics/available` groups by `dashboard_label`, which is not a dashboard identity
+
+**Priority:** P2
+**Origin:** three independent review lanes during /ship on `perf/series-picker-dashboard-index`
+(2026-10-06).
+**Why:** `getAvailableDashboards` groups by `(dashboard_label, panel_title, panel_id, unit)` with
+no dashboard id, but `uq_application_dashboards_unique` includes `grafana_instance_id` — so two
+application dashboards in one system and environment can share a label, with the same uid and
+therefore the same panel ids (20 of 152 uids are duplicated across instances on dev; see item 43
+of the root CLAUDE.md). Their rows collapse into one group and the response carries the union of
+both dashboards' series. The merge is **server-side**, so it has already happened whichever
+dashboards the client has selected.
+**Mitigated, not fixed, in v0.2.97.6:** `ambiguousLabels` in `metric-options.ts` detects a label
+claimed by more than one dashboard on the system and declines the map for it, so those panels fall
+back to the per-panel `/distinct-names` call that is scoped by `application_dashboard_id`. That is
+correct but it gives up the speed-up exactly where the system is most complicated.
+**What:** add `application_dashboard_id` to the SELECT and GROUP BY, and let the client key on it.
+**Do not do this without measuring:** that column is absent from `idx_ds_metrics_panel_lookup`
+`(test_run_id, dashboard_label, panel_title, panel_id, unit, metric_name)`, so adding it to the
+grouping costs the index-only scan over the run's ~2 M entries — the entry above measures that scan
+at 2.7 s of a 3.6 s query. It likely needs the index widened first, which is the same work as
+making that scan sublinear.
+**Where:** `apps/api/src/modules/metrics/metrics.service.ts` (`getAvailableDashboards`),
+`apps/web/app/test-runs/[id]/components/shared/metric-options.ts` (`ambiguousLabels`).
+
+### `/ds-metrics/available` has no response DTO, and two clients hand-rolled its shape
+
+**Priority:** P3
+**Origin:** API-contract review during /ship on `perf/series-picker-dashboard-index` (2026-10-06).
+**Why:** the route carries only `@ApiOperation` and the service returns
+`Promise<Record<string, unknown>[]>`, so Swagger publishes no response schema at all. The shape
+exists instead as two divergent hand-written copies — `AvailablePanel` in
+`apps/mcp/src/perfana-client.ts` (`unit: string | null`, `metric_count: string`, `metric_names`
+required) and `AvailablePanelRow` in `metric-options.ts` (`unit?`, no `metric_count`,
+`metric_names?`). Neither comes from `@perfana/shared`. `metric_names` became load-bearing for the
+web cascade in v0.2.97.6 and has been a live MCP contract longer than that.
+**What:** an `AvailablePanelDto` in `@perfana/shared`, `@ApiOkResponse({ type: [AvailablePanelDto] })`
+on the route, both clients importing it. Swagger is built at runtime from decorators, so there is
+no spec to regenerate. A spec assertion on the `ARRAY_AGG` projection landed in v0.2.97.6 as the
+cheap half of this.
+**Where:** `apps/api/src/modules/metrics/metrics.controller.ts`, `apps/mcp/src/perfana-client.ts`,
+`apps/web/app/test-runs/[id]/components/shared/metric-options.ts`.
+
+### Measure the write-side cost of `idx_ds_metric_statistics_app_dashboard`
+
+**Priority:** P3
+**Origin:** performance review during /ship on `perf/series-picker-dashboard-index` (2026-10-06).
+**Why:** `application_dashboard_id` is a random uuid, so every statistics row insert now dirties a
+random leaf page in the new index — extra WAL and random I/O inside transactions that already run
+against the 540 s `AGGREGATION_STATEMENT_TIMEOUT_MS` budget, on a pipeline that deletes and
+rewrites every row for a run. The read-side win is measured; this cost is assumed to be small and
+has not been checked.
+**What:** compare a `statistics-calculation` stage duration on a large run before and after the
+index exists.
+**Where:** `apps/worker/src/pipelines/StatisticsPipeline.ts`, migration 1814.
 
 ---
 

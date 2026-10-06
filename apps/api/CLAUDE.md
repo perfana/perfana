@@ -920,6 +920,59 @@ Cancelling still leaves a 0-byte file at the chosen location: the picker creates
 before the first byte arrives, and `abort()` discards the swap file, not the entry.
 
 
+### `hasData` probes one index per dashboard, and that inverted when the index landed
+
+`filterToDashboardsWithData` narrows a page of application dashboards to the ones
+`ds_metric_statistics` has rows for. It backs `?hasData=true`, which every metric picker sets.
+
+It used to be `SELECT DISTINCT application_dashboard_id ... WHERE application_dashboard_id =
+ANY($1::uuid[])`, deliberately avoiding a per-dashboard probe because no index led with that
+column. Measured on production 2026-10-06 (1,231,739 rows / 1613 MB):
+
+```
+Parallel Index Only Scan using uniq_ds_metric_statistics
+  rows=110263 loops=3   Rows Removed by Filter: 300317   Heap Fetches: 213726
+  Buffers: shared hit=235391                          932 ms (warm)
+```
+
+and over that day, 220 calls at a 1932 ms mean and 628,633 blocks read. The API log for the same
+day has the endpoint at 10,663 ms and 23,604 ms with two client aborts at 11,229 ms and 5,483 ms.
+
+Migration 1814 adds `idx_ds_metric_statistics_app_dashboard (application_dashboard_id)`, which
+inverts the choice: the DISTINCT form must read every matching entry before deduplicating, while a
+probe stops at the first row per id. The query is now `unnest($1::uuid[])` + `EXISTS` — `unnest`
+rather than `= ANY` because the ids have to be rows for the planner to drive a semi-join off them.
+
+Four things worth keeping straight:
+
+1. **The two halves may land apart, and that is survivable by design.** Without the index the
+   planner takes one bounded pass, never 148 table scans — a hash semi-join over a sequential scan
+   on PG15 (what `docker-compose.infra.yml` pins), a nested loop of btree skip-scans on PG18
+   (25.6 ms measured, against the DISTINCT form's 287 ms on the same data). On PG15 that fallback
+   reads the whole 1258 MB heap per picker open, which is the cache-eviction shape of issue #34 —
+   permanent, not transitional, on a deploy that skips the migration runner.
+2. **The lock discipline is 1809's, not 1807's, and this is the part to copy.** 1807's "plain
+   CREATE INDEX, the table is small enough" does not transfer: `ds_metric_statistics` is held for up
+   to `AGGREGATION_STATEMENT_TIMEOUT_MS` (540 s) by a running aggregation, `CREATE INDEX` needs
+   SHARE against the pipelines' ROW EXCLUSIVE, and Postgres' lock queue is FIFO — so an unbounded
+   wait parks a SHARE request in front of every writer behind it, for minutes, with the batch
+   transaction open. Nothing stops the worker during a migration: no service declares
+   `depends_on: perfana-migration`. 1814 uses 1809's plpgsql retry (3 s `lock_timeout`, 10
+   attempts) on `up()` **and** `down()`; a DROP needs ACCESS EXCLUSIVE, which stalls readers too.
+   None of 1813's per-chunk machinery applies — this table is not a hypertable.
+3. **Not a covering index on purpose.** A first-row-only semi-join does ~148 heap visibility checks
+   against the 213,726 heap fetches that made the old plan slow, so `INCLUDE` would buy nothing.
+   It also closes a missing foreign-key index: `FK_30d5e9b699656dce6b211718780` had no leading one,
+   so every `application_dashboards` delete scanned 1.2 M rows to verify the constraint.
+4. **A `ds_metric_statistics` row proves an analysis MEASURED the dashboard, not that a picker
+   reads that table.** The pickers read `ds_metrics`, Grafana JSON or Dynatrace. The docblock used
+   to claim otherwise. One consequence of the proxy: during a running test only
+   `upsertPerfTestStatistics` has written there, so `hasData=true` transiently hides Grafana and
+   Dynatrace dashboards whose series `/ds-metrics/available` would happily return.
+
+The client half of the same dialog — and why `metric_names` is now a contract field — is in
+"The series cascade reads its series from the panel list" in [apps/web/CLAUDE.md](../web/CLAUDE.md).
+
 ### The errors endpoint's `sample_url` is a key the client sends back, so it must not be normalised
 
 `GET /test-runs/:id/errors` groups `requests_error` rows and hands each group a `url`. That value

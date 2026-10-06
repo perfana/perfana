@@ -388,6 +388,47 @@ details that are load-bearing:
 **Cancel drops the draft.** Because the panel survives a close, a cancelled selection would
 otherwise still be ticked — with an armed "Add 3 series" — the next time the picker is opened.
 
+### The series cascade reads its series from the panel list, and the key is a label
+
+`/ds-metrics/available/:run` has always returned `metric_names` per panel. The cascade used to
+discard it and then ask `/ds-metrics/distinct-names` once per panel — on a production select-all
+over a 62-dashboard perf-test run, **625 requests** six at a time, three database round trips each
+(`validateTestRunAccess` is two of them), for an answer already in the response. Since v0.2.97.6
+`fetchPanelsForDashboards` builds a map with `seriesFromAvailableRows` and hangs it on
+`PanelOption.metricNames`; `fetchSeriesForPanel` returns it without a request.
+
+Four things hold it together, and three of them fail silently:
+
+1. **The run-wide fetch stays gated on the batch containing a perf-test dashboard.** Widening it
+   to every selection reads as "one call replaces N" and is a net LOSS, because the series step is
+   lazy: `MetricSeriesCascade` asks for series only for the panels the user actually ticks, never
+   for every panel it lists. At 895 ms warm / 5958 ms cold for `/available` against ~10 ms for a
+   scoped `/distinct-names`, breakeven is ~90 ticked panels, and the effect re-runs on every
+   dashboard toggle with nothing cached. The 625-request trace is a select-all over a perf-test
+   run — exactly the case where these rows are fetched for the panel list anyway, so reading the
+   series out of them costs nothing extra.
+2. **`dashboard_label` is not a dashboard identity, and the endpoint groups by it.**
+   `uq_application_dashboards_unique` carries `grafana_instance_id`, so one label can belong to two
+   application dashboards with the same uid and the same panel ids. The server merges their series
+   in its `GROUP BY` before anything reaches the client. `ambiguousLabels` detects the collision and
+   declines the map for that label, so those panels fall back to `/distinct-names`, which is scoped
+   by `application_dashboard_id`. **Judge it over every dashboard on the system, not over the
+   selection** — the merge has already happened whether or not both twins are picked, so a
+   selection-scoped guard catches the obvious case and misses the quiet one. That is why
+   `fetchPanelsForDashboards` takes a fourth `allDashboards` argument.
+3. **`isUrlPanel` is tested BEFORE the short-circuit, and must stay there.** A URL panel's series
+   are the run's normalized URLs, which no `ds_metrics` row carries; panels 210-218 do get
+   `metricNames` attached and deliberately never read it.
+4. **An empty `metric_names` must not reach `panel.metricNames`.** `[]` is truthy, so it would
+   short-circuit to an empty dropdown with no request and nothing logged. The
+   `!row.metric_names?.length` guard in the map builder is what prevents it, and the same guard is
+   what lets an API older than this client fall back cleanly.
+
+The whole mechanism degrades to the old behaviour rather than to an error, so nothing here is
+visible in a log — the only symptom of a break is the latency that was there before. The API side
+pins the projection in `metrics.service.spec.ts`; see "Graph presets are scoped…" neighbours in
+[apps/api/CLAUDE.md](../api/CLAUDE.md) for the `hasData` half of the same dialog.
+
 ### There is one `CopyButton` — reach for it instead of hand-rolling the next one
 
 `apps/web/components/ui/copy-button.tsx` is the shared copy-to-clipboard icon button

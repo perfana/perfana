@@ -18,14 +18,14 @@ Everything here is a read — collection is the worker's job
 
 | Route | Service method | Serves |
 |---|---|---|
-| `GET ds-metrics/available/:testRunId` | `getAvailableDashboards` | Panel dropdown in the trends, compare and graphs cards; MCP `get_available_metrics` |
+| `GET ds-metrics/available/:testRunId` | `getAvailableDashboards` | Panel dropdown in the trends, compare and graphs cards, **and their series dropdown** via `metric_names`; MCP `get_available_metrics` |
 | `GET ds-metrics/time-series/:testRunId` | `getMetricTimeSeries` | Chart data for a single metric |
 | `GET ds-metrics/:testRunId/:panelId` | `findDSMetricsForPanel` | Panel chart data (LTTB-downsampled above a threshold) |
 | `GET ds-metric-statistics` | `findDSMetricStatistics(Multiple)` | Per-metric aggregates for a run |
 | `GET ds-metrics-comparison` | comparison query | Run-vs-run metric comparison |
 | `GET control-group-trends/:testRunId` | `findControlGroupTrends` | Baseline trend series |
 | `GET ds-metrics/panels-by-dashboard` | `getPanelsByApplicationDashboard` | Panel list for one application dashboard |
-| `GET ds-metrics/distinct-names` | `getDistinctMetricNames` | Metric-name dropdown |
+| `GET ds-metrics/distinct-names` | `getDistinctMetricNames` | Metric-name dropdown — since v0.2.97.6 the per-panel **fallback** for the cards' cascade (a panel the run-wide rows do not mention, an ambiguous dashboard label, or a failed run-wide fetch); still the primary path for report generation and trends presets |
 
 ## Three things to know before writing a query here
 
@@ -60,6 +60,19 @@ reads the whole run. `getAvailableDashboards` used to run `COUNT(DISTINCT metric
 those — 927 ms, byte-identical output, index-only over `idx_ds_metrics_panel_lookup`, which carries
 exactly those columns after `test_run_id`. `metric_count` stays a bigint so the response contract is
 unchanged.
+
+**`metric_names` is a consumed contract field, not an incidental extra**, and two clients read it:
+the web cascade (`seriesFromAvailableRows` in
+`apps/web/app/test-runs/[id]/components/shared/metric-options.ts`) and MCP's
+`get_available_metrics`. Dropping or truncating the `ARRAY_AGG` projection breaks neither loudly —
+the cascade falls back to one `/ds-metrics/distinct-names` per panel (625 requests on a select-all
+over a 62-dashboard run) and MCP simply stops naming series. `metrics.service.spec.ts` asserts the
+projection for that reason.
+
+**Adding a column to the `GROUP BY` is not free.** `application_dashboard_id` is the one a caller
+tends to want — it would let the cascade key by dashboard identity rather than by label, which is
+not unique — but it is absent from `idx_ds_metrics_panel_lookup`, so adding it costs the index-only
+scan over the run's ~2 M entries. The cascade resolves the ambiguity client-side instead.
 
 Do not generalise that into "DISTINCT on `ds_metrics` is slow". A *single-column* `SELECT DISTINCT`
 with the leading index columns fixed gets a native TimescaleDB `Custom Scan (SkipScan)`: 3.9 ms,
