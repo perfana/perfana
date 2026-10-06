@@ -426,8 +426,9 @@ Four things hold it together, and three of them fail silently:
 
 The whole mechanism degrades to the old behaviour rather than to an error, so nothing here is
 visible in a log — the only symptom of a break is the latency that was there before. The API side
-pins the projection in `metrics.service.spec.ts`; see "Graph presets are scoped…" neighbours in
-[apps/api/CLAUDE.md](../api/CLAUDE.md) for the `hasData` half of the same dialog.
+pins the projection in `metrics.service.spec.ts`; see "`hasData` probes one index per dashboard"
+in [apps/api/CLAUDE.md](../api/CLAUDE.md) for the other half of the same dialog — why the
+dashboard list it opens with now probes an index instead of scanning `ds_metric_statistics`.
 
 ### There is one `CopyButton` — reach for it instead of hand-rolling the next one
 

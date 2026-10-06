@@ -139,6 +139,7 @@ ApplicationDashboard (1) ──▶ (N) DsMetrics (panel linkage)
 - Composite index on `(system_under_test_id, test_environment, workload)` for test run lookups
 - `(system_under_test_id, test_environment, workload, start_time)` on `test_runs` — serves the "run immediately before this one" lookup a report's previous-run baseline needs. The `..., created_at` variant cannot: `created_at` is ingest order, not run order. The index does not cover the query's `completed = true` predicate, so Postgres still filters after the index scan; make it partial if that ever shows up in a plan
 - Time-based indexes on `ds_metrics` for time-series queries
+- `application_dashboard_id` on `ds_metric_statistics` (`idx_ds_metric_statistics_app_dashboard`, migration 1814) — the only index leading with that column. It serves the `?hasData=true` filter behind every metric picker, which probes one dashboard id at a time and stops at the first row; `uniq_ds_metric_statistics` leads with `test_run_id`, so before this the filter read the whole 1.2 M-row table on every picker open. It also covers `FK_30d5e9b699656dce6b211718780`, which had no leading index, so an `application_dashboards` delete had to scan the table to verify the constraint
 - `organization_id` on all tenant-scoped tables
 
 ## Key Constraints

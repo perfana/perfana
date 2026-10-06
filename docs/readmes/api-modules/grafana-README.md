@@ -96,7 +96,7 @@ references a `DELETE /grafana/dashboards/:id` 409 is complaining about.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/grafana/application-dashboards` | List application dashboards |
+| GET | `/grafana/application-dashboards` | List application dashboards. `?hasData=true` narrows the page to the dashboards `ds_metric_statistics` has rows for — every metric picker sets it; the system-configuration management view must NOT, because that is where a dead dashboard is found and deleted |
 | GET | `/grafana/application-dashboards/:id` | Get a single application dashboard |
 | POST | `/grafana/application-dashboards` | Create |
 | PUT | `/grafana/application-dashboards/:id` | Update |
@@ -105,6 +105,14 @@ references a `DELETE /grafana/dashboards/:id` 409 is complaining about.
 | POST | `/grafana/application-dashboards/batch-delete-info` | Preview for many |
 | POST | `/grafana/application-dashboards/batch-delete` | Queue a batch delete |
 | POST | `/grafana/application-dashboards/copy` | Copy to another scope |
+
+`?hasData=true` is answered by `filterToDashboardsWithData`, one `EXISTS` probe per dashboard id
+against `idx_ds_metric_statistics_app_dashboard` (migration 1814, v0.2.97.6). Two things it is
+easy to misread: a `ds_metric_statistics` row proves that some **completed analysis measured**
+the dashboard, not that any picker reads that table (they read `ds_metrics`, Grafana JSON or
+Dynatrace) — and during a **running** test only `upsertPerfTestStatistics` has written there, so
+the flag transiently hides Grafana and Dynatrace dashboards whose series `/ds-metrics/available`
+would happily return. See "`hasData` probes one index per dashboard" in `apps/api/CLAUDE.md`.
 
 ## Services
 
