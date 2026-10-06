@@ -16,6 +16,10 @@ import { CreateDsCompareConfigDto, UpdateDsCompareConfigDto, DsCompareConfigDto 
 import { ResourceNotFoundException, DatabaseException } from '../../../common/exceptions/business.exception';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { AuditService } from '../../audit/audit.service';
+// The marker the Dynatrace host-mapping path stamps on the panel-level config it seeds. That row
+// names no author, so the marker plus a null author is the one shape nobody has touched; a UI save
+// rewrites it to 'metric'/'panel'. Shared so the writer and this reader cannot drift apart.
+import { DYNATRACE_HOST_COMPARE_SOURCE } from '../../../constants/ds-compare-config.constants';
 
 const GOLDEN_PATH_ACTOR = 'system:golden-path';
 /** What PerformanceTestMetricsPipeline stamps on the default compare configs it seeds. */
@@ -624,15 +628,20 @@ export class TestRunsMetricsService {
     });
     const existingPanels = new Set<string>();
     const existingMetrics = new Set<string>();
-    // Rows the worker seeded and nobody has touched since. PerformanceTestMetricsPipeline writes a
+    // Rows a machine seeded and nobody has touched since. PerformanceTestMetricsPipeline writes a
     // default panel-level config for every perf-test panel during the run, i.e. BEFORE this method
-    // runs at completion — so without this a template on those dashboards would be skipped as
-    // "already configured" on every run, forever. Key = `${dashboard}|${panel}|${metric ?? ''}`.
+    // runs at completion, and the Dynatrace host mapping writes one per host panel when the host is
+    // mapped — so without this a template on those dashboards would be skipped as "already
+    // configured" on every run, forever. Key = `${dashboard}|${panel}|${metric ?? ''}`.
+    // The merge stamps GOLDEN_PATH_ACTOR, so a Dynatrace row stops matching after the first pass.
     const workerSeeded = new Map<string, (typeof existingConfigs)[number]>();
     for (const c of existingConfigs) {
       existingPanels.add(`${c.application_dashboard_id}|${c.panel_id}`);
       if (c.metric_name) existingMetrics.add(`${c.application_dashboard_id}|${c.panel_id}|${c.metric_name}`);
-      if (c.updated_by === WORKER_ACTOR) workerSeeded.set(`${c.application_dashboard_id}|${c.panel_id}|${c.metric_name ?? ''}`, c);
+      const machineSeeded =
+        c.updated_by === WORKER_ACTOR ||
+        (!c.updated_by && (c.config_data as Record<string, unknown> | null)?.source === DYNATRACE_HOST_COMPARE_SOURCE);
+      if (machineSeeded) workerSeeded.set(`${c.application_dashboard_id}|${c.panel_id}|${c.metric_name ?? ''}`, c);
     }
 
     // 4. For each dashboard, resolve its templates and create the missing DsCompareConfig records

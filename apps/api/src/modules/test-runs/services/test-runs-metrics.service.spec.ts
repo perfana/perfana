@@ -296,6 +296,78 @@ describe('TestRunsMetricsService', () => {
       });
     });
 
+    describe('Dynatrace host rows seeded by the mapping path', () => {
+      // A HOST mapping writes a panel-level config with no author at all, so the row read as a user
+      // edit and every `^dynatrace-` template was skipped forever. Measured on the dev database:
+      // 56 of 56 panels a CPU/Memory Usage template targets were already occupied, 0 mergeable.
+      const dashboard = {
+        id: 'dash-dt', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production',
+        dashboardUid: 'dynatrace-dynatrace-host-metrics-app-1', organizationId: 'org-1',
+      };
+      const template = {
+        id: 'tmpl-dt', system_under_test_id: null, dashboard_uid: '^dynatrace-', regex: true,
+        panel_id: null, panel_title: 'CPU Usage',
+        metric_classification: 'USE_utilization', higher_is_better: false, config_overrides: { absThreshold: 5 },
+      };
+      const dynatraceSeeded = {
+        metricClassification: { classification: 'USE_utilization', higherIsBetter: false },
+        thresholds: { aggregation: 'mean', percentageThreshold: 0.1, iqrThreshold: 2, absoluteThreshold: null },
+        ignore: false,
+        source: 'dynatrace-host',
+      };
+
+      beforeEach(() => {
+        applicationDashboardRepo.find.mockResolvedValue([dashboard]);
+        templateRepo.find.mockResolvedValue([template]);
+        dsPanelsRepo.query.mockResolvedValue([
+          { dashboard_id: 'dash-dt', panel_id: 67141, panel_title: 'CPU Usage' },
+        ]);
+      });
+
+      it("merges the template's absThreshold into the mapping-seeded row", async () => {
+        compareConfigRepo.find.mockResolvedValue([
+          { id: 'cfg-dt', application_dashboard_id: 'dash-dt', panel_id: 67141, metric_name: null, config_data: dynatraceSeeded, updated_by: null },
+        ] as any);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 1 });
+        expect(compareConfigRepo.create).not.toHaveBeenCalled();
+        expect(compareConfigRepo.update).toHaveBeenCalledWith(
+          { id: 'cfg-dt' },
+          {
+            config_data: { ...dynatraceSeeded, thresholds: { ...dynatraceSeeded.thresholds, absoluteThreshold: 5 } },
+            updated_by: 'system:golden-path',
+          },
+        );
+      });
+
+      it('leaves a Dynatrace panel the user edited alone (source rewritten by the UI save)', async () => {
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            id: 'cfg-dt', application_dashboard_id: 'dash-dt', panel_id: 67141, metric_name: null,
+            config_data: { ...dynatraceSeeded, source: 'panel' }, updated_by: 'user-sub',
+          },
+        ] as any);
+
+        expect(await service.applyGoldenPathClassifications(testRunInput)).toEqual({ compareConfigsCreated: 0 });
+        expect(compareConfigRepo.update).not.toHaveBeenCalled();
+      });
+
+      it('does not re-merge a row the golden path already stamped', async () => {
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            id: 'cfg-dt', application_dashboard_id: 'dash-dt', panel_id: 67141, metric_name: null,
+            config_data: { ...dynatraceSeeded, thresholds: { ...dynatraceSeeded.thresholds, absoluteThreshold: 5 } },
+            updated_by: 'system:golden-path',
+          },
+        ] as any);
+
+        expect(await service.applyGoldenPathClassifications(testRunInput)).toEqual({ compareConfigsCreated: 0 });
+        expect(compareConfigRepo.update).not.toHaveBeenCalled();
+      });
+    });
+
     describe('generic templates (issue #607)', () => {
       const dashboards = [
         { id: 'dash-a', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production', dashboardUid: 'performance-test-metrics-a', organizationId: 'org-1' },

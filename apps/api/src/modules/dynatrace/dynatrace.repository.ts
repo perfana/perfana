@@ -13,6 +13,7 @@ import { CreateDynatraceQueryDto } from './dto/create-dynatrace-query.dto';
 import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { generateDeterministicUuid } from '../../utils/uuid-generator';
+import { DYNATRACE_HOST_COMPARE_SOURCE } from '../../constants/ds-compare-config.constants';
 
 /**
  * The dashboard a host's four metric queries hang off. This string is the ONLY
@@ -991,7 +992,7 @@ export class DynatraceRepository {
         absoluteThreshold: null,
       },
       ignore: false,
-      source: 'dynatrace-host',
+      source: DYNATRACE_HOST_COMPARE_SOURCE,
     };
 
     // Use a transaction to ensure atomicity

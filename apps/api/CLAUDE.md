@@ -711,6 +711,43 @@ selectors fold, and that no selector mentions `utilTime` (mutation-verified: rem
 `splitBy()` fails it). That test is the only thing stopping a private copy of the list from
 reappearing.
 
+### A golden-path template loses to any row already on the panel, and a Dynatrace host panel always has one
+
+`applyGoldenPathClassifications` (`modules/test-runs/services/test-runs-metrics.service.ts`) runs at
+run completion and refuses to overwrite a `ds_compare_config` row that already sits on the panel —
+user edits must survive. Its one exception used to be `updated_by = 'worker-pipeline'`, the default
+row `PerformanceTestMetricsPipeline` seeds during the run.
+
+**`createDsCompareConfigForMetric` (`modules/dynatrace/dynatrace.repository.ts`) writes a panel-level
+row the moment a HOST is mapped, and its INSERT names no `created_by`/`updated_by` at all.** So the
+row read as a user edit while being pure boilerplate — classification hardcoded `USE_utilization`,
+`absoluteThreshold: null`, `percentageThreshold: 0.10`. Measured on the dev database: of the 56
+(dashboard, panel) pairs a `dashboardUid: '^dynatrace-'` + `panelTitle: CPU Usage` / `Memory Usage`
+template resolves, **56 were already occupied and 0 were mergeable**, so the template was a
+guaranteed no-op on every run, forever. The provisioning side was fine — the rows were in
+`provisioned_template_ds_compare_configs`, the uid matched (`dynatrace-dynatrace-host-metrics-…`),
+`ds_panels` carried the titles. Nothing was logged; the panels simply kept `absoluteThreshold: null`.
+
+The discriminator is `config_data.source`, not authorship:
+
+- The Dynatrace insert stamps `source: 'dynatrace-host'`, and a UI save rewrites it to
+  `'metric'`/`'panel'` **and** sets `updated_by` (`updateDsCompareConfig`). So
+  `!updated_by && source === 'dynatrace-host'` is the one shape nobody has touched. 591 of the dev
+  database's 592 null-author rows match it; the one that does not reads `source: 'panel'`.
+- **The merge is self-limiting.** It stamps `GOLDEN_PATH_ACTOR`, so the row stops matching after the
+  first pass — which is also why the null-author half of the test cannot be dropped.
+- **It takes effect on the next completed run**, not at boot. Rows already written stay as they are
+  until that run analyses.
+- `higher_is_better` comes from the template, so a template whose `panelTitle` reaches
+  `Network Traffic` would overwrite the `higherIsBetter: null` the Dynatrace path sets deliberately
+  for an informational metric. The shipped templates name CPU and Memory only.
+
+A row the golden path itself authored is never revisited, so **editing a template's `absThreshold` in
+YAML does not propagate to panels it already seeded** — that was true before this fix and still is.
+
+`regex` support landed in v0.2.95.35 and `panelTitle` in v0.2.95.37; a deploy older than those
+ignores both halves of such a template.
+
 ### An artificial Dynatrace dashboard is per-workload, but its unique constraint is not
 
 `generateDynatraceDashboardUuid` hashes `(system, environment, workload, label)`, so every
