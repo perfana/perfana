@@ -496,3 +496,43 @@ Three behaviours the helpers encode, so a new caller does not have to rediscover
 - **A non-zero rate that rounds to 0.00 renders as `<0.01%`.** Three failures in 100k
   transactions is routine on a large run, and "0.00% errors" on a red badge asserts the one
   thing the badge exists to rule out.
+
+### A third config scope fans out to every dashboard sharing a panel title, matched by title alone
+
+`ConfigFormData`'s save used to take `scope: 'metric' | 'panel'`. `ConfigScope`
+(`anomaly-detection/types.ts`) adds `'all-dashboards'` — the row settings view's third radio,
+"This Panel On All Dashboards" (`configuration-comparison/MetricConfigForm.tsx`). It does not
+introduce a third kind of stored row: `handleConfigSave` (`anomaly-detection/hooks/useAnomalyDetection.ts`)
+still writes `config_data.source` as `'metric'` or `'panel'` only — `all-dashboards` decides **how
+many** panel-level rows get written, not what shape they are.
+
+- **Targets come from the fan-out helper, not from every dashboard in the system.**
+  `collectPanelTargets` (`anomaly-detection/utils.ts`) scans the current page's already-loaded
+  `anomalyData` rows, keeps every one whose `panel_title` equals the row being edited, and dedupes
+  by `application_dashboard_id` + `panel_id`. The set is therefore exactly the dashboards *this
+  test run* collected from — nothing is fetched to find dashboards the run has no anomaly rows for.
+- **The match key is the panel title string, not the panel or its source.** A panel id is only
+  unique within one Grafana dashboard (see item 43 in the root [CLAUDE.md](../../CLAUDE.md)), so
+  this helper deliberately matches on the human-readable title instead — but that means two
+  unrelated panels that happen to share a title (a Grafana dashboard and a Dynatrace host panel
+  both called "CPU Usage", say) are indistinguishable to it and both receive the same classification
+  and threshold.
+- **Each target is an independent POST, via `Promise.allSettled`, not `Promise.all`.** The API has
+  no transaction spanning multiple `ds_compare_config` rows, so a partial failure is a real
+  outcome, not an edge case to collapse into one error. `saved === 0` is reported as a hard
+  failure; `0 < saved < total` surfaces as "Configuration saved on N of M dashboards — K failed:
+  `<first error>`" so the user knows a retry is worth it (every target is an upsert, so retrying
+  is safe) rather than reading one opaque failure or a false "success."
+
+### A golden-path template's discriminator is a shared constant now, not a repeated string literal
+
+`DYNATRACE_HOST_COMPARE_SOURCE` (`apps/api/src/constants/ds-compare-config.constants.ts`) is the
+`config_data.source` marker `DynatraceRepository.createDsCompareConfigForMetric` stamps on the
+panel-level row it writes when a host is mapped, and the same value `TestRunsMetricsService
+.applyGoldenPathClassifications` tests for to tell that boilerplate row apart from a user edit (see
+"A golden-path template loses to any row already on the panel" in
+[apps/api/CLAUDE.md](../api/CLAUDE.md) for the full mechanism and the bug it fixes). The web side's
+part of the contract: `handleConfigSave` above always overwrites `source` with `'metric'` or
+`'panel'` on any UI save, which is what makes a user edit distinguishable from the Dynatrace
+boilerplate in the first place — a future save path that skips this field would make every row it
+touches look machine-seeded again.
