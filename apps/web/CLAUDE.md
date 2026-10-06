@@ -507,8 +507,8 @@ still writes `config_data.source` as `'metric'` or `'panel'` only — `all-dashb
 many** panel-level rows get written, not what shape they are.
 
 - **Targets come from the fan-out helper, not from every dashboard in the system.**
-  `collectPanelTargets` (`anomaly-detection/utils.ts`) scans the current page's already-loaded
-  `anomalyData` rows, keeps every one whose `panel_title` equals the row being edited, and dedupes
+  `collectPanelTargets` (`anomaly-detection/utils.ts`) scans the run's whole already-loaded
+  `anomalyData` list (not `paginatedData` — the current page would silently miss targets), keeps every one whose `panel_title` equals the row being edited, and dedupes
   by `application_dashboard_id` + `panel_id`. The set is therefore exactly the dashboards *this
   test run* collected from — nothing is fetched to find dashboards the run has no anomaly rows for.
 - **The match key is the panel title string, not the panel or its source.** A panel id is only
