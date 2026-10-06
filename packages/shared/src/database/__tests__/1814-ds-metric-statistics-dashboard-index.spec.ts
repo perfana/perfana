@@ -20,13 +20,14 @@ describe('migration 1814 — ds_metric_statistics (application_dashboard_id)', (
     expect(sql).toMatch(/ON\s+public\.ds_metric_statistics\s*\(application_dashboard_id\)/i);
   });
 
-  it('builds it plainly, inside the migration transaction', async () => {
+  it('builds it plainly — no CONCURRENTLY, no COMMIT escape', async () => {
     const [sql] = await run('up');
 
-    // CONCURRENTLY cannot run inside a transaction, and the COMMIT escape that would let it
-    // ends the whole migration batch (see 1813, which pays that price deliberately for a
-    // hypertable). This table is not a hypertable, so none of 1813's per-chunk machinery
-    // applies and a plain build that fails fast is safe.
+    // Deliberately NOT asserted as "inside the migration transaction": 1813 issues a bare
+    // COMMIT two migrations earlier, so under `transaction: "all"` this one runs in
+    // autocommit whenever 1813 is in the same batch. The reason that holds either way is
+    // that a dead CONCURRENTLY build leaves an INVALID index which `IF NOT EXISTS` then
+    // matches forever — success reported, index never used.
     expect(sql).not.toMatch(/CONCURRENTLY/i);
     expect(sql).not.toMatch(/\bCOMMIT\b/i);
     // Not a covering index: the probe stops at the first row per id, so there is nothing

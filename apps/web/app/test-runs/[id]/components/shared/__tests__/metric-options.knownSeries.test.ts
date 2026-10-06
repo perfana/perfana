@@ -82,7 +82,7 @@ it('serves a Grafana panel from the same rows, when a perf-test dashboard paid f
 });
 
 it('still asks for a panel the rows do not mention', async () => {
-  const [jvmPanels] = await fetchPanelsForDashboards([grafanaDashboard], testRun);
+  const [, jvmPanels] = await fetchPanelsForDashboards([perfDashboard, grafanaDashboard], testRun);
   const gc = jvmPanels!.find((p) => p.id === 41)!;
   expect(gc.metricNames).toBeUndefined();
 
@@ -98,7 +98,7 @@ it('falls back to a request per panel when the run-wide fetch fails', async () =
     return { ok: true, json: async () => ['from-the-network'] } as unknown as Response;
   });
 
-  const [jvmPanels] = await fetchPanelsForDashboards([grafanaDashboard], testRun);
+  const [, jvmPanels] = await fetchPanelsForDashboards([perfDashboard, grafanaDashboard], testRun);
   const heap = jvmPanels!.find((p) => p.id === 40)!;
   expect(heap.metricNames).toBeUndefined();
   expect((await fetchSeriesForPanel(heap, testRun)).map((s) => s.metricName)).toEqual(['from-the-network']);
@@ -129,13 +129,14 @@ it('still asks when a row carries no metric_names at all — an API older than t
   mockFetch.mockImplementation(async (url: string) => {
     if (url.includes('/ds-metrics/available/')) {
       return { ok: true, json: async () => [
+        { dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_names: ['T01_Login'] },
         { dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 40, unit: 'bytes' },
       ] } as unknown as Response;
     }
     return { ok: true, json: async () => ['from-the-network'] } as unknown as Response;
   });
 
-  const [jvmPanels] = await fetchPanelsForDashboards([grafanaDashboard], testRun);
+  const [, jvmPanels] = await fetchPanelsForDashboards([perfDashboard, grafanaDashboard], testRun);
   const heap = jvmPanels!.find((p) => p.id === 40)!;
   expect(heap.metricNames).toBeUndefined();
   expect((await fetchSeriesForPanel(heap, testRun)).map((s) => s.metricName)).toEqual(['from-the-network']);
@@ -147,13 +148,14 @@ it('still asks when a row carries an empty metric_names, rather than answering w
   mockFetch.mockImplementation(async (url: string) => {
     if (url.includes('/ds-metrics/available/')) {
       return { ok: true, json: async () => [
+        { dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_names: ['T01_Login'] },
         { dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 40, metric_names: [] },
       ] } as unknown as Response;
     }
     return { ok: true, json: async () => ['from-the-network'] } as unknown as Response;
   });
 
-  const [jvmPanels] = await fetchPanelsForDashboards([grafanaDashboard], testRun);
+  const [, jvmPanels] = await fetchPanelsForDashboards([perfDashboard, grafanaDashboard], testRun);
   const heap = jvmPanels!.find((p) => p.id === 40)!;
   expect(heap.metricNames).toBeUndefined();
   expect((await fetchSeriesForPanel(heap, testRun)).map((s) => s.metricName)).toEqual(['from-the-network']);

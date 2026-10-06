@@ -218,6 +218,23 @@ interface AvailablePanelRow {
  * already happened whether or not both twins are picked: selecting only one of them still
  * yields a row carrying both dashboards' series. Computed from the selection alone, the guard
  * would catch the obvious case and miss exactly the quiet one.
+ *
+ * **Two blind spots, because the population is the picker's merged list and not
+ * `application_dashboards`.** Neither is closable from here, and both are the same symptom —
+ * a series offered on a panel that has none of it, drawing nothing, logging nothing:
+ *
+ * - **Dynatrace twins are deduped by label before they arrive.** The cards drop the artificial
+ *   Dynatrace rows and rebuild that half from `GET /dynatrace/queries/dashboards`, which is
+ *   `getDistinctDashboardLabels` — one entry per distinct label by construction. So this never
+ *   returns a Dynatrace label, and the forked-artificial-dashboard case (item 44) is NOT
+ *   covered despite being the same shape.
+ * - **Compare and Trends pass `hasData=true`, Graphs does not.** A twin with `ds_metrics` rows
+ *   for this run but no `ds_metric_statistics` row — a live run, or metrics that are all
+ *   ramp-up — is missing from the population those two cards hand in, so the label reads
+ *   unambiguous and the merged union goes to the visible twin.
+ *
+ * A real close needs dashboard identity in the response; see the TODOS.md entry for why adding
+ * `application_dashboard_id` to that GROUP BY is not free.
  */
 function ambiguousLabels(dashboards: ApplicationDashboard[]): Set<string> {
   const seen = new Set<string>();
@@ -370,6 +387,12 @@ export async function fetchSeriesForPanel(
     }
 
     // Already known from the panel list's one run-wide fetch — no request at all.
+    //
+    // On a LIVE run this is a snapshot taken when the dashboard selection last changed: a
+    // transaction that first reports at minute 40 does not appear until the user touches the
+    // dashboard column, where before this change every panel tick re-asked. The panel list
+    // beside it has always had exactly that staleness, from exactly this fetch, so the two are
+    // now consistent rather than one being fresher than the other.
     if (panel.metricNames) {
       return withAllAggregated(panel.metricNames);
     }

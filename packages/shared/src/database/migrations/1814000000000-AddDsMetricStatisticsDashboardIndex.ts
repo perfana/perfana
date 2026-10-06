@@ -19,12 +19,21 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *
  * The comment this replaces said to measure first and then add the index CONCURRENTLY out of
  * band. The measurement is above; the index is here instead, plain, following
- * 1807000000000-AddDsPanelsTestRunIndex: CONCURRENTLY cannot run inside the migration
- * transaction, and a COMMIT escape ends the whole migration batch. This table is NOT a
- * hypertable (`createHypertables` covers ds_metrics, requests_raw, requests_error,
- * transactions and virtual_users only), so none of 1813's per-chunk machinery — the
- * `transaction_per_chunk` build, `assertFullCoverage`, the refused CONCURRENTLY — applies
- * here, and a plain build that fails fast is genuinely safe.
+ * 1807000000000-AddDsPanelsTestRunIndex. This table is NOT a hypertable
+ * (`createHypertables` covers ds_metrics, requests_raw, requests_error, transactions and
+ * virtual_users only), so none of 1813's per-chunk machinery — the `transaction_per_chunk`
+ * build, `assertFullCoverage`, the refused CONCURRENTLY — applies here, and a plain build
+ * that fails fast is genuinely safe.
+ *
+ * **Do not reach for CONCURRENTLY here, and not for the usual reason.** "It cannot run inside
+ * the migration transaction" is only sometimes true: 1813 issues a bare `COMMIT` two
+ * migrations earlier, so under the production runner's `transaction: "all"` this one runs in
+ * autocommit on any deploy that carries 1813 in the same batch, and inside the transaction on
+ * a deploy already past it. The reason that holds either way is the failure mode: a
+ * CONCURRENTLY build that dies leaves an INVALID index behind, which `IF NOT EXISTS` then
+ * matches forever — the retry reports success and the index never serves a query. That is
+ * 1813's silent-partial-build trap in a different costume, and the plain build does not have
+ * it.
  *
  * The lock discipline is 1809's, on this same table, and it is the part that matters.
  * 1807 is the precedent for the SHAPE, not for this: `ds_panels` has no long-running writer,
