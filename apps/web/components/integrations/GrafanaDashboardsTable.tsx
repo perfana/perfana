@@ -43,16 +43,9 @@ import { useThemeMode } from '@/contexts/theme-context'
 import { fetchGrafanaDashboards, deleteGrafanaDashboard, GrafanaDashboard } from '@/lib/grafana-dashboards'
 import { GrafanaInstance } from '@/lib/grafana-instances'
 
-// Artificial dashboards created by performance-metrics pipeline don't exist in Grafana
-const ARTIFICIAL_DASHBOARD_UID_PREFIX = 'performance-test-metrics-'
-
-/**
- * Check if a dashboard is "artificial" (created by performance-metrics pipeline)
- * These dashboards don't actually exist in Grafana - they're synthetic entries for metrics
- */
-function isArtificialDashboard(dashboard: { uid?: string }): boolean {
-  return dashboard.uid?.startsWith(ARTIFICIAL_DASHBOARD_UID_PREFIX) ?? false
-}
+// ponytail: artificial rows (Dynatrace / performance-test placeholders) are filtered
+// server-side by GrafanaDashboardsService.findAll — never by uid prefix, which only ever
+// matched the performance-test half.
 
 interface GrafanaDashboardsTableProps {
   grafanaInstance: GrafanaInstance
@@ -136,8 +129,7 @@ export default function GrafanaDashboardsTable({
       case 'other':
         filtered = dashboards.filter(d =>
           !d.tags?.some(tag => tag.toLowerCase().includes('perfana-template')) &&
-          (!d.usedBySut || d.usedBySut.length === 0) &&
-          !isArtificialDashboard(d)
+          (!d.usedBySut || d.usedBySut.length === 0)
         )
         break
     }
@@ -279,8 +271,7 @@ export default function GrafanaDashboardsTable({
     ).length,
     other: dashboards.filter(d =>
       !d.tags?.some(tag => tag.toLowerCase().includes('perfana-template')) &&
-      (!d.usedBySut || d.usedBySut.length === 0) &&
-      !isArtificialDashboard(d)
+      (!d.usedBySut || d.usedBySut.length === 0)
     ).length,
   }), [dashboards])
 

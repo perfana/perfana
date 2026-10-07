@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.7] - 2026-10-07
+
+### Fixed
+- **Dynatrace and performance-test placeholders no longer appear in the Grafana dashboard list.** Integrations → Grafana → details listed every one of them beside the real dashboards — 131 of the 173 rows on a development database — and they cannot be opened in Grafana, because they do not exist there: Perfana writes them so its own metrics have somewhere to hang. They were meant to be hidden already, by a check for a metrics source that is not Grafana, but these rows are usually attached to no metrics source at all, so the check matched nothing. They are now recognised by having no Grafana dashboard definition, which every one of them lacks and no real dashboard does. Choosing an SLO on a Dynatrace host metric is unaffected: that path looks a dashboard up by its uid and still sees them.
+
+### Note for existing installations
+- Nothing to do.
+
 ## [0.2.97.6] - 2026-10-06
 
 ### Fixed

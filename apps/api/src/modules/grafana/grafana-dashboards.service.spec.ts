@@ -172,6 +172,28 @@ describe('GrafanaDashboardsService', () => {
         });
       });
 
+      it('excludes artificial rows on grafana_json as well as metrics_sources, and only when no uid is given', async () => {
+        // An artificial row's application_dashboards often carry metrics_source_id NULL
+        // (SUT-imported, and every Dynatrace host placeholder), so the metrics_sources
+        // NOT EXISTS matches nothing and the row sails through on its own. grafana_json
+        // is the airtight half. A by-uid lookup still returns them: the SLO dialog needs it.
+        queryBuilder.getMany.mockResolvedValue([mockDashboardEntity]);
+
+        await service.findAll(mockUserId, mockRoles);
+
+        const clause = (queryBuilder.andWhere as jest.Mock).mock.calls
+          .map(call => String(call[0]))
+          .find(sql => sql.includes('NOT EXISTS'));
+        expect(clause).toContain('gd.grafana_json IS NOT NULL');
+        expect(clause).toContain("ms.source_type != 'grafana'");
+
+        (queryBuilder.andWhere as jest.Mock).mockClear();
+        await service.findAll(mockUserId, mockRoles, { uid: 'dynatrace-dynatrace-host-metrics-x' });
+        expect((queryBuilder.andWhere as jest.Mock).mock.calls
+          .map(call => String(call[0]))
+          .some(sql => sql.includes('grafana_json'))).toBe(false);
+      });
+
       it('should filter dashboards by grafanaInstanceId', async () => {
         // Arrange
         const query: GrafanaDashboardQuery = {

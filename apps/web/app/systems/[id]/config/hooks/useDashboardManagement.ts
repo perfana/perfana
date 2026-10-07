@@ -192,11 +192,12 @@ export function useDashboardManagement(): UseDashboardManagementReturn {
       // section, not picked from this list. Offering them here invites choosing one and
       // getting a dashboard that resolves to nothing in Grafana.
       //
-      // Scoped to this picker deliberately. The SLO dialog reads a different endpoint
-      // (/grafana/application-dashboards) and MUST keep offering the artificial ones, since an
-      // SLO on a Dynatrace host metric is the point; and the by-uid lookup in useAddSLOForm
-      // hits /grafana/dashboards for those same rows. A filter in the API's findAll would
-      // break both.
+      // Belt and braces since v0.2.97.7: findAll now also drops any row with
+      // `grafana_json` NULL when no uid is given, which is every artificial row. This
+      // filter stays because the by-uid path is deliberately exempt — the SLO dialog reads
+      // /grafana/application-dashboards and MUST keep offering the artificial ones (an SLO
+      // on a Dynatrace host metric is the point), and useAddSLOForm's by-uid lookup hits
+      // /grafana/dashboards for those same rows. A filter on the uid branch would break both.
       //
       // `dashboard_uid` because getSourceType reads that name; this endpoint returns `uid`.
       // The helper prefers a linked MetricsSource's source_type and only falls back to the

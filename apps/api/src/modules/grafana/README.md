@@ -35,18 +35,26 @@ database 40 of 46 rows sit above 900000 and every one is a real dashboard. A
 
 Four things to know before writing code against this table:
 
-- **`findAll`'s artificial-row filter is deliberately loose. Do not tighten
-  it.** The `NOT EXISTS` on `metrics_sources.source_type != 'grafana'` is
-  wrapped in `if (!query.uid)`, so `GET /grafana/dashboards?uid=…` returns
-  artificial rows on purpose: the SLO dialog and `useAddSLOForm`'s by-uid
-  lookup both depend on them (an SLO on a Dynatrace host metric is the point).
-  The picker-side filter belongs in the client — `isArtificialDashboard` in
-  `apps/web/lib/metrics-source-utils.ts`, applied in `useDashboardManagement`.
-  `useDashboardManagement.artificialDashboards.test.ts` guards this.
-- The `source_type` predicate also misses artificial application dashboards
-  that arrived through a SUT import — those have `metrics_source_id` NULL, so
-  they join to no source type. Where a filter genuinely has to hold (the
-  grafana-sync restore sweep), `grafana_json` is the reliable signal.
+- **`findAll` hides artificial rows on `grafana_json`, and the `uid` branch is
+  exempt on purpose.** Both halves of the filter — `gd.grafana_json IS NOT NULL`
+  and the `NOT EXISTS` on `metrics_sources.source_type != 'grafana'` — are
+  wrapped in `if (!query.uid)`, so `GET /grafana/dashboards?uid=…` still returns
+  artificial rows: the SLO dialog and `useAddSLOForm`'s by-uid lookup both depend
+  on them (an SLO on a Dynatrace host metric is the point). Do not extend either
+  predicate to the uid branch. The client-side `isArtificialDashboard`
+  (`apps/web/lib/metrics-source-utils.ts`, applied in `useDashboardManagement`)
+  stays as belt and braces for that exemption;
+  `useDashboardManagement.artificialDashboards.test.ts` guards it.
+- **`grafana_json` carries that filter, not `source_type`** (v0.2.97.7). The
+  `source_type` predicate alone hid almost nothing: an artificial row's
+  `application_dashboards` usually have `metrics_source_id` NULL — every
+  SUT-imported one, and every Dynatrace host placeholder on the dev database —
+  so the join matches no row and the dashboard sails through. On that database
+  131 of 173 rows were artificial and all 131 were being listed. `grafana_json`
+  is NULL on every artificial row and set on every real one, which is why the
+  grafana-sync restore sweep and `filterCollectableGrafanaDashboards` already
+  read it. The `source_type` clause is kept for a real dashboard repointed at a
+  non-Grafana source.
 - A dashboard `uid` is unique only *within* a Grafana instance, so a lookup by
   uid must also scope by `grafana_instance_id` — `remove()` included.
 - **The two tables disagree about `grafana_instance_id`, on purpose.** An

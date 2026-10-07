@@ -119,11 +119,19 @@ export class GrafanaDashboardsService {
       }
 
       // Exclude synthetic dashboards created for non-Grafana sources.
-      // Join through application_dashboards → metrics_sources to check source_type.
-      // Only include dashboards linked to a MetricsSource with source_type = 'grafana'
-      // (or not linked to any MetricsSource — legacy data).
+      //
+      // `grafana_json IS NOT NULL` is the airtight half: an artificial row has no
+      // counterpart in any Grafana, so nothing ever wrote JSON for it. The
+      // metrics_sources NOT EXISTS below is kept for a real dashboard that has been
+      // repointed at a non-Grafana source, but it cannot carry this on its own —
+      // an artificial row's application_dashboards often have metrics_source_id
+      // NULL (SUT-imported, and every Dynatrace host placeholder on the dev DB),
+      // so the join matches nothing and the row sails through.
+      //
+      // Both only apply when no `uid` is supplied. A by-uid lookup deliberately
+      // still returns them: the SLO dialog and useAddSLOForm depend on it.
       if (!query.uid) {
-        queryBuilder.andWhere(`NOT EXISTS (
+        queryBuilder.andWhere(`gd.grafana_json IS NOT NULL AND NOT EXISTS (
           SELECT 1 FROM application_dashboards ad
           JOIN metrics_sources ms ON ms.id = ad.metrics_source_id
           WHERE ad.grafana_dashboard_id = gd.id
