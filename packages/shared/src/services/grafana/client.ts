@@ -329,7 +329,7 @@ export class GrafanaClient {
    */
   async getDatasourceByUid(uid: string): Promise<{ id: number; uid: string; name: string; type: string } | null> {
     try {
-      const response = await axios.get(`${this.originUrl}/api/datasources/uid/${uid}`, {
+      const response = await axios.get(`${this.originUrl}/api/datasources/uid/${encodeURIComponent(uid)}`, {
         headers: {
           'Authorization': `Bearer ${this.grafanaConfig.apiKey}`,
           'Accept': 'application/json',
