@@ -155,7 +155,7 @@ describe('templated datasource (${datasource})', () => {
     expect(requestedUids).toEqual(['prometheus-main']);
   });
 
-  test.each(['interval', 'timeFilter', 'system_under_test', 'test_environment'])(
+  test.each(['interval', '__interval', 'timeFilter', 'system_under_test', 'test_environment'])(
     'refuses to let a datasource variable named %s overwrite the run variable',
     async (reservedName) => {
       // Every resolved variable is substituted into the stored query. A dashboard author who
@@ -173,6 +173,14 @@ describe('templated datasource (${datasource})', () => {
 
       expect(docs[0].query_variables[reservedName]).not.toBe('prometheus-main');
       expect(requestedUids).toEqual([]);
+      // The residue of refusing it: the ref is left in place, so the ordinary substitution
+      // loop replaces it with the RUN's value and the panel ends up with a nonsense uid and
+      // the generic map-miss warning. Strictly better than the run's own variable being
+      // overwritten for every query on the dashboard, and pinned here so it stays deliberate.
+      const query = docs[0].requests[0].request_body.queries[0];
+      expect((query.datasource as { uid: string }).uid).toBe(
+        docs[0].query_variables[reservedName]
+      );
     }
   );
 

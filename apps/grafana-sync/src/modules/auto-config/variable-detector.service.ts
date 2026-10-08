@@ -133,11 +133,32 @@ export class VariableDetectorService {
         return [];
       }
     } else if (typeof templatingVariable.datasource === 'string') {
-      // Datasource specified as string (name)
-      datasource = await this.grafanaApiService.getDatasourceByNameWithLabel(
-        grafanaInstance.label,
-        templatingVariable.datasource,
-      );
+      // Datasource specified as a bare string. On a legacy (Grafana 8 schema) dashboard that
+      // is sometimes `"$datasource"` rather than a name, which the by-name lookup would 404 on
+      // — the same dead end the object arm above exists to avoid. `resolvePanelDatasource` in
+      // store-dashboard.service.ts treats this shape as real, so resolve it the same way.
+      const refName = parseTemplateVariableRef(templatingVariable.datasource);
+      if (refName) {
+        const resolvedUid = this.resolveTemplatedDatasourceUid(
+          grafanaDashboard,
+          templatingVariable.datasource,
+        );
+        if (!resolvedUid) {
+          this.logger.warn(
+            `Datasource for variable "${templatingVariable.name}" references "${templatingVariable.datasource}", which did not resolve, skipping query`,
+          );
+          return [];
+        }
+        datasource = await this.grafanaApiService.getDatasourceByUidWithLabel(
+          grafanaInstance.label,
+          resolvedUid,
+        );
+      } else {
+        datasource = await this.grafanaApiService.getDatasourceByNameWithLabel(
+          grafanaInstance.label,
+          templatingVariable.datasource,
+        );
+      }
     } else {
       this.logger.warn(`No datasource specified for variable "${templatingVariable.name}"`);
       return [];
@@ -195,7 +216,7 @@ export class VariableDetectorService {
     query: string,
   ): Promise<string[]> {
     const queryUrl =
-      `/api/datasources/proxy/uid/${datasource.uid}/query?` +
+      `/api/datasources/proxy/uid/${encodeURIComponent(datasource.uid)}/query?` +
       `db=${datasource.database}&q=${encodeURIComponent(query)}`;
 
     const variableValues: string[] = [];
@@ -252,10 +273,12 @@ export class VariableDetectorService {
       );
 
       queryUrl =
-        `/api/datasources/proxy/uid/${datasource.uid}/api/v1/series?` +
+        `/api/datasources/proxy/uid/${encodeURIComponent(datasource.uid)}/api/v1/series?` +
         `match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
     } else {
-      queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/api/v1/label/${variable.name}/values`;
+      // variable.name is dashboard-controlled; a `/`, `?` or `#` in it rewrites the proxied
+      // path. apps/api's twin of this request encodes its segment the same way.
+      queryUrl = `/api/datasources/proxy/uid/${encodeURIComponent(datasource.uid)}/api/v1/label/${encodeURIComponent(variable.name)}/values`;
     }
 
     const variableValues: string[] = [];

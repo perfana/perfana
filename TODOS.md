@@ -2949,7 +2949,7 @@ here on an old-data index is not proof either.
 open, smaller" item.
 **Why:** `resolvePanelDatasource` (`apps/grafana-sync/src/modules/grafana-sync/store-dashboard.service.ts`)
 opens with `if (ds == null || ds === '') throw new Error('No datasource found in panel')`, and
-`storeDashboard` now picks `graphPanels.find(p => p.datasource) ?? graphPanels[0]`. So a
+`storeDashboard` now picks `graphPanels.find(namesADatasource) ?? graphPanels[0]`. So a
 dashboard with one graph panel that inherits Grafana's org default still fails wholesale, for
 a column (`grafana_dashboards.datasource_type`) that is display-only.
 **Why P3:** every panel Perfana collects from in practice names its datasource, and the

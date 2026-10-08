@@ -282,6 +282,11 @@ const TEMPLATE_REF_RE = /^\$\{([^}]+)\}$|^\$([A-Za-z_][A-Za-z0-9_]*)$/;
  * called `timeFilter` or `interval` would otherwise replace the run's own value and produce a
  * malformed or wrong-scoped query with nothing logged. `variable-discovery.service.ts` already
  * filters the first two out of the templating list for the same reason.
+ *
+ * Residue: refusing the variable leaves its ref in the panel, so substitution replaces it with
+ * the run's own value and the panel ends up with a uid like `15s` and the generic
+ * "not found in datasource map" warning rather than the actionable unresolved-variable one.
+ * That is the intended trade — the alternative was corrupting every query on the dashboard.
  */
 const RESERVED_QUERY_VARIABLES = new Set([
   'system_under_test',
