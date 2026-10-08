@@ -519,12 +519,27 @@ jobs:
 
       # The workspaces are not otherwise covered: before this, the only repo-level npm
       # projects were the root package.json and docs-site.
+      # The runner's default node is v22 and package.json requires >=24.0.0 <25.0.0, so
+      # `npm ci` fails EBADENGINE without this. NODE_VERSION is not readable here (it is a
+      # Dockerfile ARG), so the major is stated; the engines range is what has to agree.
+      - name: Set up Node
+        if: steps.gate.outputs.has_token == 'true' && github.event_name == 'push'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Monitor app dependencies from the source tree
         if: steps.gate.outputs.has_token == 'true' && github.event_name == 'push'
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
-          npm ci --ignore-scripts
+          # Warn rather than fail: this job never gates a release, and the images are already
+          # pushed by the time it runs. The previous `|| echo` guarded only the snyk call, so
+          # an npm failure aborted the step under `bash -e`.
+          if ! npm ci --ignore-scripts; then
+            echo "::warning::npm ci failed — skipping the source-tree monitor"
+            exit 0
+          fi
           # --exclude keeps agent worktrees and Next.js build output out; both hold copies of
           # the repo's own manifests and each copy becomes its own Snyk project.
           snyk monitor --all-projects --exclude=.claude,.next \

@@ -70,10 +70,17 @@ RUN apt-get update \
 # ================================================================================================
 # Distroless: no shell, no package manager. Pure-JS TypeORM runner only needs
 # node. distroless ships the `nonroot` user (uid 65532).
+# Same node overlay as the root Dockerfile: distroless nodejs24 still ships 24.14.0, four
+# months after 24.18.1 closed a critical Directory Traversal (SNYK-UPSTREAM-NODE-18507940).
+# This file carries its own copy of the distroless base, so it needs its own copy of the fix —
+# v0.2.97.11 patched only the root Dockerfile and left this image on the vulnerable node.
+FROM node:${NODE_VERSION}-bookworm-slim AS node-patch
+
 FROM gcr.io/distroless/nodejs24-debian12:nonroot AS migrations
 
 # Overlay patched libssl3 (see openssl-patch stage above)
 COPY --from=openssl-patch /patch/ /
+COPY --from=node-patch /usr/local/bin/node /nodejs/bin/node
 
 WORKDIR /app
 

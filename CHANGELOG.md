@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.13] - 2026-10-08
+
+### Security
+- **The remaining two container images now carry the fixed Node.js runtime as well.** 0.2.97.11 updated the runtime for the API, web, worker and Grafana sync images, but missed the other two, and the automated scan of the 0.2.97.12 release is what showed it. The migration image is built from its own file, which had its own copy of the old setup; the report image cannot use the same minimal base at all, because it needs a browser to render PDFs, and the variant it was pinned to had stopped receiving Node updates at a version below the fix. Both are now on Node 24.21.0. The report image reports no known vulnerabilities at all; the migration image is left with the same single Debian GCC finding as the others, for which no fix exists.
+- The Alpine base of the report image moves from 3.22 to 3.23 to get that Node version, which also updates its bundled browser. Report rendering was verified end to end on the new base.
+
+### Fixed
+- **The automatic Snyk registration no longer fails on its second step.** Registering the application dependencies needs the project's own Node version to install them, and the build runner defaults to an older one, so that step stopped before it began. It now selects the right version, and a dependency-install problem is reported as a warning instead of failing the step — the images are already published by then. Registration of the images themselves was unaffected and has been working since 0.2.97.12.
+
+### Note for existing installations
+- Nothing to do; the next release carries both runtimes.
+
 ## [0.2.97.12] - 2026-10-08
 
 ### Changed

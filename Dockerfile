@@ -18,8 +18,12 @@
 # ARGS AND METADATA
 # ================================================================================================
 ARG NODE_VERSION=24
-# alpine 3.22 ships Node 20.20.x (CVE-2025-55131 fix); 3.20/3.21 are stuck on <20.20.0
-ARG ALPINE_VERSION=3.22
+# Pin the alpine variant deliberately: the node team stops refreshing a variant once the
+# next alpine lands, so the tag freezes at whatever node it last built. node:24-alpine3.22
+# froze at 24.16.0, below the 24.18.1 that closed a critical Directory Traversal
+# (SNYK-UPSTREAM-NODE-18507940) — which reached production in the perfana-report image,
+# the one stage that cannot use distroless. 3.23 ships 24.21.0.
+ARG ALPINE_VERSION=3.23
 ARG APP_VERSION=0.1.0
 ARG BUILD_DATE
 ARG VCS_REF
