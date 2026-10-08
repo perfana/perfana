@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.12] - 2026-10-08
+
+### Changed
+- **The automatic Snyk registration added in 0.2.97.10 now always files its reports in the same place.** It previously relied on whichever organisation the configured credential happened to default to, so with a personal credential the reports could land in a different organisation than the one being watched. The destination is now set explicitly in the build configuration.
+- **It can also be checked without cutting a release.** Running the image build manually with pushing enabled performs a read-only check that the credential works and the images can be read, and reports which organisation it reached. It records nothing, so a manual check cannot overwrite the report for a released version.
+
+### Note for existing installations
+- Nothing to do.
+
 ## [0.2.97.11] - 2026-10-08
 
 ### Security
