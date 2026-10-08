@@ -251,7 +251,7 @@ export class GrafanaClientService {
 
   async getDatasource(grafanaInstance: GrafanaInstance, datasourceUid: string): Promise<GrafanaDatasource> {
     try {
-      const endpoint = `/api/datasources/uid/${datasourceUid}`;
+      const endpoint = `/api/datasources/uid/${encodeURIComponent(datasourceUid)}`;
       const datasource = await this.grafanaCall(grafanaInstance, endpoint) as GrafanaDatasource;
       return datasource;
     } catch (error) {

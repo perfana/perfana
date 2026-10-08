@@ -30,6 +30,26 @@ interface DashboardTemplatingVariable {
   query?: string | { query?: string };
 }
 
+/**
+ * Whether a panel actually names a datasource. `panel.datasource` is truthy for `{}` and for
+ * `{ foo: 1 }`, and resolvePanelDatasource throws on those — so a bare object would shadow a
+ * sibling panel that really does name one and still cost the whole dashboard.
+ */
+function namesADatasource(panel: { datasource?: unknown }): boolean {
+  const ds = panel.datasource;
+  if (typeof ds === 'string') {
+    return ds.length > 0;
+  }
+  if (ds && typeof ds === 'object') {
+    const o = ds as { uid?: unknown; type?: unknown };
+    return (
+      (typeof o.uid === 'string' && o.uid.length > 0) ||
+      (typeof o.type === 'string' && o.type.length > 0)
+    );
+  }
+  return false;
+}
+
 @Injectable()
 export class StoreDashboardService {
   private readonly logger = new Logger(StoreDashboardService.name);
@@ -178,10 +198,14 @@ export class StoreDashboardService {
         grafanaDashboardSummary.uid,
       );
 
-      // Extract first graph panel to determine datasource
-      const firstGraphPanel = dashboardDetails.dashboard.panels?.find((panel: any) =>
+      // Extract the first graph panel that names a datasource. A panel with no datasource key
+      // inherits Grafana's org default, which the dashboard JSON does not name — picking it
+      // threw "No datasource found in panel" and cost the whole dashboard, even though
+      // datasourceType is display-only and a sibling panel usually carries it (issue #657).
+      const graphPanels = (dashboardDetails.dashboard.panels ?? []).filter((panel: any) =>
         ['graph', 'timeseries', 'table', 'flamegraph'].includes(panel.type),
       );
+      const firstGraphPanel = graphPanels.find(namesADatasource) ?? graphPanels[0];
 
       if (!firstGraphPanel) {
         throw new Error(`No graph panel found in dashboard ${grafanaDashboardSummary.title}`);

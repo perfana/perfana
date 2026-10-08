@@ -1200,3 +1200,44 @@ enqueues are batched (`enqueueTransactionStatsRollupBulk`) rather than looped; a
 entity manager, an escaping rejection is an unhandled rejection that terminates the process — so
 everything in that hook logs and swallows.
 
+
+### A templated datasource uid is resolved from the dashboard, not from the app dashboard
+
+A Grafana dashboard can leave the datasource to a `type: 'datasource'` template variable, so its
+panels and targets carry `"uid": "${datasource}"` verbatim in `grafana_json`. Nothing else in the
+schema holds the real uid: `grafana_dashboards.datasource_type` is display-only, and the uid that
+drives collection is whatever `createPanelDocuments` writes into
+`ds_panels.requests[].request_body.queries[].datasource.uid`.
+
+`resolveDatasourceVariables` (`apps/worker/src/pipelines/panels/helpers.ts`) reads the variable's
+`current.value` — which on Grafana 9+ *is* the uid; its `query` is only the plugin-type filter and
+is never substitutable. Three things about where that value is applied:
+
+1. **It seeds `queryVariables` before the application dashboard's own variables**, so a variable
+   named `datasource` configured on the app dashboard in Perfana still wins. That manual override
+   was the pre-0.2.97.9 workaround and has to keep working — there is a test on the precedence,
+   because spread ordering is the only thing enforcing it. Since 0.2.97.9 grafana-sync's
+   `variable-discovery.service.ts` writes that variable itself for auto-configured dashboards
+   (`case 'datasource'`), so on those the app-dashboard row is normally the one that applies.
+   **Consequence worth knowing:** that stored row outranks the worker's own read, so when the
+   dropdown's selection changes in Grafana the row keeps pointing at the old datasource until
+   auto-config runs for that system again. Both halves read the same `current.value`; the
+   grafana-sync one reads it out of `grafana_json` because `extractTemplatingVariables` drops
+   `current` and a stored dashboard is only re-extracted when it changes in Grafana. The two
+   four-line readers are deliberately duplicated rather than shared — see TODOS.md, "The
+   `current.value` reader and the template-ref regex exist in two apps".
+2. **The pre-flight uid collection resolves the ref too.** That loop builds the `uid → {id}` map
+   that `createPanelRequests` looks up *after* substitution. Collect the raw `${datasource}` and
+   the map is keyed on a string no query will ever carry: `getDatasourceByUid('${datasource}')`
+   404s, the lookup misses, and `datasourceId` silently degrades from a number to the template
+   string. An unresolvable ref is now skipped rather than sent to Grafana. The loop runs per
+   *Grafana* dashboard, so it also walks that dashboard's application dashboards and collects
+   their override uids — without that, an override resolves in the target and then misses this
+   map, which is the same degradation by a different door.
+3. **Grafana 8 and earlier stored the datasource *name* in `current.value`.** Such a value misses
+   the map and falls back to the string uid, exactly as before the fix — there is no lookup by
+   name on this path.
+
+The symptom when none of this resolves is not an error: `/api/ds/query` answers
+`{"message":"Data source not found"}` per query and the run records nothing for that dashboard.
+The tell is the worker warning naming the panel and the unresolved variable.

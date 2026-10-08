@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.9] - 2026-10-08
+
+### Fixed
+- **Metrics are now collected from dashboards whose panels pick their datasource from a dropdown.** Importing them was fixed in 0.2.97.8, but every query still went to Grafana with the dropdown's name — `${datasource}` — where Grafana expects a datasource identifier, so Grafana rejected all of them and the run recorded nothing for the dashboard. The identifier the dropdown is set to is now read from the dashboard and used, which is what Grafana itself does — including when the dropdown allows several selections, in which case the first applies. A variable of that name on the dashboard's configuration in Perfana still wins, so the 0.2.97.8 workaround keeps working, and that override is now resolved completely rather than only in the query. A dropdown whose selection the dashboard does not record is now reported in the worker log, naming the panel and what to add, instead of failing silently.
+- **An auto-configured dashboard now carries its datasource dropdown as an editable variable.** The dropdown's current selection is written onto the application dashboard alongside the other variables, so it can be changed per system and environment, or pinned from the auto-config profile — useful when the same dashboard is collected from more than one Prometheus. Variable discovery previously skipped the dropdown entirely and logged that its kind was not supported.
+- **A dashboard whose first graph panel does not name a datasource now imports.** Such a panel takes whatever datasource the Grafana instance uses by default, which the dashboard itself does not name — so Perfana gave up on the whole dashboard. It now reads the kind from the first panel that does name one.
+
+### Security
+- **A datasource identifier taken from a dashboard can no longer rewrite the path of a Grafana API request.** Perfana asks Grafana about a datasource by putting its identifier into a URL, and the identifier comes from the dashboard — which anyone who can edit that dashboard controls. A crafted one could point the request at a different Grafana endpoint, using Perfana's own credentials, which are usually broader than those of the person editing the dashboard. Identifiers and names are now escaped before they go into the URL at every one of these calls. Nothing changes for an ordinary datasource.
+
+### Note for existing installations
+- Dashboards affected by the first item start collecting on the next test run. To fill in a run that has already finished, re-evaluate it with **force re-fetch** — a plain re-analyse will not help, because the run's own data collection was recorded as complete (Grafana rejected each query individually rather than failing the range) and the collection stages are skipped. Dashboards affected by the last item are picked up by the next sync, within a minute.
+- Auto-configured dashboards gain the datasource variable the next time their system runs a test; the row is updated in place and no existing variable or SLO is touched.
+- A dashboard on which *no* panel names a datasource is still not imported.
+
 ## [0.2.97.8] - 2026-10-08
 
 ### Fixed

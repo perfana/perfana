@@ -574,6 +574,202 @@ describe('StoreDashboardService', () => {
       expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalled();
     });
 
+    it('should skip a graph panel with no datasource key instead of failing the dashboard', async () => {
+      // A panel without a datasource key inherits Grafana's org default, which the dashboard
+      // JSON does not name. Perfana only persists the type, so a sibling panel answers it.
+      const inheritedDefault = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            { id: 1, title: 'Inherits the default', type: 'timeseries' },
+            {
+              id: 2,
+              title: 'Names its datasource',
+              type: 'timeseries',
+              datasource: { uid: '${datasource}', type: 'prometheus' },
+            },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(inheritedDefault);
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
+      );
+
+      expect(result.datasourceType).toBe('prometheus');
+    });
+
+    it('should still fail when no graph panel names a datasource at all', async () => {
+      // The `?? graphPanels[0]` fallback keeps the original diagnosis: a dashboard whose only
+      // graph panels inherit the org default has no type for Perfana to persist.
+      const allInherited = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            { id: 1, title: 'Inherits the default', type: 'timeseries' },
+            { id: 2, title: 'Also inherits', type: 'graph' },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(allInherited);
+
+      await expect(
+        service.storeDashboard(mockGrafanaInstance as GrafanaInstance, dashboardSummary, false),
+      ).rejects.toThrow('No datasource found in panel');
+
+      expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalled();
+      expect(dashboardRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should treat an empty-string panel datasource as not naming one', async () => {
+      const emptyDatasource = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            { id: 1, title: 'Empty datasource', type: 'timeseries', datasource: '' },
+            {
+              id: 2,
+              title: 'Names its datasource',
+              type: 'timeseries',
+              datasource: { uid: 'prometheus-uid', type: 'prometheus' },
+            },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(emptyDatasource);
+      jest
+        .spyOn(grafanaApiService, 'getDatasourceByUid')
+        .mockResolvedValue({ type: 'prometheus', name: 'Prometheus' } as any);
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
+      );
+
+      expect(result.datasourceType).toBe('prometheus');
+      expect(grafanaApiService.getDatasourceByUid).toHaveBeenCalledWith(
+        'test-instance-id',
+        'prometheus-uid',
+      );
+    });
+
+    it('should use the first graph panel that names a datasource when several disagree', async () => {
+      // datasourceType is display-only and the table holds one value, so the first
+      // datasource-bearing graph panel decides it. Pinned so a reorder is a visible change.
+      const mixed = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            { id: 1, title: 'Row-ish panel', type: 'text', datasource: { type: 'loki', uid: 'l' } },
+            { id: 2, title: 'Logs', type: 'table', datasource: { uid: 'loki-uid', type: 'loki' } },
+            {
+              id: 3,
+              title: 'Metrics',
+              type: 'timeseries',
+              datasource: { uid: 'prometheus-uid', type: 'prometheus' },
+            },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(mixed);
+      jest
+        .spyOn(grafanaApiService, 'getDatasourceByUid')
+        .mockImplementation(async (_instanceId: string, uid: string) =>
+          uid === 'loki-uid'
+            ? ({ type: 'loki', name: 'Loki' } as any)
+            : ({ type: 'prometheus', name: 'Prometheus' } as any),
+        );
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
+      );
+
+      // The `text` panel is not a graph type and must not win it.
+      expect(result.datasourceType).toBe('loki');
+      expect(grafanaApiService.getDatasourceByUid).toHaveBeenCalledWith(
+        'test-instance-id',
+        'loki-uid',
+      );
+    });
+
+    it('does not let a bare `datasource: {}` shadow a sibling that names one', async () => {
+      // `{}` is truthy, so a plain `panel.datasource` test would pick this panel and then
+      // throw on it — failing the dashboard even though panel 2 carries a real datasource.
+      const bareObject = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            { id: 1, title: 'Bare object', type: 'timeseries', datasource: {} },
+            {
+              id: 2,
+              title: 'Names its datasource',
+              type: 'timeseries',
+              datasource: { uid: '${datasource}', type: 'prometheus' },
+            },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(bareObject);
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
+      );
+
+      expect(result.datasourceType).toBe('prometheus');
+    });
+
+    it('still fails when EVERY graph panel inherits the org default', async () => {
+      // The `?? graphPanels[0]` arm. Grafana's org default is not named anywhere in the
+      // dashboard JSON, so there is nothing to resolve and the dashboard is refused. Asserted
+      // so the limitation is pinned rather than implied — see TODOS.md, "Templated datasource".
+      const allInherit = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            { id: 1, title: 'Inherits the default', type: 'timeseries' },
+            { id: 2, title: 'Also inherits', type: 'timeseries' },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(allInherit);
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      await expect(
+        service.storeDashboard(mockGrafanaInstance as GrafanaInstance, dashboardSummary, false),
+      ).rejects.toThrow('No datasource found in panel');
+      expect(dashboardRepo.save).not.toHaveBeenCalled();
+    });
+
     it('should fall back to the first target datasource type', async () => {
       const templated = {
         ...dashboardDetails,

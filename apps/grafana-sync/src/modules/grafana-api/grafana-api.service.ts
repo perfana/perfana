@@ -240,7 +240,7 @@ export class GrafanaApiService {
    */
   async getDatasourceByUid(instanceId: string, datasourceUid: string): Promise<any> {
     const instance = await this.getInstance(instanceId);
-    return this.get(instance, `/api/datasources/uid/${datasourceUid}`);
+    return this.get(instance, `/api/datasources/uid/${encodeURIComponent(datasourceUid)}`);
   }
 
   /**
@@ -248,7 +248,7 @@ export class GrafanaApiService {
    */
   async getDatasourceByName(instanceId: string, datasourceName: string): Promise<any> {
     const instance = await this.getInstance(instanceId);
-    return this.get(instance, `/api/datasources/name/${datasourceName}`);
+    return this.get(instance, `/api/datasources/name/${encodeURIComponent(datasourceName)}`);
   }
 
   /**
@@ -344,7 +344,7 @@ export class GrafanaApiService {
    */
   async getDatasourceByUidWithLabel(label: string, datasourceUid: string): Promise<any> {
     const instance = await this.getInstanceByLabel(label);
-    return this.get(instance, `/api/datasources/uid/${datasourceUid}`);
+    return this.get(instance, `/api/datasources/uid/${encodeURIComponent(datasourceUid)}`);
   }
 
   /**
@@ -352,7 +352,7 @@ export class GrafanaApiService {
    */
   async getDatasourceByNameWithLabel(label: string, datasourceName: string): Promise<any> {
     const instance = await this.getInstanceByLabel(label);
-    return this.get(instance, `/api/datasources/name/${datasourceName}`);
+    return this.get(instance, `/api/datasources/name/${encodeURIComponent(datasourceName)}`);
   }
 
   /**

@@ -2939,6 +2939,108 @@ here on an old-data index is not proof either.
 
 ---
 
+## Templated datasource
+
+### A dashboard where NO panel names a datasource still does not import
+
+**Priority:** P3
+**Origin:** Plan-completion audit during /ship on `fix/657-templated-datasource-collection`
+(2026-10-08, v0.2.97.9), which closed the sibling-panel half of issue #657's "Also still
+open, smaller" item.
+**Why:** `resolvePanelDatasource` (`apps/grafana-sync/src/modules/grafana-sync/store-dashboard.service.ts`)
+opens with `if (ds == null || ds === '') throw new Error('No datasource found in panel')`, and
+`storeDashboard` now picks `graphPanels.find(namesADatasource) ?? graphPanels[0]`. So a
+dashboard with one graph panel that inherits Grafana's org default still fails wholesale, for
+a column (`grafana_dashboards.datasource_type`) that is display-only.
+**Why P3:** every panel Perfana collects from in practice names its datasource, and the
+sibling-panel case — the common shape — now imports. Recorded as remaining in the v0.2.97.9
+CHANGELOG and in CLAUDE.md item 52.
+**What to do:** the org default is only discoverable through `GET /api/datasources` (look for
+`isDefault`), which needs an admin-scoped Grafana token. Either call it once per instance and
+cache, or stop treating an unresolvable type as fatal and store the dashboard with
+`datasource_type` NULL — but note the second option swallows a genuine Grafana API failure,
+which is why v0.2.97.9 did not take it (three existing specs assert that a transport error
+still fails the dashboard).
+
+### A panel that inherits the org default imports but stays invisible to every picker
+
+**Priority:** P3
+**Origin:** Red team + adversarial review during /ship on
+`fix/657-templated-datasource-collection` (2026-10-08, v0.2.97.9) — both found it independently.
+**Why:** v0.2.97.9 made such a dashboard import by picking the first graph panel that *names* a
+datasource, but `extractPanels` (`store-dashboard.service.ts`) still filters on
+`panel.datasource`, so the panel that used to fail the import is dropped from
+`grafana_dashboards.panels` — the list the SLO dialog, graph presets and report series all read.
+The worker reads `grafana_json` instead and `shouldStorePanel` passes a panel whose
+`datasourceType` is null, so that panel **is** collected. Net: metrics exist for a panel no
+picker offers and no SLO can target, with nothing logged. Issue #18's shape, by a new door.
+**Why it is not fixed in v0.2.97.9:** the two options are not equivalent and the choice is a
+real one. Dropping the filter admits datasource-less panels into a list the web pickers assume
+is datasource-bearing; keeping it means teaching the worker to skip them, which loses metrics
+that are currently collected. Previously unreachable because the whole dashboard failed.
+**What to do:** pick one and assert the two sides agree in a test.
+
+### Repeat-by-datasource expands to a single panel
+
+**Priority:** P4
+**Origin:** Red team + adversarial review during /ship on
+`fix/657-templated-datasource-collection` (2026-10-08).
+**Why:** `firstCurrentValue` (worker) and `datasourceVariableUid` (grafana-sync) both take the
+first selection of a multi-select datasource variable, on the stated grounds that Perfana
+collects one series per panel. That does not hold for a panel with `repeat: 'datasource'`, which
+is the main reason Grafana offers multi-select on a datasource variable at all: the repeat
+expansion reads its values from `appDashboard.variables[].values`, and grafana-sync now writes
+a one-element array there, so the dashboard expands to one panel and silently collects from the
+first datasource only.
+**Why P4:** before v0.2.97.9 such a dashboard collected nothing at all, so this is a smaller
+gap than what it replaced, and no deployment is known to use the pattern.
+**What to do:** decide whether `datasourceVariableUid` should write the whole array, and make
+the pre-flight uid collection resolve every value (it already loops over `variable.values`).
+
+### The new override-uid collection is not instance-scoped
+
+**Priority:** P4
+**Origin:** Red team + adversarial review during /ship on
+`fix/657-templated-datasource-collection` (2026-10-08). Same class as the "First-row selection"
+section above.
+**Why:** the override loop in `createPanelDocuments` matches application dashboards on
+`dashboard_uid` alone, and a dashboard uid is unique only within a Grafana instance (20 of 152
+uids on the dev database are duplicated across instances). Instance A's pass can therefore pick
+up instance B's override uid and look it up against instance A's Grafana. Benign today — the
+maps are per-instance, so the usual outcome is a 404 and a wasted call — but when the same uid
+exists on both instances pointing at different datasources it yields a numeric id for the wrong
+datasource with no warning.
+**Why P4:** `matchingAppDashboards` immediately below has had the same shape for far longer, so
+this is a new instance of an existing hole rather than a new hole; fixing only the new loop
+would be the half-fix shape.
+**What to do:** add `ad.grafana_instance_id` to the SELECT in
+`getApplicationDashboardsForTestRun`, add it to the `ApplicationDashboard` interface, and
+require it to match (treating NULL as a match) in BOTH the override loop and
+`matchingAppDashboards`.
+
+### The `current.value` reader and the template-ref regex exist in two apps
+
+**Priority:** P4
+**Origin:** Maintainability + simplification specialists during /ship on
+`fix/657-templated-datasource-collection` (2026-10-08) — two independent agents converged on it.
+**Why:** `firstCurrentValue` (`apps/worker/src/pipelines/panels/helpers.ts`) and
+`getDatasourceVariableUid` (`apps/grafana-sync/src/modules/auto-config/variable-discovery.service.ts`)
+apply the same rule — flatten a multi-select `current.value` to its first element, reject a
+non-string or empty value — in four lines each. Separately, the worker's `TEMPLATE_REF_RE` is
+the exact alternation of the two regexes `parseTemplateVariableRef`
+(`store-dashboard.service.ts`) already uses. A change to the ref grammar (Grafana's
+`${name:raw}` format suffix, which `[^}]+` currently captures as part of the variable name in
+both copies) has to be made twice or the two apps disagree about whether a uid is templated.
+**Why P4 and not done in v0.2.97.9:** `packages/shared` is the right home and
+`check:workspace-exports` makes it safe, but it costs a new file, a declared `exports` subpath,
+two imports and a shared rebuild for the api type-check — more moving parts than eight
+duplicated lines. The two readers also take different sources (`grafana_json` vs the entity),
+so they are not drop-in interchangeable.
+**What to do:** if a third caller appears, or the ref grammar changes, extract
+`firstCurrentValue` + the ref parser to `packages/shared/src/utils` behind a declared export
+and keep the per-app wrappers thin.
+
+
 ## Completed
 
 ### `findDashboardByLabel` matches a label across every system and environment
