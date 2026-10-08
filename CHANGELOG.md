@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.11] - 2026-10-08
+
+### Security
+- **The Node.js runtime in the container images is no longer four months out of date.** The images are built on Google's distroless Node 24 base, and that base was still shipping Node 24.14.0 — four months after 24.18.1 closed a critical path-traversal flaw and eight further high-severity ones. Because the base is referenced by a moving tag, rebuilding did not help: there was nothing newer to pull. The fixed Node binary is now taken from the official Debian Node image and laid over the base, which is exactly what this project already does for OpenSSL for the same reason. For the API image this takes the report from 1 critical, 12 high and 15 medium findings to 1 high and none of the others.
+- The one remaining high-severity finding is in Debian 12's GCC runtime libraries, and Debian has published no fix for it — the version in the image is the newest that exists. Nothing can be done about it here.
+
+### Note for existing installations
+- Nothing to do; the next release carries the newer runtime. Node moves from 24.14.0 to 24.21.0, a maintenance update within the same major version, so application behaviour is unchanged.
+
 ## [0.2.97.9] - 2026-10-08
 
 ### Fixed

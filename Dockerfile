@@ -194,10 +194,25 @@ RUN apt-get update \
     && cp -a --parents /usr/lib/*-linux-gnu/libssl.so.3 /patch/ \
     && cp -a --parents /usr/lib/*-linux-gnu/libcrypto.so.3 /patch/
 
+# Node in gcr.io/distroless/nodejs24-debian12 trails upstream badly: on 2026-10-08 the
+# :nonroot tag still shipped node 24.14.0, four months after 24.18.1 closed a CRITICAL
+# Directory Traversal (SNYK-UPSTREAM-NODE-18507940) and eight highs. The tag is rolling, so
+# rebuilding does not help — there is nothing newer to pull. Same lag as libssl3 above, same
+# remedy: overlay the fixed binary from the official Debian image.
+#
+# Safe because both sides are Debian 12/glibc and the official node binary needs only libc6,
+# libstdc++6 and libgcc-s1, which the distroless base already carries (`ldd` lists no libssl
+# — node statically links its own OpenSSL). No /var/lib/dpkg/status.d entry is needed here,
+# unlike libssl3: node is not a dpkg package in this image, so scanners read the version from
+# the binary itself. Not pinned, for the same reason the libssl3 install is not — an unpinned
+# node:24 is always the latest 24.x security build.
+FROM node:${NODE_VERSION}-bookworm-slim AS node-patch
+
 # Patched distroless base — all runtime images derive from this instead of the
-# raw :nonroot tag so they inherit the overlaid libssl3.
+# raw :nonroot tag so they inherit the overlaid libssl3 and node.
 FROM gcr.io/distroless/nodejs24-debian12:nonroot AS distroless-patched
 COPY --from=openssl-patch /patch/ /
+COPY --from=node-patch /usr/local/bin/node /nodejs/bin/node
 
 # ================================================================================================
 # STAGE 6: Runtime Preparation
