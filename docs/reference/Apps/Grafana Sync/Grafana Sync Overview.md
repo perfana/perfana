@@ -60,7 +60,7 @@ Restore is also **failure-isolated per dashboard**: before this, one dashboard G
 When enabled, the sync service can automatically discover and configure dashboards:
 
 1. **DashboardFinder** — Finds candidate dashboards in Grafana
-2. **VariableDiscovery** — Identifies dashboard variables (service, pod, namespace)
+2. **VariableDiscovery** — Identifies dashboard variables (service, pod, namespace). Handles `constant`, `interval`, `custom`, `query` and — since v0.2.97.9 — `datasource`: a datasource dropdown is written onto the application dashboard as a variable holding the uid it is currently set to, read from `grafana_json` (the trimmed `templating_variables` drops `current`). Any other type is logged as unsupported and skipped
 3. **VariableMatcher** — Maps variables to test run dimensions
 4. **ApplicationDashboardCreator** — Creates dashboard entries in Perfana
 5. **DashboardConfigurator** — Sets up panel links and configurations
