@@ -366,7 +366,108 @@ describe('VariableDiscoveryService', () => {
       expect(result).toContainEqual({ name: 'datasource', values: ['prom-a'] });
     });
 
-    it('should warn and add no variable when the datasource variable has no current value', async () => {
+    it.each([
+      ['an empty string', { text: '', value: '' }],
+      ['an empty multi-select', { text: [], value: [] }],
+      ['a non-string value', { text: 'Prometheus', value: 42 }],
+      ['no value key at all', { text: 'Prometheus' }],
+    ])('should add no variable when current is %s', async (_label, current) => {
+      // Anything but a non-empty string (or a non-empty array of them) leaves the panel's
+      // `${datasource}` unresolved, which is the case the warning exists for. Resolving it to
+      // '' or 'undefined' would POST a query Grafana rejects with no tell.
+      const mockGrafanaDashboard = createMockDashboard([
+        { name: 'datasource', type: 'datasource', query: 'prometheus' },
+      ]);
+      mockGrafanaDashboard.grafanaJson = {
+        dashboard: {
+          templating: {
+            list: [{ name: 'datasource', type: 'datasource', query: 'prometheus', current }],
+          },
+        },
+      };
+
+      const result = await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        { dashboardUid: 'test-uid', dashboardName: 'Test Dashboard' },
+        mockGrafanaInstance,
+      );
+
+      expect(result.some((v) => v.name === 'datasource')).toBe(false);
+      expect(loggerWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('has no current value in dashboard "Test Dashboard"'),
+      );
+    });
+
+    it('should add no variable when grafana_json has no entry for that variable name', async () => {
+      // templating_variables and grafana_json are written at different times; a variable
+      // renamed in Grafana since the last extraction has no `current` to read.
+      const mockGrafanaDashboard = createMockDashboard([
+        { name: 'datasource', type: 'datasource', query: 'prometheus' },
+      ]);
+      mockGrafanaDashboard.grafanaJson = {
+        dashboard: {
+          templating: {
+            list: [
+              {
+                name: 'metrics_datasource',
+                type: 'datasource',
+                current: { text: 'Prometheus', value: 'PBFA97CFB590B2093' },
+              },
+            ],
+          },
+        },
+      };
+
+      const result = await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        { dashboardUid: 'test-uid', dashboardName: 'Test Dashboard' },
+        mockGrafanaInstance,
+      );
+
+      expect(result.some((v) => v.name === 'datasource')).toBe(false);
+      expect(loggerWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('has no current value in dashboard "Test Dashboard"'),
+      );
+    });
+
+    it('should resolve each datasource variable when a dashboard has several', async () => {
+      const mockGrafanaDashboard = createMockDashboard([
+        { name: 'ds_metrics', type: 'datasource', query: 'prometheus' },
+        { name: 'ds_logs', type: 'datasource', query: 'loki' },
+      ]);
+      mockGrafanaDashboard.grafanaJson = {
+        dashboard: {
+          templating: {
+            list: [
+              {
+                name: 'ds_metrics',
+                type: 'datasource',
+                current: { text: 'Prometheus', value: 'prometheus-uid' },
+              },
+              { name: 'ds_logs', type: 'datasource', current: { text: 'Loki', value: 'loki-uid' } },
+            ],
+          },
+        },
+      };
+
+      const result = await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        { dashboardUid: 'test-uid', dashboardName: 'Test Dashboard' },
+        mockGrafanaInstance,
+      );
+
+      expect(result).toContainEqual({ name: 'ds_metrics', values: ['prometheus-uid'] });
+      expect(result).toContainEqual({ name: 'ds_logs', values: ['loki-uid'] });
+      expect(variableDetectorService.getValuesFromDatasourceQuery).not.toHaveBeenCalled();
+    });
+
+    it('should warn and add no variable when the dashboard has no grafana_json at all', async () => {
+      // createMockDashboard sets grafanaJson: null, so the whole optional chain collapses —
+      // a different path to "no current value" than the per-guard cases above. Named for what
+      // it actually exercises.
       const mockGrafanaDashboard = createMockDashboard([
         { name: 'datasource', type: 'datasource', query: 'prometheus' },
       ]);

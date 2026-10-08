@@ -7,6 +7,11 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { GrafanaApiService } from '../grafana-api/grafana-api.service';
+import {
+  datasourceVariableUid,
+  parseTemplateVariableRef,
+  templatingListFromGrafanaJson,
+} from './datasource-variable.util';
 import { GrafanaDashboard, GrafanaInstance } from '@perfana/shared/entities';
 import { validateRegexPattern } from '@perfana/shared/utils';
 
@@ -28,6 +33,30 @@ export class VariableDetectorService {
   private readonly logger = new Logger(VariableDetectorService.name);
 
   constructor(private grafanaApiService: GrafanaApiService) {}
+
+  /**
+   * A query variable's own datasource uid, with a `${name}` / `$name` ref resolved against the
+   * dashboard's datasource variables. Returns undefined when there is nothing usable, so the
+   * caller warns and skips instead of 404ing against the literal.
+   */
+  private resolveTemplatedDatasourceUid(
+    grafanaDashboard: GrafanaDashboard,
+    rawUid: unknown,
+  ): string | undefined {
+    if (typeof rawUid !== 'string' || rawUid.length === 0) {
+      return undefined;
+    }
+
+    const refName = parseTemplateVariableRef(rawUid);
+    if (!refName) {
+      return rawUid;
+    }
+
+    return datasourceVariableUid(
+      templatingListFromGrafanaJson(grafanaDashboard.grafanaJson),
+      refName,
+    );
+  }
 
   /**
    * Apply regex filter to a value and collect results.
@@ -83,7 +112,13 @@ export class VariableDetectorService {
 
     if (templatingVariable.datasource && typeof templatingVariable.datasource === 'object') {
       // Datasource specified as object with uid
-      const datasourceUid = (templatingVariable.datasource as any).uid;
+      const rawUid = (templatingVariable.datasource as any).uid;
+      // On a dashboard that leaves its datasource to a variable, Grafana writes
+      // `datasource: { uid: '${datasource}' }` onto every QUERY variable too. Passing that
+      // literal to /api/datasources/uid/ is a guaranteed 404 whose throw the caller's catch
+      // swallows, so the variable is stored with no values — and the dashboard collects
+      // nothing for every series those values select (issue #657).
+      const datasourceUid = this.resolveTemplatedDatasourceUid(grafanaDashboard, rawUid);
       if (datasourceUid) {
         datasource = await this.grafanaApiService.getDatasourceByUidWithLabel(
           grafanaInstance.label,
@@ -91,7 +126,9 @@ export class VariableDetectorService {
         );
       } else {
         this.logger.warn(
-          `Datasource for variable "${templatingVariable.name}" has no uid, skipping query`,
+          `Datasource for variable "${templatingVariable.name}" has no resolvable uid` +
+            (rawUid ? ` ("${rawUid}" did not resolve)` : '') +
+            ', skipping query',
         );
         return [];
       }

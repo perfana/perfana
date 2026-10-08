@@ -10,6 +10,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { TestRun, GrafanaDashboard, GrafanaInstance } from '@perfana/shared/entities';
 import { DashboardVariable } from './types';
 import { VariableDetectorService, TemplatingVariable } from './variable-detector.service';
+import { datasourceVariableUid, templatingListFromGrafanaJson } from './datasource-variable.util';
 import { VariableMatcherService } from './variable-matcher.service';
 
 @Injectable()
@@ -276,19 +277,9 @@ export class VariableDiscoveryService {
     grafanaDashboard: GrafanaDashboard,
     variableName: string,
   ): string | undefined {
-    const list = (
-      grafanaDashboard.grafanaJson as
-        | { dashboard?: { templating?: { list?: TemplatingVariable[] } } }
-        | undefined
-    )?.dashboard?.templating?.list;
-
-    const current = (list ?? []).find((v) => v?.name === variableName)?.current as
-      | { value?: unknown }
-      | undefined;
-
-    // Grafana allows multi-select on a datasource variable (for repeated panels); Perfana
-    // collects one series per panel, so the first selection is the one that applies.
-    const value = Array.isArray(current?.value) ? current?.value[0] : current?.value;
-    return typeof value === 'string' && value.length > 0 ? value : undefined;
+    return datasourceVariableUid(
+      templatingListFromGrafanaJson(grafanaDashboard.grafanaJson),
+      variableName,
+    );
   }
 }
