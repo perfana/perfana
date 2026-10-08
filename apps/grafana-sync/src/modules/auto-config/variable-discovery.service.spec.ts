@@ -307,6 +307,83 @@ describe('VariableDiscoveryService', () => {
       });
     });
 
+    it('should resolve a datasource variable to the uid it is set to in grafana_json', async () => {
+      const mockGrafanaDashboard = createMockDashboard([
+        { name: 'datasource', type: 'datasource', query: 'prometheus' },
+      ]);
+      // `current` lives only in grafana_json — extractTemplatingVariables drops it.
+      mockGrafanaDashboard.grafanaJson = {
+        dashboard: {
+          templating: {
+            list: [
+              {
+                name: 'datasource',
+                type: 'datasource',
+                query: 'prometheus',
+                current: { text: 'Prometheus', value: 'PBFA97CFB590B2093' },
+              },
+            ],
+          },
+        },
+      };
+
+      const result = await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        { dashboardUid: 'test-uid', dashboardName: 'Test Dashboard' },
+        mockGrafanaInstance,
+      );
+
+      expect(result).toContainEqual({ name: 'datasource', values: ['PBFA97CFB590B2093'] });
+      expect(variableDetectorService.getValuesFromDatasourceQuery).not.toHaveBeenCalled();
+    });
+
+    it('should take the first selection of a multi-select datasource variable', async () => {
+      const mockGrafanaDashboard = createMockDashboard([
+        { name: 'datasource', type: 'datasource', query: 'prometheus' },
+      ]);
+      mockGrafanaDashboard.grafanaJson = {
+        dashboard: {
+          templating: {
+            list: [
+              {
+                name: 'datasource',
+                type: 'datasource',
+                current: { text: ['Prom A', 'Prom B'], value: ['prom-a', 'prom-b'] },
+              },
+            ],
+          },
+        },
+      };
+
+      const result = await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        { dashboardUid: 'test-uid', dashboardName: 'Test Dashboard' },
+        mockGrafanaInstance,
+      );
+
+      expect(result).toContainEqual({ name: 'datasource', values: ['prom-a'] });
+    });
+
+    it('should warn and add no variable when the datasource variable has no current value', async () => {
+      const mockGrafanaDashboard = createMockDashboard([
+        { name: 'datasource', type: 'datasource', query: 'prometheus' },
+      ]);
+
+      const result = await service.getApplicationDashboardVariables(
+        mockTestRun,
+        mockGrafanaDashboard,
+        { dashboardUid: 'test-uid', dashboardName: 'Test Dashboard' },
+        mockGrafanaInstance,
+      );
+
+      expect(result.some((v) => v.name === 'datasource')).toBe(false);
+      expect(loggerWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('has no current value in dashboard "Test Dashboard"'),
+      );
+    });
+
     it('should log warning for unsupported variable type', async () => {
       const mockGrafanaDashboard = createMockDashboard([
         {

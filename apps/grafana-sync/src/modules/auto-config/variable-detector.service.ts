@@ -13,6 +13,8 @@ import { validateRegexPattern } from '@perfana/shared/utils';
 export interface TemplatingVariable {
   name: string;
   type: string;
+  /** Present in grafana_json, not in the trimmed grafana_dashboards.templating_variables. */
+  current?: { value?: string | string[]; text?: string | string[] };
   query?: string | { query: string };
   datasource?: any;
   regex?: string;

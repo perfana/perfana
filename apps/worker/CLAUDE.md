@@ -1215,7 +1215,12 @@ is never substitutable. Three things about where that value is applied:
 
 1. **It seeds `queryVariables` before the application dashboard's own variables**, so a variable
    named `datasource` configured on the app dashboard in Perfana still wins. That manual override
-   was the pre-0.2.97.9 workaround and has to keep working.
+   was the pre-0.2.97.9 workaround and has to keep working — and since 0.2.97.9 grafana-sync's
+   `variable-discovery.service.ts` writes that variable itself for auto-configured dashboards
+   (`case 'datasource'`), so on those the app-dashboard row is normally the one that applies.
+   Both halves read the same `current.value`; the grafana-sync one reads it out of `grafana_json`
+   because `extractTemplatingVariables` drops `current` and a stored dashboard is only
+   re-extracted when it changes in Grafana.
 2. **The pre-flight uid collection resolves the ref too.** That loop runs per *Grafana* dashboard,
    before any app-dashboard variable is known, and builds the `uid → {id}` map that
    `createPanelRequests` looks up *after* substitution. Collect the raw `${datasource}` and the

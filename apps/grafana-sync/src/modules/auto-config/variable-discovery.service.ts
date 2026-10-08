@@ -237,8 +237,58 @@ export class VariableDiscoveryService {
         }
         break;
 
+      case 'datasource': {
+        // Grafana resolves a datasource variable to the uid it is currently set to; the
+        // variable's `query` is only the plugin-type filter and cannot be substituted into a
+        // panel's `datasource.uid`. Without this row, `${datasource}` reaches /api/ds/query
+        // verbatim and every query on the dashboard is rejected (issue #657).
+        const datasourceUid = this.getDatasourceVariableUid(
+          grafanaDashboard,
+          templatingVariable.name,
+        );
+
+        if (!datasourceUid) {
+          this.logger.warn(
+            `Datasource variable "${templatingVariable.name}" has no current value in dashboard "${grafanaDashboard.name}" — set the dropdown in Grafana and save, or add the variable with the datasource uid on the application dashboard`,
+          );
+          break;
+        }
+
+        applicationDashboardVariables.push({
+          name: templatingVariable.name,
+          values: [datasourceUid],
+        });
+        break;
+      }
+
       default:
         this.logger.warn(`Variable of type ${templatingVariable.type} not supported`);
     }
+  }
+
+  /**
+   * The uid a `type: 'datasource'` variable is currently set to, read from grafana_json.
+   * Not from `grafanaDashboard.templatingVariables`: `extractTemplatingVariables` drops
+   * `current`, and a stored dashboard is only re-extracted when it changes in Grafana, so
+   * every dashboard already in the database would stay unresolvable.
+   */
+  private getDatasourceVariableUid(
+    grafanaDashboard: GrafanaDashboard,
+    variableName: string,
+  ): string | undefined {
+    const list = (
+      grafanaDashboard.grafanaJson as
+        | { dashboard?: { templating?: { list?: TemplatingVariable[] } } }
+        | undefined
+    )?.dashboard?.templating?.list;
+
+    const current = (list ?? []).find((v) => v?.name === variableName)?.current as
+      | { value?: unknown }
+      | undefined;
+
+    // Grafana allows multi-select on a datasource variable (for repeated panels); Perfana
+    // collects one series per panel, so the first selection is the one that applies.
+    const value = Array.isArray(current?.value) ? current?.value[0] : current?.value;
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 }
