@@ -63,7 +63,8 @@ interface TemplateVariable {
   type?: string;
   includeAll?: boolean;
   allValue?: string;
-  current?: { value?: string };
+  /** A multi-select variable's `current.value` is an array; Grafana sends both shapes. */
+  current?: { value?: string | string[] };
 }
 
 const logger = getLogger('panels-helpers');
@@ -276,6 +277,24 @@ export async function getBenchmarksForTestRun(
 const TEMPLATE_REF_RE = /^\$\{([^}]+)\}$|^\$([A-Za-z_][A-Za-z0-9_]*)$/;
 
 /**
+ * Query-variable names the run owns. A dashboard author can name a template variable anything,
+ * and every resolved variable is substituted into the stored query — so a datasource variable
+ * called `timeFilter` or `interval` would otherwise replace the run's own value and produce a
+ * malformed or wrong-scoped query with nothing logged. `variable-discovery.service.ts` already
+ * filters the first two out of the templating list for the same reason.
+ */
+const RESERVED_QUERY_VARIABLES = new Set([
+  'system_under_test',
+  'test_environment',
+  'timeFilter',
+  'interval',
+  '__interval'
+]);
+
+/** Grafana's "all values selected" sentinels. Never a datasource uid. */
+const ALL_SENTINELS = new Set(['All', '$__all', '.*']);
+
+/**
  * Concrete datasource uids for the dashboard's `type: 'datasource'` template variables,
  * keyed by variable name. Grafana 9+ stores the uid the variable points at in
  * `current.value`; its `query` is only the plugin-type filter, so it cannot be substituted
@@ -285,21 +304,53 @@ const TEMPLATE_REF_RE = /^\$\{([^}]+)\}$|^\$([A-Za-z_][A-Za-z0-9_]*)$/;
  * datasource map and fall back to the string uid exactly as it did before this fix.
  */
 function resolveDatasourceVariables(templateVariables: unknown[] | undefined): Record<string, string> {
-  const resolved: Record<string, string> = {};
+  // Object.create(null), not {}: the keys are dashboard-controlled variable names, so a plain
+  // literal lets `${constructor}` / `${toString}` resolve off Object.prototype and hand a
+  // Function to code that is typed for a string.
+  const resolved: Record<string, string> = Object.create(null);
   for (const templateVar of templateVariables ?? []) {
     const tv = templateVar as TemplateVariable;
-    if (tv?.type === 'datasource' && tv.name && tv.current?.value) {
-      resolved[tv.name] = tv.current.value;
+    const uid = tv?.type === 'datasource' ? firstCurrentValue(tv.current?.value) : undefined;
+    if (uid && tv.name && !RESERVED_QUERY_VARIABLES.has(tv.name)) {
+      resolved[tv.name] = uid;
     }
   }
   return resolved;
+}
+
+/** Datasource variable names collected from the dashboard, whether or not they resolved. */
+function datasourceVariableNames(templateVariables: unknown[] | undefined): Set<string> {
+  const names = new Set<string>();
+  for (const templateVar of templateVariables ?? []) {
+    const tv = templateVar as TemplateVariable;
+    if (tv?.type === 'datasource' && tv.name && !RESERVED_QUERY_VARIABLES.has(tv.name)) {
+      names.add(tv.name);
+    }
+  }
+  return names;
+}
+
+/**
+ * A template variable's selected value as a single string. Grafana sends `current.value` as an
+ * array for a multi-select variable (a datasource variable may be multi-select, for repeated
+ * panels); Perfana collects one series per panel, so the first selection is the one that applies.
+ * Without this, the array reaches `Record<string, string>` and substitution stringifies it as
+ * `prom-a,prom-b` — a uid Grafana cannot resolve.
+ */
+function firstCurrentValue(value: string | string[] | undefined): string | undefined {
+  const first = Array.isArray(value) ? value[0] : value;
+  if (typeof first !== 'string' || first.length === 0 || ALL_SENTINELS.has(first)) {
+    return undefined;
+  }
+  return first;
 }
 
 /** Replace a whole-string template ref with the datasource variable's uid, when known. */
 function resolveUidTemplateRef(uid: string, datasourceVariables: Record<string, string>): string {
   const match = TEMPLATE_REF_RE.exec(uid);
   const name = match?.[1] ?? match?.[2];
-  return (name && datasourceVariables[name]) || uid;
+  const resolved = name ? datasourceVariables[name] : undefined;
+  return typeof resolved === 'string' && resolved.length > 0 ? resolved : uid;
 }
 
 export async function createPanelDocuments(
@@ -331,6 +382,30 @@ export async function createPanelDocuments(
     // keyed on the uid the query will actually carry after substitution — otherwise the lookup
     // in createPanelRequests misses and datasourceId degrades from a number to the raw string.
     const datasourceVariables = resolveDatasourceVariables(dashboardJson.dashboard.templating?.list);
+    // The application dashboard's own variable overrides the dashboard's selection at
+    // substitution time (see generateTemplateVariablesFromAppDashboard), so its uid is one the
+    // query can carry too. Collect it as well, or the override resolves in the target and then
+    // misses this map — leaving datasourceId a string and logging a spurious map-miss warning.
+    // Gate on the datasource variable NAMES, not on the resolved map: the map is empty exactly
+    // when the dashboard variable carries no current value, which is the one case the warning
+    // in createPanelRequests tells the operator to fix with an override.
+    const datasourceVariableNameSet = datasourceVariableNames(dashboardJson.dashboard.templating?.list);
+    for (const appDashboard of perfanaData.application_dashboards) {
+      if (appDashboard.dashboard_uid !== dashboard.uid) {
+        continue;
+      }
+      for (const variable of appDashboard.variables ?? []) {
+        if (!variable.name || !datasourceVariableNameSet.has(variable.name)) {
+          continue;
+        }
+        for (const override of variable.values ?? []) {
+          // `All` becomes `.*` at substitution time, so neither is ever a uid to resolve.
+          if (override && !ALL_SENTINELS.has(override) && !TEMPLATE_REF_RE.test(override)) {
+            addUid(instanceId, override);
+          }
+        }
+      }
+    }
     for (const panel of dashboardJson.dashboard.panels) {
       const p = panel as GrafanaPanelJson;
       if (p.targets) {
@@ -564,11 +639,15 @@ function generateTemplateVariablesFromAppDashboard(
     test_environment: testRun.test_environment,
     timeFilter: `time >= ${testRun.start_time.getTime()}ms AND time <= ${testRun.end_time.getTime()}ms`,
     interval: "15s",
-    __interval: "15s",
-    // Datasource variables first, so an application dashboard variable of the same name
-    // (the manual override) still wins below.
-    ...resolveDatasourceVariables(templateVariables)
+    __interval: "15s"
   };
+
+  // Datasource variables are applied BEFORE the application dashboard's own variables (the
+  // manual override, assigned in the loop below), so the override still wins — and they are
+  // never allowed over a RESERVED_QUERY_VARIABLES key, which resolveDatasourceVariables
+  // already drops. Assigning rather than spreading into the literal above keeps that order
+  // explicit instead of depending on where the spread sits.
+  Object.assign(queryVariables, resolveDatasourceVariables(templateVariables));
 
   // Build a map of template variables for quick lookup
   const templateVarMap = new Map<string, TemplateVariable>();
@@ -613,10 +692,11 @@ function generateTemplateVariablesFromAppDashboard(
             // Default to wildcard if includeAll is true but no allValue specified
             queryVariables[variable.name] = '.*';
             logger.debug(`Variable ${variable.name} = .* (default wildcard for includeAll)`);
-          } else if (templateVar.current?.value) {
+          } else if (firstCurrentValue(templateVar.current?.value)) {
             // Use template's current value as fallback
-            queryVariables[variable.name] = templateVar.current.value;
-            logger.debug(`Variable ${variable.name} = ${templateVar.current.value} (from template current value)`);
+            const currentValue = firstCurrentValue(templateVar.current?.value)!;
+            queryVariables[variable.name] = currentValue;
+            logger.debug(`Variable ${variable.name} = ${currentValue} (from template current value)`);
           } else {
             logger.warn(`Variable ${variable.name} has no values and no suitable fallback in template`);
           }
@@ -670,8 +750,9 @@ function _generateTemplateVariables(
   if (templateVariables && Array.isArray(templateVariables)) {
     for (const templateVar of templateVariables) {
       const tv = templateVar as TemplateVariable;
-      if (tv.name && tv.current?.value) {
-        queryVariables[tv.name] = tv.current.value;
+      const currentValue = firstCurrentValue(tv.current?.value);
+      if (tv.name && currentValue) {
+        queryVariables[tv.name] = currentValue;
       }
     }
   }
