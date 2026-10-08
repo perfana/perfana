@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.10] - 2026-10-08
+
+### Changed
+- **Released container images are now registered with Snyk automatically.** After a build from `main` or a version tag publishes the six images, they are sent to Snyk so the vulnerability report for the version that is actually running stays current. Until now this was done by hand, and the registered images had been left at 0.2.61.21 since June — every report shown was for that build, not for anything since. The same step also registers the application dependencies of each app, which were not covered at all: only the repository root and the documentation site were.
+
+### Note for existing installations
+- Nothing to do, and nothing changes for anyone who does not use Snyk. The step needs a `SNYK_TOKEN` repository secret; without one it is skipped and reported as skipped in the build summary. It never fails a build — the images are already published by the time it runs.
+
 ## [0.2.97.9] - 2026-10-08
 
 ### Fixed
