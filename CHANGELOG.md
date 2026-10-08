@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.9] - 2026-10-08
+
+### Fixed
+- **Metrics are now collected from dashboards whose panels pick their datasource from a dropdown.** Importing them was fixed in 0.2.97.8, but every query still went to Grafana with the dropdown's name — `${datasource}` — where Grafana expects a datasource identifier, so Grafana rejected all of them and the run recorded nothing for the dashboard. The identifier the dropdown is set to is now read from the dashboard and used, which is what Grafana itself does. A variable of that name on the dashboard's configuration in Perfana still wins, so the 0.2.97.8 workaround keeps working. A dropdown whose selection the dashboard does not record is now reported in the worker log, naming the panel and what to add, instead of failing silently.
+- **A dashboard whose first graph panel does not name a datasource now imports.** Such a panel takes whatever datasource the Grafana instance uses by default, which the dashboard itself does not name — so Perfana gave up on the whole dashboard. It now reads the kind from the first panel that does name one.
+
+### Note for existing installations
+- Dashboards affected by the first item start collecting on the next test run; re-analyse a finished run to fill it in. Dashboards affected by the second are picked up by the next sync, within a minute.
+- A dashboard on which *no* panel names a datasource is still not imported.
+
 ## [0.2.97.8] - 2026-10-08
 
 ### Fixed

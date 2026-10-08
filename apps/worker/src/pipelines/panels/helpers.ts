@@ -60,6 +60,7 @@ interface GrafanaDashboardJson {
 
 interface TemplateVariable {
   name?: string;
+  type?: string;
   includeAll?: boolean;
   allValue?: string;
   current?: { value?: string };
@@ -271,6 +272,36 @@ export async function getBenchmarksForTestRun(
   return result.rows as Benchmark[];
 }
 
+/** A Grafana template ref used on its own: `$name` or `${name}`. */
+const TEMPLATE_REF_RE = /^\$\{([^}]+)\}$|^\$([A-Za-z_][A-Za-z0-9_]*)$/;
+
+/**
+ * Concrete datasource uids for the dashboard's `type: 'datasource'` template variables,
+ * keyed by variable name. Grafana 9+ stores the uid the variable points at in
+ * `current.value`; its `query` is only the plugin-type filter, so it cannot be substituted
+ * into a query. Without this, `${datasource}` survives into the stored target and
+ * /api/ds/query answers "Data source not found" for every query on the dashboard.
+ * ponytail: Grafana 8 and earlier stored the datasource *name* here, which will miss the
+ * datasource map and fall back to the string uid exactly as it did before this fix.
+ */
+function resolveDatasourceVariables(templateVariables: unknown[] | undefined): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const templateVar of templateVariables ?? []) {
+    const tv = templateVar as TemplateVariable;
+    if (tv?.type === 'datasource' && tv.name && tv.current?.value) {
+      resolved[tv.name] = tv.current.value;
+    }
+  }
+  return resolved;
+}
+
+/** Replace a whole-string template ref with the datasource variable's uid, when known. */
+function resolveUidTemplateRef(uid: string, datasourceVariables: Record<string, string>): string {
+  const match = TEMPLATE_REF_RE.exec(uid);
+  const name = match?.[1] ?? match?.[2];
+  return (name && datasourceVariables[name]) || uid;
+}
+
 export async function createPanelDocuments(
   perfanaData: PerfanaData,
   systemUnderTestName: string
@@ -296,6 +327,10 @@ export async function createPanelDocuments(
       continue;
     }
     const instanceId = dashboard.grafana_instance_id ?? null;
+    // Panel targets may carry a templated uid (`${datasource}`). Resolve it here so the map is
+    // keyed on the uid the query will actually carry after substitution — otherwise the lookup
+    // in createPanelRequests misses and datasourceId degrades from a number to the raw string.
+    const datasourceVariables = resolveDatasourceVariables(dashboardJson.dashboard.templating?.list);
     for (const panel of dashboardJson.dashboard.panels) {
       const p = panel as GrafanaPanelJson;
       if (p.targets) {
@@ -312,7 +347,10 @@ export async function createPanelDocuments(
             if (!uid && p.datasource && typeof p.datasource === 'object' && p.datasource.uid) {
               uid = p.datasource.uid;
             }
-            if (uid && uid !== 'grafana') {
+            if (uid) {
+              uid = resolveUidTemplateRef(uid, datasourceVariables);
+            }
+            if (uid && uid !== 'grafana' && !TEMPLATE_REF_RE.test(uid)) {
               addUid(instanceId, uid);
             }
           }
@@ -526,7 +564,10 @@ function generateTemplateVariablesFromAppDashboard(
     test_environment: testRun.test_environment,
     timeFilter: `time >= ${testRun.start_time.getTime()}ms AND time <= ${testRun.end_time.getTime()}ms`,
     interval: "15s",
-    __interval: "15s"
+    __interval: "15s",
+    // Datasource variables first, so an application dashboard variable of the same name
+    // (the manual override) still wins below.
+    ...resolveDatasourceVariables(templateVariables)
   };
 
   // Build a map of template variables for quick lookup
@@ -690,6 +731,15 @@ async function createPanelRequests(
         if (datasourceInfo) {
           // Use the numeric datasource ID from Grafana API (matches Python expectation)
           substitutedTarget.datasourceId = datasourceInfo.id;
+        } else if (TEMPLATE_REF_RE.test(uid)) {
+          // Nothing resolved the variable, so the query would be POSTed with a literal
+          // `${datasource}` and rejected by /api/ds/query with "Data source not found".
+          logger.warn(
+            `⚠️ Panel ${p.id} target[${targetIndex}] keeps an unresolved datasource variable "${uid}" — ` +
+            `the dashboard's variable has no current value; add a variable of that name on the ` +
+            `application dashboard with the concrete datasource uid`
+          );
+          substitutedTarget.datasourceId = uid;
         } else if (uid !== 'grafana') {
           // Skip warning for 'grafana' datasource - these panels are filtered by shouldStorePanel()
           logger.warn(`⚠️ Datasource UID ${uid} not found in datasource map, using UID as fallback`);

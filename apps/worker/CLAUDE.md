@@ -1200,3 +1200,32 @@ enqueues are batched (`enqueueTransactionStatsRollupBulk`) rather than looped; a
 entity manager, an escaping rejection is an unhandled rejection that terminates the process — so
 everything in that hook logs and swallows.
 
+
+### A templated datasource uid is resolved from the dashboard, not from the app dashboard
+
+A Grafana dashboard can leave the datasource to a `type: 'datasource'` template variable, so its
+panels and targets carry `"uid": "${datasource}"` verbatim in `grafana_json`. Nothing else in the
+schema holds the real uid: `grafana_dashboards.datasource_type` is display-only, and the uid that
+drives collection is whatever `createPanelDocuments` writes into
+`ds_panels.requests[].request_body.queries[].datasource.uid`.
+
+`resolveDatasourceVariables` (`apps/worker/src/pipelines/panels/helpers.ts`) reads the variable's
+`current.value` — which on Grafana 9+ *is* the uid; its `query` is only the plugin-type filter and
+is never substitutable. Three things about where that value is applied:
+
+1. **It seeds `queryVariables` before the application dashboard's own variables**, so a variable
+   named `datasource` configured on the app dashboard in Perfana still wins. That manual override
+   was the pre-0.2.97.9 workaround and has to keep working.
+2. **The pre-flight uid collection resolves the ref too.** That loop runs per *Grafana* dashboard,
+   before any app-dashboard variable is known, and builds the `uid → {id}` map that
+   `createPanelRequests` looks up *after* substitution. Collect the raw `${datasource}` and the
+   map is keyed on a string no query will ever carry: `getDatasourceByUid('${datasource}')` 404s,
+   the lookup misses, and `datasourceId` silently degrades from a number to the template string.
+   An unresolvable ref is now skipped rather than sent to Grafana.
+3. **Grafana 8 and earlier stored the datasource *name* in `current.value`.** Such a value misses
+   the map and falls back to the string uid, exactly as before the fix — there is no lookup by
+   name on this path.
+
+The symptom when none of this resolves is not an error: `/api/ds/query` answers
+`{"message":"Data source not found"}` per query and the run records nothing for that dashboard.
+The tell is the worker warning naming the panel and the unresolved variable.

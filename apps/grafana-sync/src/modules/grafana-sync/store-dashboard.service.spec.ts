@@ -574,6 +574,38 @@ describe('StoreDashboardService', () => {
       expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalled();
     });
 
+    it('should skip a graph panel with no datasource key instead of failing the dashboard', async () => {
+      // A panel without a datasource key inherits Grafana's org default, which the dashboard
+      // JSON does not name. Perfana only persists the type, so a sibling panel answers it.
+      const inheritedDefault = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            { id: 1, title: 'Inherits the default', type: 'timeseries' },
+            {
+              id: 2,
+              title: 'Names its datasource',
+              type: 'timeseries',
+              datasource: { uid: '${datasource}', type: 'prometheus' },
+            },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(inheritedDefault);
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
+      );
+
+      expect(result.datasourceType).toBe('prometheus');
+    });
+
     it('should fall back to the first target datasource type', async () => {
       const templated = {
         ...dashboardDetails,

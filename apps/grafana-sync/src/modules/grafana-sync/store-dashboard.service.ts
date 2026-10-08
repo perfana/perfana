@@ -178,10 +178,14 @@ export class StoreDashboardService {
         grafanaDashboardSummary.uid,
       );
 
-      // Extract first graph panel to determine datasource
-      const firstGraphPanel = dashboardDetails.dashboard.panels?.find((panel: any) =>
+      // Extract the first graph panel that names a datasource. A panel with no datasource key
+      // inherits Grafana's org default, which the dashboard JSON does not name — picking it
+      // threw "No datasource found in panel" and cost the whole dashboard, even though
+      // datasourceType is display-only and a sibling panel usually carries it (issue #657).
+      const graphPanels = (dashboardDetails.dashboard.panels ?? []).filter((panel: any) =>
         ['graph', 'timeseries', 'table', 'flamegraph'].includes(panel.type),
       );
+      const firstGraphPanel = graphPanels.find((panel: any) => panel.datasource) ?? graphPanels[0];
 
       if (!firstGraphPanel) {
         throw new Error(`No graph panel found in dashboard ${grafanaDashboardSummary.title}`);
