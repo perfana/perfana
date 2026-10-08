@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.8] - 2026-10-08
+
+### Fixed
+- **Dashboards whose panels pick their datasource from a dropdown now import.** A Grafana dashboard can leave the datasource up to the viewer — community Kubernetes dashboards almost always do — and Perfana treated that dropdown's name as if it were a datasource and asked Grafana for it. Grafana answered that no such datasource exists, and the dashboard was not imported. The datasource kind is now read from the panel itself, which is where Grafana records it, and from the dropdown's own definition for older dashboards that do not carry it.
+- **One dashboard that cannot be imported no longer stops the rest.** New dashboards were added in a single pass that gave up at the first failure, so a single unimportable dashboard silently kept every dashboard behind it from ever being added — which is how the problem above went unnoticed for so long. Each dashboard is now added on its own, and one that fails is reported and skipped.
+
+### Note for existing installations
+- Nothing to do. Dashboards that previously failed to import are picked up by the next sync, within a minute.
+- Collecting metrics from these dashboards is a separate matter and does not work yet: the queries still carry the dropdown's name where Grafana expects a datasource, and Grafana rejects them. The dashboard and its panels will appear in Perfana and record nothing. As a workaround, add a variable named `datasource` to the dashboard's configuration in Perfana and give it the identifier of the datasource to use.
+
 ## [0.2.97.7] - 2026-10-07
 
 ### Fixed
