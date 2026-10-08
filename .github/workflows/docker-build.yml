@@ -22,6 +22,9 @@ on:
 
 env:
   IMAGE_PREFIX: perfana
+  # Snyk org the monitored projects belong to (perfana-6l5). Pinned here rather than relying
+  # on the token's default org — see the Monitor step for why.
+  SNYK_ORG_ID: 38baf2f1-9a2b-4f50-b327-e7706953f8af
 
 jobs:
   read-version:
@@ -416,10 +419,14 @@ jobs:
         build-perfana-report,
         build-migration,
       ]
-    # Only for builds that actually published the version tag this monitors. A develop push
-    # would overwrite the projects with a non-release image, and the projects are untagged
-    # (see below), so there would be no way to tell afterwards which one they hold.
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    # Monitoring only runs for builds that published the version tag it records. A develop
+    # push would overwrite the projects with a non-release image, and the projects are
+    # untagged (see below), so there would be no way to tell afterwards which one they hold.
+    # A manual run with push_images=true instead takes the read-only validation path below,
+    # so the token and registry access can be checked without waiting for a release.
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      || (github.event_name == 'workflow_dispatch' && github.event.inputs.push_images == 'true')
     # Bookkeeping, never a release gate: a Snyk outage or an expired token must not fail a
     # build whose images are already pushed.
     continue-on-error: true
@@ -451,8 +458,31 @@ jobs:
       # monorepo's manifests, which is 47 projects per run and 41 of them duplicates of
       # another app's. App dependencies are covered from the source tree in the next step,
       # which is where they belong.
+      # Validation only, on a manual run: the version tag is not applied on
+      # workflow_dispatch (see the metadata-action steps above), so there is nothing to
+      # monitor under it — and a dispatch must not write a non-release snapshot into the
+      # projects anyway. `test` writes nothing. Exit 1 means vulnerabilities were found,
+      # which is a successful check here; only a non-1 failure means the token, the org or
+      # the registry pull is broken. The printed "Organization:" line is the point: it shows
+      # which org the token actually resolved to.
+      - name: Validate Snyk access (manual runs)
+        if: steps.gate.outputs.has_token == 'true' && github.event_name == 'workflow_dispatch'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set -u
+          snyk container test "${IMAGE_PREFIX}/perfana-api:main" \
+            --file=./Dockerfile \
+            --exclude-app-vulns \
+            --org="${SNYK_ORG_ID}" || rc=$?
+          if [ "${rc:-0}" -gt 1 ]; then
+            echo "::error::snyk container test failed with exit ${rc} — check the token, the org and registry access"
+            exit "$rc"
+          fi
+          echo "Snyk access validated against org ${SNYK_ORG_ID}." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Monitor container images (OS layer)
-        if: steps.gate.outputs.has_token == 'true'
+        if: steps.gate.outputs.has_token == 'true' && github.event_name == 'push'
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
           VERSION: ${{ needs.read-version.outputs.version }}
@@ -467,9 +497,13 @@ jobs:
             # create a separate project per version, which is the sprawl this avoids. The
             # project stays untagged and updates in place; which version a snapshot holds is
             # recorded in its history.
+            # --org is pinned rather than left to the token's default org: a personal token
+            # resolves to whichever org Snyk picked for that account, which would scatter the
+            # projects across orgs depending on who issued the token.
             if ! snyk container monitor "${image}:${VERSION}" \
               --file="${dockerfile}" \
-              --exclude-app-vulns; then
+              --exclude-app-vulns \
+              --org="${SNYK_ORG_ID}"; then
               echo "::warning::snyk container monitor failed for ${image}:${VERSION}"
               failed=$((failed + 1))
             fi
@@ -486,7 +520,7 @@ jobs:
       # The workspaces are not otherwise covered: before this, the only repo-level npm
       # projects were the root package.json and docs-site.
       - name: Monitor app dependencies from the source tree
-        if: steps.gate.outputs.has_token == 'true'
+        if: steps.gate.outputs.has_token == 'true' && github.event_name == 'push'
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
@@ -494,6 +528,7 @@ jobs:
           # --exclude keeps agent worktrees and Next.js build output out; both hold copies of
           # the repo's own manifests and each copy becomes its own Snyk project.
           snyk monitor --all-projects --exclude=.claude,.next \
+            --org="${SNYK_ORG_ID}" \
             || echo "::warning::snyk monitor (source tree) failed"
 
   summary:
