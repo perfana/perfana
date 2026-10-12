@@ -302,6 +302,14 @@ export async function waitForJobs(
         );
       } else if (parkedBehindHolder) {
         await progressReporter?.setWaiting(null);
+      } else {
+        // Running, not parked: nothing else publishes for the duration of a stage, and the
+        // record expires after LOCK_TTL_SECONDS (5 min) — the API then evicts the job and the
+        // UI blanks while the sut:env:workload lock still refuses new runs of the workload.
+        // checks-evaluation is the one that reaches that on its own (one raw scan per
+        // transaction per run); the heavy stages are touched by PipelineOrchestrator already,
+        // and a second touch is harmless.
+        await progressReporter?.touch();
       }
       parkedBehindHolder = holder;
       if (holder) {parkedMs += slice;} else {runningMs += slice;}

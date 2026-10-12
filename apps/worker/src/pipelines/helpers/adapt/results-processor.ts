@@ -156,8 +156,11 @@ export class ResultsProcessor {
       queryParams.push(metricFilter.metricName);
     }
 
-    const result = await manager.query(adaptSQL, queryParams);
-    return result.length || 0;
+    // `RETURNING 1` makes the rows the count. TypeORM's manager.query hands back the pg
+    // `rows` for an INSERT, so without it `.length` is 0 on every successful upsert — the
+    // same bug fixed for control-group-statistics in v0.2.95.26.
+    const result = await manager.query(adaptSQL + '\n      RETURNING 1', queryParams);
+    return Array.isArray(result) ? result.length : 0;
   }
 
   /**
@@ -292,15 +295,16 @@ export class ResultsProcessor {
 
     const conclusionSQL = this.resultsSQLBuilder.buildConclusionSQL(placeholders);
 
-    const result = await manager.query(conclusionSQL, testRunIds);
+    const result = await manager.query(conclusionSQL + '\n      RETURNING 1', testRunIds);
+    const rowCount = Array.isArray(result) ? result.length : 0;
     this.logger.info(
-      `Generated conclusions for ${testRunIds.length} test runs, affected ${result.length} rows`
+      `Generated conclusions for ${testRunIds.length} test runs, affected ${rowCount} rows`
     );
 
     // Log tracked regression processing results
     await this.statusUpdater.logTrackedRegressionResults(manager, testRunIds);
 
-    return result.length || 0;
+    return rowCount;
   }
 
   /**
@@ -366,11 +370,11 @@ export class ResultsProcessor {
       testRunIds.length
     );
 
-    const result = await manager.query(trackedResultsSQL, [
+    const result = await manager.query(trackedResultsSQL + '\n      RETURNING 1', [
       ...testRunIds,
       JSON.stringify(defaultConfig),
     ]);
-    const rowCount = result.length || 0;
+    const rowCount = Array.isArray(result) ? result.length : 0;
 
     this.logger.info(`Re-evaluated ${rowCount} tracked result(s) against current baseline`);
 
