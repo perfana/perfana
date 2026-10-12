@@ -27,8 +27,8 @@ async function resetStuckStatuses(specificTestRunId?: string) {
 
     let whereClause = `
       WHERE (
-        (status->>'evaluatingAdapt' = 'IN_PROGRESS' AND (status->>'lastUpdate')::timestamp < NOW() - INTERVAL '10 minutes')
-        OR (status->>'evaluatingComparisons' = 'IN_PROGRESS' AND (status->>'lastUpdate')::timestamp < NOW() - INTERVAL '10 minutes')
+        (status->>'evaluatingAdapt' = 'IN_PROGRESS' AND (status->>'lastUpdate')::timestamptz < NOW() - INTERVAL '10 minutes')
+        OR (status->>'evaluatingComparisons' = 'IN_PROGRESS' AND (status->>'lastUpdate')::timestamptz < NOW() - INTERVAL '10 minutes')
       )
     `;
 
@@ -48,7 +48,7 @@ async function resetStuckStatuses(specificTestRunId?: string) {
             '{evaluatingAdapt}',
             CASE
               WHEN status->>'evaluatingAdapt' = 'IN_PROGRESS'
-                   AND (status->>'lastUpdate')::timestamp < NOW() - INTERVAL '10 minutes'
+                   AND (status->>'lastUpdate')::timestamptz < NOW() - INTERVAL '10 minutes'
               THEN '"FAILED"'::jsonb
               ELSE status->'evaluatingAdapt'
             END
@@ -56,13 +56,13 @@ async function resetStuckStatuses(specificTestRunId?: string) {
           '{evaluatingComparisons}',
           CASE
             WHEN status->>'evaluatingComparisons' = 'IN_PROGRESS'
-                 AND (status->>'lastUpdate')::timestamp < NOW() - INTERVAL '10 minutes'
+                 AND (status->>'lastUpdate')::timestamptz < NOW() - INTERVAL '10 minutes'
             THEN '"FAILED"'::jsonb
             ELSE status->'evaluatingComparisons'
           END
         ),
         '{lastUpdate}',
-        to_jsonb(NOW()::text)
+        to_jsonb(NOW())
       )
       ${whereClause}
       RETURNING test_run_id,

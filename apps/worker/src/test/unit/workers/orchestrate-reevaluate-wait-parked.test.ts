@@ -45,7 +45,7 @@ describe('waitForJobs parked clock', () => {
   it('does not time out a child that is still queued, and reports it as waiting', async () => {
     const child = { state: 'waiting' as string, progress: undefined as unknown };
     const { queue, remove } = childQueue(child);
-    const reporter = { setWaiting: vi.fn().mockResolvedValue(undefined) };
+    const reporter = { setWaiting: vi.fn().mockResolvedValue(undefined), touch: vi.fn().mockResolvedValue(undefined) };
 
     const wait = waitForJobs(events() as never, ['c1'], TIMEOUT, queue as never, reporter as never);
     let settled: string | null = null;
@@ -107,7 +107,7 @@ describe('waitForJobs parked clock', () => {
         remove: vi.fn(),
       })),
     };
-    const reporter = { setWaiting: vi.fn().mockResolvedValue(undefined) };
+    const reporter = { setWaiting: vi.fn().mockResolvedValue(undefined), touch: vi.fn().mockResolvedValue(undefined) };
     const wait = waitForJobs(ev as never, ['c1'], TIMEOUT, queue as never, reporter as never);
     await vi.advanceTimersByTimeAsync(POLL); // first tick: parked
     expect(reporter.setWaiting).toHaveBeenLastCalledWith(expect.stringContaining('Queued'));
@@ -136,7 +136,7 @@ describe('waitForJobs parked clock', () => {
 
   it('labels a child in retry backoff as such rather than as waiting for a worker', async () => {
     const { queue } = childQueue({ state: 'delayed' });
-    const reporter = { setWaiting: vi.fn().mockResolvedValue(undefined) };
+    const reporter = { setWaiting: vi.fn().mockResolvedValue(undefined), touch: vi.fn().mockResolvedValue(undefined) };
     waitForJobs(events() as never, ['c1'], TIMEOUT, queue as never, reporter as never).catch(() => {});
     await vi.advanceTimersByTimeAsync(POLL);
     expect(reporter.setWaiting).toHaveBeenLastCalledWith(expect.stringContaining('waiting for its retry'));
@@ -150,5 +150,17 @@ describe('waitForJobs parked clock', () => {
 
     await vi.advanceTimersByTimeAsync(61 * 60_000);
     expect(settled).toMatch(/stayed queued behind a free analysis worker/);
+  });
+
+  it('keeps the progress record alive while the child is RUNNING, not only while it is parked', async () => {
+    // Nothing else publishes for the duration of a stage, and the record expires after
+    // 5 min — the API then evicts the job from the UI while the scope lock still refuses
+    // new runs of the workload. checks-evaluation is the stage that reaches that.
+    const { queue } = childQueue({ state: 'active', progress: 0 });
+    const reporter = { setWaiting: vi.fn().mockResolvedValue(undefined), touch: vi.fn().mockResolvedValue(undefined) };
+    waitForJobs(events() as never, ['c1'], TIMEOUT, queue as never, reporter as never).catch(() => {});
+    await vi.advanceTimersByTimeAsync(POLL * 3);
+    expect(reporter.touch).toHaveBeenCalledTimes(3);
+    expect(reporter.setWaiting).not.toHaveBeenCalled();
   });
 });

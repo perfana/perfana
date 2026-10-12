@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.14] - 2026-10-12
+
+### Fixed
+- **A re-evaluate no longer disappears from the UI while a stage is still running.** The job's progress record expires after five minutes, and while the orchestrator waits for a stage it only republished the record when that stage was *queued* behind something — so a stage that was genuinely working for longer than five minutes had its record expire, the page stopped showing the job, and new runs of the same workload were still refused because the job did in fact hold the lock. The record is now kept alive while the stage runs as well. The stage this reaches in practice is the SLO evaluation, which on a run whose transaction rollup is missing reads the raw data once per transaction.
+- **The stuck-status reset log says which test run it reset.** It read `test run undefined` on every line, which is the one thing it exists to say — it is the only statement that can mark a run's analysis FAILED without the run itself failing.
+- **Three worker log lines no longer report "0 rows" on work that succeeded.** The ADAPT results upsert, the conclusion write and the tracked-result re-evaluation all logged a row count of zero, however many rows they wrote. Same cause as the control-group statistics line fixed in 0.2.95.26.
+
+### Changed
+- **A run's `lastUpdate` timestamp is now compared in UTC when deciding whether its analysis is stuck.** The comparison dropped the timezone and read the stored time as local, so on a deployment whose database is not set to UTC every in-progress run looked hours stale and could be marked FAILED by the next control-groups job — including a run another job was evaluating at that moment. Deployments on the shipped compose files run their database in UTC and were not affected.
+
+### Note for existing installations
+- Nothing to do. If your database's `timezone` setting is not UTC (`SHOW timezone;`), the stuck-reset bug above was live for you; runs it marked FAILED can be re-evaluated.
+
 ## [0.2.97.13] - 2026-10-08
 
 ### Security

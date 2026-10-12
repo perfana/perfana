@@ -2,6 +2,12 @@ import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
 
+interface ResetStuckRow {
+  test_run_id: string;
+  adapt_status: string | null;
+  comparisons_status: string | null;
+}
+
 interface TestRunStatusRow {
   test_run_id: string;
   checks_status: string;
@@ -192,7 +198,7 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
             '{evaluatingAdapt}',
             CASE
               WHEN status->>'evaluatingAdapt' = 'IN_PROGRESS'
-                   AND (status->>'lastUpdate')::timestamp < NOW() - INTERVAL '10 minutes'
+                   AND (status->>'lastUpdate')::timestamptz < NOW() - INTERVAL '10 minutes'
               THEN '"FAILED"'::jsonb
               ELSE status->'evaluatingAdapt'
             END
@@ -200,28 +206,30 @@ export class ControlGroupsPipeline extends BasePipelineTypeORM {
           '{evaluatingComparisons}',
           CASE
             WHEN status->>'evaluatingComparisons' = 'IN_PROGRESS'
-                 AND (status->>'lastUpdate')::timestamp < NOW() - INTERVAL '10 minutes'
+                 AND (status->>'lastUpdate')::timestamptz < NOW() - INTERVAL '10 minutes'
             THEN '"FAILED"'::jsonb
             ELSE status->'evaluatingComparisons'
           END
         ),
         '{lastUpdate}',
-        to_jsonb(NOW()::text)
+        to_jsonb(NOW())
       )
       WHERE test_run_id = ANY($1::varchar[])
         AND (
-          (status->>'evaluatingAdapt' = 'IN_PROGRESS' AND (status->>'lastUpdate')::timestamp < NOW() - INTERVAL '10 minutes')
-          OR (status->>'evaluatingComparisons' = 'IN_PROGRESS' AND (status->>'lastUpdate')::timestamp < NOW() - INTERVAL '10 minutes')
+          (status->>'evaluatingAdapt' = 'IN_PROGRESS' AND (status->>'lastUpdate')::timestamptz < NOW() - INTERVAL '10 minutes')
+          OR (status->>'evaluatingComparisons' = 'IN_PROGRESS' AND (status->>'lastUpdate')::timestamptz < NOW() - INTERVAL '10 minutes')
         )
       RETURNING test_run_id, status->>'evaluatingAdapt' as adapt_status, status->>'evaluatingComparisons' as comparisons_status
     `;
 
-    const result = await manager.query(resetQuery, [testRunIds]);
+    // TypeORM's postgres driver returns `[rows, rowCount]` for an UPDATE, so iterating the
+    // result itself logged `test run undefined` and hid which run was reset — the one thing
+    // this log exists to say.
+    const raw = await manager.query(resetQuery, [testRunIds]) as ResetStuckRow[] | [ResetStuckRow[], number];
+    const rows = (Array.isArray(raw[0]) ? raw[0] : raw) as ResetStuckRow[];
 
-    if (result.length > 0) {
-      for (const row of result) {
-        this.logger.info(`Reset stuck status for test run ${row.test_run_id}: adapt=${row.adapt_status}, comparisons=${row.comparisons_status}`);
-      }
+    for (const row of rows) {
+      this.logger.info(`Reset stuck status for test run ${row.test_run_id}: adapt=${row.adapt_status}, comparisons=${row.comparisons_status}`);
     }
   }
 
