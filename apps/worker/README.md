@@ -122,11 +122,12 @@ SLO judges the slope of a series".
 more: `Performance test metrics all aggregated` (uid `performance-test-metrics-all-aggregated`),
 generated from the pseudo-scenario `ALL_AGGREGATED_SCENARIO = 'all aggregated'` in
 `src/constants/performance-metrics.ts`. It carries the same panels with one series on each, named
-`All aggregated`, rolled up over every scenario, transaction and sampler in the run. Being an
-ordinary scenario dashboard is the whole trick — every dashboard dropdown in the web app lists it
-with no client-side special case.
+`All aggregated`, rolled up over every scenario, transaction and sampler in the run — plus, on
+Error Count (301) since v0.2.97.16, one `All aggregated.<code>` series per response code beside
+that total. Being an ordinary scenario dashboard is the whole trick — every dashboard dropdown in
+the web app lists it with no client-side special case.
 
-Five things not to undo:
+Six things not to undo:
 
 - **The roll-up is a second `GROUPING SETS` entry — `(bd.bucket_time)`, one of three, the third
   being `(bd.scenario_name, bd.bucket_time)` for the per-scenario `total` series — on the existing
@@ -150,7 +151,16 @@ Five things not to undo:
   land on one dashboard, and two rows sharing `(dashboard, panel, metric_name, time)` inside one
   `ON CONFLICT DO UPDATE` batch are rejected by Postgres outright, failing the whole pipeline.
   `ErrorsProcessor` (both branches) and `VirtualUsersProcessor` filter the real scenario out before
-  appending the roll-up. Losing one pathologically-named scenario's row beats failing every run.
+  appending the roll-up — `ErrorsProcessor`'s main branch counts it into the roll-up's per-code
+  totals first, then skips its own dashboard rows. Losing one pathologically-named scenario's row
+  beats failing every run.
+- **Both scenario queries `GROUP BY` their output expressions, not the raw columns (v0.2.97.16).**
+  `COALESCE(scenario_name, 'default')` in the SELECT with `GROUP BY scenario_name` resolves to the
+  input column, so a run holding both a NULL and a literal `default` scenario returns two rows that
+  coalesce to one metric name — and two rows sharing `(dashboard, panel, metric_name, time)` are
+  rejected by the upsert batch, which fails the `performance-test-metrics` stage for that run on
+  every analysis. `ErrorsProcessor` is `GROUP BY 1, 2` (scenario and response code),
+  `VirtualUsersProcessor` `GROUP BY 1`. Latent on panels 301/302/303 until that version.
 - **The virtual-user roll-up is JS arithmetic on purpose.** Threads add across scenarios, so the
   run-wide figure is a sum — but each scenario's average covers only its own samples, so a scenario
   active for part of the run would contribute its full average to the whole. `VirtualUsersProcessor`
@@ -166,7 +176,9 @@ Five things not to undo:
 scenario-level panels by **title** (`Error Count`, `Avg Active Threads`, `Max Active Threads`), not
 only by metric name. Those panels hold one point by construction, and the metric-name exclusion only
 matched the per-scenario spelling — on this dashboard they are all named `All aggregated`, so
-without the title filter every run reports three sparse metrics forever.
+without the title filter every run reports three sparse metrics forever. The title filter is also
+the whole of what covers Error Count's per-response-code series (v0.2.97.16): the metric-name list
+matches the bare `error_count`, never `error_count.<code>` or `All aggregated.<code>`.
 
 The name `All aggregated` collides with a pre-existing **synthetic** dropdown entry in the web app
 and the report renderers, guarded on both sides; see "The perf-test pipeline writes one extra

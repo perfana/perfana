@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Note for existing installations
 - Nothing to do. The breakdown appears on runs analysed from this release onwards; re-analysing an older run produces it. The first runs after the deploy have no baseline for the new series, so expect them to read as incomparable until the control group fills.
-- A response code longer than 240 characters is shortened to that length before it becomes a series name, and two codes that are identical up to that point are counted as one series. Real status codes and tool exception names are far shorter, so this is a safety bound rather than a limit you are expected to meet.
+- A response code longer than 120 characters is shortened to that length before it becomes a series name, and two codes that are identical up to that point are counted as one series. Real status codes and tool exception names are far shorter, so this is a safety bound rather than a limit you are expected to meet.
 
 ## [0.2.97.15] - 2026-10-13
 

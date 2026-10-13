@@ -225,6 +225,17 @@ version, because the pipeline inserts them with `ON CONFLICT DO NOTHING` and wou
 A **metric-level** config on one of those panels shadows the panel row wholesale and must carry
 its own `minSampleCount`. See [[Environment Variables]] and [[Migrations]].
 
+Since v0.2.97.16 Error Count also carries one `error_count.<code>` series per response code beside
+its total. Those series sit on the same panel and get no config of their own, so on a scenario
+dashboard they inherit the panel row — floor `1`, classified as errors, lower is better — and each
+code is compared against the baseline exactly where the total is. On the
+`Performance test metrics all aggregated` dashboard no panel-level config is written at all (the
+roll-up is display-only), so its `All aggregated` total and its `All aggregated.<code>` series
+resolve to the built-in default config, which carries no `minSampleCount`: they fall back to
+`ADAPT_MIN_SAMPLE_COUNT` and read `incomparable` against the single point per run they hold. That
+also means setting that variable to `1` makes the whole roll-up dashboard comparable — the
+pre-existing 301/302/303 totals as well as every per-code series.
+
 ## Configuration
 
 ADAPT behavior can be configured per test run via the API:

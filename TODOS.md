@@ -3049,7 +3049,7 @@ and keep the per-app wrappers thin.
 **Why:** `ErrorsProcessor` emits one `ds_metrics` series per distinct response code per scenario,
 plus one per code on the roll-up dashboard. `requests_error.response_code` is unbounded `text`
 and the JTL importer writes `row.responseCode` straight through, so JMeter lands a Java exception
-sentence there rather than three digits. v0.2.97.16 bounded the code's **length** (240 chars, in
+sentence there rather than three digits. v0.2.97.16 bounded the code's **length** (120 chars, in
 SQL, so the truncated value is the GROUP BY key) but not the **number** of distinct codes. Every
 new series becomes a `ds_metric_statistics` row and a per-metric ADAPT comparison, and issue #29
 in the root CLAUDE.md puts the ceiling for that path at ~25k metrics before `adapt-analysis`

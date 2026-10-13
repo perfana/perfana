@@ -748,11 +748,13 @@ things about it:
   codes (`ponytail:` no top-N; add one if a run ever produces hundreds). The code itself **is**
   bounded, and has to be: `ds_metrics.metric_name` is `varchar(255)` **and part of the primary
   key**, and the writer truncates with `.substring(0, 255)` — so two codes agreeing on their
-  first ~240 characters would collapse to one `metric_name` after truncation, and two emitted
+  first 120 characters would collapse to one `metric_name` after truncation, and two emitted
   rows sharing `(dashboard, panel, metric_name, time)` are rejected by the batch outright
   (unique violation on a rebuild, `cardinality_violation` on a tick), failing the
   `performance-test-metrics` stage for that run on every analysis with no self-heal. So
-  `MAX_RESPONSE_CODE_LENGTH` (240 = 255 − the longest base name − its dot, **derived from
+  `MAX_RESPONSE_CODE_LENGTH` (120 = ⌊(255 − 1 − the longest base name) ÷ 2⌋ — **halved because
+  `left()` counts characters while the writer's `.substring(0, 255)` counts UTF-16 code units,
+  and a non-BMP character is two of those**; derived from
   `ALL_AGGREGATED_METRIC` rather than written down**) bounds it, and the bound is applied with
   `left()` **in SQL, not in JS** — that way the truncated value *is* the `GROUP BY` key, so
   Postgres sums two codes that collapse into one row instead of handing the writer two rows
