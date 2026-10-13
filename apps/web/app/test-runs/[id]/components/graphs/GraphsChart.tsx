@@ -10,6 +10,7 @@ import {
   buildTimestampMapping,
   calculateXAxisTicks,
   calculateAnalysisWindowIndices,
+  analysisRangeClip,
   buildChartConfig,
 } from './utils';
 import { ChartLoadingState, ChartEmptyState } from './components';
@@ -66,6 +67,9 @@ export default function GraphsChart({
   const theme = chartTheme(mode);
 
   const [cascadeOpen, setCascadeOpen] = useState(false);
+  // Draw the analysis time range only, the way the report's Custom graphs section does.
+  const [rangeOnly, setRangeOnly] = useState(false);
+  const hasWindow = Boolean(testRun?.analysis_start_offset || testRun?.analysis_end_offset);
   const [cursorIndex, setCursorIndex] = useState<number | null>(null);
   // Built once, not per render. The card keeps this panel MOUNTED while the picker is
   // closed (the card-link walk needs it), and `cursorIndex` below re-renders this component
@@ -88,14 +92,32 @@ export default function GraphsChart({
     const { sortedTimestamps, timestampToIndex } = buildTimestampMapping(visible, seriesData);
     if (sortedTimestamps.length === 0) return null;
 
-    const { tickValues, tickLabels } = calculateXAxisTicks(sortedTimestamps);
     const { startIndex, endIndex } = calculateAnalysisWindowIndices(testRun, sortedTimestamps);
+
+    const clip =
+      rangeOnly && hasWindow
+        ? analysisRangeClip(startIndex, endIndex, sortedTimestamps.length)
+        : null;
+    const inClip = (time: string) => {
+      if (!clip) return true;
+      const i = timestampToIndex.get(time);
+      return i !== undefined && i >= clip.lo && i <= clip.hi;
+    };
+
+    // Ticks come from the samples actually on screen: spacing them over the whole run and
+    // then narrowing the axis leaves the labels outside the domain, so a short window on a
+    // long run renders with one time label or none at all. The report's chart windows its
+    // labels the same way (`labelPoints` in `chart-svg.service.ts`).
+    const tickSource = clip ? sortedTimestamps.slice(clip.lo, clip.hi + 1) : sortedTimestamps;
+    const { tickValues, tickLabels } = calculateXAxisTicks(tickSource);
+    const tickOffset = clip ? clip.lo : 0;
 
     // The axis scale is chosen from the WHOLE series; the table's stats are the analysis
     // window only. A line is drawn outside the window too, so an axis sized to the window
-    // would clip the ramp-up.
+    // would clip the ramp-up. In the analysis-range-only view the clip is the whole chart,
+    // so the scale follows it.
     const axisSeries = visible.map((series) => {
-      const data = seriesData.get(series.id) ?? [];
+      const data = (seriesData.get(series.id) ?? []).filter((d) => inClip(d.time));
       const values = data.map((d) => d.value).filter((v) => Number.isFinite(v));
       return {
         id: series.id,
@@ -120,7 +142,9 @@ export default function GraphsChart({
       const group = groupOf.get(series.id);
       if (!data || data.length === 0 || !group) return;
 
-      const sorted = [...data].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+      const sorted = [...data]
+        .filter((d) => inClip(d.time))
+        .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
       const color = catColor(series.colorSlot ?? seriesConfig.indexOf(series), mode);
 
       traceIndexOf.set(series.id, traces.length);
@@ -153,9 +177,15 @@ export default function GraphsChart({
       theme,
       groups,
       x: {
-        tickvals: tickValues,
+        tickvals: tickValues.map((i) => i + tickOffset),
         ticktext: tickLabels,
-        range: [0, Math.max(sortedTimestamps.length - 1, 1)],
+        // `clip.lo + 1`, never a bare `clip.hi`: a window on a one-sample run clips to a
+        // single index, and a zero-width range is what the unclipped arm's `Math.max(…, 1)`
+        // exists to avoid. The pad is on the AXIS only — widening the clip itself would pull
+        // a neighbouring sample back into the view on a two-sample run.
+        range: clip
+          ? [clip.lo, Math.max(clip.hi, clip.lo + 1)]
+          : [0, Math.max(sortedTimestamps.length - 1, 1)],
       },
       overlay,
     });
@@ -180,7 +210,7 @@ export default function GraphsChart({
       traceIndexOf,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, seriesConfig, seriesData, testRun, mode, axisMode, chartName, events]);
+  }, [visible, seriesConfig, seriesData, testRun, mode, axisMode, chartName, events, rangeOnly, hasWindow]);
 
   /**
    * One row per configured series — hidden ones included, or a hidden series could never
@@ -274,6 +304,17 @@ export default function GraphsChart({
       }
       axisMode={onAxisModeChange ? axisMode : undefined}
       onAxisModeChange={onAxisModeChange}
+      viewToggle={
+        hasWindow
+          ? {
+              label: 'analysis range only',
+              active: rangeOnly,
+              title:
+                'Draw the analysis time range only, with a small margin so the start/end markers stay visible',
+              onToggle: () => setRangeOnly((on) => !on),
+            }
+          : undefined
+      }
       lanesNote={note}
       actions={
         <>
