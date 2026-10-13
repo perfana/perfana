@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.15] - 2026-10-13
+
+### Changed
+- **An SLO on the average or maximum response time of a whole test run is now answered from the pre-computed per-transaction summary instead of re-reading the run.** Those two evaluated by scanning every single request or transaction the run recorded — on a large run, tens of gigabytes — which on a bulk re-evaluation of many runs could spend the entire SLO stage doing nothing else. The summary already holds what they need, and both values come out of it exactly: the average can differ in the fourth decimal because the stored per-transaction averages are rounded to two, and the maximum is identical. A run whose summary was never written still falls back to reading the run itself, so no verdict can disappear.
+- Percentile SLOs (p50 / p90 / p95 / p99) deliberately keep reading the run, and are still slow on a large one. The summary answers a percentile from a compressed sketch whose error is bounded on the *position* of a value, not on the value itself, and an SLO is a pass/fail gate on the value. On test data where response times jump sharply just past the 95th percentile, a p95 of 410 ms read as 732 ms through the sketch — enough to turn a passing SLO into a failing one — while thirty-three other runs agreed to within two percent. Making those fast needs a different kind of sketch in the summary, which is a stored-data change rather than a faster query, and is tracked in the issue this came from.
+
+### Note for existing installations
+- Nothing to do. Existing stored SLO results keep their values until the run is re-evaluated; an average re-evaluated after this release can differ in the fourth decimal.
+
 ## [0.2.97.14] - 2026-10-12
 
 ### Fixed

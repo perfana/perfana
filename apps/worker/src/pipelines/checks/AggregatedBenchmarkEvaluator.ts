@@ -31,6 +31,42 @@ const STAT_SQL: Record<string, string> = {
   max: 'MAX(response_time)',
 };
 
+const ROLLUP_TABLE: Record<string, string> = {
+  transaction_response_time: 'test_run_transaction_stats',
+  request_response_time: 'test_run_sampler_stats',
+};
+
+/**
+ * Rollup equivalents of STAT_SQL, for the two stats the rollup answers EXACTLY.
+ *
+ * `avg` is the count-weighted mean of the stored per-group averages; those are
+ * ROUND(...,2) at write time, so the result differs in the 4th decimal at most
+ * (292.9742 raw vs 292.9737 rollup on a 200k-row run).
+ * `max` reads the tdigest's own min/max fields, which are stored verbatim and
+ * survive `rollup()` — byte-identical to `MAX(max_response_time)` on all 12
+ * sampler-rollup variants of the dev database, and to the raw `MAX` on both
+ * transaction runs that still have their raw rows.
+ *
+ * PERCENTILES ARE DELIBERATELY ABSENT. `approx_percentile(q, rollup(pct_agg))`
+ * bounds its RANK error, not its value, and an SLO is a pass/fail gate on the
+ * value. Where the distribution has a cliff the two diverge wildly: on the three
+ * Bravo runs of the dev database, raw p95 433/410/503 ms read 846/732/872 ms
+ * through the rollup (+74..+95 %), because raw p95 = 410 ms and raw p96 = 2092 ms
+ * -- 0.2 percentile-points of rank error is 300 ms of value error there. A
+ * `p95 <= 500 ms` SLO would flip PASS -> FAIL. The other 33 runs agreed within
+ * ~2 %, which is exactly what makes this unsafe: it looks fine until it isn't.
+ * Percentiles keep the exact raw scan. If that scan ever has to go, the rollup
+ * needs a relative-error sketch (uddsketch/`percentile_agg`, as
+ * `ds_metric_statistics` carries), not this one.
+ */
+const ROLLUP_STAT_SQL: Record<string, string> = {
+  avg: 'SUM(avg_response_time * total_count) / NULLIF(SUM(total_count), 0)',
+  max: 'max_val(rollup(pct_agg))',
+};
+
+const toNumber = (val: string | null | undefined): number | null =>
+  val !== null && val !== undefined ? parseFloat(String(val)) : null;
+
 /**
  * Service to evaluate aggregated SLO benchmarks.
  *
@@ -118,8 +154,7 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
         [testRun.test_run_id, benchmark.exclude_ramp_up_time === true],
       ) as { rows: number; result: string | null }[];
       if ((rollup[0]?.rows ?? 0) > 0) {
-        const val = rollup[0]?.result;
-        return val !== null && val !== undefined ? parseFloat(String(val)) : null;
+        return toNumber(rollup[0]?.result);
       }
       // Raw scan only when the run has no rollup at all (analyze died before
       // transaction-stats-rollup, or a re-evaluate that ChecksPipeline could not repair).
@@ -129,11 +164,36 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
         WHERE test_run_id = $1${rampUpClause()}
       `;
       const rows = await this.manager.query(sql, params) as { result: string | null }[];
-      const val = rows[0]?.result;
-      return val !== null && val !== undefined ? parseFloat(String(val)) : null;
+      return toNumber(rows[0]?.result);
     }
 
-    const statSql = STAT_SQL[benchmark.aggregate_stat ?? 'avg'] ?? 'AVG(response_time)';
+    const stat = benchmark.aggregate_stat && STAT_SQL[benchmark.aggregate_stat]
+      ? benchmark.aggregate_stat
+      : 'avg';
+
+    // Rollup first, for the stats it answers exactly -- see ROLLUP_STAT_SQL. The raw
+    // query below reads every response_time of the run and (for a percentile) sorts
+    // them: the same ~10 GB chunk scan the error_percentage arm used to pay, and a
+    // 100-run bulk re-evaluate on such an SLO would spend the whole checks stage there.
+    // Same ramp-up residue as that arm: the rollup's excluded variant also trims
+    // ramp-down, where the raw clause trims ramp-up only. One extra residue on the
+    // sampler side -- the rollup skips rows with a NULL transaction_name (252 of 11,545
+    // on a k6 run of the dev database), which the raw scan counts.
+    const rollupTable = ROLLUP_TABLE[benchmark.aggregate_metric];
+    const rollupStat = ROLLUP_STAT_SQL[stat];
+    if (rollupTable && rollupStat) {
+      const rollup = await this.manager.query(
+        `SELECT COUNT(*)::int AS rows, ${rollupStat} AS result
+           FROM ${rollupTable}
+          WHERE test_run_id = $1 AND ramp_up_excluded = $2`,
+        [testRun.test_run_id, benchmark.exclude_ramp_up_time === true],
+      ) as { rows: number; result: string | null }[];
+      if ((rollup[0]?.rows ?? 0) > 0) {
+        return toNumber(rollup[0]?.result);
+      }
+    }
+
+    const statSql = STAT_SQL[stat] ?? 'AVG(response_time)';
     const table = benchmark.aggregate_metric === 'transaction_response_time' ? 'transactions' : 'requests_raw';
 
     const sql = `
@@ -142,8 +202,7 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
       WHERE test_run_id = $1${rampUpClause()}
     `;
     const rows = await this.manager.query(sql, params) as { result: string | null }[];
-    const val = rows[0]?.result;
-    return val !== null && val !== undefined ? parseFloat(String(val)) : null;
+    return toNumber(rows[0]?.result);
   }
 
   private applyOperator(actual: number, operator: string, threshold: number): boolean {
