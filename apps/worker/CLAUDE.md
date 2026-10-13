@@ -700,25 +700,66 @@ re-analysing an older run produces it.
 **Error Count (301) carries one series per response code beside its total (v0.2.97.16).** The
 `error_count` / `All aggregated` total is unchanged; `ErrorsProcessor` additionally groups
 `requests_error` by `COALESCE(NULLIF(response_code, ''), 'unknown')` and emits
-`error_count.<code>` per scenario and `All aggregated.<code>` on the roll-up dashboard. Four
+`error_count.<code>` per scenario and `All aggregated.<code>` on the roll-up dashboard. Six
 things about it:
 
 - **They sit on panel 301 and get no config of their own.** The panel-level `ds_compare_config`
-  is the default for every metric on the panel (metric > panel > dashboard > global), so the new
-  series are `RED_errors`, lower-is-better, `mean`, `minSampleCount` 1 by inheritance. A
-  per-metric config would be a second thing to keep in step for no gain.
+  is the default for every metric on the panel (metric > panel > dashboard > global), so a
+  **real scenario's** per-code series are `RED_errors`, lower-is-better, `mean`,
+  `minSampleCount` 1 by inheritance. A per-metric config would be a second thing to keep in
+  step for no gain. **The roll-up dashboard's `All aggregated.<code>` series carry no config of
+  their own** — the write is gated on `scenarioName !== ALL_AGGREGATED_SCENARIO` (item 3
+  above). **That is not the same as ADAPT skipping them, and the difference is load-bearing:**
+  `buildCompareConfigCache` seeds a `'default'` entry unconditionally
+  (`compare-config-cache.ts:256`), so they resolve to `DEFAULT_COMPARE_CONFIG` and *are*
+  evaluated. They read `incomparable` because that default carries no `minSampleCount`, so the
+  floor falls back to `ADAPT_MIN_SAMPLE_COUNT` (default **2**) while these panels hold exactly
+  one point per run. Set it to **1** — the value this very file passes as
+  `SCENARIO_PANEL_MIN_SAMPLE_COUNT`, so an operator has every reason to think it is sane — and
+  the entire roll-up dashboard starts emitting `increase`/`decrease` rows: the pre-existing
+  301/302/303 totals as well as every per-code series. Pre-existing for the totals; the
+  breakdown multiplies its blast radius by the number of codes.
 - **`GROUP BY 1, 2`, on the output expressions, not the raw columns.** A run holding both a NULL
   and a literal `'default'` scenario — or a NULL and an empty response code — yields two rows
   that coalesce to one metric name, and two rows sharing
   `(dashboard, panel, metric_name, time)` are rejected by the upsert batch outright. The
   per-scenario spelling was already exposed to the scenario half of that before this version.
+- **`VirtualUsersProcessor` got the same `GROUP BY` fix (panels 302/303).** It is the identical
+  shape 200 lines down in the same file — `COALESCE(scenario_name, 'default')` in the SELECT
+  with `GROUP BY scenario_name` on the raw column — so it carried the same NULL-vs-`'default'`
+  collision, and fixing one spelling while leaving the other would have left two divergent
+  copies of one query shape with no marker on the unfixed one.
+- **They reach ADAPT exactly where the total does, which is not everywhere.** The per-code
+  series share the total's timestamp (`scenarioMetricTime`, `end_time` on a completed run), so
+  they inherit the open P2 in TODOS.md — a point at `end_time` is flagged `ramp_up` by
+  `RAMP_UP_EXPR` on any workload with a ramp-down offset, and `ds_metric_statistics` holds
+  `ramp_up = false` only. Measured on the dev database: panel 301 has 5779 non-ramp-up rows and
+  141 statistics rows, against 979 ramp-up rows that have none. So the breakdown is compared on
+  the same workloads the total is compared on and excluded on the same ones — never better, never
+  worse. Do not read the classification bullet above as a promise that every per-code series gets
+  an ADAPT verdict.
 - **Nothing had to change in `DataSanityCheckPipeline`.** Its metric-name regex still matches
   only the bare `error_count`, but the filter that actually covers these panels is by panel
   TITLE (item 4 above), so the per-code series are excluded with the total.
-- **The response code is whatever the load tool wrote.** JMeter puts a Java exception class in
-  `responseCode` for a connection failure, so a code can be a sentence rather than three digits.
-  Cardinality is bounded in practice and nothing truncates it. `ponytail:` no cap on distinct
-  codes; add a top-N if a run ever produces hundreds.
+- **The response code is whatever the load tool wrote, and `metric_name` is 255 chars.** JMeter
+  puts a Java exception class in `responseCode` for a connection failure, so a code can be a
+  sentence rather than three digits, and `requests_error.response_code` is unbounded `text`
+  written straight through by the JTL importer. What is **not** capped is the number of distinct
+  codes (`ponytail:` no top-N; add one if a run ever produces hundreds). The code itself **is**
+  bounded, and has to be: `ds_metrics.metric_name` is `varchar(255)` **and part of the primary
+  key**, and the writer truncates with `.substring(0, 255)` — so two codes agreeing on their
+  first ~240 characters would collapse to one `metric_name` after truncation, and two emitted
+  rows sharing `(dashboard, panel, metric_name, time)` are rejected by the batch outright
+  (unique violation on a rebuild, `cardinality_violation` on a tick), failing the
+  `performance-test-metrics` stage for that run on every analysis with no self-heal. So
+  `MAX_RESPONSE_CODE_LENGTH` (240 = 255 − the longest base name − its dot, **derived from
+  `ALL_AGGREGATED_METRIC` rather than written down**) bounds it, and the bound is applied with
+  `left()` **in SQL, not in JS** — that way the truncated value *is* the `GROUP BY` key, so
+  Postgres sums two codes that collapse into one row instead of handing the writer two rows
+  that collide only after its `substring`. Proven on 2026-10-13: two 241-char codes differing
+  at the last character return one row with `count = 2`. The JS merge is additive on both
+  sides for the same reason, so a caller that ever hands this loop pre-grouped rows cannot
+  make `error_count` and `All aggregated` stop summing to each other.
 
 **Transaction Concurrency (108) / Request Concurrency (219) are the Top 10 ranking figure inside
 ADAPT (v0.2.95.38 as "Impact" in ms/s; renamed and made unitless in v0.2.95.41).** Each is

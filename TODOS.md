@@ -3041,6 +3041,63 @@ so they are not drop-in interchangeable.
 and keep the per-app wrappers thin.
 
 
+### Panel 301's per-response-code series have no cardinality cap
+
+**Priority:** P2
+**Origin:** security + performance + test-coverage review on `feat/error-count-by-status-code`
+(2026-10-13, v0.2.97.16).
+**Why:** `ErrorsProcessor` emits one `ds_metrics` series per distinct response code per scenario,
+plus one per code on the roll-up dashboard. `requests_error.response_code` is unbounded `text`
+and the JTL importer writes `row.responseCode` straight through, so JMeter lands a Java exception
+sentence there rather than three digits. v0.2.97.16 bounded the code's **length** (240 chars, in
+SQL, so the truncated value is the GROUP BY key) but not the **number** of distinct codes. Every
+new series becomes a `ds_metric_statistics` row and a per-metric ADAPT comparison, and issue #29
+in the root CLAUDE.md puts the ceiling for that path at ~25k metrics before `adapt-analysis`
+crosses its 120 s statement timeout. A run with several scenarios times a pathological code set
+multiplies panel 301's metric count by (1 + codes), permanently, because it lands in `ds_metrics`.
+**Fix:** keep the top N codes by count per scenario (10-20) and fold the tail into a single
+`error_count.other` series, so the totals stay exact while the series count becomes a constant.
+Deliberately deferred at ship time — real status codes and tool exception names are a small set,
+and `error_count.other` is a new concept in the panel that deserves its own decision.
+**Marker:** `ponytail:` note in `apps/worker/CLAUDE.md`, Error Count section.
+
+### The `unknown` response-code sentinel is spelled twice, and the two normalise differently
+
+**Priority:** P3
+**Origin:** maintainability review on `feat/error-count-by-status-code` (2026-10-13, v0.2.97.16).
+**Why:** the worker folds NULL **and** empty string into `'unknown'`
+(`COALESCE(NULLIF(response_code, ''), 'unknown')`, `scenario-processors.ts`), while the API's
+report fetcher folds only NULL (`String(row.response_code ?? 'unknown')`,
+`report-data-fetcher.service.ts:418,431`). So for the same run an empty-string response code
+appears as `error_count.unknown` in `ds_metrics` and as an empty-named bucket in the report's
+error-code table. Neither site references the other. Confirmed empirically: the k6 run
+`PerfanaWebshop-acc-loadTest-k6-00011` writes empty response codes for all 579 of its errors, so
+this is the common case on that tool, not an edge case.
+**Fix:** export the sentinel and its normalisation from one place — `UNKNOWN_RESPONSE_CODE` in
+`apps/worker/src/constants/performance-metrics.ts` plus an `?? ''`-aware read in the report
+fetcher — so the two halves cannot drift.
+
+
+### Two web metric-name parsers mis-handle a dotted response code on panel 301
+
+**Priority:** P3
+**Origin:** adversarial review on `feat/error-count-by-status-code` (2026-10-13, v0.2.97.16).
+**Why:** both parsers split `metric_name` on `.` with no panel-id guard, and v0.2.97.16 put a
+free-text response code after a dot on panel 301 for the first time.
+`parseRequestInfoFromMetric` (`anomaly-table-utils.ts:337`) takes its legacy branch for the
+`Error Count` title and, when the split yields exactly 3 parts, sets `sampler = parts[0]` — so a
+code containing exactly ONE dot (`java.net`, a version string) makes the error-analysis
+drill-down filter on a sampler named `error_count`, which cannot exist: zero rows, nothing
+logged. `parseAggregatedMetricSource` (`AnomalyExpandedContent.tsx:35`) has the same shape — a
+code ending `.error_rate` makes it return `{ metric: 'error_percentage' }` and the expanded chart
+fetches the wrong aggregate. A bare `error_count.404` is 2 parts and unaffected, which is why
+this was not caught by the panel-301 trace; it needs a dot INSIDE the code.
+**Fix:** both call sites already have the panel id and title in hand — exclude 301 in each
+(two lines). Note the panel-301 drill-down is already a no-op for the bare `error_count` total
+(it filters on `transaction = 'Error Count'`), so the fix is about not making a broken
+drill-down differently broken, not about restoring working behaviour.
+
+
 ## Completed
 
 ### `findDashboardByLabel` matches a label across every system and environment
