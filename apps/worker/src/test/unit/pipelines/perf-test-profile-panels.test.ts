@@ -16,19 +16,21 @@ import {
 import { generateScenarioDashboardUid } from '../../../utils/uuid-generator.js';
 
 describe('perf-test profile SLO constants', () => {
-  it('lists every evaluable panel the pipeline writes, by id and title', () => {
-    // Scenario-level panels hold one point at end_time, flagged ramp_up by the ramp-down
-    // band, so no statistics row ever exists for them and an SLO on them cannot evaluate.
-    const scenarioLevel = new Set<number>([
+  it('lists every panel the pipeline writes, by id and title', () => {
+    // Since v0.2.97.17 that includes the scenario-level panels (301-303): their single point
+    // is written at `end_time - ramp_down`, inside the analysis window, so they get a
+    // statistics row and an SLO on them can evaluate. See `scenarioMetricTime`.
+    const fromWorker = Object.entries(METRIC_TYPE_PANEL_NAMES)
+      .map(([id, title]) => ({ id: Number(id), title }))
+      .sort((a, b) => a.id - b.id);
+    expect([...PERF_TEST_PROFILE_PANELS].sort((a, b) => a.id - b.id)).toEqual(fromWorker);
+    for (const id of [
       METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT,
       METRIC_TYPE_PANEL_IDS.SCENARIO_AVG_THREADS,
       METRIC_TYPE_PANEL_IDS.SCENARIO_MAX_THREADS,
-    ]);
-    const fromWorker = Object.entries(METRIC_TYPE_PANEL_NAMES)
-      .map(([id, title]) => ({ id: Number(id), title }))
-      .filter((p) => !scenarioLevel.has(p.id))
-      .sort((a, b) => a.id - b.id);
-    expect([...PERF_TEST_PROFILE_PANELS].sort((a, b) => a.id - b.id)).toEqual(fromWorker);
+    ]) {
+      expect(PERF_TEST_PROFILE_PANELS.some((p) => p.id === id)).toBe(true);
+    }
   });
 
   it('default uid pattern matches scenario dashboards, not the roll-up or the fallback', () => {

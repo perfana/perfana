@@ -33,7 +33,14 @@ vi.mock('../../../common/database-accessor.js', () => ({
 vi.mock('../../../pipelines/helpers/dashboard-manager.js');
 vi.mock('../../../pipelines/helpers/requests-processor.js');
 vi.mock('../../../pipelines/helpers/transactions-processor.js');
-vi.mock('../../../pipelines/helpers/scenario-processors.js');
+// The two processor CLASSES are mocked; `scenarioMetricTime` is a pure helper the pipeline
+// calls itself (to place the final point and to scope the interim delete), so it passes
+// through. Auto-mocking the whole module stubbed it to undefined and the delete lost its key.
+vi.mock('../../../pipelines/helpers/scenario-processors.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../pipelines/helpers/scenario-processors.js')>()),
+  ErrorsProcessor: vi.fn(),
+  VirtualUsersProcessor: vi.fn(),
+}));
 const mockLock = { acquireKeyLock: vi.fn(async () => true), releaseKeyLock: vi.fn(async () => true) };
 vi.mock('../../../config/redis-pool.js', () => ({
   acquireRedisConnection: vi.fn(async () => ({})),
@@ -1223,11 +1230,13 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(mockDatabaseService.decompressChunksForRange).toHaveBeenCalledWith(
         'ds_metrics', new Date('2024-01-01T00:57:30Z'), new Date('2024-01-01T01:00:00Z')
       );
-      // The ticks' interim scenario-level points at start_time are dropped — after the
-      // end_time points were saved, so a failed save leaves the interim point, not none.
+      // Every scenario-level point that is not the one just written is dropped — the ticks'
+      // interim point at start_time, and a point left at a previous metricTime by an older
+      // analysis. After the save, so a failed save leaves the interim point, not none.
+      // No ramp-down on this fixture, so metricTime is end_time.
       expect(mockDataSource.query).toHaveBeenCalledWith(
         expect.stringContaining('DELETE FROM ds_metrics'),
-        ['tr-001', new Date('2024-01-01T00:00:00Z'), [301, 302, 303]]
+        ['tr-001', new Date('2024-01-01T01:00:00Z'), [301, 302, 303]]
       );
       const deleteCall = mockDataSource.query.mock.calls.findIndex((c: unknown[]) => String(c[0]).includes('DELETE FROM ds_metrics'));
       const deleteOrder = mockDataSource.query.mock.invocationCallOrder[deleteCall];

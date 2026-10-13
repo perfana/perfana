@@ -134,6 +134,13 @@ export interface TestRunMetadata {
   end_time: Date | null;
 
   /**
+   * Analysis END offset in seconds (`test_runs.ramp_down`). Optional because the only producer
+   * is `loadTestRunMetadata`; absent means 0. Read by `scenarioMetricTime`, which must not put
+   * the run's single scenario-level point inside the ramp-down band — see the note there.
+   */
+  ramp_down_time?: number;
+
+  /**
    * Whether the run has finished. `end_time` alone does not say so: the keep-alive update
    * moves it to "now" on every post, so a live run carries one too.
    */

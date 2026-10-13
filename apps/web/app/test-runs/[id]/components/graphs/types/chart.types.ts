@@ -42,9 +42,11 @@ export interface PlotTrace {
   x: number[];
   y: number[];
   type: 'scatter';
-  mode: 'lines';
+  /** `lines+markers` for a one-point series, which has no segment to draw. See GraphsChart. */
+  mode: 'lines' | 'lines+markers';
   name: string;
   line: { color: string; width: number; shape: 'linear'; dash?: string };
+  marker?: { color: string; size: number };
   yaxis: string;
   connectgaps: boolean;
   /** The series table is the readout, so no floating tooltip is drawn. */

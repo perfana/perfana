@@ -496,22 +496,24 @@ nothing currently asserts it.
 
 ## Worker pipeline
 
-### The scenario-level perf-test panels (301-303) never reach `ds_metric_statistics`
+### Runs analysed before v0.2.97.17 have no statistics for the scenario-level panels (301-303)
 
-**Priority:** P2
-**Origin:** red-team review on `feat/profile-perf-test-slos` (2026-09-22, v0.2.96.6).
-**Why:** `Error Count`, `Avg Active Threads` and `Max Active Threads` hold one point per run,
-written AT `end_time` by the full pass (`scenarioMetricTime`). `RAMP_UP_EXPR` flags a sample
-`ramp_up` when `time - start > (end - start) - ramp_down`, which a point at `end_time` satisfies
-whenever the workload has any end offset — verified on `PerfanaWebshop-acc-loadTest-00019`
-(`ramp_down = 30`): all 301-303 rows are `ramp_up = true` and none has a statistics row. So an
-SLO on them can never evaluate, the SUT dialog (which lists panels from `ds_metric_statistics`)
-never offers them, and the ADAPT `minSampleCount = 1` these panels carry never applies either.
-`PERF_TEST_PROFILE_PANELS` excludes them for that reason.
-**What:** write the scenario point inside the analysis window (e.g. at `end_time - ramp_down`)
-or exempt the scenario-level panels from the ramp-down band in `MetricsPipeline` and
-`RAMP_UP_EXPR` (both must agree — see item 8 under "ADAPT's baseline depends on the `pct_agg`
-sketch" in apps/worker/CLAUDE.md). Then add 301-303 back to `PERF_TEST_PROFILE_PANELS` and its pin test.
+**Priority:** P3
+**Origin:** follow-up to the v0.2.97.17 fix of the P2 this replaces (2026-10-13).
+**Why:** `Error Count`, `Avg Active Threads` and `Max Active Threads` hold one point per run.
+Until v0.2.97.17 it was written AT `end_time`, which `RAMP_UP_EXPR` flags whenever the workload
+has any ramp-down offset, so `ds_metric_statistics` held no row for them and every SLO and ADAPT
+comparison on those panels silently evaluated nothing. `scenarioMetricTime` now writes the point
+at `end_time - ramp_down` (inclusive boundary), and 301-303 are back in
+`PERF_TEST_PROFILE_PANELS`. **Nothing backfills the runs already analysed**: a finalised run
+takes the `skip` plan, so a plain re-analyse does not move the point, and the stale point at
+`end_time` is only removed by the final pass's `time <> metricTime` delete, which that plan does
+not reach. Measured on the dev database before the fix: every run with `ramp_down = 30` had 100%
+of its 301-303 rows flagged and zero statistics rows.
+**What:** a force-refetch re-evaluate per affected run recovers it. If that is too coarse for a
+large history, a migration could shift the existing rows (`UPDATE ds_metrics SET time = ... WHERE
+panel_id IN (301,302,303)`) — note `time` is part of the primary key and `compress_orderby`, so
+that is a delete+insert on a compressed chunk, not an in-place update.
 
 ---
 

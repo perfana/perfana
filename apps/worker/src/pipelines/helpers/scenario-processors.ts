@@ -75,16 +75,38 @@ const MAX_RESPONSE_CODE_LENGTH = Math.floor(
 );
 
 /**
- * Where a run's single scenario-level point is written. A completed run puts it at end_time,
- * which is what every baseline holds. A live run does not know its end_time yet (the
- * keep-alive update moves it to "now" on every post), so the ticks upsert the cumulative
- * value at start_time — one fixed timestamp, so a run never carries more than one interim
- * point — and the final pass in PerformanceTestMetricsPipeline moves it to end_time.
- * The interim point is flagged ramp_up when the run has an analysis start offset, so the
- * live statistics leave it out; the final one is not.
+ * Where a run's single scenario-level point is written. A live run does not know its end_time
+ * yet (the keep-alive update moves it to "now" on every post), so the ticks upsert the
+ * cumulative value at start_time — one fixed timestamp, so a run never carries more than one
+ * interim point — and the final pass in PerformanceTestMetricsPipeline moves it to the end of
+ * the analysis window. The interim point is flagged ramp_up when the run has an analysis start
+ * offset, so the live statistics leave it out; the final one must not be.
+ *
+ * **The final point is written at `end_time - ramp_down`, not at `end_time`.** `RAMP_UP_EXPR`
+ * (StatisticsPipeline) flags anything strictly later than that boundary as outside the analysis
+ * window, and `ds_metric_statistics` holds `ramp_up = false` rows only — so on any workload with
+ * a ramp-down offset the point at `end_time` was flagged, panels 301/302/303 got no statistics
+ * row at all, and every SLO and ADAPT comparison on Error Count / Avg / Max Active Threads
+ * silently evaluated nothing. Measured on the dev database: every run with `ramp_down = 30`
+ * since v0.2.95.23 had 100% of its scenario points flagged and zero statistics rows, while the
+ * one run with `ramp_down = 0` had both. The boundary is inclusive (`>` in RAMP_UP_EXPR), so
+ * landing exactly on it is in-window.
+ *
+ * The shift applies only when the offsets FIT the run — the same guard RAMP_UP_EXPR opens with.
+ * When they do not, the whole run is the analysis window, `end_time` is already in it, and
+ * subtracting a ramp-down longer than the run would put the point before `start_time`.
  */
 export function scenarioMetricTime(testRun: TestRunMetadata): Date {
-  return testRun.completed && testRun.end_time ? testRun.end_time : testRun.start_time;
+  if (!testRun.completed || !testRun.end_time) {
+    return testRun.start_time;
+  }
+
+  const rampDown = testRun.ramp_down_time ?? 0;
+  const durationSeconds = (testRun.end_time.getTime() - testRun.start_time.getTime()) / 1000;
+  if (rampDown <= 0 || durationSeconds <= (testRun.ramp_up_time ?? 0) + rampDown) {
+    return testRun.end_time;
+  }
+  return new Date(testRun.end_time.getTime() - rampDown * 1000);
 }
 
 /**
