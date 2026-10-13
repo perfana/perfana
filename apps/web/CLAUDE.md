@@ -58,6 +58,44 @@ Beside it, `min`/`mean`/`max` in the series table read `–` for the same run, a
 v0.2.97.17 the worker wrote that point at `end_time`, outside it. A blank chart whose stats are
 also empty is the worker bug; a blank chart whose stats are populated is this one.
 
+### The Graphs "analysis range only" toggle clips points, it does not range the x axis
+
+`GraphsChart`'s **analysis range only** view (v0.2.97.18, the web twin of the report's Custom
+graphs "Show analysis time range only") cannot be built by just narrowing the x-axis `range`:
+**Plotly autoranges y over every point in a trace whether it is visible or not**, so a line
+drawn outside a merely-ranged window still sets the y scale and the ramp-up spike the view
+exists to hide keeps flattening everything inside it. `analysisRangeClip`
+(`apps/web/app/test-runs/[id]/components/graphs/utils/chart-utils.ts`) returns an index range
+with a 2.5% margin, and `GraphsChart` filters each series' points to it (`inClip`) before the
+axis scale is computed — the axis then follows the clipped data, not the whole run.
+
+Two things ride along with filtering the points instead of the axis:
+
+1. **X-axis ticks must come from the clipped slice, not the whole run.** `calculateXAxisTicks`
+   spaces ticks evenly over whatever timestamp array it is given; feeding it the full run and
+   then narrowing the axis leaves most of those ticks outside the visible domain, so a short
+   window on a long run renders with one time label or none. `GraphsChart` builds the tick
+   source from `sortedTimestamps.slice(clip.lo, clip.hi + 1)` and offsets the resulting
+   `tickvals` back by `clip.lo`. The report's SVG chart builder has the same guard under a
+   different name (`labelPoints` in `chart-svg.service.ts`).
+2. **The axis range is padded to at least one index wide.** The perf-test scenario panels (301
+   Error Count, 302/303 Avg/Max Active Threads) hold exactly one point per run, so a window on
+   one of those runs clips `startIndex === endIndex`. `analysisRangeClip`'s margin is
+   `Math.max(1, round(...))`, and the axis range itself is `[clip.lo, Math.max(clip.hi, clip.lo
+   + 1)]` rather than a bare `[clip.lo, clip.hi]` — otherwise Plotly is handed a zero-width
+   range, the same failure mode the un-clipped branch's `Math.max(sortedTimestamps.length - 1,
+   1)` already guards against for a run with a single timestamp.
+
+The 2.5% margin is hard-coded here and separately in the report's `ANALYSIS_ONLY_MARGIN`
+(`apps/api/src/modules/reports/renderers/chart-svg.service.ts`) with nothing asserting the two
+stay equal — see "The analysis-only margin is 2.5% in two apps with nothing holding them
+together" in TODOS.md.
+
+The toggle itself is a new optional `viewToggle` prop on `AnalystChartCard`
+(`apps/web/components/charts/AnalystChartCard.tsx`), drawn next to the axis-mode `overlay` /
+`split by unit` pair by a shared local `PillButton` — both are the same control at different
+arities, so a third copy of the button's `sx` was not needed.
+
 ### A Plotly chart must observe its own container, not the window
 
 `react-plotly.js` 2.6.0's `useResizeHandler` is only
