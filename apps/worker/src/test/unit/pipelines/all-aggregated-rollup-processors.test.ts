@@ -235,8 +235,31 @@ describe('ErrorsProcessor on a live tick', () => {
     filter_to_time: new Date('2026-01-01T00:11:00Z'),
   } as unknown as TestRunMetadata;
 
+  it('emits a per-code series for every code the tick saw, and never a name built from undefined', async () => {
+    // The tick arm upserts, where a duplicate (dashboard, panel, metric_name, time) is a
+    // cardinality_violation rather than a unique violation — so the per-code shape has to be
+    // exercised here, not only on the rebuild path. The `undefined` assertion guards the
+    // fixture itself: a row without response_code silently yields `error_count.undefined`.
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+        { scenario_name: 'loadtest', response_code: '404', error_count: '1' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', liveRun);
+
+    const names = metrics.map(m => m.metric_name);
+    expect(names).toContain('error_count.500');
+    expect(names).toContain('error_count.404');
+    expect(names.some(n => n.includes('undefined'))).toBe(false);
+    const keys = metrics.map(m => `${m.application_dashboard_id}|${m.panel_id}|${m.metric_name}|${m.time.toISOString()}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
   it('counts from start_time, not from the tick window, and writes the point at start_time', async () => {
-    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]) };
+    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', response_code: '500', error_count: '3' }]) };
     const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
 
     const { metrics } = await processor.process('run-1', liveRun);
@@ -248,7 +271,7 @@ describe('ErrorsProcessor on a live tick', () => {
   });
 
   it('flags the interim point ramp_up under an analysis start offset, and the final one not', async () => {
-    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]) };
+    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', response_code: '500', error_count: '3' }]) };
     const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
 
     const live = await processor.process('run-1', { ...liveRun, ramp_up_time: 60 } as TestRunMetadata);
@@ -259,7 +282,7 @@ describe('ErrorsProcessor on a live tick', () => {
   });
 
   it('writes the point at end_time once the run is completed', async () => {
-    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]) };
+    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', response_code: '500', error_count: '3' }]) };
     const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
 
     const { metrics } = await processor.process('run-1', { ...liveRun, completed: true } as TestRunMetadata);
@@ -285,7 +308,7 @@ describe('ErrorsProcessor on a live tick', () => {
   });
 
   it('falls back to start_time when a completed run carries no end_time', async () => {
-    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]) };
+    const dataSource = { query: vi.fn(async () => [{ scenario_name: 'loadtest', response_code: '500', error_count: '3' }]) };
     const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
 
     const { metrics } = await processor.process('run-1', {
@@ -358,8 +381,8 @@ describe('ErrorsProcessor rollup row', () => {
   it('adds a rollup series carrying the total across scenarios', async () => {
     const dataSource = {
       query: vi.fn(async () => [
-        { scenario_name: 'loadtest', error_count: '3' },
-        { scenario_name: 'soak', error_count: '4' },
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+        { scenario_name: 'soak', response_code: '500', error_count: '4' },
       ]),
     };
     const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
@@ -367,12 +390,222 @@ describe('ErrorsProcessor rollup row', () => {
     const { metrics } = await processor.process('run-1', testRun);
 
     const aggregated = metrics.filter(isAggregated);
-    expect(aggregated).toHaveLength(1);
-    expect(aggregated[0]!.metric_name).toBe(ALL_AGGREGATED_METRIC);
-    expect(aggregated[0]!.value).toBe(7);
-    expect(aggregated[0]!.panel_id).toBe(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
+    const aggregatedTotal = aggregated.find(m => m.metric_name === ALL_AGGREGATED_METRIC);
+    expect(aggregatedTotal?.value).toBe(7);
+    expect(aggregatedTotal?.panel_id).toBe(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
     // Per-scenario rows keep the scenario-level metric name.
     expect(metrics.filter(m => m.metric_name === 'error_count')).toHaveLength(2);
+  });
+
+  it('breaks each scenario and the rollup down by response code, keeping the totals', async () => {
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+        { scenario_name: 'loadtest', response_code: '404', error_count: '1' },
+        { scenario_name: 'soak', response_code: '500', error_count: '4' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics, compareConfigs } = await processor.process('run-1', testRun);
+
+    const named = new Map(metrics.map(m => [`${m.dashboard_label}|${m.metric_name}`, m.value]));
+    expect(named.get('Performance test metrics loadtest|error_count')).toBe(4);
+    expect(named.get('Performance test metrics loadtest|error_count.500')).toBe(3);
+    expect(named.get('Performance test metrics loadtest|error_count.404')).toBe(1);
+    expect(named.get('Performance test metrics soak|error_count.500')).toBe(4);
+    // The rollup sums each code across scenarios, beside its unchanged run total.
+    const agg = `Performance test metrics ${ALL_AGGREGATED_SCENARIO}`;
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}`)).toBe(8);
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}.500`)).toBe(7);
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}.404`)).toBe(1);
+    // Every series sits on panel 301 and inherits its one panel-level compare config,
+    // which is what classifies the new series RED_errors.
+    expect(metrics.every(m => m.panel_id === METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT)).toBe(true);
+    expect(compareConfigs).toHaveLength(2);
+    expect(compareConfigs.every(c =>
+      c.metric_name === null && c.config_data.metricClassification?.classification === 'RED_errors'
+    )).toBe(true);
+  });
+
+  it('groups on the output expressions, so a NULL and a literal collapse to one series', async () => {
+    // Two rows that coalesce to the same (scenario, code) pair would produce two
+    // ds_metrics rows sharing (dashboard, panel, metric_name, time), which the upsert
+    // batch rejects outright. GROUP BY 1, 2 is what keeps them one row.
+    const dataSource = {
+      query: vi.fn(async () => [{ scenario_name: 'loadtest', response_code: '500', error_count: '3' }]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    await processor.process('run-1', testRun);
+
+    const sql = (dataSource.query.mock.calls[0]![0] as string).replace(/\s+/g, ' ');
+    expect(sql).toContain("COALESCE(scenario_name, 'default') as scenario_name");
+    // The code is bounded IN SQL so the truncated value is the GROUP BY key: Postgres then
+    // sums two codes that collapse into one row, instead of handing us two rows that collide
+    // only later, after the writer's substring(0, 255) on a varchar(255) PRIMARY KEY column.
+    // 120 = floor((255 - 1 - len('All aggregated')) / 2) — HALVED because left() counts
+    // characters while the writer's substring(0, 255) counts UTF-16 code units, and a non-BMP
+    // character is two of those. At the full 240 an astral-plane code composed to 255
+    // characters / 494 code units and the writer collapsed two distinct codes onto one key.
+    expect(sql).toContain("left(COALESCE(NULLIF(response_code, ''), 'unknown'), 120) as response_code");
+    expect(sql).toContain('GROUP BY 1, 2');
+    // Grouping on the raw columns is the bug this replaced.
+    expect(sql).not.toContain('GROUP BY scenario_name');
+  });
+
+  it('keeps a non-BMP code within the writer\'s UTF-16 budget, so nothing collides or is mangled', async () => {
+    // Regression test for the unit mismatch: Postgres left()/varchar(255) count characters,
+    // PerformanceTestMetricsPipeline's substring(0, 255) counts UTF-16 code units. An emoji is
+    // two units, so a bound of 240 characters produced a 494-code-unit name that the writer cut
+    // in half — onto a shared key, mid-surrogate. The SQL bound is what prevents this, so this
+    // asserts the property at the STORED width for every name the processor emits.
+    const astral = '\u{1F600}'.repeat(120); // 120 chars, 240 UTF-16 units — the worst case
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: 'loadtest', response_code: astral, error_count: '2' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', testRun);
+
+    for (const m of metrics) {
+      // .length is UTF-16 code units — the unit the writer truncates in.
+      expect(m.metric_name.length).toBeLessThanOrEqual(255);
+      expect(m.metric_name).toBe(m.metric_name.substring(0, 255));
+      // A cut mid-surrogate would leave a lone high surrogate at the end.
+      expect(/[\uD800-\uDBFF]$/.test(m.metric_name)).toBe(false);
+    }
+    const keys = metrics.map(m => `${m.application_dashboard_id}|${m.panel_id}|${m.metric_name.substring(0, 255)}|${m.time.toISOString()}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('keeps emitted metric names unique when two codes share the bounded prefix', async () => {
+    // The bound lives in SQL, so by the time rows reach JS the collapse has already happened
+    // and the counts are summed. This asserts the JS half cannot reintroduce the collision:
+    // the per-scenario map is additive, so two rows that arrive pre-collapsed (a changed
+    // query, a merged incremental result) sum rather than overwrite.
+    const prefix = 'E'.repeat(120);
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: 'loadtest', response_code: prefix, error_count: '1' },
+        { scenario_name: 'loadtest', response_code: prefix, error_count: '2' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', testRun);
+
+    // saveDsMetrics truncates metric_name to 255 before the INSERT; two rows that collapse to
+    // one name there fail the whole batch, so uniqueness must hold at the STORED width.
+    const keys = metrics.map(
+      m => `${m.application_dashboard_id}|${m.panel_id}|${m.metric_name.slice(0, 255)}|${m.time.toISOString()}`
+    );
+    expect(new Set(keys).size).toBe(keys.length);
+    // No name can exceed the stored width, so nothing is silently chopped.
+    expect(metrics.every(m => m.metric_name.length <= 255)).toBe(true);
+    // Additive, not overwriting: the collapsed code carries 1 + 2, and the scenario total agrees.
+    const byName = new Map(metrics.map(m => [m.metric_name, m.value]));
+    expect(byName.get(`error_count.${prefix}`)).toBe(3);
+    expect(byName.get('error_count')).toBe(3);
+  });
+
+  it('folds a real scenario sharing the rollup name into it instead of emitting both', async () => {
+    // Its count belongs in the rollup, and a second row of the same name on the same
+    // dashboard, panel and time would collide inside one ON CONFLICT batch.
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: ALL_AGGREGATED_SCENARIO, response_code: '500', error_count: '2' },
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', testRun);
+
+    const keys = metrics.map(m => `${m.application_dashboard_id}|${m.panel_id}|${m.metric_name}|${m.time.toISOString()}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    const named = new Map(metrics.map(m => [`${m.dashboard_label}|${m.metric_name}`, m.value]));
+    const agg = `Performance test metrics ${ALL_AGGREGATED_SCENARIO}`;
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}`)).toBe(5);
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}.500`)).toBe(5);
+    // The roll-up dashboard carries the roll-up spelling only, never 'error_count'.
+    expect(metrics.filter(m => m.dashboard_label === agg).every(m => m.metric_name.startsWith(ALL_AGGREGATED_METRIC))).toBe(true);
+    expect(named.get('Performance test metrics loadtest|error_count')).toBe(3);
+  });
+
+  it('emits no compare config when the rollup name is the only scenario present', async () => {
+    // The roll-up dashboard is display-only; with nothing else to configure the pass
+    // must still produce its series and no config at all.
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: ALL_AGGREGATED_SCENARIO, response_code: '503', error_count: '7' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics, compareConfigs } = await processor.process('run-1', testRun);
+
+    expect(compareConfigs).toEqual([]);
+    expect(metrics.map(m => m.metric_name).sort()).toEqual([
+      ALL_AGGREGATED_METRIC,
+      `${ALL_AGGREGATED_METRIC}.503`,
+    ]);
+  });
+
+  it('names an error that recorded no code "unknown" and still counts it in the total', async () => {
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: 'loadtest', response_code: 'unknown', error_count: '2' },
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', testRun);
+
+    const named = new Map(metrics.map(m => [`${m.dashboard_label}|${m.metric_name}`, m.value]));
+    expect(named.get('Performance test metrics loadtest|error_count.unknown')).toBe(2);
+    expect(named.get('Performance test metrics loadtest|error_count')).toBe(5);
+    const agg = `Performance test metrics ${ALL_AGGREGATED_SCENARIO}`;
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}.unknown`)).toBe(2);
+  });
+
+  it('keeps a non-numeric response code verbatim in the metric name', async () => {
+    // JMeter writes a Java exception class into responseCode for a connection failure,
+    // so a code can be a sentence. Nothing truncates or sanitises it.
+    const jmeterCode = 'Non HTTP response code: java.net.ConnectException';
+    const dataSource = {
+      query: vi.fn(async () => [{ scenario_name: 'loadtest', response_code: jmeterCode, error_count: '4' }]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics } = await processor.process('run-1', testRun);
+
+    const named = new Map(metrics.map(m => [`${m.dashboard_label}|${m.metric_name}`, m.value]));
+    expect(named.get(`Performance test metrics loadtest|error_count.${jmeterCode}`)).toBe(4);
+    expect(named.get('Performance test metrics loadtest|error_count')).toBe(4);
+  });
+
+  it('reports the scenario count in its log line, not the number of (scenario, code) groups', async () => {
+    // The only operator-visible count of the pass. errorsData.length is now the number
+    // of pairs, which would read as four scenarios on a two-scenario run.
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+        { scenario_name: 'loadtest', response_code: '404', error_count: '1' },
+        { scenario_name: 'soak', response_code: '500', error_count: '4' },
+        { scenario_name: 'soak', response_code: '404', error_count: '2' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), logger as never);
+
+    await processor.process('run-1', testRun);
+
+    const lines = logger.info.mock.calls.map(c => String(c[0]));
+    expect(lines.some(l => l.includes('Processing 10 errors across 2 scenarios'))).toBe(true);
   });
 
   it('adds a zero rollup series when the run had no errors at all', async () => {
@@ -391,6 +624,8 @@ describe('ErrorsProcessor rollup row', () => {
     expect(aggregated).toHaveLength(1);
     expect(aggregated[0]!.metric_name).toBe(ALL_AGGREGATED_METRIC);
     expect(aggregated[0]!.value).toBe(0);
+    // No response code to break down: the zero branch emits the total series only.
+    expect(metrics.every(m => !m.metric_name.includes('.'))).toBe(true);
   });
 
   it('still adds the rollup when no scenario name could be found either', async () => {

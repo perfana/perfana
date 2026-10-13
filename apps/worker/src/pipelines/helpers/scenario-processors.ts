@@ -41,6 +41,40 @@ export interface ScenarioProcessorResult {
 const SCENARIO_PANEL_MIN_SAMPLE_COUNT = 1;
 
 /**
+ * How much of a response code may reach a metric name, derived rather than written down:
+ * `ds_metrics.metric_name` is `varchar(255)` **and part of the primary key**, and the writer
+ * truncates with `.substring(0, 255)` (`PerformanceTestMetricsPipeline.saveDsMetrics`). Two
+ * codes agreeing on their first `MAX_RESPONSE_CODE_LENGTH` characters would otherwise collapse
+ * to one `metric_name` AFTER the
+ * dedupe that is supposed to prevent it, and two rows sharing
+ * `(dashboard, panel, metric_name, time)` are rejected by the batch outright — a unique
+ * violation on a rebuild, a `cardinality_violation` on a tick — which fails the
+ * `performance-test-metrics` stage for that run on every analysis, with nothing to repair it.
+ * `requests_error.response_code` is unbounded `text` written straight through by the JTL
+ * importer, so the length is reachable from an uploaded file.
+ *
+ * Applying it in SQL rather than in JS is what makes it safe: the truncated value becomes the
+ * GROUP BY key, so Postgres sums the collapsed codes into one row instead of handing us two
+ * rows that only collide later.
+ *
+ * **The budget is HALVED because the two ends count in different units.** Postgres `left()`
+ * and `varchar(255)` count CHARACTERS; the last writer is `.substring(0, 255)`, which counts
+ * UTF-16 CODE UNITS, and a non-BMP character (emoji, astral-plane CJK) is two of those. At the
+ * full 240 the arithmetic looked right and was wrong: measured 2026-10-13, two codes of 239
+ * astral characters plus a distinguishing suffix survive `left()` as 240 distinct characters,
+ * compose to a name of 255 characters but **494 code units**, and are then cut by the writer to
+ * the SAME 135-character value — reintroducing the exact primary-key collision this constant
+ * exists to prevent, and cutting mid-surrogate so the stored name is mangled too. UTF-16 is at
+ * most 2 units per code point, so bounding characters at half the budget bounds code units at
+ * all of it: worst case 120 astral characters = 240 units, plus the longest base name and its
+ * dot = 255 units exactly, and the writer's `substring` becomes a no-op. Derived from
+ * `ALL_AGGREGATED_METRIC` so a longer base name cannot silently reintroduce the overflow.
+ */
+const MAX_RESPONSE_CODE_LENGTH = Math.floor(
+  (255 - 1 - Math.max('error_count'.length, ALL_AGGREGATED_METRIC.length)) / 2
+);
+
+/**
  * Where a run's single scenario-level point is written. A completed run puts it at end_time,
  * which is what every baseline holds. A live run does not know its end_time yet (the
  * keep-alive update moves it to "now" on every post), so the ticks upsert the cumulative
@@ -81,9 +115,15 @@ export class ErrorsProcessor {
     const hasFilterEndTime = filterToTime !== null;
     const metricTime = scenarioMetricTime(testRun);
 
-    // Aggregate error counts per scenario in SQL (avoids loading all error rows into JS)
+    // Aggregate error counts per scenario AND response code in SQL (avoids loading all
+    // error rows into JS). GROUP BY on the output expressions, not the raw columns: a run
+    // with both a NULL and a literal 'default' scenario (or a NULL and an empty response
+    // code) would otherwise yield two rows that coalesce to one metric name, and two rows
+    // with the same (dashboard, panel, metric_name, time) are rejected by the upsert batch.
     let query = `
-      SELECT COALESCE(scenario_name, 'default') as scenario_name, COUNT(*) as error_count
+      SELECT COALESCE(scenario_name, 'default') as scenario_name,
+             left(COALESCE(NULLIF(response_code, ''), 'unknown'), ${MAX_RESPONSE_CODE_LENGTH}) as response_code,
+             COUNT(*) as error_count
       FROM requests_error
       WHERE test_run_id = $1 AND time >= $2`;
     const params: unknown[] = [testRunId, filterFromTime];
@@ -93,12 +133,16 @@ export class ErrorsProcessor {
       params.push(filterToTime);
     }
 
-    query += ` GROUP BY scenario_name`;
+    query += ` GROUP BY 1, 2`;
 
-    const errorsData = await this.dataSource.query<Array<{ scenario_name: string; error_count: string }>>(query, params);
+    const errorsData = await this.dataSource.query<Array<{
+      scenario_name: string;
+      response_code: string;
+      error_count: string;
+    }>>(query, params);
 
     this.logger.debug(
-      `🔍 Errors query time range: ${filterFromTime.toISOString()} to ${filterToTime?.toISOString() ?? 'null'} - found ${errorsData?.length ?? 0} scenario groups`
+      `🔍 Errors query time range: ${filterFromTime.toISOString()} to ${filterToTime?.toISOString() ?? 'null'} - found ${errorsData?.length ?? 0} scenario/response-code groups`
     );
 
     if (!errorsData || errorsData.length === 0) {
@@ -162,22 +206,37 @@ export class ErrorsProcessor {
     }
 
     const totalErrors = errorsData.reduce((sum, row) => sum + parseInt(row.error_count, 10), 0);
-    this.logger.info(`📊 Processing ${totalErrors} errors across ${errorsData.length} scenarios`);
+    const scenarioCount = new Set(errorsData.map(r => r.scenario_name)).size;
+    this.logger.info(`📊 Processing ${totalErrors} errors across ${scenarioCount} scenarios`);
 
-    // Roll the scenarios up into the "all aggregated" dashboard's single series. A real
-    // scenario of that name is dropped in favour of the roll-up — its count is already in
-    // totalErrors, and two rows would collide inside one upsert batch.
-    const rows = errorsData
-      .filter(r => r.scenario_name !== ALL_AGGREGATED_SCENARIO)
-      .concat({ scenario_name: ALL_AGGREGATED_SCENARIO, error_count: String(totalErrors) });
+    // scenario -> response code -> count, plus the run-wide roll-up onto the "all
+    // aggregated" dashboard. A real scenario of the roll-up's name is folded into it rather
+    // than emitted twice — its count is already in the roll-up, and two rows would collide
+    // inside one upsert batch.
+    const byScenario = new Map<string, Map<string, number>>();
+    const rollup = new Map<string, number>();
+    for (const row of errorsData) {
+      const count = parseInt(row.error_count, 10);
+      rollup.set(row.response_code, (rollup.get(row.response_code) ?? 0) + count);
+      if (row.scenario_name === ALL_AGGREGATED_SCENARIO) { continue; }
+      const codes = byScenario.get(row.scenario_name) ?? new Map<string, number>();
+      // Additive on both sides. `GROUP BY 1, 2` already makes (scenario, code) unique, so an
+      // overwrite is correct today — but then the two halves of this loop would disagree about
+      // the same input, and the day anything hands it pre-grouped rows the per-scenario total
+      // would silently lose a count while the roll-up kept it, leaving `error_count` and
+      // `All aggregated` no longer summing to each other with nothing logged.
+      codes.set(row.response_code, (codes.get(row.response_code) ?? 0) + count);
+      byScenario.set(row.scenario_name, codes);
+    }
+    const rows: Array<[string, Map<string, number>]> = [
+      ...byScenario,
+      [ALL_AGGREGATED_SCENARIO, rollup],
+    ];
 
     const panelConfigsCreated = new Set<string>();
 
-    // Process each scenario (already grouped by SQL)
-    for (const row of rows) {
-      const scenarioName = row.scenario_name;
-      const errorCount = parseInt(row.error_count, 10);
-
+    // One entry per scenario plus the synthesized roll-up; codeCounts is code -> count.
+    for (const [scenarioName, codeCounts] of rows) {
       // Get/create dashboard for this scenario
       const dashboard = await this.dashboardManager.getOrCreateScenarioDashboard(
         scenarioName,
@@ -186,23 +245,43 @@ export class ErrorsProcessor {
       );
 
       const panel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
-      // Create error count metric
-      metrics.push(
-        createDsMetricsRecord(
-          testRunId,
-          dashboard,
-          panel,
-          scenarioName === ALL_AGGREGATED_SCENARIO
-            ? ALL_AGGREGATED_METRIC
-            : buildScenarioMetricName('error_count'),
-          errorCount,
-          metricTime,
-          METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
-          0, // Single data point
-          testRun.start_time,
-          testRun.ramp_up_time
-        )
-      );
+      const baseName = scenarioName === ALL_AGGREGATED_SCENARIO
+        ? ALL_AGGREGATED_METRIC
+        : buildScenarioMetricName('error_count');
+
+      // The unchanged total series first, then one series per response code beside it.
+      // On a REAL scenario's dashboard all of them sit on panel 301 and inherit its
+      // panel-level compare config — RED_errors, minSampleCount 1 — with no per-metric
+      // config to keep in step. On the roll-up dashboard the config below is gated on the
+      // scenario not being the roll-up, so those series carry none — but that does NOT mean
+      // ADAPT skips them: `buildCompareConfigCache` seeds a `'default'` entry
+      // unconditionally, so they resolve to DEFAULT_COMPARE_CONFIG and ARE evaluated. What
+      // makes them read `incomparable` is the sample floor: with no `minSampleCount` in that
+      // default, the floor falls back to `ADAPT_MIN_SAMPLE_COUNT` (default 2) and these
+      // panels hold exactly one point per run. A deployment that sets it to 1 — the value
+      // this very file passes as SCENARIO_PANEL_MIN_SAMPLE_COUNT — makes the whole roll-up
+      // dashboard comparable, totals and per-code series alike.
+      const series: Array<[string, number]> = [
+        [baseName, [...codeCounts.values()].reduce((a, b) => a + b, 0)],
+        ...[...codeCounts].map(([code, count]): [string, number] => [`${baseName}.${code}`, count]),
+      ];
+
+      for (const [metricName, value] of series) {
+        metrics.push(
+          createDsMetricsRecord(
+            testRunId,
+            dashboard,
+            panel,
+            metricName,
+            value,
+            metricTime,
+            METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
+            0, // Single data point
+            testRun.start_time,
+            testRun.ramp_up_time
+          )
+        );
+      }
 
       // Create panel-level compare config (once per dashboard)
       const panelKey = `${dashboard.dashboardId}::panel::${METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT}`;
@@ -274,7 +353,12 @@ export class VirtualUsersProcessor {
       params.push(filterToTime);
     }
 
-    query += ` GROUP BY scenario_name`;
+    // On the coalesced output expression, not the raw column — same reason as ErrorsProcessor
+    // above: `GROUP BY scenario_name` resolves to the input column, so a run holding both a
+    // NULL and a literal 'default' scenario yields two rows that coalesce to one metric name,
+    // and two rows sharing (dashboard, panel, metric_name, time) fail the upsert batch. Panels
+    // 302/303 carried that exposure until v0.2.97.16.
+    query += ` GROUP BY 1`;
 
     let vuData = await this.dataSource.query<Array<{
       scenario_name: string;
