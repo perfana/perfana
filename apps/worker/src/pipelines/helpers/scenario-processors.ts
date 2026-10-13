@@ -81,9 +81,15 @@ export class ErrorsProcessor {
     const hasFilterEndTime = filterToTime !== null;
     const metricTime = scenarioMetricTime(testRun);
 
-    // Aggregate error counts per scenario in SQL (avoids loading all error rows into JS)
+    // Aggregate error counts per scenario AND response code in SQL (avoids loading all
+    // error rows into JS). GROUP BY on the output expressions, not the raw columns: a run
+    // with both a NULL and a literal 'default' scenario (or a NULL and an empty response
+    // code) would otherwise yield two rows that coalesce to one metric name, and two rows
+    // with the same (dashboard, panel, metric_name, time) are rejected by the upsert batch.
     let query = `
-      SELECT COALESCE(scenario_name, 'default') as scenario_name, COUNT(*) as error_count
+      SELECT COALESCE(scenario_name, 'default') as scenario_name,
+             COALESCE(NULLIF(response_code, ''), 'unknown') as response_code,
+             COUNT(*) as error_count
       FROM requests_error
       WHERE test_run_id = $1 AND time >= $2`;
     const params: unknown[] = [testRunId, filterFromTime];
@@ -93,9 +99,13 @@ export class ErrorsProcessor {
       params.push(filterToTime);
     }
 
-    query += ` GROUP BY scenario_name`;
+    query += ` GROUP BY 1, 2`;
 
-    const errorsData = await this.dataSource.query<Array<{ scenario_name: string; error_count: string }>>(query, params);
+    const errorsData = await this.dataSource.query<Array<{
+      scenario_name: string;
+      response_code: string;
+      error_count: string;
+    }>>(query, params);
 
     this.logger.debug(
       `🔍 Errors query time range: ${filterFromTime.toISOString()} to ${filterToTime?.toISOString() ?? 'null'} - found ${errorsData?.length ?? 0} scenario groups`
@@ -162,22 +172,32 @@ export class ErrorsProcessor {
     }
 
     const totalErrors = errorsData.reduce((sum, row) => sum + parseInt(row.error_count, 10), 0);
-    this.logger.info(`📊 Processing ${totalErrors} errors across ${errorsData.length} scenarios`);
+    const scenarioCount = new Set(errorsData.map(r => r.scenario_name)).size;
+    this.logger.info(`📊 Processing ${totalErrors} errors across ${scenarioCount} scenarios`);
 
-    // Roll the scenarios up into the "all aggregated" dashboard's single series. A real
-    // scenario of that name is dropped in favour of the roll-up — its count is already in
-    // totalErrors, and two rows would collide inside one upsert batch.
-    const rows = errorsData
-      .filter(r => r.scenario_name !== ALL_AGGREGATED_SCENARIO)
-      .concat({ scenario_name: ALL_AGGREGATED_SCENARIO, error_count: String(totalErrors) });
+    // scenario -> response code -> count, plus the run-wide roll-up onto the "all
+    // aggregated" dashboard. A real scenario of the roll-up's name is folded into it rather
+    // than emitted twice — its count is already in the roll-up, and two rows would collide
+    // inside one upsert batch.
+    const byScenario = new Map<string, Map<string, number>>();
+    const rollup = new Map<string, number>();
+    for (const row of errorsData) {
+      const count = parseInt(row.error_count, 10);
+      rollup.set(row.response_code, (rollup.get(row.response_code) ?? 0) + count);
+      if (row.scenario_name === ALL_AGGREGATED_SCENARIO) { continue; }
+      const codes = byScenario.get(row.scenario_name) ?? new Map<string, number>();
+      codes.set(row.response_code, count);
+      byScenario.set(row.scenario_name, codes);
+    }
+    const rows: Array<[string, Map<string, number>]> = [
+      ...byScenario,
+      [ALL_AGGREGATED_SCENARIO, rollup],
+    ];
 
     const panelConfigsCreated = new Set<string>();
 
     // Process each scenario (already grouped by SQL)
-    for (const row of rows) {
-      const scenarioName = row.scenario_name;
-      const errorCount = parseInt(row.error_count, 10);
-
+    for (const [scenarioName, codeCounts] of rows) {
       // Get/create dashboard for this scenario
       const dashboard = await this.dashboardManager.getOrCreateScenarioDashboard(
         scenarioName,
@@ -186,23 +206,34 @@ export class ErrorsProcessor {
       );
 
       const panel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
-      // Create error count metric
-      metrics.push(
-        createDsMetricsRecord(
-          testRunId,
-          dashboard,
-          panel,
-          scenarioName === ALL_AGGREGATED_SCENARIO
-            ? ALL_AGGREGATED_METRIC
-            : buildScenarioMetricName('error_count'),
-          errorCount,
-          metricTime,
-          METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
-          0, // Single data point
-          testRun.start_time,
-          testRun.ramp_up_time
-        )
-      );
+      const baseName = scenarioName === ALL_AGGREGATED_SCENARIO
+        ? ALL_AGGREGATED_METRIC
+        : buildScenarioMetricName('error_count');
+
+      // The unchanged total series first, then one series per response code beside it.
+      // All of them sit on panel 301, so they inherit its panel-level compare config —
+      // RED_errors, minSampleCount 1 — with no per-metric config to keep in step.
+      const series: Array<[string, number]> = [
+        [baseName, [...codeCounts.values()].reduce((a, b) => a + b, 0)],
+        ...[...codeCounts].map(([code, count]): [string, number] => [`${baseName}.${code}`, count]),
+      ];
+
+      for (const [metricName, value] of series) {
+        metrics.push(
+          createDsMetricsRecord(
+            testRunId,
+            dashboard,
+            panel,
+            metricName,
+            value,
+            metricTime,
+            METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
+            0, // Single data point
+            testRun.start_time,
+            testRun.ramp_up_time
+          )
+        );
+      }
 
       // Create panel-level compare config (once per dashboard)
       const panelKey = `${dashboard.dashboardId}::panel::${METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT}`;

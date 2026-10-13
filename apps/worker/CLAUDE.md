@@ -697,6 +697,29 @@ Seven things a future reader will otherwise "fix":
 The roll-up is written at ingestion, so it appears on runs analysed from v0.2.95.4 onwards;
 re-analysing an older run produces it.
 
+**Error Count (301) carries one series per response code beside its total (v0.2.97.16).** The
+`error_count` / `All aggregated` total is unchanged; `ErrorsProcessor` additionally groups
+`requests_error` by `COALESCE(NULLIF(response_code, ''), 'unknown')` and emits
+`error_count.<code>` per scenario and `All aggregated.<code>` on the roll-up dashboard. Four
+things about it:
+
+- **They sit on panel 301 and get no config of their own.** The panel-level `ds_compare_config`
+  is the default for every metric on the panel (metric > panel > dashboard > global), so the new
+  series are `RED_errors`, lower-is-better, `mean`, `minSampleCount` 1 by inheritance. A
+  per-metric config would be a second thing to keep in step for no gain.
+- **`GROUP BY 1, 2`, on the output expressions, not the raw columns.** A run holding both a NULL
+  and a literal `'default'` scenario — or a NULL and an empty response code — yields two rows
+  that coalesce to one metric name, and two rows sharing
+  `(dashboard, panel, metric_name, time)` are rejected by the upsert batch outright. The
+  per-scenario spelling was already exposed to the scenario half of that before this version.
+- **Nothing had to change in `DataSanityCheckPipeline`.** Its metric-name regex still matches
+  only the bare `error_count`, but the filter that actually covers these panels is by panel
+  TITLE (item 4 above), so the per-code series are excluded with the total.
+- **The response code is whatever the load tool wrote.** JMeter puts a Java exception class in
+  `responseCode` for a connection failure, so a code can be a sentence rather than three digits.
+  Cardinality is bounded in practice and nothing truncates it. `ponytail:` no cap on distinct
+  codes; add a top-N if a run ever produces hundreds.
+
 **Transaction Concurrency (108) / Request Concurrency (219) are the Top 10 ranking figure inside
 ADAPT (v0.2.95.38 as "Impact" in ms/s; renamed and made unitless in v0.2.95.41).** Each is
 `SUM(response_time) / 1000 / bucket_seconds` — `throughput x avg_rt`, i.e. the average number of

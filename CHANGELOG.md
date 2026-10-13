@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.16] - 2026-10-13
+
+### Added
+- **The performance-test Error Count panel now shows a series per response code, beside the existing total.** A run's error count told you how many requests failed but not what they failed with, so every investigation started with opening the error analysis. Each scenario dashboard's Error Count panel gains an `error_count.<code>` series (`error_count.500`, `error_count.404`, and so on, with `unknown` for an error that recorded no code), and the all-aggregated dashboard gains the same breakdown summed across scenarios. The `error_count` total is unchanged, so existing graphs, SLOs and baselines keep working exactly as before.
+- The new series are classified as errors — lower is better — so ADAPT compares each response code against the baseline on its own. A code that appears in a run but not in its baseline is reported as incomparable rather than as a regression, which is the same treatment a new transaction gets.
+
+### Note for existing installations
+- Nothing to do. The breakdown appears on runs analysed from this release onwards; re-analysing an older run produces it. The first runs after the deploy have no baseline for the new series, so expect them to read as incomparable until the control group fills.
+
 ## [0.2.97.15] - 2026-10-13
 
 ### Changed

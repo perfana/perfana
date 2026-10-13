@@ -358,8 +358,8 @@ describe('ErrorsProcessor rollup row', () => {
   it('adds a rollup series carrying the total across scenarios', async () => {
     const dataSource = {
       query: vi.fn(async () => [
-        { scenario_name: 'loadtest', error_count: '3' },
-        { scenario_name: 'soak', error_count: '4' },
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+        { scenario_name: 'soak', response_code: '500', error_count: '4' },
       ]),
     };
     const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
@@ -367,12 +367,42 @@ describe('ErrorsProcessor rollup row', () => {
     const { metrics } = await processor.process('run-1', testRun);
 
     const aggregated = metrics.filter(isAggregated);
-    expect(aggregated).toHaveLength(1);
-    expect(aggregated[0]!.metric_name).toBe(ALL_AGGREGATED_METRIC);
-    expect(aggregated[0]!.value).toBe(7);
-    expect(aggregated[0]!.panel_id).toBe(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
+    const aggregatedTotal = aggregated.find(m => m.metric_name === ALL_AGGREGATED_METRIC);
+    expect(aggregatedTotal?.value).toBe(7);
+    expect(aggregatedTotal?.panel_id).toBe(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
     // Per-scenario rows keep the scenario-level metric name.
     expect(metrics.filter(m => m.metric_name === 'error_count')).toHaveLength(2);
+  });
+
+  it('breaks each scenario and the rollup down by response code, keeping the totals', async () => {
+    const dataSource = {
+      query: vi.fn(async () => [
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+        { scenario_name: 'loadtest', response_code: '404', error_count: '1' },
+        { scenario_name: 'soak', response_code: '500', error_count: '4' },
+      ]),
+    };
+    const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
+
+    const { metrics, compareConfigs } = await processor.process('run-1', testRun);
+
+    const named = new Map(metrics.map(m => [`${m.dashboard_label}|${m.metric_name}`, m.value]));
+    expect(named.get('Performance test metrics loadtest|error_count')).toBe(4);
+    expect(named.get('Performance test metrics loadtest|error_count.500')).toBe(3);
+    expect(named.get('Performance test metrics loadtest|error_count.404')).toBe(1);
+    expect(named.get('Performance test metrics soak|error_count.500')).toBe(4);
+    // The rollup sums each code across scenarios, beside its unchanged run total.
+    const agg = `Performance test metrics ${ALL_AGGREGATED_SCENARIO}`;
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}`)).toBe(8);
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}.500`)).toBe(7);
+    expect(named.get(`${agg}|${ALL_AGGREGATED_METRIC}.404`)).toBe(1);
+    // Every series sits on panel 301 and inherits its one panel-level compare config,
+    // which is what classifies the new series RED_errors.
+    expect(metrics.every(m => m.panel_id === METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT)).toBe(true);
+    expect(compareConfigs).toHaveLength(2);
+    expect(compareConfigs.every(c =>
+      c.metric_name === null && c.config_data.metricClassification?.classification === 'RED_errors'
+    )).toBe(true);
   });
 
   it('adds a zero rollup series when the run had no errors at all', async () => {
