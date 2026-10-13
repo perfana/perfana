@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.18] - 2026-10-13
+
+### Added
+- **The Graphs card can now draw the analysis time range only.** A run's chart covers the whole run, so a ramp-up spike sets the y axis scale and flattens everything that happened inside the window anomaly detection actually judged. An **analysis range only** toggle now sits in the chart header beside the overlay / split-by-unit switch: turn it on and the chart covers the analysis time range plus a small margin, with each y axis scaled to the data inside it — the same view the Custom graphs section of a report produces with its own "Show analysis time range only" setting. The toggle appears only on runs that have an analysis window to show, starts off, and is per chart rather than saved, so nothing about existing graphs or presets changes. The min, mean and max in the series table were already the analysis window only and are unaffected by it.
+
 ## [0.2.97.17] - 2026-10-13
 
 ### Fixed

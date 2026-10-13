@@ -76,6 +76,23 @@ re-adding `testRunId` to it currently leaves every test green.
 
 ## Charts
 
+### The analysis-only margin is 2.5% in two apps with nothing holding them together
+
+**Priority:** P3
+**Origin:** pre-landing review of `feat/graphs-analysis-range-only` (v0.2.97.18), maintainability
+finding, deliberately not fixed in that version.
+
+`analysisRangeClip` in `apps/web/.../graphs/utils/chart-utils.ts` and `ANALYSIS_ONLY_MARGIN`
+in `apps/api/src/modules/reports/renderers/chart-svg.service.ts` both hard-code `0.025`, and
+its docstring claims the two agree. Nothing enforces it: they sit in different apps (which
+cannot import from each other), work in different units (sample index vs milliseconds) and
+carry different floors (one sample vs 1000 ms). The repo already solved this exact shape once,
+for the chart tokens, with a drift spec that preflight runs (`chart-tokens.spec.ts`).
+
+**What:** either hoist the fraction somewhere both sides read, or add a case to that existing
+drift spec asserting the two values still match. Low stakes on its own — a divergence shows up
+as the Graphs card and the report drawing slightly different margins, never as wrong data.
+
 ### A typed graph title is overwritten whenever a series is added or removed
 
 **Priority:** P3
