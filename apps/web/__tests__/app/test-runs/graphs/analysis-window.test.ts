@@ -8,7 +8,7 @@
  * so the "nothing to dim" cases are pinned rather than inferred.
  */
 
-import { calculateAnalysisWindowIndices } from '@/app/test-runs/[id]/components/graphs/utils/chart-utils';
+import { analysisRangeClip, calculateAnalysisWindowIndices } from '@/app/test-runs/[id]/components/graphs/utils/chart-utils';
 import { analysisWindowShapes, chartTheme } from '@/lib/charts';
 import { TestRun } from '@/types/test-runs';
 
@@ -119,5 +119,23 @@ describe('analysisWindowShapes', () => {
     expect(annotations.map((a) => a.text)).toEqual(['start', 'end']);
     expect(annotations[0]).toMatchObject({ x: 3, xanchor: 'left' });
     expect(annotations[1]).toMatchObject({ x: 7, xanchor: 'right' });
+  });
+});
+
+describe('analysisRangeClip — the "analysis range only" view', () => {
+  it('pads the window by 2.5%, at least one sample either side', () => {
+    expect(analysisRangeClip(10, 90, 101)).toEqual({ lo: 8, hi: 92 });
+    expect(analysisRangeClip(2, 5, 10)).toEqual({ lo: 1, hi: 6 });
+  });
+
+  it('pads only the trimmed side when one offset is set and the other is not', () => {
+    expect(analysisRangeClip(10, null, 101)).toEqual({ lo: 8, hi: 100 });
+    expect(analysisRangeClip(null, 90, 101)).toEqual({ lo: 0, hi: 92 });
+  });
+
+  it('treats an untrimmed edge as the data edge and never leaves the data', () => {
+    expect(analysisRangeClip(null, null, 50)).toEqual({ lo: 0, hi: 49 });
+    expect(analysisRangeClip(0, 49, 50)).toEqual({ lo: 0, hi: 49 });
+    expect(analysisRangeClip(0, 0, 1)).toEqual({ lo: 0, hi: 0 });
   });
 });

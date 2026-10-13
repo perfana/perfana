@@ -246,3 +246,24 @@ export function buildChartConfig(chartName: string | undefined): Record<string, 
     ]
   };
 }
+
+/**
+ * The index range the "analysis time range only" view draws: the window plus a thin
+ * margin, so the start/end hairlines stay visible instead of landing on the plot edges —
+ * the same 2.5% margin the report's charts use (`ANALYSIS_ONLY_MARGIN` in
+ * `chart-svg.service.ts`).
+ *
+ * Callers CLIP THE POINTS to this range rather than only ranging the x axis: Plotly
+ * autoranges y over every point in a trace, visible or not, so a ranged axis alone would
+ * keep the ramp-up's scale and defeat the point of the view.
+ */
+export function analysisRangeClip(
+  startIndex: number | null,
+  endIndex: number | null,
+  n: number,
+): { lo: number; hi: number } {
+  const lo = startIndex ?? 0;
+  const hi = endIndex ?? n - 1;
+  const margin = Math.max(1, Math.round((hi - lo) * 0.025));
+  return { lo: Math.max(0, lo - margin), hi: Math.min(Math.max(n - 1, 0), hi + margin) };
+}
