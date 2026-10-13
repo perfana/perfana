@@ -446,6 +446,40 @@ per-bucket series. Five things about it are deliberate:
    to the transaction rollup". Existing `check_results` keep their stored value until the run is
    re-evaluated.
 
+### An aggregate SLO reads the rollup for `avg` and `max`, and must not for a percentile
+
+`AggregatedBenchmarkEvaluator` answers a whole-run SLO (`transaction_response_time`,
+`request_response_time`, `error_percentage`) and had one plan for all of them: scan every row of
+the run in `transactions` / `requests_raw`, and for a percentile sort them too. `error_percentage`
+got the rollup in v0.2.96.1; v0.2.97.15 adds `avg` and `max`, from
+`test_run_transaction_stats` / `test_run_sampler_stats`, and **deliberately leaves the four
+percentiles on the raw scan**.
+
+1. **`avg` and `max` are exact, which is why they move.** `avg` is
+   `SUM(avg_response_time * total_count) / SUM(total_count)` — the stored per-group averages are
+   `ROUND(…, 2)`, so the result differs in the 4th decimal at most (292.9742 raw vs 292.9737 rollup
+   on a 200k-row run). `max` is `max_val(rollup(pct_agg))`: a tdigest stores its own min and max
+   verbatim and `rollup()` carries them, so it is byte-identical to `MAX(max_response_time)` on all
+   12 sampler-rollup variants of the dev database and to the raw `MAX` on both transaction runs that
+   still hold their raw rows. Nothing approximate enters a stored SLO value.
+2. **A percentile from that sketch bounds its *rank*, not its *value*, and an SLO is a gate on the
+   value.** Where the distribution has a cliff the two come apart: on the three Bravo runs of the
+   dev database raw p95 is 433 / 410 / 503 ms and `approx_percentile(0.95, rollup(pct_agg))` reads
+   846 / 732 / 872 ms (+74…+95 %), because raw p95 is 410 ms and raw p96 is 2092 ms — two tenths of
+   a percentile-point of rank error is 300 ms of value error there. A `p95 <= 500 ms` SLO flips PASS
+   → FAIL. The other 33 runs with both halves agreed within ~2 %, which is exactly what makes it
+   unsafe: it looks fine until it isn't. If that scan ever has to go, the rollup needs a
+   **relative**-error sketch (uddsketch / `percentile_agg`, as `ds_metric_statistics` carries), not
+   this one — a schema change and a re-rollup of every run, not a query rewrite.
+3. **Two residues, both inherited from the `error_percentage` arm.** The rollup's
+   `ramp_up_excluded = true` row trims ramp-**down** as well, where the raw clause trims ramp-up
+   only; and `SAMPLER_ROLLUP_BASE_SQL` drops rows with a NULL `transaction_name`, which the raw
+   `request_response_time` scan counts (252 of 11,545 on a k6 run of the dev database). A run with
+   no rollup at all still falls back to the raw scan, so neither can make a verdict disappear.
+4. **The stat key is resolved once.** An `aggregate_stat` no one defined used to fall through to
+   `AVG(response_time)` in the raw map only; both maps now read the same resolved key, so an unknown
+   stat cannot pick the rollup for one path and the raw scan for the other.
+
 ### `ds_metrics` carries one group-key statistics object, on the PARENT
 
 `StatisticsPipeline` groups `ds_metrics` by `(test_run_id, application_dashboard_id, panel_id,

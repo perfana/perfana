@@ -158,7 +158,7 @@ describe('AggregatedBenchmarkEvaluator', () => {
     });
     expect(result.meets_requirement).toBe(true);
     expect(result.actual_value).toBe(300);
-    const call = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0];
+    const call = (manager.query as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toContain('FROM requests_raw');
     expect(call[0]).not.toContain('is_transaction');
   });
@@ -192,7 +192,7 @@ describe('AggregatedBenchmarkEvaluator', () => {
     const manager = makeManager([{ result: '800' }]);
     const evaluator = new AggregatedBenchmarkEvaluator(logger, manager);
     await evaluator.evaluate(testRun, { ...baseBenchmark, aggregate_stat: 'unknown_stat' });
-    const sql: string = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const sql: string = (manager.query as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
     expect(sql).toContain('AVG(response_time)');
   });
 
@@ -227,5 +227,41 @@ describe('AggregatedBenchmarkEvaluator', () => {
     const call = (manager.query as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(call[0]).not.toContain('time >=');
     expect(call[1]).toHaveLength(1);
+  });
+  it('reads avg and max from the rollup, and keeps percentiles on the raw scan', async () => {
+    for (const [stat, expectRollup] of [['avg', true], ['max', true], ['p95', false], ['p99', false]] as const) {
+      const query = vi.fn().mockResolvedValue([{ rows: 12, result: '480' }]);
+      const evaluator = new AggregatedBenchmarkEvaluator(logger, { query } as unknown as EntityManager);
+      await evaluator.evaluate(testRun, { ...baseBenchmark, aggregate_stat: stat });
+      const sql: string = query.mock.calls[0][0];
+      expect(sql.includes('test_run_transaction_stats'), stat).toBe(expectRollup);
+      // A percentile must never be answered from the sketch -- it bounds rank, not value.
+      expect(sql).not.toContain('approx_percentile');
+    }
+  });
+
+  it('falls back to the raw scan for avg when the run has no rollup rows', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce([{ rows: 0, result: null }])
+      .mockResolvedValueOnce([{ result: '300' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, { query } as unknown as EntityManager);
+    const result = await evaluator.evaluate(testRun, { ...baseBenchmark, aggregate_stat: 'avg' });
+    expect(result.actual_value).toBe(300);
+    expect(query.mock.calls[1][0]).toContain('FROM transactions');
+  });
+
+  it('reads request_response_time avg from the sampler rollup', async () => {
+    const query = vi.fn().mockResolvedValue([{ rows: 37, result: '156.7959' }]);
+    const evaluator = new AggregatedBenchmarkEvaluator(logger, { query } as unknown as EntityManager);
+    const result = await evaluator.evaluate(testRun, {
+      ...baseBenchmark,
+      aggregate_metric: 'request_response_time',
+      aggregate_stat: 'avg',
+      requirement_value: 500,
+    });
+    expect(result.actual_value).toBeCloseTo(156.7959);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toContain('test_run_sampler_stats');
+    expect(query.mock.calls[0][1]).toEqual(['tr-1', true]);
   });
 });
