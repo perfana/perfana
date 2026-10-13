@@ -459,6 +459,30 @@ describe('DataSanityCheckPipeline', () => {
       expect(sparseQuery).toContain('HAVING SUM(count) <');
     });
 
+    it('does not report a per-response-code error series as sparse', async () => {
+      // Error Count (301) holds one point per run by construction, and since v0.2.97.16
+      // one per response code beside it. The metric-name filter matches only the bare
+      // 'error_count', so the panel-TITLE exclusion is the whole of what covers these.
+      const testRun = createMockTestRun();
+      mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);
+      setupQueryMock({
+        sparse: [
+          { metric_name: 'error_count.500', dashboard_label: 'Performance test metrics loadtest', panel_title: 'Error Count', data_points: '1' },
+          { metric_name: 'All aggregated.404', dashboard_label: 'Performance test metrics all aggregated', panel_title: 'Error Count', data_points: '1' },
+          // Control: a genuinely sparse metric must still be reported, so this test
+          // cannot pass by the sparse check having stopped working altogether.
+          { metric_name: 'cpu', dashboard_label: 'Host', panel_title: 'CPU', data_points: '2' },
+        ],
+      });
+
+      const result = await pipeline.execute({ testRunId: 'test-run-001' });
+
+      const warnings: string[] = result.data.warnings ?? [];
+      expect(warnings.some(w => w.includes('error_count.500'))).toBe(false);
+      expect(warnings.some(w => w.includes('All aggregated.404'))).toBe(false);
+      expect(warnings.some(w => w.includes('Host / cpu'))).toBe(true);
+    });
+
     it('reports an all-ramp-up run from an EXISTS probe, never a COUNT(*) over ds_metrics', async () => {
       const testRun = createMockTestRun();
       mockDb.getTestRunByTestRunId.mockResolvedValue(testRun);

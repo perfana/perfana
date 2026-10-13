@@ -171,8 +171,8 @@ describe('scenario-level compare configs opt out of the floor', () => {
   test('ErrorsProcessor, has-errors branch: every Error Count config carries minSampleCount 1', async () => {
     const dataSource = {
       query: vi.fn(async () => [
-        { scenario_name: 'loadtest', error_count: '3' },
-        { scenario_name: 'soak', error_count: '4' },
+        { scenario_name: 'loadtest', response_code: '500', error_count: '3' },
+        { scenario_name: 'soak', response_code: '503', error_count: '4' },
       ]),
     };
     const { compareConfigs } = await new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger())
@@ -212,7 +212,7 @@ describe('scenario-level compare configs opt out of the floor', () => {
 
   test('the all-aggregated roll-up still gets no compare config at all (display-only)', async () => {
     const dataSource = {
-      query: vi.fn(async () => [{ scenario_name: 'loadtest', error_count: '3' }]),
+      query: vi.fn(async () => [{ scenario_name: 'loadtest', response_code: '500', error_count: '3' }]),
     };
     const { compareConfigs } = await new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger())
       .process('run-1', testRun);
