@@ -42,6 +42,22 @@ Do not "simplify" either half. Removing the server-side padding, or the client r
 
 Related: responses now differ in size by ~60x across bucket choices, so `useTransactionGraphData` tags each request with a sequence number and drops stale ones. A small 300 s response routinely lands before a large 5 s one issued earlier, and last-write-wins on arrival pairs one response's data with another response's divisor.
 
+### A one-point series drawn `mode: 'lines'` renders as nothing
+
+A scatter trace with a single point has no segment, so Plotly draws it and shows nothing — while
+the axes still scale to its value. The chart therefore looks *loaded and empty*, which reads as
+"no data" rather than as a point, and nothing is logged. The perf-test scenario panels (301 Error
+Count, 302/303 Avg/Max Active Threads) hold exactly one point per run by construction, so every
+series on them was invisible in the Graphs card: nine blank traces with a y-axis topping out at
+the max value. `GraphsChart` switches a `sorted.length === 1` trace to `lines+markers` with an
+explicit `marker.color` (a trace without `marker` inherits the line colour, but setting it keeps
+the exported PNG's legend swatch in step).
+
+Beside it, `min`/`mean`/`max` in the series table read `–` for the same run, and that is a
+*different* bug with the same symptom: those columns are the analysis window only, and before
+v0.2.97.17 the worker wrote that point at `end_time`, outside it. A blank chart whose stats are
+also empty is the worker bug; a blank chart whose stats are populated is this one.
+
 ### A Plotly chart must observe its own container, not the window
 
 `react-plotly.js` 2.6.0's `useResizeHandler` is only

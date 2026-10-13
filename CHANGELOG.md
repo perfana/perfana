@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.17] - 2026-10-13
+
+### Fixed
+- **The scenario-level performance-test panels — Error Count, Avg Active Threads and Max Active Threads — are measured again on any workload with a ramp-down offset.** These three panels hold a single value per run, and that value was recorded at the exact moment the run ended. Any workload configured to exclude a ramp-down period treats that moment as outside the analysis window, so the value was discarded before it reached statistics: no SLO on those panels could ever pass or fail, anomaly detection had nothing to compare, and the panels did not appear in the list the SLO dialog offers. Every workload with a ramp-down has been affected since v0.2.95.23. The value is now recorded at the end of the analysis window instead, and the three panels are selectable in profile SLOs again. Runs already analysed keep the old placement until they are re-evaluated with a force re-fetch.
+- **A graph series holding a single point is visible.** A one-point line has no length, so the Graphs card drew nothing for it while still scaling the axes to its value — the chart looked loaded and empty, which read as missing data. This is the normal shape for the Error Count and Active Threads panels, so every series added from them appeared blank. Such a series is now drawn as a point.
+
 ## [0.2.97.16] - 2026-10-13
 
 ### Added

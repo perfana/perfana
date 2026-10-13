@@ -40,4 +40,12 @@ export const PERF_TEST_PROFILE_PANELS: ReadonlyArray<{ id: number; title: string
   { id: 208, title: 'Request Latency' },
   { id: 209, title: 'Request Connect Time' },
   { id: 219, title: 'Request Concurrency' },
+  // Scenario-level: one point per run. Excluded until v0.2.97.17, because that point was
+  // written AT end_time and `RAMP_UP_EXPR` flags anything past `end_time - ramp_down`, so no
+  // statistics row ever existed and an SLO on them could not evaluate. `scenarioMetricTime`
+  // now writes it inside the window. A run analysed before that still has no row, so an SLO
+  // on these panels reads as unevaluated there until the run is re-analysed.
+  { id: 301, title: 'Error Count' },
+  { id: 302, title: 'Avg Active Threads' },
+  { id: 303, title: 'Max Active Threads' },
 ];

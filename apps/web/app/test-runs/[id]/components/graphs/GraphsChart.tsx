@@ -128,7 +128,13 @@ export default function GraphsChart({
         x: sorted.map((d) => timestampToIndex.get(d.time) as number),
         y: sorted.map((d) => toDisplay(d.value, series.yAxisFormat, group.display)),
         type: 'scatter',
-        mode: 'lines',
+        // A one-point series is a zero-length segment, which Plotly draws as nothing at all:
+        // the axes scale to the value and the plot stays empty, so it reads as "no data" rather
+        // than as a point. The scenario-level perf-test panels (Error Count, Avg/Max Active
+        // Threads) hold exactly one point per run by construction, so this is their normal
+        // shape, not an edge case.
+        mode: sorted.length === 1 ? 'lines+markers' : 'lines',
+        ...(sorted.length === 1 ? { marker: { color, size: SIZE.line * 4 } } : {}),
         // The SAME name the series table shows. ChartActions turns the legend back on for
         // an exported PNG, so a second spelling here means the copied chart's legend
         // disagrees with the table beside it — including the double-titled

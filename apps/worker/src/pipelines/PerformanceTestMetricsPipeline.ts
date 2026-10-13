@@ -38,7 +38,7 @@ import { DashboardManager } from './helpers/dashboard-manager.js';
 import { RequestsProcessor } from './helpers/requests-processor.js';
 import { upsertPerfTestStatistics } from './helpers/perf-metrics-writer.js';
 import { TransactionsProcessor } from './helpers/transactions-processor.js';
-import { ErrorsProcessor, VirtualUsersProcessor } from './helpers/scenario-processors.js';
+import { ErrorsProcessor, VirtualUsersProcessor, scenarioMetricTime } from './helpers/scenario-processors.js';
 
 /** Panels written as one point per run rather than one per bucket. */
 const SCENARIO_PANEL_IDS = [
@@ -398,15 +398,18 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
 
     if (finalPass) {
       // The ticks wrote the scenario-level points at start_time (the one timestamp known
-      // while the run is live); the pass above rewrote them at end_time. Drop the interim.
+      // while the run is live); the pass above rewrote them at scenarioMetricTime. Drop
+      // everything else on these panels — `<> metricTime`, not `= start_time`, because a run
+      // analysed before v0.2.97.17 carries its point at end_time and the pass upserts rather
+      // than replaces, so matching only the interim timestamp would leave two points.
       // withTickLock keeps a tick that started before completion from landing after this;
       // only a Redis failure or a 3 min give-up (both logged as "proceeding without it")
       // leaves that overlap open, and a second point at start_time is then its residue.
       await this.db.dataSource.query(
         `DELETE FROM ds_metrics
-         WHERE test_run_id = $1 AND time = $2 AND panel_id = ANY($3::int[])
+         WHERE test_run_id = $1 AND time <> $2 AND panel_id = ANY($3::int[])
            AND metrics_source_id IN (SELECT id FROM metrics_sources WHERE source_type = 'performance_test')`,
-        [testRunId, testRun.start_time, SCENARIO_PANEL_IDS]
+        [testRunId, scenarioMetricTime(testRun), SCENARIO_PANEL_IDS]
       );
     }
 
@@ -580,6 +583,7 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       workload: testRun.workload,
       start_time: testRun.startTime,
       ramp_up_time: testRun.analysisStartOffset || 0,
+      ramp_down_time: testRun.analysisEndOffset || 0,
       end_time: testRun.endTime || null,
       completed: testRun.completed === true,
       planned_duration: testRun.plannedDuration ?? null,

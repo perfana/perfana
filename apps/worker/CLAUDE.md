@@ -367,9 +367,11 @@ it together:
    the old template label would survive the switch.
 3. **The panel list is static.** The SUT dialog reads panels from `ds_metric_statistics`; a profile
    has no run to read, so `PERF_TEST_PROFILE_PANELS` is a hand copy of the worker's
-   `METRIC_TYPE_PANEL_NAMES` pinned by `perf-test-profile-panels.test.ts` — minus 301-303, whose
-   single point at `end_time` is flagged `ramp_up` by any ramp-down offset and never gets a
-   statistics row (TODOS.md, Worker pipeline). `panelId` is validated against it.
+   `METRIC_TYPE_PANEL_NAMES` pinned by `perf-test-profile-panels.test.ts`. `panelId` is
+   validated against it. 301-303 were excluded until v0.2.97.17 — their single point was written
+   AT `end_time`, which any ramp-down offset flags `ramp_up`, so they never got a statistics row
+   and an SLO on them could not evaluate. `scenarioMetricTime` now writes it inside the window;
+   a run analysed before that still has no row until it is force-refetched (TODOS.md).
 4. **`AutoConfigService.loadAutoConfigContext` must not abort on zero profile dashboards.** It used
    to, before the benchmark step ran, so a JMeter-only org with a perf-test-only profile was never
    provisioned — the WERKNL e2e passed only because its profile also carried a Grafana template.
@@ -595,7 +597,7 @@ Seven things a future reader will otherwise "fix":
    configs is a one-line change that puts every run's verdict at the mercy of its mix.
 4. **`DataSanityCheckPipeline` excludes the scenario-level panels by TITLE** — `Error Count`,
    `Avg Active Threads`, `Max Active Threads` — not only by metric name. Those panels hold one point
-   by construction (written once at `end_time`). The pre-existing exclusion matched the
+   by construction (written once, at the end of the analysis window). The pre-existing exclusion matched the
    *per-scenario* metric-name spelling; on this dashboard the same three metrics are named
    `All aggregated`, so without the title filter every run reports three sparse metrics, forever.
 5. **`All aggregated` was already a name, and the guards separating the two are load-bearing.**
@@ -729,15 +731,16 @@ things about it:
   with `GROUP BY scenario_name` on the raw column — so it carried the same NULL-vs-`'default'`
   collision, and fixing one spelling while leaving the other would have left two divergent
   copies of one query shape with no marker on the unfixed one.
-- **They reach ADAPT exactly where the total does, which is not everywhere.** The per-code
-  series share the total's timestamp (`scenarioMetricTime`, `end_time` on a completed run), so
-  they inherit the open P2 in TODOS.md — a point at `end_time` is flagged `ramp_up` by
-  `RAMP_UP_EXPR` on any workload with a ramp-down offset, and `ds_metric_statistics` holds
-  `ramp_up = false` only. Measured on the dev database: panel 301 has 5779 non-ramp-up rows and
-  141 statistics rows, against 979 ramp-up rows that have none. So the breakdown is compared on
-  the same workloads the total is compared on and excluded on the same ones — never better, never
-  worse. Do not read the classification bullet above as a promise that every per-code series gets
-  an ADAPT verdict.
+- **They reach ADAPT exactly where the total does.** The per-code series share the total's
+  timestamp (`scenarioMetricTime`), so whatever applies to `error_count` applies to them —
+  never better, never worse. Until v0.2.97.17 that meant *nowhere* on a workload with a
+  ramp-down offset: the point was written AT `end_time`, `RAMP_UP_EXPR` flags anything past
+  `end_time - ramp_down`, and `ds_metric_statistics` holds `ramp_up = false` only. Measured on
+  the dev database then: every run with `ramp_down = 30` had 100% of its 301-303 rows flagged
+  and zero statistics rows, against the one run with `ramp_down = 0`, which had both. A run
+  analysed before that version keeps its point at `end_time` — a plain re-analyse `skip`s a
+  finalised run, so recovery is a force-refetch (TODOS.md). Do not read the classification
+  bullet above as a promise that every per-code series gets an ADAPT verdict on old runs.
 - **Nothing had to change in `DataSanityCheckPipeline`.** Its metric-name regex still matches
   only the bare `error_count`, but the filter that actually covers these panels is by panel
   TITLE (item 4 above), so the per-code series are excluded with the total.
@@ -973,7 +976,11 @@ Three things to hold on to:
    the tick edge and a `requests_raw` row that lands late are recomputed from all their
    samples. The scenario-level `Error Count` / `Active Threads` points are counted from
    `start_time` on every tick and written at `start_time` (the one timestamp a live run knows;
-   `scenarioMetricTime`), and moved to `end_time` by the full pass. At analyze,
+   `scenarioMetricTime`), and moved to `end_time - ramp_down` by the full pass — inside the
+   analysis window, which is what gets them a `ds_metric_statistics` row at all; writing them
+   at `end_time` is the v0.2.97.17 bug. The same pass deletes every scenario point of the run
+   that is NOT at that timestamp, so the interim point and a point left behind at an older
+   `metricTime` go together. At analyze,
    `PerformanceTestMetricsPipeline.planFullCollection` picks one of three: **skip** (the
    perf-test status row is `is_complete` and the rows sit on the final grid), **tail** (same
    size, not finalised: decompress the tail's span — a no-op on a fresh run, and what saves a
