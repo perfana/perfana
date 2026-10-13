@@ -16,6 +16,54 @@ import { MONO, SANS, SIZE, chartTheme, type ChartMode } from '@/lib/charts';
 
 export type AxisDisplayMode = 'overlay' | 'split';
 
+/**
+ * The header's pill button. The axis-mode pair and the standalone `viewToggle` are the
+ * same control at different arities, so they are drawn by the same code rather than by a
+ * third hand-copy of this `sx` block. A grouped button takes its border from the group's
+ * container; `standalone` carries its own.
+ */
+function PillButton({
+  theme,
+  active,
+  onClick,
+  title,
+  standalone,
+  children,
+}: {
+  theme: ReturnType<typeof chartTheme>;
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+  standalone?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Box
+      component="button"
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      title={title}
+      sx={{
+        px: 0.75,
+        height: 20,
+        cursor: 'pointer',
+        fontFamily: MONO,
+        fontSize: 10,
+        ...(standalone
+          ? { border: `1px solid ${theme.divider}`, borderRadius: '4px', flexShrink: 0 }
+          : { border: 0 }),
+        fontWeight: active ? 600 : 400,
+        color: active ? theme.primary : theme.faint,
+        bgcolor: active ? theme.selectedBg : 'transparent',
+        '&:hover': { bgcolor: active ? theme.selectedBg : theme.hover },
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
 interface AnalystChartCardProps {
   title: React.ReactNode;
   subtitle?: string;
@@ -23,6 +71,12 @@ interface AnalystChartCardProps {
   /** The overlay | split-by-unit toggle. Omitted where the card has no choice to make. */
   axisMode?: AxisDisplayMode;
   onAxisModeChange?: (next: AxisDisplayMode) => void;
+  /**
+   * One more view-mode switch, drawn immediately beside the axis-mode group so the two
+   * read as one strip — the `actions` slot is painted before them and holds the icon
+   * actions. Graphs uses it for "analysis range only".
+   */
+  viewToggle?: { label: string; active: boolean; title?: string; onToggle: () => void };
   /** Right of the header: the hovered time, sample or run id. Blank when not hovering. */
   /**
    * Right of the header: the hovered time, sample, or run id plus its release and
@@ -56,6 +110,7 @@ export default function AnalystChartCard({
   mode,
   axisMode,
   onAxisModeChange,
+  viewToggle,
   cursor,
   headerExtra,
   lanesNote,
@@ -102,6 +157,17 @@ export default function AnalystChartCard({
         {headerExtra}
         <Box sx={{ flex: 1 }} />
         {actions}
+        {viewToggle && (
+          <PillButton
+            theme={theme}
+            active={viewToggle.active}
+            onClick={viewToggle.onToggle}
+            title={viewToggle.title}
+            standalone
+          >
+            {viewToggle.label}
+          </PillButton>
+        )}
         {axisMode && onAxisModeChange && (
           <Box
             role="group"
@@ -114,32 +180,16 @@ export default function AnalystChartCard({
               flexShrink: 0,
             }}
           >
-            {(['overlay', 'split'] as const).map((value) => {
-              const active = axisMode === value;
-              return (
-                <Box
-                  key={value}
-                  component="button"
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => onAxisModeChange(value)}
-                  sx={{
-                    border: 0,
-                    px: 0.75,
-                    height: 20,
-                    cursor: 'pointer',
-                    fontFamily: MONO,
-                    fontSize: 10,
-                    fontWeight: active ? 600 : 400,
-                    color: active ? theme.primary : theme.faint,
-                    bgcolor: active ? theme.selectedBg : 'transparent',
-                    '&:hover': { bgcolor: active ? theme.selectedBg : theme.hover },
-                  }}
-                >
-                  {value === 'overlay' ? 'overlay' : 'split by unit'}
-                </Box>
-              );
-            })}
+            {(['overlay', 'split'] as const).map((value) => (
+              <PillButton
+                key={value}
+                theme={theme}
+                active={axisMode === value}
+                onClick={() => onAxisModeChange(value)}
+              >
+                {value === 'overlay' ? 'overlay' : 'split by unit'}
+              </PillButton>
+            ))}
           </Box>
         )}
         <Typography
