@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, FindManyOptions, EntityManager } from 'typeorm';
+import { Repository, In, FindManyOptions, FindOptionsWhere, Between, EntityManager } from 'typeorm';
 import {
   DsMetrics,
   DsMetricStatistics,
@@ -14,6 +14,17 @@ import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import type { OwnedResource } from '@perfana/shared';
+
+/**
+ * A zoom window on a panel's data. Narrowing the query is what buys resolution back: the
+ * LTTB budget below is per panel, so spending it on the visible range is the only way to
+ * draw more than `4000 / distinct metric` points. It cannot go finer than the stored
+ * bucket size — that is fixed at collection time.
+ */
+export interface MetricTimeRange {
+  from: string;
+  to: string;
+}
 
 export interface MetricDataPoint {
   time: Date;
@@ -136,7 +147,7 @@ export class MetricsService {
     return accessResult.allowed;
   }
 
-  async findDSMetricsForPanel(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, userId: string = '', roles: string[] = [], metricsSourceId?: string): Promise<MetricDataPoint[] | null> {
+  async findDSMetricsForPanel(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, userId: string = '', roles: string[] = [], metricsSourceId?: string, range?: MetricTimeRange): Promise<MetricDataPoint[] | null> {
     try {
       // Validate test run access
       const hasAccess = await this.validateTestRunAccess(testRunId, userId, roles);
@@ -186,6 +197,12 @@ export class MetricsService {
       if (metricName) {
         conditions.push(`metric_name = $${countParamIdx}`);
         countParams.push(metricName);
+        countParamIdx++;
+      }
+      if (range) {
+        conditions.push(`"time" >= $${countParamIdx}::timestamptz`, `"time" <= $${countParamIdx + 1}::timestamptz`);
+        countParams.push(range.from, range.to);
+        countParamIdx += 2;
       }
 
       const whereClause = conditions.join(' AND ');
@@ -201,7 +218,7 @@ export class MetricsService {
       // If data points exceed threshold, use LTTB downsampling via TimescaleDB toolkit
       if (needs_downsampling) {
         const downsampledResults = await this.executeLTTBQuery(
-          testRunId, panelId, finalApplicationDashboardId, metricName, maxDataPoints, metricsSourceId,
+          testRunId, panelId, finalApplicationDashboardId, metricName, maxDataPoints, metricsSourceId, range,
         );
 
         if (!downsampledResults || downsampledResults.length === 0) {
@@ -211,7 +228,7 @@ export class MetricsService {
         return downsampledResults;
       } else {
         // Use regular query for smaller datasets
-        return this.executeRegularQuery(testRunId, panelId, finalApplicationDashboardId, metricName, metricsSourceId);
+        return this.executeRegularQuery(testRunId, panelId, finalApplicationDashboardId, metricName, metricsSourceId, range);
       }
 
     } catch (error) {
@@ -220,9 +237,9 @@ export class MetricsService {
     }
   }
 
-  private async executeRegularQuery(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, metricsSourceId?: string): Promise<MetricDataPoint[] | null> {
+  private async executeRegularQuery(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, metricsSourceId?: string, range?: MetricTimeRange): Promise<MetricDataPoint[] | null> {
     try {
-      const where: Record<string, string | number> = {
+      const where: FindOptionsWhere<DsMetrics> = {
         test_run_id: testRunId,
         panel_id: panelId,
       };
@@ -236,6 +253,10 @@ export class MetricsService {
 
       if (metricName) {
         where.metric_name = metricName;
+      }
+
+      if (range) {
+        where.time = Between(new Date(range.from), new Date(range.to));
       }
 
       const options: FindManyOptions<DsMetrics> = {
@@ -274,6 +295,7 @@ export class MetricsService {
     metricName?: string,
     maxDataPoints = 4000,
     metricsSourceId?: string,
+    range?: MetricTimeRange,
   ): Promise<MetricDataPoint[] | null> {
     try {
       // First count distinct metrics to distribute the resolution budget
@@ -298,6 +320,11 @@ export class MetricsService {
         metricCountConditions.push(`metric_name = $${paramIdx}`);
         params.push(metricName);
         paramIdx++;
+      }
+      if (range) {
+        metricCountConditions.push(`"time" >= $${paramIdx}::timestamptz`, `"time" <= $${paramIdx + 1}::timestamptz`);
+        params.push(range.from, range.to);
+        paramIdx += 2;
       }
 
       const whereClause = metricCountConditions.join(' AND ');
@@ -347,7 +374,7 @@ export class MetricsService {
       );
       // Fallback to regular query if lttb() is unavailable
       return this.executeRegularQuery(
-        testRunId, panelId, applicationDashboardId, metricName, metricsSourceId,
+        testRunId, panelId, applicationDashboardId, metricName, metricsSourceId, range,
       );
     }
   }

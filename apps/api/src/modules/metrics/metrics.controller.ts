@@ -2,10 +2,32 @@ import { Controller, Get, Param, NotFoundException, BadRequestException, Query, 
 import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MetricsService } from './metrics.service';
+import { MetricsService, MetricTimeRange } from './metrics.service';
 import { Benchmark } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
+
+/**
+ * Validate a chart zoom window. Both bounds or neither; anything else is a 400.
+ *
+ * Exported for `metric-time-range.spec.ts` rather than duplicated — keep this the one
+ * implementation the controller runs.
+ */
+export function parseMetricTimeRange(from?: string, to?: string): MetricTimeRange | undefined {
+  if (!from && !to) return undefined;
+  if (!from || !to) {
+    throw new BadRequestException('from and to must be supplied together');
+  }
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+  if (isNaN(fromMs) || isNaN(toMs)) {
+    throw new BadRequestException('from and to must be ISO-8601 timestamps');
+  }
+  if (fromMs > toMs) {
+    throw new BadRequestException('from must not be after to');
+  }
+  return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() };
+}
 
 @ApiTags('metrics')
 @ApiBearerAuth()
@@ -56,6 +78,8 @@ export class MetricsController {
   @Get('ds-metrics/:testRunId/:panelId')
   @ApiOperation({ summary: 'Get DS metrics for a specific panel with optional application dashboard filtering' })
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
+  @ApiQuery({ name: 'from', required: false, description: 'ISO-8601 start of the window to return. With `to`, the downsample budget is spent on this window instead of the whole run — what a chart zoom uses.' })
+  @ApiQuery({ name: 'to', required: false, description: 'ISO-8601 end of the window. Both or neither; one alone is a 400.' })
   async getDSMetricsForPanel(
     @Param('testRunId') testRunId: string,
     @Param('panelId') panelId: string,
@@ -63,11 +87,17 @@ export class MetricsController {
     @Query('benchmarkId') benchmarkId?: string,
     @Query('applicationDashboardId') applicationDashboardId?: string,
     @Query('metricsSourceId') metricsSourceId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
       throw new BadRequestException('Invalid panel ID');
     }
+
+    // Both or neither: one bound alone would silently return the whole run on one side,
+    // which reads as the zoom having been ignored rather than as a bad request.
+    const range = parseMetricTimeRange(from, to);
 
     let finalApplicationDashboardId: string | undefined = applicationDashboardId;
 
@@ -96,7 +126,7 @@ export class MetricsController {
       }
     }
 
-    const result = await this.metricsService.findDSMetricsForPanel(testRunId, panelIdNumber, finalApplicationDashboardId, undefined, ctx.userId, ctx.roles, metricsSourceId);
+    const result = await this.metricsService.findDSMetricsForPanel(testRunId, panelIdNumber, finalApplicationDashboardId, undefined, ctx.userId, ctx.roles, metricsSourceId, range);
 
     if (result === null) {
       throw new NotFoundException(`DS metrics not found for test run ${testRunId} and panel ${panelIdNumber}`);
