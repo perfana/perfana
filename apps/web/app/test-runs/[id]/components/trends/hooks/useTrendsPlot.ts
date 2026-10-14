@@ -218,6 +218,11 @@ export function useTrendsPlot({
         range: [-0.5, Math.max(runIds.length - 0.5, 0.5)],
       },
       overlay: changepointOverlay,
+      // A trend is read for its SHAPE: is this metric drifting up across releases. Pinned to
+      // zero, a run-over-run series that sits at 820-840ms is a flat line in the top tenth of
+      // a 0-900 axis and a 20ms climb is invisible. The only overlay here is the changepoint
+      // marker, which is `yref: 'paper'` — nothing data-referenced can stretch the autorange.
+      zeroBase: false,
       height: axisLayoutMode === 'lanes' ? undefined : SIZE.trendsHeight,
     });
 
