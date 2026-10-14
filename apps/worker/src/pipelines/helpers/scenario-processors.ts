@@ -13,7 +13,10 @@ import {
   buildScenarioMetricName,
   createDsMetricsRecord,
   createDsCompareConfigRecordPanelLevel,
+  createDsCompareConfigRecordPanelLevelNoClassification,
 } from './metrics-builder.js';
+import { resolveScenarioDashboards } from './scenario-dashboards.js';
+import { insertDsMetricsFromAggregate } from './perf-metrics-writer.js';
 import {
   METRIC_TYPE_PANEL_IDS,
   METRIC_TYPE_PANEL_UNITS,
@@ -70,9 +73,37 @@ const SCENARIO_PANEL_MIN_SAMPLE_COUNT = 1;
  * dot = 255 units exactly, and the writer's `substring` becomes a no-op. Derived from
  * `ALL_AGGREGATED_METRIC` so a longer base name cannot silently reintroduce the overflow.
  */
-const MAX_RESPONSE_CODE_LENGTH = Math.floor(
-  (255 - 1 - Math.max('error_count'.length, ALL_AGGREGATED_METRIC.length)) / 2
+/**
+ * The base name every scenario error series is composed from. One constant, because panel
+ * 301 composes it through `buildScenarioMetricName` while panel 304 has to interpolate it
+ * into SQL, and the two have to stay identical — 304 is documented as the same breakdown
+ * over time, so a rename on one side would silently stop matching the other. It also feeds
+ * the length budget below.
+ */
+const ERROR_COUNT_METRIC = 'error_count';
+
+export const MAX_RESPONSE_CODE_LENGTH = Math.floor(
+  (255 - 1 - Math.max(ERROR_COUNT_METRIC.length, ALL_AGGREGATED_METRIC.length)) / 2
 );
+
+/**
+ * How many response-code series the over-time breakdown keeps per scenario, busiest first.
+ *
+ * Unlike panel 301 — one cumulative point per code, so every code is one row — this panel
+ * writes one point per code PER BUCKET, zero-filled, so its row count is
+ * codes x buckets x (scenarios + 1) whether the run had three errors or three million.
+ * `response_code` is unbounded `text` straight from the JTL importer and JMeter writes
+ * exception messages into it, so the distinct count is not bounded by HTTP.
+ *
+ * **It is a per-RUN cap, which only holds because the analysis is the panel's only writer.**
+ * Ranked over a tick's window instead, each tick would keep its own busiest 20 and a run
+ * whose error text rotates could end up storing 20 x ticks series — ~3,600 on a 3 h run —
+ * with neither the `tail` nor the `skip` plan removing them. See `processOverTime`.
+ *
+ * ponytail: the tail is dropped, not folded into an "other" series — a 20-line legend is
+ * already unreadable and panel 301 still carries every code. Add the fold if someone asks.
+ */
+const MAX_CODE_SERIES = 20;
 
 /**
  * Where a run's single scenario-level point is written. A live run does not know its end_time
@@ -199,7 +230,7 @@ export class ErrorsProcessor {
             panel,
             scenarioName === ALL_AGGREGATED_SCENARIO
               ? ALL_AGGREGATED_METRIC
-              : buildScenarioMetricName('error_count'),
+              : buildScenarioMetricName(ERROR_COUNT_METRIC),
             0,
             metricTime,
             METRIC_TYPE_PANEL_UNITS[METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT],
@@ -269,7 +300,7 @@ export class ErrorsProcessor {
       const panel = this.dashboardManager.getMetricTypePanel(METRIC_TYPE_PANEL_IDS.SCENARIO_ERROR_COUNT);
       const baseName = scenarioName === ALL_AGGREGATED_SCENARIO
         ? ALL_AGGREGATED_METRIC
-        : buildScenarioMetricName('error_count');
+        : buildScenarioMetricName(ERROR_COUNT_METRIC);
 
       // The unchanged total series first, then one series per response code beside it.
       // On a REAL scenario's dashboard all of them sit on panel 301 and inherit its
@@ -327,6 +358,264 @@ export class ErrorsProcessor {
     return { metrics, compareConfigs };
   }
 
+  /**
+   * Panel 304: the same per-response-code breakdown as panel 301, but one point per bucket
+   * instead of one cumulative point per run — "which codes, and when".
+   *
+   * **The analysis is its only writer: a live tick returns early.** That is what bounds the
+   * panel, and it was a deliberate choice over a live chart (reviewed 2026-10-14). Written
+   * per tick instead, with the code set and the grid scoped to each tick's ~60 s window,
+   * two things went wrong that nothing downstream repaired: each tick kept its OWN busiest
+   * `MAX_CODE_SERIES` codes, so a run whose error text rotates — `response_code` is free
+   * text and JMeter writes exception messages into it — could store 20 x ticks series
+   * (~3,600 on a 3 h run), and neither the `tail` nor the `skip` plan deletes what the
+   * ticks wrote. A live run still shows errors/sec over time on panels 109/220 and the
+   * cumulative per-code totals on 301; only this breakdown waits for the analysis.
+   *
+   * Three more things differ from `process()` above:
+   *
+   * 1. **It reads the whole run**, like `process()` and for a related reason: one writer
+   *    over one window is what makes the top-N a per-run cap rather than a per-tick one.
+   * 2. **It writes from SQL** through `insertDsMetricsFromAggregate`. codes x buckets x
+   *    scenarios is thousands of rows where the other two scenario panels are a handful,
+   *    and the zero-fill below is natural in SQL and fiddly in JS.
+   * 3. **It zero-fills over the RUN's span.** A bucket with no errors produces no
+   *    `requests_error` row, and without an explicit 0 the chart draws a straight line over
+   *    the quiet stretch and the mean ADAPT compares is "errors per bucket THAT HAD ERRORS" —
+   *    a run with one bad minute would read the same as one that failed throughout. Two
+   *    earlier versions of the grid were worse in opposite directions. Ending it at the clock
+   *    (`filter_to_time ?? new Date()`) was unbounded: a run that never reported an `end_time`
+   *    takes `planFullCollection`'s rebuild arm, so one analysed a week later zero-filled a
+   *    week of buckets it never existed for. Taking it from MIN/MAX of the data made the span
+   *    the noisiest property of an error series — one scenario's late error stretched every
+   *    other scenario's grid, moving its mean by orders of magnitude with no change in its own
+   *    data, and two runs with identical errors but a different last error stopped being
+   *    comparable at all. `start_time` is the bucket origin, so a grid starting there is
+   *    aligned by construction, and run length / bucket bounds it at ~250 points.
+   *
+   * Values are errors/sec, like panels 109/220 and for the same reason: bucket size is a
+   * step function of run length, so a raw per-bucket count is not comparable across runs.
+   */
+  async processOverTime(
+    testRunId: string,
+    testRun: TestRunMetadata,
+    bucketSizeSeconds: number,
+    isIncremental: boolean
+  ): Promise<{ rowsInserted: number; compareConfigs: DsCompareConfigRecord[] }> {
+    const compareConfigs: DsCompareConfigRecord[] = [];
+    const panelId = METRIC_TYPE_PANEL_IDS.SCENARIO_ERRORS_OVER_TIME;
+
+    // Analysis-only — see the note on the top-N cap in the docstring. `completed` rather
+    // than `!isIncremental`, because the `tail` plan is an incremental-looking full pass and
+    // it IS the writer on a ticked run; a force re-fetch of a completed run is one too.
+    //
+    // `end_time` is required for the same reason `planFullCollection` refuses to size a run
+    // without one: it IS the grid's end. Without it the bucket size falls back to the tick's,
+    // which is derived from `planned_duration` rather than from the run — so a run that
+    // posted a 2-minute plan, actually ran two hours and never reported an end would get 1 s
+    // buckets over a 2 h span, ~7200 of them against a panel whose cost is buckets x codes x
+    // scenarios. The ~250-bucket ceiling that bounds every other shape comes from sizing the
+    // bucket off the real length, and that is exactly what is missing here.
+    if (!testRun.completed || !testRun.end_time) {
+      return { rowsInserted: 0, compareConfigs };
+    }
+
+    // **Whole-run bounds, not the caller's window.** `resolveScenarioDashboards` reads
+    // `filter_from_time`, and the pipeline hands this method the run stamped with the pass's
+    // window — so on the `tail` plan the lookup would only see the last tick's minutes. A run
+    // whose errors did not land there returned `scenarioNames = []` and wrote nothing, and
+    // because the pass then calls `markCollectionComplete` every later analyze takes the
+    // `skip` arm: panel 304 empty forever, nothing logged, only a force re-fetch recovering
+    // it. `tail` is the WELL-BEHAVED plan (tick === final), so good runs got the broken panel.
+    // `process()` above overrides the same field by hand for the same reason.
+    const runWide = {
+      ...testRun,
+      filter_from_time: testRun.start_time,
+      filter_to_time: testRun.end_time,
+    } as TestRunMetadata;
+
+    const { dashboards, scenarioNames } = await resolveScenarioDashboards({
+      dataSource: this.dataSource,
+      dashboardManager: this.dashboardManager,
+      logger: this.logger,
+      table: 'requests_error',
+      testRunId,
+      testRun: runWide,
+    });
+
+    if (scenarioNames.length === 0) {
+      // No errors in the window is the normal case, not a warning: nothing to break down.
+      return { rowsInserted: 0, compareConfigs };
+    }
+
+    const panel = this.dashboardManager.getMetricTypePanel(panelId);
+    // **The roll-up gets a config too, unlike every other processor — but an UNCLASSIFIED
+    // one, and the difference is the run verdict.** Elsewhere the roll-up is left configless,
+    // and the thing that actually keeps it harmless is not the missing row:
+    // `buildCompareConfigCache` seeds a `'default'` entry unconditionally, so a configless
+    // series resolves to DEFAULT_COMPARE_CONFIG and IS evaluated. What makes that benign is
+    // `higherIsBetter: null` — `buildConclusionLogic` only emits `'regression'` under
+    // `= true` or `= false`, and `buildConclusionSQL` flips a run on `regression_count > 0`
+    // while `increase`/`decrease` land in `difference_count`. 301-303's roll-up is doubly
+    // safe (one point, so the sample floor reads `incomparable`); 304's dense series clear
+    // that floor, so the ONLY thing standing between it and the verdict is the
+    // classification. Giving it `RED_errors` was tried and is wrong: on a single-scenario run
+    // `All aggregated.<code>` is numerically identical to `error_count.<code>`, so every
+    // regression would be counted twice and the roll-up would flip runs on its own. So: the
+    // panel's chosen aggregation (`mean`, not the default's `median`, which reads 0 on a
+    // zero-filled sparse series), and no classification.
+    for (const scenarioName of scenarioNames) {
+      const dashboard = dashboards.get(scenarioName);
+      if (dashboard && scenarioName !== ALL_AGGREGATED_SCENARIO) {
+        compareConfigs.push(
+          createDsCompareConfigRecordPanelLevel(
+            testRun,
+            dashboard,
+            panel,
+            METRIC_TYPE_PANEL_ADAPT_AGGREGATION[panelId],
+            METRIC_TYPE_PANEL_CLASSIFICATIONS[panelId]
+          )
+        );
+      }
+    }
+    const rollup = dashboards.get(ALL_AGGREGATED_SCENARIO);
+    if (rollup) {
+      compareConfigs.push(
+        createDsCompareConfigRecordPanelLevelNoClassification(
+          testRun,
+          rollup,
+          panel,
+          METRIC_TYPE_PANEL_ADAPT_AGGREGATION[panelId]
+        )
+      );
+    }
+
+    // Bounded by the RUN, never by the caller's window and never by the clock: the same
+    // bounds `process()` uses, so the two panels count the same errors, and the same bounds
+    // the dashboard lookup above now uses, so a scenario cannot be gated out of a series it
+    // has data for.
+    const params: unknown[] = [
+      testRunId,                                 // $1
+      bucketSizeSeconds,                         // $2
+      testRun.start_time,                        // $3 bucket origin, lower bound, grid start
+      testRun.end_time,                          // $4 upper bound + grid end (may be null)
+      ALL_AGGREGATED_SCENARIO,                   // $5
+      ALL_AGGREGATED_METRIC,                     // $6
+      MAX_CODE_SERIES,                           // $7
+      ERROR_COUNT_METRIC,                        // $8 — bound, not interpolated
+    ];
+
+    const aggregateCte = `
+      err AS (
+        SELECT
+          COALESCE(scenario_name, 'default') AS scenario_name,
+          left(COALESCE(NULLIF(response_code, ''), 'unknown'), ${MAX_RESPONSE_CODE_LENGTH}) AS response_code,
+          CASE
+            WHEN EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')
+            THEN time_bucket(INTERVAL '1 second' * $2, time, $3::timestamptz)
+            -- Origin PLUS the offset, not the row's own timestamp plus the offset. Adding it
+            -- to \`time\` returns a value a whole bucket past the boundary and keeps 1 s
+            -- resolution inside it, so of N rows in one bucket only one could ever satisfy
+            -- the grid equality below and the rest would be dropped as zeros.
+            ELSE $3::timestamptz + INTERVAL '1 second'
+                 * (FLOOR(EXTRACT(EPOCH FROM (time - $3::timestamptz)) / $2) * $2)
+          END AS bucket_time
+        FROM requests_error
+        WHERE test_run_id = $1
+          AND time >= $3::timestamptz
+          AND ($4::timestamptz IS NULL OR time <= $4::timestamptz)
+      ),
+      -- Grouped ONCE, before the roll-up, so \`err\` has a single reference and Postgres
+      -- inlines it. Referenced twice it is materialised into a tuplestore and the roll-up
+      -- then pushes 2x the run's raw error rows — each carrying a 120-char text column —
+      -- through the HashAggregate below, which is how a 3 M-error run spills under the
+      -- 128MB work_mem the aggregation budget sets.
+      base AS (
+        SELECT scenario_name, response_code, bucket_time, COUNT(*) AS errors
+        FROM err
+        GROUP BY 1, 2, 3
+      ),
+      -- The roll-up aggregates the GROUPED set (codes x buckets x scenarios, thousands)
+      -- rather than the raw rows. A real scenario whose name IS the roll-up's is folded into
+      -- it instead of being emitted twice: both halves land on one dashboard, so two rows
+      -- would share (dashboard, panel, metric_name, time) in one statement and be rejected.
+      counted AS (
+        SELECT scenario_name, response_code, bucket_time, errors
+        FROM base WHERE scenario_name <> $5
+        UNION ALL
+        SELECT $5, response_code, bucket_time, SUM(errors)
+        FROM base GROUP BY 2, 3
+      ),
+      codes AS (
+        SELECT scenario_name, response_code FROM (
+          SELECT scenario_name, response_code,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY scenario_name ORDER BY SUM(errors) DESC, response_code
+                 ) AS rn
+          FROM counted GROUP BY 1, 2
+        ) ranked WHERE rn <= $7
+      ),
+      -- **The grid is the RUN, one span for every scenario and every run of the workload.**
+      -- Two earlier versions were worse in opposite directions. Ending it at the clock
+      -- (\`filter_to_time ?? now()\`) was unbounded on a run with no end_time. Taking it from
+      -- MIN/MAX of the data made the span the noisiest property of an error series: one
+      -- scenario's late error stretched every other scenario's grid, so its mean — the
+      -- configured ADAPT aggregation — moved by orders of magnitude with no change in its own
+      -- data, and two runs with identical error behaviour but a different last error were not
+      -- comparable. \`$3\` is the bucket origin, so a series starting there is aligned by
+      -- construction. MAX(bucket_time) is the fallback only for a completed run with no
+      -- end_time; generate_series over a NULL bound yields no rows rather than erroring.
+      bounds AS (
+        SELECT COALESCE($4::timestamptz, MAX(bucket_time)) AS hi FROM counted
+      ),
+      buckets AS (
+        SELECT generate_series(
+          $3::timestamptz,
+          (SELECT hi FROM bounds),
+          INTERVAL '1 second' * $2
+        ) AS bucket_time
+      ),
+      filled AS (
+        SELECT
+          c.scenario_name,
+          c.response_code,
+          b.bucket_time,
+          COALESCE(n.errors, 0)::double precision / $2 AS value
+        FROM codes c
+        CROSS JOIN buckets b
+        LEFT JOIN counted n
+          ON n.scenario_name = c.scenario_name
+         AND n.response_code = c.response_code
+         AND n.bucket_time = b.bucket_time
+      )`;
+
+    const rowsSelect = `
+      SELECT
+        f.scenario_name,
+        (CASE WHEN f.scenario_name = $5 THEN $6 ELSE $8 END)
+          || '.' || f.response_code AS metric_name,
+        ${panelId} AS panel_id,
+        f.value,
+        f.bucket_time,
+        FLOOR(EXTRACT(EPOCH FROM (f.bucket_time - $3::timestamptz)) / $2)::integer AS timestep
+      FROM filled f`;
+
+    const rowsInserted = await insertDsMetricsFromAggregate({
+      dataSource: this.dataSource,
+      aggregateCte,
+      rowsSelect,
+      params,
+      dashboards,
+      panelIds: [panelId],
+      testRunId,
+      testRun,
+      isIncremental,
+    });
+
+    this.logger.info(`✅ Created ${rowsInserted} error-code series points`);
+
+    return { rowsInserted, compareConfigs };
+  }
 }
 
 /**

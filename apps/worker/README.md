@@ -124,8 +124,9 @@ generated from the pseudo-scenario `ALL_AGGREGATED_SCENARIO = 'all aggregated'` 
 `src/constants/performance-metrics.ts`. It carries the same panels with one series on each, named
 `All aggregated`, rolled up over every scenario, transaction and sampler in the run — plus, on
 Error Count (301) since v0.2.97.16, one `All aggregated.<code>` series per response code beside
-that total. Being an ordinary scenario dashboard is the whole trick — every dashboard dropdown in
-the web app lists it with no client-side special case.
+that total, and on Errors/sec by Response Code (304) since v0.2.97.19, the same per-code split
+with one point per bucket instead of one per run. Being an ordinary scenario dashboard is the
+whole trick — every dashboard dropdown in the web app lists it with no client-side special case.
 
 Six things not to undo:
 
@@ -144,9 +145,19 @@ Six things not to undo:
   therefore free; with `bucket_time` leading that sort it becomes a second, top-level sort that
   spills — 22 MB (requests) / 3 MB (transactions) on the same run, growing with the series count.
   Neither aggregate reaches JS: both feed an `INSERT … SELECT`.
-- **No `ds_compare_config` rows are created for it, in any of the four processors** — it is
+- **No `ds_compare_config` rows are created for it, with one deliberate exception** — it is
   display-only and ADAPT never evaluates it. A run-wide average moves whenever the traffic mix
-  shifts, so trending it would fail runs in which no individual transaction regressed.
+  shifts, so trending it would fail runs in which no individual transaction regressed. The
+  exception is panel 304 (v0.2.97.19), which writes an **unclassified** panel-level row for the
+  roll-up (`createDsCompareConfigRecordPanelLevelNoClassification`). A configless series is not
+  actually unevaluated — `buildCompareConfigCache` seeds a `'default'` entry, so it resolves to
+  `DEFAULT_COMPARE_CONFIG` — and what keeps 301-303's roll-up harmless is their one point per
+  run tripping the sample floor. 304's zero-filled series clear that floor, so the missing
+  classification (`higherIsBetter: null`, which `buildConclusionLogic` never turns into a
+  `regression`) is the only thing keeping it out of the run verdict, and the row also pins the
+  aggregation to `mean` because the default's `median` reads 0 on a sparse error series. See
+  [CLAUDE.md](CLAUDE.md), "Errors/sec: Transaction (109), Request (220) and the per-code
+  breakdown over time (304)".
 - **A real scenario named `all aggregated` gets its own row dropped in favour of the roll-up.** Both
   land on one dashboard, and two rows sharing `(dashboard, panel, metric_name, time)` inside one
   `ON CONFLICT DO UPDATE` batch are rejected by Postgres outright, failing the whole pipeline.
@@ -467,6 +478,12 @@ perf-test rows, re-collects the whole range at the final bucket size and marks t
 test_run_id = '<id>' AND source_type = 'performance_test'` — with the ranges empty the stage tails
 from `start_time`, which is a full-range upsert, and rebuilds only if the rows are off the grid
 or the tick size differs from the final one.
+
+**A panel added to this stage only reaches runs the new worker analysed.** A run whose perf-test
+status row is already `is_complete` takes the `skip` arm, so the stage writes nothing at all on a
+plain re-analyse — the panel stays empty with nothing logged beyond the `⏭️` line. That is how
+errors/sec (109 / 220 / 304, v0.2.97.19) behaves on every run analysed before it shipped:
+recovery is a force re-fetch, or the `is_complete` reset above.
 Deleting the status row is not equivalent: a run with no status rows takes the orchestrator's
 full-collection path for every source, Grafana and Dynatrace included.
 `metricsDocuments.length === 0` is the same signal for "ran fine, no data" and "every query failed"

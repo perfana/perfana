@@ -113,6 +113,7 @@ export const PERFORMANCE_METRICS_PANEL_UNITS: Record<number, string> = {
   106: 'short',    // TXN_APDEX (0-1 score)
   107: 'reqps',    // TXN_THROUGHPUT
   108: 'short',    // TXN_CONCURRENCY (avg requests in flight, unitless)
+  109: 'err/s',    // TXN_ERROR_COUNT
 
   // Request-level (v2 architecture)
   201: 'ms',       // REQ_RT_AVG
@@ -125,11 +126,13 @@ export const PERFORMANCE_METRICS_PANEL_UNITS: Record<number, string> = {
   208: 'ms',       // REQ_LATENCY
   209: 'ms',       // REQ_CONNECT_TIME
   219: 'short',    // REQ_CONCURRENCY (210-218 are the virtual URL panels)
+  220: 'err/s',    // REQ_ERROR_COUNT
 
   // Scenario-level (v2 architecture)
   301: 'short',    // SCENARIO_ERROR_COUNT
   302: 'short',    // SCENARIO_AVG_THREADS
   303: 'short',    // SCENARIO_MAX_THREADS
+  304: 'err/s',    // SCENARIO_ERRORS_OVER_TIME (per response code)
 
   // Legacy panel IDs (v1 architecture)
   1: 'ms',         // RESPONSE_TIME

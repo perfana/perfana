@@ -513,6 +513,121 @@ nothing currently asserts it.
 
 ## Worker pipeline
 
+### Panel 304's follow-ups from the pre-landing review (errors/sec by response code)
+
+**Priority:** P3
+**Origin:** /ship pre-landing review of v0.2.97.19 (2026-10-14). Seven specialist passes; the two
+CRITICALs were fixed on the branch (the analysis is the panel's only writer, and the zero-fill
+grid is bounded by the data instead of the clock). These are the advisory residues, none of them
+a blocker:
+
+1. **`requests_error` still carries TimescaleDB's auto-created time-only index.**
+   `requests_error_time_idx ON requests_error (time DESC)` is the same shape as
+   `virtual_users_time_idx` and the `requests_raw` twin, both dropped in v0.2.96.10 / migration
+   1813 after measuring 49x the buffers. Panel 304 adds a third whole-run scan of this table per
+   analysis (the scenario `SELECT DISTINCT`, panel 301's cumulative `process()`, and
+   `processOverTime`). Owed: `EXPLAIN (ANALYZE, BUFFERS)` of the 304 statement on an error-heavy
+   run, read which index it picks and `Rows Removed by Filter`; if it chooses the time-only one,
+   drop it in a migration following 1811's per-chunk pattern. The dev database's largest error
+   run has 137 rows, so this cannot be settled locally.
+2. **`requests_error_5s` already groups by exactly these columns and is unused here.**
+   `ConsolidatedSchema.ts` defines it as `time_bucket('5 seconds', time), …, response_code,
+   count(*)` with 1m/5m rollups and live refresh policies. Every perf-test bucket size except 1s
+   is a whole multiple of 5s, so the rebuild path could read the CAGG instead of the raw
+   hypertable — the pattern CLAUDE.md endorses for `summary-timeseries`. Blocker: the CAGG has no
+   `test_run_id`, so the run must be bounded by `system_under_test` + `test_environment` + a time
+   range passed as **bind parameters** (a run CTE seq-scans the aggregate: 58.5s vs ms).
+3. **304 upserts across the whole run on BOTH write paths, and neither is covered by the
+   decompression guard.** `decompressChunksForRange` runs only `if (finalPass)` and only over
+   the **tail span**, while 304's grid spans the run — so on the tail plan the guard no longer
+   covers what the statement touches, and on a force re-fetch (`isIncremental` with the full
+   range, so `upsert` true and `finalPass` false) it does not run at all. 304's keys are all
+   new, so there is nothing to `DO UPDATE`, but TimescaleDB still decompresses the matching
+   segments to enforce `uniq_ds_metrics_upsert`, and `compress_segmentby = test_run_id` means
+   that is the run's segments in every chunk the grid spans. The exposure is a run first
+   analysed later than `compress_after` (2 days) — the retried-job / worker-outage case the
+   guard exists for. Owed: confirm on such a run whether it logs a long `decompress_chunk` or
+   `tuple decompression limit exceeded`; the two candidate fixes (widen the tail decompress to
+   the run span, or bound 304's write to the pass's window) trade against CLAUDE.md's rule that
+   widening decompression is not free. Fails loudly into BullMQ's retries rather than
+   corrupting anything, which is why it is not a blocker.
+
+8. **A force re-fetch never deletes, so a changed code set or bucket size leaves stale 304
+   series behind.** `upsert = isIncremental || finalPass` and the `deletePerfTestMetricsForRun`
+   sweep is `if (!upsert)`, so a force re-fetch upserts with no delete and nothing prunes a
+   series the new top-20 no longer contains, or buckets off the new lattice. Mostly stable
+   across re-analyses of unchanged data (the ranking is deterministic and the grid is the run's
+   span), so it becomes real when the bucket size changes — a stale-closed run whose `end_time`
+   is later corrected changes `final`, and both generations then coexist — or when
+   `MAX_CODE_SERIES` / `MAX_RESPONSE_CODE_LENGTH` change in a future version. On the chart that
+   is two interleaved series; to ADAPT it is a verdict for a code the run no longer has. A
+   plain re-analyse afterwards self-heals (it fails `perfTestRowsOnGrid` and rebuilds); a force
+   re-fetch never does.
+
+9. **Panels 109/220 add a dense row per bucket per sampler and per transaction, on every run.**
+   They are appended to `REQUEST_PANEL_VALUES` / `TRANSACTION_PANEL_VALUES`, so `ds_metrics`
+   grows by roughly 1/9 and 1/8 — on the 1.9 M-row run cited in `perf-metrics-writer.ts`'s
+   header that is ~+210 k rows, almost all zero — plus one `ds_metric_statistics` row and one
+   compared ADAPT panel per sampler and per transaction. Issue #29 records
+   `delete-orphaned-results` crossing the 120 s cap at ~25 k metrics (`AdaptPipeline` never
+   calls `setAggregationBudget`), so this is ~+11 % on an already-tight budget. Owed: measure
+   `adapt-analysis` on a large run before rolling this out widely. Related and not new: with
+   `absoluteThreshold: null`, a baseline mean of 0 against any non-zero value is an unbounded
+   percentage increase, and that now applies on two panels per series rather than one.
+
+11. **The non-TimescaleDB bucket fallback is arithmetically wrong in the two older copies.**
+   `requests-processor.ts:227` and `transactions-processor.ts:221` compute
+   `date_trunc('second', time) + INTERVAL '1 second' * (FLOOR(EXTRACT(EPOCH FROM (time -
+   origin)) / bucket) * bucket)` — the offset added to the ROW's timestamp instead of to the
+   origin. With origin 0, bucket 10 and `time = 100s` that returns 200s, and ten rows spanning
+   one bucket return ten distinct values. `processOverTime` fixed its own copy (adding to
+   `$3::timestamptz`); these two still mislabel every bucket timestamp when `timescaledb` is
+   absent. Unreachable on any real deploy, which is why it has survived, and why fixing it is
+   a cleanup rather than a hotfix. Item 6 below covers extracting the one shared fragment.
+4. **`parseRequestInfoFromMetric` cannot read 304's series names.**
+   `anomaly-table-utils.ts` classifies by title prefix (`/^(Request|Transaction)\s+/i`). 109 and
+   220 match and parse correctly; `Errors/sec by Response Code` falls to the legacy branch and
+   uses the panel title as the transaction filter, discarding the `error_count.500` series name.
+   Same shape as 301-303 today, but 304 is the first per-bucket scenario panel, so it appears in
+   volume on the anomaly table.
+5. **A profile SLO can target 304 with no match pattern.** The panel holds no total series, only
+   `error_count.<code>`, so an SLO on it needs `matchPattern` — which is optional on all three
+   DTOs, and `resolveDashboardColumns` only membership-checks the panel id. 304 could not be left
+   out of `PERF_TEST_PROFILE_PANELS` (the pin test demands full equality against
+   `METRIC_TYPE_PANEL_NAMES`), so the residue is inherent. Owed: a guard, or require the pattern
+   in the form when the panel is 304.
+6. **The TimescaleDB-or-fallback bucket CASE is now copy-pasted three times, with two casts.**
+   `transactions-processor.ts` and `requests-processor.ts` cast the origin `$5::timestamp`;
+   `processOverTime` casts it `::timestamptz`. The new cast is the defensible one, which is the
+   problem — the three writers of a run's buckets should not compute boundaries two ways.
+   Verified equal on the dev database (169 of 169 of 304's grid points coincide with panel 105's
+   bucket timestamps), so this is latent, not live. Owed: extract one shared SQL fragment beside
+   `samplerMetricNameSql` and settle on a cast.
+7. **Nothing caps the SCENARIO dimension of panel 304's grid, and the code cap does not bound
+   the intermediate.** Written rows are `codes x buckets x (scenarios + 1)`: `MAX_CODE_SERIES`
+   bounds the first at 20 and `FULL_COLLECTION_TARGET_DATA_POINTS` bounds the second at ~250,
+   but the third is whatever the run has — 50 scenarios is ~255 k rows, 500 is ~2.5 M, each
+   carrying a 135-character `metric_name`. Separately, the cap is applied in `codes`, i.e.
+   AFTER `base` and `counted` are materialised, so on the rotating-exception-text run the cap
+   exists for, `|base|` is still ~`|requests_error|` and a 3 M-error run pushes that through a
+   HashAggregate under the 128 MB `AGGREGATION_WORK_MEM`. The group-once rewrite removed the
+   literal 2x, not the proportionality. Owed: a scenario-count guard, or apply the cap earlier.
+
+8. **A straggler tick after completion does a full-run 304 pass.** The guard is
+   `!testRun.completed`, and the scheduler ticks for ~30 s past `end_time`; such a tick has
+   `completed = true`, so it runs the whole-run aggregate and upserts the full grid inside what
+   is supposed to be a 60 s tick, and the tail pass then does it again. Cost, not correctness.
+
+9. **`processOverTime` has no `panelConfigsCreated` dedupe, unlike `process()`.** Reachable only
+   when a real scenario is literally named `all aggregated`, where it would emit two configs for
+   one dashboard; `saveDsCompareConfigs`' `ON CONFLICT … WHERE metric_name IS NULL DO NOTHING`
+   swallows the duplicate, so it is currently harmless.
+
+10. **`unitLabel` answers `''` for the worker's own display units.** Fixed for `err/s` by
+   registering it in `apps/web/lib/units.ts`; `txn/s` (panel 107), `count` and `threads`
+   (301-303) are still unregistered, so `MetricsComparisonTable`'s unit set renders those
+   columns with no unit at all. Pre-existing, one line each to fix the same way.
+
 ### Runs analysed before v0.2.97.17 have no statistics for the scenario-level panels (301-303)
 
 **Priority:** P3
@@ -3079,6 +3194,12 @@ multiplies panel 301's metric count by (1 + codes), permanently, because it land
 Deliberately deferred at ship time — real status codes and tool exception names are a small set,
 and `error_count.other` is a new concept in the panel that deserves its own decision.
 **Marker:** `ponytail:` note in `apps/worker/CLAUDE.md`, Error Count section.
+**Update (2026-10-14, v0.2.97.19):** panel **304** ships exactly this shape —
+`MAX_CODE_SERIES` (20) with `ROW_NUMBER() OVER (PARTITION BY scenario_name ORDER BY SUM(errors)
+DESC, response_code)` — so the pattern is now proven in the codebase and 301 can copy it. 304 has
+no `error_count.other` fold either, for the same reason. 301 itself is **unchanged and still
+uncapped**; the two panels therefore disagree about which codes exist on a pathological run, 304
+keeping the busiest 20 and 301 keeping all of them.
 
 ### The `unknown` response-code sentinel is spelled twice, and the two normalise differently
 

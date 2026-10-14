@@ -78,12 +78,13 @@ export async function fetchSamplerUrlMap(
 
 /**
  * The per-request panels: response time (201-204), error rate, throughput, apdex,
- * latency and connect time (205-209) and concurrency (219). They all name their series
+ * latency and connect time (205-209), concurrency (219) and errors/sec (220). They all
+ * name their series
  * `transaction_name.sampler_name`, so the sampler URL map keys them all — attaching the
  * URL to only the response-time panel left every other request row without one.
  */
 export function isRequestPanel(panelId: number | undefined): boolean {
-  return panelId != null && ((panelId >= 201 && panelId <= 209) || panelId === 219);
+  return panelId != null && ((panelId >= 201 && panelId <= 209) || panelId === 219 || panelId === 220);
 }
 
 /** Per-URL statistics for the given metric across runs. [] on error. */

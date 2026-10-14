@@ -208,7 +208,16 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       // finally. The rebuild path does not need it: its DELETE drops whole segments.
       // ponytail: the interim DELETE at start_time is outside this span on a run crossing a
       // chunk boundary; `time` is the orderby column so that is a few batches, not a segment.
-      await this.db.decompressChunksForRange('ds_metrics', fromTime!, toTime!);
+      //
+      // **The span is the RUN, not the tail, because panel 304 writes the run.** Every other
+      // processor on this path is window-scoped, but `processOverTime` upserts a zero-filled
+      // grid from `start_time` — so with only the tail decompressed, a run that crosses a UTC
+      // midnight (`ds_metrics` has 1-day chunks) and is analysed after `compress_after` upserts
+      // into a still-compressed chunk. `test_run_id` is `compress_segmentby`, so each such row
+      // decompresses the run's whole segment there as DML, inside one transaction, until
+      // `tuple decompression limit exceeded` fails the stage. This is still the NARROWEST span
+      // that works, which is the rule in CLAUDE.md — it widened because what we write did.
+      await this.db.decompressChunksForRange('ds_metrics', originalTestRun.start_time, toTime!);
     }
 
     // For incremental collection, set filter times while keeping original start_time for bucket alignment
@@ -247,6 +256,9 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       responseTimeMetrics: 0,
       transactionMetrics: 0,
       errorMetrics: 0,
+      // 304's zero-filled grid is thousands of rows where 301-303 are a handful, so it gets
+      // its own counter — folded together, "how many error metrics" stops being readable.
+      errorCodeSeriesMetrics: 0,
       virtualUserMetrics: 0,
       apdexScores: 0,
     };
@@ -363,6 +375,28 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       step: 'errors-processor',
       duration: Date.now() - stepStart,
       count: errorsResult.metrics.length
+    });
+
+    // Panel 304: the same per-response-code breakdown over time. It writes from SQL like the
+    // requests and transactions processors, so its rows are counted here and never land in
+    // allMetrics — and it is deliberately NOT one of SCENARIO_PANEL_IDS, whose single point
+    // per run the final pass enforces by deleting every other timestamp.
+    stepStart = Date.now();
+    const errorsOverTime = await this.errorsProcessor.processOverTime(
+      testRunId,
+      testRun,
+      bucketSizeSeconds,
+      upsert
+    );
+    for (let i = 0; i < errorsOverTime.compareConfigs.length; i++) {
+      allCompareConfigs.push(errorsOverTime.compareConfigs[i]);
+    }
+    breakdown.errorCodeSeriesMetrics += errorsOverTime.rowsInserted;
+    metricsCreated += errorsOverTime.rowsInserted;
+    stepTiming.push({
+      step: 'errors-over-time-processor',
+      duration: Date.now() - stepStart,
+      count: errorsOverTime.rowsInserted
     });
 
     // Process virtual_users table

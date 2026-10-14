@@ -48,6 +48,8 @@ export interface PerformanceTestMetricsOutput {
     responseTimeMetrics: number;
     transactionMetrics: number;
     errorMetrics: number;
+    /** Panel 304: one row per (code x bucket x scenario), so orders of magnitude above errorMetrics. */
+    errorCodeSeriesMetrics: number;
     virtualUserMetrics: number;
     apdexScores: number;
   };
