@@ -100,12 +100,14 @@ it('reads a URL panel series list from the run URLs instead of the statistics', 
 });
 
 it('treats every per-request panel as URL-bearing, not just response time', () => {
-  // 205-209 (error rate, throughput, apdex, latency, connect time) and 219 (concurrency) name their series
+  // 205-209 (error rate, throughput, apdex, latency, connect time), 219 (concurrency) and 220
+  // (errors/sec) name their series
   // `transaction.sampler` exactly like 201-204, so they carry a URL too.
   const { isRequestPanel } = jest.requireActual('@/lib/url-perf-panels');
-  expect([201, 204, 205, 206, 207, 208, 209, 219].every(isRequestPanel)).toBe(true);
+  expect([201, 204, 205, 206, 207, 208, 209, 219, 220].every(isRequestPanel)).toBe(true);
   // 210-218 are the virtual URL panels, never stored request rows.
-  expect([101, 104, 108, 210, 211, 218, 220, undefined].some(isRequestPanel)).toBe(false);
+  // 221 is the next unused request id; 220 became Request Errors/sec, a stored panel.
+  expect([101, 104, 108, 109, 210, 211, 218, 221, undefined].some(isRequestPanel)).toBe(false);
 });
 
 it('asks only for the series this run recorded', async () => {

@@ -1,5 +1,6 @@
 import { isUrlPanel, isRequestPanel, getUrlPanelMetric, buildUrlPanels, URL_PANEL_ID_MIN } from './url-perf-panels';
 import { PERFORMANCE_METRICS_PANEL_UNITS } from '@/app/test-runs/[id]/components/shared/metric-options';
+import { getUnit } from '@/lib/units';
 
 describe('url-perf-panels', () => {
   it('recognises URL panel ids', () => {
@@ -30,12 +31,22 @@ describe('url-perf-panels', () => {
   });
 
   it('never shares an id between a stored perf-test panel and a virtual URL panel', () => {
-    // The worker writes 101-108, 201-209, 219 and 301-303; the web synthesises 210-218 on the
+    // The worker writes 101-109, 201-209, 219-220 and 301-304; the web synthesises 210-218 on the
     // same dashboards. A stored id inside the URL block is routed through isUrlPanel() to the
     // sampler-URL rollup and answers with the wrong series (v0.2.95.38 review caught 210).
     const urlIds = new Set(buildUrlPanels('d').map(p => p.id));
     const storedIds = Object.keys(PERFORMANCE_METRICS_PANEL_UNITS).map(Number);
     expect(storedIds.filter(id => urlIds.has(id))).toEqual([]);
     expect([...urlIds].some(isRequestPanel)).toBe(false);
+  });
+
+  it('gives every stored perf-test panel a unit the formatter actually knows', () => {
+    // These panels have no Grafana JSON to read a unit from, so this table IS the unit and a
+    // typo in it is silent: `getUnit` answers an unknown id with `{ name: id, format: id }`,
+    // so the axis and the chips render the raw code ("opss") instead of failing. Every real
+    // entry has a name that differs from its id — that is the discriminator here.
+    for (const [panelId, unit] of Object.entries(PERFORMANCE_METRICS_PANEL_UNITS)) {
+      expect({ panelId, name: getUnit(unit).name }).not.toEqual({ panelId, name: unit });
+    }
   });
 });

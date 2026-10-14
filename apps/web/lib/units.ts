@@ -62,6 +62,10 @@ const units: Unit[] = [
   { name: 'duration (ms)', id: 'dtdurationms', format: 'ms', family: 'time', factor: 1e-3 },
   { name: 'duration (s)', id: 'dtdurations', format: 's', family: 'time', factor: 1 },
   { name: 'counts/sec (cps)', id: 'cps', format: 'c/s' },
+  // The worker stores this verbatim on the errors/sec panels (109/220/304) and the stored
+  // unit wins over the panel-id map, so without the entry `unitLabel` answers '' and the
+  // comparison table shows those columns with no unit at all.
+  { name: 'errors/sec (err/s)', id: 'err/s', format: 'err/s' },
   { name: 'ops/sec (ops)', id: 'ops', format: 'ops/s' },
   { name: 'requests/sec (rps)', id: 'reqps', format: 'req/s' },
   { name: 'reads/sec (rps)', id: 'rps', format: 'rd/s' },

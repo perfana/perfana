@@ -105,8 +105,9 @@ describe('presetAggregateSpec panel table (drift guard vs apps/web)', () => {
 describe('isRequestPanel (drift guard vs apps/web)', () => {
   // Same literals as apps/web/app/test-runs/[id]/components/compare/utils/__tests__/metric-options.test.ts.
   it('accepts the stored request panels and never a virtual URL panel', () => {
-    expect([201, 204, 205, 206, 207, 208, 209, 219].every(isRequestPanel)).toBe(true);
-    expect([101, 104, 108, 210, 211, 218, 220, null, undefined].some(isRequestPanel)).toBe(false);
+    expect([201, 204, 205, 206, 207, 208, 209, 219, 220].every(isRequestPanel)).toBe(true);
+    // 221 is the next unused request id; 220 became Request Errors/sec, a stored panel.
+    expect([101, 104, 108, 109, 210, 211, 218, 221, null, undefined].some(isRequestPanel)).toBe(false);
     expect([210, 214, 215, 217, 218].some((id) => isUrlPanel(id) && isRequestPanel(id))).toBe(false);
   });
 });
