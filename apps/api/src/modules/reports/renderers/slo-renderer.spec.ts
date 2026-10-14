@@ -439,4 +439,604 @@ describe('SloRenderer', () => {
     expect(html).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
     expect(html).not.toContain('grid-template-columns: repeat(3, 1fr)');
   });
+  describe('the ACTUAL column of a per-target check', () => {
+    // `average_all: false` judges every transaction separately, so there is no single actual
+    // value. `DataAggregator` still fills `panel_average` with `values[0]` — the FIRST target —
+    // which produced a report reading "0" beside a FAIL caused by two other transactions.
+    const perTarget = (overrides?: Record<string, unknown>) =>
+      makeSloResult({
+        panel_title: 'Performance test metrics BrowseAndSearch',
+        metric_name: 'Transaction Error Rate',
+        requirement_operator: 'lt',
+        requirement_value: 2,
+        metric_unit: '',
+        average_all: false,
+        meets_requirement: false,
+        panel_average: 0,
+        targets: [
+          { target: 'T01_Homepage_Load', value: 0, meets_requirement: true },
+          { target: 'T03_Search_Products', value: 4.92, meets_requirement: false },
+          { target: 'T07_Product_Assets', value: 6.56, meets_requirement: false },
+        ],
+        ...overrides,
+      });
+
+    const actualCells = (html: string) =>
+      Array.from(html.matchAll(/text-align: right;[^>]*>([^<]*)</g)).map((m) => m[1]!.trim());
+
+    it('shows the value that produced the verdict, not the first target', async () => {
+      dataFetcher.getSloCheckResults.mockResolvedValue([perTarget()]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('6.56');
+      expect(actualCells(html)).not.toContain('0');
+    });
+
+    it('shows the target closest to the limit when every target passed', async () => {
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          meets_requirement: true,
+          targets: [
+            { target: 'T01', value: 0, meets_requirement: true },
+            { target: 'T03', value: 1.8, meets_requirement: true },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('1.8');
+    });
+
+    it('takes the MINIMUM when the requirement points the other way', async () => {
+      // `gt`: higher is better, so the worst target is the smallest one.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          requirement_operator: 'gt',
+          requirement_value: 95,
+          targets: [
+            { target: 'T01', value: 99.9, meets_requirement: true },
+            { target: 'T03', value: 91.2, meets_requirement: false },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('91.2');
+    });
+
+    it('shows the failing target of an AVERAGED check too, not its passing mean', async () => {
+      // `RequirementChecker` fails the whole check on any failing target and does not consult
+      // `average_all` to do it — the panel-average comparison is only an extra failure source.
+      // So an averaged check can carry a FAIL that its own comfortably-passing mean does not
+      // explain, and printing the mean there is the same contradiction in the other half of
+      // the table: "1.5" beside "Average value should be less than 2" and a red FAIL.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          average_all: true,
+          panel_average: 1.5,
+          targets: [
+            { target: 'T01', value: 0, meets_requirement: true },
+            { target: 'T03', value: 7.4, meets_requirement: false },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('7.4');
+      expect(actualCells(html)).not.toContain('1.5');
+    });
+
+    it('keeps the mean when the AVERAGE itself is what failed', async () => {
+      // No target failed, so the verdict came from the panel-average comparison and the mean
+      // is exactly the number that produced it.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          average_all: true,
+          panel_average: 3.7,
+          targets: [
+            { target: 'T01', value: 3.2, meets_requirement: true },
+            { target: 'T03', value: 4.1, meets_requirement: true },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('3.7');
+      expect(actualCells(html)).not.toContain('4.1');
+    });
+
+    it('keeps using panel_average for a PASSING averaged check, where it IS the actual value', async () => {
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          average_all: true,
+          meets_requirement: true,
+          panel_average: 3.7,
+          targets: [
+            { target: 'T01', value: 0, meets_requirement: true },
+            { target: 'T03', value: 7.4, meets_requirement: true },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('3.7');
+      expect(actualCells(html)).not.toContain('7.4');
+    });
+
+    it.each([
+      ['NULL', null],
+      ['missing', undefined],
+    ])('treats a %s average_all as averaged on the passing side', async (_label, averageAll) => {
+      // The column is NOT NULL in the DDL, so these shapes mean the fetcher's SELECT stopped
+      // carrying `cr.average_all`. On a passing check that must degrade to the old behaviour
+      // rather than to a "closest to the limit" value the reader cannot account for. A FAILED
+      // check does not consult the column at all, so the fix survives that regression.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({ average_all: averageAll, meets_requirement: true, panel_average: 3.7 }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('3.7');
+      expect(actualCells(html)).not.toContain('6.56');
+    });
+
+    it.each(['<', 'le', 'lte', '<='])(
+      'reads %s as lower-is-better and takes the maximum',
+      async (operator) => {
+        dataFetcher.getSloCheckResults.mockResolvedValue([
+          perTarget({ requirement_operator: operator }),
+        ]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('6.56');
+      },
+    );
+
+    it.each(['>', 'ge', 'gte', '>='])(
+      'reads %s as higher-is-better and takes the minimum',
+      async (operator) => {
+        dataFetcher.getSloCheckResults.mockResolvedValue([
+          perTarget({
+            requirement_operator: operator,
+            requirement_value: 95,
+            targets: [
+              { target: 'T01', value: 99.9, meets_requirement: true },
+              { target: 'T03', value: 91.2, meets_requirement: false },
+            ],
+          }),
+        ]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('91.2');
+      },
+    );
+
+    it.each(['eq', '=', '==', 'ne', '!=', '<>', 'wat'])(
+      'falls back to panel_average on a PASSING check for %s, which orders nothing',
+      async (operator) => {
+        // Nothing failed and the operator implies no ordering, so there is no "closest to the
+        // limit" either — picking among equals would just reinvent the arbitrary values[0].
+        dataFetcher.getSloCheckResults.mockResolvedValue([
+          perTarget({ requirement_operator: operator, meets_requirement: true, panel_average: 3.7 }),
+        ]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('3.7');
+        expect(actualCells(html)).not.toContain('6.56');
+      },
+    );
+
+    it.each(['eq', 'ne', '!=', 'wat'])(
+      'shows a FAILING target for %s, where the arbitrary mean would say nothing',
+      async (operator) => {
+        // An "≠ 26.25" check that failed did so AT 26.25. The operator gives no ordering, but
+        // a target the checker actually failed is still an honest answer.
+        dataFetcher.getSloCheckResults.mockResolvedValue([
+          perTarget({
+            requirement_operator: operator,
+            requirement_value: 26.25,
+            panel_average: 3.7,
+            targets: [
+              { target: 'T01', value: 1.11, meets_requirement: true },
+              { target: 'T03', value: 26.25, meets_requirement: false },
+            ],
+          }),
+        ]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('26.25');
+        expect(actualCells(html)).not.toContain('3.7');
+      },
+    );
+
+    it('falls back to panel_average when a passing check carries no operator', async () => {
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          requirement_operator: null,
+          requirement_value: null,
+          meets_requirement: true,
+          panel_average: 3.7,
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('3.7');
+      expect(actualCells(html)).not.toContain('6.56');
+    });
+
+    it.each([
+      ['no targets array', null],
+      ['an empty targets array', []],
+      ['targets whose values are all null', [{ target: 'T01', value: null, meets_requirement: null }]],
+    ])('falls back to panel_average with %s', async (_label, targets) => {
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({ targets, panel_average: 3.7 }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('3.7');
+    });
+
+    it('ignores a target with no value and takes the worst of the rest', async () => {
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          panel_average: 99,
+          targets: [
+            { target: 'T01', value: null, meets_requirement: null },
+            { target: 'T03', value: 4.92, meets_requirement: false },
+            { target: 'T07', value: null, meets_requirement: null },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('4.92');
+      expect(actualCells(html)).not.toContain('99');
+    });
+
+    it('prints a worst value of 0 rather than falling back to panel_average', async () => {
+      // `?? `, not `||`: a check whose every target measured zero has 0 as its honest
+      // actual value, and `||` would reach past it for whatever `values[0]` happened to be.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          meets_requirement: true,
+          panel_average: 99,
+          targets: [
+            { target: 'T01', value: 0, meets_requirement: true },
+            { target: 'T03', value: 0, meets_requirement: true },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('0');
+      expect(actualCells(html)).not.toContain('99');
+    });
+
+    it('scales the worst target through its unit, as the requirement is scaled', async () => {
+      // percentunit is stored 0.0-1.0 and always read as 0-100%, so the Actual column has
+      // to go through the same formatter the requirement does — not print a bare 0.912.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          metric_name: 'Success rate',
+          requirement_operator: 'gt',
+          requirement_value: 0.95,
+          metric_unit: 'percentunit',
+          targets: [
+            { target: 'T01', value: 0.999, meets_requirement: true },
+            { target: 'T03', value: 0.912, meets_requirement: false },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('91.2%');
+      expect(html).not.toContain('percentunit');
+    });
+
+    describe('only targets the checker actually judged', () => {
+      it('ignores a series the SLO match_pattern excluded', async () => {
+        // `RequirementChecker` reports a pattern-excluded series with meets_requirement NULL.
+        // It keeps its real value, so an unfiltered max prints the worst series on the panel
+        // for a check that deliberately left it out.
+        dataFetcher.getSloCheckResults.mockResolvedValue([
+          perTarget({
+            meets_requirement: true,
+            panel_average: 1.1,
+            targets: [
+              { target: 'T03_Search_Products', value: 1.1, meets_requirement: true },
+              { target: 'T99_Excluded', value: 97.3, meets_requirement: null },
+            ],
+          }),
+        ]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('1.1');
+        expect(actualCells(html)).not.toContain('97.3');
+      });
+
+      it('ignores a weak-trend series, which the pipeline left out of the average too', async () => {
+        // A Trend SLO below the correlation floor passes on the grounds that the slope is
+        // meaningless, and `DataAggregator` keeps it out of `values`. Printing it would put a
+        // steep %/h figure beside a PASS — the same contradiction, inverted.
+        dataFetcher.getSloCheckResults.mockResolvedValue([
+          perTarget({
+            requirement_value: 5,
+            meets_requirement: true,
+            panel_average: 0.4,
+            targets: [
+              { target: 'T01', value: 0.4, meets_requirement: true },
+              { target: 'T99_Noise', value: 48.2, meets_requirement: true, weak_trend: true, trend_corr: 0.11 },
+            ],
+          }),
+        ]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('0.4');
+        expect(actualCells(html)).not.toContain('48.2');
+      });
+
+      it('keeps an is_artificial target, because the aggregator averages those', async () => {
+        // `is_artificial` is `stat.is_constant`, which also matches a real series that never
+        // varied. Excluding it here would invent a divergence from `panel_average`, not close one.
+        dataFetcher.getSloCheckResults.mockResolvedValue([
+          perTarget({
+            targets: [
+              { target: 'T01', value: 1.0, meets_requirement: true },
+              { target: 'T02_Flat', value: 7.7, meets_requirement: false, is_artificial: true },
+            ],
+          }),
+        ]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('7.7');
+      });
+
+      it('falls back to panel_average when nothing was judged', async () => {
+        dataFetcher.getSloCheckResults.mockResolvedValue([
+          perTarget({
+            panel_average: 3.3,
+            targets: [
+              { target: 'T01', value: 11.1, meets_requirement: null },
+              { target: 'T02', value: 22.2, meets_requirement: null },
+            ],
+          }),
+        ]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('3.3');
+        expect(actualCells(html)).not.toContain('22.2');
+      });
+    });
+
+    it('reads a target value stored as a jsonb string', async () => {
+      // `Number.isFinite('4.92')` is false, but the breakdown's sort coerces and
+      // formatValueWithUnit parseFloats it — a strict check here made the three layers
+      // disagree and sent the row back to the arbitrary panel_average while the breakdown
+      // printed the real numbers underneath it.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          panel_average: 0,
+          targets: [
+            { target: 'T01', value: '0' as never, meets_requirement: true },
+            { target: 'T03', value: '4.92' as never, meets_requirement: false },
+            { target: 'T07', value: '6.56' as never, meets_requirement: false },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('6.56');
+      expect(actualCells(html)).not.toContain('0');
+    });
+
+    it('ignores a target whose meets_requirement key is absent entirely', async () => {
+      // jsonb is not type-checked at the boundary. `!== null` would read a missing key as
+      // judged on the passing side while the failing side's `=== false` never admits it.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          meets_requirement: true,
+          panel_average: 1.2,
+          targets: [
+            { target: 'T01', value: 1.2, meets_requirement: true },
+            { target: 'T99_Unjudged', value: 88.8 } as never,
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('1.2');
+      expect(actualCells(html)).not.toContain('88.8');
+    });
+
+    it('picks the failing value furthest from the requirement for eq', async () => {
+      // `eq`'s failing targets are every value that is NOT the threshold, and they differ
+      // arbitrarily — taking the first would be the same defect as panel_average.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          requirement_operator: 'eq',
+          requirement_value: 100,
+          panel_average: 3.7,
+          targets: [
+            { target: 'T01_Near', value: 99, meets_requirement: false },
+            { target: 'T03_Far', value: 12, meets_requirement: false },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('12');
+      expect(actualCells(html)).not.toContain('99');
+    });
+
+    it('counts only judged targets in the breakdown caption', async () => {
+      // "2 of 7 targets failed" when 5 were pattern-excluded is the dishonest count the
+      // caption exists to replace.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          targets: [
+            { target: 'T01', value: 4.92, meets_requirement: false },
+            { target: 'T02', value: 6.56, meets_requirement: false },
+            { target: 'X01', value: 9.9, meets_requirement: null },
+            { target: 'X02', value: 9.9, meets_requirement: null },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(
+        makeSection({ config: { showFailureDetails: true } }),
+        makeTestRun(),
+      );
+
+      expect(html).toContain('2 of 2 targets failed');
+      expect(html).not.toContain('2 of 4 targets failed');
+    });
+
+    it('renders a non-string target name instead of throwing away the section', async () => {
+      // escapeHtml calls .replace on it, and the sort can now surface a malformed target
+      // that previously sat in the truncated tail. A throw here costs the whole SLO section.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          targets: [{ target: 12345 as never, value: 6.56, meets_requirement: false }],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(
+        makeSection({ config: { showFailureDetails: true } }),
+        makeTestRun(),
+      );
+
+      expect(html).toContain('12345');
+      expect(html).not.toContain('Failed to render');
+    });
+
+    it('sinks a null-valued failing target to the end of the breakdown', async () => {
+      // The comparator has to be a total order: `null - null` is NaN, which V8 leaves unsorted.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          targets: [
+            { target: 'T01_NoValue', value: null, meets_requirement: false },
+            { target: 'T03_Worst', value: 9.1, meets_requirement: false },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(
+        makeSection({ config: { showFailureDetails: true } }),
+        makeTestRun(),
+      );
+
+      expect(actualCells(html)).toContain('9.1');
+      expect(html.indexOf('T03_Worst')).toBeLessThan(html.indexOf('T01_NoValue'));
+    });
+
+    it('survives a targets value that is not an array', async () => {
+      // `targets` is jsonb and this path now runs for passing rows too, where the old code
+      // never touched it. An unguarded .filter throws into the compiler's per-section catch,
+      // which replaces the whole SLO section with an error placeholder.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({ panel_average: 2.5, targets: { 'T01': 4.92 } as never }),
+      ]);
+
+      const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+      expect(actualCells(html)).toContain('2.5');
+      expect(html).toContain('SLO Results');
+    });
+
+    it('lists the failing targets worst first, so the actual value is row one', async () => {
+      // The breakdown is capped at 20 rows. Unsorted, the value the ACTUAL column prints can
+      // land in the "and N more" tail, and a reader cannot tell a truncated list from a wrong one.
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          targets: [
+            { target: 'T01_Mild', value: 2.5, meets_requirement: false },
+            { target: 'T03_Worst', value: 9.1, meets_requirement: false },
+            { target: 'T07_Middle', value: 4.4, meets_requirement: false },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(
+        makeSection({ config: { showFailureDetails: true } }),
+        makeTestRun(),
+      );
+
+      expect(actualCells(html)).toContain('9.1');
+      expect(html.indexOf('T03_Worst')).toBeLessThan(html.indexOf('T07_Middle'));
+      expect(html.indexOf('T07_Middle')).toBeLessThan(html.indexOf('T01_Mild'));
+    });
+
+    it('lists failing targets lowest first when higher is better', async () => {
+      dataFetcher.getSloCheckResults.mockResolvedValue([
+        perTarget({
+          requirement_operator: 'gte',
+          requirement_value: 95,
+          targets: [
+            { target: 'T01_Near', value: 94, meets_requirement: false },
+            { target: 'T03_Worst', value: 11, meets_requirement: false },
+          ],
+        }),
+      ]);
+
+      const html = await renderer.renderSloSection(
+        makeSection({ config: { showFailureDetails: true } }),
+        makeTestRun(),
+      );
+
+      expect(actualCells(html)).toContain('11');
+      expect(html.indexOf('T03_Worst')).toBeLessThan(html.indexOf('T01_Near'));
+    });
+
+    it.each([['LT'], [' lt '], ['LTE'], ['\tLt\n']])(
+      'normalises the operator spelling %j the way the worker does',
+      async (operator) => {
+        // `benchmarks.requirement_operator` is free text with no CHECK constraint and no DTO
+        // allowlist, and `evaluateRequirement` trims and lowercases before matching — so the
+        // worker judges these and this column must not silently fall back to panel_average.
+        dataFetcher.getSloCheckResults.mockResolvedValue([perTarget({ requirement_operator: operator })]);
+
+        const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+        expect(actualCells(html)).toContain('6.56');
+        expect(actualCells(html)).not.toContain('0');
+      },
+    );
+  });
+
+  it('warns rather than reporting an all-clear when the SLO query failed', async () => {
+    // null is not []: an empty array draws the green "no checks" card, which reads as
+    // "everything passed" and is then stored permanently.
+    dataFetcher.getSloCheckResults.mockResolvedValue(null);
+
+    const html = await renderer.renderSloSection(makeSection(), makeTestRun());
+
+    expect(html).toContain('SLO results could not be loaded');
+    expect(html).toContain('it does not mean the SLOs passed');
+    expect(html).not.toContain('No SLO check results available');
+    expect(html).not.toContain('Total Checks');
+  });
 });

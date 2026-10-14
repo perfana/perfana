@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
-import { ReportDataFetcherService, SloCheckResult } from '../services/report-data-fetcher.service';
+import { ReportDataFetcherService, SloCheckResult, SloCheckTarget } from '../services/report-data-fetcher.service';
 import { formatValueWithUnit } from './unit-format';
 import {
   REPORT_COLORS,
@@ -268,13 +268,43 @@ export class SloRenderer {
     if (result.meets_requirement === true) return '';
     const isApdex = this.isApdex(result);
     if (!isApdex && !showFailureDetails) return '';
-    const failing = (result.targets ?? []).filter((t) => t.meets_requirement === false);
+    const allTargets = Array.isArray(result.targets) ? result.targets : [];
+    const failing = allTargets.filter((t) => t.meets_requirement === false);
     if (failing.length === 0) return '';
+
+    // Worst first, so the value the ACTUAL column prints is row one rather than somewhere in
+    // the "and N more" tail — a reader who cannot find that number below it has no way to tell
+    // a truncated list from a wrong one. An Apdex score is higher-is-better by definition, so
+    // its worst failing target is its lowest.
+    const direction = isApdex ? 'higher-is-better' : this.operatorDirection(result.requirement_operator);
+    // Rank by the same key `worstTargetValue` picks with, including the direction-less arm, so
+    // the value in the ACTUAL column is always row one. A target with no usable number sinks to
+    // the end rather than scrambling the order: the comparator has to be a consistent total
+    // order, and `null - null` / `'a' - 'b'` both yield NaN, which V8 silently leaves unsorted.
+    const rank = (t: SloCheckTarget): number | null => {
+      const v = this.numericValue(t);
+      if (v === null) return null;
+      if (direction === null) {
+        const req = result.requirement_value;
+        return req == null || !Number.isFinite(req) ? 0 : -Math.abs(v - req);
+      }
+      return direction === 'lower-is-better' ? -v : v;
+    };
+    failing.sort((a, b) => {
+      const ra = rank(a);
+      const rb = rank(b);
+      if (ra === null) return rb === null ? 0 : 1;
+      if (rb === null) return -1;
+      return ra - rb;
+    });
 
     // ponytail: 20 rows then a count — a 2000-transaction check would otherwise be the report.
     const shown = failing.slice(0, 20);
     const rest = failing.length - shown.length;
-    const total = (result.targets ?? []).length;
+    // Only the targets the checker actually judged: a check that judged 2 series and
+    // pattern-excluded 5 must not read "2 of 7 targets failed", which is the same dishonest
+    // count the caption below exists to replace.
+    const total = allTargets.filter((t) => this.wasJudged(t)).length;
 
     const head = isApdex
       ? ['Transaction', 'Scenario', 'Apdex', 'Threshold', 'Avg', 'Satisfied', 'Tolerating', 'Frustrated', 'Status']
@@ -283,8 +313,8 @@ export class SloRenderer {
     const rows = shown.map((t) => {
       const cells = isApdex
         ? [
-            this.utils.escapeHtml(t.target),
-            this.utils.escapeHtml(t.scenario_name ?? '—'),
+            this.utils.escapeHtml(String(t.target ?? '')),
+            this.utils.escapeHtml(String(t.scenario_name ?? '—')),
             this.formatScore(t.value),
             this.formatMs(t.threshold_ms),
             this.formatMs(t.avg_response_time_ms),
@@ -294,7 +324,8 @@ export class SloRenderer {
             markerChip('FAIL', 'bad'),
           ]
         : [
-            this.utils.escapeHtml(t.target),
+            // String(): `target` comes out of jsonb, and escapeHtml calls .replace on it.
+            this.utils.escapeHtml(String(t.target ?? '')),
             this.utils.escapeHtml(this.formatActualValue(t.value, result.metric_unit)),
             markerChip('FAIL', 'bad'),
           ];
@@ -355,7 +386,139 @@ export class SloRenderer {
 
   private actualText(result: SloCheckResult): string {
     if (this.isApdex(result)) return this.formatScore(result.panel_average);
-    return this.utils.escapeHtml(this.formatActualValue(result.panel_average, result.metric_unit));
+    const value = this.worstTargetValue(result) ?? result.panel_average;
+    return this.utils.escapeHtml(this.formatActualValue(value, result.metric_unit));
+  }
+
+  /**
+   * The value that produced this check's verdict, or null to fall back to `panel_average`.
+   *
+   * `panel_average` is only an actual value when `average_all` is true. Otherwise
+   * `DataAggregator` fills it with `values[0]`, the first target of an unordered query, which
+   * says nothing about the check: a Transaction Error Rate check that failed on two
+   * transactions at 4.92 and 6.56 printed its first transaction's `0` beside a FAIL badge.
+   *
+   * The rule is therefore driven by the VERDICT, not by `average_all`:
+   *
+   * - **A failed check shows the worst failing target**, whatever `average_all` says.
+   *   `RequirementChecker` fails the whole check when any single target fails and does not
+   *   consult `average_all` to do it — the panel-average comparison is only an *additional*
+   *   failure source — so an averaged check can carry a FAIL that its own comfortably-passing
+   *   mean does not explain. Printing the mean there is the same self-contradiction.
+   * - **A failed check with no failing target** is one where the average itself is what
+   *   failed, so `panel_average` is exactly the right number: null.
+   * - **A passing per-target check shows the target closest to the limit**, so the row stays
+   *   informative rather than going blank, while a passing averaged check keeps its mean.
+   *
+   * An operator with no ordering (`eq`/`ne`) has no "worst", but a *failing* target's value is
+   * still an honest answer where the arbitrary first one is not — an "≠ 26.25" check that
+   * failed did so at 26.25. On the passing side it falls back, because picking among equals
+   * would just reinvent `values[0]`.
+   */
+  private worstTargetValue(result: SloCheckResult): number | null {
+    // `targets` is jsonb: a SUT-imported or hand-repaired row can hold a non-array shape, and
+    // unlike the old code path this one runs for PASSING rows too, so an unguarded `.filter`
+    // would take out the whole section through the compiler's per-section catch.
+    const judged = (Array.isArray(result.targets) ? result.targets : []).filter((t) => this.wasJudged(t));
+    const direction = this.operatorDirection(result.requirement_operator);
+
+    if (result.meets_requirement === false) {
+      const failed = this.finiteValues(judged.filter((t) => t.meets_requirement === false));
+      if (failed.length === 0) return null;
+      if (direction === null) return this.furthestFromRequirement(failed, result.requirement_value);
+      return direction === 'lower-is-better' ? Math.max(...failed) : Math.min(...failed);
+    }
+
+    if (result.average_all !== false || direction === null) return null;
+    const values = this.finiteValues(judged);
+    if (values.length === 0) return null;
+    return direction === 'lower-is-better' ? Math.max(...values) : Math.min(...values);
+  }
+
+  /**
+   * The target values that are usable numbers.
+   *
+   * Coerced rather than type-checked, because `Number.isFinite('4.92')` is false while both
+   * the sort below and `formatValueWithUnit` happily parse that string — so a strict check
+   * here would make the three layers disagree, and a row whose jsonb values are strings would
+   * fall back to the arbitrary `panel_average` while the breakdown printed the real numbers
+   * right underneath it. Worker-written targets are numbers; SUT-imported and hand-repaired
+   * rows are the population that is not guaranteed to be.
+   */
+  private finiteValues(targets: SloCheckTarget[]): number[] {
+    return targets
+      .map((t) => this.numericValue(t))
+      .filter((v): v is number => v !== null);
+  }
+
+  /** A target's value as a number, or null when it is not one. */
+  private numericValue(target: SloCheckTarget): number | null {
+    if (target.value == null) return null;
+    const n = Number(target.value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /**
+   * The failing value furthest from the requirement, for an operator that implies no ordering.
+   *
+   * `eq`'s failing targets are every value that is *not* the threshold and can differ from one
+   * another arbitrarily, so taking the first would be the same arbitrary-first-element defect
+   * as `panel_average` itself. Absolute distance is well defined there and degenerate-but-
+   * correct for `ne`, where every failing target equals the threshold.
+   */
+  private furthestFromRequirement(values: number[], requirement: number | null): number {
+    if (requirement == null || !Number.isFinite(requirement)) return values[0]!;
+    return values.reduce((worst, v) =>
+      Math.abs(v - requirement) > Math.abs(worst - requirement) ? v : worst,
+    );
+  }
+
+  /**
+   * Whether the checker actually judged this target, i.e. whether its value is one the
+   * verdict could have come from. `targets` is wider than that set in two ways, and both
+   * carry a real number that would otherwise win a max/min:
+   *
+   * - a series the SLO's `match_pattern` filtered out is reported with `meets_requirement`
+   *   NULL (`RequirementChecker.createTargetResult`'s caller), so the panel's worst series
+   *   could be printed for a check that deliberately excluded it;
+   * - a Trend SLO series below the correlation floor is given `meets_requirement: true`
+   *   with `weak_trend`, and `DataAggregator` leaves it out of `values` on the grounds that
+   *   "an unjudged value must not tip an average_all verdict" — so a PASS row could print a
+   *   steep slope the pipeline already called meaningless.
+   *
+   * `is_artificial` is deliberately NOT excluded: `DataAggregator` sets it from
+   * `stat.is_constant`, which also matches a real series that simply never varied, and the
+   * aggregator does average those. Dropping them here would invent a new divergence rather
+   * than close one.
+   */
+  private wasJudged(target: SloCheckTarget): boolean {
+    // Explicitly boolean, not `!== null`: `targets` is jsonb and TypeScript cannot enforce the
+    // interface across that boundary, so a target missing the key would read as judged here
+    // while the failing branch's `=== false` could never admit it — one object, two
+    // classifications inside one method.
+    const judged = target.meets_requirement === true || target.meets_requirement === false;
+    return judged && target.weak_trend !== true;
+  }
+
+  /**
+   * Which way a requirement points, or null when the operator implies no ordering.
+   *
+   * Normalised the same way `evaluateRequirement` (apps/worker/src/pipelines/checks/
+   * requirement-operator.ts) normalises — that helper is the authority on which spellings
+   * an SLO can carry, and `benchmarks.requirement_operator` is free text with no CHECK
+   * constraint and no DTO allowlist. Matching it raw would send a padded or upper-case
+   * spelling to `default`, and this column would silently fall back to the arbitrary
+   * `panel_average` that `worstTargetValue` exists to replace.
+   */
+  private operatorDirection(operator: string | null): 'lower-is-better' | 'higher-is-better' | null {
+    switch ((operator ?? '').trim().toLowerCase()) {
+      case 'lt': case '<': case 'le': case 'lte': case '<=':
+        return 'lower-is-better';
+      case 'gt': case '>': case 'ge': case 'gte': case '>=':
+        return 'higher-is-better';
+      default:
+        return null;
+    }
   }
 
   /**
