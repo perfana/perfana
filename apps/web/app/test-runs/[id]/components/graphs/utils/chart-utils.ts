@@ -90,8 +90,17 @@ export function calculateAnalysisWindowIndices(
   const n = sortedTimestamps.length;
   if (!testRun || n === 0) return { startIndex: null, endIndex: null };
 
-  const firstTime = new Date(sortedTimestamps[0]).getTime();
-  const lastTime = new Date(sortedTimestamps[n - 1]).getTime();
+  // Anchored to the RUN's clock when it is known, not to the data's own edges. The chart
+  // does not always hold the whole run any more: a zoom refetches a window, and offsets
+  // measured from the window's first and last sample would re-anchor the analysis window
+  // onto it — a 30 min ramp-up inside a 9 min window puts the start boundary past the end,
+  // the two indices collapse onto each other, and every row's min/mean/max reads `–`.
+  // Falls back to the data edges when the run carries no times, which is what the
+  // boundary-interaction tests pin.
+  const runStart = testRun.start_time ? new Date(testRun.start_time).getTime() : NaN;
+  const runEnd = testRun.end_time ? new Date(testRun.end_time).getTime() : NaN;
+  const firstTime = Number.isNaN(runStart) ? new Date(sortedTimestamps[0]).getTime() : runStart;
+  const lastTime = Number.isNaN(runEnd) ? new Date(sortedTimestamps[n - 1]).getTime() : runEnd;
 
   let startIndex: number | null = null;
   if (testRun.analysis_start_offset) {

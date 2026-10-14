@@ -139,3 +139,48 @@ describe('analysisRangeClip — the "analysis range only" view', () => {
     expect(analysisRangeClip(0, 0, 1)).toEqual({ lo: 0, hi: 0 });
   });
 });
+
+describe('calculateAnalysisWindowIndices — a zoomed chart holds only part of the run', () => {
+  // The run: 10 minutes, a 5-minute ramp-up, no ramp-down.
+  const run = () =>
+    makeTestRun({
+      start_time: '2024-01-01T00:00:00.000Z',
+      end_time: '2024-01-01T00:10:00.000Z',
+      analysis_start_offset: 300,
+    });
+
+  it('keeps every sample of a window that sits wholly inside the analysis window', () => {
+    // A zoom into 07:00–07:30, well past the ramp-up. Anchored to the run's clock the
+    // boundary is 05:00, before all of these, so nothing is excluded. Anchored to the
+    // window's own first sample it would be 12:00 — past the end — and the indices would
+    // collapse, blanking every row's min/mean/max.
+    const zoomed = [
+      '2024-01-01T00:07:00.000Z',
+      '2024-01-01T00:07:10.000Z',
+      '2024-01-01T00:07:20.000Z',
+      '2024-01-01T00:07:30.000Z',
+    ];
+    expect(calculateAnalysisWindowIndices(run(), zoomed)).toEqual({ startIndex: 0, endIndex: null });
+  });
+
+  it('excludes a window that sits wholly inside the ramp-up', () => {
+    // 02:00–02:30 is before the 05:00 boundary, so the window genuinely holds no
+    // in-analysis samples and the start index clamps past the last one.
+    const rampUpOnly = [
+      '2024-01-01T00:02:00.000Z',
+      '2024-01-01T00:02:10.000Z',
+      '2024-01-01T00:02:20.000Z',
+    ];
+    expect(calculateAnalysisWindowIndices(run(), rampUpOnly)).toEqual({ startIndex: 2, endIndex: null });
+  });
+
+  it('splits a window that straddles the ramp-up boundary', () => {
+    const straddling = [
+      '2024-01-01T00:04:40.000Z',
+      '2024-01-01T00:04:50.000Z',
+      '2024-01-01T00:05:00.000Z',
+      '2024-01-01T00:05:10.000Z',
+    ];
+    expect(calculateAnalysisWindowIndices(run(), straddling)).toEqual({ startIndex: 2, endIndex: null });
+  });
+});
