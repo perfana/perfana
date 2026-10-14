@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceDashboards, DynatraceDashboard } from '@/lib/dynatrace';
 import {
   ApplicationDashboard,
+  ChartTimeRange,
   SeriesConfig,
   MetricDataPoint,
 } from '../types';
@@ -24,6 +25,28 @@ import { nextFreeSlot } from '@/lib/charts';
 import type { AxisDisplayMode } from '@/components/charts';
 import { TestRun } from '@/types/test-runs';
 import { mapLimit, OPTION_FETCH_CONCURRENCY, type SeriesPick } from '../../shared/metric-options';
+
+/**
+ * One retry of a failed panel request, and only one.
+ *
+ * This request is shared by every series on the panel (see `fetchSeriesBatch`), which is
+ * what collapses hundreds of identical fetches into one — but it also widens the blast
+ * radius of a failure from one series to the whole group. A deterministic failure (404,
+ * 403, a consistent 500) would have taken every series with it under the old per-series
+ * fan-out too; a one-off blip would not have, because each series carried its own request.
+ * A single retry buys back that robustness without buying back the N requests.
+ */
+const PANEL_FETCH_ATTEMPTS = 2;
+
+/**
+ * A synthetic run-wide aggregate, which has its own endpoint — NOT the identically named
+ * stored series on the real `Performance test metrics all aggregated` dashboard, where the
+ * name is an ordinary metric on every panel.
+ */
+function isSyntheticAggregated(series: SeriesConfig): boolean {
+  return series.metricName.startsWith(ALL_AGGREGATED_OPTION)
+    && !isAllAggregatedDashboard(series.dashboardLabel);
+}
 
 interface UseGraphsDataProps {
   testRun: TestRun | null;
@@ -50,6 +73,14 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   // Series data state for chart visualization
   const [seriesData, setSeriesData] = useState<Map<string, MetricDataPoint[]>>(new Map());
   const [chartDataLoading, setChartDataLoading] = useState(false);
+
+  // The window a chart zoom narrowed the fetches to, or null for the whole run. Held here
+  // rather than in the chart so a series added while zoomed is fetched for the same window.
+  const [zoomRange, setZoomRange] = useState<ChartTimeRange | null>(null);
+  // Which zoom the in-flight refetch belongs to. A zoom is one gesture but N requests, and
+  // a narrow window answers faster than a wide one — so without this a zoom-out issued
+  // after a zoom-in can be overwritten by the zoom-in's later reply.
+  const zoomRequestRef = useRef(0);
 
   /**
    * Fetch application dashboards for the test run's system and environment
@@ -120,13 +151,20 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   }, [testRun]);
 
   /**
-   * Fetch metric data for a series from the backend
+   * One panel's rows, every metric on it. The endpoint has no metric filter — it answers
+   * with the whole panel and the caller picks its series out — so this is deliberately
+   * NOT per series: `fetchSeriesBatch` below issues it once per panel and shares the
+   * answer, which is what keeps a 586-series perf-test panel at one request per zoom.
    */
-  const fetchSeriesData = useCallback(async (series: SeriesConfig): Promise<MetricDataPoint[]> => {
-    if (series.metricName.startsWith(ALL_AGGREGATED_OPTION)
-        && !isAllAggregatedDashboard(series.dashboardLabel)) {
-      return fetchAggregatedSeriesData(testRun?.test_run_id || testRunId, series);
-    }
+  const fetchPanelRows = useCallback(async (
+    series: SeriesConfig,
+    range: ChartTimeRange | null,
+    attempt = 1,
+  ): Promise<MetricDataPoint[]> => {
+    const again = (): Promise<MetricDataPoint[]> =>
+      attempt < PANEL_FETCH_ATTEMPTS
+        ? fetchPanelRows(series, range, attempt + 1)
+        : Promise.resolve([]);
     try {
       const params = new URLSearchParams({
         applicationDashboardId: series.dashboardId,
@@ -134,6 +172,10 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
       });
       if (series.metricsSourceId) {
         params.set('metricsSourceId', series.metricsSourceId);
+      }
+      if (range) {
+        params.set('from', range.from);
+        params.set('to', range.to);
       }
 
       const testRunIdForQuery = testRun?.test_run_id || testRunId;
@@ -147,20 +189,124 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
       );
 
       if (response.ok) {
-        const allMetrics = await response.json();
-        const filteredMetrics = allMetrics.filter(
-          (m: MetricDataPoint) => m.metric_name === series.metricName
-        );
-        return filteredMetrics;
-      } else {
-        console.warn(`Failed to fetch data for series ${series.id}:`, response.statusText);
-        return [];
+        const body = await response.json();
+        // Always an array out, whatever came back: the callers `.filter` this, and that
+        // call now sits outside this try — a malformed body would throw there and take
+        // every series on the panel's batch with it.
+        return Array.isArray(body) ? body : [];
       }
+      console.warn(`Failed to fetch data for panel ${series.panelId}:`, response.statusText);
+      return again();
     } catch (error) {
-      console.error(`Error fetching data for series ${series.id}:`, error);
-      return [];
+      console.error(`Error fetching data for panel ${series.panelId}:`, error);
+      return again();
     }
   }, [testRun, testRunId]);
+
+  /**
+   * Fetch metric data for a series from the backend
+   */
+  const fetchSeriesData = useCallback(async (
+    series: SeriesConfig,
+    rangeOverride?: ChartTimeRange | null,
+  ): Promise<MetricDataPoint[]> => {
+    // `undefined` means "whatever window the chart is on"; an explicit null means the whole
+    // run, which is what a zoom reset passes before the state has caught up.
+    const range = rangeOverride === undefined ? zoomRange : rangeOverride;
+    if (isSyntheticAggregated(series)) {
+      const points = await fetchAggregatedSeriesData(testRun?.test_run_id || testRunId, series);
+      // The aggregated endpoint has no window parameter (it is fixed at 60s buckets), so
+      // the window is applied here — otherwise this one series keeps the whole run's
+      // timestamps and the chart's index axis spans the run again.
+      if (!range) return points;
+      // Parsed, not compared as strings: these two series' timestamps come from different
+      // endpoints and only agree once they are instants.
+      const fromMs = Date.parse(range.from);
+      const toMs = Date.parse(range.to);
+      return points.filter((p) => {
+        const ms = Date.parse(p.time);
+        return ms >= fromMs && ms <= toMs;
+      });
+    }
+    const rows = await fetchPanelRows(series, range);
+    return rows.filter((m) => m.metric_name === series.metricName);
+  }, [testRun, testRunId, zoomRange, fetchPanelRows]);
+
+  /**
+   * Fetch a list of series, ONE request per panel rather than one per series.
+   *
+   * The panel endpoint returns every metric on the panel whatever the caller asked for, so
+   * a per-series fan-out fetches the same payload once per line: a select-all over a
+   * perf-test dashboard is one series per transaction (hundreds), and a zoom repeats the
+   * whole fan-out on every drag. Grouping on (dashboard, panel, source) — the three fields
+   * that decide the request — collapses that to one request per panel, and each series
+   * picks its own metric out of the shared answer.
+   *
+   * The synthetic "All aggregated" series keep their own endpoint, which is per series.
+   */
+  const fetchSeriesBatch = useCallback(async (
+    list: SeriesConfig[],
+    range: ChartTimeRange | null,
+  ): Promise<Array<readonly [string, MetricDataPoint[]]>> => {
+    const panels = new Map<string, SeriesConfig[]>();
+    const aggregated: SeriesConfig[] = [];
+    for (const series of list) {
+      if (isSyntheticAggregated(series)) {
+        aggregated.push(series);
+        continue;
+      }
+      const key = `${series.dashboardId}|${series.panelId}|${series.metricsSourceId ?? ''}`;
+      const group = panels.get(key);
+      if (group) group.push(series);
+      else panels.set(key, [series]);
+    }
+
+    // One task list, so the two kinds of request share ONE concurrency budget: two
+    // `mapLimit`s under a `Promise.all` would put 2 x OPTION_FETCH_CONCURRENCY in flight.
+    const tasks: Array<() => Promise<Array<readonly [string, MetricDataPoint[]]>>> = [
+      ...[...panels.values()].map((group) => async () => {
+        // Every series in the group answers to the same request, so the first one's
+        // dashboard/panel/source is the whole group's.
+        const rows = await fetchPanelRows(group[0]!, range);
+        return group.map(
+          (series) =>
+            [series.id, rows.filter((m) => m.metric_name === series.metricName)] as const,
+        );
+      }),
+      ...aggregated.map((series) => async () => [
+        [series.id, await fetchSeriesData(series, range)] as const,
+      ]),
+    ];
+
+    const fetched = await mapLimit(tasks, OPTION_FETCH_CONCURRENCY, (task) => task());
+    return fetched.flat();
+  }, [fetchPanelRows, fetchSeriesData]);
+
+  /**
+   * Narrow every series to a zoom window, or widen back to the whole run with `null`.
+   *
+   * The point is resolution, not filtering: the API spends its 4000-point LTTB budget on
+   * the range it is given, divided across the panel's series, so a window a tenth the
+   * length of the run comes back with up to ten times the detail — down to the bucket size
+   * the data was stored at, which no zoom can go below.
+   */
+  const applyZoomRange = useCallback(async (range: ChartTimeRange | null) => {
+    setZoomRange(range);
+    if (addedSeries.length === 0) return;
+
+    const request = ++zoomRequestRef.current;
+    setChartDataLoading(true);
+    try {
+      const fetched = await fetchSeriesBatch(addedSeries, range);
+      // Replaced wholesale, not merged: a narrowed window is the new truth for every series,
+      // so a leftover entry would draw outside it. Which is why the stale guard is needed.
+      if (request === zoomRequestRef.current) setSeriesData(new Map(fetched));
+    } catch (error) {
+      console.error('Error refetching series data for the zoom range:', error);
+    } finally {
+      if (request === zoomRequestRef.current) setChartDataLoading(false);
+    }
+  }, [addedSeries, fetchSeriesBatch]);
 
   /**
    * Add the picked series and fetch their data. Each pick carries its own dashboard and
@@ -211,14 +357,13 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
 
     setAddedSeries(prev => [...prev, ...filteredNewSeries]);
 
-    // Fetch data for new series. Bounded: a select-all across dashboards is hundreds of
-    // series, one ds_metrics query each. Merged functionally so a second add landing
-    // while this one is in flight cannot overwrite it from a stale copy of the map.
+    // Fetch data for new series. Bounded, and one request per PANEL rather than per
+    // series — a select-all across dashboards is hundreds of series off a handful of
+    // panels. Merged functionally so a second add landing while this one is in flight
+    // cannot overwrite it from a stale copy of the map.
     setChartDataLoading(true);
     try {
-      const fetched = await mapLimit(filteredNewSeries, OPTION_FETCH_CONCURRENCY, async (series) =>
-        [series.id, await fetchSeriesData(series)] as const,
-      );
+      const fetched = await fetchSeriesBatch(filteredNewSeries, zoomRange);
       setSeriesData(prev => new Map([...prev, ...fetched]));
       showToast(`Added ${filteredNewSeries.length} metric(s) with data`);
       return filteredNewSeries.length;
@@ -229,7 +374,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     } finally {
       setChartDataLoading(false);
     }
-  }, [addedSeries, fetchSeriesData]);
+  }, [addedSeries, fetchSeriesBatch, zoomRange]);
 
   /**
    * Remove a series from the list
@@ -342,6 +487,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     seriesData,
     chartDataLoading,
     axisMode,
+    zoomRange,
 
     // State setters
     setAddedSeries,
@@ -361,5 +507,6 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     handleClearAllSeries,
     handleUpdateSeriesUnit,
     handleToggleSeriesVisibility,
+    applyZoomRange,
   };
 }

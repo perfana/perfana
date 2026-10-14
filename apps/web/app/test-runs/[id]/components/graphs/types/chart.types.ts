@@ -4,6 +4,16 @@ import type { PerfanaEvent } from '@/lib/events';
 import type { AxisDisplayMode } from '@/components/charts';
 
 /**
+ * A zoom window, as ISO timestamps. Zooming refetches the visible range so the API's
+ * per-panel downsample budget is spent on it; it cannot go below the bucket size the
+ * data was collected at.
+ */
+export interface ChartTimeRange {
+  from: string;
+  to: string;
+}
+
+/**
  * Props for GraphsChart component
  *
  * `extractChartThemeColors`, `AxisAssignment`, `UnitConversion` and `ChartThemeColors`
@@ -32,6 +42,13 @@ export interface GraphsChartProps {
   onRemoveSeries?: (seriesId: string) => void;
   onUpdateSeriesUnit?: (seriesId: string, unitId: string) => void;
   onToggleSeriesVisibility?: (seriesId: string) => void;
+  /**
+   * A drag-zoom on the plot, or `null` on a double-click reset. Given, the card refetches
+   * the window at full resolution; omitted, zoom is plot-local as before.
+   */
+  onZoomRange?: (range: ChartTimeRange | null) => void;
+  /** True while a zoom window is in force — the chart holds that window's data only. */
+  zoomed?: boolean;
 }
 
 /**

@@ -3,7 +3,7 @@
 import type { PlotTrace } from './types/chart.types';
 import type { Config, Data, Layout } from 'plotly.js';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Box, useTheme } from '@mui/material';
+import { Box, Typography, useTheme } from '@mui/material';
 
 import { GraphsChartProps, SeriesConfig } from './types';
 import {
@@ -12,15 +12,17 @@ import {
   calculateAnalysisWindowIndices,
   analysisRangeClip,
   buildChartConfig,
+  zoomRangeFromRelayout,
 } from './utils';
 import { ChartLoadingState, ChartEmptyState } from './components';
 import { mergeEventShapesIntoIndexedLayout } from '../shared/event-lines';
 import { seriesRowName } from '@/lib/aggregated-perf-series';
 
 import Plot from '@/components/ResponsivePlot';
-import { AnalystChartCard, ChartActions, SeriesTable, type SeriesRow } from '@/components/charts';
+import { AnalystChartCard, ChartActions, PillButton, SeriesTable, type SeriesRow } from '@/components/charts';
 import {
   EMPTY,
+  MONO,
   SIZE,
   analysisWindowShapes,
   axisBadge,
@@ -61,6 +63,8 @@ export default function GraphsChart({
   onRemoveSeries,
   onUpdateSeriesUnit,
   onToggleSeriesVisibility,
+  onZoomRange,
+  zoomed = false,
 }: GraphsChartProps) {
   const muiTheme = useTheme();
   const mode = muiTheme.palette.mode === 'dark' ? 'dark' : 'light';
@@ -256,6 +260,19 @@ export default function GraphsChart({
     });
   }, [seriesConfig, seriesData, plot, cursorIndex, mode]);
 
+  /**
+   * A drag-zoom refetches the visible window at full resolution; a double-click widens back
+   * to the whole run. The mapping from Plotly's index axis lives in `zoomRangeFromRelayout`.
+   */
+  const onRelayout = useCallback(
+    (e: Readonly<Record<string, unknown>>) => {
+      if (!onZoomRange || !plot) return;
+      const range = zoomRangeFromRelayout(e, plot.sortedTimestamps, zoomed);
+      if (range !== undefined) onZoomRange(range);
+    },
+    [onZoomRange, plot, zoomed],
+  );
+
   const onHoverRow = useCallback(
     (seriesId: string | null) => {
       const gd = graphRef.current;
@@ -271,7 +288,12 @@ export default function GraphsChart({
   const sources = new Set(seriesConfig.map((s) => s.dashboardLabel));
   const summary = `${seriesConfig.length} series · ${sources.size} ${sources.size === 1 ? 'source' : 'sources'}`;
 
-  const body = loading ? (
+  // `loading && plot` is a zoom or an add landing on a chart that is already drawn: keep it
+  // rather than swapping it for a spinner. A drag-zoom has already redrawn the narrowed
+  // range client-side, and unmounting it there reads as the chart breaking, not sharpening.
+  // The busy state is the header's "updating…" instead — see the note beside it for why it
+  // is not an opacity on this subtree.
+  const body = loading && !plot ? (
     <ChartLoadingState />
   ) : seriesConfig.length === 0 ? (
     <ChartEmptyState variant="no-series" />
@@ -290,6 +312,7 @@ export default function GraphsChart({
       onUpdate={(_fig, gd) => { graphRef.current = gd as unknown as HTMLElement; }}
       onHover={(e) => setCursorIndex(Number(e.points?.[0]?.x ?? NaN))}
       onUnhover={() => setCursorIndex(null)}
+      onRelayout={onRelayout}
     />
   );
 
@@ -319,6 +342,32 @@ export default function GraphsChart({
       actions={
         <>
           {actions}
+          {loading && plot && (
+            // NOT a dim on the plot: `faint` and `muted` paint 9-11px text inside it, and
+            // `lib/charts/tokens.ts` measures 0.45 at 3.36:1 — below the floor — which is
+            // why `faint` was raised to 0.58. A layer opacity would put the axis labels
+            // under it again, during exactly the refetch the reader is meant to read
+            // through. The chart stays fully legible and the header says it is updating.
+            // `role="status"` carries the implicit `aria-live="polite"`: the plot's own
+            // `aria-busy` announces nothing on a container that is not a live region, so
+            // without this the refetch is visible to sighted readers only.
+            <Typography
+              role="status"
+              sx={{ fontFamily: MONO, fontSize: 10, color: theme.muted, flexShrink: 0 }}
+            >
+              updating…
+            </Typography>
+          )}
+          {zoomed && onZoomRange && (
+            <PillButton
+              theme={theme}
+              onClick={() => onZoomRange(null)}
+              title="Draw the whole run again, at the whole run's resolution (double-clicking the plot does the same)"
+              standalone
+            >
+              reset zoom
+            </PillButton>
+          )}
           <ChartActions
             graph={graphEl}
             mode={mode}
@@ -348,7 +397,9 @@ export default function GraphsChart({
         />
       }
     >
-      <Box sx={{ width: '100%' }}>{body}</Box>
+      <Box sx={{ width: '100%' }} aria-busy={loading || undefined}>
+        {body}
+      </Box>
     </AnalystChartCard>
   );
 }

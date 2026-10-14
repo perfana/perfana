@@ -267,3 +267,40 @@ export function analysisRangeClip(
   const margin = Math.max(1, Math.round((hi - lo) * 0.025));
   return { lo: Math.max(0, lo - margin), hi: Math.min(Math.max(n - 1, 0), hi + margin) };
 }
+
+/**
+ * Turn a Plotly relayout event on the chart's INDEX x axis into the time window to refetch.
+ *
+ * Returns `undefined` for an event that is not a zoom decision, `null` for a reset, and a
+ * window otherwise. Plotly hands back fractional indices into `sortedTimestamps`, so the
+ * bounds are rounded outwards to whole samples.
+ *
+ * A reset is recognised only by `xaxis.autorange`, never by a range that happens to span
+ * everything: the layout writes an explicit `[0, len - 1]` on every render, so reading a
+ * full-span relayout as a reset would refetch the whole run on each redraw.
+ */
+export function zoomRangeFromRelayout(
+  event: Readonly<Record<string, unknown>>,
+  sortedTimestamps: string[],
+  zoomed: boolean,
+): { from: string; to: string } | null | undefined {
+  if (event['xaxis.autorange'] === true) {
+    return zoomed ? null : undefined;
+  }
+
+  const r0 = Number(event['xaxis.range[0]']);
+  const r1 = Number(event['xaxis.range[1]']);
+  if (!Number.isFinite(r0) || !Number.isFinite(r1)) return undefined;
+
+  const last = sortedTimestamps.length - 1;
+  const lo = Math.max(0, Math.floor(Math.min(r0, r1)));
+  const hi = Math.min(last, Math.ceil(Math.max(r0, r1)));
+
+  // Nothing to refine: a window of one or two samples, or the whole span already on screen.
+  if (hi - lo < 2) return undefined;
+  if (lo === 0 && hi >= last) return undefined;
+
+  const from = sortedTimestamps[lo];
+  const to = sortedTimestamps[hi];
+  return from && to ? { from, to } : undefined;
+}
