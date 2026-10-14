@@ -84,7 +84,18 @@ function yAxis(group: AxisGroup, theme: ChartTheme, zeroBase: boolean, overlayin
   };
 
   if (min < 0 || !zeroBase) {
-    return { ...base, autorange: true, nticks: TICK_COUNT + 1, ...(overlaying ? { overlaying, side: 'right' } : {}) };
+    return {
+      ...base,
+      autorange: true,
+      // A group that never goes negative must not be DRAWN negative. Plotly's plain
+      // autorange gives a constant series `[value - 1, value + 1]`, so an all-zero error
+      // count — a clean run — renders a -1..1 axis with ticks for impossible values
+      // (`autorange.js`: `newRange = [lower, upper]`). `nonnegative` clamps that to
+      // `[max(0, lower), max(1, upper)]` and leaves every non-constant case alone.
+      ...(min < 0 ? {} : { rangemode: 'nonnegative' }),
+      nticks: TICK_COUNT + 1,
+      ...(overlaying ? { overlaying, side: 'right' } : {}),
+    };
   }
 
   const ticks = tickValues(max, TICK_COUNT);
