@@ -2080,11 +2080,14 @@ LTTB budget is spent on it (`applyZoomRange` in
 **Where:** `apps/web/app/test-runs/[id]/components/graphs/hooks/useGraphsData.ts`,
 `apps/web/app/test-runs/[id]/components/graphs/utils/aggregated-series.ts`.
 
-### Two autoranged axes in a narrowed view no longer share gridlines
+### Two autoranged axes no longer share gridlines
 
 **Priority:** P4
 **Origin:** design review during /ship on `feat/graphs-zoom-granularity` (2026-10-14,
 v0.2.97.22). Deliberate scope, the accepted price of scaling y to the visible data.
+**Scope widened in v0.2.97.23:** first this was narrowed views only (Graphs zoom and analysis
+range only). Trends now passes `zeroBase: false` unconditionally, so it is the DEFAULT view of
+a card, not an opt-in one. Same cause, same fix, more visible.
 **Why:** `yAxis` in `apps/web/lib/charts/layout.ts` gives a zero-pinned axis an explicit
 `[0, topTick]` range AND explicit `tickvals`, and that shared tick set is what makes the right
 axis land on the left axis' gridlines (only the left one draws them — `grid = overlaying ===

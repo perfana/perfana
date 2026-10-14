@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.23] - 2026-10-14
+
+### Fixed
+- **Trend graphs now scale their y axis to the data.** A trend is read for its shape: is this metric drifting up across releases. Every y axis was pinned to zero, so a run-over-run series sitting at 820-840ms was a flat line in the top tenth of a 0-900ms axis and a 20ms climb across ten releases was invisible. The Trends card now frames what is on the chart. The same applies in lanes mode, where each unit family gets its own lane, and to a second axis when two unit families share the chart.
+
+  The cost is the same one the Graphs card accepted in v0.2.97.22: with two unit families the left and right axes scale independently, so their gridlines no longer line up. On Trends this is the default view rather than an opt-in one.
+
+- **A metric that is always zero no longer draws a negative axis.** With the axis following the data, a series whose value never changes — an error count of zero on a run of clean tests — was framed one unit either side of itself, so a count metric rendered an axis from -1 to 1 with ticks for values that cannot exist. Any axis whose data never goes below zero is now clamped at zero while still following the data above it. A metric that genuinely goes negative is unaffected and still shows its negative values.
+
+  This applies everywhere the data-following axis is used, so the Graphs card's zoom and analysis-range-only views get it too.
+
 ## [0.2.97.22] - 2026-10-14
 
 ### Fixed
