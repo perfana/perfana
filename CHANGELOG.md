@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   The cost is the same one the Graphs card accepted in v0.2.97.22: with two unit families the left and right axes scale independently, so their gridlines no longer line up. On Trends this is the default view rather than an opt-in one.
 
+- **A report chart no longer flattens a metric that goes below zero.** Report charts framed every y axis from zero up, whatever the data did, so a series that dips negative — a temperature, a trend that is improving rather than degrading, any difference against a baseline — was drawn with the dip cut off at the axis floor. A series that is negative throughout came out worse than that: its axis ran from zero down to a number below zero, which put the line outside the plot area entirely and printed the gridline labels in reverse. Report charts now start at zero only when the data never goes below it, which is the same rule the app's charts follow, so a report and the Trends card tell the same story about the same metric.
+
 - **A metric that is always zero no longer draws a negative axis.** With the axis following the data, a series whose value never changes — an error count of zero on a run of clean tests — was framed one unit either side of itself, so a count metric rendered an axis from -1 to 1 with ticks for values that cannot exist. Any axis whose data never goes below zero is now clamped at zero while still following the data above it. A metric that genuinely goes negative is unaffected and still shows its negative values.
 
   This applies everywhere the data-following axis is used, so the Graphs card's zoom and analysis-range-only views get it too.
