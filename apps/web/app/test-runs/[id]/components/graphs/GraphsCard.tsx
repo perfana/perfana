@@ -166,6 +166,8 @@ export default function GraphsCard({
               onAxisModeChange={graphsData.setAxisMode}
               events={events}
               showToast={showToast}
+              onZoomRange={graphsData.applyZoomRange}
+              zoomed={graphsData.zoomRange !== null}
             />
           </Collapse>
 

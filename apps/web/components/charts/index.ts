@@ -1,4 +1,4 @@
-export { default as AnalystChartCard } from './AnalystChartCard';
+export { default as AnalystChartCard, PillButton } from './AnalystChartCard';
 export type { AxisDisplayMode } from './AnalystChartCard';
 export { default as SeriesTable } from './SeriesTable';
 export type { SeriesRow } from './SeriesTable';

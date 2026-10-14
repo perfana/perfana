@@ -2050,6 +2050,36 @@ are unaffected. Either scope `unmountOnExit` to the Apdex branch or give the cha
 
 ## Web charts
 
+### Three residues of the Graphs card's zoom refetch
+
+**Priority:** P3
+**Origin:** performance and design review during /ship on `feat/graphs-zoom-granularity`
+(2026-10-14, v0.2.97.20). All three are deliberate scope, not oversights.
+**Why:** a drag-zoom on the Graphs chart refetches the window so the API's per-panel 4000-point
+LTTB budget is spent on it (`applyZoomRange` in
+`apps/web/app/test-runs/[id]/components/graphs/hooks/useGraphsData.ts`). Three things it does not do:
+
+1. **The synthetic "All aggregated" series is refetched on every zoom, and its data is
+   window-independent.** `/test-runs/:id/aggregated-metric-timeseries` has no range parameter
+   (fixed 60s buckets) and the window is applied client-side, so each zoom re-pulls the whole run's
+   buckets to discard most of them. Caching it per series would fix that for a finished run and
+   freeze it for a **live** one, where the aggregate grows and a zoom is the only thing that
+   refreshes it today — which is why it was left alone. A fix needs a cache keyed on something that
+   expires while a run is running.
+2. **There is no zoom-out stack.** A second drag narrows within the window already held, and only
+   `reset zoom` (or Plotly's double-click) widens — back to the whole run, not one step out. The
+   chart holds only the window's points, so a step-out would have to refetch the previous window
+   from a kept stack of them.
+3. **A panel's batch shares one failure.** `fetchSeriesBatch` issues one request per
+   (dashboard, panel, source) and shares the answer, so a failed panel request blanks every series
+   on that panel rather than one. Nominal rather than a real regression — every series in the group
+   sends the identical URL, so the old per-series fan-out failed for all of them too — but the
+   outcome is a silent "no data" for the group, with only a `console.warn`. Surfacing it needs a
+   toast path on the zoom side, which has none today.
+
+**Where:** `apps/web/app/test-runs/[id]/components/graphs/hooks/useGraphsData.ts`,
+`apps/web/app/test-runs/[id]/components/graphs/utils/aggregated-series.ts`.
+
 ### A landed card-link cannot be recovered after a tab switch
 
 **Priority:** P2

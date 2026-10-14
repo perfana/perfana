@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, InputBase, Button, useTheme } from '@mui/material';
 import { BookmarkBorder, DeleteSweepOutlined } from '@mui/icons-material';
 
-import { SeriesConfig, ApplicationDashboard, MetricDataPoint } from '../types';
+import { SeriesConfig, ApplicationDashboard, MetricDataPoint, ChartTimeRange } from '../types';
 import type { TestRun } from '@/types/test-runs';
 import type { PerfanaEvent } from '@/lib/events';
 import type { GraphPreset } from '@/lib/graph-presets';
@@ -43,6 +43,9 @@ interface GraphsExpandedContentProps {
   onAxisModeChange: (mode: AxisDisplayMode) => void;
   events?: PerfanaEvent[];
   showToast?: (message: string) => void;
+  /** A drag-zoom on the chart; `null` on reset. Refetches every series for that window. */
+  onZoomRange?: (range: ChartTimeRange | null) => void;
+  zoomed?: boolean;
 }
 
 /**
@@ -75,6 +78,8 @@ export function GraphsExpandedContent({
   onAxisModeChange,
   events,
   showToast,
+  onZoomRange,
+  zoomed,
 }: GraphsExpandedContentProps) {
   const mode = useTheme().palette.mode === 'dark' ? 'dark' : 'light';
   const [confirmClear, setConfirmClear] = useState(false);
@@ -104,6 +109,8 @@ export function GraphsExpandedContent({
         onRemoveSeries={onRemoveSeries}
         onUpdateSeriesUnit={onUpdateSeriesUnit}
         onToggleSeriesVisibility={onToggleSeriesVisibility}
+        onZoomRange={onZoomRange}
+        zoomed={zoomed}
         titleNode={
           <InputBase
             value={chartName}

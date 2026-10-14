@@ -20,7 +20,7 @@ Everything here is a read — collection is the worker's job
 |---|---|---|
 | `GET ds-metrics/available/:testRunId` | `getAvailableDashboards` | Panel dropdown in the trends, compare and graphs cards, **and their series dropdown** via `metric_names`; MCP `get_available_metrics` |
 | `GET ds-metrics/time-series/:testRunId` | `getMetricTimeSeries` | Chart data for a single metric |
-| `GET ds-metrics/:testRunId/:panelId` | `findDSMetricsForPanel` | Panel chart data (LTTB-downsampled above a threshold) |
+| `GET ds-metrics/:testRunId/:panelId` | `findDSMetricsForPanel` | Panel chart data (LTTB-downsampled above a threshold). Optional `from`/`to` (ISO-8601) narrow the query to a window, so the 4000-point budget is spent on it rather than on the whole run — what a Graphs-card zoom sends. Both or neither: one alone, an unparseable value, or `from` after `to` is a 400 |
 | `GET ds-metric-statistics` | `findDSMetricStatistics(Multiple)` | Per-metric aggregates for a run |
 | `GET ds-metrics-comparison` | comparison query | Run-vs-run metric comparison |
 | `GET control-group-trends/:testRunId` | `findControlGroupTrends` | Baseline trend series |

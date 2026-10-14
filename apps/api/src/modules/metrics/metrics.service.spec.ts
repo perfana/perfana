@@ -334,6 +334,85 @@ describe('MetricsService', () => {
         expect(result).toBeNull();
       });
     });
+
+    /**
+     * The zoom window a chart narrows its fetch to. `range` must reach every query this
+     * method can take: the existence check (so "needs downsampling" is decided against the
+     * window, not the whole run), the regular-query path's `Between`, and both SQL
+     * statements inside the LTTB path — the metric-count query and the `lttb()` query
+     * itself share one `params` array, so a bug here would show as the two going out of
+     * sync rather than as a thrown error.
+     */
+    describe('Zoom time range', () => {
+      const range = { from: '2024-01-01T00:00:00.000Z', to: '2024-01-01T01:00:00.000Z' };
+
+      it('passes the range into the existence check, ahead of the regular/LTTB branch', async () => {
+        metricsRepo.query.mockResolvedValue([{ needs_downsampling: false }]);
+        metricsRepo.find.mockResolvedValue([]);
+
+        await service.findDSMetricsForPanel(
+          testRunId, panelId, applicationDashboardId, undefined, '', [], undefined, range,
+        );
+
+        const [sql, params] = metricsRepo.query.mock.calls[0];
+        expect(sql).toContain('"time" >= $');
+        expect(sql).toContain('"time" <= $');
+        expect(params).toEqual(expect.arrayContaining([range.from, range.to]));
+      });
+
+      it('scopes the regular query to the window with a TypeORM Between', async () => {
+        metricsRepo.query.mockResolvedValue([{ needs_downsampling: false }]);
+        metricsRepo.find.mockResolvedValue([]);
+
+        await service.findDSMetricsForPanel(
+          testRunId, panelId, applicationDashboardId, undefined, '', [], undefined, range,
+        );
+
+        const options = metricsRepo.find.mock.calls[0][0] as { where: { time?: { _type: string; _value: unknown } } };
+        expect(options.where.time).toBeDefined();
+        expect(options.where.time!._type).toBe('between');
+        expect(options.where.time!._value).toEqual([new Date(range.from), new Date(range.to)]);
+      });
+
+      it('carries the range through both statements of the LTTB downsample path', async () => {
+        const calls: Array<{ sql: string; params: unknown[] }> = [];
+        metricsRepo.query.mockImplementation((sql: string, params: unknown[] = []) => {
+          calls.push({ sql, params });
+          if (sql.includes('needs_downsampling')) return Promise.resolve([{ needs_downsampling: true }]);
+          if (sql.includes('COUNT(DISTINCT')) return Promise.resolve([{ count: 1 }]);
+          return Promise.resolve([{ metric_name: 'm', time: new Date(range.from), value: 1 }]);
+        });
+
+        const result = await service.findDSMetricsForPanel(
+          testRunId, panelId, applicationDashboardId, undefined, '', [], undefined, range,
+        );
+
+        expect(result).not.toBeNull();
+        const metricCountCall = calls.find((c) => c.sql.includes('COUNT(DISTINCT'))!;
+        const lttbCall = calls.find((c) => c.sql.includes('lttb('))!;
+        expect(metricCountCall.sql).toContain('"time" >= $');
+        expect(metricCountCall.params).toEqual(expect.arrayContaining([range.from, range.to]));
+        // Both statements are built from the same whereClause/params pair, so the range
+        // bounds that reached the count must be the exact ones the lttb() query ran with.
+        expect(lttbCall.params).toEqual(metricCountCall.params);
+      });
+
+      it('forwards the range to the regular-query fallback when lttb() itself fails', async () => {
+        metricsRepo.query.mockImplementation((sql: string) => {
+          if (sql.includes('needs_downsampling')) return Promise.resolve([{ needs_downsampling: true }]);
+          if (sql.includes('COUNT(DISTINCT')) return Promise.resolve([{ count: 1 }]);
+          return Promise.reject(new Error('lttb() unavailable'));
+        });
+        metricsRepo.find.mockResolvedValue([]);
+
+        await service.findDSMetricsForPanel(
+          testRunId, panelId, applicationDashboardId, undefined, '', [], undefined, range,
+        );
+
+        const options = metricsRepo.find.mock.calls[0][0] as { where: { time?: { _type: string } } };
+        expect(options.where.time?._type).toBe('between');
+      });
+    });
   });
 
   describe('findDSMetricStatisticsMultiple', () => {

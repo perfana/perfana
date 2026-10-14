@@ -21,8 +21,12 @@ export type AxisDisplayMode = 'overlay' | 'split';
  * same control at different arities, so they are drawn by the same code rather than by a
  * third hand-copy of this `sx` block. A grouped button takes its border from the group's
  * container; `standalone` carries its own.
+ *
+ * Exported so a card can put a one-off button in its `actions` slot — the Graphs card's
+ * `reset zoom` — without copying this block. `active` left undefined means the button is
+ * an action, not a toggle, and no `aria-pressed` is emitted: a reset is not "off".
  */
-function PillButton({
+export function PillButton({
   theme,
   active,
   onClick,
@@ -31,7 +35,7 @@ function PillButton({
   children,
 }: {
   theme: ReturnType<typeof chartTheme>;
-  active: boolean;
+  active?: boolean;
   onClick: () => void;
   title?: string;
   standalone?: boolean;
@@ -135,6 +139,12 @@ export default function AnalystChartCard({
       <Box
         sx={{
           display: 'flex',
+          // Wraps rather than clips. The card is `overflow: 'hidden'` and only the title
+          // shrinks — every control right of the spacer is `flexShrink: 0` — so on a narrow
+          // content column the rightmost ones (the copy/download icons) used to be cut off
+          // with no way to reach them. The Graphs card can carry nine of them at once.
+          flexWrap: 'wrap',
+          rowGap: 0.5,
           alignItems: 'center',
           gap: 1,
           px: '14px',
