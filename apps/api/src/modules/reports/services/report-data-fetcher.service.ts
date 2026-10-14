@@ -2133,6 +2133,7 @@ export class ReportDataFetcherService {
           cr.targets,
           cr.message,
           cr.panel_average,
+          cr.average_all,
           cr.meets_requirement,
           cr.status
         FROM check_results cr

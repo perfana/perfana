@@ -1537,3 +1537,77 @@ describe('ReportDataFetcherService getBaselineRunComparison baselineUnit', () =>
     expect(data!.rows[0]!.baselineUnit).toBeNull();
   });
 });
+
+describe('ReportDataFetcherService getSloCheckResults', () => {
+  let service: ReportDataFetcherService;
+  let dsQuery: jest.Mock;
+  let logger: { error: jest.SpyInstance };
+
+  beforeEach(async () => {
+    dsQuery = jest.fn().mockResolvedValue([]);
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ReportDataFetcherService,
+        {
+          provide: getRepositoryToken(TestRun),
+          useValue: { query: jest.fn(), findOne: jest.fn() },
+        },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            isGlobalAdmin: jest.fn().mockReturnValue(true),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+          },
+        },
+        { provide: DataSource, useValue: { query: dsQuery } },
+      ],
+    }).compile();
+    service = module.get(ReportDataFetcherService);
+    logger = {
+      error: jest
+        .spyOn((service as unknown as { logger: { error: () => void } }).logger, 'error')
+        .mockImplementation(() => undefined),
+    };
+  });
+
+  afterEach(() => {
+    logger.error.mockRestore();
+    jest.clearAllMocks();
+  });
+
+  it('selects average_all, which decides what panel_average means', async () => {
+    // SloRenderer reads this column to tell "the average of every target" from "the FIRST
+    // target". Drop it from the SELECT and the column reads `undefined`, which the renderer
+    // has to treat as averaged — so the per-target Actual value silently reverts, with no
+    // error and nothing in the log.
+    await service.getSloCheckResults('run-001');
+
+    const [sql] = dsQuery.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('cr.average_all');
+  });
+
+  it('scopes to the run it was asked about', async () => {
+    await service.getSloCheckResults('run-001');
+
+    const [sql, params] = dsQuery.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('WHERE cr.test_run_id = $1');
+    expect(params).toEqual(['run-001']);
+  });
+
+  it('returns null — not [] — when the query fails', async () => {
+    // [] draws the green all-clear card and stores it permanently; null draws the warning.
+    dsQuery.mockRejectedValue(new Error('connection terminated'));
+
+    expect(await service.getSloCheckResults('run-001')).toBeNull();
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('passes the rows straight through, average_all included', async () => {
+    const row = { benchmark_id: 'b1', average_all: false, panel_average: 0 };
+    dsQuery.mockResolvedValue([row]);
+
+    const rows = await service.getSloCheckResults('run-001');
+
+    expect(rows).toEqual([row]);
+  });
+});

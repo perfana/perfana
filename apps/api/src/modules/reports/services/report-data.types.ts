@@ -30,6 +30,18 @@ export interface SloCheckResult {
   requirement_operator: string | null;
   requirement_value: number | null;
   panel_average: number | null;
+  /**
+   * False when the check judges every target on its own rather than their average. It decides
+   * what `panel_average` even means: `DataAggregator` stores the mean only when this is true,
+   * and otherwise stores `values[0]` — the FIRST target, which is not a statement about the
+   * check at all.
+   *
+   * The column is `boolean DEFAULT false NOT NULL`, so the nullable arm is defensive rather
+   * than load-bearing: it is what a row looks like when the SELECT above stops carrying the
+   * column, and readers treat that case as "averaged" so the display degrades to the old
+   * behaviour instead of guessing.
+   */
+  average_all: boolean | null;
   meets_requirement: boolean | null;
   /** 'COMPLETE' | 'ERROR' | 'NO_DATA' — tells an errored check apart from one that was not evaluated. */
   status: string | null;
@@ -45,7 +57,23 @@ export interface SloCheckResult {
 export interface SloCheckTarget {
   target: string;
   value: number | null;
+  /** NULL when the checker did not judge this target at all — a series the SLO's `match_pattern` excluded. */
   meets_requirement: boolean | null;
+  /**
+   * Trend SLOs: the correlation floor found no clear trend, so the slope was reported but not
+   * judged — the target is passed on those grounds and `DataAggregator` leaves it out of
+   * `panel_average`. Anything reading a target's value as "what the verdict came from" has to
+   * leave it out too. Written by `RequirementChecker.createTargetResult`.
+   */
+  weak_trend?: boolean | null;
+  /** Trend SLOs: the series' correlation coefficient, which `weak_trend` is derived from. */
+  trend_corr?: number | null;
+  /**
+   * `DataAggregator`'s `is_constant` — the synthetic `default` row of a validate-with-default
+   * check, but also a real series that simply never varied. The aggregator averages these, so
+   * readers should not treat the flag as "not a measurement".
+   */
+  is_artificial?: boolean | null;
   /** apdex checks only */
   scenario_name?: string | null;
   threshold_ms?: number | null;
