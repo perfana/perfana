@@ -394,6 +394,25 @@ describe('autorange never draws a non-negative group negative', () => {
     expect(layout.yaxis.rangemode).toBe('nonnegative');
   });
 
+  it('clamps the RIGHT axis and every lane too, not just the first one', () => {
+    // All three go through the same line in `yAxis`, but the overlaying/lane spread is
+    // appended AFTER the rangemode one — a refactor that reorders them would drop the clamp
+    // on exactly the axis most likely to hold a flat all-zero series.
+    const two = buildTimeSeriesLayout({
+      theme,
+      groups: groupsOf(s('a', 'ms', 850), s('b', 'short', 0, 0)),
+      zeroBase: false,
+    }) as unknown as Layout;
+    expect(two.yaxis2?.rangemode).toBe('nonnegative');
+
+    const lanes = buildLanesLayout({
+      theme,
+      groups: groupsOf(s('a', 'ms', 850), s('b', 'percentunit', 0.9), s('c', 'short', 0, 0)),
+      zeroBase: false,
+    }) as unknown as Layout;
+    expect(lanes.yaxis3?.rangemode).toBe('nonnegative');
+  });
+
   it('leaves a group that genuinely dips below zero unclamped', () => {
     // The pre-existing negative branch must keep showing negatives — clamping it would
     // hide the data it exists for.

@@ -139,10 +139,11 @@ length, which is the case the zero pin is right for.
 
 Two consequences:
 
-1. **Two unit families in a narrowed view no longer share gridlines.** The autorange branch
+1. **Two unit families lose shared gridlines wherever `zeroBase: false` applies** — a
+   narrowed Graphs view, or Trends unconditionally. The autorange branch
    omits `tickvals`, so each axis picks its own and the right axis' labels stop sitting on the
-   drawn gridlines. Visual only, accepted, tracked under "Two autoranged axes in a narrowed
-   view no longer share gridlines" in TODOS.md.
+   drawn gridlines. Visual only, accepted, tracked under "Two autoranged axes no
+   longer share gridlines" in TODOS.md.
 2. **An autoranged non-negative group is clamped with `rangemode: 'nonnegative'`.** Plotly's
    plain autorange gives a CONSTANT series `[value - 1, value + 1]`
    (`plotly.js/src/plots/cartesian/autorange.js`, the `minmin === maxmax` branch), so an

@@ -109,6 +109,29 @@ it('autoranges every lane once a third unit family pushes the chart into lanes m
   }
 });
 
+it('clamps a flat all-zero trend at zero rather than drawing it on a -1..1 axis', () => {
+  // The case the clamp exists for, exercised through the hook rather than only against
+  // `yAxis` directly: an error count that reports 0 on every run is a clean result, and
+  // Plotly's plain autorange would frame it one unit either side of itself — a y axis with
+  // ticks for impossible negative error counts.
+  const errors: TrendsSeries = {
+    id: 'err', dashboardId: 'd', dashboardLabel: 'JMeter', panelId: 301,
+    panelTitle: 'Error Count', metricName: 'error_count', source: 'performance-metrics',
+    yAxisFormat: 'short',
+  };
+  const flat = [
+    row(errors, 'WEBSHOP-acc-loadTest-00020', '2026-09-28T05:00:00Z', 0),
+    row(errors, 'WEBSHOP-acc-loadTest-00021', '2026-09-29T05:00:00Z', 0),
+    row(errors, 'WEBSHOP-acc-loadTest-00022', '2026-09-30T05:00:00Z', 0),
+  ];
+
+  const { result } = render(flat, [errors]);
+  const y = (result.current.plotLayout as unknown as { yaxis: Axis & { rangemode?: string } }).yaxis;
+
+  expect(y.autorange).toBe(true);
+  expect(y.rangemode).toBe('nonnegative');
+});
+
 it('keeps the changepoint marker paper-referenced, so it cannot stretch the autorange', () => {
   // Autorange includes DATA-referenced shapes in its range. Every shape this chart merges
   // must stay on the paper ref or a marker at y=0..1 would drag the axis down to zero and

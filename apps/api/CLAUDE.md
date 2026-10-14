@@ -655,11 +655,18 @@ zero-pinned and has been converging on the report since:
 | Trends | follows the data, unconditionally | v0.2.97.23 |
 | Compare | `[0, niceTop]` | — |
 
-Trends was the sharpest divergence: the report's trend charts (`trends-renderer`, drawn by the
-same `chart-svg.service` with `style.markers` and no analysis window) framed a run-over-run
+Trends was the sharpest divergence: the report's trend charts (`renderTrendPresetCharts` in
+`graphs-renderer.ts` — NOT `trends-renderer.ts`, which emits only the run-history and delta
+tables and imports no chart builder at all — drawn by the same `chart-svg.service` with
+`markers: true` and `NO_WINDOW`) framed a run-over-run
 series on its own range while the app flattened it against zero, so the two told different
 stories about the same metric. A non-negative app axis that follows the data is clamped at zero
-(`rangemode: 'nonnegative'`), which is also what the report's padding does.
+(`rangemode: 'nonnegative'`), which is what the report's padding does **as of v0.2.97.23**: its
+`range()` used to floor `yMin` at zero unconditionally, with no `minVal >= 0` guard. That hid a
+negative excursion the chart existed to show, and on an ALL-negative series it produced
+`yMin = 0 > yMax < 0` — `scaleYOn` divides by that span, so the points left the plot rect and
+the gridline labels counted the wrong way down. Both sides now floor at zero only when the data
+never goes negative.
 
 ### The host metric list has ONE definition, and the disk metrics must fold explicitly
 
