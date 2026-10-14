@@ -272,15 +272,14 @@ export class SloRenderer {
     const failing = allTargets.filter((t) => t.meets_requirement === false);
     if (failing.length === 0) return '';
 
-    // Worst first, so the value the ACTUAL column prints is row one rather than somewhere in
-    // the "and N more" tail — a reader who cannot find that number below it has no way to tell
-    // a truncated list from a wrong one. An Apdex score is higher-is-better by definition, so
-    // its worst failing target is its lowest.
+    // Worst first, by the same key `worstTargetValue` picks with, so the value in the ACTUAL
+    // column is row one rather than somewhere in the "and N more" tail — a reader who cannot
+    // find that number below it has no way to tell a truncated list from a wrong one. An Apdex
+    // score is higher-is-better, so its worst failing target is its lowest. A target with no
+    // usable number sinks to the end rather than scrambling the order: the comparator has to be
+    // a consistent total order, and `null - null` / `'a' - 'b'` both yield NaN, which V8
+    // silently leaves unsorted.
     const direction = isApdex ? 'higher-is-better' : this.operatorDirection(result.requirement_operator);
-    // Rank by the same key `worstTargetValue` picks with, including the direction-less arm, so
-    // the value in the ACTUAL column is always row one. A target with no usable number sinks to
-    // the end rather than scrambling the order: the comparator has to be a consistent total
-    // order, and `null - null` / `'a' - 'b'` both yield NaN, which V8 silently leaves unsorted.
     const rank = (t: SloCheckTarget): number | null => {
       const v = this.numericValue(t);
       if (v === null) return null;
