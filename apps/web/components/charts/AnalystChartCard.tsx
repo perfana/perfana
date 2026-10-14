@@ -21,8 +21,12 @@ export type AxisDisplayMode = 'overlay' | 'split';
  * same control at different arities, so they are drawn by the same code rather than by a
  * third hand-copy of this `sx` block. A grouped button takes its border from the group's
  * container; `standalone` carries its own.
+ *
+ * Exported so a card can put a one-off button in its `actions` slot — the Graphs card's
+ * `reset zoom` — without copying this block. `active` left undefined means the button is
+ * an action, not a toggle, and no `aria-pressed` is emitted: a reset is not "off".
  */
-function PillButton({
+export function PillButton({
   theme,
   active,
   onClick,
@@ -31,7 +35,7 @@ function PillButton({
   children,
 }: {
   theme: ReturnType<typeof chartTheme>;
-  active: boolean;
+  active?: boolean;
   onClick: () => void;
   title?: string;
   standalone?: boolean;
