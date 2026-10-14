@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.19] - 2026-10-14
+
+### Added
+- **Errors are now a time series, not just a total — and the response codes are broken out over time.** Until now a run's errors were one cumulative number per scenario: you could see how many requests failed, and since v0.2.97.16 which codes they were, but not *when*. Three panels change that. **Transaction Errors/sec** and **Request Errors/sec** sit beside the existing error-rate panels and carry the absolute count per bucket rather than a percentage — a rate cannot tell 1 failure in 2 requests from 5,000 in 10,000, and these can. **Errors/sec by Response Code** draws one line per response code across the run, so a burst of 503s at the ten-minute mark is visible as a burst at the ten-minute mark, next to the throughput and response-time panels on the same dashboard. All three are compared by ADAPT like any other metric, appear in the Graphs, Trends and Compare pickers, and can carry an SLO; the per-code panel also shows up on the all-aggregated dashboard with the run-wide totals for each code.
+
+  **Existing runs do not gain the panels by being re-analysed.** A run that has already been analysed is marked final, so a plain re-analyse returns before the metrics are rebuilt; use a **force re-fetch** re-evaluate on any older run you want the new panels for. The same applies to the baseline: ADAPT has no history for these panels yet, so the first runs after the upgrade report them as *incomparable* until enough runs have accumulated, exactly as any newly added metric does.
+
+  Values are stored per second rather than per bucket, so two runs of different lengths stay comparable (Perfana sizes buckets from run length, so a raw per-bucket count would double when a run crosses a size boundary). The per-code panel keeps the 20 busiest codes per scenario — JMeter writes whole exception messages into the response-code field, so the distinct count is not bounded by HTTP — and it is written once per analysis rather than during the run, which is what keeps that cap meaningful. While a test is running you still get errors/sec over time on the two new transaction and request panels, and the cumulative per-code totals on Error Count; the per-code breakdown appears when the run is analysed. Quiet minutes are written as explicit zeros across the whole run, so a chart never draws a straight line over a gap and an SLO on the series measures the run rather than only the minutes that happened to fail.
+
 ## [0.2.97.18] - 2026-10-13
 
 ### Added
