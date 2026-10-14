@@ -766,6 +766,117 @@ things about it:
   sides for the same reason, so a caller that ever hands this loop pre-grouped rows cannot
   make `error_count` and `All aggregated` stop summing to each other.
 
+**Errors/sec: Transaction (109), Request (220) and the per-code breakdown over time (304).**
+Panel 301 above is one cumulative point per run and stays that way — every SLO, baseline and
+compare config on it was built against that shape. These three are the time series beside it:
+
+- **109 / 220 cost nothing to produce.** `SUM(bd.is_error)` is already in both processors'
+  `aggregated` CTE, divided by the row count to make the error RATE and then thrown away; they
+  expose it as `error_count_per_second` in `computed` and add one row to the panel VALUES list.
+  No extra scan, no new query. Classified `RED_errors`, lower is better, `mean`, unit `err/s`.
+- **Per SECOND, not per bucket, like `throughput` and `concurrency` and for the same reason.**
+  Bucket size is a step function of run length (`perfTestBucketSizes`), so a raw per-bucket count
+  doubles when a run crosses a boundary and ADAPT flags every series. They are also deliberately
+  NOT rounded: `ROUND(…, 2)` stores a single error in a 600 s bucket (0.0017/s) as a flat zero.
+- **304 is the only new query, and the analysis is its ONLY writer — a live tick returns early.**
+  `ErrorsProcessor.processOverTime` buckets `requests_error` by `(scenario, response_code,
+  bucket)` over the **whole run** and emits `error_count.<code>` per scenario plus
+  `All aggregated.<code>` on the roll-up — no total series, since 109/220 already carry it. The
+  early return is keyed on `test_runs.completed`, so the `tail` plan (an incremental-looking full
+  pass, and the writer on a ticked run) and a force re-fetch both still write it.
+  **Writing it per tick is what the review rejected (2026-10-14), and both failures were
+  silent:** the top-N was ranked over the tick's ~60 s window, so each tick kept its own busiest
+  20 and a run whose error text rotates could store 20 x ticks series — ~3,600 on a 3 h run —
+  with neither the `tail` nor the `skip` plan deleting what the ticks wrote; and the grid end came
+  from the clock (`filter_to_time ?? new Date()`), which on `planFullCollection`'s rebuild arm for
+  a run with no `end_time` (crashed client) zero-filled from `start_time` to **now**, so a run
+  analysed a week later wrote a week of all-zero buckets into a compressed hypertable. During a
+  live run errors/sec over time is on 109/220 and the cumulative per-code totals on 301.
+- **It zero-fills over the RUN's span, and the grid went through three versions before that
+  was right.** A bucket with no errors produces no row, so without an explicit 0 the chart
+  draws a straight line across the quiet stretch and the mean ADAPT compares is "errors per
+  bucket THAT HAD ERRORS": one bad minute would read like a run that failed throughout. Ending
+  the grid at the clock (`filter_to_time ?? new Date()`) was **unbounded** — the rebuild arm
+  fires for a run with no `end_time`, so one analysed a week later zero-filled a week. Taking
+  it from `MIN/MAX(bucket_time)` of the data fixed that and broke comparability instead: one
+  pair of bounds serves the whole statement, so **one scenario's late error stretched every
+  other scenario's grid**, moving its `mean` — the configured ADAPT aggregation — by orders of
+  magnitude with no change in its own data, and two runs with identical error behaviour but a
+  different last error were no longer comparable (`percentageThreshold` 0.15 against a grid
+  length that is itself the noisiest property of an error series). The grid is now
+  `generate_series($start_time, COALESCE($end_time, MAX(bucket_time)), bucket)`: one span for
+  every scenario and every run of the workload, bounded at ~250 points by run length, and
+  aligned by construction because `start_time` IS `time_bucket`'s origin. Verified on
+  `SONAR-acceptatie-loadtest_perfana-00010`: 183 grid points equal to the run's own
+  `generate_series`, 181 of them coinciding with panel 105's bucket timestamps, roll-up summing
+  to the raw 137 errors, zero duplicate keys. **A completed run with a NULL `end_time` returns
+  early rather than falling back to the data**: `planFullCollection` never computes `final` for
+  one, so the bucket size would come from `planned_duration` instead of the run, and the
+  ~250-bucket ceiling that bounds every other shape comes precisely from sizing the bucket off
+  the real length — a 2-minute plan that ran two hours would write ~7200 buckets x 20 codes x
+  scenarios.
+- **Both of its queries are bounded by the RUN, and the gating one is the trap.**
+  `resolveScenarioDashboards` reads `filter_from_time`, and the pipeline hands this method the
+  run stamped with the pass's window — so with only the aggregate widened, the `tail` plan's
+  lookup saw just the last tick's minutes, returned no scenarios, and wrote nothing; the pass
+  then calls `markCollectionComplete`, so **every later analyze takes the `skip` arm and the
+  panel is empty forever**, recoverable only by a force re-fetch. `tail` is the well-behaved
+  plan (`tick === final`), so good runs got the broken panel while aborted ones got the
+  correct one. It now passes whole-run bounds explicitly, the way `process()` always did. The
+  run bounds also make 301 and 304 count the same errors, which a clock-skewed load generator
+  would otherwise break.
+- **The `finalPass` decompress spans the RUN because this panel writes the run.** Every other
+  processor on the tail path is window-scoped, so `decompressChunksForRange` covered the tail
+  only. `ds_metrics` has 1-day chunks and `compress_after` 2 days, so a run that crosses a UTC
+  midnight and is analysed late — the worker-outage / retried-job case the call exists for —
+  upserted 304's grid into a still-compressed chunk, and with `test_run_id` as
+  `compress_segmentby` each row decompresses the run's whole segment there as DML until
+  `tuple decompression limit exceeded` fails the stage. It is still the narrowest span that
+  works, which is the rule: it widened because what the pass writes widened.
+- **The non-TimescaleDB fallback adds the offset to the ORIGIN, not to `time`.**
+  `$origin + INTERVAL '1 second' * (FLOOR(EXTRACT(EPOCH FROM (time - $origin)) / $bucket) *
+  $bucket)`. Added to `time` — which is what `requests-processor.ts` and
+  `transactions-processor.ts` still do, see TODOS — a row 100 s into a 10 s-bucket run lands at
+  200 s and keeps 1 s resolution inside the bucket. For those two panels that mislabels a
+  timestamp; for 304 it is data loss, because only one of the ten per-second values can satisfy
+  the grid equality and the other nine are dropped as zeros.
+- **Group once, then roll up.** `base` groups `err` before the roll-up so `err` has a single
+  reference and Postgres inlines it; referenced twice it is materialised into a tuplestore and
+  the roll-up pushes **2x the run's raw error rows** — each carrying a 120-char text column —
+  through the HashAggregate, which is how a 3 M-error run spills under the 128MB `work_mem` the
+  aggregation budget sets. The roll-up now aggregates the grouped set (thousands), not the raw
+  rows, and the result is identical.
+- **It writes from SQL, through `insertDsMetricsFromAggregate`.** codes x buckets x scenarios is
+  thousands of rows where 301-303 are a handful. `resolveScenarioDashboards` gained
+  `'requests_error'` as a source table for it, so only scenarios that actually errored get series.
+  `MAX_CODE_SERIES` (20, `ponytail:` no "other" bucket) is a per-**run** cap, and only because
+  the analysis is the single writer — `response_code` is unbounded `text` into which JMeter
+  writes exception messages, so the distinct count is not bounded by HTTP.
+- **`'error_count'` is one constant (`ERROR_COUNT_METRIC`), read by both panels.** 301 composes
+  the name through `buildScenarioMetricName` and 304 binds it as a parameter; 304 is documented
+  as the same breakdown over time, so a rename on one side silently stops matching the other.
+- **304's roll-up gets a compare config, unlike every other processor's — an UNCLASSIFIED one,
+  and that word is the run verdict.** Elsewhere the roll-up is left configless, and the thing
+  that actually keeps it harmless is NOT the missing row: `buildCompareConfigCache` seeds a
+  `'default'` entry unconditionally, so a configless series resolves to
+  `DEFAULT_COMPARE_CONFIG` and IS evaluated. What makes that benign is `higherIsBetter: null`
+  — `buildConclusionLogic` (`adapt/results/sql-fragments.ts`) emits `'regression'` only under
+  `= true` or `= false`, and `buildConclusionSQL` flips a run on `regression_count > 0` while
+  `increase`/`decrease` land in `difference_count`. 301-303's roll-up is doubly safe: one point
+  per run, so the sample floor reads `incomparable` anyway. 304's series clear that floor, so
+  the classification is the only thing left between it and the verdict. Giving it `RED_errors`
+  was tried during review and is **wrong**: on a single-scenario run `All aggregated.<code>` is
+  numerically identical to `error_count.<code>`, so every 304 regression would be counted twice
+  in `regressionCount`, listed twice in the UI, and the roll-up could flip a run on its own. It
+  therefore gets `createDsCompareConfigRecordPanelLevelNoClassification` with the panel's own
+  `mean` — the aggregation matters because the default's `median` reads 0 on a zero-filled
+  sparse error series. `ignore` is a field on `CompareConfig` that nothing reads back off a
+  stored row, so "stored but not evaluated" is not expressible here.
+- **304 is NOT in `PerformanceTestMetricsPipeline`'s `SCENARIO_PANEL_IDS`.** That list drives the
+  final pass's `DELETE … WHERE time <> metricTime`, which enforces one point per run; adding 304
+  to it would delete all but one of its buckets. `isRequestPanel` in BOTH `url-perf-panels.ts`
+  copies lists 220, so a request errors/sec row gets its sampler URL like every other 201-219 row.
+
 **Transaction Concurrency (108) / Request Concurrency (219) are the Top 10 ranking figure inside
 ADAPT (v0.2.95.38 as "Impact" in ms/s; renamed and made unitless in v0.2.95.41).** Each is
 `SUM(response_time) / 1000 / bucket_seconds` — `throughput x avg_rt`, i.e. the average number of
@@ -812,7 +923,7 @@ pipeline). Against a baseline with no control row the result is `incomparable`, 
 the deploy are judged against a 1-, 2-, 3-run baseline on this panel only — expect noisier
 verdicts until the group fills. And the request id is 219, not 210, because 210-218 are the web's
 **virtual URL panels** (`isUrlPanel` in both `url-perf-panels.ts` files) and a stored 210 would be
-routed through the sampler-URL rollup — `isRequestPanel` lists the stored ids (201-209, 219) for
+routed through the sampler-URL rollup — `isRequestPanel` lists the stored ids (201-209, 219-220) for
 the same reason.
 
 ### ADAPT runs with JIT off, on purpose
