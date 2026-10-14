@@ -139,6 +139,12 @@ export default function AnalystChartCard({
       <Box
         sx={{
           display: 'flex',
+          // Wraps rather than clips. The card is `overflow: 'hidden'` and only the title
+          // shrinks — every control right of the spacer is `flexShrink: 0` — so on a narrow
+          // content column the rightmost ones (the copy/download icons) used to be cut off
+          // with no way to reach them. The Graphs card can carry nine of them at once.
+          flexWrap: 'wrap',
+          rowGap: 0.5,
           alignItems: 'center',
           gap: 1,
           px: '14px',
