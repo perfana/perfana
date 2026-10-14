@@ -1098,3 +1098,110 @@ created from. Re-scoping is a delete and a re-save. Two traps the new `PATCH /gr
 Client side, see "A graph preset's scope is a flag, not a missing `test_run_id`" in
 [apps/web/CLAUDE.md](../web/CLAUDE.md) — in particular the rule that an upsert must match on
 owner, because `findAll` legitimately returns other people's global presets.
+
+### A report's SLO ACTUAL column reads the targets, not `panel_average`
+
+`check_results.panel_average` means two different things depending on a sibling column, and only
+one of them is a statement about the check. `DataAggregator` (`apps/worker/src/pipelines/checks/`)
+ends with:
+
+```ts
+if (benchmark.average_all) {
+  panelAverage = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+} else if (values.length > 0) {
+  panelAverage = values[0];          // the FIRST target of an unordered query
+}
+```
+
+`average_all: false` — the default for every UI-created SLO, and `false` on every
+`check_results` row on the dev database — judges each transaction separately, so there is no
+single actual value and the column holds an arbitrary one. A Transaction Error Rate SLO that
+failed on two transactions at 4.92 % and 6.56 % printed its first transaction's `0` next to a
+FAIL badge: a report contradicting itself in adjacent columns, permanently, because a generated
+report is stored.
+
+`SloRenderer.worstTargetValue` therefore derives the number from `targets`, and it is keyed on the
+**verdict, not on `average_all`**:
+
+- a **failed** check shows its worst failing target (`Math.max` for a lower-is-better operator,
+  `Math.min` for higher-is-better);
+- a failed check with **no** failing target is one where the panel average is what failed, so
+  `panel_average` is the right number;
+- a **passing** per-target check shows the target closest to the threshold, so the row stays
+  informative, while a passing averaged check keeps its mean.
+
+The verdict drives it because `RequirementChecker` fails the whole check when **any** target fails
+and does not consult `average_all` to do so — its target loop has no `average_all` guard, and the
+panel-average comparison at `RequirementChecker.ts:141` is only an *additional* failure source. So
+an averaged check can carry a FAIL that its own comfortably-passing mean does not explain (`1.5`
+beside `Average value should be less than 2`), which is the same contradiction in the other half
+of the table. Gating the fix on `average_all` leaves that half broken; a spec case pins it.
+
+Five things that have to stay true:
+
+1. **The SELECT has to carry `cr.average_all`.** It only steers the *passing* side now, but
+   without it the field is `undefined`, which reads as "averaged", and a passing per-target check
+   silently goes back to showing an arbitrary target — no error, nothing logged.
+   `report-data-fetcher.service.spec.ts` asserts the emitted SQL text contains `cr.average_all`
+   for exactly that reason (the same guard shape as the `sample_url` assertion in
+   `test-runs-performance-query.service.spec.ts`). A FAILED check does not consult the column at
+   all, so the headline fix survives that regression.
+2. **Only targets the checker judged may be scanned.** `targets` is wider than the set the verdict
+   came from, in two ways that each carry a real number a max/min would happily pick:
+   `RequirementChecker` reports a series excluded by the SLO's `match_pattern` with
+   `meets_requirement` NULL, and gives a Trend series below the correlation floor
+   `meets_requirement: true` with `weak_trend`, which `DataAggregator` deliberately leaves out of
+   `values` ("an unjudged value must not tip an `average_all` verdict"). Print either and you get
+   the same self-contradiction inverted — a PASS row showing a value far past its threshold.
+   `wasJudged()` is the filter; `SloCheckTarget` declares the flags so the renderer can see them.
+3. **`is_artificial` is deliberately NOT filtered.** It is `DataAggregator`'s `stat.is_constant`,
+   which also matches a real series that simply never varied, and the aggregator averages those.
+   Excluding it here would invent a divergence from `panel_average` rather than close one.
+4. **`renderFailingTargets` sorts worst-first.** It caps the breakdown at 20 rows, so without
+   a sort the value the ACTUAL column prints frequently lands in the `and N more` tail and a
+   reader cannot tell a truncated list from a wrong number. An Apdex score is higher-is-better, so
+   its worst failing target is its lowest.
+5. **The operator is normalised before matching.** `benchmarks.requirement_operator` is
+   `character varying` with no CHECK constraint and no DTO allowlist, and the authority on which
+   spellings an SLO can carry — `evaluateRequirement` in
+   `apps/worker/src/pipelines/checks/requirement-operator.ts` — does `.trim().toLowerCase()`
+   first. Match it raw and a padded or upper-case spelling the worker judged fine falls to
+   `default`, and this column silently reverts to `panel_average`.
+
+That operator table is now a third copy in the tree (the worker helper, this file's
+`operatorLabels`, and `operatorDirection`), and `apps/api` cannot import from `apps/worker`. If a
+fourth appears, move the vocabulary to `packages/shared` or add a drift spec in the
+`test:chart-tokens` mould rather than hand-syncing it again.
+
+An operator with no ordering (`eq`/`ne`) has no "worst", but a *failing* target's value is still
+honest where the arbitrary first one is not — an "≠ 26.25" check that failed did so at 26.25. It
+picks the failing value **furthest from `requirement_value`** rather than the first one: `eq`'s
+failing targets are every value that is not the threshold and differ arbitrarily, so `failed[0]`
+would be the same arbitrary-first-element defect in a smaller pool. On the passing side it falls
+back, because picking among equals would just reinvent `values[0]`.
+
+Three boundary rules that are easy to undo, all of them because `targets` is **jsonb** and
+TypeScript cannot enforce `SloCheckTarget` across that boundary:
+
+- **Target values are coerced, not type-checked.** `Number.isFinite('4.92')` is false while the
+  breakdown's sort coerces and `formatValueWithUnit` parseFloats — a strict check made the three
+  layers disagree, and a row whose values are strings fell back to the arbitrary `panel_average`
+  while the breakdown printed the real numbers directly underneath it.
+- **`wasJudged` tests for an explicit boolean**, not `!== null`. A target missing the key would
+  otherwise read as judged on the passing branch while the failing branch's `=== false` could
+  never admit it: one object, two classifications in one method.
+- **`escapeHtml` gets `String(t.target ?? '')`.** It calls `.replace`, so a numeric or object
+  target name throws, and `report-html-compiler` catches per section at **warn** — the whole SLO
+  section of a stored report becomes an error placeholder with no error-level log line.
+
+Known residue, deliberate: the column now carries three different statistics across rows of one
+table (worst failing target, closest-to-threshold target, panel average) with nothing marking
+which, while the Requirement column still says "Average value should be less than …". For a FAIL
+row on an averaged check the mean itself appears nowhere in the report, so "the mean passed, one
+series failed" is not reconstructible from the artefact. Labelling it was considered and declined
+for v0.2.97.24; see TODOS.md under Reports.
+
+Unchanged by all of this: an Apdex check short-circuits before the column (its table has no
+ACTUAL column at all), and a passing averaged check still shows `panel_average`, where it
+genuinely is the actual value. **A report generated before v0.2.97.24 keeps its old number** — the HTML is
+stored, so it has to be regenerated.
