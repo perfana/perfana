@@ -157,6 +157,39 @@ describe('GraphsChart — "analysis range only" toggle', () => {
     expect(restoredData[0].x).toHaveLength(N);
   });
 
+  it('drops the y-axis zero pin once toggled on, so the clipped window fills the plot', () => {
+    const { rerender } = render(
+      <GraphsChart
+        {...baseProps}
+        testRun={makeTestRun({ analysis_start_offset: 10, analysis_end_offset: 10 })}
+      />,
+    );
+
+    // Off: the whole run reads against zero, which is what makes two series on two axes
+    // share one set of gridlines.
+    const offLayout = plotProps[plotProps.length - 1].layout as {
+      yaxis: { range?: number[]; autorange?: boolean };
+    };
+    expect(offLayout.yaxis.range?.[0]).toBe(0);
+    expect(offLayout.yaxis.autorange).toBeUndefined();
+
+    fireEvent.click(screen.getByRole('button', { name: /analysis range only/i }));
+    rerender(
+      <GraphsChart
+        {...baseProps}
+        testRun={makeTestRun({ analysis_start_offset: 10, analysis_end_offset: 10 })}
+      />,
+    );
+
+    // On: the clip IS the chart, so the axis follows the clipped values (8..93 here)
+    // instead of squashing them into the top tenth of a 0-100 axis.
+    const onLayout = plotProps[plotProps.length - 1].layout as {
+      yaxis: { range?: number[]; autorange?: boolean };
+    };
+    expect(onLayout.yaxis.autorange).toBe(true);
+    expect(onLayout.yaxis.range).toBeUndefined();
+  });
+
   it('leaves the series table stats unchanged by the toggle — they are already window-scoped', () => {
     const { rerender } = render(
       <GraphsChart
