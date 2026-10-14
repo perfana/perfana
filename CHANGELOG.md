@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.22] - 2026-10-14
+
+### Fixed
+- **A zoomed graph, and the analysis-range-only view, now scale the y axis to what is on screen.** Both views already narrowed what the chart draws — a drag-zoom re-fetches just that window, and the **analysis range only** toggle clips each line to the analysis window — but every y axis was still pinned to zero, so a window of 800-850ms response times was drawn against a 0-900ms axis: a near-flat line at the top with all of its shape squeezed out. In both of those views the axis now starts where the visible data starts, so zooming into a band actually shows the band.
+
+  The whole-run view is unchanged and still reads against zero, which is what lets a left and a right axis share one set of gridlines. The price in a narrowed view with two unit families is that the two axes scale independently, so their gridlines no longer line up — the same thing that already happened to any series with negative values.
+
+  This also makes good on the v0.2.97.18 note that the analysis-range-only view scaled "each y axis to the data inside it": the points were clipped for it, but the zero-pinned range overrode the result, so the view narrowed horizontally and kept the full run's vertical scale.
+
 ## [0.2.97.21] - 2026-10-14
 
 ### Added

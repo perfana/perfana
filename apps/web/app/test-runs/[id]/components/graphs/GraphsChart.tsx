@@ -116,10 +116,10 @@ export default function GraphsChart({
     const { tickValues, tickLabels } = calculateXAxisTicks(tickSource);
     const tickOffset = clip ? clip.lo : 0;
 
-    // The axis scale is chosen from the WHOLE series; the table's stats are the analysis
-    // window only. A line is drawn outside the window too, so an axis sized to the window
-    // would clip the ramp-up. In the analysis-range-only view the clip is the whole chart,
-    // so the scale follows it.
+    // The axis scale is chosen from whatever is DRAWN — the whole run normally, the clip in
+    // the analysis-range-only view — while the table's stats are the analysis window only.
+    // A line is drawn outside the window too, so an axis sized to the window would clip the
+    // ramp-up. Zero-pinning is dropped in the narrowed views (`zeroBase` below).
     const axisSeries = visible.map((series) => {
       const data = (seriesData.get(series.id) ?? []).filter((d) => inClip(d.time));
       const values = data.map((d) => d.value).filter((v) => Number.isFinite(v));
@@ -192,6 +192,8 @@ export default function GraphsChart({
           : [0, Math.max(sortedTimestamps.length - 1, 1)],
       },
       overlay,
+      // A narrowed view scales y to what is on screen; the whole run stays pinned to zero.
+      zeroBase: !(zoomed || clip !== null),
     });
 
     if (events && events.length > 0) {
@@ -214,7 +216,7 @@ export default function GraphsChart({
       traceIndexOf,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, seriesConfig, seriesData, testRun, mode, axisMode, chartName, events, rangeOnly, hasWindow]);
+  }, [visible, seriesConfig, seriesData, testRun, mode, axisMode, chartName, events, rangeOnly, hasWindow, zoomed]);
 
   /**
    * One row per configured series — hidden ones included, or a hidden series could never

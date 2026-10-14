@@ -136,6 +136,27 @@ describe('GraphsChart — zoom wiring', () => {
     expect(onZoomRange).toHaveBeenCalledWith(null);
   });
 
+  it('drops the y-axis zero pin while zoomed, so the narrowed window fills the plot', () => {
+    // The whole-run view reads against zero: a band of values near the top is meant to
+    // look small next to zero. A zoom is the opposite ask — show the SHAPE of what is on
+    // screen — and a window of 800-850ms pinned to a 0-900 axis is a flat line.
+    const { rerender } = render(<GraphsChart {...baseProps} onZoomRange={jest.fn()} zoomed={false} />);
+
+    const wholeRun = plotProps[plotProps.length - 1].layout as {
+      yaxis: { range?: number[]; autorange?: boolean };
+    };
+    expect(wholeRun.yaxis.range?.[0]).toBe(0);
+    expect(wholeRun.yaxis.autorange).toBeUndefined();
+
+    rerender(<GraphsChart {...baseProps} onZoomRange={jest.fn()} zoomed />);
+
+    const zoomedIn = plotProps[plotProps.length - 1].layout as {
+      yaxis: { range?: number[]; autorange?: boolean };
+    };
+    expect(zoomedIn.yaxis.autorange).toBe(true);
+    expect(zoomedIn.yaxis.range).toBeUndefined();
+  });
+
   it('keeps the drawn chart on screen, fully legible, while a zoom refetch is in flight', () => {
     // The drag has already redrawn the narrowed range client-side; swapping it for a
     // spinner reads as the chart breaking rather than sharpening. The busy state is a
