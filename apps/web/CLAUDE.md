@@ -67,7 +67,13 @@ drawn outside a merely-ranged window still sets the y scale and the ramp-up spik
 exists to hide keeps flattening everything inside it. `analysisRangeClip`
 (`apps/web/app/test-runs/[id]/components/graphs/utils/chart-utils.ts`) returns an index range
 with a 2.5% margin, and `GraphsChart` filters each series' points to it (`inClip`) before the
-axis scale is computed — the axis then follows the clipped data, not the whole run.
+axis scale is computed — so the autorange that Plotly would compute follows the clipped data,
+not the whole run.
+
+Clipping is **necessary but was not sufficient** until v0.2.97.22: `yAxis` handed every
+non-negative group an explicit `[0, topTick]` range, which overrides autorange outright, so the
+clipped view narrowed horizontally and kept the whole run's vertical scale anyway. See "A
+narrowed view drops the y-axis zero pin" below.
 
 Two things ride along with filtering the points instead of the axis:
 
@@ -110,6 +116,36 @@ length comes back with up to ten times the detail — down to the bucket size th
 collected at, which no zoom goes below.
 
 Four things worth knowing before touching this path:
+
+### A narrowed view drops the y-axis zero pin
+
+`yAxis` (`apps/web/lib/charts/layout.ts`) gives a group whose values are all >= 0 an explicit
+`[0, topTick]` range plus explicit `tickvals`, and that shared tick set is the whole reason a
+right-hand axis lands on the left axis' gridlines (only the left axis draws them —
+`grid = overlaying === undefined`). Correct for a whole run: a band of values near the top is
+*meant* to read as small next to zero.
+
+Wrong the moment the chart is narrowed. `LayoutSpec.zeroBase: false` (v0.2.97.22) takes the
+autorange branch a negative-valued group already took, so the axis frames what is drawn;
+`GraphsChart` passes `!(zoomed || clip !== null)`, covering both the drag-zoom and the
+analysis-range-only view. It defaults to true, so Trends and Compare — the only other callers
+of the layout builders, and the only charts without a narrowed view (`viewToggle` and
+`onRelayout` appear in `GraphsChart` alone) — keep today's scale.
+
+Two consequences:
+
+1. **Two unit families in a narrowed view no longer share gridlines.** The autorange branch
+   omits `tickvals`, so each axis picks its own and the right axis' labels stop sitting on the
+   drawn gridlines. Visual only, accepted, tracked under "Two autoranged axes in a narrowed
+   view no longer share gridlines" in TODOS.md.
+2. **Autorange counts DATA-REFERENCED shapes in its range.** Every overlay in `layout.ts` is
+   `yref: 'paper'` — the analysis-window wash and boundary labels, the event lines — except
+   `sloShape`, whose `y0`/`y1` are the SLO value. A chart that merges an SLO line *and* passes
+   `zeroBase: false` would stretch its axis to the SLO with the data nowhere near it, which is
+   the exact failure the flag exists to remove. `sloShape` has no production caller today; give
+   it a paper ref before wiring one into a narrowed view.
+
+### The Graphs zoom reset
 
 1. **A reset is recognised only by `xaxis.autorange`, never by a full-span range.** Plotly
    rewrites the INDEX x-axis to an explicit `[0, len - 1]` on every render, so a relayout whose

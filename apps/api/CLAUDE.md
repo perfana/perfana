@@ -644,9 +644,11 @@ about that arrangement are easy to get wrong:
    palette edit in `apps/web` could merge with the guard never running.
 
 Deliberately **not** mirrored: the dark palette (there is no dark report), and the y-axis
-domain. The app pins a non-negative axis to `[0, niceTop]`; the report keeps its padded
-min..max, because re-framing the charts of a report people have already read is a different
-change from restyling them.
+domain. The app pins a non-negative axis to `[0, niceTop]` for a whole run; the report keeps
+its padded min..max, because re-framing the charts of a report people have already read is a
+different change from restyling them. As of v0.2.97.22 the two agree in the NARROWED case:
+`LayoutSpec.zeroBase: false` drops the app's zero pin for a drag-zoom or the analysis-range-only
+view, which is the same framing the report's analysis-only charts have always used.
 
 ### The host metric list has ONE definition, and the disk metrics must fold explicitly
 
