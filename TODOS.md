@@ -1430,7 +1430,13 @@ do the work per group. `POST /reevaluate-batch` asserts per-run access but never
   row exists, which is unique on the scope.
 - `apps/worker/.../checks/DataAggregator.ts:322` — `panelAverage = values[0]` from an unordered
   statistics query. The verdict is safe (only consumed when `average_all` is true) but the stored
-  and displayed `check_results.panel_average` is an unlabelled arbitrary series.
+  `check_results.panel_average` is an unlabelled arbitrary series. **No longer *displayed* in
+  reports** as of v0.2.97.24: `SloRenderer.actualText` derives the ACTUAL column from the worst
+  judged target, keyed on the **verdict** rather than on `average_all`, so the arbitrary value is
+  only reached as a fallback (a passing averaged check, a FAIL with no failing target, no operator
+  direction, or nothing judged). The stored column is still arbitrary, and the SLO
+  card in the web app and `getSloSummary` still read it directly — fixing the writer would make
+  all three honest at once.
 - `apps/api/.../metrics.service.ts:155-161` — `firstDashboard` resolves a dashboard from
   `(test_run_id, panel_id)`, and low panel ids recur on every dashboard a run collected.
 - `apps/api/.../test-runs-data-sources.service.ts:793` — `configs.find(...) ?? configs[0]` returns
@@ -2268,6 +2274,32 @@ scroll container, which may make the shared hook unnecessary; check before reach
 
 ## Reports
 
+### The SLO ACTUAL column carries three statistics with nothing marking which
+
+**Priority:** P2
+**Origin:** adversarial review during /ship on `fix/report-slo-actual-worst-target` (2026-10-14),
+finding 7. Labelling was offered as an option when the fix was extended to averaged SLOs and
+declined for v0.2.97.24, so this records the cost rather than reopening the choice.
+**Why:** after v0.2.97.24 `SloRenderer.worstTargetValue` makes that one column mean three
+different things depending on the row: the worst **failing** target (any FAIL), the target
+closest to the threshold (PASS on a per-target check), or `panel_average` (PASS on an averaged
+check, or a FAIL where the average itself is what failed). Nothing on the page distinguishes
+them, and the Requirement column beside it still reads "Average value should be less than 500 ms"
+from `requirementSubject`. So a reader of a FAIL row on an averaged SLO sees a requirement about
+an average next to a number that is not the average, indistinguishable from the row above it
+where the same column *is* one.
+**The sharper half:** for that row the mean the check nominally evaluated appears **nowhere** in
+the report — the per-series breakdown is opt-in (`showFailureDetails`) and lists targets, not the
+panel average — so "the mean passed, one series failed" is not reconstructible from the stored
+artefact. That is information loss, not just ambiguity.
+**Options, cheapest first:** a `worst` marker chip beside the value when `worstTargetValue`
+supplied it; a column footnote; or a second column carrying the average. The renderer already
+knows which branch produced the number, so the plumbing is a return-shape change
+(`{ value, kind }`) rather than new data.
+**Related:** the same column disagrees with the web SLO card and the Slack/Teams summary, which
+still read `panel_average` directly — see "First-row selection" for the `DataAggregator:322`
+writer.
+
 ### A chart's series table is uncapped, and one chart can carry 300 legend rows
 
 **Priority:** P2
@@ -2745,6 +2777,26 @@ index exists.
 ---
 
 ## Quality gates
+
+### `apps/api` spec files are type-checked by nothing
+
+**Priority:** P3
+**Origin:** the v0.2.97.24 testing-specialist review (2026-10-14), while reviewing a change that
+added a required field to `SloCheckResult`.
+**Why:** `apps/api/tsconfig.json` lists `**/*.spec.ts` and `**/*.test.ts` in `exclude`, so
+`npm run type-check` never sees them, and `apps/api/jest.config.js` runs ts-jest with
+`isolatedModules: true`, which is transpile-only and reports no diagnostics. `tsconfig.test.json`
+additionally turns `strictNullChecks` and `noUncheckedIndexedAccess` off. So a spec can reference
+a field that does not exist, or drop a now-required one, and nothing anywhere fails — the only
+signal is a test that happens to assert on the value.
+**Symptom this produced:** adding the required `average_all` to `SloCheckResult` left ~25 existing
+`makeSloResult()` fixtures silently producing `average_all: undefined`, a shape the
+`boolean DEFAULT false NOT NULL` column can never return. The fix shipped behind a runtime
+assertion on the emitted SQL instead, because a type would not have been enforced.
+**Fix:** either drop the spec globs from `exclude` so preflight's type-check covers them (expect a
+tail of errors to work through first), or keep the exclusion and type the shared fixture factories
+as `(overrides?: Partial<T>): T` so a contract change at least fails the next edit of that file.
+Note the `Partial<T>` route alone buys nothing while the files are excluded from `tsc`.
 
 ### The worker integration suite is dead code, not dormant coverage
 

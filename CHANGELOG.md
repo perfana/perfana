@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.24] - 2026-10-14
+
+### Fixed
+- **A report's SLO table no longer shows a number that contradicts its own verdict.** The ACTUAL column printed the stored panel average, which is only the value that was judged when the SLO averages its series. On an SLO that judges each transaction separately — the default — it is an arbitrary one: a Transaction Error Rate SLO that failed because two transactions were at 4.92 % and 6.56 % showed `0`, the first transaction in the list, which was fine, next to a red FAIL.
+
+  The column now shows the value that produced the verdict. A failed SLO shows its worst failing transaction, a passing one shows the transaction closest to its threshold so the row still says how much room was left, and an SLO whose average is what failed still shows that average. This applies to averaged SLOs too: a check fails when any single transaction fails, whatever the averaging setting says, so one of those could read `1.5` beside "Average value should be less than 2" and a FAIL — it now names the transaction that caused it. An equals/not-equals SLO, which has no worst value, shows a transaction that actually failed rather than an arbitrary one. Apdex rows never had the column and are unchanged.
+
+  The failing-transaction breakdown under a failed row is now ordered worst first, so the number in the ACTUAL column is the first row beneath it rather than somewhere inside the "and N more" tail.
+
+  Two things the column now refuses to show, because the checker did not judge them: a series excluded by an SLO's match pattern, and a trend series the pipeline found to have no clear trend. Either would have put a number far past the threshold next to a PASS. The comparison operator is also read the way the checker reads it, so an SLO provisioned with `LT` rather than `lt` gets the same treatment as one created in the UI.
+
+  **Reports generated before this version keep their old number** — the HTML is stored when the report is generated, so an affected report has to be regenerated. The SLO card in the app and the Slack/Teams summary still read the stored average, so they can still disagree with a freshly generated report; that is tracked separately.
+
 ## [0.2.97.23] - 2026-10-14
 
 ### Fixed
