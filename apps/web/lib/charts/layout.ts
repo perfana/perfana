@@ -52,12 +52,17 @@ function groupExtent(group: AxisGroup): { min: number; max: number } {
 /**
  * The y-axis config for one group.
  *
- * A group whose values are all ≥ 0 gets an explicit `[0, topTick]` range and explicit
- * `tickvals`: that is what makes the right-hand axis share the left one's gridlines
- * instead of interleaving its own. A group with negative values cannot be pinned to
- * zero, so it falls back to autorange and simply takes the same tick COUNT.
+ * With `zeroBase`, a group whose values are all ≥ 0 gets an explicit `[0, topTick]` range
+ * and explicit `tickvals`: that is what makes the right-hand axis share the left one's
+ * gridlines instead of interleaving its own. A group with negative values cannot be pinned
+ * to zero, so it falls back to autorange and simply takes the same tick COUNT.
+ *
+ * `zeroBase: false` takes that same fallback deliberately: in a narrowed view (a drag-zoom,
+ * or analysis-range-only) the point is to read the shape of what is on screen, and a band
+ * of 800-850ms values pinned to a 0-900 axis is a flat line. The shared gridlines are the
+ * price, same as for a negative group.
  */
-function yAxis(group: AxisGroup, theme: ChartTheme, overlaying?: string): Rec {
+function yAxis(group: AxisGroup, theme: ChartTheme, zeroBase: boolean, overlaying?: string): Rec {
   const { min, max } = groupExtent(group);
   const grid = overlaying === undefined;
   const base: Rec = {
@@ -78,7 +83,7 @@ function yAxis(group: AxisGroup, theme: ChartTheme, overlaying?: string): Rec {
     title: { text: '' },
   };
 
-  if (min < 0) {
+  if (min < 0 || !zeroBase) {
     return { ...base, autorange: true, nticks: TICK_COUNT + 1, ...(overlaying ? { overlaying, side: 'right' } : {}) };
   }
 
@@ -127,6 +132,16 @@ export interface LayoutSpec {
   overlay?: Overlay;
   /** Overrides the standard height for a card that needs its own (Compare, Trends). */
   height?: number;
+  /**
+   * Pin each y axis to zero (the default). Pass `false` for a narrowed view — a drag-zoom
+   * or analysis-range-only — so the axis scales to the data actually on screen.
+   *
+   * With `false` the range is Plotly's autorange, which includes DATA-REFERENCED shapes.
+   * Every overlay in this file is `yref: 'paper'` except `sloShape` (y0/y1 are the SLO
+   * value): a chart that merges one AND passes `zeroBase: false` would stretch its axis to
+   * the SLO even with the data nowhere near it. Give that overlay a paper ref first.
+   */
+  zeroBase?: boolean;
 }
 
 function xAxis(theme: ChartTheme, spec: XAxisSpec | undefined, anchor: string): Rec {
@@ -181,8 +196,9 @@ export function buildTimeSeriesLayout(spec: LayoutSpec): Rec {
 
   layout.margin = { l: 46, r: right ? 46 : 16, t: 20, b: 24 };
   layout.xaxis = xAxis(theme, spec.x, 'y');
-  layout.yaxis = yAxis(groups[0] ?? emptyGroup(), theme);
-  if (right) layout.yaxis2 = yAxis(groups[1], theme, 'y');
+  const zeroBase = spec.zeroBase ?? true;
+  layout.yaxis = yAxis(groups[0] ?? emptyGroup(), theme, zeroBase);
+  if (right) layout.yaxis2 = yAxis(groups[1], theme, zeroBase, 'y');
 
   const labels: Rec[] = [];
   if (groups[0]?.display.label) {
@@ -221,7 +237,7 @@ export function buildLanesLayout(spec: LayoutSpec): Rec {
     // to be in the same order.
     const domainTop = 1 - index * (laneFraction + gapFraction);
     const domain = [Math.max(domainTop - laneFraction, 0), domainTop];
-    const axis = yAxis(group, theme);
+    const axis = yAxis(group, theme, spec.zeroBase ?? true);
     axis.domain = domain;
     axis.anchor = 'x';
     layout[index === 0 ? 'yaxis' : `yaxis${index + 1}`] = axis;

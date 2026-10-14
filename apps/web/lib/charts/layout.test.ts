@@ -346,3 +346,36 @@ describe('mergeOverlays', () => {
     expect(mergeOverlays()).toEqual(EMPTY_OVERLAY);
   });
 });
+
+describe('zeroBase', () => {
+  it('scales to the data on screen instead of pinning to zero when false', () => {
+    const narrowed = buildTimeSeriesLayout({
+      theme,
+      groups: groupsOf(s('a', 'ms', 850)),
+      zeroBase: false,
+    }) as unknown as Layout;
+    expect(narrowed.yaxis.autorange).toBe(true);
+    expect(narrowed.yaxis.range).toBeUndefined();
+
+    // Default is unchanged: the whole run still reads against zero.
+    const full = buildTimeSeriesLayout({ theme, groups: groupsOf(s('a', 'ms', 850)) }) as unknown as Layout;
+    expect(full.yaxis.range?.[0]).toBe(0);
+  });
+
+  it('applies to the right axis and to every lane', () => {
+    const two = buildTimeSeriesLayout({
+      theme,
+      groups: groupsOf(s('a', 'ms', 850), s('b', 'percentunit', 0.9)),
+      zeroBase: false,
+    }) as unknown as Layout;
+    expect(two.yaxis2?.autorange).toBe(true);
+
+    const lanes = buildLanesLayout({
+      theme,
+      groups: groupsOf(s('a', 'ms', 850), s('b', 'percentunit', 0.9), s('c', 'short', 42)),
+      zeroBase: false,
+    }) as unknown as Layout;
+    expect(lanes.yaxis.autorange).toBe(true);
+    expect(lanes.yaxis3?.autorange).toBe(true);
+  });
+});
