@@ -208,7 +208,15 @@ export class ChartSvgService {
         if (v > maxVal) maxVal = v;
       }
       const pad = (maxVal - minVal || 1) * 0.1;
-      return { yMin: Math.max(0, minVal - pad), yMax: maxVal + pad };
+      // Floor at zero only when the data never goes negative — the same guard the app's
+      // `rangemode: 'nonnegative'` carries (`apps/web/lib/charts/layout.ts`). Flooring
+      // unconditionally hid a negative excursion, and for an ALL-negative series it produced
+      // `yMin = 0 > yMax < 0`: `scaleYOn` then divides by a negative span, so the points land
+      // outside the plot rect and the gridline labels count the wrong way down.
+      return {
+        yMin: minVal < 0 ? minVal - pad : Math.max(0, minVal - pad),
+        yMax: maxVal + pad,
+      };
     };
 
     // Every right-hand axis costs horizontal room. If the axes would leave no

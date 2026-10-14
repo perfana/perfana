@@ -87,6 +87,38 @@ describe('ChartSvgService', () => {
     });
   });
 
+  describe('y domain', () => {
+    // `unit: ''` so the axis labels are plain numbers — a unit-formatted label parses as
+    // NaN and would make these assertions pass over an empty set.
+    const domain = (values: number[]) => {
+      const labels = axisLabels(render([series({ unit: '', dataPoints: points(values) })]));
+      const numbers = labels.map(Number).filter((n) => !Number.isNaN(n));
+      expect(numbers.length).toBeGreaterThan(1);
+      return numbers;
+    };
+
+    // The app's `rangemode: 'nonnegative'` only clamps a group whose min is >= 0, and the
+    // report has to agree with it: these charts and the Trends card draw the same series.
+    it('floors a non-negative series at zero rather than padding below it', () => {
+      expect(Math.min(...domain([10, 20, 30]))).toBeGreaterThanOrEqual(0);
+    });
+
+    it('lets a series that goes negative keep its negative domain', () => {
+      // Flooring this at zero hid the excursion the chart exists to show.
+      expect(Math.min(...domain([-40, 10, 30]))).toBeLessThan(0);
+    });
+
+    it('never inverts the axis on an ALL-negative series', () => {
+      // `Math.max(0, min - pad)` against a negative max produced yMin > yMax, so `scaleYOn`
+      // divided by a negative span: the points left the plot rect and the gridline labels
+      // counted the wrong way down.
+      const numbers = domain([-500, -300, -100]);
+      expect(Math.max(...numbers)).toBeLessThanOrEqual(0);
+      // The first label drawn is the top of the axis, so the set must descend.
+      expect(numbers[0]!).toBeGreaterThan(numbers[numbers.length - 1]!);
+    });
+  });
+
   describe('axis collapse', () => {
     it('gives each unit its own right-hand spine while they fit', () => {
       const html = render([

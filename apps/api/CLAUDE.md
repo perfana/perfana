@@ -644,11 +644,29 @@ about that arrangement are easy to get wrong:
    palette edit in `apps/web` could merge with the guard never running.
 
 Deliberately **not** mirrored: the dark palette (there is no dark report), and the y-axis
-domain. The app pins a non-negative axis to `[0, niceTop]` for a whole run; the report keeps
-its padded min..max, because re-framing the charts of a report people have already read is a
-different change from restyling them. As of v0.2.97.22 the two agree in the NARROWED case:
-`LayoutSpec.zeroBase: false` drops the app's zero pin for a drag-zoom or the analysis-range-only
-view, which is the same framing the report's analysis-only charts have always used.
+domain. The report has always kept a padded min..max, because re-framing the charts of a report
+people have already read is a different change from restyling them. The app started fully
+zero-pinned and has been converging on the report since:
+
+| App chart | y domain | Since |
+|---|---|---|
+| Graphs, whole run | `[0, niceTop]` | — |
+| Graphs, drag-zoom or analysis range only | follows the data (`zeroBase: false`) | v0.2.97.22 |
+| Trends | follows the data, unconditionally | v0.2.97.23 |
+| Compare | `[0, niceTop]` | — |
+
+Trends was the sharpest divergence: the report's trend charts (`renderTrendPresetCharts` in
+`graphs-renderer.ts` — NOT `trends-renderer.ts`, which emits only the run-history and delta
+tables and imports no chart builder at all — drawn by the same `chart-svg.service` with
+`markers: true` and `NO_WINDOW`) framed a run-over-run
+series on its own range while the app flattened it against zero, so the two told different
+stories about the same metric. A non-negative app axis that follows the data is clamped at zero
+(`rangemode: 'nonnegative'`), which is what the report's padding does **as of v0.2.97.23**: its
+`range()` used to floor `yMin` at zero unconditionally, with no `minVal >= 0` guard. That hid a
+negative excursion the chart existed to show, and on an ALL-negative series it produced
+`yMin = 0 > yMax < 0` — `scaleYOn` divides by that span, so the points left the plot rect and
+the gridline labels counted the wrong way down. Both sides now floor at zero only when the data
+never goes negative.
 
 ### The host metric list has ONE definition, and the disk metrics must fold explicitly
 

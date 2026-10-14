@@ -128,17 +128,32 @@ right-hand axis lands on the left axis' gridlines (only the left axis draws them
 Wrong the moment the chart is narrowed. `LayoutSpec.zeroBase: false` (v0.2.97.22) takes the
 autorange branch a negative-valued group already took, so the axis frames what is drawn;
 `GraphsChart` passes `!(zoomed || clip !== null)`, covering both the drag-zoom and the
-analysis-range-only view. It defaults to true, so Trends and Compare — the only other callers
-of the layout builders, and the only charts without a narrowed view (`viewToggle` and
-`onRelayout` appear in `GraphsChart` alone) — keep today's scale.
+analysis-range-only view. It defaults to true, so a caller that does not opt in keeps the zero
+pin.
+
+**Trends opts in unconditionally** (v0.2.97.23, `useTrendsPlot`): it has no narrowed view, but a
+trend is read for its SHAPE across releases, so a run-over-run series sitting at 820-840ms is a
+flat line in the top tenth of a 0-900 axis and a 20ms climb is invisible. Compare is the one
+layout caller still fully zero-pinned, and deliberately: it draws two runs over their whole
+length, which is the case the zero pin is right for.
 
 Two consequences:
 
-1. **Two unit families in a narrowed view no longer share gridlines.** The autorange branch
+1. **Two unit families lose shared gridlines wherever `zeroBase: false` applies** — a
+   narrowed Graphs view, or Trends unconditionally. The autorange branch
    omits `tickvals`, so each axis picks its own and the right axis' labels stop sitting on the
-   drawn gridlines. Visual only, accepted, tracked under "Two autoranged axes in a narrowed
-   view no longer share gridlines" in TODOS.md.
-2. **Autorange counts DATA-REFERENCED shapes in its range.** Every overlay in `layout.ts` is
+   drawn gridlines. Visual only, accepted, tracked under "Two autoranged axes no
+   longer share gridlines" in TODOS.md.
+2. **An autoranged non-negative group is clamped with `rangemode: 'nonnegative'`.** Plotly's
+   plain autorange gives a CONSTANT series `[value - 1, value + 1]`
+   (`plotly.js/src/plots/cartesian/autorange.js`, the `minmin === maxmax` branch), so an
+   all-zero error count — a clean run — would render a -1..1 axis with ticks for impossible
+   values. `nonnegative` clamps that to `[max(0, lower), max(1, upper)]`. It is NOT inert on a
+   non-constant series either: the same flag pins the padded lower edge at 0 when the padding
+   would carry it under, so `[0.1, 5, 10]` starts at 0 rather than just below it. It is applied
+   only when the group's `min >= 0`: the pre-existing negative branch must keep showing
+   negatives, which is the data it exists for.
+3. **Autorange counts DATA-REFERENCED shapes in its range.** Every overlay in `layout.ts` is
    `yref: 'paper'` — the analysis-window wash and boundary labels, the event lines — except
    `sloShape`, whose `y0`/`y1` are the SLO value. A chart that merges an SLO line *and* passes
    `zeroBase: false` would stretch its axis to the SLO with the data nowhere near it, which is

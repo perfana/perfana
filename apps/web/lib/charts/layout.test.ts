@@ -42,6 +42,7 @@ type Axis = {
   range?: [number, number];
   tickvals?: number[];
   nticks?: number;
+  rangemode?: string;
   autorange?: boolean;
   overlaying?: string;
   side?: string;
@@ -377,5 +378,49 @@ describe('zeroBase', () => {
     }) as unknown as Layout;
     expect(lanes.yaxis.autorange).toBe(true);
     expect(lanes.yaxis3?.autorange).toBe(true);
+  });
+});
+
+describe('autorange never draws a non-negative group negative', () => {
+  it('clamps an autoranged non-negative group with rangemode nonnegative', () => {
+    // Plotly's plain autorange gives a CONSTANT series [value-1, value+1], so an all-zero
+    // error count would render a -1..1 axis with ticks for impossible values.
+    const layout = buildTimeSeriesLayout({
+      theme,
+      groups: groupsOf(s('a', 'short', 0, 0)),
+      zeroBase: false,
+    }) as unknown as Layout;
+    expect(layout.yaxis.autorange).toBe(true);
+    expect(layout.yaxis.rangemode).toBe('nonnegative');
+  });
+
+  it('clamps the RIGHT axis and every lane too, not just the first one', () => {
+    // All three go through the same line in `yAxis`, but the overlaying/lane spread is
+    // appended AFTER the rangemode one — a refactor that reorders them would drop the clamp
+    // on exactly the axis most likely to hold a flat all-zero series.
+    const two = buildTimeSeriesLayout({
+      theme,
+      groups: groupsOf(s('a', 'ms', 850), s('b', 'short', 0, 0)),
+      zeroBase: false,
+    }) as unknown as Layout;
+    expect(two.yaxis2?.rangemode).toBe('nonnegative');
+
+    const lanes = buildLanesLayout({
+      theme,
+      groups: groupsOf(s('a', 'ms', 850), s('b', 'percentunit', 0.9), s('c', 'short', 0, 0)),
+      zeroBase: false,
+    }) as unknown as Layout;
+    expect(lanes.yaxis3?.rangemode).toBe('nonnegative');
+  });
+
+  it('leaves a group that genuinely dips below zero unclamped', () => {
+    // The pre-existing negative branch must keep showing negatives — clamping it would
+    // hide the data it exists for.
+    const layout = buildTimeSeriesLayout({
+      theme,
+      groups: groupsOf(s('a', 'short', 5, -5)),
+    }) as unknown as Layout;
+    expect(layout.yaxis.autorange).toBe(true);
+    expect(layout.yaxis.rangemode).toBeUndefined();
   });
 });
