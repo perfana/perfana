@@ -18,7 +18,7 @@ export interface ResolveScenarioDashboardsOptions {
   dashboardManager: DashboardManager;
   logger: Logger;
   /** Source table to read scenario names from — must have scenario_name and time. */
-  table: 'requests_raw' | 'transactions';
+  table: 'requests_raw' | 'transactions' | 'requests_error';
   testRunId: string;
   testRun: TestRunMetadata;
 }

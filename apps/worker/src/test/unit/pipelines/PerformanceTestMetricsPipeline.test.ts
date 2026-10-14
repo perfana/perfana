@@ -199,7 +199,11 @@ describe('PerformanceTestMetricsPipeline', () => {
     mockDashboardManagerInstance = { getResolvedDashboardIds: vi.fn(() => ['dash-1']) };
     mockRequestsProcessorInstance = { process: vi.fn().mockResolvedValue(createSqlProcessorResult()) };
     mockTransactionsProcessorInstance = { process: vi.fn().mockResolvedValue(createSqlProcessorResult()) };
-    mockErrorsProcessorInstance = { process: vi.fn().mockResolvedValue(createProcessorResult()) };
+    mockErrorsProcessorInstance = {
+      process: vi.fn().mockResolvedValue(createProcessorResult()),
+      // Panel 304 writes from SQL, so it answers like the requests/transactions processors.
+      processOverTime: vi.fn().mockResolvedValue(createSqlProcessorResult()),
+    };
     mockVirtualUsersProcessorInstance = { process: vi.fn().mockResolvedValue(createProcessorResult()) };
 
     // Wire constructor mocks
@@ -530,6 +534,54 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining('completed')
       );
+    });
+
+    it('runs the errors-over-time pass with the bucket size and the write mode', async () => {
+      // Panel 304 writes from SQL, so it needs the bucket size (its values are per second)
+      // and the upsert flag (a tick overlaps the previous window by design). Neither reaches
+      // ErrorsProcessor.process, which is why this is a second method and not a flag on it.
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect(mockErrorsProcessorInstance.processOverTime).toHaveBeenCalledOnce();
+      const [testRunId, testRunArg, bucketSizeSeconds, upsert] =
+        mockErrorsProcessorInstance.processOverTime.mock.calls[0];
+      expect(testRunId).toBe('tr-001');
+      expect(testRunArg.start_time).toEqual(new Date('2024-01-01T00:00:00Z'));
+      expect(bucketSizeSeconds).toBeGreaterThan(0);
+      expect(upsert).toBe(false);
+    });
+
+    it('counts the rows it inserted, since they never pass through allMetrics', async () => {
+      // It inserts as it aggregates and returns a count, like the requests and transactions
+      // processors. Dropping that count from the totals would leave metricsCreated at 0 on a
+      // run whose only perf-test rows are 304's — and `metricsCreated > 0` is what gates the
+      // statistics pass, so the series would exist with no statistics row behind it.
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1, 0));
+      mockErrorsProcessorInstance.processOverTime.mockResolvedValue(createSqlProcessorResult(5, 0));
+
+      const result = await pipeline.execute({ testRunId: 'tr-001' });
+
+      expect((result.data as any).metricsCreated).toBe(6);
+      // Separate counters: 304's zero-filled grid is thousands of rows where 301 is a
+      // handful, so folded together the figure stops reading as "how many error metrics".
+      expect((result.data as any).breakdown.errorMetrics).toBe(1);
+      expect((result.data as any).breakdown.errorCodeSeriesMetrics).toBe(5);
+    });
+
+    it('carries its per-scenario compare configs into the compare-config save', async () => {
+      // The panel-level config is what makes ADAPT evaluate the per-code series; dropped
+      // here the rows land with no config and fall back to DEFAULT_COMPARE_CONFIG silently.
+      mockErrorsProcessorInstance.processOverTime.mockResolvedValue(createSqlProcessorResult(1, 2));
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      // The other processors return none in this fixture, so the two configs in the insert
+      // are 304's: 11 bound parameters each.
+      const insert = mockDataSource.query.mock.calls.find((c: unknown[]) =>
+        String(c[0]).includes('INSERT INTO ds_compare_config')
+      );
+      expect(insert).toBeDefined();
+      expect((insert![1] as unknown[]).length).toBe(22);
     });
   });
 
@@ -1227,8 +1279,13 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(mockRequestsProcessorInstance.process.mock.calls[0][4]).toBe(true); // upsert
       // The tail's upserts and delete carry non-segmentby predicates: a late first analysis
       // on a compressed chunk would hit the DML decompression limit without this.
+      // **From start_time, not from the tail start.** Panel 304 upserts a zero-filled grid
+      // over the whole run on this path while every other processor stays inside the window,
+      // and `ds_metrics` has 1-day chunks with `compress_after` 2 days — so a run that crosses
+      // a UTC midnight and is analysed late would upsert into a still-compressed chunk and
+      // decompress the run's whole segment there as DML. Still the narrowest span that works.
       expect(mockDatabaseService.decompressChunksForRange).toHaveBeenCalledWith(
-        'ds_metrics', new Date('2024-01-01T00:57:30Z'), new Date('2024-01-01T01:00:00Z')
+        'ds_metrics', new Date('2024-01-01T00:00:00Z'), new Date('2024-01-01T01:00:00Z')
       );
       // Every scenario-level point that is not the one just written is dropped — the ticks'
       // interim point at start_time, and a point left at a previous metricTime by an older

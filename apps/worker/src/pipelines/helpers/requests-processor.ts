@@ -47,6 +47,7 @@ const REQUEST_PANEL_VALUES: Array<{ panelId: number; column: string }> = [
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_P95, column: 'p95_response_time' },
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_RT_P99, column: 'p99_response_time' },
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_ERROR_RATE, column: 'error_rate' },
+  { panelId: METRIC_TYPE_PANEL_IDS.REQ_ERROR_COUNT, column: 'error_count_per_second' },
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT, column: 'throughput' },
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_APDEX, column: 'apdex_score' },
   { panelId: METRIC_TYPE_PANEL_IDS.REQ_LATENCY, column: 'avg_latency' },
@@ -63,6 +64,7 @@ const REQUEST_PANEL_IDS = REQUEST_PANEL_VALUES.map((m) => m.panelId);
 const CLASSIFIED_REQUEST_PANELS: Set<number> = new Set([
   METRIC_TYPE_PANEL_IDS.REQ_RT_AVG,
   METRIC_TYPE_PANEL_IDS.REQ_ERROR_RATE,
+  METRIC_TYPE_PANEL_IDS.REQ_ERROR_COUNT,
   METRIC_TYPE_PANEL_IDS.REQ_THROUGHPUT,
   METRIC_TYPE_PANEL_IDS.REQ_APDEX,
   METRIC_TYPE_PANEL_IDS.REQ_CONCURRENCY,
@@ -320,6 +322,10 @@ export class RequestsProcessor {
           avg_connect_time,
           concurrency,
           ROUND((error_count::numeric / NULLIF(request_count, 0) * 100)::numeric, 2) as error_rate,
+          -- The absolute behind that rate — see TXN_ERROR_COUNT in the constants. Per
+          -- second and unrounded: at 600s buckets a single error is 0.0017/s, which
+          -- ROUND(...,2) would store as a flat zero.
+          error_count::double precision / $4 as error_count_per_second,
           ROUND((request_count::numeric / $4)::numeric, 2) as throughput,
           FLOOR(EXTRACT(EPOCH FROM (bucket_time - $5::timestamp)) / $4)::integer as timestep,
           -- Apdex score: (satisfied + tolerating/2) / total
