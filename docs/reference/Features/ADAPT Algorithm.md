@@ -229,12 +229,29 @@ Since v0.2.97.16 Error Count also carries one `error_count.<code>` series per re
 its total. Those series sit on the same panel and get no config of their own, so on a scenario
 dashboard they inherit the panel row — floor `1`, classified as errors, lower is better — and each
 code is compared against the baseline exactly where the total is. On the
-`Performance test metrics all aggregated` dashboard no panel-level config is written at all (the
-roll-up is display-only), so its `All aggregated` total and its `All aggregated.<code>` series
-resolve to the built-in default config, which carries no `minSampleCount`: they fall back to
+`Performance test metrics all aggregated` dashboard no panel-level config is written for those
+panels (the roll-up is display-only), so its `All aggregated` total and its `All aggregated.<code>`
+series resolve to the built-in default config, which carries no `minSampleCount`: they fall back to
 `ADAPT_MIN_SAMPLE_COUNT` and read `incomparable` against the single point per run they hold. That
-also means setting that variable to `1` makes the whole roll-up dashboard comparable — the
-pre-existing 301/302/303 totals as well as every per-code series.
+also means setting that variable to `1` makes those roll-up series comparable — the pre-existing
+301/302/303 totals as well as every per-code series on Error Count.
+
+Since v0.2.97.19 the same per-code breakdown also exists over time, on **Errors/sec by Response
+Code (304)**, one `error_count.<code>` point per bucket in errors/sec. Those series are dense, so
+the sample floor does not hold them back and the config shape is what governs them: on a scenario
+dashboard the panel row is classified `RED_errors`, lower is better, aggregation `mean`, and each
+code is compared against the baseline like any other series. On the roll-up dashboard 304 is the
+one exception to "no config at all" — it writes a panel row **without** a classification. A
+configless series is not unevaluated (the compare-config cache seeds a default entry), and what
+keeps the other roll-up series harmless is their single point tripping the sample floor, which
+304's do not. `higherIsBetter: null` is therefore the only thing keeping the roll-up out of the
+run verdict: the conclusion SQL emits `regression` only for `true`/`false`, so 304's roll-up lands
+in `difference_count`. Classifying it was tried and is wrong — on a single-scenario run
+`All aggregated.<code>` is numerically identical to `error_count.<code>`, so every regression
+would be counted twice. The two errors/sec time series beside it, **Transaction Errors/sec (109)**
+and **Request Errors/sec (220)**, are ordinary classified panels on both kinds of dashboard. All
+three are per second rather than per bucket, because bucket size is a step function of run length
+and a raw count would shift on every boundary crossing.
 
 ## Configuration
 
