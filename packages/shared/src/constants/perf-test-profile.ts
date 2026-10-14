@@ -30,6 +30,7 @@ export const PERF_TEST_PROFILE_PANELS: ReadonlyArray<{ id: number; title: string
   { id: 106, title: 'Transaction Apdex' },
   { id: 107, title: 'Transaction Throughput' },
   { id: 108, title: 'Transaction Concurrency' },
+  { id: 109, title: 'Transaction Errors/sec' },
   { id: 201, title: 'Request RT Avg' },
   { id: 202, title: 'Request RT P90' },
   { id: 203, title: 'Request RT P95' },
@@ -40,6 +41,7 @@ export const PERF_TEST_PROFILE_PANELS: ReadonlyArray<{ id: number; title: string
   { id: 208, title: 'Request Latency' },
   { id: 209, title: 'Request Connect Time' },
   { id: 219, title: 'Request Concurrency' },
+  { id: 220, title: 'Request Errors/sec' },
   // Scenario-level: one point per run. Excluded until v0.2.97.17, because that point was
   // written AT end_time and `RAMP_UP_EXPR` flags anything past `end_time - ramp_down`, so no
   // statistics row ever existed and an SLO on them could not evaluate. `scenarioMetricTime`
@@ -48,4 +50,7 @@ export const PERF_TEST_PROFILE_PANELS: ReadonlyArray<{ id: number; title: string
   { id: 301, title: 'Error Count' },
   { id: 302, title: 'Avg Active Threads' },
   { id: 303, title: 'Max Active Threads' },
+  // 304 is the per-response-code breakdown of 301 over time, so an SLO on it needs a
+  // metric match pattern (`error_count.500`); the panel itself holds no total series.
+  { id: 304, title: 'Errors/sec by Response Code' },
 ];
