@@ -148,9 +148,11 @@ Two consequences:
    plain autorange gives a CONSTANT series `[value - 1, value + 1]`
    (`plotly.js/src/plots/cartesian/autorange.js`, the `minmin === maxmax` branch), so an
    all-zero error count — a clean run — would render a -1..1 axis with ticks for impossible
-   values. `nonnegative` clamps that to `[max(0, lower), max(1, upper)]` and changes nothing
-   else. It is applied only when the group's `min >= 0`: the pre-existing negative branch must
-   keep showing negatives, which is the data it exists for.
+   values. `nonnegative` clamps that to `[max(0, lower), max(1, upper)]`. It is NOT inert on a
+   non-constant series either: the same flag pins the padded lower edge at 0 when the padding
+   would carry it under, so `[0.1, 5, 10]` starts at 0 rather than just below it. It is applied
+   only when the group's `min >= 0`: the pre-existing negative branch must keep showing
+   negatives, which is the data it exists for.
 3. **Autorange counts DATA-REFERENCED shapes in its range.** Every overlay in `layout.ts` is
    `yref: 'paper'` — the analysis-window wash and boundary labels, the event lines — except
    `sloShape`, whose `y0`/`y1` are the SLO value. A chart that merges an SLO line *and* passes
