@@ -96,6 +96,59 @@ The toggle itself is a new optional `viewToggle` prop on `AnalystChartCard`
 `split by unit` pair by a shared local `PillButton` — both are the same control at different
 arities, so a third copy of the button's `sx` was not needed.
 
+### A Graphs chart zoom refetches the window, it does not just redraw it
+
+Dragging a zoom box on the Graphs chart (v0.2.97.20) does not simply narrow what Plotly already
+holds — `GraphsChart`'s `onRelayout` reads the gesture through `zoomRangeFromRelayout`
+(`apps/web/app/test-runs/[id]/components/graphs/utils/chart-utils.ts`), and `useGraphsData`'s
+`applyZoomRange` refetches every added series for that window via `GET
+/metrics/ds-metrics/:testRunId/:panelId?from=...&to=...` (validated by `parseMetricTimeRange` in
+`apps/api/src/modules/metrics/metrics.controller.ts` — both bounds or neither, else a 400). The
+point is resolution: the endpoint's LTTB budget (4000 points, divided across a panel's distinct
+metrics) is spent on the visible window instead of the whole run, so a window a tenth the run's
+length comes back with up to ten times the detail — down to the bucket size the data was
+collected at, which no zoom goes below.
+
+Four things worth knowing before touching this path:
+
+1. **A reset is recognised only by `xaxis.autorange`, never by a full-span range.** Plotly
+   rewrites the INDEX x-axis to an explicit `[0, len - 1]` on every render, so a relayout whose
+   range happens to span the whole run is not a safe "zoomed back out" signal — reading it that
+   way would refetch the whole run on every redraw. `zoomRangeFromRelayout` treats only
+   `event['xaxis.autorange'] === true` as a reset, and only when already `zoomed`.
+2. **One request per (dashboard, panel, source), not per series.** The panel endpoint returns
+   every metric on the panel regardless of what the caller asked for, so `fetchSeriesBatch`
+   groups the added series by that triple and calls `fetchPanelRows` once per group, sharing the
+   answer — a perf-test panel with hundreds of per-transaction series is one request per zoom,
+   not one per series. `fetchPanelRows` gets one retry (`PANEL_FETCH_ATTEMPTS = 2`) to buy back
+   some of the per-series robustness the grouping gives up: a deterministic failure (404/403/500)
+   still blanks the whole group — a known residue, see "Three residues of the Graphs card's zoom
+   refetch" in TODOS.md — but a one-off blip no longer does.
+3. **The synthetic "All aggregated" series has no range parameter and is filtered client-side.**
+   `/test-runs/:id/aggregated-metric-timeseries` always returns the whole run's fixed 60s buckets;
+   `fetchSeriesData` narrows it by filtering the parsed-timestamp points itself. On a live run this
+   also means that series keeps growing independent of the zoom — deliberate for now, see item 1 of
+   the same TODOS.md entry.
+4. **A stale in-flight reply is dropped, not merged.** `zoomRequestRef` tags each
+   `applyZoomRange` call; a narrow window's request can answer before an earlier wide one is done,
+   so only the reply whose tag still matches the ref is allowed to call `setSeriesData` — and it
+   replaces the series map wholesale rather than merging, because a narrowed window is the new
+   truth for every series and a leftover entry would draw points outside it.
+
+The chart stays mounted and fully legible during the refetch — the spinner condition is `loading
+&& !plot`, not bare `loading`, so a zoom or an add landing on an already-drawn chart keeps it on
+screen — with an `updating…` `role="status"` label in the header instead of a dim on the plot. A
+0.45 opacity on the chart subtree was tried and reverted: `lib/charts/tokens.ts` measures that
+value at 3.36:1 for the chart's 9-11px axis/legend text, below the contrast floor, and it would
+also sit over the axis labels during the exact moment the reader needs to read them.
+
+Riding along: `PillButton` (inside `AnalystChartCard`) is now exported, because the zoom's `reset
+zoom` control is a one-off action button rather than a toggle — `active` became optional so a
+caller can omit it and skip the `aria-pressed` a reset state should not carry. The header row that
+holds it also gained `flexWrap` + `rowGap`: the Graphs card can carry nine controls at once (axis
+mode, view toggle, zoom reset, chart actions…), and on a narrow content column the rightmost ones
+used to clip rather than wrap onto a second line.
+
 ### A Plotly chart must observe its own container, not the window
 
 `react-plotly.js` 2.6.0's `useResizeHandler` is only
