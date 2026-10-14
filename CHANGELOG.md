@@ -4,12 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.97.20] - 2026-10-14
+## [0.2.97.21] - 2026-10-14
 
 ### Added
 - **Zooming into a graph now sharpens it.** The Graphs card draws a panel at the resolution the whole run calls for: a panel's chart data is capped at 4000 points, shared out across every series on it, so a 40-series panel gets 100 points per line and a two-minute spike inside a three-hour run is a couple of samples wide. Drag a box on the chart and Perfana now re-fetches **just that window** — the point budget is spent on what you are looking at, so the same spike comes back at up to the full detail the data was stored with. A **reset zoom** button appears in the chart header while a window is in force (double-clicking the plot does the same), and a series added while zoomed arrives already scoped to that window.
 
   What zooming cannot do is invent detail that was never collected: the bucket size is fixed when a run is analysed — sized from the run's length, so 15s on a one-hour run and 60s on a three-hour one — and that is the floor. On a panel small enough that nothing was ever dropped, a zoom returns the same points it already had, so the chart simply narrows.
+
+  While zoomed, the min, mean and max beside each series describe the visible window. Those figures are the analysis window only — they exclude the ramp-up, so they are the numbers anomaly detection compared — and they were previously measured from the edges of whatever the chart happened to hold, which a zoom changes.
 
   Chart data is also fetched **once per panel** now instead of once per series. The request has always returned every series on the panel, so a chart with 40 lines off one panel was asking for the same answer 40 times; adding a whole dashboard of transactions in one click was hundreds of identical requests. That is one request now, on the zoom path and on the add-series path alike. While a window is being fetched the chart you just drew stays on screen and fully readable, with the header saying it is updating, rather than being replaced by a spinner.
 
