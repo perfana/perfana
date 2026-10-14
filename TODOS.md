@@ -1432,8 +1432,9 @@ do the work per group. `POST /reevaluate-batch` asserts per-run access but never
   statistics query. The verdict is safe (only consumed when `average_all` is true) but the stored
   `check_results.panel_average` is an unlabelled arbitrary series. **No longer *displayed* in
   reports** as of v0.2.97.24: `SloRenderer.actualText` derives the ACTUAL column from the worst
-  judged target when `average_all` is false, so the arbitrary value is only reached as a fallback
-  (no operator direction, or nothing judged). The stored column is still arbitrary, and the SLO
+  judged target, keyed on the **verdict** rather than on `average_all`, so the arbitrary value is
+  only reached as a fallback (a passing averaged check, a FAIL with no failing target, no operator
+  direction, or nothing judged). The stored column is still arbitrary, and the SLO
   card in the web app and `getSloSummary` still read it directly — fixing the writer would make
   all three honest at once.
 - `apps/api/.../metrics.service.ts:155-161` — `firstDashboard` resolves a dashboard from

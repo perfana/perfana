@@ -1132,7 +1132,7 @@ report is stored.
 
 The verdict drives it because `RequirementChecker` fails the whole check when **any** target fails
 and does not consult `average_all` to do so — its target loop has no `average_all` guard, and the
-panel-average comparison at `RequirementChecker.ts:141` is only an *additional* failure source. So
+panel-average comparison at `RequirementChecker.ts:143` is only an *additional* failure source. So
 an averaged check can carry a FAIL that its own comfortably-passing mean does not explain (`1.5`
 beside `Average value should be less than 2`), which is the same contradiction in the other half
 of the table. Gating the fix on `average_all` leaves that half broken; a spec case pins it.
