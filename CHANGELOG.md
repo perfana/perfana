@@ -25,7 +25,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   What is deliberately unchanged: the pre-aggregated five-second summaries these queries prefer are already restricted to the run's own window, so nothing there needed a second bound.
 
-  The worker's four remaining queries are tracked in #674.
+- **And the worker, which closes it.** The rollup that makes a transaction expand fast, the Apdex and error-rate checks behind your SLOs, and three background probes all read these tables, and none of them said which days to look at. One of them is worth calling out: the rollup computes the full-run numbers and the analysis-window numbers in a single pass, and the filter that produces the second looked like a bound and was not — the query as a whole still had none.
+
+  Five more API queries that the first pass missed are converted too, including the one behind "what will be deleted" when you remove a system. That one spans every run the system ever had, so there is no single window — it uses the system's own first and last run instead, which on a shared installation is still the difference between locking two months of data and two years of it.
+
+  Nothing in any of this changes a number the product reports.
 
 ## [0.2.97.25] - 2026-10-16
 

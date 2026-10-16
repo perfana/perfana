@@ -1,4 +1,9 @@
 import { EntityManager } from 'typeorm';
+import {
+  TEST_RUN_TIMES_SQL,
+  analysisBoundsFromRow,
+  timeBoundsSql,
+} from '@perfana/shared/database/run-window';
 import type { Logger } from 'pino';
 import { BaseCheckService } from './BaseCheckService.js';
 import { TestRun } from './BenchmarkMatcher.js';
@@ -189,12 +194,29 @@ export class ApdexCalculator extends BaseCheckService {
     // aggregate, not in WHERE, so observed_count still counts every execution.
     const scored = includeFailedRequests ? 'response_time IS NOT NULL' : 'response_time IS NOT NULL AND success = true';
 
-    // Exclude analysis start offset period if configured
-    if (excludeRampUp && testRun.ramp_up && testRun.start_time) {
-      const rampUpEndTime = new Date(testRun.start_time.getTime() + testRun.ramp_up * 1000);
-      conditions.push(`time >= $${paramIndex}`);
-      queryParams.push(rampUpEndTime);
-      paramIndex++;
+    // The window: the analysis timerange when excludeRampUp is set, the run's own
+    // padded window otherwise. Never absent — an unbounded read locks every chunk of
+    // `transactions` (#674, see @perfana/shared/database/run-window). The run row is
+    // already in hand, so this costs no round trip.
+    const time = timeBoundsSql(
+      analysisBoundsFromRow(
+        {
+          start_time: testRun.start_time ?? null,
+          end_time: testRun.end_time ?? null,
+          ramp_up: testRun.ramp_up ?? null,
+          // This TestRun shape carries no ramp_down, so the toggle trims the head only
+          // — unchanged from before; the tail is bounded by the padded end either way.
+          ramp_down: null,
+        },
+        excludeRampUp,
+      ),
+      'time',
+      paramIndex,
+    );
+    if (time.clause) {
+      conditions.push(time.clause.replace(/^AND /, ''));
+      queryParams.push(...time.params);
+      paramIndex = time.nextIndex;
     }
 
     const whereClause = conditions.join(' AND ');
@@ -932,6 +954,16 @@ export class ApdexCalculator extends BaseCheckService {
    * this `test_run_id` (rollup pipeline has not run yet, or the run predates
    * the rollup tables). Same shape #296 / #298 use for the Apdex fast path.
    */
+  /**
+   * The run's own padded window, for the two raw `transactions` fallbacks below. They
+   * only run when the rollup is empty, and only then does this round trip happen —
+   * but when it does, the read must be bounded or it locks every chunk (#674).
+   */
+  private async runWindow(testRunId: string) {
+    const rows = await this.manager.query(TEST_RUN_TIMES_SQL, [testRunId]);
+    return timeBoundsSql(analysisBoundsFromRow(rows?.[0], false), 'time', 2);
+  }
+
   async getAvailableTransactions(testRunId: string): Promise<string[]> {
     const rollupResult = await this.manager.query(`
       SELECT DISTINCT transaction_name
@@ -946,13 +978,15 @@ export class ApdexCalculator extends BaseCheckService {
       return rollupResult.map((row) => row.transaction_name);
     }
 
+    const time = await this.runWindow(testRunId);
     const legacyResult = await this.manager.query(`
       SELECT DISTINCT transaction_name
       FROM transactions
       WHERE test_run_id = $1
         AND transaction_name IS NOT NULL
+        ${time.clause}
       ORDER BY transaction_name
-    `, [testRunId]) as Array<{ transaction_name: string }>;
+    `, [testRunId, ...time.params]) as Array<{ transaction_name: string }>;
 
     return legacyResult.map((row) => row.transaction_name);
   }
@@ -987,13 +1021,15 @@ export class ApdexCalculator extends BaseCheckService {
       }));
     }
 
+    const time = await this.runWindow(testRunId);
     const legacyResult = await this.manager.query(`
       SELECT DISTINCT transaction_name, COALESCE(scenario_name, 'default') as scenario_name
       FROM transactions
       WHERE test_run_id = $1
         AND transaction_name IS NOT NULL
+        ${time.clause}
       ORDER BY scenario_name, transaction_name
-    `, [testRunId]) as Array<{ transaction_name: string; scenario_name: string }>;
+    `, [testRunId, ...time.params]) as Array<{ transaction_name: string; scenario_name: string }>;
 
     return legacyResult.map((row) => ({
       transaction_name: row.transaction_name,

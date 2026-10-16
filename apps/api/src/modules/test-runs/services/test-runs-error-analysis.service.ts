@@ -5,7 +5,7 @@ import {
   AnalysisBounds,
   TEST_RUN_TIMES_SQL,
   analysisBoundsFromRow,
-} from '../../../common/db/run-window';
+} from '@perfana/shared/database/run-window';
 
 const NO_SCENARIO_SENTINEL = '__NO_SCENARIO__';
 
@@ -80,7 +80,7 @@ function buildScenarioFilterForRollup(
  * run's time window (and, with excludeRampUp, to the analysis timerange).
  * Returns an empty clause only when both cutoffs are null — an in-flight run
  * with no start_time at all. Every other read MUST carry this, see
- * `common/db/run-window.ts`: without it the statement locks every chunk.
+ * `@perfana/shared/database/run-window`: without it the statement locks every chunk.
  * startIndex is the $N position to use for the first new param (1-based).
  */
 function buildTimeFilter(
@@ -166,7 +166,7 @@ export class TestRunsErrorAnalysisService {
 
   /**
    * Resolve the `time` cutoffs for a run: always the padded run window (the
-   * chunk-lock bound, see `common/db/run-window.ts`), narrowed to the analysis
+   * chunk-lock bound, see `@perfana/shared/database/run-window`), narrowed to the analysis
    * timerange when `excludeRampUp` is on.
    *
    * Fetched as its own round trip on purpose — a join or subquery on

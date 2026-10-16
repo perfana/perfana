@@ -430,7 +430,9 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(sqlCalls[insertIdx]).toMatch(/FROM sampler_rollup_base/);
       // The aggregate reads requests_raw with the run bound; the INSERT reads only the temp table.
       expect(sqlCalls[ctasIdx]).toMatch(/FROM requests_raw r/);
-      expect(mockManagerQuery.mock.calls[ctasIdx]![1]).toHaveLength(3);
+      // $1 test_run_id, $2/$3 ramp cutoffs, $4/$5 the padded run window (#674).
+      expect(mockManagerQuery.mock.calls[ctasIdx]![1]).toHaveLength(5);
+      expect(sqlCalls[ctasIdx]).toMatch(/r\.time >= \$4 AND r\.time <= \$5/);
       expect(sqlCalls[insertIdx]).not.toMatch(/requests_raw/);
       // last(url_hash, time) replaces the ARRAY_AGG(... ORDER BY time DESC)[1] trick.
       expect(sqlCalls[ctasIdx]).toMatch(/last\(r\.url_hash, r\.time\)/);

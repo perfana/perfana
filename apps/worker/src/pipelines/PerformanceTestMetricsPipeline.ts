@@ -20,6 +20,7 @@
  */
 
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
+import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
 import { PipelineResult } from '../types/pipeline.js';
 import type { Logger } from 'pino';
 import {
@@ -283,10 +284,23 @@ export class PerformanceTestMetricsPipeline extends BasePipelineTypeORM {
       // rows would silently strip the run of its metrics and ADAPT results. Same rule as
       // every other delete-then-rewrite here: the probe stays strict because the statement
       // deletes.
+      // Bounded by the run's own padded window: an EXISTS probe is cheap to execute
+      // (test_run_id leads the index) but takes a lock on every chunk of both tables
+      // before it runs (#674, see @perfana/shared/database/run-window). The padding is
+      // what keeps it a probe for "did this run write anything" — ingest lagging past
+      // end_time stays inside it. The run row is in hand, so no round trip.
+      const probeTime = timeBoundsSql(
+        analysisBoundsFromRow(
+          { start_time: testRun.start_time, end_time: testRun.end_time ?? null },
+          false,
+        ),
+        'time',
+        2,
+      );
       const raw: Array<{ has_rows: boolean }> = await this.db.dataSource.query(
-        `SELECT EXISTS (SELECT 1 FROM requests_raw WHERE test_run_id = $1)
-             OR EXISTS (SELECT 1 FROM transactions WHERE test_run_id = $1) AS has_rows`,
-        [testRunId]
+        `SELECT EXISTS (SELECT 1 FROM requests_raw WHERE test_run_id = $1 ${probeTime.clause})
+             OR EXISTS (SELECT 1 FROM transactions WHERE test_run_id = $1 ${probeTime.clause}) AS has_rows`,
+        [testRunId, ...probeTime.params]
       );
       // Postgres always answers one boolean row; only an explicit false means "nothing here".
       if (raw[0]?.has_rows === false) {

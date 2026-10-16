@@ -1,4 +1,5 @@
 import { EntityManager } from 'typeorm';
+import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
 import type { Logger } from 'pino';
 import { BaseCheckService } from './BaseCheckService.js';
 import type { TestRun } from './BenchmarkMatcher.js';
@@ -129,13 +130,28 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
     const params: unknown[] = [testRun.test_run_id];
     let paramIndex = 2;
 
+    // The window: the ramp-up cutoff when the benchmark asks for it, the run's own
+    // padded window otherwise. Never absent — these raw scans are the fallback arm, and
+    // unbounded each locks every chunk of its table (#674, see
+    // @perfana/shared/database/run-window). The run row is in hand, so no round trip.
+    //
+    // Called lazily and at most once per query, because it claims parameter slots.
     const rampUpClause = (): string => {
-      if (benchmark.exclude_ramp_up_time && testRun.ramp_up && testRun.start_time) {
-        const rampUpEnd = new Date(testRun.start_time.getTime() + testRun.ramp_up * 1000);
-        params.push(rampUpEnd);
-        return ` AND time >= $${paramIndex++}`;
-      }
-      return '';
+      const time = timeBoundsSql(
+        analysisBoundsFromRow(
+          {
+            start_time: testRun.start_time ?? null,
+            end_time: testRun.end_time ?? null,
+            ramp_up: testRun.ramp_up ?? null,
+          },
+          benchmark.exclude_ramp_up_time === true,
+        ),
+        'time',
+        paramIndex,
+      );
+      params.push(...time.params);
+      paramIndex = time.nextIndex;
+      return time.clause ? ` ${time.clause}` : '';
     };
 
     if (benchmark.aggregate_metric === 'error_percentage') {

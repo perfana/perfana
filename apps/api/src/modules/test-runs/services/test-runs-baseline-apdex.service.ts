@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -453,6 +454,14 @@ export class TestRunsBaselineApdexService {
   private async getTransactionResponseTimes(
     testRun: TestRunQueryResult,
   ): Promise<TransactionResponseTimes[]> {
+    // Bounded from the run row already in hand — an unbounded read locks every chunk
+    // of `transactions` (#674, see @perfana/shared/database/run-window). Not
+    // ramp-trimmed: a baseline is calibrated against everything the run recorded.
+    const time = timeBoundsSql(
+      analysisBoundsFromRow({ start_time: testRun.start_time, end_time: testRun.end_time }, false),
+      't.time',
+      5,
+    );
     // Get all transactions with response times
     // Use system_under_test_id (UUID) for threshold lookups
     const query = `
@@ -475,6 +484,7 @@ export class TestRunsBaselineApdexService {
       WHERE t.test_run_id = $4
         AND t.response_time IS NOT NULL
         AND t.success = true
+        ${time.clause}
       GROUP BY t.transaction_name, t.scenario_name, wat.apdex_threshold, wtat.apdex_threshold
       ORDER BY t.scenario_name, t.transaction_name
     `;
@@ -484,6 +494,7 @@ export class TestRunsBaselineApdexService {
       testRun.test_environment,
       testRun.workload,
       testRun.test_run_id,
+      ...time.params,
     ]);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -527,6 +538,12 @@ export class TestRunsBaselineApdexService {
     // Validate user has access to the system
     await this.validateSystemAccess(testRun.system_under_test_id, userId, roles);
 
+    // Bounded, as above.
+    const time = timeBoundsSql(
+      analysisBoundsFromRow({ start_time: testRun.start_time, end_time: testRun.end_time }, false),
+      't.time',
+      3,
+    );
     // Get response times for this specific transaction
     const query = `
       SELECT
@@ -537,10 +554,12 @@ export class TestRunsBaselineApdexService {
         AND t.transaction_name = $2
         AND t.response_time IS NOT NULL
         AND t.success = true
+        ${time.clause}
       GROUP BY t.transaction_name
     `;
 
-    const result = await withRequestEm(this.testRunRepo).query(query, [testRun.test_run_id, transactionName]);
+    const result = await withRequestEm(this.testRunRepo).query(
+      query, [testRun.test_run_id, transactionName, ...time.params]);
 
     if (!result || result.length === 0) {
       throw new NotFoundException(`Transaction ${transactionName} not found in test run ${testRunId}`);

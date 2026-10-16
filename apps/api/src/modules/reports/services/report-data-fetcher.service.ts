@@ -11,7 +11,7 @@ import {
   analysisBoundsFromRow,
   spanBounds,
   timeBoundsSql,
-} from '../../../common/db/run-window';
+} from '@perfana/shared/database/run-window';
 import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
@@ -201,7 +201,7 @@ export class ReportDataFetcherService {
    * Always bounded, whatever `excludeRampUp` says. With the toggle off these are the
    * run's own start and end, padded an hour either side; with it on they narrow to the
    * analysis timerange. The unbounded case is not a valid one: a read on these tables
-   * with no `time` predicate locks every chunk — see `common/db/run-window.ts`.
+   * with no `time` predicate locks every chunk — see `@perfana/shared/database/run-window`.
    *
    * The end cutoff is not optional padding either. `ds_metrics.ramp_up` is baked by the
    * worker to exclude the ramp-DOWN band as well, so a series read from that table is
@@ -245,7 +245,7 @@ export class ReportDataFetcherService {
   ): Promise<ScenarioData | null> {
     try {
       // The run window, from the entity already in hand. Not optional: without it each
-      // of these two reads locks every chunk of `transactions`. See common/db/run-window.ts.
+      // of these two reads locks every chunk of `transactions`. See @perfana/shared/database/run-window.
       const time = timeBoundsSql(analysisBoundsFromEntity(testRun), 'txn.time', 3);
       // Build organization filter for test_run validation
       const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
@@ -351,7 +351,7 @@ export class ReportDataFetcherService {
       // Always bounded: with the toggle on this is the analysis window (start after
       // ramp-up, end before ramp-down, the Performance Analysis card's), with it off the
       // run's own padded window. The second is not cosmetic — an unbounded read locks
-      // every chunk of `requests_error`. See common/db/run-window.ts.
+      // every chunk of `requests_error`. See @perfana/shared/database/run-window.
       const bounds: string[] = [];
       const params: unknown[] = [testRun.testRunId];
       const time = timeBoundsSql(analysisBoundsFromEntity(testRun, excludeRampUp), 'e.time', 2);
@@ -480,7 +480,7 @@ export class ReportDataFetcherService {
     if (transactionNames.length === 0) return chains;
     try {
       // The LIMIT inside the lateral bounds rows *returned*, not chunks locked, so the
-      // run window is still needed — one extra PK read. See common/db/run-window.ts.
+      // run window is still needed — one extra PK read. See @perfana/shared/database/run-window.
       const time = timeBoundsSql(
         await this.getAnalysisWindowBounds(testRunId, false, userId, roles), 'time', 3);
       const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
@@ -567,7 +567,7 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<string[]> {
     try {
-      // Bounded from the entity in hand; see common/db/run-window.ts.
+      // Bounded from the entity in hand; see @perfana/shared/database/run-window.
       const time = timeBoundsSql(analysisBoundsFromEntity(testRun), 'txn.time', 2);
       const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
       const rows: Array<{ scenario_name: string | null }> = await withRequestEm(this.testRunRepo).query(
@@ -853,7 +853,7 @@ export class ReportDataFetcherService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<{ avg: number | null; p90: number | null; p95: number | null; p99: number | null; pass: number; fail: number }> {
-    // Bounded; see common/db/run-window.ts.
+    // Bounded; see @perfana/shared/database/run-window.
     const time = timeBoundsSql(
       await this.getAnalysisWindowBounds(testRunId, false, userId, roles), 't.time', 2);
     const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
@@ -1035,7 +1035,7 @@ export class ReportDataFetcherService {
     try {
       const testRunId = testRun.testRunId;
 
-      // Always bounded, toggle or not — see common/db/run-window.ts. The same bounds
+      // Always bounded, toggle or not — see @perfana/shared/database/run-window. The same bounds
       // go to the throughput and virtual-user reads below, so this is one lookup.
       const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       const time = timeBoundsSql(bounds, 't.time', 2);
@@ -1604,7 +1604,7 @@ export class ReportDataFetcherService {
    * @param excludeRampUp - Whether to exclude ramp-up period
    * @param bounds - The run's time window, when the caller already resolved it. Omitted
    *                 (or null) it is looked up here — never left unbounded; see
-   *                 common/db/run-window.ts.
+   *                 @perfana/shared/database/run-window.
    * @param roles - User roles from JWT token (for admin bypass)
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @returns Virtual user statistics (overall and per-scenario)
@@ -2356,7 +2356,7 @@ export class ReportDataFetcherService {
       // The per-run transaction stats are a SEPARATE query on purpose. They used to be a
       // LEFT JOIN LATERAL correlated to `tr.test_run_id`, which cannot carry a `time`
       // bound a planner can use — the window is only known per outer row, so every one of
-      // these reads locked every chunk of `transactions` (see common/db/run-window.ts).
+      // these reads locked every chunk of `transactions` (see @perfana/shared/database/run-window).
       // Fetching the runs first turns it into one bounded `ANY(...)` read below.
       const query = `
         SELECT
@@ -2963,7 +2963,7 @@ export class ReportDataFetcherService {
       // system call = no org filter; real users get org-scoped results.
       // One window spanning both runs — per-run bounds cannot be expressed against a
       // single `ANY(...)` read, and an unbounded one locks every chunk of `transactions`
-      // (see common/db/run-window.ts). The span is wider than either run, which costs a
+      // (see @perfana/shared/database/run-window). The span is wider than either run, which costs a
       // chunk or two of locks and nothing in correctness: `test_run_id` still selects.
       const time = timeBoundsSql(
         spanBounds(await Promise.all([currentRunId, baselineRunId].map((id) =>

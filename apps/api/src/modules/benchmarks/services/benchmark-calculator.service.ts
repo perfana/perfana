@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import {
+  TEST_RUN_TIMES_SQL,
+  analysisBoundsFromRow,
+  timeBoundsSql,
+} from '@perfana/shared/database/run-window';
 
 /**
  * Result of an Apdex calculation preview
@@ -62,13 +67,18 @@ export class BenchmarkCalculatorService {
    */
   async getAvailableTransactions(testRunId: string): Promise<string[]> {
     try {
+      // Bounded, or this locks every chunk of `requests_raw` — see
+      // @perfana/shared/database/run-window.
+      const runRows = await this.dataSource.query(TEST_RUN_TIMES_SQL, [testRunId]);
+      const time = timeBoundsSql(analysisBoundsFromRow(runRows?.[0], false), 'time', 2);
       const result = await this.dataSource.query(`
         SELECT DISTINCT transaction_name
         FROM requests_raw
         WHERE test_run_id = $1
           AND transaction_name IS NOT NULL
+          ${time.clause}
         ORDER BY transaction_name
-      `, [testRunId]);
+      `, [testRunId, ...time.params]);
 
       return result.map((row: { transaction_name: string }) => row.transaction_name);
     } catch (error) {
@@ -99,17 +109,12 @@ export class BenchmarkCalculatorService {
       } = params;
 
       // First get test run info for ramp-up exclusion
-      const testRunResult = await this.dataSource.query(`
-        SELECT start_time, ramp_up
-        FROM test_runs
-        WHERE test_run_id = $1
-      `, [testRunId]);
+      const testRunResult = await this.dataSource.query(TEST_RUN_TIMES_SQL, [testRunId]);
 
       if (testRunResult.length === 0) {
         throw new Error(`Test run not found: ${testRunId}`);
       }
 
-      const testRun = testRunResult[0];
       const toleratingThreshold = thresholdMs * 4;
 
       // Build WHERE clause
@@ -129,12 +134,15 @@ export class BenchmarkCalculatorService {
         conditions.push('success = true');
       }
 
-      // Exclude ramp-up time if configured
-      if (excludeRampUp && testRun.ramp_up && testRun.start_time) {
-        const analysisStartTime = new Date(new Date(testRun.start_time).getTime() + testRun.ramp_up * 1000);
-        conditions.push(`time >= $${paramIndex}`);
-        queryParams.push(analysisStartTime);
-        paramIndex++;
+      // The window: the analysis timerange when excludeRampUp is set, the run's own
+      // padded window otherwise. Never absent — an unbounded read on this table locks
+      // every chunk of it. See @perfana/shared/database/run-window.
+      const bounds = timeBoundsSql(
+        analysisBoundsFromRow(testRunResult[0], excludeRampUp), 'time', paramIndex);
+      if (bounds.clause) {
+        conditions.push(bounds.clause.replace(/^AND /, ''));
+        queryParams.push(...bounds.params);
+        paramIndex = bounds.nextIndex;
       }
 
       const whereClause = conditions.join(' AND ');

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
 import { DataSource, EntityManager } from 'typeorm';
 import { SystemUnderTest, OwnedResource } from '@perfana/shared/entities';
 import { ResourceNotFoundException, DatabaseException } from '../../../common/exceptions/business.exception';
@@ -55,10 +56,30 @@ export class DeleteSystemUnderTestHandler {
     const systemName = sut[0].name;
 
     // Count all related resources
-    const countQuery = async (sql: string, params: string[] = [sutId]): Promise<number> => {
+    const countQuery = async (sql: string, params: unknown[] = [sutId]): Promise<number> => {
       const result = await this.dataSource.query(sql, params);
       return parseInt(result[0]?.count ?? '0', 10);
     };
+
+    // The two raw-hypertable counts below span every run of this system, so there is no
+    // single run window — but the system's own span is still a bound, and without one
+    // each count locks every chunk in the table rather than the ones this system's data
+    // lives in (#674; see @perfana/shared/database/run-window). On a shared deploy a
+    // system that ran for two months in a two-year table locks ~60 chunks, not ~730.
+    // Hour-padded for the ingest lag past `end_time`.
+    const spanRows = await this.dataSource.query(
+      `SELECT MIN(start_time) AS min_start, MAX(end_time) AS max_end
+         FROM test_runs WHERE system_under_test_id = $1`,
+      [sutId],
+    );
+    const span = timeBoundsSql(
+      analysisBoundsFromRow(
+        { start_time: spanRows?.[0]?.min_start ?? null, end_time: spanRows?.[0]?.max_end ?? null },
+        false,
+      ),
+      'time',
+      2,
+    );
 
     const [
       testRuns,
@@ -109,10 +130,12 @@ export class DeleteSystemUnderTestHandler {
         `SELECT COUNT(*) FROM test_run_configs WHERE test_run_id IN (SELECT id FROM test_runs WHERE system_under_test_id = $1)`,
       ),
       countQuery(
-        `SELECT COUNT(*) FROM requests_raw WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1)`,
+        `SELECT COUNT(*) FROM requests_raw WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1) ${span.clause}`,
+        [sutId, ...span.params],
       ),
       countQuery(
-        `SELECT COUNT(*) FROM transactions WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1)`,
+        `SELECT COUNT(*) FROM transactions WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1) ${span.clause}`,
+        [sutId, ...span.params],
       ),
       countQuery(
         `SELECT COUNT(*) FROM test_run_transaction_stats WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1)`,

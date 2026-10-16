@@ -1,4 +1,5 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
+import { RUN_WINDOW_PAD_MS } from '@perfana/shared/database/run-window';
 import { PipelineResult } from '../types/pipeline.js';
 
 interface TransactionStatsRollupInput {
@@ -131,6 +132,14 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
       );
       const endCutoff = new Date(testRun.endTime.getTime() - rampDownSeconds * 1000);
 
+      // The run's own window, hour-padded for ingest lag. This is NOT the ramp window
+      // above — it bounds the three reads so each locks the run's chunks instead of
+      // every chunk in the table (#674, see @perfana/shared/database/run-window). It is
+      // a superset of every row the run wrote, so the full-run aggregates are unchanged;
+      // the ramp-excluded ones come from the FILTERs on $2/$3 and are untouched.
+      const windowStart = new Date(testRun.startTime.getTime() - RUN_WINDOW_PAD_MS);
+      const windowEnd = new Date(testRun.endTime.getTime() + RUN_WINDOW_PAD_MS);
+
       this.logger.info(
         `🎯 Rolling up transaction stats for ${testRunId} (ramp_up=${rampUpSeconds}s, ramp_down=${rampDownSeconds}s, startCutoff=${startCutoff.toISOString()}, endCutoff=${endCutoff.toISOString()})`
       );
@@ -190,13 +199,16 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
 
         const txResult = await manager.query<RollupRowCount[]>(
           TRANSACTION_ROLLUP_SQL,
-          [testRunId, startCutoff, endCutoff]
+          [testRunId, startCutoff, endCutoff, windowStart, windowEnd]
         );
-        await manager.query(SAMPLER_ROLLUP_BASE_SQL, [testRunId, startCutoff, endCutoff]);
+        await manager.query(
+          SAMPLER_ROLLUP_BASE_SQL,
+          [testRunId, startCutoff, endCutoff, windowStart, windowEnd],
+        );
         const samplerResult = await manager.query<RollupRowCount[]>(SAMPLER_ROLLUP_INSERT_SQL);
         const parallelGroupResult = await manager.query<RollupRowCount[]>(
           PARALLEL_GROUP_ROLLUP_SQL,
-          [testRunId, startCutoff, endCutoff]
+          [testRunId, startCutoff, endCutoff, windowStart, windowEnd]
         );
 
         // manager.query returns the INSERT's affected count via rowCount,
@@ -313,6 +325,7 @@ const TRANSACTION_ROLLUP_SQL = `
     FROM transactions t
     JOIN test_runs tr ON tr.test_run_id = t.test_run_id
     WHERE t.test_run_id = $1
+      AND t.time >= $4 AND t.time <= $5   -- run window; see #674
     GROUP BY
       t.test_run_id, t.transaction_name, COALESCE(t.scenario_name, ''),
       tr.system_under_test_id, tr.test_environment, tr.workload
@@ -406,6 +419,7 @@ const PARALLEL_GROUP_ROLLUP_SQL = `
       ) -> -1                                                          AS pc
     FROM requests_raw r
     WHERE r.test_run_id = $1
+      AND r.time >= $4 AND r.time <= $5   -- run window; see #674
       AND r.transaction_name IS NOT NULL
       AND r.parent_controllers IS NOT NULL
   ),
@@ -552,6 +566,7 @@ const SAMPLER_ROLLUP_BASE_SQL = `
         FILTER (WHERE r.success AND r.time >= $2 AND r.time < $3)                               AS pct_passed_excl
     FROM requests_raw r
     WHERE r.test_run_id = $1
+      AND r.time >= $4 AND r.time <= $5   -- run window; see #674
       AND r.transaction_name IS NOT NULL
     GROUP BY
       r.test_run_id, r.transaction_name, r.sampler_name,

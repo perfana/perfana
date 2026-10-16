@@ -8,7 +8,7 @@ import {
   TEST_RUN_TIMES_SQL,
   analysisBoundsFromRow,
   timeBoundsSql,
-} from '../../../common/db/run-window';
+} from '@perfana/shared/database/run-window';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { TestRunsMapperService } from './test-runs-mapper.service';
@@ -164,7 +164,7 @@ export class TestRunsPerformanceQueryService {
    * `requests_error` or `virtual_users` with no `time` predicate locks every chunk of the
    * table plus every compressed twin plus the indexes on both, and the predicate this
    * replaced — `($2::boolean = false OR …)` — folded to TRUE on exactly the default path.
-   * See `common/db/run-window.ts`.
+   * See `@perfana/shared/database/run-window`.
    */
   private async getAnalysisBounds(
     testRunId: string,
@@ -363,7 +363,7 @@ export class TestRunsPerformanceQueryService {
    * to EXECUTE — `test_run_id` leads `idx_requests_raw_test_run_time` and is the
    * `compress_segmentby` key, so a miss is a 1.9 ms index-only descent — but execution
    * was never the cost: a read with no `time` predicate takes a LOCK on every chunk of
-   * the table before it runs anything (#674, see common/db/run-window.ts), and this one
+   * the table before it runs anything (#674, see @perfana/shared/database/run-window), and this one
    * is on a read path. The padding is what makes the bound safe: the 36 s-late rows the
    * paragraph above measures are an hour inside it, so the case this probe exists to
    * detect still reaches it. The window costs one PK read, taken by the caller.
@@ -1212,7 +1212,7 @@ export class TestRunsPerformanceQueryService {
       }
 
       // Always bounded — the toggle narrows the window, it does not decide whether there
-      // is one. See getAnalysisBounds and common/db/run-window.ts.
+      // is one. See getAnalysisBounds and @perfana/shared/database/run-window.
       const time = timeBoundsSql(
         await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp), 't.time', 2);
 
@@ -1519,7 +1519,7 @@ export class TestRunsPerformanceQueryService {
       // to be the plan.
       // The LIMIT inside the subquery bounds rows RETURNED, not chunks locked — the same
       // distinction that made this query slow before migration 1813's index. One extra PK
-      // read for the window; see common/db/run-window.ts.
+      // read for the window; see @perfana/shared/database/run-window.
       const time = timeBoundsSql(
         await this.getAnalysisBounds(resolvedTestRunId, false), 'time', 3);
       const rows = await withRequestEm(this.testRunRepo).query(
@@ -1957,7 +1957,7 @@ export class TestRunsPerformanceQueryService {
       // The run's own window, for the two raw-hypertable reads below (requests_error
       // always, requests_raw on the legacy arm). NOT narrowed by excludeRampUp: this
       // modal has always listed every error in the run, and the toggle is applied to the
-      // sampler arms only. See common/db/run-window.ts.
+      // sampler arms only. See @perfana/shared/database/run-window.
       const bounds = await this.getAnalysisBounds(resolvedTestRunId, false);
 
       const params: unknown[] = [resolvedTestRunId];
@@ -2813,7 +2813,7 @@ export class TestRunsPerformanceQueryService {
       // raw-scan path so we don't return zeros for a populated test run.
       // runInfo carries the run's own window (endTime clamped to NOW() for an in-flight
       // run) and, when the toggle is on, the ramp cutoffs. Either way this read is
-      // bounded — see common/db/run-window.ts.
+      // bounded — see @perfana/shared/database/run-window.
       const bounds: AnalysisBounds = {
         startCutoff: runInfo.cutoffTime ?? new Date(runInfo.startTime.getTime() - RUN_WINDOW_PAD_MS),
         endCutoff: runInfo.endCutoffTime ?? new Date(runInfo.endTime.getTime() + RUN_WINDOW_PAD_MS),
@@ -3022,7 +3022,7 @@ export class TestRunsPerformanceQueryService {
    * The pre-v0.2.96.10 raw scan, kept as the fallback for runs the CAGGs cannot answer.
    * Same numbers as before — it is the reference the CAGG path was verified against —
    * but bounded: the two branches of the UNION each locked every chunk of their table
-   * (see common/db/run-window.ts). The caller already holds the run's timestamps, so
+   * (see @perfana/shared/database/run-window). The caller already holds the run's timestamps, so
    * this costs no round trip.
    */
   private async querySummaryTimeseriesFromRaw(

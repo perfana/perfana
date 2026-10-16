@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { analysisBoundsFromEntity, timeBoundsSql } from '@perfana/shared/database/run-window';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder, ObjectLiteral } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -1194,15 +1195,24 @@ export class TestRunsCrudQueryService {
 
         return result.map((row: { metric_name: string }) => row.metric_name);
       } else {
+        // Bounded from the run already in hand; an unbounded read locks every chunk
+        // of `requests_raw` (#674, see @perfana/shared/database/run-window).
+        const time = timeBoundsSql(
+          analysisBoundsFromEntity({ startTime: testRun.start_time, endTime: testRun.end_time }),
+          'time',
+          2,
+        );
         const query = `
           SELECT DISTINCT CONCAT_WS('|', scenario_name, transaction_name, sampler_name) as request_name
           FROM requests_raw
           WHERE test_run_id = $1
             AND sampler_name IS NOT NULL
+            ${time.clause}
           ORDER BY request_name
         `;
 
-        const result = await withRequestEm(this.testRunRepo).query(query, [testRun.test_run_id]);
+        const result = await withRequestEm(this.testRunRepo).query(
+          query, [testRun.test_run_id, ...time.params]);
 
         return result.map((row: { request_name: string }) => row.request_name);
       }

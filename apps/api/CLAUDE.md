@@ -1231,7 +1231,7 @@ Migration 1815 warns about the sizing; a `time` bound is what removes the growth
 the `test_runs` relations on top. Chunk exclusion for locking purposes happens at **plan** time,
 and a correlated subquery is not available then; runtime exclusion is too late, the locks are
 already taken. So the window has to be fetched in its own round trip and passed as bind
-parameters — which is what `common/db/run-window.ts` (`TEST_RUN_TIMES_SQL` +
+parameters — which is what `@perfana/shared/database/run-window` (`TEST_RUN_TIMES_SQL` +
 `analysisBoundsFromRow`) exists for. Anyone "fixing" a site by reaching into `test_runs` inline
 has regressed it while appearing to do the right thing, and no behavioural test can see it: the
 result set is identical. The guard is an assertion on the **emitted SQL text** — see
@@ -1257,10 +1257,12 @@ reads those as "bounded", so the heuristic in issue #674 undercounted: 5 of
 `report-data-fetcher.service.ts`'s 16 sites looked unbounded and 11 of them were. Any site
 still carrying `= false OR` is one of these. Grep for it, do not grep for `time >=`.
 
-Converted so far: **every raw-hypertable read in `apps/api`** —
-`test-runs-error-analysis.service.ts` (9 sites),
-`reports/services/report-data-fetcher.service.ts` (16) and
-`test-runs-performance-query.service.ts` (16). Four shapes came up and are worth copying:
+**Converted: every raw-hypertable read in the repo** — 41 in `apps/api` across five services
+beyond the three heavy ones, and 12 in `apps/worker`. The helper lives in
+`packages/shared/src/database/run-window.ts` because both apps bind from it; it is exported as
+`@perfana/shared/database/run-window`, a declared subpath (an undeclared one type-checks and
+then fails at boot — see the workspace-exports check in the root CLAUDE.md). Five shapes came
+up and are worth copying:
 
 - **The caller already holds the entity** — `analysisBoundsFromEntity(testRun)`, no round trip.
   The entity spells the columns `startTime` / `endTime` / `analysisStartOffset` /
@@ -1274,8 +1276,13 @@ Converted so far: **every raw-hypertable read in `apps/api`** —
   bounded `ANY(...)` aggregate over their ids. Same answer, one read instead of eleven.
 - **Two table aliases, one parameter set** — `timeBoundsSql(bounds, 't.time', 2)` and
   `timeBoundsSql(bounds, 'rr.time', 2)` built from the same `startIndex` give two clauses that
-  bind to the same values. The throughput fallback, the errors modal and the summary-timeseries
-  UNION all need this; pass `.params` from one of them, not both.
+  bind to the same values. The throughput fallback, the errors modal, the summary-timeseries
+  UNION and the perf-test pipeline's two-EXISTS probe all need this; pass `.params` from one of
+  them, not both.
+- **A query spanning every run of a SYSTEM** — the SUT-delete preview counts `requests_raw` and
+  `transactions` for all of a system's runs, so there is no run window. Its own
+  `MIN(start_time)`/`MAX(end_time)` still is one: a system that ran for two months in a
+  two-year table locks ~60 chunks instead of ~730.
 
 Three things that look like exceptions and are decisions:
 
@@ -1292,14 +1299,25 @@ Three things that look like exceptions and are decisions:
    and this is a read path. The hour of padding covers the 36 s-late rows the probe exists to
    detect. The window comes from the caller, which needed it anyway, so it costs no round trip.
 
-Still unbounded: the worker's `scenario-processors`, `ApdexCalculator`,
-`TransactionStatsRollupPipeline` and `PerformanceTestMetricsPipeline`. Re-measure a converted
-site with
+One shape is specific to the worker, in `TransactionStatsRollupPipeline`: its three statements
+compute the full-run AND the ramp-excluded aggregate in one pass, the second through `FILTER
+(WHERE time >= $2 AND time < $3)`. **Those FILTERs are not a bound** — the WHERE carried none,
+so each statement locked every chunk. They now take `$4`/`$5`, the padded run window, in the
+WHERE. It is a superset of every row the run wrote, so the full-run aggregates are unchanged
+and the FILTERs are untouched. Do not "simplify" by moving the ramp cutoffs into the WHERE:
+that would silently narrow the full-run half to the analysis window.
+
+Re-measure a converted site with
 `BEGIN; <query>; SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'relation'; ROLLBACK;`.
 
-The guards are `report-data-fetcher.time-bounds.spec.ts` and
-`test-runs-performance-query.time-bounds.spec.ts`: both drive each method in **both** toggle
-positions and assert on the emitted SQL — a parameterised bound, a real `Date` in the params,
-no `= false OR`, and no `time >= tr.<column>`. That last regex is deliberately about the
-comparison, not the column: `tr.start_time IS NOT NULL` is a legitimate predicate and appears
-in the repair probe.
+Four guards, all asserting on the emitted SQL because no behavioural test can see any of this:
+`report-data-fetcher.time-bounds.spec.ts`, `test-runs-performance-query.time-bounds.spec.ts`,
+the worker's `raw-hypertable-time-bounds.test.ts`, and the assertion inside
+`test-runs-error-analysis.service.spec.ts`. Each drives its methods in **both** toggle positions
+and checks for a parameterised bound, a real `Date` in the params, no `= false OR`, and no
+`time >= tr.<column>`. That last regex is deliberately about the comparison, not the column:
+`tr.start_time IS NOT NULL` is a legitimate predicate and appears in the repair probe. The
+helper itself has `packages/shared/src/database/__tests__/run-window.spec.ts`, which pins the
+rules a reader is most likely to "tidy": the hour of padding, that a toggle with no ramp
+configured still bounds, that `spanBounds` gives up entirely when a run has no start, and that
+`timeBoundsSql` emits no predicate rather than a `<= NULL` that would match nothing.
