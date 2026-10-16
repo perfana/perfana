@@ -22,11 +22,24 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * that tests continuously always land inside the 1-hour window, which is why
  * only some systems' detail pages feel slow.
  *
- * 7 days matches `compress_after` on the raw hypertables, so refreshes stay in
- * the uncompressed region. Re-refreshing an already-materialised window is a
- * no-op (~7 ms, "already up-to-date"), so the wider window costs nothing at
- * steady state — the policies consult the invalidation log, they do not
- * recompute the range.
+ * 7 days was chosen to match `compress_after` on the raw hypertables, so
+ * refreshes stayed in the uncompressed region. **Migration 1815 shortened that
+ * `compress_after` to 2 days and this window deliberately stayed at 7**, because
+ * the coupling was about where a refresh READS, not about correctness: a refresh
+ * reads the raw hypertable, and reads of compressed chunks work, they are only
+ * slower. It held when the JTL upload was the normal ingest path — a bundle
+ * arrives when the run finishes, so its early buckets are invalidated hours or
+ * days after their timestamps. With JTL retired and all ingest live from the
+ * backend listener at ~now(), a bucket is materialised within minutes of being
+ * written, long before its chunk reaches 2 days, so the window and the
+ * compression boundary no longer interact in practice. What can still invalidate
+ * an old bucket is a SUT import (`SUT_TRANSFER_ENABLED`, admin-only, default
+ * off), which writes historical rows at their original timestamps; that refresh
+ * reads compressed data and is slower, nothing more.
+ *
+ * Re-refreshing an already-materialised window is a no-op (~7 ms, "already
+ * up-to-date"), so the wider window costs nothing at steady state — the policies
+ * consult the invalidation log, they do not recompute the range.
  *
  * The first policy run after this migration works through the invalidation log
  * for the whole widened window (observed: ~5000 batches per view), so anything

@@ -31,18 +31,47 @@ services:
     # the CAGGs silently stop being materialised and every query that reads one
     # falls back to scanning the raw hypertable. Nothing errors; pages just crawl.
     #
-    # max_locks_per_transaction: ds_metrics and requests_raw use 1-day chunks (migration
-    # 1804) and have no retention policy, and every hot query filters on test_run_id with
-    # no time predicate, so one query locks every chunk plus its compressed twin. The
-    # lock table is this value x max_connections; the default 64 runs out as
-    # `out of shared memory` once a few hundred chunks exist and several backends
-    # plan at once.
+    # max_locks_per_transaction: ds_metrics, requests_raw, transactions and requests_error
+    # all use 1-day chunks (migrations 1804 and 1815) and none of them has a retention
+    # policy, and every hot query filters on test_run_id with no time predicate, so one
+    # query locks every chunk plus its compressed twin plus the indexes on both — measured
+    # at ~9-11 relation locks per chunk, not one: 136 locks over 12 chunks of requests_raw,
+    # 230 over 21 for a two-table join, and 417 over 46 for all four tables at once. At
+    # ~365 chunks per table per year that projects to ~8,000 locks for a two-table run
+    # query and ~13,000 for a four-table one.
+    #
+    # The budget is this value x (max_connections + max_prepared_transactions), NOT this
+    # value alone — a single transaction may exceed the per-transaction figure freely while
+    # the global pool holds. Measured: that 417-lock four-table query ran in one backend
+    # with this set to 256 and completed without error. So the trigger is CONCURRENCY x
+    # chunks, never one query crossing a threshold — at 128,000 pooled entries the
+    # two-table projection allows ~16 concurrent and the four-table one ~8; at 512,000,
+    # ~64 and ~32. Sizing this as a per-query limit produces the wrong headroom number. The
+    # timescaledb-ha image sets max_connections=500 itself, so 1024 gives ~512,000 entries.
+    # At an estimated ~168 B/entry (unmeasured) that is ~86 MB of shared memory for the
+    # whole table, i.e. ~65 MB MORE than the ~21 MB that 256 was already using.
+    #
+    # Be clear about what this buys, because 256 is not an imminent limit: at today's 46
+    # chunks the four-table query takes 417 locks, 0.3% of the pool, and a year out it
+    # still allows ~9 concurrent. 1024 makes that ~38. It is headroom for growth past a
+    # year and for the fact that NOTHING bounds chunk growth — there is no retention
+    # policy on any raw hypertable — not a fix for a firing warning. Migration 1815's
+    # check is keyed on the two-table projection and would not have tripped at 256 either.
+    #
+    # Two things to know before changing either number. The default 64 runs out as
+    # `out of shared memory` — a hard query error, not degradation — once a few hundred
+    # chunks exist and several backends plan at once. And LOWERING max_connections shrinks
+    # this table, which is the opposite of what you want when protecting memory.
+    #
+    # The root-cause fix is a parameterised time bound on those queries (136 -> 21 locks,
+    # measured): see issue #674. Note a bound read via a subquery on test_runs does NOT
+    # help — it measured worse (150) than no predicate at all.
     command:
       - postgres
       - -c
       - max_worker_processes=32
       - -c
-      - max_locks_per_transaction=256
+      - max_locks_per_transaction=1024
       # A worker that dies mid-aggregation frees the heavy-stage lock after its 5 min TTL,
       # but Postgres only notices the closed socket when it next writes, and an
       # aggregation writes nothing until it finishes: the next holder would overlap the
