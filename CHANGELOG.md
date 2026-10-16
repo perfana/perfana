@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.28] - 2026-10-16
+
+### Fixed
+- **A job that was turned away no longer disturbs the one that turned it away.** When two analyses of the same workload arrive together, the second is refused and waits its turn. On its way out it was tidying up after the *first* one: putting its data back into compressed storage while it was still writing to it.
+
+  Two things could follow. Usually the tidy-up simply waited for the first job to finish, holding the second job open for up to nine minutes doing nothing useful. Occasionally it won the race, and the running analysis then failed on data it had just prepared, taking a multi-minute calculation down with it. It retried and recovered, but the retry re-ran the whole calculation, which is slow for everyone else using the system at the time.
+
+  The analyse path was worse than it looked. A refused analysis does not give up immediately; it steps aside and tries again every minute for up to an hour, and each of those attempts was doing this. A job now tidies up only if it actually got the go-ahead to work.
+
+  Nothing about the stored data changes, and a job that was refused was never going to produce results anyway.
+
 ## [0.2.97.27] - 2026-10-16
 
 ### Changed

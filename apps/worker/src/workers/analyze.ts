@@ -292,10 +292,27 @@ export function analyzeTestWorker() {
       // Put back any chunk this job decompressed for a full collection on an old run
       // (PipelineOrchestrator.decompressRunSpanForCollection). Best-effort, like the
       // re-evaluate orchestrator's; a chunk left behind goes to the columnstore policy.
-      try {
-        await getDatabaseService().recompressTouchedChunks();
-      } catch (recompressError) {
-        logger.warn(`recompressTouchedChunks failed for job ${job.id}:`, recompressError);
+      //
+      // Only when this job held the scope lock. WorkerDatabaseService is a process
+      // singleton and its decompressed-chunk Set is shared by every job in the process,
+      // while this `finally` also runs on the two paths that did no work at all: the
+      // blocked re-park (DelayedError, every BLOCKED_REPARK_MS until BLOCKED_MAX_WAIT_MS)
+      // and the blocked throw. Draining there recompresses chunks the *blocking* job
+      // decompressed and is still writing to — at best its compress_chunk queues behind
+      // that job's AccessExclusiveLock, at worst its next DML resumes against a
+      // recompressed chunk and hits `tuple decompression limit exceeded`, failing a
+      // multi-minute heavy stage into a retry that re-runs the whole aggregation. The
+      // chunk is also gone from the Set, so the owning job's own finally will not put it
+      // back. A job that never acquired the lock decompressed nothing, so it owes nothing.
+      // ponytail: a lock guard, not per-chunk ref-counting — see issue #589 for why the
+      // full fix (Map<chunk, Set<jobId>>) was judged more concurrency surface than the
+      // remaining same-process race is worth.
+      if (lockAcquired) {
+        try {
+          await getDatabaseService().recompressTouchedChunks();
+        } catch (recompressError) {
+          logger.warn(`recompressTouchedChunks failed for job ${job.id}:`, recompressError);
+        }
       }
 
       // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
