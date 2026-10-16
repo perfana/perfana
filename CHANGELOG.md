@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.25] - 2026-10-16
+
+### Changed
+- **Load-test sample data is compressed after 2 days instead of 7, and is stored in daily chunks.** The tables holding raw requests, transactions and errors kept a week of data uncompressed before TimescaleDB compressed it, and transactions and errors were stored in week-long chunks, so a week's data could sit uncompressed for up to a fortnight. They now follow the same schedule the metrics table has had since v0.2.95.18: daily chunks, compressed once they are two days old. On a system taking 3,000 requests a second that is roughly 115 GB of uncompressed data down to 44 GB, and about 370 GB down to 275 GB after a year. Virtual-user samples are unchanged — they are small enough that daily chunks would compress them worse.
+
+  **If you run tests longer than two days, set `RAW_COMPRESS_AFTER` above your longest test.** Otherwise a soak test has its early data compressed while it is still running, which the live statistics still read correctly but more slowly. The first run of the new policy works through whatever backlog exists, so it is scheduled for 03:00 UTC by default — an hour after the metrics policy, so the two do not collide — and `RAW_COMPRESS_INITIAL_START` moves it if your quiet hour is elsewhere.
+
+  Operators running their own Postgres should check `max_locks_per_transaction`: two more tables now accumulate a chunk a day, and a query for one test run locks every chunk it might touch. The migration warns at deploy time if the setting is too low, and the warning accounts for something easy to miss — the lock table is sized by `max_locks_per_transaction` multiplied by `max_connections`, so *lowering* `max_connections` makes it smaller.
+
 ## [0.2.97.24] - 2026-10-14
 
 ### Fixed
