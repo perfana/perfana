@@ -5,6 +5,7 @@ import {
   AnalysisBounds,
   TEST_RUN_TIMES_SQL,
   analysisBoundsFromRow,
+  snapBoundsToChunks,
 } from '@perfana/shared/database/run-window';
 
 const NO_SCENARIO_SENTINEL = '__NO_SCENARIO__';
@@ -273,7 +274,12 @@ export class TestRunsErrorAnalysisService {
     // Fallback: rollup not yet computed (ingestion in progress, or finalization
     // failed). Scan requests_raw directly — slow on big runs, but keeps the
     // error-rate readout populated for in-progress runs.
-    const rawTime = buildTimeFilter(bounds, 2);
+    // Whole-run aggregate: widen to the chunk boundary so the planner can drop the
+    // qual on a fully covered chunk. Restores the ~1.9x buffer cost a plain bound adds
+    // to a scan like this (8,513 vs 16,186 on a 2.5 M-row run) for one ~3 ms catalog
+    // lookup, cached per table. Selective reads must NOT do this — 3 ms dwarfs them.
+    const rawTime = buildTimeFilter(
+      await snapBoundsToChunks((sql, p) => this.dataSource.query(sql, p), 'requests_raw', bounds), 2);
     const rawFilter = buildScenarioFilter(scenarios, rawTime.nextIndex);
     const totalRequestsQuery = `
       SELECT COUNT(*) as total

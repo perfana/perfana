@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import {
   TEST_RUN_TIMES_SQL,
   analysisBoundsFromRow,
+  snapBoundsToChunks,
   timeBoundsSql,
 } from '@perfana/shared/database/run-window';
 
@@ -70,7 +71,15 @@ export class BenchmarkCalculatorService {
       // Bounded, or this locks every chunk of `requests_raw` — see
       // @perfana/shared/database/run-window.
       const runRows = await this.dataSource.query(TEST_RUN_TIMES_SQL, [testRunId]);
-      const time = timeBoundsSql(analysisBoundsFromRow(runRows?.[0], false), 'time', 2);
+      // Whole-run aggregate: widen to the chunk boundary so the planner can drop the
+      // qual on a fully covered chunk. Restores the ~1.9x buffer cost a plain bound adds
+      // to a scan like this (8,513 vs 16,186 on a 2.5 M-row run) for one ~3 ms catalog
+      // lookup, cached per table. Selective reads must NOT do this — 3 ms dwarfs them.
+      const time = timeBoundsSql(
+        await snapBoundsToChunks(
+          (sql, p) => this.dataSource.query(sql, p), 'requests_raw',
+          analysisBoundsFromRow(runRows?.[0], false)),
+        'time', 2);
       const result = await this.dataSource.query(`
         SELECT DISTINCT transaction_name
         FROM requests_raw

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.27] - 2026-10-16
+
+### Changed
+- **The one slowdown v0.2.97.26 introduced is gone.** That release asked every query on the raw sample tables which days of data it needed, which stopped them locking the whole table. For queries that look something up — clicking into an error, expanding a transaction — that was a large speed-up. For queries that total a whole test run it was a slowdown of roughly 1.9x, because the database could no longer answer them from its compressed summaries and had to unpack the timestamps instead.
+
+  Those whole-run queries now round their window out to the edges of the storage blocks it already touches. The database recognises that it needs all of each block and skips the check entirely. On a 2.5-million-row run the count that regressed went from 16,186 page reads back to 8,513 — slightly better than before any of this work — while keeping the reduced locking in full.
+
+  This is applied only to the handful of whole-run queries that were affected. Resolving the block edges costs a small lookup, which is free next to a query that reads a whole run and would be the dominant cost of a query that reads ten rows, so the lookups stay off those.
+
+  No numbers change. The rounded window is always wider than the one it replaces, never narrower.
+
 ## [0.2.97.26] - 2026-10-16
 
 ### Fixed

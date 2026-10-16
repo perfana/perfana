@@ -80,10 +80,16 @@ const isAggregated = (m: { dashboard_label: string | null }) =>
  * `mockDataSource` answers the scenario lookup first, then the insert.
  */
 const mockDataSource = (scenarios: string[] = ['loadtest']) => {
-  const query = vi
-    .fn()
-    .mockResolvedValueOnce(scenarios.map((scenario_name) => ({ scenario_name })))
-    .mockResolvedValue([[], 42]);
+  // Dispatch by SQL rather than by call order: the chunk-boundary lookup (#674
+  // follow-up) would otherwise consume the scenario slot. [] means "no chunks", so the
+  // bound is left unsnapped — these tests are not about chunk alignment.
+  let answered = 0;
+  const query = vi.fn((sql: string) => {
+    if (String(sql).includes('timescaledb_information.chunks')) return Promise.resolve([]);
+    return Promise.resolve(
+      answered++ === 0 ? scenarios.map((scenario_name) => ({ scenario_name })) : [[], 42],
+    );
+  });
   // The insert runs inside dataSource.transaction behind two set_config budget
   // statements; keep those out of `query` so calls[1] is still the insert.
   const transaction = (fn: (em: { query: typeof query }) => Promise<unknown>) =>
@@ -91,11 +97,15 @@ const mockDataSource = (scenarios: string[] = ['loadtest']) => {
   return { query, transaction };
 };
 
+/** By content, not by index: the chunk-boundary lookup shifts call positions. */
+const insertCall = (dataSource: { query: { mock: { calls: unknown[][] } } }) =>
+  dataSource.query.mock.calls.find((c) => /INSERT INTO/i.test(String(c[0])))!;
+
 const insertSql = (dataSource: { query: { mock: { calls: unknown[][] } } }) =>
-  (dataSource.query.mock.calls[1]![0] as string).replace(/\s+/g, ' ');
+  (insertCall(dataSource)[0] as string).replace(/\s+/g, ' ');
 
 const insertParams = (dataSource: { query: { mock: { calls: unknown[][] } } }) =>
-  dataSource.query.mock.calls[1]![1] as unknown[];
+  insertCall(dataSource)[1] as unknown[];
 
 describe('RequestsProcessor rollup rows', () => {
   it('gives the roll-up grouping set one fixed name instead of "null.null"', async () => {
@@ -293,11 +303,12 @@ describe('ErrorsProcessor on a live tick', () => {
   it('writes the zero-error points at start_time too while the run is live', async () => {
     // The zero-errors branch builds its own rows from the requests_raw scenario lookup;
     // it has to land on the same interim timestamp or the final pass cannot drop it.
+    // Dispatch by SQL: the chunk-boundary lookup (#674 follow-up) would otherwise take
+    // the errors slot. [] means "no chunks", so the bound is left unsnapped.
+    const seq = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{ scenario_name: 'loadtest' }]);
     const dataSource = {
-      query: vi
-        .fn()
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([{ scenario_name: 'loadtest' }]),
+      query: vi.fn((sql: string, params?: unknown[]) =>
+        String(sql).includes('timescaledb_information.chunks') ? Promise.resolve([]) : seq(sql, params)),
     };
     const processor = new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger());
 

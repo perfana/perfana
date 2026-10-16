@@ -1,7 +1,10 @@
 import {
+  CHUNK_CACHE_TTL_MS,
   RUN_WINDOW_PAD_MS,
   analysisBoundsFromEntity,
   analysisBoundsFromRow,
+  resetChunkCache,
+  snapBoundsToChunks,
   spanBounds,
   timeBoundsSql,
 } from '../run-window';
@@ -126,5 +129,106 @@ describe('run-window', () => {
       expect(t.params).toEqual([]);
       expect(t.nextIndex).toBe(2);
     });
+  });
+});
+
+describe('snapBoundsToChunks (#674 follow-up)', () => {
+  const D = (s: string) => new Date(s);
+  // One 7-day chunk (pre-migration-1815 width) then two 1-day chunks. Mixed widths are
+  // the normal state of a table whose chunk_time_interval was changed, and the reason
+  // these boundaries are read rather than computed.
+  const ROWS = [
+    { range_start: '2026-09-10T00:00:00.000Z', range_end: '2026-09-17T00:00:00.000Z' },
+    { range_start: '2026-09-17T00:00:00.000Z', range_end: '2026-09-18T00:00:00.000Z' },
+    { range_start: '2026-09-18T00:00:00.000Z', range_end: '2026-09-19T00:00:00.000Z' },
+  ];
+  const querier = (rows: unknown[] = ROWS) => jest.fn().mockResolvedValue(rows);
+
+  beforeEach(() => resetChunkCache());
+
+  it('widens outward to the real chunk boundary', async () => {
+    const b = await snapBoundsToChunks(querier(), 'requests_raw', {
+      startCutoff: D('2026-09-10T02:03:05.000Z'), endCutoff: D('2026-09-10T07:05:35.000Z'),
+    });
+    expect(b.startCutoff!.toISOString()).toBe('2026-09-10T00:00:00.000Z');
+    expect(b.endCutoff!.toISOString()).toBe('2026-09-17T00:00:00.000Z');
+  });
+
+  it('never narrows — the result is always a superset of the input', async () => {
+    // A window wider than the chunks it covers keeps its own edges.
+    const wide = { startCutoff: D('2026-09-01T00:00:00.000Z'), endCutoff: D('2026-09-30T00:00:00.000Z') };
+    const b = await snapBoundsToChunks(querier(), 'requests_raw', wide);
+    expect(b.startCutoff!.getTime()).toBeLessThanOrEqual(wide.startCutoff.getTime());
+    expect(b.endCutoff!.getTime()).toBeGreaterThanOrEqual(wide.endCutoff.getTime());
+  });
+
+  it('touches no chunk the original window did not', async () => {
+    // Snapping must not pull in a neighbouring chunk — that would add locks back.
+    const b = await snapBoundsToChunks(querier(), 'requests_raw', {
+      startCutoff: D('2026-09-17T06:00:00.000Z'), endCutoff: D('2026-09-17T08:00:00.000Z'),
+    });
+    expect(b.startCutoff!.toISOString()).toBe('2026-09-17T00:00:00.000Z');
+    expect(b.endCutoff!.toISOString()).toBe('2026-09-18T00:00:00.000Z');
+  });
+
+  /**
+   * The trap that cost 11 locks before it was caught. A chunk's range is half-open, so a
+   * bound snapped to `range_end` and compared with `<=` reaches one instant into the NEXT
+   * chunk and takes its locks: measured 32 relation locks against 21 for the same rows,
+   * giving back half of what the bound is for.
+   */
+  it('marks a chunk-snapped end half-open, and timeBoundsSql emits <', async () => {
+    const b = await snapBoundsToChunks(querier(), 'requests_raw', {
+      startCutoff: D('2026-09-10T02:03:05.000Z'), endCutoff: D('2026-09-10T07:05:35.000Z'),
+    });
+    expect(b.endExclusive).toBe(true);
+    expect(timeBoundsSql(b, 'time', 2).clause).toBe('AND time >= $2::timestamptz AND time < $3::timestamptz');
+  });
+
+  it('keeps an inclusive end when the caller window already reached past the last chunk', async () => {
+    // Nothing was snapped on that side, so the caller's own inclusive end stands.
+    const b = await snapBoundsToChunks(querier(), 'requests_raw', {
+      startCutoff: D('2026-09-10T02:00:00.000Z'), endCutoff: D('2026-10-01T00:00:00.000Z'),
+    });
+    expect(b.endCutoff!.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    expect(b.endExclusive).toBe(false);
+    expect(timeBoundsSql(b, 'time', 2).clause).toContain('time <= $3');
+  });
+
+  it('leaves an in-flight run open-ended', async () => {
+    const b = await snapBoundsToChunks(querier(), 'requests_raw', {
+      startCutoff: D('2026-09-10T02:00:00.000Z'), endCutoff: null,
+    });
+    expect(b.startCutoff!.toISOString()).toBe('2026-09-10T00:00:00.000Z');
+    expect(b.endCutoff).toBeNull();
+  });
+
+  /** It is an optimisation. It must never be the reason a read breaks. */
+  it.each([
+    ['the catalog query throws', () => jest.fn().mockRejectedValue(new Error('no such view'))],
+    ['the table has no chunks', () => querier([])],
+  ])('returns the bounds untouched when %s', async (_label, mk) => {
+    const input = { startCutoff: D('2026-09-10T02:00:00.000Z'), endCutoff: D('2026-09-10T07:00:00.000Z') };
+    await expect(snapBoundsToChunks(mk(), 'requests_raw', input)).resolves.toEqual(input);
+  });
+
+  it('does nothing, and asks nothing, for an unbounded window', async () => {
+    const q = querier();
+    await expect(snapBoundsToChunks(q, 'requests_raw', { startCutoff: null, endCutoff: null }))
+      .resolves.toEqual({ startCutoff: null, endCutoff: null });
+    expect(q).not.toHaveBeenCalled();
+  });
+
+  it('caches per table, and re-reads once the TTL lapses', async () => {
+    const q = querier();
+    const w = { startCutoff: D('2026-09-10T02:00:00.000Z'), endCutoff: D('2026-09-10T07:00:00.000Z') };
+    await snapBoundsToChunks(q, 'requests_raw', w, 1_000);
+    await snapBoundsToChunks(q, 'requests_raw', w, 1_000 + CHUNK_CACHE_TTL_MS - 1);
+    expect(q).toHaveBeenCalledTimes(1);
+    await snapBoundsToChunks(q, 'requests_raw', w, 1_000 + CHUNK_CACHE_TTL_MS + 1);
+    expect(q).toHaveBeenCalledTimes(2);
+    // A different table is a different cache entry.
+    await snapBoundsToChunks(q, 'transactions', w, 1_000 + CHUNK_CACHE_TTL_MS + 1);
+    expect(q).toHaveBeenCalledTimes(3);
   });
 });

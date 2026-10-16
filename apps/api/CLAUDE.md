@@ -1236,10 +1236,23 @@ on the same run, identical results:
 So a selective read gets whole-chunk exclusion and wins enormously; a whole-run aggregate pays
 ~1.5-1.9x the buffer reads. `shared_blks_read` is the exact axis issues #9 and #34 identify as
 what collapses the buffer cache for everything else, so this is not nothing — it is accepted
-because the lock growth is an unbounded hard failure and this is bounded degradation. A
-follow-up worth testing: snapping the bound outward to the **chunk boundary** instead of an
-arbitrary hour measured 8,513 buffers on the `count(*)` case — parity with unbounded, same lock
-set — but it needs the deployment's real `chunk_interval`, so it is not hardcodable.
+because the lock growth is an unbounded hard failure and this is bounded degradation. **Shipped in v0.2.97.27 for the aggregate shapes only:** `snapBoundsToChunks` widens the window
+outward to the boundaries of the chunks it already overlaps, which lets the planner drop the qual
+on a fully covered chunk. Measured on the same `count(*)`: 8,513 buffers against 16,186 padded and
+8,562 unbounded — better than before the bound existed — with the lock set unchanged at 21.
+
+Three things about it that are not obvious, each of which cost a measurement to learn:
+
+- **The interval cannot be computed, it must be read from the catalog.** `requests_raw` reports a
+  1-day `chunk_time_interval` while its pre-1815 chunks are still 7 days wide. A bound snapped
+  with the current interval covers none of those: measured 16,161 buffers, no better than not
+  snapping. Any table whose interval was ever changed has mixed widths.
+- **The snapped end must be half-open.** A chunk's range is `[start, end)`, so snapping to
+  `range_end` and comparing `<=` reaches one instant into the next chunk and takes its locks:
+  32 against 21. `AnalysisBounds.endExclusive` exists for this and `timeBoundsSql` honours it.
+- **It belongs on aggregates only.** The catalog lookup is ~3 ms: 1.7 % of a 180 ms whole-run
+  scan, and 200x the cost of the 0.016 ms selective reads elsewhere in these files, which are
+  already 470x better from plain chunk exclusion. Four sites use it; the rest must not.
 
 The end of that road is a hard `out of shared memory`, not degradation: the shared lock table
 holds `max_locks_per_transaction × (max_connections + max_prepared_transactions)` entries, and

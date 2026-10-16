@@ -187,7 +187,13 @@ describe('scenario-level compare configs opt out of the floor', () => {
 
   test('ErrorsProcessor, zero-errors branch: the same opt-out on the scenario-lookup path', async () => {
     const dataSource = {
-      query: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{ scenario_name: 'loadtest' }]),
+      // The chunk-boundary lookup (#674 follow-up) answers [] by SQL text rather than
+      // consuming a slot in this sequence; [] means "no chunks", so nothing is snapped.
+      query: (() => {
+        const seq = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{ scenario_name: 'loadtest' }]);
+        return vi.fn((sql: string, params?: unknown[]) =>
+          String(sql).includes('timescaledb_information.chunks') ? Promise.resolve([]) : seq(sql, params));
+      })(),
     };
     const { compareConfigs } = await new ErrorsProcessor(dataSource as never, makeDashboardManager(), silentLogger())
       .process('run-1', testRun);
