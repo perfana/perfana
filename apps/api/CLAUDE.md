@@ -1257,9 +1257,10 @@ reads those as "bounded", so the heuristic in issue #674 undercounted: 5 of
 `report-data-fetcher.service.ts`'s 16 sites looked unbounded and 11 of them were. Any site
 still carrying `= false OR` is one of these. Grep for it, do not grep for `time >=`.
 
-Converted so far: `test-runs-error-analysis.service.ts` (all 9 sites) and
-`reports/services/report-data-fetcher.service.ts` (all 16). Three shapes came up in the second
-one and are worth copying:
+Converted so far: **every raw-hypertable read in `apps/api`** —
+`test-runs-error-analysis.service.ts` (9 sites),
+`reports/services/report-data-fetcher.service.ts` (16) and
+`test-runs-performance-query.service.ts` (16). Four shapes came up and are worth copying:
 
 - **The caller already holds the entity** — `analysisBoundsFromEntity(testRun)`, no round trip.
   The entity spells the columns `startTime` / `endTime` / `analysisStartOffset` /
@@ -1271,21 +1272,34 @@ one and are worth copying:
   aggregating `transactions` per outer `test_runs` row; the window is only known per row, so
   there is nothing a planner can exclude on. It is now two queries: fetch the runs, then one
   bounded `ANY(...)` aggregate over their ids. Same answer, one read instead of eleven.
+- **Two table aliases, one parameter set** — `timeBoundsSql(bounds, 't.time', 2)` and
+  `timeBoundsSql(bounds, 'rr.time', 2)` built from the same `startIndex` give two clauses that
+  bind to the same values. The throughput fallback, the errors modal and the summary-timeseries
+  UNION all need this; pass `.params` from one of them, not both.
 
-Still unbounded: 7 sites in `test-runs-performance-query.service.ts` (which also carries 20-odd
-`= false OR` predicates, so expect that count to grow on reading), and the worker's
-`scenario-processors`, `ApdexCalculator`, `TransactionStatsRollupPipeline` and
-`PerformanceTestMetricsPipeline`. Re-measure a converted site with
+Three things that look like exceptions and are decisions:
+
+1. **A CAGG read is not one of these.** `transactions_5s` / `requests_raw_5s` are already
+   bucket-bounded by the run window, so they are handed the ramp cutoff **only when the toggle
+   is on**. Passing the padded window start there is not a lock bound — it is a wrong first
+   bucket. The 20-odd remaining `= false OR` predicates in
+   `test-runs-performance-query.service.ts` are all CAGG reads, and correct as they stand.
+2. **The errors modal is bounded by the run window, never the analysis one.** It has always
+   listed every error in the run; the toggle reaches its sampler arms only.
+3. **`repairEmptySamplerRollup`'s probe is bounded now**, and its old comment arguing otherwise
+   is resolved rather than overruled. Unbounded it was cheap to *execute* — a 1.9 ms index-only
+   descent — but execution was never the cost: the locks are taken before the statement runs,
+   and this is a read path. The hour of padding covers the 36 s-late rows the probe exists to
+   detect. The window comes from the caller, which needed it anyway, so it costs no round trip.
+
+Still unbounded: the worker's `scenario-processors`, `ApdexCalculator`,
+`TransactionStatsRollupPipeline` and `PerformanceTestMetricsPipeline`. Re-measure a converted
+site with
 `BEGIN; <query>; SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'relation'; ROLLBACK;`.
 
-Two of those seven are `repairEmptySamplerRollup`'s probe, and converting it needs a decision
-rather than a patch: its comment argues for being unbounded because a row arriving outside the
-recorded window is the case it exists to detect. The hour of padding covers the 36 s lag that
-comment measured, so a padded bound is probably right — but the probe also *joins* `test_runs`
-already, so bounding it means splitting that into two round trips in a repair path, not adding
-a predicate.
-
-One deliberate exception in the converted file: the throughput CAGG path
-(`getThroughputStatsFromCaggForReport`) is handed the ramp cutoff **only when the toggle is on**.
-It reads `transactions_5s` / `requests_raw_5s`, which are already bucket-bounded by the run
-window, so the padded window start is not a lock bound there — it is a wrong first bucket.
+The guards are `report-data-fetcher.time-bounds.spec.ts` and
+`test-runs-performance-query.time-bounds.spec.ts`: both drive each method in **both** toggle
+positions and assert on the emitted SQL — a parameterised bound, a real `Date` in the params,
+no `= false OR`, and no `time >= tr.<column>`. That last regex is deliberately about the
+comparison, not the column: `tr.start_time IS NOT NULL` is a legitimate predicate and appears
+in the repair probe.

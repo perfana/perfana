@@ -261,6 +261,30 @@ describe('TestRunsPerformanceQueryService', () => {
     /has_requests_raw_cagg/i.test(sql);
 
   /**
+   * The run-window lookup every raw-hypertable read now resolves its `time` bounds from
+   * (#674). It fires whatever `excludeRampUp` says — the bound is a chunk-lock bound,
+   * not the analysis-window toggle — so it is dispatched by SQL rather than taking a
+   * slot in each test's result sequence.
+   *
+   * 10:00 start, 120s ramp-up; 11:00 end, 60s ramp-down. Toggle off → the hour-padded
+   * run window (09:00 / 12:00); toggle on → the analysis window (10:02 / 10:59).
+   */
+  const isRunWindowLookup = (sql: unknown): boolean =>
+    typeof sql === 'string' &&
+    /SELECT start_time, ramp_up, end_time, ramp_down FROM test_runs/.test(sql);
+
+  const RUN_WINDOW_ROW = [{
+    start_time: '2025-01-01T10:00:00.000Z',
+    ramp_up: '120',
+    end_time: '2025-01-01T11:00:00.000Z',
+    ramp_down: '60',
+  }];
+  const WINDOW_START = new Date('2025-01-01T09:00:00.000Z');
+  const WINDOW_END = new Date('2025-01-01T12:00:00.000Z');
+  const ANALYSIS_START = new Date('2025-01-01T10:02:00.000Z');
+  const ANALYSIS_END = new Date('2025-01-01T10:59:00.000Z');
+
+  /**
    * Configures testRunRepo.query so that the first call (UUID lookup) returns
    * the given test_run_id, and all subsequent calls return the provided rows.
    * `SET LOCAL work_mem` preludes are treated as no-op steps.
@@ -273,6 +297,7 @@ describe('TestRunsPerformanceQueryService', () => {
     let idx = 0;
     (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
       if (isSetLocalWorkMem(sql)) return [];
+      if (isRunWindowLookup(sql)) return RUN_WINDOW_ROW;
       if (isRollupExistenceCheck(sql)) return [];
       if (isRollupScopeLookup(sql)) return [];
       if (isCaggScopeLookup(sql)) return [];
@@ -295,6 +320,7 @@ describe('TestRunsPerformanceQueryService', () => {
     let idx = 0;
     (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
       if (isSetLocalWorkMem(sql)) return [];
+      if (isRunWindowLookup(sql)) return RUN_WINDOW_ROW;
       if (isRollupExistenceCheck(sql)) return [];
       if (isRollupScopeLookup(sql)) return [];
       if (isCaggScopeLookup(sql)) return [];
@@ -315,6 +341,7 @@ describe('TestRunsPerformanceQueryService', () => {
   function mockWithRollupHit(rollupRows: unknown[]) {
     (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
       if (isSetLocalWorkMem(sql)) return [];
+      if (isRunWindowLookup(sql)) return RUN_WINDOW_ROW;
       if (isRollupExistenceCheck(sql)) return [{ '?column?': 1 }];
       if (isRollupScopeLookup(sql)) return [];
       if (isCaggScopeLookup(sql)) return [];
@@ -437,43 +464,47 @@ describe('TestRunsPerformanceQueryService', () => {
     });
 
     describe('ramp-up exclusion', () => {
-      it('fetches cutoff time when excludeRampUp is true', async () => {
+      it('narrows the stats read to the analysis window when excludeRampUp is true', async () => {
         // Arrange – plain test_run_id → no UUID lookup
-        // First query: ramp-up cutoff; second: SET LOCAL work_mem; third: stats
-        const startTime = new Date('2024-01-01T10:00:00Z');
-        mockQuerySequence(
-          [{ start_time: startTime.toISOString(), ramp_up: '300' }],
-          [RAW_TRANSACTION_ROW],
-        );
+        mockQuerySequence([RAW_TRANSACTION_ROW]);
 
         // Act
         const result = await service.getTransactionStats(TEST_RUN_ID, true, IS_ADMIN, []);
 
         // Assert
         expect(result).toHaveLength(1);
-        // 7 calls: rollup existence check + scope lookup (rollup-pending gate)
-        // + CAGG scope lookup (live-Apdex CAGG plan) + ramp-up lookup
-        // + SET LOCAL statement_timeout + SET LOCAL work_mem + stats query
-        expect(testRunRepo.query).toHaveBeenCalledTimes(7);
         const calls = (testRunRepo.query as jest.Mock).mock.calls;
         expect(calls.some(([sql]) => (sql as string).includes('SELECT start_time, ramp_up'))).toBe(true);
+        const statsCall = calls.find(([sql]: [string]) => sql.includes('approx_percentile'))!;
+        // The fixture's run is 10:00-11:00 with a 120s ramp-up and a 60s ramp-down.
+        expect(statsCall[1][1]).toEqual(ANALYSIS_START);
+        expect(statsCall[1][2]).toEqual(ANALYSIS_END);
       });
 
-      it('passes null cutoff when excludeRampUp is false', async () => {
-        // Arrange – only 1 query (stats), no ramp-up lookup
+      /**
+       * #674: the toggle narrows the window, it does not remove it. With the toggle off
+       * the read still carries the run's own window, padded an hour either side —
+       * without it the statement locks every chunk of `transactions`.
+       */
+      it('still bounds the read to the padded run window when excludeRampUp is false', async () => {
+        // Arrange
         mockQuerySequence([RAW_TRANSACTION_ROW]);
 
         // Act
         await service.getTransactionStats(TEST_RUN_ID, false, IS_ADMIN, []);
 
-        // Assert – stats query receives $3 = null (cutoffTime)
+        // Assert
         const statsCalls = (testRunRepo.query as jest.Mock).mock.calls;
         // The stats query is identified by the approx_percentile call (new shape)
         const statsCall = statsCalls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         );
         expect(statsCall).toBeDefined();
-        expect(statsCall![1][2]).toBeNull();
+        expect(statsCall![0]).toContain('t.time >= $2');
+        expect(statsCall![0]).toContain('t.time <= $3');
+        expect(statsCall![0]).not.toContain('= false OR');
+        expect(statsCall![1][1]).toEqual(WINDOW_START);
+        expect(statsCall![1][2]).toEqual(WINDOW_END);
       });
 
       it('passes null cutoff when ramp_up data missing from DB', async () => {
@@ -497,9 +528,9 @@ describe('TestRunsPerformanceQueryService', () => {
           sql.includes('approx_percentile')
         )!;
         expect(statsCall[0]).toContain("interval '1 minute'");
-        // Admin params: [testRunId, excludeRampUp, cutoffTime, endCutoff, sinceMinutes]
-        expect(statsCall[1]).toHaveLength(5);
-        expect(statsCall[1][4]).toBe(60);
+        // Admin params: [testRunId, startCutoff, endCutoff, sinceMinutes]
+        expect(statsCall[1]).toHaveLength(4);
+        expect(statsCall[1][3]).toBe(60);
       });
 
       it('includes window filter and org filter for non-admin with sinceMinutes', async () => {
@@ -510,10 +541,10 @@ describe('TestRunsPerformanceQueryService', () => {
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         )!;
-        // Non-admin params: [testRunId, excludeRampUp, cutoffTime, endCutoff, sinceMinutes, orgIds]
-        expect(statsCall[1]).toHaveLength(6);
-        expect(statsCall[1][4]).toBe(30);
-        expect(statsCall[1][5]).toEqual(ORG_IDS);
+        // Non-admin params: [testRunId, startCutoff, endCutoff, sinceMinutes, orgIds]
+        expect(statsCall[1]).toHaveLength(5);
+        expect(statsCall[1][3]).toBe(30);
+        expect(statsCall[1][4]).toEqual(ORG_IDS);
       });
 
       it('omits window filter when sinceMinutes is undefined (admin)', async () => {
@@ -524,8 +555,8 @@ describe('TestRunsPerformanceQueryService', () => {
         const statsCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         )!;
-        // Admin params without sinceMinutes: [testRunId, excludeRampUp, cutoffTime, endCutoff]
-        expect(statsCall[1]).toHaveLength(4);
+        // Admin params without sinceMinutes: [testRunId, startCutoff, endCutoff]
+        expect(statsCall[1]).toHaveLength(3);
       });
     });
 
@@ -1275,33 +1306,33 @@ describe('TestRunsPerformanceQueryService', () => {
     });
 
     describe('ramp-up exclusion', () => {
-      it('fetches cutoff time when excludeRampUp is true', async () => {
-        const startTime = new Date('2024-01-01T10:00:00Z');
-        mockQuerySequence(
-          [{ start_time: startTime.toISOString(), ramp_up: '120' }],
-          [RAW_SAMPLER_ROW],
-        );
+      it('narrows the samples read to the analysis window when excludeRampUp is true', async () => {
+        mockQuerySequence([RAW_SAMPLER_ROW]);
 
         const result = await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, true, IS_ADMIN, []);
 
         expect(result).toHaveLength(1);
-        // 8 calls: rollup existence check + scope lookup (rollup-pending gate)
-        // + CAGG scope lookup (live-Apdex CAGG plan) + ramp-up lookup
-        // + SET LOCAL statement_timeout + SET LOCAL work_mem + samples query
-        // + parallel-group lookup (bounded requests_raw read, decorates the result)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(8);
+        const samplesCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          sql.includes('FROM requests_raw r'),
+        )!;
+        expect(samplesCall[0]).toContain('r.time >= $3');
+        expect(samplesCall[0]).toContain('r.time <= $4');
+        expect(samplesCall[1][2]).toEqual(ANALYSIS_START);
+        expect(samplesCall[1][3]).toEqual(ANALYSIS_END);
       });
 
-      it('does not fetch cutoff when excludeRampUp is false', async () => {
+      /** #674: still bounded with the toggle off, to the padded run window. */
+      it('still bounds the samples read when excludeRampUp is false', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, IS_ADMIN, []);
 
-        // 7 calls — rollup existence check + scope lookup (rollup-pending gate)
-        // + CAGG scope lookup (live-Apdex CAGG plan) + SET LOCAL statement_timeout
-        // + SET LOCAL work_mem + samples query (no ramp-up lookup)
-        // + parallel-group lookup (bounded requests_raw read, decorates the result)
-        expect(testRunRepo.query).toHaveBeenCalledTimes(7);
+        const samplesCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
+          sql.includes('FROM requests_raw r'),
+        )!;
+        expect(samplesCall[0]).not.toContain('= false OR');
+        expect(samplesCall[1][2]).toEqual(WINDOW_START);
+        expect(samplesCall[1][3]).toEqual(WINDOW_END);
       });
     });
 
@@ -1501,6 +1532,7 @@ const chainRow = (
         let call = 0;
         (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
           if (isSetLocalWorkMem(sql)) return [];
+          if (isRunWindowLookup(sql)) return RUN_WINDOW_ROW;
           if (isRollupExistenceCheck(sql)) return [];
           if (isRollupScopeLookup(sql)) return [];
           if (isCaggScopeLookup(sql)) return [];
@@ -1651,9 +1683,9 @@ const chainRow = (
           sql.includes('approx_percentile')
         )!;
         expect(samplerCall[0]).toContain("interval '1 minute'");
-        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, sinceMinutes]
-        expect(samplerCall[1]).toHaveLength(6);
-        expect(samplerCall[1][5]).toBe(45);
+        // Params: [testRunId, transactionName, startCutoff, endCutoff, sinceMinutes]
+        expect(samplerCall[1]).toHaveLength(5);
+        expect(samplerCall[1][4]).toBe(45);
       });
 
       it('appends orgIds after sinceMinutes for non-admin', async () => {
@@ -1664,13 +1696,13 @@ const chainRow = (
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         )!;
-        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, sinceMinutes, orgIds]
-        expect(samplerCall[1]).toHaveLength(7);
-        expect(samplerCall[1][5]).toBe(15);
-        expect(samplerCall[1][6]).toEqual(ORG_IDS);
+        // Params: [testRunId, transactionName, startCutoff, endCutoff, sinceMinutes, orgIds]
+        expect(samplerCall[1]).toHaveLength(6);
+        expect(samplerCall[1][4]).toBe(15);
+        expect(samplerCall[1][5]).toEqual(ORG_IDS);
       });
 
-      it('places orgIds at position 5 when sinceMinutes absent (non-admin)', async () => {
+      it('places orgIds after the window bounds when sinceMinutes is absent (non-admin)', async () => {
         mockQuerySequence([RAW_SAMPLER_ROW]);
 
         await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, false, NOT_ADMIN, ORG_IDS);
@@ -1678,9 +1710,9 @@ const chainRow = (
         const samplerCall = (testRunRepo.query as jest.Mock).mock.calls.find(([sql]: [string]) =>
           sql.includes('approx_percentile')
         )!;
-        // Params: [testRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, orgIds]
-        expect(samplerCall[1]).toHaveLength(6);
-        expect(samplerCall[1][5]).toEqual(ORG_IDS);
+        // Params: [testRunId, transactionName, startCutoff, endCutoff, orgIds]
+        expect(samplerCall[1]).toHaveLength(5);
+        expect(samplerCall[1][4]).toEqual(ORG_IDS);
       });
     });
 
@@ -2305,8 +2337,9 @@ const chainRow = (
         await service.getTransactionErrors(TEST_RUN_ID, undefined, undefined, IS_ADMIN, []);
 
         const call = getMainErrorsCall();
-        // Params should only contain testRunId (no extra filters)
-        expect(call[1]).toEqual([TEST_RUN_ID]);
+        // testRunId, then the run window — the only params with no filters (#674).
+        expect(call[1]).toEqual([TEST_RUN_ID, WINDOW_START, WINDOW_END]);
+        expect(call[0]).toContain('re.time >= $2');
       });
 
       it('appends transaction filter param when transactionName provided', async () => {
@@ -2316,7 +2349,8 @@ const chainRow = (
 
         const call = getMainErrorsCall();
         expect(call[1]).toContain('checkout');
-        expect(call[1]).toHaveLength(2);
+        // + the two window bounds
+        expect(call[1]).toHaveLength(4);
       });
 
       it('appends sampler filter param when samplerName provided', async () => {
@@ -2326,7 +2360,7 @@ const chainRow = (
 
         const call = getMainErrorsCall();
         expect(call[1]).toContain('POST /checkout');
-        expect(call[1]).toHaveLength(2);
+        expect(call[1]).toHaveLength(4);
       });
 
       it('appends both transaction and sampler filter params', async () => {
@@ -2337,7 +2371,7 @@ const chainRow = (
         const call = getMainErrorsCall();
         expect(call[1]).toContain('checkout');
         expect(call[1]).toContain('POST /checkout');
-        expect(call[1]).toHaveLength(3);
+        expect(call[1]).toHaveLength(5);
       });
 
       it('appends orgIds as last param for non-admin', async () => {
@@ -2653,30 +2687,15 @@ const chainRow = (
      * getVirtualUserStats issues two parallel queries (overall + by_scenario)
      * via Promise.all. We configure the mock to return results in call order.
      */
+    /**
+     * The window lookup fires on every call now (#674) and is dispatched by SQL, so
+     * the sequence below only counts the two data queries.
+     */
     function mockVuQueries(overallRows: unknown[], scenarioRows: unknown[]) {
       let callCount = 0;
-      (testRunRepo.query as jest.Mock).mockImplementation(async () => {
+      (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
+        if (isRunWindowLookup(sql)) return RUN_WINDOW_ROW;
         if (callCount === 0) {
-          callCount++;
-          return overallRows;
-        }
-        callCount++;
-        return scenarioRows;
-      });
-    }
-
-    function mockVuQueriesWithRampUp(
-      rampUpRow: unknown,
-      overallRows: unknown[],
-      scenarioRows: unknown[]
-    ) {
-      let callCount = 0;
-      (testRunRepo.query as jest.Mock).mockImplementation(async () => {
-        if (callCount === 0) {
-          callCount++;
-          return [rampUpRow];
-        }
-        if (callCount === 1) {
           callCount++;
           return overallRows;
         }
@@ -2724,12 +2743,13 @@ const chainRow = (
 
     describe('UUID resolution', () => {
       it('resolves UUID before querying', async () => {
-        // UUID lookup + ramp-up + 2 parallel queries
+        // UUID lookup + the run-window lookup + 2 parallel queries
         let callCount = 0;
-        (testRunRepo.query as jest.Mock).mockImplementation(async () => {
+        (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
           callCount++;
           if (callCount === 1) return [{ test_run_id: TEST_RUN_ID }]; // UUID lookup
-          if (callCount === 2) return [RAW_VU_OVERALL]; // overall
+          if (isRunWindowLookup(sql)) return RUN_WINDOW_ROW;
+          if (callCount === 3) return [RAW_VU_OVERALL]; // overall
           return [RAW_VU_SCENARIO]; // by_scenario
         });
 
@@ -2742,18 +2762,36 @@ const chainRow = (
     });
 
     describe('ramp-up exclusion', () => {
-      it('fetches cutoff time when excludeRampUp is true', async () => {
-        const startTime = new Date('2024-01-01T10:00:00Z');
-        mockVuQueriesWithRampUp(
-          { start_time: startTime.toISOString(), ramp_up: '300' },
-          [RAW_VU_OVERALL],
-          [RAW_VU_SCENARIO],
-        );
+      it('narrows both reads to the analysis window when excludeRampUp is true', async () => {
+        mockVuQueries([RAW_VU_OVERALL], [RAW_VU_SCENARIO]);
 
         await service.getVirtualUserStats(TEST_RUN_ID, true, IS_ADMIN, []);
 
-        // 3 calls: ramp-up + 2 parallel VU queries
+        // 3 calls: the window lookup + 2 parallel VU queries
         expect(testRunRepo.query).toHaveBeenCalledTimes(3);
+        for (const [sql, params] of (testRunRepo.query as jest.Mock).mock.calls
+          .filter(([sql]: [string]) => sql.includes('FROM virtual_users vu'))) {
+          expect(sql).toContain('vu.time >= $2');
+          expect(sql).toContain('vu.time <= $3');
+          expect(params[1]).toEqual(ANALYSIS_START);
+          expect(params[2]).toEqual(ANALYSIS_END);
+        }
+      });
+
+      /** #674: bounded with the toggle off too, to the padded run window. */
+      it('still bounds both reads when excludeRampUp is false', async () => {
+        mockVuQueries([RAW_VU_OVERALL], [RAW_VU_SCENARIO]);
+
+        await service.getVirtualUserStats(TEST_RUN_ID, false, IS_ADMIN, []);
+
+        const reads = (testRunRepo.query as jest.Mock).mock.calls
+          .filter(([sql]: [string]) => sql.includes('FROM virtual_users vu'));
+        expect(reads).toHaveLength(2);
+        for (const [sql, params] of reads) {
+          expect(sql).not.toContain('= false OR');
+          expect(params[1]).toEqual(WINDOW_START);
+          expect(params[2]).toEqual(WINDOW_END);
+        }
       });
     });
 
@@ -3534,24 +3572,13 @@ const chainRow = (
         bucketRows?: Array<{ time: string; value: string | null }>;
       } = {},
     ) {
-      const { applyAnalysisWindow = false, bucketRows = [] } = opts;
-      let callIdx = 0;
+      const { bucketRows = [] } = opts;
       (testRunRepo.query as jest.Mock).mockImplementation(async (sql: unknown) => {
         // Skip SET LOCAL preludes (shouldn't appear here, but guard defensively)
         if (isSetLocalWorkMem(sql)) return [];
-
-        // resolveTestRunId: plain test_run_id → skipped (no UUID lookup)
-        // getAnalysisBounds query — only issued when applyAnalysisWindow=true
-        if (
-          applyAnalysisWindow &&
-          callIdx === 0 &&
-          typeof sql === 'string' &&
-          /ramp_up.*ramp_down|ramp_down.*ramp_up/i.test(sql)
-        ) {
-          callIdx++;
-          return [{ start_time: '2024-01-01T10:00:00Z', ramp_up: 60, end_time: '2024-01-01T10:10:00Z', ramp_down: 0 }];
-        }
-
+        // resolveTestRunId: plain test_run_id → skipped (no UUID lookup).
+        // The window lookup fires whatever applyAnalysisWindow says (#674).
+        if (isRunWindowLookup(sql)) return RUN_WINDOW_ROW;
         // Bucket data query (everything else)
         return bucketRows;
       });
@@ -3847,7 +3874,12 @@ const chainRow = (
         expect(boundsCall).toBeDefined();
       });
 
-      it('does NOT issue getAnalysisBounds query when applyAnalysisWindow is false', async () => {
+      /**
+       * #674: it issues the bounds query either way now. With the window off the read
+       * is still bounded — to the run's own padded window — because an unbounded read
+       * on these tables locks every chunk. The toggle only narrows it.
+       */
+      it('still issues the bounds query, and bounds the read, when applyAnalysisWindow is false', async () => {
         // Arrange
         mockAggTimeseries({ applyAnalysisWindow: false, bucketRows: [] });
 
@@ -3861,12 +3893,14 @@ const chainRow = (
           [],
         );
 
-        // Assert: no query touching ramp_up
+        // Assert
         const calls = (testRunRepo.query as jest.Mock).mock.calls;
-        const boundsCall = calls.find(([sql]: [unknown]) =>
-          typeof sql === 'string' && /ramp_up/i.test(sql),
-        );
-        expect(boundsCall).toBeUndefined();
+        expect(calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /ramp_up/i.test(sql))).toBeDefined();
+        const bucketCall = calls.find(([sql]: [unknown]) =>
+          typeof sql === 'string' && /date_trunc\('minute'/.test(sql))!;
+        expect(bucketCall[1][1]).toEqual(WINDOW_START);
+        expect(bucketCall[1][2]).toEqual(WINDOW_END);
       });
     });
 

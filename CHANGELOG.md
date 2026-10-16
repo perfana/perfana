@@ -19,7 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   Two of them needed more than a filter. The trends table asked the database for each run's statistics separately, once per run inside a single query, which is a shape that cannot carry a window; it is now one query across all the runs it is comparing. The baseline comparison reads both runs under one window spanning the two. Both return the same numbers.
 
-  The other places that read these tables — the rest of Performance Analysis and parts of the worker — are not converted yet and are tracked in #674.
+- **Performance Analysis follows, and that is every such query in the API.** The transaction table, the sampler breakdown behind a row expand, the errors modal, virtual users, throughput, the aggregate graphs and the analysis-window overview chart all ask for the run's window now. Eight of those sixteen had the same toggle-dependent filter the report queries had, so they were unbounded on the default path.
+
+  Two were different. The chain decoration on a transaction expand is bounded by an index since v0.2.96.26, which makes it fast — but fast and cheap are not the same thing here, since the locks are taken before the query runs. And a background check that repairs a half-written rollup argued in its own comment for staying unbounded, because a sample arriving after a run is marked finished is exactly what it looks for; the hour of padding covers that, so it is bounded like the rest.
+
+  What is deliberately unchanged: the pre-aggregated five-second summaries these queries prefer are already restricted to the run's own window, so nothing there needed a second bound.
+
+  The worker's four remaining queries are tracked in #674.
 
 ## [0.2.97.25] - 2026-10-16
 
