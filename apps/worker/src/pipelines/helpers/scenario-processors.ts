@@ -7,7 +7,7 @@
  */
 
 import { DataSource } from 'typeorm';
-import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
+import { analysisBoundsFromRow, snapBoundsToChunks, timeBoundsSql } from '@perfana/shared/database/run-window';
 import type { Logger } from 'pino';
 import type { DashboardManager } from './dashboard-manager.js';
 import {
@@ -206,11 +206,16 @@ export class ErrorsProcessor {
       // data points are attributed to the real scenarios, not a phantom "default".
       // Bounded by the run's padded window; unbounded this locks every chunk of
       // `requests_raw` (#674, see @perfana/shared/database/run-window).
+      // Whole-run aggregate: widen to the chunk boundary so the planner can drop the qual
+      // on a fully covered chunk (8,513 buffers vs 16,186 on a 2.5 M-row run) for one
+      // ~3 ms catalog lookup, cached per table. Selective reads must NOT do this.
       const time = timeBoundsSql(
-        analysisBoundsFromRow(
-          { start_time: testRun.start_time, end_time: testRun.end_time ?? null },
-          false,
-        ),
+        await snapBoundsToChunks(
+          (sql, p) => this.dataSource.query(sql, p) as Promise<unknown[]>, 'requests_raw',
+          analysisBoundsFromRow(
+            { start_time: testRun.start_time, end_time: testRun.end_time ?? null },
+            false,
+          )),
         'time',
         2,
       );

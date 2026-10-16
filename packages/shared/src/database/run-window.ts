@@ -41,7 +41,17 @@ export interface TestRunTimesRow {
 
 export interface AnalysisBounds {
   startCutoff: Date | null;
+  /** Inclusive unless `endExclusive`. */
   endCutoff: Date | null;
+  /**
+   * Emit `<` rather than `<=` for the end.
+   *
+   * A chunk's range is half-open, `[range_start, range_end)`, so a bound snapped to
+   * `range_end` and compared with `<=` reaches one instant into the NEXT chunk and takes
+   * its locks: measured 32 relation locks against 21 for the same rows, undoing half of
+   * what the bound is for. Only `snapBoundsToChunks` sets this.
+   */
+  endExclusive?: boolean;
 }
 
 const seconds = (v: string | number | null | undefined): number => {
@@ -143,12 +153,116 @@ export function timeBoundsSql(
     params.push(bounds.startCutoff);
   }
   if (bounds.endCutoff) {
-    conditions.push(`${column} <= $${idx++}::timestamptz`);
+    conditions.push(`${column} ${bounds.endExclusive ? '<' : '<='} $${idx++}::timestamptz`);
     params.push(bounds.endCutoff);
   }
   return {
     clause: conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '',
     params,
     nextIndex: idx,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Chunk alignment (#674 follow-up)
+// ---------------------------------------------------------------------------
+
+/**
+ * The cost a plain bound carries, and the one shape that avoids it.
+ *
+ * A `time` bound stops TimescaleDB answering a whole-run aggregate off the compressed
+ * batch headers (`VectorAgg`) and makes it decompress the `time` column to apply the
+ * filter. Measured on a 2.5 M-row run, `count(*)`: 8,562 buffers unbounded against
+ * 16,186 hour-padded. Widening the bound OUTWARD to the chunk's own boundary restores
+ * constraint exclusion — the qual is dropped on a fully covered chunk — for 8,513
+ * buffers, parity with unbounded, and the identical 21-lock win.
+ *
+ * **Only worth it on an aggregate.** Resolving the boundary costs a catalog round trip
+ * (~3 ms). That is 1.7 % of a 180 ms aggregate scan and 200x the cost of the 0.016 ms
+ * selective lookups elsewhere in this file, which are already 470x better bounded. Call
+ * this for a whole-run scan; never for a point read.
+ *
+ * **The interval cannot be computed, it must be read.** `requests_raw` reports a 1-day
+ * `chunk_time_interval` while chunks created before migration 1815 are still 7 days
+ * wide, and a bound snapped with the current interval covers none of those: measured
+ * 16,161 buffers, no better than not snapping at all. Chunk widths are mixed on any
+ * table whose interval was ever changed, so the boundaries come from the catalog.
+ */
+export interface ChunkRange { start: Date; end: Date }
+
+/** Cached per hypertable. A chunk's bounds never change once it exists, so the only
+ *  staleness is a chunk created since — which costs a missed optimisation, never a
+ *  wrong answer, because snapping is outward-only. */
+const chunkCache = new Map<string, { at: number; ranges: ChunkRange[] }>();
+export const CHUNK_CACHE_TTL_MS = 60_000;
+
+/** Visible for tests. */
+export function resetChunkCache(): void { chunkCache.clear(); }
+
+type Querier = (sql: string, params: unknown[]) => Promise<unknown[]>;
+
+const CHUNK_RANGES_SQL = `
+  SELECT range_start, range_end
+    FROM timescaledb_information.chunks
+   WHERE hypertable_name = $1
+   ORDER BY range_start`;
+
+/**
+ * Widen `bounds` outward to the boundaries of the chunks it already overlaps.
+ *
+ * Outward only, via LEAST/GREATEST: the returned window is always a superset of the one
+ * passed in, so it can never drop a row the caller would have seen. It also touches no
+ * chunk the original did not, so the lock count is unchanged.
+ *
+ * Fail-safe: any error, or a table with no chunks, returns `bounds` untouched. This is
+ * an optimisation; it must never be the reason a read breaks.
+ */
+export async function snapBoundsToChunks(
+  query: Querier,
+  hypertable: string,
+  bounds: AnalysisBounds,
+  now: number = Date.now(),
+): Promise<AnalysisBounds> {
+  if (!bounds.startCutoff && !bounds.endCutoff) return bounds;
+
+  let entry = chunkCache.get(hypertable);
+  if (!entry || now - entry.at > CHUNK_CACHE_TTL_MS) {
+    try {
+      const rows = (await query(CHUNK_RANGES_SQL, [hypertable])) as Array<{
+        range_start: string | Date | null; range_end: string | Date | null;
+      }>;
+      entry = {
+        at: now,
+        ranges: (rows ?? [])
+          .filter((r) => r.range_start && r.range_end)
+          .map((r) => ({ start: new Date(r.range_start!), end: new Date(r.range_end!) })),
+      };
+      chunkCache.set(hypertable, entry);
+    } catch {
+      return bounds; // optimisation only — never fail the caller's read
+    }
+  }
+  if (entry.ranges.length === 0) return bounds;
+
+  // Only chunks the window already overlaps. A half-open window (in-flight run) is
+  // treated as open-ended on that side, so every later chunk counts.
+  const lo = bounds.startCutoff;
+  const hi = bounds.endCutoff;
+  const touched = entry.ranges.filter(
+    (c) => (!hi || c.start <= hi) && (!lo || c.end > lo),
+  );
+  if (touched.length === 0) return bounds;
+
+  const maxChunkEnd = Math.max(...touched.map((c) => c.end.getTime()));
+  const snappedEnd = hi ? new Date(Math.max(hi.getTime(), maxChunkEnd)) : null;
+
+  return {
+    startCutoff: lo
+      ? new Date(Math.min(lo.getTime(), ...touched.map((c) => c.start.getTime())))
+      : null,
+    endCutoff: snappedEnd,
+    // Half-open only when the end IS a chunk boundary. If the caller's own end was
+    // already past the last chunk we kept theirs, and theirs is inclusive.
+    endExclusive: snappedEnd != null && snappedEnd.getTime() === maxChunkEnd,
   };
 }

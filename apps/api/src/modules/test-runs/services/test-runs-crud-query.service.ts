@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { analysisBoundsFromEntity, timeBoundsSql } from '@perfana/shared/database/run-window';
+import { analysisBoundsFromEntity, snapBoundsToChunks, timeBoundsSql } from '@perfana/shared/database/run-window';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder, ObjectLiteral } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -1197,8 +1197,13 @@ export class TestRunsCrudQueryService {
       } else {
         // Bounded from the run already in hand; an unbounded read locks every chunk
         // of `requests_raw` (#674, see @perfana/shared/database/run-window).
+        // Whole-run aggregate: widen to the chunk boundary so the planner can drop the
+        // qual on a fully covered chunk (8,513 buffers vs 16,186 on a 2.5 M-row run) for
+        // one ~3 ms catalog lookup, cached per table. Selective reads must NOT do this.
         const time = timeBoundsSql(
-          analysisBoundsFromEntity({ startTime: testRun.start_time, endTime: testRun.end_time }),
+          await snapBoundsToChunks(
+            (sql, p) => withRequestEm(this.testRunRepo).query(sql, p), 'requests_raw',
+            analysisBoundsFromEntity({ startTime: testRun.start_time, endTime: testRun.end_time })),
           'time',
           2,
         );
