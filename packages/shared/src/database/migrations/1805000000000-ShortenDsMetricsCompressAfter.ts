@@ -28,9 +28,19 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * time-bounded reads the ramp-up refresh and `decompressChunksForRange` bounds depend
  * on. The pipeline's reads outnumber the chart's.
  *
- * Only `ds_metrics`. `requests_raw`/`transactions`/`requests_error` stay at 7 days on
- * purpose: their 15 continuous aggregates refresh with `start_offset` 7 days, chosen to
- * match `compress_after` so refreshes stay in row store (1799000000000-WidenCaggRefreshWindows).
+ * Only `ds_metrics` **at the time this migration was written**.
+ * `requests_raw`/`transactions`/`requests_error` stayed at 7 days because their 15
+ * continuous aggregates refresh with `start_offset` 7 days, chosen to match `compress_after`
+ * so refreshes stay in row store (1799000000000-WidenCaggRefreshWindows).
+ *
+ * **Superseded for those three by migration 1815**, which took them to 2 days as well. The
+ * coupling was a read-performance one and it stopped binding once the JTL upload was retired
+ * and all ingest became live at ~now(): a bucket is materialised minutes after it is written,
+ * long before its chunk reaches 2 days. See 1815's "The 7-day coupling" for the full argument
+ * and for what is left of it. `virtual_users` is still at 7 days, on volume grounds.
+ *
+ * Note 1815 schedules its first run at **03:00** UTC rather than this migration's 02:00, so a
+ * deploy applying both does not stack four backlog compressions in the same hour.
  *
  * ── Precondition: migration 1804's decompress wrappers, PROVEN on the deploy ──────────
  *
