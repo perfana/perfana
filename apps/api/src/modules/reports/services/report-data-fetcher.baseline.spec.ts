@@ -1,6 +1,15 @@
 import { ReportDataFetcherService } from './report-data-fetcher.service';
 
 const repoStub = {} as any;
+
+/**
+ * Both runs' `test_runs` rows — the comparison spans their windows before reading
+ * `transactions`, so an unbounded `ANY(...)` read cannot lock every chunk (#674).
+ */
+const WINDOW_ROW = [{
+  start_time: '2026-01-01T10:00:00.000Z', ramp_up: '60',
+  end_time: '2026-01-01T11:00:00.000Z', ramp_down: '60',
+}];
 const authzStub = {} as any;
 const dataSourceStub = {} as any;
 
@@ -13,7 +22,10 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
       { test_run_id: 'cur', scenario_name: 'checkout', transaction_name: 'login', avg_ms: '110', p95_ms: '220', p99_ms: '300' },
       { test_run_id: 'base', scenario_name: 'checkout', transaction_name: 'login', avg_ms: '100', p95_ms: '200', p99_ms: '250' },
     ];
-    const testRunRepo = { query: jest.fn().mockResolvedValue(rows) } as any;
+    const testRunRepo = { query: jest.fn()
+      .mockResolvedValueOnce(WINDOW_ROW)   // current run's window
+      .mockResolvedValueOnce(WINDOW_ROW)   // baseline run's window
+      .mockResolvedValue(rows) } as any;
     const svc = new ReportDataFetcherService(testRunRepo, authzStub, dataSourceStub);
     const data = await svc.getBaselineRunComparison('cur', 'base', 'performance-metrics',
       { metrics: ['avg', 'p95', 'p99'], userId: '', roles: [] });
@@ -23,10 +35,13 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
     expect(row.label).toBe('login');
     expect(row.metrics.find(m => m.key === 'avg')!.diffPercent).toBeCloseTo(10);
     expect(row.metrics.find(m => m.key === 'p99')!.diffPercent).toBeCloseTo(20);
-    // System call: no org filter params appended
-    const [sql, params] = testRunRepo.query.mock.calls[0]!;
+    // System call: no org filter params appended, but the span bounds are.
+    const [sql, params] = testRunRepo.query.mock.calls[2]!;
     expect(sql).toContain('FROM transactions');
-    expect(params).toEqual([['cur', 'base']]);
+    expect(sql).toContain('txn.time >= $2');
+    expect(params[0]).toEqual(['cur', 'base']);
+    expect((params[1] as Date).toISOString()).toBe('2026-01-01T09:00:00.000Z');
+    expect((params[2] as Date).toISOString()).toBe('2026-01-01T12:00:00.000Z');
   });
 
   it.each([
@@ -275,7 +290,10 @@ describe('ReportDataFetcherService.getBaselineRunComparison', () => {
       { test_run_id: 'base', dashboard_label: 'Perf', panel_title: 'Transaction RT Avg', panel_id: 101, metric_name: 'login', mean: 100, q95: 200, q99: 250, unit: 'ms' },
     ];
     const dataSource = { query: jest.fn().mockResolvedValue(statsRows) };
+    // Both scalar reads run under one Promise.all, so both window lookups land first.
     const repo = { query: jest.fn()
+      .mockResolvedValueOnce(WINDOW_ROW)                                                                 // current window
+      .mockResolvedValueOnce(WINDOW_ROW)                                                                 // baseline window
       .mockResolvedValueOnce([{ avg: '150', p90: null, p95: '250', p99: '300', pass: '1', fail: '0' }])  // current
       .mockResolvedValueOnce([{ avg: '120', p90: null, p95: '200', p99: '250', pass: '1', fail: '0' }]) } as any; // baseline
     const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);

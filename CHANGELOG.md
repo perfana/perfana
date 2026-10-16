@@ -13,7 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   Results are unchanged. The window is padded by an hour either side of the recorded start and end, because samples can still be arriving up to about 36 seconds after a run is marked finished and a load generator's clock can run slightly ahead of the recorded start.
 
-  The other places that read these tables — the rest of Performance Analysis, report generation, and parts of the worker — are not converted yet and are tracked in #674.
+- **Report generation stops doing the same thing, in sixteen more places.** Every query the report builds over the raw sample tables — scenario tables, error analysis, Apdex, throughput, virtual users, the aggregate graphs, the trends table and the baseline comparison — now asks for the run's own window.
+
+  Eleven of those sixteen looked bounded and were not. They carried a filter that applied *only* when the "exclude ramp-up" toggle was on, so on the default path — toggle off, which is what most reports render with — there was effectively no window at all. The toggle now decides how far the window is narrowed, never whether there is one.
+
+  Two of them needed more than a filter. The trends table asked the database for each run's statistics separately, once per run inside a single query, which is a shape that cannot carry a window; it is now one query across all the runs it is comparing. The baseline comparison reads both runs under one window spanning the two. Both return the same numbers.
+
+  The other places that read these tables — the rest of Performance Analysis and parts of the worker — are not converted yet and are tracked in #674.
 
 ## [0.2.97.25] - 2026-10-16
 

@@ -1,12 +1,19 @@
 import { ReportDataFetcherService } from './report-data-fetcher.service';
 
+const RUN_WINDOW_ROW = [{
+  start_time: '2025-06-01T10:00:00.000Z', ramp_up: '120',
+  end_time: '2025-06-01T11:00:00.000Z', ramp_down: '60',
+}];
+
 describe('ReportDataFetcherService aggregate methods', () => {
   it('getAggregatedSeries maps rows to {Date,number} and aggregates across all transactions', async () => {
     const testRunRepo = {
-      query: jest.fn().mockResolvedValue([
-        { time: '2025-06-01T10:00:00.000Z', value: '120.5' },
-        { time: '2025-06-01T10:01:00.000Z', value: '130' },
-      ]),
+      query: jest.fn()
+        .mockResolvedValueOnce(RUN_WINDOW_ROW)
+        .mockResolvedValue([
+          { time: '2025-06-01T10:00:00.000Z', value: '120.5' },
+          { time: '2025-06-01T10:01:00.000Z', value: '130' },
+        ]),
     } as any;
     const svc = new ReportDataFetcherService(testRunRepo, {} as any, {} as any);
 
@@ -16,13 +23,16 @@ describe('ReportDataFetcherService aggregate methods', () => {
       { time: new Date('2025-06-01T10:00:00.000Z'), value: 120.5 },
       { time: new Date('2025-06-01T10:01:00.000Z'), value: 130 },
     ]);
-    const [sql, params] = testRunRepo.query.mock.calls[0];
+    const [sql, params] = testRunRepo.query.mock.calls[1];
     expect(sql).toContain('FROM transactions');
     expect(sql).toContain("date_trunc('minute', t.time)");
     // The whole point: NO per-transaction grouping — one series for the run.
     expect(sql).not.toMatch(/transaction_name/i);
-    // excludeRampUp=false → both cutoffs null; system call → no org params.
-    expect(params).toEqual(['run-1', null, null]);
+    // excludeRampUp=false still bounds, to the padded run window (#674); system call
+    // → no org params.
+    expect(params).toEqual([
+      'run-1', new Date('2025-06-01T09:00:00.000Z'), new Date('2025-06-01T12:00:00.000Z'),
+    ]);
   });
 
   it('trims BOTH ends of the analysis window, the way the baked ds_metrics.ramp_up column does', async () => {
@@ -52,39 +62,44 @@ describe('ReportDataFetcherService aggregate methods', () => {
     // Exact PERCENTILE_CONT is the better number in isolation and the WRONG one here: the
     // Graphs card draws the same series from that endpoint's t-digest, and the two were
     // measured up to 21% apart on a spiky bucket.
-    const testRunRepo = { query: jest.fn().mockResolvedValue([]) } as any;
+    const testRunRepo = { query: jest.fn().mockResolvedValueOnce(RUN_WINDOW_ROW).mockResolvedValue([]) } as any;
     const svc = new ReportDataFetcherService(testRunRepo, {} as any, {} as any);
 
     await svc.getAggregatedSeries('run-1', 'request_response_time', 'p95', false, '', []);
 
-    const [sql] = testRunRepo.query.mock.calls[0];
+    const [sql] = testRunRepo.query.mock.calls[1];
     expect(sql).toContain('approx_percentile(0.95, percentile_agg(t.response_time::double precision))');
     expect(sql).not.toMatch(/PERCENTILE_CONT/i);
   });
 
   it('getAggregatedSeries uses requests_raw + error math for error_percentage', async () => {
-    const testRunRepo = { query: jest.fn().mockResolvedValue([]) } as any;
+    const testRunRepo = { query: jest.fn().mockResolvedValueOnce(RUN_WINDOW_ROW).mockResolvedValue([]) } as any;
     const svc = new ReportDataFetcherService(testRunRepo, {} as any, {} as any);
 
     await svc.getAggregatedSeries('run-1', 'error_percentage', 'avg', false, '', []);
 
-    const [sql] = testRunRepo.query.mock.calls[0];
+    const [sql] = testRunRepo.query.mock.calls[1];
     expect(sql).toContain('FROM requests_raw');
     expect(sql).toContain('FILTER (WHERE NOT t.success)');
   });
 
   it('getAggregatedScalars returns run-wide avg/p90/p95/p99/pass/fail with no GROUP BY', async () => {
     const testRunRepo = {
-      query: jest.fn().mockResolvedValue([{ avg: '110', p90: '180', p95: '220', p99: '300', pass: '980', fail: '20' }]),
+      query: jest.fn()
+        .mockResolvedValueOnce(RUN_WINDOW_ROW)
+        .mockResolvedValue([{ avg: '110', p90: '180', p95: '220', p99: '300', pass: '980', fail: '20' }]),
     } as any;
     const svc = new ReportDataFetcherService(testRunRepo, {} as any, {} as any);
 
     const s = await svc.getAggregatedScalars('run-1', '', []);
 
     expect(s).toEqual({ avg: 110, p90: 180, p95: 220, p99: 300, pass: 980, fail: 20 });
-    const [sql] = testRunRepo.query.mock.calls[0];
+    const [sql, params] = testRunRepo.query.mock.calls[1];
     expect(sql).toContain('FROM transactions');
     expect(sql).not.toContain('GROUP BY');
+    // Bounded, even though this one takes no excludeRampUp at all (#674).
+    expect(sql).toContain('t.time >= $2');
+    expect(params[1]).toEqual(new Date('2025-06-01T09:00:00.000Z'));
   });
 });
 

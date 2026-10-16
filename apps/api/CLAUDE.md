@@ -1249,13 +1249,33 @@ Two things the helper settles that a hand-rolled bound gets wrong:
    applies, because the lock bound is not optional. A run with no `end_time` keeps an unbounded
    upper end on purpose — there are no chunks past now() to exclude.
 
-Converted so far: `test-runs-error-analysis.service.ts` (all 9 sites). Still unbounded, by the
-`FROM <table>` + 700-character lookahead heuristic that issue #674 used for triage: 7 sites in
-`test-runs-performance-query.service.ts`, 6 in `reports/services/report-data-fetcher.service.ts`,
-and the worker's `scenario-processors`, `ApdexCalculator`, `TransactionStatsRollupPipeline` and
-`PerformanceTestMetricsPipeline`. That heuristic is triage, not a verdict — a bound inside a CTE
-can sit outside the window, and an unrelated `time` mention can read as "bounded". Re-measure a
-converted site with
+**A third thing to know, and the reason the triage count was wrong.** The old shape here was
+`AND ($2::boolean = false OR time >= $3::timestamptz)` — bound only when the analysis-timerange
+toggle was on. With the toggle *off*, which is the default, that folds to TRUE at plan time and
+the read is as unbounded as one with no predicate at all. A `FROM <table>` + lookahead grep
+reads those as "bounded", so the heuristic in issue #674 undercounted: 5 of
+`report-data-fetcher.service.ts`'s 16 sites looked unbounded and 11 of them were. Any site
+still carrying `= false OR` is one of these. Grep for it, do not grep for `time >=`.
+
+Converted so far: `test-runs-error-analysis.service.ts` (all 9 sites) and
+`reports/services/report-data-fetcher.service.ts` (all 16). Three shapes came up in the second
+one and are worth copying:
+
+- **The caller already holds the entity** — `analysisBoundsFromEntity(testRun)`, no round trip.
+  The entity spells the columns `startTime` / `endTime` / `analysisStartOffset` /
+  `analysisEndOffset`.
+- **Several runs in one `ANY(...)` read** — `spanBounds()` over each run's window. The span is
+  wider than any one run, which costs a chunk or two of locks and nothing in correctness, since
+  `test_run_id` still selects. Per-run bounds cannot be expressed against a single read.
+- **A correlated `LATERAL`** — cannot be fixed with a predicate at all. `getTrendsData` had one
+  aggregating `transactions` per outer `test_runs` row; the window is only known per row, so
+  there is nothing a planner can exclude on. It is now two queries: fetch the runs, then one
+  bounded `ANY(...)` aggregate over their ids. Same answer, one read instead of eleven.
+
+Still unbounded: 7 sites in `test-runs-performance-query.service.ts` (which also carries 20-odd
+`= false OR` predicates, so expect that count to grow on reading), and the worker's
+`scenario-processors`, `ApdexCalculator`, `TransactionStatsRollupPipeline` and
+`PerformanceTestMetricsPipeline`. Re-measure a converted site with
 `BEGIN; <query>; SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'relation'; ROLLBACK;`.
 
 Two of those seven are `repairEmptySamplerRollup`'s probe, and converting it needs a decision
@@ -1264,3 +1284,8 @@ recorded window is the case it exists to detect. The hour of padding covers the 
 comment measured, so a padded bound is probably right — but the probe also *joins* `test_runs`
 already, so bounding it means splitting that into two round trips in a repair path, not adding
 a predicate.
+
+One deliberate exception in the converted file: the throughput CAGG path
+(`getThroughputStatsFromCaggForReport`) is handed the ramp cutoff **only when the toggle is on**.
+It reads `transactions_5s` / `requests_raw_5s`, which are already bucket-bounded by the run
+window, so the padded window start is not a lock bound there — it is a wrong first bucket.
