@@ -31,18 +31,37 @@ services:
     # the CAGGs silently stop being materialised and every query that reads one
     # falls back to scanning the raw hypertable. Nothing errors; pages just crawl.
     #
-    # max_locks_per_transaction: ds_metrics and requests_raw use 1-day chunks (migration
-    # 1804) and have no retention policy, and every hot query filters on test_run_id with
-    # no time predicate, so one query locks every chunk plus its compressed twin. The
-    # lock table is this value x max_connections; the default 64 runs out as
-    # `out of shared memory` once a few hundred chunks exist and several backends
-    # plan at once.
+    # max_locks_per_transaction: ds_metrics, requests_raw, transactions and requests_error
+    # all use 1-day chunks (migrations 1804 and 1815) and none of them has a retention
+    # policy, and every hot query filters on test_run_id with no time predicate, so one
+    # query locks every chunk plus its compressed twin plus the indexes on both — measured
+    # at ~11 relation locks per chunk, not one (136 locks for 12 chunks of requests_raw;
+    # 230 for a two-table join over 21). At ~365 chunks per table per year that projects to
+    # ~8,000 locks for a two-table run query and ~16,000 for one touching all four.
+    #
+    # The budget is this value x (max_connections + max_prepared_transactions), NOT this
+    # value alone — a single transaction may exceed it while the table has room. The
+    # timescaledb-ha image sets max_connections=500 itself, so 1024 gives ~512,000 entries
+    # (~85 MB of shared memory, estimated at ~168 B/entry). 256 gave 128,000, which is just
+    # under 8 concurrent four-table queries (~128,480) — fine for the two tables 1804
+    # re-chunked, thin for four. Migration 1815's warning is keyed on the two-table
+    # projection and so would NOT have fired at 256; this is headroom, not a fix for a
+    # warning.
+    #
+    # Two things to know before changing either number. The default 64 runs out as
+    # `out of shared memory` — a hard query error, not degradation — once a few hundred
+    # chunks exist and several backends plan at once. And LOWERING max_connections shrinks
+    # this table, which is the opposite of what you want when protecting memory.
+    #
+    # The root-cause fix is a parameterised time bound on those queries (136 -> 21 locks,
+    # measured): see issue #674. Note a bound read via a subquery on test_runs does NOT
+    # help — it measured worse (150) than no predicate at all.
     command:
       - postgres
       - -c
       - max_worker_processes=32
       - -c
-      - max_locks_per_transaction=256
+      - max_locks_per_transaction=1024
       # A worker that dies mid-aggregation frees the heavy-stage lock after its 5 min TTL,
       # but Postgres only notices the closed socket when it next writes, and an
       # aggregation writes nothing until it finishes: the next holder would overlap the
