@@ -395,7 +395,12 @@ describe('ApdexCalculator', () => {
       expect(params).toContainEqual(expectedRampUpEnd);
     });
 
-    it('should not add ramp-up filter when excludeRampUp is true but ramp_up is undefined', async () => {
+    /**
+     * #674: with no ramp_up there is nothing to trim, but the read is still bounded —
+     * to the run's own window, padded an hour either side. An unbounded read on
+     * `transactions` locks every chunk of the table.
+     */
+    it('falls back to the padded run window when excludeRampUp is true but ramp_up is undefined', async () => {
       // Arrange
       const testRun = createTestRun({ ramp_up: undefined });
       mockManager.query.mockResolvedValue([makeApdexRow(80, 10, 10)]);
@@ -409,9 +414,12 @@ describe('ApdexCalculator', () => {
         excludeRampUp: true,
       });
 
-      // Assert
-      const [query] = mockManager.query.mock.calls[0];
-      expect(query).not.toContain('time >=');
+      // Assert — 10:00 − 1 h / 11:00 + 1 h, not the ramp cutoff.
+      const [query, params] = mockManager.query.mock.calls[0];
+      expect(query).toContain('time >= $2');
+      expect(query).toContain('time <= $3');
+      expect((params[1] as Date).toISOString()).toBe('2024-01-01T09:00:00.000Z');
+      expect((params[2] as Date).toISOString()).toBe('2024-01-01T12:00:00.000Z');
     });
 
     it('should pass threshold and 4x threshold as query params', async () => {
@@ -1424,6 +1432,7 @@ describe('ApdexCalculator', () => {
       // Arrange — rollup miss, legacy has rows
       mockManager.query
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ start_time: '2024-01-01T10:00:00Z', ramp_up: 60, end_time: '2024-01-01T11:00:00Z', ramp_down: 0 }]) // run-window lookup (#674)
         .mockResolvedValueOnce([
           { transaction_name: 'legacy-tx' },
         ]);
@@ -1433,22 +1442,28 @@ describe('ApdexCalculator', () => {
 
       // Assert
       expect(result).toEqual(['legacy-tx']);
-      expect(mockManager.query).toHaveBeenCalledTimes(2);
-      const [legacyQuery] = mockManager.query.mock.calls[1];
+      expect(mockManager.query).toHaveBeenCalledTimes(3);
+      const [legacyQuery, legacyParams] = mockManager.query.mock.calls[2];
       expect(legacyQuery).toContain('FROM transactions');
       expect(legacyQuery).not.toContain('test_run_transaction_stats');
+      // Bounded, or this locks every chunk of the hypertable.
+      expect(legacyQuery).toContain('time >= $2');
+      expect(legacyParams[1]).toBeInstanceOf(Date);
     });
 
     it('should return empty array when both rollup and legacy are empty', async () => {
       // Arrange
-      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      mockManager.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ start_time: '2024-01-01T10:00:00Z', ramp_up: 60, end_time: '2024-01-01T11:00:00Z', ramp_down: 0 }])
+        .mockResolvedValueOnce([]);
 
       // Act
       const result = await calculator.getAvailableTransactions('run-empty');
 
       // Assert
       expect(result).toEqual([]);
-      expect(mockManager.query).toHaveBeenCalledTimes(2);
+      expect(mockManager.query).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -1484,6 +1499,7 @@ describe('ApdexCalculator', () => {
       // Arrange — rollup miss, legacy returns the transactions
       mockManager.query
         .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ start_time: '2024-01-01T10:00:00Z', ramp_up: 60, end_time: '2024-01-01T11:00:00Z', ramp_down: 0 }]) // run-window lookup (#674)
         .mockResolvedValueOnce([
           { transaction_name: 'legacy-login', scenario_name: 'default' },
         ]);
@@ -1493,23 +1509,29 @@ describe('ApdexCalculator', () => {
 
       // Assert
       expect(result).toEqual([{ transaction_name: 'legacy-login', scenario_name: 'default' }]);
-      expect(mockManager.query).toHaveBeenCalledTimes(2);
-      const [legacyQuery, legacyParams] = mockManager.query.mock.calls[1];
+      expect(mockManager.query).toHaveBeenCalledTimes(3);
+      const [legacyQuery, legacyParams] = mockManager.query.mock.calls[2];
       expect(legacyQuery).toContain('FROM transactions');
       expect(legacyQuery).not.toContain('test_run_transaction_stats');
-      expect(legacyParams).toEqual(['run-pre-rollup']);
+      // Bounded, or this locks every chunk of the hypertable.
+      expect(legacyQuery).toContain('time >= $2');
+      expect(legacyParams[0]).toBe('run-pre-rollup');
+      expect(legacyParams[1]).toBeInstanceOf(Date);
     });
 
     it('should return empty array when both rollup and legacy are empty', async () => {
       // Arrange
-      mockManager.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      mockManager.query
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ start_time: '2024-01-01T10:00:00Z', ramp_up: 60, end_time: '2024-01-01T11:00:00Z', ramp_down: 0 }])
+        .mockResolvedValueOnce([]);
 
       // Act
       const result = await calculator.getTransactionsWithScenarios('run-empty');
 
       // Assert
       expect(result).toEqual([]);
-      expect(mockManager.query).toHaveBeenCalledTimes(2);
+      expect(mockManager.query).toHaveBeenCalledTimes(3);
     });
 
     it('should pass test_run_id as the sole query parameter on the rollup query', async () => {

@@ -2,6 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { withRequestEm, getRequestEm, runAfterRequestCommit } from '../../../common/db/request-em';
+import {
+  AnalysisBounds,
+  RUN_WINDOW_PAD_MS,
+  TEST_RUN_TIMES_SQL,
+  analysisBoundsFromRow,
+  timeBoundsSql,
+} from '@perfana/shared/database/run-window';
 import { TestRun as TestRunEntity } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
 import { TestRunsMapperService } from './test-runs-mapper.service';
@@ -146,36 +153,25 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
-   * Get analysis bounds (start cutoff from ramp_up, end cutoff from ramp_down) for a test run.
-   * When excludeRampUp is false both values are null.
-   * For running tests (end_time IS NULL) the end cutoff is not applied — only completed tests
-   * have a tail to trim.
+   * The `time` bounds to read a raw hypertable over.
+   *
+   * Always bounded, whatever `excludeRampUp` says. With the toggle off these are the
+   * run's own start and end, padded an hour either side; with it on they narrow to the
+   * analysis timerange (start after ramp-up, end before ramp-down — the latter only for
+   * a completed run, which has a tail to trim).
+   *
+   * The unbounded case is not a valid one. A read on `requests_raw`, `transactions`,
+   * `requests_error` or `virtual_users` with no `time` predicate locks every chunk of the
+   * table plus every compressed twin plus the indexes on both, and the predicate this
+   * replaced — `($2::boolean = false OR …)` — folded to TRUE on exactly the default path.
+   * See `@perfana/shared/database/run-window`.
    */
   private async getAnalysisBounds(
     testRunId: string,
     excludeRampUp: boolean,
-  ): Promise<{ startCutoff: Date | null; endCutoff: Date | null }> {
-    if (!excludeRampUp) return { startCutoff: null, endCutoff: null };
-
-    const query = `SELECT start_time, ramp_up, end_time, ramp_down FROM test_runs WHERE test_run_id = $1`;
-    const result = await withRequestEm(this.testRunRepo).query(query, [testRunId]);
-
-    let startCutoff: Date | null = null;
-    let endCutoff: Date | null = null;
-
-    if (result[0]?.start_time && result[0]?.ramp_up) {
-      const startTime = new Date(result[0].start_time);
-      const rampUpSeconds = this.mapper.parseInt(result[0].ramp_up);
-      if (rampUpSeconds > 0) startCutoff = new Date(startTime.getTime() + rampUpSeconds * 1000);
-    }
-
-    if (result[0]?.end_time && result[0]?.ramp_down) {
-      const endTime = new Date(result[0].end_time);
-      const rampDownSeconds = this.mapper.parseInt(result[0].ramp_down);
-      if (rampDownSeconds > 0) endCutoff = new Date(endTime.getTime() - rampDownSeconds * 1000);
-    }
-
-    return { startCutoff, endCutoff };
+  ): Promise<AnalysisBounds> {
+    const result = await withRequestEm(this.testRunRepo).query(TEST_RUN_TIMES_SQL, [testRunId]);
+    return analysisBoundsFromRow(result[0], excludeRampUp);
   }
 
   /**
@@ -362,14 +358,15 @@ export class TestRunsPerformanceQueryService {
    *    is the only thing stopping a non-member from causing background work on
    *    a run they cannot read.
    *
-   * The probe is NOT time-bounded: the rollup has no `time` predicate either,
-   * so a row arriving outside the recorded window (the 36s-late case above) is
-   * one the rollup would aggregate but a bounded probe would miss, stranding
-   * the run on the slow path. Unbounded is cheap here — `test_run_id` LEADS
-   * `idx_requests_raw_test_run_time` and is the `compress_segmentby` key, so
-   * a miss is an index-only descent (measured 1.9ms, `Heap Fetches: 0`), not
-   * the every-chunk scan the "LIMIT bounds rows matched, not scanned" pitfall
-   * describes — that one applies to a filter with no leading index.
+   * The two EXISTS probes are bounded by the run's window, hour-padded, which is the
+   * resolution of the tension this comment used to describe. Unbounded they were cheap
+   * to EXECUTE — `test_run_id` leads `idx_requests_raw_test_run_time` and is the
+   * `compress_segmentby` key, so a miss is a 1.9 ms index-only descent — but execution
+   * was never the cost: a read with no `time` predicate takes a LOCK on every chunk of
+   * the table before it runs anything (#674, see @perfana/shared/database/run-window), and this one
+   * is on a read path. The padding is what makes the bound safe: the 36 s-late rows the
+   * paragraph above measures are an hour inside it, so the case this probe exists to
+   * detect still reaches it. The window costs one PK read, taken by the caller.
    *
    * Best-effort: this request is still served from the CAGG (or the raw-scan
    * safety net). One caveat on "the next expand gets the rollup": if the job
@@ -381,6 +378,7 @@ export class TestRunsPerformanceQueryService {
     testRunId: string,
     isAdmin: boolean,
     organizationIds: string[],
+    bounds: AnalysisBounds,
   ): Promise<void> {
     const em = withRequestEm(this.testRunRepo);
     // Only meaningful — and only legal — inside a transaction. The read below
@@ -391,6 +389,10 @@ export class TestRunsPerformanceQueryService {
     // SAVEPOINT would turn a slow read into a 500 with a misleading cause.
     const guarded = getRequestEm() !== null;
     let repairable: unknown[];
+    // Both probes share one parameter set, numbered after the optional org ids.
+    const timeIdx = !isAdmin ? 3 : 2;
+    const timeT = timeBoundsSql(bounds, 't.time', timeIdx);
+    const timeR = timeBoundsSql(bounds, 'r.time', timeIdx);
 
     try {
       if (guarded) await em.query('SAVEPOINT sampler_rollup_repair');
@@ -407,15 +409,20 @@ export class TestRunsPerformanceQueryService {
               SELECT 1 FROM test_run_sampler_stats s WHERE s.test_run_id = tr.test_run_id
             )
             AND EXISTS (
-              SELECT 1 FROM transactions t WHERE t.test_run_id = tr.test_run_id
+              SELECT 1 FROM transactions t
+               WHERE t.test_run_id = tr.test_run_id
+                 ${timeT.clause}
             )
             AND EXISTS (
               SELECT 1 FROM requests_raw r
                WHERE r.test_run_id = tr.test_run_id
                  AND r.transaction_name IS NOT NULL
+                 ${timeR.clause}
             )
           LIMIT 1`,
-        !isAdmin ? [testRunId, organizationIds] : [testRunId],
+        !isAdmin
+          ? [testRunId, organizationIds, ...timeT.params]
+          : [testRunId, ...timeT.params],
       );
       if (guarded) await em.query('RELEASE SAVEPOINT sampler_rollup_repair');
     } catch (err) {
@@ -1204,17 +1211,17 @@ export class TestRunsPerformanceQueryService {
         return pendingRollup;
       }
 
-      const { startCutoff: cutoffTime, endCutoff } = await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp);
+      // Always bounded — the toggle narrows the window, it does not decide whether there
+      // is one. See getAnalysisBounds and @perfana/shared/database/run-window.
+      const time = timeBoundsSql(
+        await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp), 't.time', 2);
 
       // Param layout (1-indexed):
       //   $1 = resolvedTestRunId
-      //   $2 = excludeRampUp
-      //   $3 = cutoffTime (start cutoff)
-      //   $4 = endCutoff  (end cutoff)
-      //   $5 = sinceMinutes  (only when provided)
-      //   $5 or $6 = organizationIds (non-admin only; index shifts when sinceMinutes present)
-      const windowParamIndex = 5;
-      const orgParamIndex = clampedSinceMinutes != null ? 6 : 5;
+      //   $2..  = the window bounds (one or two, an in-flight run has no end)
+      //   then sinceMinutes (only when provided), then organizationIds (non-admin only)
+      const windowParamIndex = time.nextIndex;
+      const orgParamIndex = clampedSinceMinutes != null ? time.nextIndex + 1 : time.nextIndex;
 
       const windowFilter = clampedSinceMinutes != null
         ? `AND t.time >= NOW() - ($${windowParamIndex}::numeric * interval '1 minute')`
@@ -1246,8 +1253,7 @@ export class TestRunsPerformanceQueryService {
           JOIN test_runs tr ON tr.test_run_id = t.test_run_id
           JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           WHERE t.test_run_id = $1
-            AND ($2::boolean = false OR $3::timestamptz IS NULL OR t.time >= $3::timestamptz)
-            AND ($2::boolean = false OR $4::timestamptz IS NULL OR t.time <= $4::timestamptz)
+            ${time.clause}
             ${windowFilter}
             ${orgFilterClause}
           GROUP BY t.transaction_name, t.scenario_name, tr.system_under_test_id, tr.test_environment, tr.workload
@@ -1308,18 +1314,14 @@ export class TestRunsPerformanceQueryService {
         ORDER BY transaction_name ASC
       `;
 
-      // Param layout: $1=testRunId, $2=excludeRampUp, $3=cutoffTime, $4=endCutoff,
-      //   $5=sinceMinutes (when provided), $6=orgIds (non-admin)
-      //   OR $5=orgIds (non-admin, no window)
+      const base = [resolvedTestRunId, ...time.params];
       let queryParams: unknown[];
       if (clampedSinceMinutes != null) {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff, clampedSinceMinutes, organizationIds]
-          : [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff, clampedSinceMinutes];
+          ? [...base, clampedSinceMinutes, organizationIds]
+          : [...base, clampedSinceMinutes];
       } else {
-        queryParams = !isAdmin
-          ? [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff, organizationIds]
-          : [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff];
+        queryParams = !isAdmin ? [...base, organizationIds] : base;
       }
       // Wrap in a transaction so SET LOCAL applies only to this query
       // (reverts at COMMIT — global default unaffected). Manager comes from
@@ -1515,6 +1517,11 @@ export class TestRunsPerformanceQueryService {
       // order IS plan order. It can misplace a controller whose first pass did not run (an If
       // that was false on iteration one), which is why it orders the table rather than claiming
       // to be the plan.
+      // The LIMIT inside the subquery bounds rows RETURNED, not chunks locked — the same
+      // distinction that made this query slow before migration 1813's index. One extra PK
+      // read for the window; see @perfana/shared/database/run-window.
+      const time = timeBoundsSql(
+        await this.getAnalysisBounds(resolvedTestRunId, false), 'time', 3);
       const rows = await withRequestEm(this.testRunRepo).query(
         `SELECT sampler_name, scenario_name, chain, from_plan, MIN(seq) AS first_seen
            FROM (
@@ -1543,13 +1550,14 @@ export class TestRunsPerformanceQueryService {
                         FROM requests_raw
                        WHERE test_run_id = $1
                          AND transaction_name = $2
+                         ${time.clause}
                        ORDER BY time
                        LIMIT ${PARALLEL_GROUP_SCAN_ROWS}
                     ) rr
            ) first_rows
           WHERE chain IS NOT NULL
           GROUP BY sampler_name, scenario_name, chain, from_plan`,
-        [resolvedTestRunId, transactionName],
+        [resolvedTestRunId, transactionName, ...time.params],
       );
       if (!rows || rows.length === 0) {
         return;
@@ -1710,7 +1718,15 @@ export class TestRunsPerformanceQueryService {
           // so that is the case that most needs the rollup repaired. It carries
           // its own org filter precisely because it runs before the CAGG scope
           // lookup that would otherwise be doing that scoping.
-          await this.repairEmptySamplerRollup(resolvedTestRunId, isAdmin, organizationIds);
+          await this.repairEmptySamplerRollup(
+            resolvedTestRunId,
+            isAdmin,
+            organizationIds,
+            // The same window the read below resolves; hoisted so the probe costs no
+            // extra round trip. Not ramp-trimmed — the probe asks whether the run has
+            // rows at all, which the ramp bands answer too.
+            await this.getAnalysisBounds(resolvedTestRunId, false),
+          );
         }
         const caggScope = await this.loadCaggApdexScope(
           resolvedTestRunId,
@@ -1749,12 +1765,13 @@ export class TestRunsPerformanceQueryService {
         }
       }
 
-      const { startCutoff: cutoffTime, endCutoff } = await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp);
+      const time = timeBoundsSql(
+        await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp), 'r.time', 3);
 
-      // Param layout: $1=testRunId, $2=transactionName, $3=excludeRampUp, $4=cutoffTime, $5=endCutoff,
-      //   $6=sinceMinutes (when provided), $6 or $7=orgIds (non-admin)
-      const windowParamIndexSamples = 6;
-      const orgParamIndexSamples = clampedSinceMinutes != null ? 7 : 6;
+      // Param layout: $1=testRunId, $2=transactionName, $3.. = the window bounds, then
+      // sinceMinutes (when provided), then orgIds (non-admin).
+      const windowParamIndexSamples = time.nextIndex;
+      const orgParamIndexSamples = clampedSinceMinutes != null ? time.nextIndex + 1 : time.nextIndex;
 
       const windowFilterSamples = clampedSinceMinutes != null
         ? `AND r.time >= NOW() - ($${windowParamIndexSamples}::numeric * interval '1 minute')`
@@ -1808,8 +1825,7 @@ export class TestRunsPerformanceQueryService {
           FROM requests_raw r
           WHERE r.test_run_id = $1
             AND r.transaction_name = $2
-            AND ($3::boolean = false OR $4::timestamptz IS NULL OR r.time >= $4::timestamptz)
-            AND ($3::boolean = false OR $5::timestamptz IS NULL OR r.time <= $5::timestamptz)
+            ${time.clause}
             ${windowFilterSamples}
           GROUP BY r.sampler_name, r.scenario_name, r.system_under_test, r.test_environment
         )
@@ -1846,15 +1862,14 @@ export class TestRunsPerformanceQueryService {
         ORDER BY a.total_count DESC
       `;
 
+      const baseSamples = [resolvedTestRunId, transactionName, ...time.params];
       let queryParams: unknown[];
       if (clampedSinceMinutes != null) {
         queryParams = !isAdmin
-          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, clampedSinceMinutes, organizationIds]
-          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, clampedSinceMinutes];
+          ? [...baseSamples, clampedSinceMinutes, organizationIds]
+          : [...baseSamples, clampedSinceMinutes];
       } else {
-        queryParams = !isAdmin
-          ? [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, endCutoff, organizationIds]
-          : [resolvedTestRunId, transactionName, excludeRampUp, cutoffTime, endCutoff];
+        queryParams = !isAdmin ? [...baseSamples, organizationIds] : baseSamples;
       }
       // Wrap in a transaction so SET LOCAL applies only to this query.
       // Manager comes from the request-scoped EM via withRequestEm so this nested
@@ -1939,6 +1954,12 @@ export class TestRunsPerformanceQueryService {
         : null;
       const useCagg = !useSamplerRollup && caggScope?.hasRequestsRawCagg === true;
 
+      // The run's own window, for the two raw-hypertable reads below (requests_error
+      // always, requests_raw on the legacy arm). NOT narrowed by excludeRampUp: this
+      // modal has always listed every error in the run, and the toggle is applied to the
+      // sampler arms only. See @perfana/shared/database/run-window.
+      const bounds = await this.getAnalysisBounds(resolvedTestRunId, false);
+
       const params: unknown[] = [resolvedTestRunId];
       let paramIndex = 2;
 
@@ -1946,6 +1967,10 @@ export class TestRunsPerformanceQueryService {
       let orgParamIndex = paramIndex;
       if (transactionName) orgParamIndex++;
       if (samplerName) orgParamIndex++;
+      // Ask the builder how many slots it will claim rather than re-deriving its rule
+      // here: this index numbers `ANY($n::uuid[])`, the org filter, and getting it wrong
+      // is a tenancy bug rather than a crash.
+      orgParamIndex += timeBoundsSql(bounds, 're.time', orgParamIndex).params.length;
       if (useSamplerRollup) orgParamIndex++; // ramp_up_excluded param
       if (useCagg) orgParamIndex += 6; // sut, env, startTime, endTime, excludeRampUp, cutoffTime
 
@@ -1966,6 +1991,12 @@ export class TestRunsPerformanceQueryService {
         params.push(samplerName);
         paramIndex++;
       }
+
+      // Two aliases over one set of parameters: same indices, different column.
+      const timeErr = timeBoundsSql(bounds, 're.time', paramIndex);
+      const timeRaw = timeBoundsSql(bounds, 'rr.time', paramIndex);
+      params.push(...timeErr.params);
+      paramIndex = timeErr.nextIndex;
 
       // ramp_up_excluded param sits between the optional transaction/sampler
       // filters and the org-ids tail (rollup path only).
@@ -2116,6 +2147,7 @@ export class TestRunsPerformanceQueryService {
             WHERE rr.test_run_id = $1
               ${transactionFilter ? transactionFilter.replace('re.', 'rr.') : ''}
               ${samplerFilter ? samplerFilter.replace('re.', 'rr.') : ''}
+              ${timeRaw.clause}
               ${orgFilterClause}
             GROUP BY rr.sampler_name
           )
@@ -2164,6 +2196,7 @@ export class TestRunsPerformanceQueryService {
           WHERE re.test_run_id = $1
             ${transactionFilter}
             ${samplerFilter}
+            ${timeErr.clause}
             ${orgFilterClause}
           GROUP BY error_type, re.response_code, re.response_message, re.sampler_name, re.system_under_test, re.test_environment, normalized_url, re.url_hash
         ),
@@ -2261,12 +2294,13 @@ export class TestRunsPerformanceQueryService {
       // Resolve UUID to test_run_id if necessary
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
 
-      const { startCutoff: cutoffTime, endCutoff } = await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp);
+      const time = timeBoundsSql(
+        await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp), 'vu.time', 2);
 
       // Build organization filter clause
-      // Param layout: $1=testRunId, $2=excludeRampUp, $3=cutoffTime, $4=endCutoff, $5=orgIds (non-admin)
+      // Param layout: $1=testRunId, $2.. = the window bounds, then orgIds (non-admin).
       const orgFilterClause = !isAdmin
-        ? 'AND sut.organization_id = ANY($5::uuid[])'
+        ? `AND sut.organization_id = ANY($${time.nextIndex}::uuid[])`
         : '';
 
       const overallQuery = `
@@ -2283,8 +2317,7 @@ export class TestRunsPerformanceQueryService {
         LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
         LEFT JOIN teams team ON team.id = sut.team_id
         WHERE vu.test_run_id = $1
-          AND ($2::boolean = false OR $3::timestamptz IS NULL OR vu.time >= $3::timestamptz)
-          AND ($2::boolean = false OR $4::timestamptz IS NULL OR vu.time <= $4::timestamptz)
+          ${time.clause}
           ${orgFilterClause}
       `;
 
@@ -2304,16 +2337,15 @@ export class TestRunsPerformanceQueryService {
         LEFT JOIN teams team ON team.id = sut.team_id
         WHERE vu.test_run_id = $1
           AND vu.scenario_name IS NOT NULL
-          AND ($2::boolean = false OR $3::timestamptz IS NULL OR vu.time >= $3::timestamptz)
-          AND ($2::boolean = false OR $4::timestamptz IS NULL OR vu.time <= $4::timestamptz)
+          ${time.clause}
           ${orgFilterClause}
         GROUP BY vu.scenario_name
         ORDER BY vu.scenario_name ASC
       `;
 
       const queryParams = !isAdmin
-        ? [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff, organizationIds]
-        : [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoff];
+        ? [resolvedTestRunId, ...time.params, organizationIds]
+        : [resolvedTestRunId, ...time.params];
 
       const [overallResult, scenarioResult] = await Promise.all([
         withRequestEm(this.testRunRepo).query(overallQuery, queryParams),
@@ -2781,14 +2813,21 @@ export class TestRunsPerformanceQueryService {
       // Fallback: in-flight run that pre-dates the next CAGG refresh (≤30 s lag),
       // or a stack where the CAGG policy hasn't run yet. Falls back to the legacy
       // raw-scan path so we don't return zeros for a populated test run.
-      const cutoffTime = runInfo.cutoffTime;
-      const endCutoffTime = runInfo.endCutoffTime;
+      // runInfo carries the run's own window (endTime clamped to NOW() for an in-flight
+      // run) and, when the toggle is on, the ramp cutoffs. Either way this read is
+      // bounded — see @perfana/shared/database/run-window.
+      const bounds: AnalysisBounds = {
+        startCutoff: runInfo.cutoffTime ?? new Date(runInfo.startTime.getTime() - RUN_WINDOW_PAD_MS),
+        endCutoff: runInfo.endCutoffTime ?? new Date(runInfo.endTime.getTime() + RUN_WINDOW_PAD_MS),
+      };
+      // Two aliases, one set of parameters: same indices, different column.
+      const timeT = timeBoundsSql(bounds, 't.time', 2);
+      const timeR = timeBoundsSql(bounds, 'rr.time', 2);
 
       // Build organization filter clause
-      // Param layout: $1=testRunId, $2=excludeRampUp, $3=cutoffTime, $4=endCutoffTime,
-      //   $5=orgIds (non-admin)
+      // Param layout: $1=testRunId, $2.. = the window bounds, then orgIds (non-admin).
       const orgFilterClause = !isAdmin
-        ? 'AND sut.organization_id = ANY($5::uuid[])'
+        ? `AND sut.organization_id = ANY($${timeT.nextIndex}::uuid[])`
         : '';
 
       const transactionsQuery = `
@@ -2801,8 +2840,7 @@ export class TestRunsPerformanceQueryService {
           LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           LEFT JOIN teams team ON team.id = sut.team_id
           WHERE t.test_run_id = $1
-            AND ($2::boolean = false OR $3::timestamptz IS NULL OR t.time >= $3::timestamptz)
-            AND ($2::boolean = false OR $4::timestamptz IS NULL OR t.time <= $4::timestamptz)
+            ${timeT.clause}
             ${orgFilterClause}
           GROUP BY floor(extract(epoch from t.time) / 5)
         )
@@ -2820,8 +2858,7 @@ export class TestRunsPerformanceQueryService {
           LEFT JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
           LEFT JOIN teams team ON team.id = sut.team_id
           WHERE rr.test_run_id = $1
-            AND ($2::boolean = false OR $3::timestamptz IS NULL OR rr.time >= $3::timestamptz)
-            AND ($2::boolean = false OR $4::timestamptz IS NULL OR rr.time <= $4::timestamptz)
+            ${timeR.clause}
             ${orgFilterClause}
           GROUP BY floor(extract(epoch from rr.time) / 5)
         )
@@ -2841,8 +2878,7 @@ export class TestRunsPerformanceQueryService {
           LEFT JOIN teams team ON team.id = sut.team_id
           WHERE t.test_run_id = $1
             AND t.scenario_name IS NOT NULL
-            AND ($2::boolean = false OR $3::timestamptz IS NULL OR t.time >= $3::timestamptz)
-            AND ($2::boolean = false OR $4::timestamptz IS NULL OR t.time <= $4::timestamptz)
+            ${timeT.clause}
             ${orgFilterClause}
           GROUP BY t.scenario_name, floor(extract(epoch from t.time) / 5)
         ),
@@ -2857,8 +2893,7 @@ export class TestRunsPerformanceQueryService {
           LEFT JOIN teams team ON team.id = sut.team_id
           WHERE rr.test_run_id = $1
             AND rr.scenario_name IS NOT NULL
-            AND ($2::boolean = false OR $3::timestamptz IS NULL OR rr.time >= $3::timestamptz)
-            AND ($2::boolean = false OR $4::timestamptz IS NULL OR rr.time <= $4::timestamptz)
+            ${timeR.clause}
             ${orgFilterClause}
           GROUP BY rr.scenario_name, floor(extract(epoch from rr.time) / 5)
         ),
@@ -2886,8 +2921,8 @@ export class TestRunsPerformanceQueryService {
       `;
 
       const queryParams = !isAdmin
-        ? [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoffTime, organizationIds]
-        : [resolvedTestRunId, excludeRampUp, cutoffTime, endCutoffTime];
+        ? [resolvedTestRunId, ...timeT.params, organizationIds]
+        : [resolvedTestRunId, ...timeT.params];
 
       const [transactionsResult, requestsResult, scenarioResult] = await Promise.all([
         withRequestEm(this.testRunRepo).query(transactionsQuery, queryParams),
@@ -2987,13 +3022,19 @@ export class TestRunsPerformanceQueryService {
 
   /**
    * The pre-v0.2.96.10 raw scan, kept as the fallback for runs the CAGGs cannot answer.
-   * Unchanged on purpose: it is the reference the CAGG path was verified against.
+   * Same numbers as before — it is the reference the CAGG path was verified against —
+   * but bounded: the two branches of the UNION each locked every chunk of their table
+   * (see @perfana/shared/database/run-window). The caller already holds the run's timestamps, so
+   * this costs no round trip.
    */
   private async querySummaryTimeseriesFromRaw(
     resolvedTestRunId: string,
     startTime: string,
     bucketSizeSeconds: number,
+    bounds: AnalysisBounds,
   ): Promise<SummaryTimeseriesRow[]> {
+    // The two branches share one parameter set: same indices, same column name.
+    const time = timeBoundsSql(bounds, 'time', 4);
     return withRequestEm(this.testRunRepo).query(
       `SELECT
          FLOOR(EXTRACT(EPOCH FROM (t.time - $2::timestamptz)) / $3) * $3 AS time_seconds,
@@ -3001,13 +3042,13 @@ export class TestRunsPerformanceQueryService {
          AVG(t.response_time) AS avg_response_time,
          0 AS errors_per_second
        FROM (
-         SELECT time, response_time FROM transactions   WHERE test_run_id = $1
+         SELECT time, response_time FROM transactions   WHERE test_run_id = $1 ${time.clause}
          UNION ALL
-         SELECT time, response_time FROM requests_raw   WHERE test_run_id = $1
+         SELECT time, response_time FROM requests_raw   WHERE test_run_id = $1 ${time.clause}
        ) t
        GROUP BY 1
        ORDER BY 1`,
-      [resolvedTestRunId, startTime, bucketSizeSeconds],
+      [resolvedTestRunId, startTime, bucketSizeSeconds, ...time.params],
     );
   }
 
@@ -3084,6 +3125,7 @@ export class TestRunsPerformanceQueryService {
           resolvedTestRunId,
           start_time,
           bucketSizeSeconds,
+          analysisBoundsFromRow({ start_time, end_time }, false),
         );
       }
 
@@ -3120,10 +3162,16 @@ export class TestRunsPerformanceQueryService {
       }
 
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
-      // applyAnalysisWindow=true is semantically equivalent to excludeRampUp=true in getAnalysisBounds
-      const { startCutoff, endCutoff } = await this.getAnalysisBounds(resolvedTestRunId, applyAnalysisWindow);
+      // applyAnalysisWindow=true is semantically equivalent to excludeRampUp=true in getAnalysisBounds.
+      // Built by the shared helper rather than `($n IS NULL OR …)`: that spelling folds to
+      // TRUE at plan time when the bound is null — the shape #674 removes — and it is
+      // invisible to the `= false OR` grep the docs point the next reader at.
+      const bounds = await this.getAnalysisBounds(resolvedTestRunId, applyAnalysisWindow);
+      // Two aliases, one parameter set: same indices, different column.
+      const time = timeBoundsSql(bounds, 't.time', 2);
+      const timeR = timeBoundsSql(bounds, 'r.time', 2);
 
-      const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($4::uuid[])';
+      const orgClause = isAdmin ? '' : `AND sut.organization_id = ANY($${time.nextIndex}::uuid[])`;
 
       const statExprMap: Record<typeof stat, string> = {
         avg: 'ROUND(AVG(t.response_time)::numeric, 2)',
@@ -3149,15 +3197,14 @@ export class TestRunsPerformanceQueryService {
         JOIN test_runs tr ON tr.test_run_id = r.test_run_id
         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
         WHERE r.test_run_id = $1
-          AND ($2::timestamptz IS NULL OR r.time >= $2::timestamptz)
-          AND ($3::timestamptz IS NULL OR r.time <= $3::timestamptz)
+          ${timeR.clause}
           ${orgClause}
         GROUP BY 1
         ORDER BY 1
       `;
         params = isAdmin
-          ? [resolvedTestRunId, startCutoff, endCutoff]
-          : [resolvedTestRunId, startCutoff, endCutoff, organizationIds];
+          ? [resolvedTestRunId, ...time.params]
+          : [resolvedTestRunId, ...time.params, organizationIds];
       } else {
         const table = metric === 'transaction_response_time' ? 'transactions' : 'requests_raw';
         const statExpr = statExprMap[stat];
@@ -3169,15 +3216,14 @@ export class TestRunsPerformanceQueryService {
         JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
         WHERE t.test_run_id = $1
-          AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
-          AND ($3::timestamptz IS NULL OR t.time <= $3::timestamptz)
+          ${time.clause}
           ${orgClause}
         GROUP BY 1
         ORDER BY 1
       `;
         params = isAdmin
-          ? [resolvedTestRunId, startCutoff, endCutoff]
-          : [resolvedTestRunId, startCutoff, endCutoff, organizationIds];
+          ? [resolvedTestRunId, ...time.params]
+          : [resolvedTestRunId, ...time.params, organizationIds];
       }
 
       const rows: Array<{ time: string; value: string }> = await withRequestEm(this.testRunRepo).query(query, params);

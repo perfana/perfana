@@ -1205,3 +1205,149 @@ Unchanged by all of this: an Apdex check short-circuits before the column (its t
 ACTUAL column at all), and a passing averaged check still shows `panel_average`, where it
 genuinely is the actual value. **A report generated before v0.2.97.24 keeps its old number** — the HTML is
 stored, so it has to be regenerated.
+
+### A raw-hypertable read takes a lock per chunk, and the window has to be fetched first
+
+A query on `requests_raw`, `transactions`, `requests_error` or `virtual_users` that filters on
+`test_run_id` alone locks **every chunk** of the table, plus every compressed twin, plus the
+indexes on both — ~11 relation locks per chunk, whatever the result set is. With the daily
+chunks migration 1815 introduced and no retention policy on any of the four, that count grows
+~365 per table per year, forever. Measured on the dev database against a 2.5 M-row run,
+counting `pg_locks` inside the transaction:
+
+| Form | Relation locks |
+|---|---|
+| `WHERE test_run_id = $1` | **136** |
+| `+ time >= $2 AND time <= $3` (literals or bind params) | **21** |
+| `+ time` bounds read via a **subquery** on `test_runs` | **150** |
+
+**It is a trade, not a free win, and which way it goes depends on the query's shape.** A
+bound costs TimescaleDB the `VectorAgg` push-down that answers a simple aggregate off the
+compressed batch headers, and forces the `time` column off disk to apply the filter. Measured
+on the same run, identical results:
+
+| Shape | Unbounded | Bounded | |
+|---|---|---|---|
+| `count(*)` over the whole run | 8,562 buffers / 10.9 ms | 16,161 / 179.7 ms | **1.9x worse** |
+| `SELECT DISTINCT transaction_name` | 16,174 buffers | 23,733 | **1.5x worse** |
+| `ORDER BY time DESC LIMIT 10`, hit | 2,347 buffers / 2.8 ms | **5 / 0.016 ms** | 470x better |
+| the same, miss | 9,404 buffers / 75 locks | **131 / 15 locks** | 72x better |
+
+So a selective read gets whole-chunk exclusion and wins enormously; a whole-run aggregate pays
+~1.5-1.9x the buffer reads. `shared_blks_read` is the exact axis issues #9 and #34 identify as
+what collapses the buffer cache for everything else, so this is not nothing — it is accepted
+because the lock growth is an unbounded hard failure and this is bounded degradation. A
+follow-up worth testing: snapping the bound outward to the **chunk boundary** instead of an
+arbitrary hour measured 8,513 buffers on the `count(*)` case — parity with unbounded, same lock
+set — but it needs the deployment's real `chunk_interval`, so it is not hardcodable.
+
+The end of that road is a hard `out of shared memory`, not degradation: the shared lock table
+holds `max_locks_per_transaction × (max_connections + max_prepared_transactions)` entries, and
+three concurrent year-old join queries exhaust the 25,600 a `max_connections = 100` deploy gets.
+Migration 1815 warns about the sizing; a `time` bound is what removes the growth.
+
+**The obvious refactor makes it worse — read the third row again.** Joining or subquerying
+`test_runs` for `start_time` / `end_time` in the same statement excludes *no* chunks and adds
+the `test_runs` relations on top. Chunk exclusion for locking purposes happens at **plan** time,
+and a correlated subquery is not available then; runtime exclusion is too late, the locks are
+already taken. So the window has to be fetched in its own round trip and passed as bind
+parameters — which is what `@perfana/shared/database/run-window` (`TEST_RUN_TIMES_SQL` +
+`analysisBoundsFromRow`) exists for. Anyone "fixing" a site by reaching into `test_runs` inline
+has regressed it while appearing to do the right thing, and no behavioural test can see it: the
+result set is identical. The guard is an assertion on the **emitted SQL text** — see
+`test-runs-error-analysis.service.spec.ts`, "never reads the window from test_runs inside a
+hypertable query".
+
+Two things the helper settles that a hand-rolled bound gets wrong:
+
+1. **The window is padded an hour each side**, because ingest lags the recorded timestamps —
+   `requests_raw` rows have been observed arriving up to 36 s past `end_time`, and a load
+   generator's clock can run ahead of `start_time`. An unpadded bound silently drops rows the
+   unbounded query returned. An hour costs at most one extra daily chunk per side.
+2. **The window is not the analysis timerange.** `excludeRampUp` narrows the same bounds to the
+   Performance Analysis toggle's window; with the toggle *off* the padded run window still
+   applies, because the lock bound is not optional. A run with no `end_time` keeps an unbounded
+   upper end on purpose — there are no chunks past now() to exclude.
+
+**A third thing to know, and the reason the triage count was wrong.** The old shape here was
+`AND ($2::boolean = false OR time >= $3::timestamptz)` — bound only when the analysis-timerange
+toggle was on. With the toggle *off*, which is the default, that folds to TRUE at plan time and
+the read is as unbounded as one with no predicate at all. A `FROM <table>` + lookahead grep
+reads those as "bounded", so the heuristic in issue #674 undercounted: 5 of
+`report-data-fetcher.service.ts`'s 16 sites looked unbounded and 11 of them were. Any site
+still carrying `= false OR` is one of these. Grep for it, do not grep for `time >=`.
+
+**Converted: every raw-hypertable read in the repo** — 41 in `apps/api` across five services
+beyond the three heavy ones, and 12 in `apps/worker`. The helper lives in
+`packages/shared/src/database/run-window.ts` because both apps bind from it; it is exported as
+`@perfana/shared/database/run-window`, a declared subpath (an undeclared one type-checks and
+then fails at boot — see the workspace-exports check in the root CLAUDE.md). Five shapes came
+up and are worth copying:
+
+- **The caller already holds the entity** — `analysisBoundsFromEntity(testRun)`, no round trip.
+  The entity spells the columns `startTime` / `endTime` / `analysisStartOffset` /
+  `analysisEndOffset`.
+- **Several runs in one `ANY(...)` read** — `spanBounds()` over each run's window. The span is
+  wider than any one run, which costs a chunk or two of locks and nothing in correctness, since
+  `test_run_id` still selects. Per-run bounds cannot be expressed against a single read.
+- **A correlated `LATERAL`** — cannot be fixed with a predicate at all. `getTrendsData` had one
+  aggregating `transactions` per outer `test_runs` row; the window is only known per row, so
+  there is nothing a planner can exclude on. It is now two queries: fetch the runs, then one
+  bounded `ANY(...)` aggregate over their ids. Same answer, one read instead of eleven.
+- **Two table aliases, one parameter set** — `timeBoundsSql(bounds, 't.time', 2)` and
+  `timeBoundsSql(bounds, 'rr.time', 2)` built from the same `startIndex` give two clauses that
+  bind to the same values. The throughput fallback, the errors modal, the summary-timeseries
+  UNION and the perf-test pipeline's two-EXISTS probe all need this; pass `.params` from one of
+  them, not both.
+- **A query spanning every run of a SYSTEM** — the SUT-delete preview counts `requests_raw` and
+  `transactions` for all of a system's runs, so there is no run window. Its own
+  `MIN(start_time)`/`MAX(end_time)` still is one: a system that ran for two months in a
+  two-year table locks ~60 chunks instead of ~730.
+
+Three things that look like exceptions and are decisions:
+
+1. **A CAGG read is not one of these.** `transactions_5s` / `requests_raw_5s` are already
+   bucket-bounded by the run window, so they are handed the ramp cutoff **only when the toggle
+   is on**. Passing the padded window start there is not a lock bound — it is a wrong first
+   bucket. The 15 remaining `= false OR` predicates (8 in `test-runs-performance-query.service.ts`,
+   6 in `report-data-fetcher.service.ts`, 1 in `test-runs-timeseries-query.service.ts`) are all
+   CAGG reads and correct as they stand. **Grep for `IS NULL OR` as well as `= false OR`** —
+   both spellings fold to TRUE when the bound is null, and the second is the one that hid four
+   raw-hypertable reads from the first version of this note.
+2. **The errors modal is bounded by the run window, never the analysis one.** It has always
+   listed every error in the run; the toggle reaches its sampler arms only.
+3. **`repairEmptySamplerRollup`'s probe is bounded now**, and its old comment arguing otherwise
+   is resolved rather than overruled. Unbounded it was cheap to *execute* — a 1.9 ms index-only
+   descent — but execution was never the cost: the locks are taken before the statement runs,
+   and this is a read path. The hour of padding covers the 36 s-late rows the probe exists to
+   detect. The window comes from the caller, which needed it anyway, so it costs no round trip.
+
+One shape is specific to the worker, in `TransactionStatsRollupPipeline`: its three statements
+compute the full-run AND the ramp-excluded aggregate in one pass, the second through `FILTER
+(WHERE time >= $2 AND time < $3)`. **Those FILTERs are not a bound** — the WHERE carried none,
+so each statement locked every chunk. They now take `$4`/`$5`, the padded run window, in the
+WHERE. It is a superset of every row the run wrote, so the full-run aggregates are unchanged
+and the FILTERs are untouched. Do not "simplify" by moving the ramp cutoffs into the WHERE:
+that would silently narrow the full-run half to the analysis window.
+
+Re-measure a converted site with
+`BEGIN; <query>; SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'relation'; ROLLBACK;`.
+
+Five guards, all asserting on the emitted SQL because no behavioural test can see any of this:
+`report-data-fetcher.time-bounds.spec.ts`, `test-runs-performance-query.time-bounds.spec.ts`,
+`benchmark-calculator.time-bounds.spec.ts`, the worker's `raw-hypertable-time-bounds.test.ts`,
+and the assertion inside `test-runs-error-analysis.service.spec.ts`. Each drives its methods in
+**both** toggle positions and checks for a parameterised bound, the exact window by value, no
+`= false OR` **or** `IS NULL OR`, and no `time >= tr.<column>`.
+
+**They count bounds per statement, and that is the point.** A first-match
+`expect(sql).toMatch(/time >= \$\d+/)` passes while a second read in the same statement has
+lost its bound — the per-scenario throughput query has two CTEs, the errors modal reads
+`requests_error` beside `requests_raw`, the summary-timeseries fallback is a UNION. A mutation
+sweep found five bounds deletable that way with 8,000+ tests green. `assertBounded` now requires
+one `time >=` per hypertable `FROM`/`JOIN` in the same SQL. Keep it that way. That last regex is deliberately about the comparison, not the column:
+`tr.start_time IS NOT NULL` is a legitimate predicate and appears in the repair probe. The
+helper itself has `packages/shared/src/database/__tests__/run-window.spec.ts`, which pins the
+rules a reader is most likely to "tidy": the hour of padding, that a toggle with no ramp
+configured still bounds, that `spanBounds` gives up entirely when a run has no start, and that
+`timeBoundsSql` emits no predicate rather than a `<= NULL` that would match nothing.

@@ -1,4 +1,10 @@
 import { BadRequestException, HttpException, Injectable, Logger } from '@nestjs/common';
+import {
+  AnalysisBounds,
+  TEST_RUN_TIMES_SQL,
+  analysisBoundsFromRow,
+  timeBoundsSql,
+} from '@perfana/shared/database/run-window';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
@@ -55,25 +61,29 @@ export class TestRunsTimeSeriesQueryService {
   }
 
   /**
-   * Get ramp-up cutoff time for a test run
+   * The ramp-up cutoff AND the run's own window, in one round trip.
+   *
+   * The cutoff is what the CAGG reads narrow to when the toggle is on. The window is
+   * what the `scenarios` CTE — the one read here that hits a raw hypertable — must be
+   * bounded by whatever the toggle says, or it locks every chunk of `transactions`
+   * (#674, see @perfana/shared/database/run-window).
    */
-  private async getRampUpCutoffTime(testRunId: string, excludeRampUp: boolean): Promise<Date | null> {
-    if (!excludeRampUp) return null;
+  private async getRunBounds(
+    testRunId: string,
+    excludeRampUp: boolean,
+  ): Promise<{ cutoffTime: Date | null; window: AnalysisBounds }> {
+    const result = await withRequestEm(this.testRunRepo).query(TEST_RUN_TIMES_SQL, [testRunId]);
+    const row = result[0];
+    const window = analysisBoundsFromRow(row, false);
 
-    const query = `
-      SELECT start_time, ramp_up
-      FROM test_runs
-      WHERE test_run_id = $1
-    `;
-    const result = await withRequestEm(this.testRunRepo).query(query, [testRunId]);
-
-    if (result[0]?.start_time && result[0]?.ramp_up) {
-      const startTime = new Date(result[0].start_time);
-      const analysisStartOffsetSeconds = this.mapper.parseInt(result[0].ramp_up);
-      return new Date(startTime.getTime() + analysisStartOffsetSeconds * 1000);
+    let cutoffTime: Date | null = null;
+    if (excludeRampUp && row?.start_time && row?.ramp_up) {
+      const startTime = new Date(row.start_time);
+      const analysisStartOffsetSeconds = this.mapper.parseInt(row.ramp_up);
+      cutoffTime = new Date(startTime.getTime() + analysisStartOffsetSeconds * 1000);
     }
 
-    return null;
+    return { cutoffTime, window };
   }
 
   /**
@@ -171,8 +181,10 @@ export class TestRunsTimeSeriesQueryService {
   private buildTimeSeriesQuery(opts: {
     kind: 'transaction' | 'sampler' | 'sampler-single';
     aggSec: number;
+    /** `time` bound for the `scenarios` CTE, already numbered past the params above. */
+    scenarioTimeClause: string;
   }): string {
-    const { kind, aggSec } = opts;
+    const { kind, aggSec, scenarioTimeClause } = opts;
     const sourceView = kind === 'transaction' ? 'transactions_5s' : 'requests_raw_5s';
     const isSamplerSingle = kind === 'sampler-single';
     const isSamplerGroup = kind === 'sampler';
@@ -194,9 +206,13 @@ export class TestRunsTimeSeriesQueryService {
         WHERE tr.test_run_id = $1
       ),
       scenarios AS (
+        -- The only raw-hypertable read in this query; everything below it is a CAGG,
+        -- bucket-bounded by the run CTE. Bounded by PARAMETERS, never by run.start_time:
+        -- a correlated read excludes no chunks and locks more (#674).
         SELECT DISTINCT scenario_name
         FROM transactions
         WHERE test_run_id = $1 AND transaction_name = $2
+          ${scenarioTimeClause}
       ),
       bounds AS (
         SELECT CASE WHEN ${excludeRampParam}::boolean
@@ -314,12 +330,14 @@ export class TestRunsTimeSeriesQueryService {
         `Getting time-series data for transaction: ${transactionName} with ${aggSec}s aggregation (${aggregationSeconds === undefined ? 'server-picked from run duration' : 'caller-supplied'}, excludeRampUp: ${excludeRampUp})`,
       );
 
-      const cutoffTime = await this.getRampUpCutoffTime(testRunId, excludeRampUp);
-      const queryParams = [testRunId, transactionName, excludeRampUp, cutoffTime ?? null];
+      const { cutoffTime, window } = await this.getRunBounds(testRunId, excludeRampUp);
+      const time = timeBoundsSql(window, 'time', 5);
+      const queryParams = [testRunId, transactionName, excludeRampUp, cutoffTime ?? null, ...time.params];
 
       const transactionQuery = this.buildTimeSeriesQuery({
         kind: 'transaction',
         aggSec,
+        scenarioTimeClause: time.clause,
       });
       const transactionResult = await withRequestEm(this.testRunRepo).query(
         transactionQuery,
@@ -329,6 +347,7 @@ export class TestRunsTimeSeriesQueryService {
       const samplerQuery = this.buildTimeSeriesQuery({
         kind: 'sampler',
         aggSec,
+        scenarioTimeClause: time.clause,
       });
       const samplerResult = await withRequestEm(this.testRunRepo).query(
         samplerQuery,
@@ -396,18 +415,21 @@ export class TestRunsTimeSeriesQueryService {
         `Getting time-series data for sampler: ${samplerName} in transaction: ${transactionName} with ${aggregationSeconds}s aggregation (excludeRampUp: ${excludeRampUp})`,
       );
 
-      const cutoffTime = await this.getRampUpCutoffTime(testRunId, excludeRampUp);
+      const { cutoffTime, window } = await this.getRunBounds(testRunId, excludeRampUp);
+      const time = timeBoundsSql(window, 'time', 6);
       const queryParams = [
         testRunId,
         transactionName,
         samplerName,
         excludeRampUp,
         cutoffTime ?? null,
+        ...time.params,
       ];
 
       const samplerQuery = this.buildTimeSeriesQuery({
         kind: 'sampler-single',
         aggSec: aggregationSeconds,
+        scenarioTimeClause: time.clause,
       });
       const samplerResult = await withRequestEm(this.testRunRepo).query(
         samplerQuery,

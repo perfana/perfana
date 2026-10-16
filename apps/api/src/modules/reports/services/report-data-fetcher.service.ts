@@ -5,6 +5,13 @@ import { TestRun } from '@perfana/shared';
 import { SeriesConfig } from '@perfana/shared/entities';
 import { ControllerRef } from '../renderers/controller-sections';
 import { withRequestEm } from '../../../common/db/request-em';
+import {
+  AnalysisBounds,
+  analysisBoundsFromEntity,
+  analysisBoundsFromRow,
+  spanBounds,
+  timeBoundsSql,
+} from '@perfana/shared/database/run-window';
 import { resolveTestRunUuid } from './resolve-test-run';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
@@ -171,40 +178,42 @@ export class ReportDataFetcherService {
   }
 
   /**
-   * Get ramp-up cutoff time for a test run
-   * @param testRunId - Test run ID
-   * @param excludeRampUp - Whether to exclude ramp-up period
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
-   * @returns Cutoff time or null if not excluding ramp-up
-   */
-  async getRampUpCutoffTime(
-    testRunId: string,
-    excludeRampUp: boolean,
-    userId: string = '',
-    roles: string[] = [],
-  ): Promise<Date | null> {
-    return (await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles)).startCutoff;
-  }
-
-  /**
-   * BOTH ends of the analysis window, mirroring `getAnalysisBounds` in
-   * TestRunsPerformanceQueryService.
+   * BOTH ends of the window to read a raw hypertable over, mirroring
+   * `getAnalysisBounds` in TestRunsPerformanceQueryService.
    *
-   * The end cutoff is not optional padding. `ds_metrics.ramp_up` is baked by the worker to
-   * exclude the ramp-DOWN band as well, so a series read from that table is already trimmed
-   * at both ends. An aggregate computed from the raw tables with only a start cutoff runs
-   * past it, and the graphs section now draws the two on ONE chart — two lines ending at
-   * different x positions.
+   * Always bounded, whatever `excludeRampUp` says. With the toggle off these are the
+   * run's own start and end, padded an hour either side; with it on they narrow to the
+   * analysis timerange. The unbounded case is not a valid one: a read on these tables
+   * with no `time` predicate locks every chunk — see `@perfana/shared/database/run-window`.
+   *
+   * The end cutoff is not optional padding either. `ds_metrics.ramp_up` is baked by the
+   * worker to exclude the ramp-DOWN band as well, so a series read from that table is
+   * already trimmed at both ends. An aggregate computed from the raw tables with only a
+   * start cutoff runs past it, and the graphs section now draws the two on ONE chart —
+   * two lines ending at different x positions.
+   */
+  /**
+   * @param endBound which end the window gets.
+   *
+   * `'analysis'` trims the ramp-DOWN band, which is what a reader paired with a
+   * `ds_metrics` series needs (see the paragraph above).
+   *
+   * **`'head-trimmed'` is not a variant — it is the pre-#674 contract.** Before this
+   * change, the Apdex, throughput and virtual-user reads carried
+   * `AND ($2::boolean = false OR t.time >= $3)`: a START cutoff and no end at all. Giving
+   * them an analysis end would silently re-cut the default report — measured on
+   * `PerfanaWebshop-acc-loadTest-k6-00019`, the Apdex table lost 131 of 275 rows and its
+   * average moved 282.41 → 286.58 ms, on 58 of 60 runs on the dev database. #674 is a
+   * lock fix; it does not get to change a published number. Trimming the report's
+   * ramp-down band may well be right, but it is a product change and ships on its own.
    */
   private async getAnalysisWindowBounds(
     testRunId: string,
     excludeRampUp: boolean,
     userId: string = '',
     roles: string[] = [],
-  ): Promise<{ startCutoff: Date | null; endCutoff: Date | null }> {
-    if (!excludeRampUp) return { startCutoff: null, endCutoff: null };
-
+    endBound: 'analysis' | 'head-trimmed' = 'analysis',
+  ): Promise<AnalysisBounds> {
     // Internal/system calls (no userId) or admin users bypass org filtering
     const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
 
@@ -217,15 +226,21 @@ export class ReportDataFetcherService {
     const result = await withRequestEm(this.testRunRepo).query(query, [testRunId, ...orgFilter.params]);
     const row = result[0];
 
-    let startCutoff: Date | null = null;
-    let endCutoff: Date | null = null;
-    if (row?.start_time && row?.ramp_up) {
-      startCutoff = new Date(new Date(row.start_time).getTime() + parseInt(row.ramp_up) * 1000);
+    // A run the caller cannot see (org filter) or that does not exist yields no row, and
+    // every bound then collapses to "unbounded" — the 136-lock statement this file exists
+    // to remove, reached silently. Say so; the read still runs, as it did before #674.
+    if (!row) {
+      this.logger.warn(
+        `No visible test_runs row for ${testRunId}: raw-hypertable reads for it run unbounded (#674)`,
+      );
+      return { startCutoff: null, endCutoff: null };
     }
-    if (row?.end_time && row?.ramp_down) {
-      endCutoff = new Date(new Date(row.end_time).getTime() - parseInt(row.ramp_down) * 1000);
+
+    const bounds = analysisBoundsFromRow(row, excludeRampUp);
+    if (endBound === 'head-trimmed') {
+      return { startCutoff: bounds.startCutoff, endCutoff: analysisBoundsFromRow(row, false).endCutoff };
     }
-    return { startCutoff, endCutoff };
+    return bounds;
   }
 
   /**
@@ -244,8 +259,11 @@ export class ReportDataFetcherService {
     includeChildRequests: boolean = false,
   ): Promise<ScenarioData | null> {
     try {
+      // The run window, from the entity already in hand. Not optional: without it each
+      // of these two reads locks every chunk of `transactions`. See @perfana/shared/database/run-window.
+      const time = timeBoundsSql(analysisBoundsFromEntity(testRun), 'txn.time', 3);
       // Build organization filter for test_run validation
-      const orgFilter = await this.resolveOrgFilter(userId, roles, 3, 'tr');
+      const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
 
       // Query transactions for this test run and scenario with organization filtering
       const query = `
@@ -261,12 +279,14 @@ export class ReportDataFetcherService {
         JOIN test_runs tr ON tr.test_run_id = txn.test_run_id
         WHERE txn.test_run_id = $1
           AND txn.scenario_name = $2
+          ${time.clause}
           ${orgFilter.clause}
         GROUP BY txn.transaction_name
         ORDER BY txn.transaction_name
       `;
 
-      const transactions = await withRequestEm(this.testRunRepo).query(query, [testRun.testRunId, scenarioName, ...orgFilter.params]);
+      const transactions = await withRequestEm(this.testRunRepo).query(
+        query, [testRun.testRunId, scenarioName, ...time.params, ...orgFilter.params]);
 
       if (!transactions || transactions.length === 0) {
         return null;
@@ -282,12 +302,14 @@ export class ReportDataFetcherService {
         JOIN test_runs tr ON tr.test_run_id = txn.test_run_id
         WHERE txn.test_run_id = $1
           AND txn.scenario_name = $2
+          ${time.clause}
           ${orgFilter.clause}
         GROUP BY txn.transaction_name, time_bucket
         ORDER BY txn.transaction_name, time_bucket
       `;
 
-      const timeSeriesData = await withRequestEm(this.testRunRepo).query(timeSeriesQuery, [testRun.testRunId, scenarioName, ...orgFilter.params]);
+      const timeSeriesData = await withRequestEm(this.testRunRepo).query(
+        timeSeriesQuery, [testRun.testRunId, scenarioName, ...time.params, ...orgFilter.params]);
 
       const childrenByTransaction = includeChildRequests
         ? await this.getChildRequestsByTransaction(testRun, scenarioName, userId, roles)
@@ -341,24 +363,15 @@ export class ReportDataFetcherService {
       transactionsWithErrors: 0, byCode: [], byTransaction: [], overTime: [],
     };
     try {
-      // The analysis window, matching the Performance Analysis card's toggle: start
-      // after ramp-up, end before ramp-down, and only for a run that has finished.
+      // Always bounded: with the toggle on this is the analysis window (start after
+      // ramp-up, end before ramp-down, the Performance Analysis card's), with it off the
+      // run's own padded window. The second is not cosmetic — an unbounded read locks
+      // every chunk of `requests_error`. See @perfana/shared/database/run-window.
       const bounds: string[] = [];
       const params: unknown[] = [testRun.testRunId];
-      if (excludeRampUp) {
-        // ramp_up / ramp_down on the entity are analysisStartOffset /
-        // analysisEndOffset — the same seconds the analysis time range dialog sets.
-        const rampUp = Number(testRun.analysisStartOffset ?? 0);
-        if (testRun.startTime && rampUp > 0) {
-          params.push(new Date(new Date(testRun.startTime).getTime() + rampUp * 1000));
-          bounds.push(`AND e.time >= $${params.length}`);
-        }
-        const rampDown = Number(testRun.analysisEndOffset ?? 0);
-        if (testRun.endTime && rampDown > 0) {
-          params.push(new Date(new Date(testRun.endTime).getTime() - rampDown * 1000));
-          bounds.push(`AND e.time <= $${params.length}`);
-        }
-      }
+      const time = timeBoundsSql(analysisBoundsFromEntity(testRun, excludeRampUp), 'e.time', 2);
+      bounds.push(time.clause);
+      params.push(...time.params);
       if (scenarios.length > 0) {
         params.push(scenarios);
         bounds.push(`AND COALESCE(e.scenario_name, '') = ANY($${params.length})`);
@@ -481,7 +494,11 @@ export class ReportDataFetcherService {
     const chains = new Map<string, { chain: ControllerRef[]; firstSeen: number }>();
     if (transactionNames.length === 0) return chains;
     try {
-      const orgFilter = await this.resolveOrgFilter(userId, roles, 3, 'tr');
+      // The LIMIT inside the lateral bounds rows *returned*, not chunks locked, so the
+      // run window is still needed — one extra PK read. See @perfana/shared/database/run-window.
+      const time = timeBoundsSql(
+        await this.getAnalysisWindowBounds(testRunId, false, userId, roles), 'time', 3);
+      const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
       const rows: Array<Record<string, unknown>> = await withRequestEm(this.testRunRepo).query(
         `SELECT txn.name AS transaction_name, r.scenario_name, r.sampler_name, r.chain,
                 MIN(r.seq) AS first_seen
@@ -511,6 +528,7 @@ export class ReportDataFetcherService {
                         FROM requests_raw
                        WHERE test_run_id = $1
                          AND transaction_name = txn.name
+                         ${time.clause}
                        ORDER BY time
                        LIMIT ${REQUEST_CHAIN_SCAN_ROWS}
                     ) rr
@@ -519,7 +537,7 @@ export class ReportDataFetcherService {
           WHERE r.chain IS NOT NULL
             ${orgFilter.clause}
           GROUP BY 1, 2, 3, 4`,
-        [testRunId, transactionNames, ...orgFilter.params],
+        [testRunId, transactionNames, ...time.params, ...orgFilter.params],
       );
 
       // A sampler that ran at two different plan positions has no single answer here: the sampler
@@ -564,16 +582,19 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<string[]> {
     try {
-      const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
+      // Bounded from the entity in hand; see @perfana/shared/database/run-window.
+      const time = timeBoundsSql(analysisBoundsFromEntity(testRun), 'txn.time', 2);
+      const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
       const rows: Array<{ scenario_name: string | null }> = await withRequestEm(this.testRunRepo).query(
         `SELECT DISTINCT txn.scenario_name
          FROM transactions txn
          JOIN test_runs tr ON tr.test_run_id = txn.test_run_id
          WHERE txn.test_run_id = $1
            AND txn.scenario_name IS NOT NULL
+           ${time.clause}
            ${orgFilter.clause}
          ORDER BY txn.scenario_name`,
-        [testRun.testRunId, ...orgFilter.params],
+        [testRun.testRunId, ...time.params, ...orgFilter.params],
       );
       return rows.map((r) => r.scenario_name).filter((n): n is string => !!n);
     } catch (error) {
@@ -791,9 +812,12 @@ export class ReportDataFetcherService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<{ time: Date; value: number }[]> {
-    const { startCutoff, endCutoff } = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
-    // params: $1 testRunId, $2 start cutoff, $3 end cutoff; org params start at $4
-    const orgFilter = await this.resolveOrgFilter(userId, roles, 4, 'tr');
+    // Built by the shared helper rather than `($n IS NULL OR …)`: that spelling folds to
+    // TRUE at plan time when the bound is null, which is the shape #674 exists to remove,
+    // and it is invisible to the `= false OR` grep the docs tell the next reader to run.
+    const time = timeBoundsSql(
+      await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles), 't.time', 2);
+    const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
 
     const statExprMap: Record<typeof stat, string> = {
       avg: 'ROUND(AVG(t.response_time)::numeric, 2)',
@@ -812,8 +836,7 @@ export class ReportDataFetcherService {
         FROM requests_raw t
         JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         WHERE t.test_run_id = $1
-          AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
-          AND ($3::timestamptz IS NULL OR t.time <= $3::timestamptz)
+          ${time.clause}
           ${orgFilter.clause}
         GROUP BY 1
         ORDER BY 1
@@ -825,8 +848,7 @@ export class ReportDataFetcherService {
         FROM ${table} t
         JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         WHERE t.test_run_id = $1
-          AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
-          AND ($3::timestamptz IS NULL OR t.time <= $3::timestamptz)
+          ${time.clause}
           ${orgFilter.clause}
         GROUP BY 1
         ORDER BY 1
@@ -834,7 +856,7 @@ export class ReportDataFetcherService {
     }
 
     const rows: Array<{ time: string; value: string | null }> =
-      await withRequestEm(this.testRunRepo).query(query, [testRunId, startCutoff, endCutoff, ...orgFilter.params]);
+      await withRequestEm(this.testRunRepo).query(query, [testRunId, ...time.params, ...orgFilter.params]);
     return rows.map((r) => ({ time: new Date(r.time), value: r.value == null ? 0 : Number(r.value) }));
   }
 
@@ -847,7 +869,10 @@ export class ReportDataFetcherService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<{ avg: number | null; p90: number | null; p95: number | null; p99: number | null; pass: number; fail: number }> {
-    const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
+    // Bounded; see @perfana/shared/database/run-window.
+    const time = timeBoundsSql(
+      await this.getAnalysisWindowBounds(testRunId, false, userId, roles), 't.time', 2);
+    const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
     const query = `
       SELECT
         ROUND(AVG(t.response_time)::numeric, 2) AS avg,
@@ -859,10 +884,11 @@ export class ReportDataFetcherService {
       FROM transactions t
       JOIN test_runs tr ON tr.test_run_id = t.test_run_id
       WHERE t.test_run_id = $1
+        ${time.clause}
         ${orgFilter.clause}
     `;
     const rows: Array<Record<string, string | null>> =
-      await withRequestEm(this.testRunRepo).query(query, [testRunId, ...orgFilter.params]);
+      await withRequestEm(this.testRunRepo).query(query, [testRunId, ...time.params, ...orgFilter.params]);
     const r = rows[0] ?? {};
     const num = (v: string | null | undefined) => (v == null ? null : Number(v));
     return {
@@ -1025,18 +1051,18 @@ export class ReportDataFetcherService {
     try {
       const testRunId = testRun.testRunId;
 
-      // Get ramp-up cutoff time if needed (pass userId/roles for org filtering)
-      const cutoffTime = await this.getRampUpCutoffTime(testRunId, excludeRampUp, userId, roles);
+      // Always bounded, toggle or not — see @perfana/shared/database/run-window. The same bounds
+      // go to the throughput and virtual-user reads below, so this is one lookup.
+      // 'head-trimmed': this read had a start cutoff and no end before #674. See the
+      // getAnalysisWindowBounds docblock — an analysis end here moves published numbers.
+      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const time = timeBoundsSql(bounds, 't.time', 2);
 
       // Build organization filter for queries
-      // Base params are: [testRunId, excludeRampUp, cutoffTime] = indices 1, 2, 3
-      // Organization params start at index 4
-      const orgFilter = await this.resolveOrgFilter(userId, roles, 4, 'tr');
+      const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
 
       // Note: apdexThreshold parameter no longer used in query - we fetch per-transaction thresholds from DB
-      const queryParams = cutoffTime
-        ? [testRunId, excludeRampUp, cutoffTime, ...orgFilter.params]
-        : [testRunId, excludeRampUp, null, ...orgFilter.params];
+      const queryParams = [testRunId, ...time.params, ...orgFilter.params];
 
       // Query all per-transaction statistics first (this matches Performance Analysis approach)
       // We get per-transaction percentiles, then calculate weighted averages for overall/scenario summaries
@@ -1067,7 +1093,7 @@ export class ReportDataFetcherService {
           AND wtat.workload = tr.workload
           AND wtat.transaction_name = t.transaction_name
         WHERE t.test_run_id = $1
-          AND ($2::boolean = false OR t.time >= $3::timestamptz)
+          ${time.clause}
           ${orgFilter.clause}
         GROUP BY t.transaction_name, t.scenario_name, wtat.apdex_threshold, wat.apdex_threshold
         ORDER BY t.scenario_name, t.transaction_name
@@ -1114,10 +1140,10 @@ export class ReportDataFetcherService {
       const overallErrorRate = totalCount > 0 ? (totalFailed / totalCount) * 100 : 0;
 
       // Fetch peak throughput metrics (transactions/sec and requests/sec) with organization filtering
-      const throughputStats = await this.getThroughputStatsForReport(testRunId, excludeRampUp, cutoffTime, userId, roles);
+      const throughputStats = await this.getThroughputStatsForReport(testRunId, excludeRampUp, bounds, userId, roles);
 
       // Fetch virtual user stats (peak active users) with organization filtering
-      const virtualUserStats = await this.getVirtualUserStatsForReport(testRunId, excludeRampUp, cutoffTime, userId, roles);
+      const virtualUserStats = await this.getVirtualUserStatsForReport(testRunId, excludeRampUp, bounds, userId, roles);
 
       // Group transactions by scenario and calculate weighted averages
       const scenarioMap: Record<string, ApdexTransactionRow[]> = {};
@@ -1422,7 +1448,9 @@ export class ReportDataFetcherService {
    * Calculates peak transactions/sec and peak requests/sec
    * @param testRunId - Test run ID
    * @param excludeRampUp - Whether to exclude ramp-up period
-   * @param cutoffTime - Cutoff time for excluding ramp-up
+   * @param bounds - The run's time window, when the caller already resolved it. Omitted
+   *                 (or null) it is looked up here — never left unbounded, because the
+   *                 raw-scan fallback below would then lock every chunk of both tables.
    * @param roles - User roles from JWT token (for admin bypass)
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @returns Throughput statistics (overall and per-scenario)
@@ -1430,11 +1458,13 @@ export class ReportDataFetcherService {
   async getThroughputStatsForReport(
     testRunId: string,
     excludeRampUp: boolean = false,
-    cutoffTime: Date | null = null,
+    bounds: AnalysisBounds | null = null,
     userId: string = '',
     roles: string[] = [],
   ): Promise<ThroughputStats> {
     try {
+      // 'head-trimmed' — see getApdexDataFromDatabase.
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
@@ -1444,18 +1474,21 @@ export class ReportDataFetcherService {
       // pre-aggregated rows. See issue #288.
       const runInfo = await this.loadThroughputRunInfoForReport(testRunId, orgIds);
       if (runInfo && runInfo.hasCagg) {
-        return await this.getThroughputStatsFromCaggForReport(runInfo, excludeRampUp, cutoffTime);
+        // The CAGGs are already bucket-bounded by the run window, so they only need the
+        // ramp cutoff — and only when the toggle asked for one.
+        return await this.getThroughputStatsFromCaggForReport(
+          runInfo, excludeRampUp, excludeRampUp ? window.startCutoff : null);
       }
 
       // Fallback: in-flight run that pre-dates the next CAGG refresh (≤30 s lag),
       // run not yet started, or a stack where the CAGG policy never ran. Reverts
       // to the legacy raw-scan path.
 
-      // Build organization filter for test_run validation
-      // Base params are: [testRunId, excludeRampUp, cutoffTime] = indices 1, 2, 3
-      // Organization params start at index 4
+      // Base params are [testRunId, ...time bounds]; the org params follow.
+      const time = timeBoundsSql(window, 'time', 2);
+      const orgStart = time.nextIndex;
       const orgFilter = orgIds !== null
-        ? this.buildOrganizationFilterClause(4, orgIds, 'tr')
+        ? this.buildOrganizationFilterClause(orgStart, orgIds, 'tr')
         : { clause: '', params: [] };
 
       // Build the org filter CTE clause using tr.organization_id directly
@@ -1464,7 +1497,7 @@ export class ReportDataFetcherService {
           ? `, org_filter AS (
               SELECT tr.test_run_id FROM test_runs tr
               WHERE tr.test_run_id = $1
-                AND tr.organization_id IN (${orgIds.map((_, i) => `$${4 + i}`).join(', ')})
+                AND tr.organization_id IN (${orgIds.map((_, i) => `$${orgStart + i}`).join(', ')})
             )`
           : `, org_filter AS (
               SELECT tr.test_run_id FROM test_runs tr WHERE FALSE
@@ -1482,7 +1515,7 @@ export class ReportDataFetcherService {
             COUNT(*) as total_count
           FROM transactions
           WHERE test_run_id = $1
-            AND ($2::boolean = false OR time >= $3::timestamptz)
+            ${time.clause}
           GROUP BY floor(extract(epoch from time) / 5)
         )${orgFilterCte}
         SELECT CEIL(MAX(total_count)::numeric / 5) as peak_transactions_per_second
@@ -1497,7 +1530,7 @@ export class ReportDataFetcherService {
             COUNT(*) as total_count
           FROM requests_raw
           WHERE test_run_id = $1
-            AND ($2::boolean = false OR time >= $3::timestamptz)
+            ${time.clause}
           GROUP BY floor(extract(epoch from time) / 5)
         )${orgFilterCte}
         SELECT CEIL(MAX(total_count)::numeric / 5) as peak_requests_per_second
@@ -1514,7 +1547,7 @@ export class ReportDataFetcherService {
           FROM transactions
           WHERE test_run_id = $1
             AND scenario_name IS NOT NULL
-            AND ($2::boolean = false OR time >= $3::timestamptz)
+            ${time.clause}
           GROUP BY scenario_name, floor(extract(epoch from time) / 5)
         ),
         request_buckets AS (
@@ -1525,7 +1558,7 @@ export class ReportDataFetcherService {
           FROM requests_raw
           WHERE test_run_id = $1
             AND scenario_name IS NOT NULL
-            AND ($2::boolean = false OR time >= $3::timestamptz)
+            ${time.clause}
           GROUP BY scenario_name, floor(extract(epoch from time) / 5)
         ),
         transaction_peaks AS (
@@ -1552,9 +1585,7 @@ export class ReportDataFetcherService {
         ORDER BY scenario_name ASC
       `;
 
-      const queryParams = cutoffTime
-        ? [testRunId, excludeRampUp, cutoffTime, ...orgFilter.params]
-        : [testRunId, excludeRampUp, null, ...orgFilter.params];
+      const queryParams = [testRunId, ...time.params, ...orgFilter.params];
 
       const [transactionsResult, requestsResult, scenarioResult] = await Promise.all([
         withRequestEm(this.testRunRepo).query(transactionsQuery, queryParams),
@@ -1590,7 +1621,9 @@ export class ReportDataFetcherService {
    * Calculates peak and average active threads (users)
    * @param testRunId - Test run ID
    * @param excludeRampUp - Whether to exclude ramp-up period
-   * @param cutoffTime - Cutoff time for excluding ramp-up
+   * @param bounds - The run's time window, when the caller already resolved it. Omitted
+   *                 (or null) it is looked up here — never left unbounded; see
+   *                 @perfana/shared/database/run-window.
    * @param roles - User roles from JWT token (for admin bypass)
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @returns Virtual user statistics (overall and per-scenario)
@@ -1598,19 +1631,21 @@ export class ReportDataFetcherService {
   async getVirtualUserStatsForReport(
     testRunId: string,
     excludeRampUp: boolean = false,
-    cutoffTime: Date | null = null,
+    bounds: AnalysisBounds | null = null,
     userId: string = '',
     roles: string[] = [],
   ): Promise<VirtualUserStats> {
     try {
+      // 'head-trimmed' — see getApdexDataFromDatabase.
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
-      // Build organization filter for test_run validation
-      // Base params are: [testRunId, excludeRampUp, cutoffTime] = indices 1, 2, 3
-      // Organization params start at index 4
+      // Base params are [testRunId, ...time bounds]; the org params follow.
+      const time = timeBoundsSql(window, 'vu.time', 2);
+      const orgStart = time.nextIndex;
       const orgFilter = orgIds !== null
-        ? this.buildOrganizationFilterClause(4, orgIds, 'tr')
+        ? this.buildOrganizationFilterClause(orgStart, orgIds, 'tr')
         : { clause: '', params: [] };
 
       // Build organization filter using tr.organization_id directly
@@ -1619,7 +1654,7 @@ export class ReportDataFetcherService {
           ? `AND EXISTS (
               SELECT 1 FROM test_runs tr
               WHERE tr.test_run_id = vu.test_run_id
-                AND tr.organization_id IN (${orgIds.map((_, i) => `$${4 + i}`).join(', ')})
+                AND tr.organization_id IN (${orgIds.map((_, i) => `$${orgStart + i}`).join(', ')})
             )`
           : 'AND FALSE'
         : '';
@@ -1630,7 +1665,7 @@ export class ReportDataFetcherService {
           AVG(vu.active_threads)::numeric(10,2) as avg_active_threads
         FROM virtual_users vu
         WHERE vu.test_run_id = $1
-          AND ($2::boolean = false OR vu.time >= $3::timestamptz)
+          ${time.clause}
           ${orgFilterJoinClause}
       `;
 
@@ -1642,15 +1677,13 @@ export class ReportDataFetcherService {
         FROM virtual_users vu
         WHERE vu.test_run_id = $1
           AND vu.scenario_name IS NOT NULL
-          AND ($2::boolean = false OR vu.time >= $3::timestamptz)
+          ${time.clause}
           ${orgFilterJoinClause}
         GROUP BY vu.scenario_name
         ORDER BY vu.scenario_name ASC
       `;
 
-      const queryParams = cutoffTime
-        ? [testRunId, excludeRampUp, cutoffTime, ...orgFilter.params]
-        : [testRunId, excludeRampUp, null, ...orgFilter.params];
+      const queryParams = [testRunId, ...time.params, ...orgFilter.params];
 
       const [overallResult, scenarioResult] = await Promise.all([
         withRequestEm(this.testRunRepo).query(overallQuery, queryParams),
@@ -2338,35 +2371,24 @@ export class ReportDataFetcherService {
       // takes the next free index rather than shifting everything after it.
       const floorParamIndex = 5 + orgFilter.params.length;
 
-      // Fetch recent completed runs for the same system/environment/workload
+      // Fetch recent completed runs for the same system/environment/workload.
+      //
+      // The per-run transaction stats are a SEPARATE query on purpose. They used to be a
+      // LEFT JOIN LATERAL correlated to `tr.test_run_id`, which cannot carry a `time`
+      // bound a planner can use — the window is only known per outer row, so every one of
+      // these reads locked every chunk of `transactions` (see @perfana/shared/database/run-window).
+      // Fetching the runs first turns it into one bounded `ANY(...)` read below.
       const query = `
         SELECT
           tr.test_run_id,
           tr.start_time,
+          tr.end_time,
           tr.application_release,
           tr.duration,
           tr.consolidated_result,
-          tr.annotations,
-          COALESCE(txn_stats.avg_ms, 0) as avg_ms,
-          COALESCE(txn_stats.p95_ms, 0) as p95_ms,
-          COALESCE(txn_stats.p99_ms, 0) as p99_ms,
-          COALESCE(txn_stats.error_rate, 0) as error_rate,
-          COALESCE(txn_stats.total_transactions, 0) as total_transactions
+          tr.annotations
         FROM test_runs tr
         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
-        LEFT JOIN LATERAL (
-          SELECT
-            ROUND(AVG(t.response_time)::numeric, 2) as avg_ms,
-            ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p95_ms,
-            ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p99_ms,
-            CASE WHEN COUNT(*) > 0
-              THEN ROUND((COUNT(CASE WHEN t.success = false THEN 1 END)::numeric / COUNT(*)::numeric) * 100, 2)
-              ELSE 0
-            END as error_rate,
-            COUNT(*)::integer as total_transactions
-          FROM transactions t
-          WHERE t.test_run_id = tr.test_run_id
-        ) txn_stats ON true
         WHERE tr.system_under_test_id = $1
           AND tr.test_environment = $2
           AND tr.workload = $3
@@ -2399,19 +2421,47 @@ export class ReportDataFetcherService {
         return null;
       }
 
-      const mapRow = (row: Record<string, unknown>): TrendRunSummary => ({
-        testRunId: row.test_run_id as string,
-        startTime: new Date(row.start_time as string),
-        applicationRelease: (row.application_release as string) || null,
-        duration: row.duration ? parseInt(row.duration as string) : null,
-        avgMs: parseFloat(row.avg_ms as string) || 0,
-        p95Ms: parseFloat(row.p95_ms as string) || 0,
-        p99Ms: parseFloat(row.p99_ms as string) || 0,
-        errorRate: parseFloat(row.error_rate as string) || 0,
-        totalTransactions: parseInt(row.total_transactions as string) || 0,
-        consolidatedResult: row.consolidated_result ?? null,
-        annotations: Array.isArray(row.annotations) ? (row.annotations as string[]) : [],
-      });
+      // One bounded read for every run's stats, spanning all of their windows. The ids
+      // came from the org-filtered query above, so this one needs no org clause of its own.
+      const runIds = (rows as Record<string, unknown>[]).map((r) => r.test_run_id as string);
+      const time = timeBoundsSql(
+        spanBounds((rows as Record<string, unknown>[]).map((r) => analysisBoundsFromRow(r, false))),
+        't.time',
+        2,
+      );
+      const statRows: Array<Record<string, unknown>> = await withRequestEm(this.testRunRepo).query(
+        `SELECT
+           t.test_run_id,
+           ROUND(AVG(t.response_time)::numeric, 2) as avg_ms,
+           ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p95_ms,
+           ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) as p99_ms,
+           ROUND((COUNT(*) FILTER (WHERE t.success = false)::numeric / COUNT(*)::numeric) * 100, 2) as error_rate,
+           COUNT(*)::integer as total_transactions
+         FROM transactions t
+         WHERE t.test_run_id = ANY($1)
+         ${time.clause}
+         GROUP BY t.test_run_id`,
+        [runIds, ...time.params],
+      );
+      const statsByRun = new Map(statRows.map((r) => [r.test_run_id as string, r]));
+
+      const mapRow = (row: Record<string, unknown>): TrendRunSummary => {
+        // A run with no transactions has no stat row — the LATERAL's COALESCE(_, 0).
+        const st = statsByRun.get(row.test_run_id as string) ?? {};
+        return {
+          testRunId: row.test_run_id as string,
+          startTime: new Date(row.start_time as string),
+          applicationRelease: (row.application_release as string) || null,
+          duration: row.duration ? parseInt(row.duration as string) : null,
+          avgMs: parseFloat(st.avg_ms as string) || 0,
+          p95Ms: parseFloat(st.p95_ms as string) || 0,
+          p99Ms: parseFloat(st.p99_ms as string) || 0,
+          errorRate: parseFloat(st.error_rate as string) || 0,
+          totalTransactions: parseInt(st.total_transactions as string) || 0,
+          consolidatedResult: row.consolidated_result ?? null,
+          annotations: Array.isArray(row.annotations) ? (row.annotations as string[]) : [],
+        };
+      };
 
       // First row is the current (or most recent) run
       const currentRun = mapRow(rows[0]);
@@ -2931,9 +2981,19 @@ export class ReportDataFetcherService {
       // report HTML generation runs in a background job with no user context.
       // resolveOrgFilter implements the fetcher's convention: empty userId =
       // system call = no org filter; real users get org-scoped results.
-      const orgFilter = await this.resolveOrgFilter(opts.userId, opts.roles, 2, 'tr');
+      // One window spanning both runs — per-run bounds cannot be expressed against a
+      // single `ANY(...)` read, and an unbounded one locks every chunk of `transactions`
+      // (see @perfana/shared/database/run-window). The span is wider than either run, which costs a
+      // chunk or two of locks and nothing in correctness: `test_run_id` still selects.
+      const time = timeBoundsSql(
+        spanBounds(await Promise.all([currentRunId, baselineRunId].map((id) =>
+          this.getAnalysisWindowBounds(id, false, opts.userId, opts.roles)))),
+        'txn.time',
+        2,
+      );
+      const orgFilter = await this.resolveOrgFilter(opts.userId, opts.roles, time.nextIndex, 'tr');
       // ponytail: full-run stats on both sides (consistent diff); apply
-      // getRampUpCutoffTime per run if analysis-window comparison is needed.
+      // getAnalysisWindowBounds per run if analysis-window comparison is needed.
       const query = `
         SELECT
           txn.test_run_id,
@@ -2946,6 +3006,7 @@ export class ReportDataFetcherService {
         FROM transactions txn
         JOIN test_runs tr ON tr.test_run_id = txn.test_run_id
         WHERE txn.test_run_id = ANY($1)
+        ${time.clause}
         ${orgFilter.clause}
         GROUP BY txn.test_run_id, txn.scenario_name, txn.transaction_name
         ORDER BY txn.scenario_name, txn.transaction_name
@@ -2958,7 +3019,8 @@ export class ReportDataFetcherService {
         p90_ms: string | null;
         p95_ms: string | null;
         p99_ms: string | null;
-      }> = await withRequestEm(this.testRunRepo).query(query, [[currentRunId, baselineRunId], ...orgFilter.params]);
+      }> = await withRequestEm(this.testRunRepo).query(
+        query, [[currentRunId, baselineRunId], ...time.params, ...orgFilter.params]);
       if (allRows.length === 0) return null;
 
       const key = (r: { scenario_name?: string | null; transaction_name: string }) =>

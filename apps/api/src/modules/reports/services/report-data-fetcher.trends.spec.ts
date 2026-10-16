@@ -5,10 +5,19 @@ const authzStub = {} as any;
 const runRow = (id: string, start: string) => ({
   test_run_id: id,
   start_time: start,
+  end_time: start,
   application_release: 'v1',
   duration: '600',
   consolidated_result: { meetsRequirement: true, adaptTestRunOK: true },
   annotations: ['note'],
+});
+
+/**
+ * The per-run transaction stats are a second, time-bounded query now — they used to be
+ * a LATERAL correlated to `tr.test_run_id`, which locked every chunk (#674).
+ */
+const statRow = (id: string) => ({
+  test_run_id: id,
   avg_ms: '100',
   p95_ms: '200',
   p99_ms: '300',
@@ -25,7 +34,8 @@ describe('ReportDataFetcherService trend window', () => {
     const repo = {
       query: jest.fn()
         .mockResolvedValueOnce([{ start_time: '2026-08-14T07:50:20.413Z' }]) // the change-point run
-        .mockResolvedValueOnce([runRow('run-009', '2026-08-18T10:00:00Z'), runRow('run-008', '2026-08-17T10:00:00Z')]),
+        .mockResolvedValueOnce([runRow('run-009', '2026-08-18T10:00:00Z'), runRow('run-008', '2026-08-17T10:00:00Z')])
+        .mockResolvedValueOnce([statRow('run-009'), statRow('run-008')]),
     } as any;
     const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
 
@@ -42,6 +52,14 @@ describe('ReportDataFetcherService trend window', () => {
     expect(runsParams[4]).toEqual(new Date('2026-08-14T07:50:20.413Z'));
     expect(data!.currentRun.testRunId).toBe('run-009');
     expect(data!.currentRun.annotations).toEqual(['note']);
+    expect(data!.currentRun.avgMs).toBe(100);
+
+    // The stats query is bounded and keyed on the run ids, not correlated per run.
+    const [statsSql, statsParams] = repo.query.mock.calls[2]!;
+    expect(statsSql).toContain('t.test_run_id = ANY($1)');
+    expect(statsSql).toContain('t.time >= $2');
+    expect(statsParams[0]).toEqual(['run-009', 'run-008']);
+    expect(statsParams[1]).toBeInstanceOf(Date);
   });
 
   it('falls back to the run count when no change point has been recorded', async () => {
@@ -67,7 +85,8 @@ describe('ReportDataFetcherService trend window', () => {
     const repo = {
       query: jest.fn()
         .mockResolvedValueOnce([{ start_time: '2026-08-01T00:00:00Z' }])
-        .mockResolvedValueOnce([runRow('run-009', '2026-08-18T10:00:00Z'), runRow('run-008', '2026-08-17T10:00:00Z')]),
+        .mockResolvedValueOnce([runRow('run-009', '2026-08-18T10:00:00Z'), runRow('run-008', '2026-08-17T10:00:00Z')])
+        .mockResolvedValueOnce([statRow('run-009'), statRow('run-008')]),
     } as any;
     const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
 
@@ -208,12 +227,13 @@ describe('ReportDataFetcherService.getMetricTrends', () => {
     // The floor used to replace the run count with a flat 51. That was survivable
     // while a floor required an explicit choice; once the change-point window
     // became the default it made every template's configured run count dead and
-    // quietly pulled up to 50 runs through the percentile LATERAL.
+    // quietly pulled up to 50 runs through the percentile aggregate.
     const dataSource = { query: jest.fn().mockResolvedValue([{ test_run_id: 'run-005' }]) };
     const repo = {
       query: jest.fn()
         .mockResolvedValueOnce([{ start_time: '2026-08-14T07:50:20.413Z' }])
-        .mockResolvedValueOnce([runRow('run-009', '2026-08-18T10:00:00Z')]),
+        .mockResolvedValueOnce([runRow('run-009', '2026-08-18T10:00:00Z')])
+        .mockResolvedValueOnce([statRow('run-009')]),
     } as any;
     const svc = new ReportDataFetcherService(repo, authzStub, dataSource as any);
 

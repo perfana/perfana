@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import {
+  AnalysisBounds,
+  TEST_RUN_TIMES_SQL,
+  analysisBoundsFromRow,
+} from '@perfana/shared/database/run-window';
 
 const NO_SCENARIO_SENTINEL = '__NO_SCENARIO__';
 
@@ -70,15 +75,12 @@ function buildScenarioFilterForRollup(
   return { clause: ` AND (${conditions.join(' OR ')})`, params };
 }
 
-interface AnalysisBounds {
-  startCutoff: Date | null;
-  endCutoff: Date | null;
-}
-
 /**
- * Builds a SQL fragment + params for restricting `requests_error` rows to the
- * analysis timerange (ramp-up/ramp-down trimmed). Returns an empty clause when
- * both cutoffs are null (excludeRampUp off, or the run has no ramp config).
+ * Builds a SQL fragment + params for restricting a raw-hypertable read to the
+ * run's time window (and, with excludeRampUp, to the analysis timerange).
+ * Returns an empty clause only when both cutoffs are null — an in-flight run
+ * with no start_time at all. Every other read MUST carry this, see
+ * `@perfana/shared/database/run-window`: without it the statement locks every chunk.
  * startIndex is the $N position to use for the first new param (1-based).
  */
 function buildTimeFilter(
@@ -163,33 +165,16 @@ export class TestRunsErrorAnalysisService {
   ) {}
 
   /**
-   * Resolve the analysis-timerange cutoffs (start after ramp-up, end before
-   * ramp-down) for a test run. Returns null cutoffs when excludeRampUp is off,
-   * matching the Performance Analysis card's "Analysis timerange" toggle.
-   * ramp_up/ramp_down are stored in seconds. The end cutoff only applies to
-   * completed runs (end_time set).
+   * Resolve the `time` cutoffs for a run: always the padded run window (the
+   * chunk-lock bound, see `@perfana/shared/database/run-window`), narrowed to the analysis
+   * timerange when `excludeRampUp` is on.
+   *
+   * Fetched as its own round trip on purpose — a join or subquery on
+   * `test_runs` inside the hypertable read excludes nothing and locks more.
    */
   private async getAnalysisBounds(testRunId: string, excludeRampUp: boolean): Promise<AnalysisBounds> {
-    if (!excludeRampUp) return { startCutoff: null, endCutoff: null };
-
-    const rows = await this.dataSource.query(
-      `SELECT start_time, ramp_up, end_time, ramp_down FROM test_runs WHERE test_run_id = $1`,
-      [testRunId],
-    );
-    const row = rows?.[0];
-    let startCutoff: Date | null = null;
-    let endCutoff: Date | null = null;
-
-    if (row?.start_time && row?.ramp_up) {
-      const rampUpSeconds = parseInt(String(row.ramp_up), 10);
-      if (rampUpSeconds > 0) startCutoff = new Date(new Date(row.start_time).getTime() + rampUpSeconds * 1000);
-    }
-    if (row?.end_time && row?.ramp_down) {
-      const rampDownSeconds = parseInt(String(row.ramp_down), 10);
-      if (rampDownSeconds > 0) endCutoff = new Date(new Date(row.end_time).getTime() - rampDownSeconds * 1000);
-    }
-
-    return { startCutoff, endCutoff };
+    const rows = await this.dataSource.query(TEST_RUN_TIMES_SQL, [testRunId]);
+    return analysisBoundsFromRow(rows?.[0], excludeRampUp);
   }
 
   /**
@@ -461,6 +446,11 @@ export class TestRunsErrorAnalysisService {
       `Getting error details for test run: ${testRunId}, transaction: ${transactionName}, sampler: ${samplerName}`
     );
 
+    // The run window matters most here: `ORDER BY time DESC LIMIT 10` cannot
+    // stop early on a miss, so without a bound this walks — and locks — every
+    // chunk in the table. No ramp trim: a drill-down shows what was recorded.
+    const bounds = await this.getAnalysisBounds(testRunId, false);
+    const time = buildTimeFilter(bounds, 5);
     const query = `
       SELECT
         time,
@@ -478,7 +468,7 @@ export class TestRunsErrorAnalysisService {
       WHERE test_run_id = $1
         AND transaction_name = $2
         AND sampler_name = $3
-        AND url = $4
+        AND url = $4${time.clause}
       ORDER BY time DESC
       LIMIT 10
     `;
@@ -488,6 +478,7 @@ export class TestRunsErrorAnalysisService {
       transactionName,
       samplerName,
       url,
+      ...time.params,
     ]);
 
     return results.map((row: Record<string, unknown>) => ({

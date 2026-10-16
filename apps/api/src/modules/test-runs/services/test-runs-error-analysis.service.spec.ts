@@ -31,6 +31,22 @@ function makeDataSourceMock(queryImpl?: jest.Mock) {
   return { query: queryImpl ?? jest.fn() };
 }
 
+/**
+ * Every public method resolves the run's time window first (issue #674), so
+ * the `test_runs` lookup is always query 0. `beforeEach` queues it; each
+ * test's own `mockResolvedValueOnce` chain lines up behind it.
+ *
+ * 10:00 start, 60s ramp-up; 10:10 end, 60s ramp-down. With excludeRampUp off
+ * the bounds are the hour-padded run window (09:00 / 11:10); with it on they
+ * are the analysis timerange (10:01 / 10:09).
+ */
+const TEST_RUN_ROW = [{
+  start_time: '2026-01-01T10:00:00.000Z',
+  ramp_up: '60',
+  end_time: '2026-01-01T10:10:00.000Z',
+  ramp_down: '60',
+}];
+
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
@@ -43,6 +59,7 @@ describe('TestRunsErrorAnalysisService', () => {
 
   beforeEach(async () => {
     mockQuery = jest.fn();
+    mockQuery.mockResolvedValueOnce(TEST_RUN_ROW); // run-window lookup, #674
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -147,10 +164,12 @@ describe('TestRunsErrorAnalysisService', () => {
         // Act
         await service.getErrorSummary(TEST_RUN_ID);
 
-        // Assert — every query receives the testRunId.
+        // Assert — every query receives the testRunId as $1 (calls 1-3; call 0
+        // is the run-window lookup).
         expect(mockQuery.mock.calls[0][1]).toEqual([TEST_RUN_ID]);
-        expect(mockQuery.mock.calls[1][1]).toEqual([TEST_RUN_ID]);
+        expect(mockQuery.mock.calls[1][1][0]).toBe(TEST_RUN_ID);
         expect(mockQuery.mock.calls[2][1]).toEqual([TEST_RUN_ID]);
+        expect(mockQuery.mock.calls[3][1][0]).toBe(TEST_RUN_ID);
       });
 
       it('should read total requests from test_run_transaction_stats when the rollup is populated (#287)', async () => {
@@ -169,7 +188,7 @@ describe('TestRunsErrorAnalysisService', () => {
         expect(result.totalRequests).toBe(5000);
         expect(result.errorRate).toBe(2);
         // The third call must hit test_run_transaction_stats, not requests_raw.
-        const totalRequestsSql = mockQuery.mock.calls[2][0] as string;
+        const totalRequestsSql = mockQuery.mock.calls[3][0] as string;
         expect(totalRequestsSql).toContain('FROM test_run_transaction_stats');
         expect(totalRequestsSql).toContain('SUM(total_count)');
         expect(totalRequestsSql).toContain('ramp_up_excluded = false');
@@ -193,7 +212,8 @@ describe('TestRunsErrorAnalysisService', () => {
           uniqueErrorUrls: 0,
         });
         // The error rate query should not be attempted when no errors exist
-        expect(mockQuery).toHaveBeenCalledTimes(1);
+        // (call 0 is the run-window lookup).
+        expect(mockQuery).toHaveBeenCalledTimes(2);
       });
 
       it('should return zero summary when query returns null/undefined', async () => {
@@ -781,10 +801,10 @@ describe('TestRunsErrorAnalysisService', () => {
         // Act
         await service.getErrorDetails(TEST_RUN_ID, TRANSACTION, SAMPLER, URL);
 
-        // Assert
+        // Assert — the four filters, then the run-window bounds (#674).
         expect(mockQuery).toHaveBeenCalledWith(
           expect.any(String),
-          [TEST_RUN_ID, TRANSACTION, SAMPLER, URL],
+          [TEST_RUN_ID, TRANSACTION, SAMPLER, URL, expect.any(Date), expect.any(Date)],
         );
       });
 
@@ -969,45 +989,62 @@ describe('TestRunsErrorAnalysisService', () => {
   // Analysis-timerange toggle (excludeRampUp)
   // =========================================================================
 
-  describe('excludeRampUp (analysis timerange)', () => {
-    // 10:00 start, 60s ramp-up → 10:01:00 start cutoff; 10:10 end, 60s
-    // ramp-down → 10:09:00 end cutoff.
-    const TEST_RUN_ROW = [{
-      start_time: '2026-01-01T10:00:00.000Z',
-      ramp_up: '60',
-      end_time: '2026-01-01T10:10:00.000Z',
-      ramp_down: '60',
-    }];
-
-    it('does not query test_runs or add a time filter when off (default)', async () => {
+  describe('time bounds (#674) and the excludeRampUp toggle', () => {
+    it('bounds requests_error to the padded run window when the toggle is off', async () => {
       mockQuery.mockResolvedValueOnce([]);
 
       await service.getErrorsOverTime(TEST_RUN_ID);
 
-      // Single query, no test_runs bounds lookup, no time predicate.
-      expect(mockQuery).toHaveBeenCalledTimes(1);
-      expect(mockQuery.mock.calls[0][0]).not.toContain('time >=');
-      expect(mockQuery.mock.calls[0][1]).toEqual([TEST_RUN_ID]);
+      // Call 0 is the run-window lookup; call 1 is the hypertable read, and it
+      // MUST carry a parameterised time bound or it locks every chunk.
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+      const [sql, params] = mockQuery.mock.calls[1];
+      expect(sql).toContain('time >= $2');
+      expect(sql).toContain('time < $3');
+      expect(params[0]).toBe(TEST_RUN_ID);
+      expect((params[1] as Date).toISOString()).toBe('2026-01-01T09:00:00.000Z');
+      expect((params[2] as Date).toISOString()).toBe('2026-01-01T11:10:00.000Z');
     });
 
-    it('filters requests_error to the analysis window when on', async () => {
-      mockQuery
-        .mockResolvedValueOnce(TEST_RUN_ROW) // getAnalysisBounds → test_runs
-        .mockResolvedValueOnce([]);          // errors-over-time query
+    it('narrows to the analysis window when the toggle is on', async () => {
+      mockQuery.mockResolvedValueOnce([]);
 
       await service.getErrorsOverTime(TEST_RUN_ID, undefined, true);
 
       const [sql, params] = mockQuery.mock.calls[1];
       expect(sql).toContain('time >= $2');
       expect(sql).toContain('time < $3');
-      expect(params[0]).toBe(TEST_RUN_ID);
       expect((params[1] as Date).toISOString()).toBe('2026-01-01T10:01:00.000Z');
       expect((params[2] as Date).toISOString()).toBe('2026-01-01T10:09:00.000Z');
     });
 
+    it('leaves the end unbounded for an in-flight run', async () => {
+      mockQuery.mockReset();
+      mockQuery
+        .mockResolvedValueOnce([{ start_time: '2026-01-01T10:00:00.000Z', ramp_up: '60', end_time: null, ramp_down: null }])
+        .mockResolvedValueOnce([]);
+
+      await service.getErrorsOverTime(TEST_RUN_ID);
+
+      const [sql, params] = mockQuery.mock.calls[1];
+      expect(sql).toContain('time >= $2');
+      expect(sql).not.toContain('time <');
+      expect(params).toHaveLength(2);
+    });
+
+    it('bounds the error-details drill-down, whose LIMIT cannot stop early', async () => {
+      mockQuery.mockResolvedValueOnce([]);
+
+      await service.getErrorDetails(TEST_RUN_ID, 'txn', 'sampler', 'https://Example.test/A');
+
+      const [sql, params] = mockQuery.mock.calls[1];
+      expect(sql).toContain('time >= $5');
+      expect(sql).toContain('time < $6');
+      expect(params).toHaveLength(6);
+    });
+
     it('uses the ramp-up-excluded rollup total for the error rate when on', async () => {
       mockQuery
-        .mockResolvedValueOnce([{ start_time: '2026-01-01T10:00:00.000Z', ramp_up: '60', end_time: null, ramp_down: null }]) // bounds
         .mockResolvedValueOnce([{ totalErrors: '10', uniqueResponseCodes: '1', transactionsWithErrors: '1', uniqueErrorUrls: '1' }]) // summary
         .mockResolvedValueOnce([{ '?column?': 1 }]) // rollup exists
         .mockResolvedValueOnce([{ total: '1000' }]); // rollup sum
@@ -1017,6 +1054,42 @@ describe('TestRunsErrorAnalysisService', () => {
       const rollupSql = mockQuery.mock.calls[3][0] as string;
       expect(rollupSql).toContain('ramp_up_excluded = true');
       expect(result.errorRate).toBe(1); // 10/1000 * 100
+    });
+
+    /**
+     * The trap in #674: reaching into `test_runs` from inside the hypertable
+     * read looks like the fix and is worse — chunk exclusion for locking
+     * happens at plan time, so a correlated subquery excludes nothing and adds
+     * the `test_runs` relations on top (150 locks against 136 for no predicate
+     * at all). No behavioural test can see this; only the SQL text can.
+     */
+    it('never reads the window from test_runs inside a hypertable query', async () => {
+      // Dispatch on SQL text rather than call order: the window lookup fires
+      // once per method, and the rollup probe must come back empty so the
+      // `requests_raw` fallback is exercised too.
+      mockQuery.mockReset();
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes('FROM test_runs')) return Promise.resolve(TEST_RUN_ROW);
+        if (sql.includes('FROM test_run_transaction_stats')) return Promise.resolve([]);
+        return Promise.resolve([{ totalErrors: '1', uniqueResponseCodes: '1', transactionsWithErrors: '1', uniqueErrorUrls: '1', total: '1' }]);
+      });
+
+      await service.getErrorSummary(TEST_RUN_ID);
+      await service.getErrorsByCode(TEST_RUN_ID);
+      await service.getErrorsByTransaction(TEST_RUN_ID);
+      await service.getErrorsOverTime(TEST_RUN_ID);
+      await service.getErrorsOverTimeByCode(TEST_RUN_ID);
+      await service.getErrorDetails(TEST_RUN_ID, 't', 's', 'u');
+
+      const hypertableReads = (mockQuery.mock.calls as [string, unknown[]][])
+        .filter(([sql]) => /FROM (requests_error|requests_raw)\b/.test(sql));
+
+      expect(hypertableReads.length).toBeGreaterThan(0);
+      for (const [sql, params] of hypertableReads) {
+        expect(sql).toMatch(/time >= \$\d+/);
+        expect(sql).not.toMatch(/\btest_runs\b/);
+        expect(params.some((p) => p instanceof Date)).toBe(true);
+      }
     });
   });
 });

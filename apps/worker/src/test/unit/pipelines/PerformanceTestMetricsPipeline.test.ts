@@ -709,6 +709,33 @@ describe('PerformanceTestMetricsPipeline', () => {
       expect(mockRequestsProcessorInstance.process).not.toHaveBeenCalled();
     });
 
+    /**
+     * #674: the SUT-import probe is two EXISTS over two raw hypertables. Cheap to EXECUTE,
+     * but unbounded each takes a lock on every chunk of its table before it runs — and this
+     * probe gates a DELETE, so it runs on every full-collection analyse. Both arms share one
+     * parameter set (same indices, same column name), from the run row already in hand.
+     * Nothing behavioural can see it: the probe answers the same boolean either way.
+     */
+    it('bounds both EXISTS arms of the SUT-import probe by the run window (#674)', async () => {
+      mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
+
+      await pipeline.execute({ testRunId: 'tr-001' });
+
+      const [sql, params] = (mockDataSource.query.mock.calls as [string, unknown[]][])
+        .find(([q]) => /AS has_rows/.test(q))!;
+      // Both arms, not just the first.
+      expect(sql.match(/time >= \$2/g)).toHaveLength(2);
+      expect(sql.match(/time <= \$3/g)).toHaveLength(2);
+      expect(sql).not.toMatch(/time\s*(?:>=|<=)\s*tr\./i);
+      // The PADDED run window (00:00-01:00 ± 1 h), so ingest arriving late still counts as
+      // "this run wrote something" — the whole point of the probe.
+      expect(params).toEqual([
+        'tr-001',
+        new Date('2023-12-31T23:00:00.000Z'),
+        new Date('2024-01-01T02:00:00.000Z'),
+      ]);
+    });
+
     it('should NOT delete anything for incremental mode', async () => {
       mockErrorsProcessorInstance.process.mockResolvedValue(createProcessorResult(1));
 

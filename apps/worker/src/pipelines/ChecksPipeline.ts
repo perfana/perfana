@@ -1,4 +1,9 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
+import {
+  TEST_RUN_TIMES_SQL,
+  analysisBoundsFromRow,
+  timeBoundsSql,
+} from '@perfana/shared/database/run-window';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
 import type { PoolClient } from 'pg';
@@ -252,11 +257,16 @@ export class ChecksPipeline extends BasePipelineTypeORM {
    */
   private async ensureTransactionRollup(testRunId: string): Promise<boolean> {
     try {
+      // The `transactions` half is bounded by the run's padded window: cheap to execute,
+      // but unbounded it locks every chunk of the table before it runs (#674, see
+      // @perfana/shared/database/run-window). One PK read, inside the same try.
+      const runRows = await this.query<Record<string, unknown>>(TEST_RUN_TIMES_SQL, [testRunId]);
+      const time = timeBoundsSql(analysisBoundsFromRow(runRows?.[0], false), 'time', 2);
       const [probe] = await this.query<{ has_rollup: boolean; has_transactions: boolean }>(
         `SELECT
            EXISTS (SELECT 1 FROM test_run_transaction_stats WHERE test_run_id = $1) AS has_rollup,
-           EXISTS (SELECT 1 FROM transactions WHERE test_run_id = $1) AS has_transactions`,
-        [testRunId],
+           EXISTS (SELECT 1 FROM transactions WHERE test_run_id = $1 ${time.clause}) AS has_transactions`,
+        [testRunId, ...time.params],
       );
       if (!probe || probe.has_rollup || !probe.has_transactions) {return false;}
 

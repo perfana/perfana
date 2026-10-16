@@ -269,9 +269,26 @@ describe('TestRunsTimeSeriesQueryService', () => {
     function primeOrgAccessAndRamp(mockRepo: MockRepo) {
       // 1. validateOrganizationAccess: SELECT sut.organization_id, sut.created_by ...
       mockRepo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: USER }]);
-      // 2. getRampUpCutoffTime (only when excludeRampUp=true): SELECT start_time, ramp_up
-      // (skipped when excludeRampUp=false)
+      // getRunBounds comes next, EXCEPT when the caller omitted aggregationSeconds —
+      // the duration probe runs first then. Queued per test with primeRunWindow().
     }
+
+    /**
+     * `getRunBounds`: SELECT start_time, ramp_up, end_time, ramp_down. Unconditional
+     * since #674 — the `scenarios` CTE's `transactions` read needs the run window
+     * whatever the ramp-up toggle says, or it locks every chunk of the table.
+     * 00:00-01:00 with a 60s ramp-up, so the padded window is 23:00 / 02:00.
+     */
+    function primeRunWindow(mockRepo: MockRepo) {
+      mockRepo.query.mockResolvedValueOnce([{
+        start_time: '2026-05-07T00:00:00.000Z',
+        ramp_up: '60',
+        end_time: '2026-05-07T01:00:00.000Z',
+        ramp_down: '0',
+      }]);
+    }
+    const WINDOW_START = new Date('2026-05-06T23:00:00.000Z');
+    const WINDOW_END = new Date('2026-05-07T02:00:00.000Z');
 
     it('rejects aggregationSeconds=1 with BadRequestException', async () => {
       primeOrgAccessAndRamp(repo);
@@ -282,6 +299,7 @@ describe('TestRunsTimeSeriesQueryService', () => {
 
     it('runs the transaction CAGG query and the sampler CAGG query', async () => {
       primeOrgAccessAndRamp(repo);
+      primeRunWindow(repo);
       // 3. transaction CAGG query
       repo.query.mockResolvedValueOnce([
         {
@@ -325,16 +343,18 @@ describe('TestRunsTimeSeriesQueryService', () => {
         false,
       );
 
-      // 3 calls: org-access query, transaction CAGG query, sampler CAGG query (no ramp-up DB lookup when excludeRampUp=false).
-      expect(repo.query).toHaveBeenCalledTimes(3);
+      // 4 calls: org access, run-window lookup, transaction CAGG, sampler CAGG.
+      expect(repo.query).toHaveBeenCalledTimes(4);
 
-      const txCallArgs = repo.query.mock.calls[1]!;
+      const txCallArgs = repo.query.mock.calls[2]!;
       expect(txCallArgs[0]).toContain('FROM transactions_5s c');
-      expect(txCallArgs[1]).toEqual([TEST_RUN_ID, TX_NAME, false, null]);
+      // $5/$6 bound the `scenarios` CTE's raw `transactions` read (#674).
+      expect(txCallArgs[0]).toContain('time >= $5');
+      expect(txCallArgs[1]).toEqual([TEST_RUN_ID, TX_NAME, false, null, WINDOW_START, WINDOW_END]);
 
-      const samplerCallArgs = repo.query.mock.calls[2]!;
+      const samplerCallArgs = repo.query.mock.calls[3]!;
       expect(samplerCallArgs[0]).toContain('FROM requests_raw_5s c');
-      expect(samplerCallArgs[1]).toEqual([TEST_RUN_ID, TX_NAME, false, null]);
+      expect(samplerCallArgs[1]).toEqual([TEST_RUN_ID, TX_NAME, false, null, WINDOW_START, WINDOW_END]);
 
       expect(result.transaction_data).toHaveLength(1);
       expect(result.sampler_data['GET /api/foo']).toHaveLength(1);
@@ -380,8 +400,9 @@ describe('TestRunsTimeSeriesQueryService', () => {
 
     it('resolves the bucket from the run duration when aggregationSeconds is omitted', async () => {
       primeOrgAccessAndRamp(repo);
-      // duration lookup: 3 h -> 30 s buckets
+      // duration lookup: 3 h -> 30 s buckets. It runs BEFORE the window lookup.
       repo.query.mockResolvedValueOnce([{ seconds: 10800 }]);
+      primeRunWindow(repo);
       repo.query.mockResolvedValueOnce([]); // transaction CAGG
       repo.query.mockResolvedValueOnce([]); // sampler CAGG
 
@@ -394,20 +415,21 @@ describe('TestRunsTimeSeriesQueryService', () => {
         false,
       );
 
-      // 4 calls now: org access, duration lookup, transaction CAGG, sampler CAGG.
-      expect(repo.query).toHaveBeenCalledTimes(4);
+      // 5 calls now: org access, duration lookup, run-window lookup, 2 CAGG queries.
+      expect(repo.query).toHaveBeenCalledTimes(5);
       expect(repo.query.mock.calls[1]![0]).toContain(
         'EXTRACT(EPOCH FROM (end_time - start_time))',
       );
       // The resolved bucket reaches both CAGG queries, not the 5 s floor.
-      expect(repo.query.mock.calls[2]![0]).toContain("time_bucket('30 seconds'::interval");
       expect(repo.query.mock.calls[3]![0]).toContain("time_bucket('30 seconds'::interval");
+      expect(repo.query.mock.calls[4]![0]).toContain("time_bucket('30 seconds'::interval");
       // Echoed back: the client divides counts by it for throughput.
       expect(result.aggregation_seconds).toBe(30);
     });
 
     it('does not probe the run duration when the caller supplied a bucket', async () => {
       primeOrgAccessAndRamp(repo);
+      primeRunWindow(repo);
       repo.query.mockResolvedValueOnce([]); // transaction CAGG
       repo.query.mockResolvedValueOnce([]); // sampler CAGG
 
@@ -420,7 +442,7 @@ describe('TestRunsTimeSeriesQueryService', () => {
         false,
       );
 
-      expect(repo.query).toHaveBeenCalledTimes(3);
+      expect(repo.query).toHaveBeenCalledTimes(4);
       expect(
         repo.query.mock.calls.some((c) => String(c[0]).includes('EXTRACT(EPOCH FROM')),
       ).toBe(false);
@@ -458,6 +480,11 @@ describe('TestRunsTimeSeriesQueryService', () => {
     it('runs the sampler-single CAGG query with sampler_name as $3', async () => {
       // org access
       repo.query.mockResolvedValueOnce([{ organization_id: 'org-1', created_by: USER }]);
+      // run-window lookup (#674)
+      repo.query.mockResolvedValueOnce([{
+        start_time: '2026-05-07T00:00:00.000Z', ramp_up: '60',
+        end_time: '2026-05-07T01:00:00.000Z', ramp_down: '0',
+      }]);
       // sampler-single CAGG query
       repo.query.mockResolvedValueOnce([
         {
@@ -485,11 +512,16 @@ describe('TestRunsTimeSeriesQueryService', () => {
         false,
       );
 
-      expect(repo.query).toHaveBeenCalledTimes(2);
-      const callArgs = repo.query.mock.calls[1]!;
+      expect(repo.query).toHaveBeenCalledTimes(3);
+      const callArgs = repo.query.mock.calls[2]!;
       expect(callArgs[0]).toContain('FROM requests_raw_5s c');
       expect(callArgs[0]).toContain('AND c.sampler_name = $3');
-      expect(callArgs[1]).toEqual([TEST_RUN_ID, TX_NAME, SAMPLER, false, null]);
+      // $6/$7 bound the `scenarios` CTE's raw `transactions` read (#674).
+      expect(callArgs[0]).toContain('time >= $6');
+      expect(callArgs[1]).toEqual([
+        TEST_RUN_ID, TX_NAME, SAMPLER, false, null,
+        new Date('2026-05-06T23:00:00.000Z'), new Date('2026-05-07T02:00:00.000Z'),
+      ]);
       expect(result).toHaveLength(1);
     });
 

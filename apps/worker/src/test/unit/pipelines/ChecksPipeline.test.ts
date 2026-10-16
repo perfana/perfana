@@ -1158,6 +1158,40 @@ describe('ChecksPipeline', () => {
       expect(mockLogger.warn).not.toHaveBeenCalled();
     });
 
+    /**
+     * #674: the `transactions` half of the probe is cheap to EXECUTE (test_run_id leads the
+     * index) but unbounded it takes a lock on every chunk of the hypertable before it runs.
+     * The window comes from its own PK read on `test_runs`, bound as parameters — never
+     * read off a join inside the probe, which excludes no chunks and locks more.
+     * Nothing behavioural can see this; the probe answers the same either way.
+     */
+    it('bounds the transactions half of the probe by the run window (#674)', async () => {
+      mockDb.query.mockImplementation(async (sql: string) =>
+        /start_time, ramp_up, end_time, ramp_down/.test(sql)
+          ? [{
+              start_time: '2026-04-10T10:00:00.000Z', ramp_up: '60',
+              end_time: '2026-04-10T10:10:00.000Z', ramp_down: '0',
+            }]
+          : [needsRollup],
+      );
+      mockRollupExecute.mockResolvedValue({ success: true, data: {} });
+
+      await (pipeline as any).ensureTransactionRollup('test-run-1');
+
+      const [sql, params] = (mockDb.query.mock.calls as [string, unknown[]][])
+        .find(([q]) => /FROM transactions\b/.test(q))!;
+      expect(sql).toMatch(/FROM transactions WHERE test_run_id = \$1 AND time >= \$2/);
+      expect(sql).toContain('time <= $3');
+      expect(sql).not.toMatch(/time\s*(?:>=|<=)\s*tr\./i);
+      // The padded run window, not the ramp cutoff: the probe asks whether the run wrote
+      // anything at all, and ingest lagging past end_time has to stay inside it.
+      expect(params).toEqual([
+        'test-run-1',
+        new Date('2026-04-10T09:00:00.000Z'),
+        new Date('2026-04-10T11:10:00.000Z'),
+      ]);
+    });
+
     it('leaves a populated rollup alone', async () => {
       mockDb.query.mockResolvedValue([{ has_rollup: true, has_transactions: true }]);
 

@@ -412,6 +412,58 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(samplerBase).toMatch(/FILTER\s*\(\s*WHERE\s+r\.success\s+AND\s+r\.time\s*>=\s*\$2/i);
     });
 
+    /**
+     * #674: all THREE aggregate reads carry the run window on $4/$5, and that window is a
+     * strict SUPERSET of the ramp cutoffs on $2/$3 — padded an hour either side.
+     *
+     * This is the half of the fix no behavioural test can see and that is easiest to break:
+     * binding $4/$5 to startCutoff/endCutoff instead of the padded window would still look
+     * "bounded" to every grep and to the assertion above, while silently narrowing the
+     * FULL-RUN aggregates (count, avg, the unsuffixed percentiles) to the analysis window.
+     * The ramp-excluded columns are the ones that come from the FILTERs on $2/$3, and they
+     * must keep doing so.
+     */
+    it('bounds all three aggregates by the padded run window, a superset of the ramp cutoffs (#674)', async () => {
+      // 10:00-10:10, 60s ramp-up, no ramp-down -> cutoffs 10:01/10:10, window 09:00/11:10.
+      mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
+      wireTransaction({ tx: 1, sampler: 1, parallelGroup: 1 });
+
+      await pipeline.execute({ testRunId: 'run-001' });
+
+      const reads = mockManagerQuery.mock.calls.filter(([sql]) =>
+        /INSERT INTO test_run_transaction_stats|CREATE TEMP TABLE sampler_rollup_base|INSERT INTO test_run_parallel_group_stats/i.test(
+          sql as string,
+        ),
+      );
+      // transaction rollup, sampler CTAS, parallel-group rollup.
+      expect(reads).toHaveLength(3);
+
+      for (const [sql, params] of reads as [string, unknown[]][]) {
+        // Every one reads a raw hypertable and every one is bounded on $4/$5.
+        expect(sql).toMatch(/FROM (?:transactions t|requests_raw r)\b/);
+        expect(sql).toMatch(/\btime >= \$4 AND \w+\.time <= \$5/);
+        // Never reached off the joined test_runs: a correlated read excludes no chunks.
+        expect(sql).not.toMatch(/time\s*(?:>=|<=|>|<|BETWEEN)\s*tr\./i);
+
+        const [, startCutoff, endCutoff, windowStart, windowEnd] = params as [
+          string, Date, Date, Date, Date,
+        ];
+        expect(params).toHaveLength(5);
+        expect(startCutoff.toISOString()).toBe('2026-04-10T10:01:00.000Z');
+        expect(endCutoff.toISOString()).toBe('2026-04-10T10:10:00.000Z');
+        expect(windowStart.toISOString()).toBe('2026-04-10T09:00:00.000Z');
+        expect(windowEnd.toISOString()).toBe('2026-04-10T11:10:00.000Z');
+        // The point: the WHERE bound cannot narrow what the full-run aggregate sees.
+        expect(windowStart.getTime()).toBeLessThan(startCutoff.getTime());
+        expect(windowEnd.getTime()).toBeGreaterThan(endCutoff.getTime());
+      }
+
+      // And the ramp band is still carved out by the FILTERs, not by the WHERE.
+      const [txSql] = reads.find(([sql]) =>
+        /INSERT INTO test_run_transaction_stats/i.test(sql as string))! as [string, unknown[]];
+      expect(txSql).toMatch(/FILTER\s*\(\s*WHERE\s+t\.time\s*>=\s*\$2/i);
+    });
+
     it('aggregates the sampler rollup into an ON COMMIT DROP temp table and inserts from it (STAT-P1)', async () => {
       // INSERT ... SELECT cannot use parallel workers; as one statement the sampler
       // aggregate sorted every requests_raw row serially and spilled 488 MB at 512MB
@@ -430,7 +482,9 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(sqlCalls[insertIdx]).toMatch(/FROM sampler_rollup_base/);
       // The aggregate reads requests_raw with the run bound; the INSERT reads only the temp table.
       expect(sqlCalls[ctasIdx]).toMatch(/FROM requests_raw r/);
-      expect(mockManagerQuery.mock.calls[ctasIdx]![1]).toHaveLength(3);
+      // $1 test_run_id, $2/$3 ramp cutoffs, $4/$5 the padded run window (#674).
+      expect(mockManagerQuery.mock.calls[ctasIdx]![1]).toHaveLength(5);
+      expect(sqlCalls[ctasIdx]).toMatch(/r\.time >= \$4 AND r\.time <= \$5/);
       expect(sqlCalls[insertIdx]).not.toMatch(/requests_raw/);
       // last(url_hash, time) replaces the ARRAY_AGG(... ORDER BY time DESC)[1] trick.
       expect(sqlCalls[ctasIdx]).toMatch(/last\(r\.url_hash, r\.time\)/);

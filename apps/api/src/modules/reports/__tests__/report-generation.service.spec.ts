@@ -186,7 +186,6 @@ describe('ReportGenerationService', () => {
         {
           provide: ReportDataFetcherService,
           useValue: {
-            getRampUpCutoffTime: jest.fn(),
             getScenarioDataFromDatabase: jest.fn(),
             getApdexDataFromDatabase: jest.fn(),
             getThroughputStatsForReport: jest.fn(),

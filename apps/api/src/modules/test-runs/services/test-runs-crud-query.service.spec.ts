@@ -1723,10 +1723,13 @@ describe('TestRunsCrudQueryService', () => {
         'scenario1|transaction1|sampler1',
         'scenario2|transaction2|sampler2',
       ]);
-      expect(testRunRepo.query).toHaveBeenCalledWith(
-        expect.stringContaining('requests_raw'),
-        [testRunId],
-      );
+      // #674: the read carries the run's own window, so it locks the run's chunks
+      // rather than every chunk of `requests_raw`.
+      const [sql, params] = testRunRepo.query.mock.calls.at(-1)!;
+      expect(sql).toContain('requests_raw');
+      expect(sql).toContain('time >= $2');
+      expect(params[0]).toBe(testRunId);
+      expect(params.length).toBeGreaterThan(1);
     });
 
     it('should query ds_panels/ds_metrics when panelDescription is provided', async () => {

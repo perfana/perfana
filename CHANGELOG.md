@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.26] - 2026-10-16
+
+### Fixed
+- **Error analysis no longer makes Postgres lock every day of stored samples to read one test run.** The six queries behind the Errors card filtered on the test run alone, with nothing to say which days of data to look at. Postgres answers that by locking the whole table — every daily slice of it, plus its compressed copy and the indexes on both — before it reads a thing. On the development database one of those queries took 136 locks where 21 were needed for the same rows.
+
+  That did not matter when the raw sample tables were stored in week-long slices. Since v0.2.97.25 they are stored a day at a time, and nothing deletes old ones, so the count grows by roughly 365 per table per year and never comes down. The ceiling is a shared budget across the whole database, and running into it is not a slowdown — it is a query that fails outright with `out of shared memory`. The six queries now ask for the run's own window, which is the one thing that keeps the cost flat as data accumulates. The slowest of them, the drill-down that opens when you click an error, benefits most: it reads the ten most recent matching errors, which it could not stop looking for early.
+
+  Results are unchanged. The window is padded by an hour either side of the recorded start and end, because samples can still be arriving up to about 36 seconds after a run is marked finished and a load generator's clock can run slightly ahead of the recorded start.
+
+- **Report generation stops doing the same thing, in sixteen more places.** Every query the report builds over the raw sample tables — scenario tables, error analysis, Apdex, throughput, virtual users, the aggregate graphs, the trends table and the baseline comparison — now asks for the run's own window.
+
+  Eleven of those sixteen looked bounded and were not. They carried a filter that applied *only* when the "exclude ramp-up" toggle was on, so on the default path — toggle off, which is what most reports render with — there was effectively no window at all. The toggle now decides how far the window is narrowed, never whether there is one.
+
+  Two of them needed more than a filter. The trends table asked the database for each run's statistics separately, once per run inside a single query, which is a shape that cannot carry a window; it is now one query across all the runs it is comparing. The baseline comparison reads both runs under one window spanning the two. Both return the same numbers.
+
+- **Performance Analysis follows.** The transaction table, the sampler breakdown behind a row expand, the errors modal, virtual users, throughput, the aggregate graphs and the analysis-window overview chart all ask for the run's window now. Eight of those sixteen had the same toggle-dependent filter the report queries had, so they were unbounded on the default path.
+
+  Two were different. The chain decoration on a transaction expand is bounded by an index since v0.2.96.26, which makes it fast — but fast and cheap are not the same thing here, since the locks are taken before the query runs. And a background check that repairs a half-written rollup argued in its own comment for staying unbounded, because a sample arriving after a run is marked finished is exactly what it looks for; the hour of padding covers that, so it is bounded like the rest.
+
+  What is deliberately unchanged: the pre-aggregated five-second summaries these queries prefer are already restricted to the run's own window, so nothing there needed a second bound.
+
+- **And the worker, which closes it.** The rollup that makes a transaction expand fast, the Apdex and error-rate checks behind your SLOs, and three background probes all read these tables, and none of them said which days to look at. One of them is worth calling out: the rollup computes the full-run numbers and the analysis-window numbers in a single pass, and the filter that produces the second looked like a bound and was not — the query as a whole still had none.
+
+  Five more API queries that the first pass missed are converted too, including the one behind "what will be deleted" when you remove a system. That one spans every run the system ever had, so there is no single window — it uses the system's own first and last run instead, which on a shared installation is still the difference between locking two months of data and two years of it.
+
+  Nothing in any of this changes a number the product reports, and that was checked rather than assumed. On the development database the four tables return identical row counts for a 2.5-million-row run with and without the window, and the rollup's whole-run figures match across all 253 transactions. The report's Apdex, throughput and virtual-user readings keep exactly the window they had before — trimming their ramp-down band would have moved the default report's numbers on 58 of 60 runs, and that is a product change for its own release, not a side effect of a lock fix.
+
+  One honest caveat on speed. Asking for a window is not free in every case: a query that totals a whole run now reads about 1.5 to 1.9 times as many database pages, because the database can no longer answer it from compressed summaries alone. A query that looks something up — clicking into an error, expanding a transaction — gets dramatically faster, by 70 to 470 times, because it can now skip whole days of storage it used to open. The trade is deliberate: running out of lock space is an outright failure with no warning, and this is a measurable slowdown on one kind of query.
+
 ## [0.2.97.25] - 2026-10-16
 
 ### Changed

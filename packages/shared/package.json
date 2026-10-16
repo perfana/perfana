@@ -41,6 +41,11 @@
       "development": "./src/database/data-source-system.ts",
       "default": "./dist/database/data-source-system.js"
     },
+    "./database/run-window": {
+      "types": "./dist/database/run-window.d.ts",
+      "development": "./src/database/run-window.ts",
+      "default": "./dist/database/run-window.js"
+    },
     "./database/system-connection": {
       "types": "./dist/database/system-connection.d.ts",
       "development": "./src/database/system-connection.ts",

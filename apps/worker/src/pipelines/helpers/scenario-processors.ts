@@ -7,6 +7,7 @@
  */
 
 import { DataSource } from 'typeorm';
+import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
 import type { Logger } from 'pino';
 import type { DashboardManager } from './dashboard-manager.js';
 import {
@@ -203,10 +204,20 @@ export class ErrorsProcessor {
 
       // Look up actual scenario names from requests_raw so zero-error
       // data points are attributed to the real scenarios, not a phantom "default".
+      // Bounded by the run's padded window; unbounded this locks every chunk of
+      // `requests_raw` (#674, see @perfana/shared/database/run-window).
+      const time = timeBoundsSql(
+        analysisBoundsFromRow(
+          { start_time: testRun.start_time, end_time: testRun.end_time ?? null },
+          false,
+        ),
+        'time',
+        2,
+      );
       const scenarioRows = await this.dataSource.query<Array<{ scenario_name: string }>>(
         `SELECT DISTINCT scenario_name FROM requests_raw
-         WHERE test_run_id = $1 AND scenario_name IS NOT NULL`,
-        [testRunId]
+         WHERE test_run_id = $1 AND scenario_name IS NOT NULL ${time.clause}`,
+        [testRunId, ...time.params]
       );
       const scenarioNames = scenarioRows.length > 0
         ? scenarioRows.map(r => r.scenario_name)
