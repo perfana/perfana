@@ -72,13 +72,27 @@ describe('TestRunsPerformanceQueryService raw-hypertable time bounds (#674)', ()
   const hypertableReads = () =>
     (query.mock.calls as [string, unknown[]][]).filter(([sql]) => HYPERTABLE.test(sql));
 
+  /**
+   * Count, do not merely match. A single statement can read the hypertable more than
+   * once — the per-scenario throughput query has two bounded CTEs, the errors modal has
+   * a `requests_error` arm beside a `requests_raw` one, the summary-timeseries fallback
+   * is a UNION. A first-match `toMatch(/time >= \$\d+/)` passes while one of those
+   * bounds is missing; a 46-mutation sweep proved five such bounds were deletable with
+   * the whole suite green. So require one `time >=` per hypertable read in the same SQL.
+   */
+  const boundsRequiredIn = (sql: string): number =>
+    (sql.match(new RegExp(HYPERTABLE.source, 'g')) ?? []).length;
+
   /** @param expected the bounds every read should carry, or null to only check shape. */
   const assertBounded = (expected: [Date, Date] | null = null) => {
     const reads = hypertableReads();
     expect(reads.length).toBeGreaterThan(0);
     for (const [sql, params] of reads) {
       expect(sql).toMatch(/time >= \$\d+/);
-      expect(sql).not.toContain('= false OR');
+      // One bound per hypertable read in this statement, not just the first.
+      expect((sql.match(/time >= \$\d+/g) ?? []).length).toBeGreaterThanOrEqual(boundsRequiredIn(sql));
+      // Both fold-to-TRUE spellings: `= false OR` and the `$n IS NULL OR` form.
+      expect(sql).not.toMatch(/(?:= false|IS NULL) OR/);
       expect(sql).not.toMatch(READS_RUN_TIMES);
       const dates = (params ?? []).filter((p): p is Date => p instanceof Date);
       expect(dates.length).toBeGreaterThan(0);
@@ -207,5 +221,30 @@ describe('TestRunsPerformanceQueryService raw-hypertable time bounds (#674)', ()
     expect(sql).toContain('r.time >= $2');
     expect(sql).not.toMatch(READS_RUN_TIMES);
     expect(params).toEqual([TEST_RUN_ID, WINDOW_START, WINDOW_END]);
+  });
+
+  /**
+   * The non-admin arm shifts the bounds to $3 because the org uuid[] takes $2. Getting
+   * that backwards is NOT a test failure in production: the query throws, the probe's
+   * own catch swallows it to a `warn`, and the sampler-rollup repair then never fires
+   * for any non-admin — resurfacing as root-CLAUDE issue #10 (slow transaction expands)
+   * with nothing in the log pointing here. Only the param layout can catch it.
+   */
+  it('repairEmptySamplerRollup puts the org ids ahead of the bounds for a non-admin', async () => {
+    const ORG_IDS = ['11111111-1111-4111-8111-111111111111'];
+    await (service as unknown as {
+      repairEmptySamplerRollup: (
+        id: string, isAdmin: boolean, orgs: string[], bounds: unknown,
+      ) => Promise<void>;
+    }).repairEmptySamplerRollup(
+      TEST_RUN_ID, false, ORG_IDS, { startCutoff: WINDOW_START, endCutoff: WINDOW_END });
+
+    const reads = hypertableReads();
+    expect(reads).toHaveLength(1);
+    const [sql, params] = reads[0]!;
+    expect(sql).toContain('ANY($2::uuid[])');
+    expect(sql).toContain('t.time >= $3');
+    expect(sql).toContain('r.time >= $3');
+    expect(params).toEqual([TEST_RUN_ID, ORG_IDS, WINDOW_START, WINDOW_END]);
   });
 });

@@ -1221,6 +1221,26 @@ counting `pg_locks` inside the transaction:
 | `+ time >= $2 AND time <= $3` (literals or bind params) | **21** |
 | `+ time` bounds read via a **subquery** on `test_runs` | **150** |
 
+**It is a trade, not a free win, and which way it goes depends on the query's shape.** A
+bound costs TimescaleDB the `VectorAgg` push-down that answers a simple aggregate off the
+compressed batch headers, and forces the `time` column off disk to apply the filter. Measured
+on the same run, identical results:
+
+| Shape | Unbounded | Bounded | |
+|---|---|---|---|
+| `count(*)` over the whole run | 8,562 buffers / 10.9 ms | 16,161 / 179.7 ms | **1.9x worse** |
+| `SELECT DISTINCT transaction_name` | 16,174 buffers | 23,733 | **1.5x worse** |
+| `ORDER BY time DESC LIMIT 10`, hit | 2,347 buffers / 2.8 ms | **5 / 0.016 ms** | 470x better |
+| the same, miss | 9,404 buffers / 75 locks | **131 / 15 locks** | 72x better |
+
+So a selective read gets whole-chunk exclusion and wins enormously; a whole-run aggregate pays
+~1.5-1.9x the buffer reads. `shared_blks_read` is the exact axis issues #9 and #34 identify as
+what collapses the buffer cache for everything else, so this is not nothing — it is accepted
+because the lock growth is an unbounded hard failure and this is bounded degradation. A
+follow-up worth testing: snapping the bound outward to the **chunk boundary** instead of an
+arbitrary hour measured 8,513 buffers on the `count(*)` case — parity with unbounded, same lock
+set — but it needs the deployment's real `chunk_interval`, so it is not hardcodable.
+
 The end of that road is a hard `out of shared memory`, not degradation: the shared lock table
 holds `max_locks_per_transaction × (max_connections + max_prepared_transactions)` entries, and
 three concurrent year-old join queries exhaust the 25,600 a `max_connections = 100` deploy gets.
@@ -1289,8 +1309,11 @@ Three things that look like exceptions and are decisions:
 1. **A CAGG read is not one of these.** `transactions_5s` / `requests_raw_5s` are already
    bucket-bounded by the run window, so they are handed the ramp cutoff **only when the toggle
    is on**. Passing the padded window start there is not a lock bound — it is a wrong first
-   bucket. The 20-odd remaining `= false OR` predicates in
-   `test-runs-performance-query.service.ts` are all CAGG reads, and correct as they stand.
+   bucket. The 15 remaining `= false OR` predicates (8 in `test-runs-performance-query.service.ts`,
+   6 in `report-data-fetcher.service.ts`, 1 in `test-runs-timeseries-query.service.ts`) are all
+   CAGG reads and correct as they stand. **Grep for `IS NULL OR` as well as `= false OR`** —
+   both spellings fold to TRUE when the bound is null, and the second is the one that hid four
+   raw-hypertable reads from the first version of this note.
 2. **The errors modal is bounded by the run window, never the analysis one.** It has always
    listed every error in the run; the toggle reaches its sampler arms only.
 3. **`repairEmptySamplerRollup`'s probe is bounded now**, and its old comment arguing otherwise
@@ -1310,12 +1333,19 @@ that would silently narrow the full-run half to the analysis window.
 Re-measure a converted site with
 `BEGIN; <query>; SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'relation'; ROLLBACK;`.
 
-Four guards, all asserting on the emitted SQL because no behavioural test can see any of this:
+Five guards, all asserting on the emitted SQL because no behavioural test can see any of this:
 `report-data-fetcher.time-bounds.spec.ts`, `test-runs-performance-query.time-bounds.spec.ts`,
-the worker's `raw-hypertable-time-bounds.test.ts`, and the assertion inside
-`test-runs-error-analysis.service.spec.ts`. Each drives its methods in **both** toggle positions
-and checks for a parameterised bound, a real `Date` in the params, no `= false OR`, and no
-`time >= tr.<column>`. That last regex is deliberately about the comparison, not the column:
+`benchmark-calculator.time-bounds.spec.ts`, the worker's `raw-hypertable-time-bounds.test.ts`,
+and the assertion inside `test-runs-error-analysis.service.spec.ts`. Each drives its methods in
+**both** toggle positions and checks for a parameterised bound, the exact window by value, no
+`= false OR` **or** `IS NULL OR`, and no `time >= tr.<column>`.
+
+**They count bounds per statement, and that is the point.** A first-match
+`expect(sql).toMatch(/time >= \$\d+/)` passes while a second read in the same statement has
+lost its bound — the per-scenario throughput query has two CTEs, the errors modal reads
+`requests_error` beside `requests_raw`, the summary-timeseries fallback is a UNION. A mutation
+sweep found five bounds deletable that way with 8,000+ tests green. `assertBounded` now requires
+one `time >=` per hypertable `FROM`/`JOIN` in the same SQL. Keep it that way. That last regex is deliberately about the comparison, not the column:
 `tr.start_time IS NOT NULL` is a legitimate predicate and appears in the repair probe. The
 helper itself has `packages/shared/src/database/__tests__/run-window.spec.ts`, which pins the
 rules a reader is most likely to "tidy": the hour of padding, that a toggle with no ramp

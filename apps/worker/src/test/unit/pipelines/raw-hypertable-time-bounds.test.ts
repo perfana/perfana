@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import pino from 'pino';
 import { ApdexCalculator } from '../../../pipelines/checks/ApdexCalculator.js';
 import { AggregatedBenchmarkEvaluator } from '../../../pipelines/checks/AggregatedBenchmarkEvaluator.js';
+import { ErrorsProcessor } from '../../../pipelines/helpers/scenario-processors.js';
+import type { DashboardManager } from '../../../pipelines/helpers/dashboard-manager.js';
+import type { TestRunMetadata } from '../../../types/performance-metrics.js';
 import type { TestRun } from '../../../pipelines/checks/BenchmarkMatcher.js';
 import type { EntityManager } from 'typeorm';
 
@@ -116,6 +119,56 @@ describe('worker raw-hypertable time bounds (#674)', () => {
       } as never);
 
       assertBounded(excludeRampUp ? undefined : [WINDOW_START, WINDOW_END]);
+    });
+  });
+
+  /**
+   * The zero-error branch of the perf-test pipeline. It is the only converted worker
+   * read whose bound no other test touches: the `requests_error` aggregate above it
+   * returns nothing, and the scenario-name lookup it then falls to is a plain
+   * `SELECT DISTINCT ... FROM requests_raw` on `test_run_id` alone unless bounded.
+   */
+  describe('ErrorsProcessor (zero-error branch)', () => {
+    const dashboardManager = {
+      getOrCreateScenarioDashboard: vi.fn(async (scenarioName: string) => ({
+        dashboardId: `dash-${scenarioName}`,
+        dashboardUid: `uid-${scenarioName}`,
+        dashboardLabel: `Performance test metrics ${scenarioName}`,
+      })),
+      getMetricTypePanel: (panelId: number) => ({ panelId, panelName: 'Error Count' }),
+    } as unknown as DashboardManager;
+
+    const metadata = {
+      test_run_id: 'run-001',
+      system_under_test_id: 'sut-1',
+      test_environment: 'acc',
+      workload: 'load',
+      organization_id: 'org-1',
+      start_time: new Date('2026-01-01T10:00:00Z'),
+      end_time: new Date('2026-01-01T11:00:00Z'),
+      ramp_up_time: 0,
+      completed: true,
+    } as unknown as TestRunMetadata;
+
+    it('bounds the scenario-name lookup on requests_raw', async () => {
+      query.mockImplementation(async (sql: string) =>
+        // No errors -> the branch under test; then one real scenario name.
+        /FROM requests_raw/.test(sql) ? [{ scenario_name: 'loadtest' }] : [],
+      );
+
+      await new ErrorsProcessor(
+        { query } as never,
+        dashboardManager,
+        pino({ level: 'silent' }) as never,
+      ).process('run-001', metadata);
+
+      // Both reads on this path are bounded; the `requests_error` aggregate carries its
+      // own cumulative window, so only the lookup's exact parameters are pinned.
+      assertBounded();
+      const [sql, params] = hypertableReads().find(([s]) => /FROM requests_raw/.test(s))!;
+      expect(sql).toMatch(/time >= \$2/);
+      expect(sql).toContain('time <= $3');
+      expect(params).toEqual(['run-001', WINDOW_START, WINDOW_END]);
     });
   });
 });

@@ -29,6 +29,12 @@ const RUN_WINDOW_ROW = [{
   ramp_down: '60',
 }];
 
+/** The padded run window (toggle off) and the analysis window (toggle on). */
+const WINDOW_START = new Date('2026-01-01T09:00:00.000Z');
+const WINDOW_END = new Date('2026-01-01T12:00:00.000Z');
+const ANALYSIS_START = new Date('2026-01-01T10:01:00.000Z');
+const ANALYSIS_END = new Date('2026-01-01T10:59:00.000Z');
+
 const testRun = {
   id: 'uuid-1',
   testRunId: 'run-001',
@@ -46,6 +52,10 @@ function makeRepo() {
   const query = jest.fn(async (sql: string) => {
     if (/tr\.ramp_up[\s\S]*tr\.ramp_down/.test(sql)) return RUN_WINDOW_ROW;
     if (/has_cagg/.test(sql)) return [];
+    // One row, not []. getScenarioDataFromDatabase early-returns on an empty first
+    // result, which left its SECOND read (the time-series query) never emitted and so
+    // never asserted — a bound could be deleted from it with every test green.
+    if (/FROM transactions txn/.test(sql)) return [{ transaction_name: 'checkout', avg_ms: '1', p95_ms: '1', p99_ms: '1', pass: '1', fail: '0', total: '1' }];
     return [];
   });
   return { query, findOne: jest.fn().mockResolvedValue({ id: 'uuid-1' }) } as never;
@@ -67,14 +77,36 @@ describe('ReportDataFetcherService raw-hypertable time bounds (#674)', () => {
   const hypertableReads = () =>
     (repo.query.mock.calls as [string, unknown[]][]).filter(([sql]) => HYPERTABLE.test(sql));
 
-  const assertBounded = () => {
+  /**
+   * @param expected the exact bounds every read must carry. Asserting merely that
+   * *some* parameter is a Date lets a wrong-but-present window through, which is the
+   * failure this whole file exists to catch — so the window is pinned by value.
+   */
+  /**
+   * Count, do not merely match. A single statement can read the hypertable more than
+   * once — the per-scenario throughput query has two bounded CTEs, the errors modal has
+   * a `requests_error` arm beside a `requests_raw` one, the summary-timeseries fallback
+   * is a UNION. A first-match `toMatch(/time >= \$\d+/)` passes while one of those
+   * bounds is missing; a 46-mutation sweep proved five such bounds were deletable with
+   * the whole suite green. So require one `time >=` per hypertable read in the same SQL.
+   */
+  const boundsRequiredIn = (sql: string): number =>
+    (sql.match(new RegExp(HYPERTABLE.source, 'g')) ?? []).length;
+
+  const assertBounded = (expected: [Date, Date] = [WINDOW_START, WINDOW_END]) => {
     const reads = hypertableReads();
     expect(reads.length).toBeGreaterThan(0);
     for (const [sql, params] of reads) {
       expect(sql).toMatch(/time >= \$\d+/);
+      // One bound per hypertable read in this statement, not just the first.
+      expect((sql.match(/time >= \$\d+/g) ?? []).length).toBeGreaterThanOrEqual(boundsRequiredIn(sql));
       expect(sql).not.toMatch(READS_RUN_TIMES);
-      // …and the bound is a real value, not a NULL the planner folds away.
-      expect((params ?? []).some((p) => p instanceof Date)).toBe(true);
+      // Both fold-to-TRUE spellings: `= false OR` and the `$n IS NULL OR` form.
+      expect(sql).not.toMatch(/(?:= false|IS NULL) OR/);
+      // …and the bound is the real window, not a NULL the planner folds away.
+      const dates = (params ?? []).filter((p): p is Date => p instanceof Date);
+      expect(dates.map((d) => d.toISOString()))
+        .toEqual(expect.arrayContaining(expected.map((d) => d.toISOString())));
     }
   };
 
@@ -82,34 +114,47 @@ describe('ReportDataFetcherService raw-hypertable time bounds (#674)', () => {
   // toggle positions, because the lock bound is NOT the analysis-window toggle: the
   // reads used to carry `($2::boolean = false OR time >= $3)`, which folds to TRUE —
   // no bound at all — on the default path.
-  it.each([false, true])('getScenarioDataFromDatabase (excludeRampUp=%s)', async () => {
+  // getScenarioDataFromDatabase takes no excludeRampUp parameter — it is always the
+  // run's own window. One case, not a two-case `it.each` whose parameter goes unused.
+  it('getScenarioDataFromDatabase', async () => {
     await service.getScenarioDataFromDatabase(testRun, 'checkout', '', []);
     assertBounded();
   });
 
   it.each([false, true])('getErrorAnalysis (excludeRampUp=%s)', async (excludeRampUp) => {
     await service.getErrorAnalysis(testRun, [], excludeRampUp, '', []);
-    assertBounded();
+    assertBounded(excludeRampUp ? [ANALYSIS_START, ANALYSIS_END] : [WINDOW_START, WINDOW_END]);
   });
 
-  it.each([false, true])('getApdexDataFromDatabase (excludeRampUp=%s)', async (excludeRampUp) => {
+  /**
+   * #674 regression guard, and the reason it is not `[ANALYSIS_START, ANALYSIS_END]`.
+   *
+   * Before #674 these three readers carried `AND ($2::boolean = false OR t.time >= $3)` —
+   * a START cutoff and NO end. Handing them an analysis end re-cuts the default report:
+   * measured on a real run, the Apdex table lost 131 of 275 rows and its average moved
+   * 282.41 → 286.58 ms, on 58 of 60 runs on the dev database. The toggle still trims the
+   * head; the end is the padded run window and exists only to bound the locks.
+   */
+  it.each([false, true])('getApdexDataFromDatabase keeps its pre-#674 head-only trim (excludeRampUp=%s)', async (excludeRampUp) => {
     await service.getApdexDataFromDatabase(testRun, 500, excludeRampUp, '', []);
-    assertBounded();
+    assertBounded([excludeRampUp ? ANALYSIS_START : WINDOW_START, WINDOW_END]);
   });
 
   it.each([false, true])('getThroughputStatsForReport (excludeRampUp=%s)', async (excludeRampUp) => {
     await service.getThroughputStatsForReport('run-001', excludeRampUp, null, '', []);
-    assertBounded();
+    // Head-only trim, as before #674 — see getApdexDataFromDatabase above.
+    assertBounded([excludeRampUp ? ANALYSIS_START : WINDOW_START, WINDOW_END]);
   });
 
   it.each([false, true])('getVirtualUserStatsForReport (excludeRampUp=%s)', async (excludeRampUp) => {
     await service.getVirtualUserStatsForReport('run-001', excludeRampUp, null, '', []);
-    assertBounded();
+    // Head-only trim, as before #674 — see getApdexDataFromDatabase above.
+    assertBounded([excludeRampUp ? ANALYSIS_START : WINDOW_START, WINDOW_END]);
   });
 
   it.each([false, true])('getAggregatedSeries (excludeRampUp=%s)', async (excludeRampUp) => {
     await service.getAggregatedSeries('run-001', 'transaction_response_time', 'avg', excludeRampUp, '', []);
-    assertBounded();
+    assertBounded(excludeRampUp ? [ANALYSIS_START, ANALYSIS_END] : [WINDOW_START, WINDOW_END]);
   });
 
   it('getAggregatedScalars', async () => {

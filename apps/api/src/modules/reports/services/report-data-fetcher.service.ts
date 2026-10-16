@@ -178,23 +178,6 @@ export class ReportDataFetcherService {
   }
 
   /**
-   * Get ramp-up cutoff time for a test run
-   * @param testRunId - Test run ID
-   * @param excludeRampUp - Whether to exclude ramp-up period
-   * @param roles - User roles from JWT token (for admin bypass)
-   * @param organizationIds - User's accessible organization IDs from JWT token
-   * @returns Cutoff time or null if not excluding ramp-up
-   */
-  async getRampUpCutoffTime(
-    testRunId: string,
-    excludeRampUp: boolean,
-    userId: string = '',
-    roles: string[] = [],
-  ): Promise<Date | null> {
-    return (await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles)).startCutoff;
-  }
-
-  /**
    * BOTH ends of the window to read a raw hypertable over, mirroring
    * `getAnalysisBounds` in TestRunsPerformanceQueryService.
    *
@@ -209,11 +192,27 @@ export class ReportDataFetcherService {
    * start cutoff runs past it, and the graphs section now draws the two on ONE chart —
    * two lines ending at different x positions.
    */
+  /**
+   * @param endBound which end the window gets.
+   *
+   * `'analysis'` trims the ramp-DOWN band, which is what a reader paired with a
+   * `ds_metrics` series needs (see the paragraph above).
+   *
+   * **`'head-trimmed'` is not a variant — it is the pre-#674 contract.** Before this
+   * change, the Apdex, throughput and virtual-user reads carried
+   * `AND ($2::boolean = false OR t.time >= $3)`: a START cutoff and no end at all. Giving
+   * them an analysis end would silently re-cut the default report — measured on
+   * `PerfanaWebshop-acc-loadTest-k6-00019`, the Apdex table lost 131 of 275 rows and its
+   * average moved 282.41 → 286.58 ms, on 58 of 60 runs on the dev database. #674 is a
+   * lock fix; it does not get to change a published number. Trimming the report's
+   * ramp-down band may well be right, but it is a product change and ships on its own.
+   */
   private async getAnalysisWindowBounds(
     testRunId: string,
     excludeRampUp: boolean,
     userId: string = '',
     roles: string[] = [],
+    endBound: 'analysis' | 'head-trimmed' = 'analysis',
   ): Promise<AnalysisBounds> {
     // Internal/system calls (no userId) or admin users bypass org filtering
     const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
@@ -225,7 +224,23 @@ export class ReportDataFetcherService {
       ${orgFilter.clause}
     `;
     const result = await withRequestEm(this.testRunRepo).query(query, [testRunId, ...orgFilter.params]);
-    return analysisBoundsFromRow(result[0], excludeRampUp);
+    const row = result[0];
+
+    // A run the caller cannot see (org filter) or that does not exist yields no row, and
+    // every bound then collapses to "unbounded" — the 136-lock statement this file exists
+    // to remove, reached silently. Say so; the read still runs, as it did before #674.
+    if (!row) {
+      this.logger.warn(
+        `No visible test_runs row for ${testRunId}: raw-hypertable reads for it run unbounded (#674)`,
+      );
+      return { startCutoff: null, endCutoff: null };
+    }
+
+    const bounds = analysisBoundsFromRow(row, excludeRampUp);
+    if (endBound === 'head-trimmed') {
+      return { startCutoff: bounds.startCutoff, endCutoff: analysisBoundsFromRow(row, false).endCutoff };
+    }
+    return bounds;
   }
 
   /**
@@ -797,9 +812,12 @@ export class ReportDataFetcherService {
     userId: string = '',
     roles: string[] = [],
   ): Promise<{ time: Date; value: number }[]> {
-    const { startCutoff, endCutoff } = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
-    // params: $1 testRunId, $2 start cutoff, $3 end cutoff; org params start at $4
-    const orgFilter = await this.resolveOrgFilter(userId, roles, 4, 'tr');
+    // Built by the shared helper rather than `($n IS NULL OR …)`: that spelling folds to
+    // TRUE at plan time when the bound is null, which is the shape #674 exists to remove,
+    // and it is invisible to the `= false OR` grep the docs tell the next reader to run.
+    const time = timeBoundsSql(
+      await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles), 't.time', 2);
+    const orgFilter = await this.resolveOrgFilter(userId, roles, time.nextIndex, 'tr');
 
     const statExprMap: Record<typeof stat, string> = {
       avg: 'ROUND(AVG(t.response_time)::numeric, 2)',
@@ -818,8 +836,7 @@ export class ReportDataFetcherService {
         FROM requests_raw t
         JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         WHERE t.test_run_id = $1
-          AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
-          AND ($3::timestamptz IS NULL OR t.time <= $3::timestamptz)
+          ${time.clause}
           ${orgFilter.clause}
         GROUP BY 1
         ORDER BY 1
@@ -831,8 +848,7 @@ export class ReportDataFetcherService {
         FROM ${table} t
         JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         WHERE t.test_run_id = $1
-          AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
-          AND ($3::timestamptz IS NULL OR t.time <= $3::timestamptz)
+          ${time.clause}
           ${orgFilter.clause}
         GROUP BY 1
         ORDER BY 1
@@ -840,7 +856,7 @@ export class ReportDataFetcherService {
     }
 
     const rows: Array<{ time: string; value: string | null }> =
-      await withRequestEm(this.testRunRepo).query(query, [testRunId, startCutoff, endCutoff, ...orgFilter.params]);
+      await withRequestEm(this.testRunRepo).query(query, [testRunId, ...time.params, ...orgFilter.params]);
     return rows.map((r) => ({ time: new Date(r.time), value: r.value == null ? 0 : Number(r.value) }));
   }
 
@@ -1037,7 +1053,9 @@ export class ReportDataFetcherService {
 
       // Always bounded, toggle or not — see @perfana/shared/database/run-window. The same bounds
       // go to the throughput and virtual-user reads below, so this is one lookup.
-      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
+      // 'head-trimmed': this read had a start cutoff and no end before #674. See the
+      // getAnalysisWindowBounds docblock — an analysis end here moves published numbers.
+      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
       const time = timeBoundsSql(bounds, 't.time', 2);
 
       // Build organization filter for queries
@@ -1445,7 +1463,8 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<ThroughputStats> {
     try {
-      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
+      // 'head-trimmed' — see getApdexDataFromDatabase.
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
@@ -1617,7 +1636,8 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<VirtualUserStats> {
     try {
-      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
+      // 'head-trimmed' — see getApdexDataFromDatabase.
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 

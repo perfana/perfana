@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   Two of them needed more than a filter. The trends table asked the database for each run's statistics separately, once per run inside a single query, which is a shape that cannot carry a window; it is now one query across all the runs it is comparing. The baseline comparison reads both runs under one window spanning the two. Both return the same numbers.
 
-- **Performance Analysis follows, and that is every such query in the API.** The transaction table, the sampler breakdown behind a row expand, the errors modal, virtual users, throughput, the aggregate graphs and the analysis-window overview chart all ask for the run's window now. Eight of those sixteen had the same toggle-dependent filter the report queries had, so they were unbounded on the default path.
+- **Performance Analysis follows.** The transaction table, the sampler breakdown behind a row expand, the errors modal, virtual users, throughput, the aggregate graphs and the analysis-window overview chart all ask for the run's window now. Eight of those sixteen had the same toggle-dependent filter the report queries had, so they were unbounded on the default path.
 
   Two were different. The chain decoration on a transaction expand is bounded by an index since v0.2.96.26, which makes it fast — but fast and cheap are not the same thing here, since the locks are taken before the query runs. And a background check that repairs a half-written rollup argued in its own comment for staying unbounded, because a sample arriving after a run is marked finished is exactly what it looks for; the hour of padding covers that, so it is bounded like the rest.
 
@@ -29,7 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   Five more API queries that the first pass missed are converted too, including the one behind "what will be deleted" when you remove a system. That one spans every run the system ever had, so there is no single window — it uses the system's own first and last run instead, which on a shared installation is still the difference between locking two months of data and two years of it.
 
-  Nothing in any of this changes a number the product reports.
+  Nothing in any of this changes a number the product reports, and that was checked rather than assumed. On the development database the four tables return identical row counts for a 2.5-million-row run with and without the window, and the rollup's whole-run figures match across all 253 transactions. The report's Apdex, throughput and virtual-user readings keep exactly the window they had before — trimming their ramp-down band would have moved the default report's numbers on 58 of 60 runs, and that is a product change for its own release, not a side effect of a lock fix.
+
+  One honest caveat on speed. Asking for a window is not free in every case: a query that totals a whole run now reads about 1.5 to 1.9 times as many database pages, because the database can no longer answer it from compressed summaries alone. A query that looks something up — clicking into an error, expanding a transaction — gets dramatically faster, by 70 to 470 times, because it can now skip whole days of storage it used to open. The trade is deliberate: running out of lock space is an outright failure with no warning, and this is a measurable slowdown on one kind of query.
 
 ## [0.2.97.25] - 2026-10-16
 

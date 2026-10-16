@@ -3,7 +3,7 @@
  *
  * Tests cover:
  * - Organization filter clause construction (admin bypass, org membership, empty orgs)
- * - getRampUpCutoffTime: excludeRampUp flag, DB row handling, admin/non-admin paths
+ * - getAnalysisWindowBounds: excludeRampUp flag, DB row handling, admin/non-admin paths
  * - getScenarioDataFromDatabase: data mapping, error pct, null-field safety, empty result, errors
  * - getApdexDataFromDatabase: weighted average math, scenario grouping, threshold logic, empty result
  * - getThroughputStatsForReport: overall + per-scenario mapping, org filter CTE variants, error path
@@ -118,15 +118,28 @@ describe('ReportDataFetcherService', () => {
     jest.clearAllMocks();
   });
 
+  /** The deleted public wrapper's one job: the start of the resolved window. */
+  const getBoundsStart = async (id: string, excl: boolean, user: string, roles: string[]) =>
+    (await (service as unknown as {
+      getAnalysisWindowBounds: (i: string, e: boolean, u: string, r: string[]) => Promise<{ startCutoff: Date | null }>;
+    }).getAnalysisWindowBounds(id, excl, user, roles)).startCutoff;
+
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // getRampUpCutoffTime
+  // getAnalysisWindowBounds
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('getRampUpCutoffTime', () => {
+  /**
+   * `getRampUpCutoffTime` was deleted in #674: the branch replaced its only caller, and
+   * with the toggle off it no longer returned null, so its name and `@returns` were both
+   * lies. Its real value was covering org-filter construction on the `test_runs` bounds
+   * lookup, which lives on in the private `getAnalysisWindowBounds` — so these cases
+   * call that instead of disappearing with the method.
+   */
+  describe('getAnalysisWindowBounds (org filtering on the bounds lookup)', () => {
     describe('when excludeRampUp is false', () => {
       /**
        * It used to short-circuit to null, which left every read that used the cutoff
@@ -139,7 +152,7 @@ describe('ReportDataFetcherService', () => {
         ]);
         authzService.isGlobalAdmin.mockReturnValue(true);
 
-        const result = await service.getRampUpCutoffTime('run-001', false, 'admin-user', ['perfana-admin']);
+        const result = await getBoundsStart('run-001', false, 'admin-user', ['perfana-admin']);
 
         expect(result!.toISOString()).toBe('2025-01-01T09:00:00.000Z');
         expect(testRunRepo.query).toHaveBeenCalled();
@@ -154,7 +167,7 @@ describe('ReportDataFetcherService', () => {
         ]);
         authzService.isGlobalAdmin.mockReturnValue(true);
 
-        const result = await service.getRampUpCutoffTime('run-001', true, 'admin-user', ['perfana-admin']);
+        const result = await getBoundsStart('run-001', true, 'admin-user', ['perfana-admin']);
 
         expect(result).toBeInstanceOf(Date);
         // 10:00:00 + 120 seconds = 10:02:00
@@ -165,7 +178,7 @@ describe('ReportDataFetcherService', () => {
         testRunRepo.query.mockResolvedValueOnce([]);
         authzService.isGlobalAdmin.mockReturnValue(true);
 
-        const result = await service.getRampUpCutoffTime('run-001', true, 'admin-user', ['perfana-admin']);
+        const result = await getBoundsStart('run-001', true, 'admin-user', ['perfana-admin']);
 
         expect(result).toBeNull();
       });
@@ -174,7 +187,7 @@ describe('ReportDataFetcherService', () => {
         testRunRepo.query.mockResolvedValueOnce([{ start_time: null, ramp_up: '60' }]);
         authzService.isGlobalAdmin.mockReturnValue(true);
 
-        const result = await service.getRampUpCutoffTime('run-001', true, 'admin-user', ['perfana-admin']);
+        const result = await getBoundsStart('run-001', true, 'admin-user', ['perfana-admin']);
 
         expect(result).toBeNull();
       });
@@ -183,7 +196,7 @@ describe('ReportDataFetcherService', () => {
         testRunRepo.query.mockResolvedValueOnce([{ start_time: '2025-01-01T10:00:00.000Z', ramp_up: null }]);
         authzService.isGlobalAdmin.mockReturnValue(true);
 
-        const result = await service.getRampUpCutoffTime('run-001', true, 'admin-user', ['perfana-admin']);
+        const result = await getBoundsStart('run-001', true, 'admin-user', ['perfana-admin']);
 
         // No ramp to trim, but still bounded — an unbounded read locks every chunk.
         expect(result!.toISOString()).toBe('2025-01-01T09:00:00.000Z');
@@ -193,7 +206,7 @@ describe('ReportDataFetcherService', () => {
         testRunRepo.query.mockResolvedValueOnce([]);
         authzService.isGlobalAdmin.mockReturnValue(true);
 
-        await service.getRampUpCutoffTime('run-001', true, 'admin-user', ['perfana-admin']);
+        await getBoundsStart('run-001', true, 'admin-user', ['perfana-admin']);
 
         expect(authzService.getAccessibleOrganizations).not.toHaveBeenCalled();
       });
@@ -201,7 +214,7 @@ describe('ReportDataFetcherService', () => {
       it('should skip org filter when userId is empty (system/internal call)', async () => {
         testRunRepo.query.mockResolvedValueOnce([]);
 
-        await service.getRampUpCutoffTime('run-001', true, '', []);
+        await getBoundsStart('run-001', true, '', []);
 
         expect(authzService.getAccessibleOrganizations).not.toHaveBeenCalled();
         expect(authzService.isGlobalAdmin).not.toHaveBeenCalled();
@@ -212,7 +225,7 @@ describe('ReportDataFetcherService', () => {
         authzService.getAccessibleOrganizations.mockResolvedValue(['org-1', 'org-2']);
         testRunRepo.query.mockResolvedValueOnce([]);
 
-        await service.getRampUpCutoffTime('run-001', true, 'user-1', []);
+        await getBoundsStart('run-001', true, 'user-1', []);
 
         expect(authzService.getAccessibleOrganizations).toHaveBeenCalledWith('user-1');
         const [sql, params] = testRunRepo.query.mock.calls[0] as [string, unknown[]];
@@ -228,7 +241,7 @@ describe('ReportDataFetcherService', () => {
         authzService.getAccessibleOrganizations.mockResolvedValue([]);
         testRunRepo.query.mockResolvedValueOnce([]);
 
-        await service.getRampUpCutoffTime('run-001', true, 'user-1', []);
+        await getBoundsStart('run-001', true, 'user-1', []);
 
         const [sql] = testRunRepo.query.mock.calls[0] as [string, unknown[]];
         // Not `organization_id IS NULL`: the column is NOT NULL since Phase 4, so
@@ -649,9 +662,12 @@ describe('ReportDataFetcherService', () => {
         const [sql, params] = testRunRepo.query.mock.calls[1] as [string, unknown[]];
         expect(sql).toContain('t.time >= $2');
         expect(sql).toContain('t.time <= $3');
-        // 10:00 + 120s ramp-up, 11:00 − 60s ramp-down.
+        // 10:00 + 120s ramp-up for the head. The END is the PADDED run window, not
+        // 11:00 − 60s: this reader trimmed only the head before #674 and must keep
+        // doing so, or the default report's Apdex numbers move. See the
+        // getAnalysisWindowBounds docblock.
         expect((params[1] as Date).toISOString()).toBe('2025-01-01T10:02:00.000Z');
-        expect((params[2] as Date).toISOString()).toBe('2025-01-01T10:59:00.000Z');
+        expect((params[2] as Date).toISOString()).toBe('2025-01-01T12:00:00.000Z');
       });
 
       /**
@@ -905,8 +921,9 @@ describe('ReportDataFetcherService', () => {
           const [sql, params] = call as [string, unknown[]];
           expect(sql).toContain('time >= $2');
           expect(sql).toContain('time <= $3');
+          // Head-only trim, as before #674 — the end is the padded run window.
           expect((params[1] as Date).toISOString()).toBe('2025-01-01T10:02:00.000Z');
-          expect((params[2] as Date).toISOString()).toBe('2025-01-01T10:59:00.000Z');
+          expect((params[2] as Date).toISOString()).toBe('2025-01-01T12:00:00.000Z');
         }
       });
 
@@ -1224,7 +1241,7 @@ describe('ReportDataFetcherService', () => {
       testRunRepo.query.mockResolvedValueOnce([]);
 
       // getRampUpCutoffTime uses paramStartIndex=2 ($2, $3 for org params)
-      await service.getRampUpCutoffTime('run-001', true, 'user-1', []);
+      await getBoundsStart('run-001', true, 'user-1', []);
 
       const [sql, params] = testRunRepo.query.mock.calls[0] as [string, unknown[]];
       // The clause should reference $2 and $3
@@ -1239,7 +1256,7 @@ describe('ReportDataFetcherService', () => {
       authzService.getAccessibleOrganizations.mockResolvedValue(['org-X']);
       testRunRepo.query.mockResolvedValueOnce([]);
 
-      await service.getRampUpCutoffTime('run-001', true, 'user-1', []);
+      await getBoundsStart('run-001', true, 'user-1', []);
 
       const [sql] = testRunRepo.query.mock.calls[0] as [string, unknown[]];
       expect(sql).toContain('organization_id IN');

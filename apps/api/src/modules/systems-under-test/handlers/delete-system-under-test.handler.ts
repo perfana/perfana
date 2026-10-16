@@ -67,8 +67,16 @@ export class DeleteSystemUnderTestHandler {
     // lives in (#674; see @perfana/shared/database/run-window). On a shared deploy a
     // system that ran for two months in a two-year table locks ~60 chunks, not ~730.
     // Hour-padded for the ingest lag past `end_time`.
+    //
+    // `MAX(end_time)` alone would be wrong: SQL MAX SKIPS NULLs, and an in-flight run has
+    // a NULL end_time. Its rows would then sit past the bound and be left out of the
+    // counts, so the confirmation dialog would UNDER-report what the cascade deletes —
+    // and the cascade itself has no time predicate. A NULL end anywhere means "still
+    // running", so propagate it and leave the upper bound open.
     const spanRows = await this.dataSource.query(
-      `SELECT MIN(start_time) AS min_start, MAX(end_time) AS max_end
+      `SELECT MIN(start_time) AS min_start,
+              CASE WHEN count(*) FILTER (WHERE end_time IS NULL) > 0
+                   THEN NULL ELSE MAX(end_time) END AS max_end
          FROM test_runs WHERE system_under_test_id = $1`,
       [sutId],
     );

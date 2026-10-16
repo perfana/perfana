@@ -1967,8 +1967,10 @@ export class TestRunsPerformanceQueryService {
       let orgParamIndex = paramIndex;
       if (transactionName) orgParamIndex++;
       if (samplerName) orgParamIndex++;
-      // One param per end that exists — an in-flight run has no end.
-      orgParamIndex += (bounds.startCutoff ? 1 : 0) + (bounds.endCutoff ? 1 : 0);
+      // Ask the builder how many slots it will claim rather than re-deriving its rule
+      // here: this index numbers `ANY($n::uuid[])`, the org filter, and getting it wrong
+      // is a tenancy bug rather than a crash.
+      orgParamIndex += timeBoundsSql(bounds, 're.time', orgParamIndex).params.length;
       if (useSamplerRollup) orgParamIndex++; // ramp_up_excluded param
       if (useCagg) orgParamIndex += 6; // sut, env, startTime, endTime, excludeRampUp, cutoffTime
 
@@ -3160,10 +3162,16 @@ export class TestRunsPerformanceQueryService {
       }
 
       const resolvedTestRunId = await this.resolveTestRunId(testRunId);
-      // applyAnalysisWindow=true is semantically equivalent to excludeRampUp=true in getAnalysisBounds
-      const { startCutoff, endCutoff } = await this.getAnalysisBounds(resolvedTestRunId, applyAnalysisWindow);
+      // applyAnalysisWindow=true is semantically equivalent to excludeRampUp=true in getAnalysisBounds.
+      // Built by the shared helper rather than `($n IS NULL OR …)`: that spelling folds to
+      // TRUE at plan time when the bound is null — the shape #674 removes — and it is
+      // invisible to the `= false OR` grep the docs point the next reader at.
+      const bounds = await this.getAnalysisBounds(resolvedTestRunId, applyAnalysisWindow);
+      // Two aliases, one parameter set: same indices, different column.
+      const time = timeBoundsSql(bounds, 't.time', 2);
+      const timeR = timeBoundsSql(bounds, 'r.time', 2);
 
-      const orgClause = isAdmin ? '' : 'AND sut.organization_id = ANY($4::uuid[])';
+      const orgClause = isAdmin ? '' : `AND sut.organization_id = ANY($${time.nextIndex}::uuid[])`;
 
       const statExprMap: Record<typeof stat, string> = {
         avg: 'ROUND(AVG(t.response_time)::numeric, 2)',
@@ -3189,15 +3197,14 @@ export class TestRunsPerformanceQueryService {
         JOIN test_runs tr ON tr.test_run_id = r.test_run_id
         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
         WHERE r.test_run_id = $1
-          AND ($2::timestamptz IS NULL OR r.time >= $2::timestamptz)
-          AND ($3::timestamptz IS NULL OR r.time <= $3::timestamptz)
+          ${timeR.clause}
           ${orgClause}
         GROUP BY 1
         ORDER BY 1
       `;
         params = isAdmin
-          ? [resolvedTestRunId, startCutoff, endCutoff]
-          : [resolvedTestRunId, startCutoff, endCutoff, organizationIds];
+          ? [resolvedTestRunId, ...time.params]
+          : [resolvedTestRunId, ...time.params, organizationIds];
       } else {
         const table = metric === 'transaction_response_time' ? 'transactions' : 'requests_raw';
         const statExpr = statExprMap[stat];
@@ -3209,15 +3216,14 @@ export class TestRunsPerformanceQueryService {
         JOIN test_runs tr ON tr.test_run_id = t.test_run_id
         JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
         WHERE t.test_run_id = $1
-          AND ($2::timestamptz IS NULL OR t.time >= $2::timestamptz)
-          AND ($3::timestamptz IS NULL OR t.time <= $3::timestamptz)
+          ${time.clause}
           ${orgClause}
         GROUP BY 1
         ORDER BY 1
       `;
         params = isAdmin
-          ? [resolvedTestRunId, startCutoff, endCutoff]
-          : [resolvedTestRunId, startCutoff, endCutoff, organizationIds];
+          ? [resolvedTestRunId, ...time.params]
+          : [resolvedTestRunId, ...time.params, organizationIds];
       }
 
       const rows: Array<{ time: string; value: string }> = await withRequestEm(this.testRunRepo).query(query, params);
