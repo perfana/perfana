@@ -480,6 +480,10 @@ describe('analyzeTestWorker', () => {
       expect(job.updateData).toHaveBeenCalledWith(expect.objectContaining({ blockedSince: expect.any(Number) }));
       expect(mockOrchestrator.executeSequentialPipeline).not.toHaveBeenCalled();
       expect(mockReleaseLock).not.toHaveBeenCalled(); // never acquired, nothing to hand back
+      // Issue #589: the decompressed-chunk Set is process-wide, so draining it here would
+      // recompress the BLOCKING job's chunks while it is still writing to them — and a
+      // re-park does this every BLOCKED_REPARK_MS for up to BLOCKED_MAX_WAIT_MS.
+      expect(mockDb.recompressTouchedChunks).not.toHaveBeenCalled();
     });
 
     it('gives up with a thrown blocked error once the re-park budget is spent', async () => {
@@ -495,6 +499,7 @@ describe('analyzeTestWorker', () => {
       };
       await expect((worker as never as (j: unknown, t?: string) => Promise<unknown>)(job, 'tok')).rejects.toThrow(/Job blocked/);
       expect(job.moveToDelayed).not.toHaveBeenCalled();
+      expect(mockDb.recompressTouchedChunks).not.toHaveBeenCalled(); // issue #589, as above
     });
   });
 

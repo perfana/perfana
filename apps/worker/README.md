@@ -373,6 +373,18 @@ as DML), and since v0.2.95.18 the missing-data gap fill, for the same reason —
 at 2 days that is any gap on a run more than ~3 days old. All of it is put back once, by
 `recompressTouchedChunks` in the orchestrator's `finally`.
 
+`recompressTouchedChunks` drains a Set that lives on the process-singleton
+`WorkerDatabaseService`, so every job in the process shares it. Both callers — the re-evaluate
+orchestrator and `analyze.ts` — therefore guard the drain on `lockAcquired` (v0.2.97.28): a job
+refused the `sut:env:workload` scope lock decompressed nothing, and draining there would recompress
+the **blocking** job's chunks while it is still writing to them. On the analyze side that refusal is
+not one event but a re-park every `BLOCKED_REPARK_MS` for up to `BLOCKED_MAX_WAIT_MS`, so it fired
+once a minute for up to an hour. What is *not* fixed: a job that did hold the lock and finished
+first can still recompress a chunk another in-flight job needs. `HeavyStageMutex` keeps two jobs out
+of `refreshRampUpFlags` at once, but the drain in a `finally` is not under that mutex — issue #589
+has the per-chunk ref-counting that would close it, and why it was judged not worth the
+concurrency surface yet.
+
 `MAX_DECOMPRESSED_CHUNKS` (8, `WorkerDatabaseService`) caps how many chunks one process holds in
 row store at a time. A 1-day chunk is ~16 GB decompressed and recompression happens only at the
 end of the re-evaluate, so a bulk apply over 100 runs on distinct days would otherwise inflate the

@@ -1245,10 +1245,25 @@ ${breakdown}
       // WorkerDatabaseService is a process singleton, so the statistics jobs this orchestrator
       // awaits share its tracking set. A statistics job that lands on another worker process
       // leaves its chunks to the columnstore policy, exactly as before.
-      try {
-        await getDatabaseService().recompressTouchedChunks();
-      } catch (recompressError) {
-        logger.error(`Failed to recompress chunks for job ${job.id}:`, recompressError);
+      //
+      // Only when this job held the scope lock. That same sharing means a job refused the
+      // sut:env:workload lock — a routine path, since analyze.ts takes the same lock after
+      // every run of the workload finishes — would otherwise reach this `finally` having
+      // done no work and recompress the chunks the *blocking* job decompressed and is still
+      // writing to: at best its compress_chunk queues behind that job's AccessExclusiveLock,
+      // at worst that job's next DML resumes against a recompressed chunk and hits
+      // `tuple decompression limit exceeded`, failing a multi-minute heavy stage into a
+      // retry that re-runs the whole aggregation. The chunk is also cleared from the Set, so
+      // the owning job's own finally will not put it back.
+      // ponytail: a lock guard, not per-chunk ref-counting — see issue #589 for why the full
+      // fix (Map<chunk, Set<jobId>>) was judged more concurrency surface than the remaining
+      // same-process race is worth.
+      if (lockAcquired) {
+        try {
+          await getDatabaseService().recompressTouchedChunks();
+        } catch (recompressError) {
+          logger.error(`Failed to recompress chunks for job ${job.id}:`, recompressError);
+        }
       }
 
       // Stop the heartbeat before releasing, so a renewal cannot resurrect the TTL
