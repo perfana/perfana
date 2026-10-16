@@ -35,18 +35,28 @@ services:
     # all use 1-day chunks (migrations 1804 and 1815) and none of them has a retention
     # policy, and every hot query filters on test_run_id with no time predicate, so one
     # query locks every chunk plus its compressed twin plus the indexes on both — measured
-    # at ~11 relation locks per chunk, not one (136 locks for 12 chunks of requests_raw;
-    # 230 for a two-table join over 21). At ~365 chunks per table per year that projects to
-    # ~8,000 locks for a two-table run query and ~16,000 for one touching all four.
+    # at ~9-11 relation locks per chunk, not one: 136 locks over 12 chunks of requests_raw,
+    # 230 over 21 for a two-table join, and 417 over 46 for all four tables at once. At
+    # ~365 chunks per table per year that projects to ~8,000 locks for a two-table run
+    # query and ~13,000 for a four-table one.
     #
     # The budget is this value x (max_connections + max_prepared_transactions), NOT this
-    # value alone — a single transaction may exceed it while the table has room. The
-    # timescaledb-ha image sets max_connections=500 itself, so 1024 gives ~512,000 entries
-    # (~85 MB of shared memory, estimated at ~168 B/entry). 256 gave 128,000, which is just
-    # under 8 concurrent four-table queries (~128,480) — fine for the two tables 1804
-    # re-chunked, thin for four. Migration 1815's warning is keyed on the two-table
-    # projection and so would NOT have fired at 256; this is headroom, not a fix for a
-    # warning.
+    # value alone — a single transaction may exceed the per-transaction figure freely while
+    # the global pool holds. Measured: that 417-lock four-table query ran in one backend
+    # with this set to 256 and completed without error. So the trigger is CONCURRENCY x
+    # chunks, never one query crossing a threshold — at 128,000 pooled entries the
+    # two-table projection allows ~16 concurrent and the four-table one ~8; at 512,000,
+    # ~64 and ~32. Sizing this as a per-query limit produces the wrong headroom number. The
+    # timescaledb-ha image sets max_connections=500 itself, so 1024 gives ~512,000 entries.
+    # At an estimated ~168 B/entry (unmeasured) that is ~86 MB of shared memory for the
+    # whole table, i.e. ~65 MB MORE than the ~21 MB that 256 was already using.
+    #
+    # Be clear about what this buys, because 256 is not an imminent limit: at today's 46
+    # chunks the four-table query takes 417 locks, 0.3% of the pool, and a year out it
+    # still allows ~9 concurrent. 1024 makes that ~38. It is headroom for growth past a
+    # year and for the fact that NOTHING bounds chunk growth — there is no retention
+    # policy on any raw hypertable — not a fix for a firing warning. Migration 1815's
+    # check is keyed on the two-table projection and would not have tripped at 256 either.
     #
     # Two things to know before changing either number. The default 64 runs out as
     # `out of shared memory` — a hard query error, not degradation — once a few hundred
