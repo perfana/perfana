@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.26] - 2026-10-16
+
+### Fixed
+- **Error analysis no longer makes Postgres lock every day of stored samples to read one test run.** The six queries behind the Errors card filtered on the test run alone, with nothing to say which days of data to look at. Postgres answers that by locking the whole table — every daily slice of it, plus its compressed copy and the indexes on both — before it reads a thing. On the development database one of those queries took 136 locks where 21 were needed for the same rows.
+
+  That did not matter when the raw sample tables were stored in week-long slices. Since v0.2.97.25 they are stored a day at a time, and nothing deletes old ones, so the count grows by roughly 365 per table per year and never comes down. The ceiling is a shared budget across the whole database, and running into it is not a slowdown — it is a query that fails outright with `out of shared memory`. The six queries now ask for the run's own window, which is the one thing that keeps the cost flat as data accumulates. The slowest of them, the drill-down that opens when you click an error, benefits most: it reads the ten most recent matching errors, which it could not stop looking for early.
+
+  Results are unchanged. The window is padded by an hour either side of the recorded start and end, because samples can still be arriving up to about 36 seconds after a run is marked finished and a load generator's clock can run slightly ahead of the recorded start.
+
+  The other places that read these tables — the rest of Performance Analysis, report generation, and parts of the worker — are not converted yet and are tracked in #674.
+
 ## [0.2.97.25] - 2026-10-16
 
 ### Changed

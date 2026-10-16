@@ -1205,3 +1205,62 @@ Unchanged by all of this: an Apdex check short-circuits before the column (its t
 ACTUAL column at all), and a passing averaged check still shows `panel_average`, where it
 genuinely is the actual value. **A report generated before v0.2.97.24 keeps its old number** — the HTML is
 stored, so it has to be regenerated.
+
+### A raw-hypertable read takes a lock per chunk, and the window has to be fetched first
+
+A query on `requests_raw`, `transactions`, `requests_error` or `virtual_users` that filters on
+`test_run_id` alone locks **every chunk** of the table, plus every compressed twin, plus the
+indexes on both — ~11 relation locks per chunk, whatever the result set is. With the daily
+chunks migration 1815 introduced and no retention policy on any of the four, that count grows
+~365 per table per year, forever. Measured on the dev database against a 2.5 M-row run,
+counting `pg_locks` inside the transaction:
+
+| Form | Relation locks |
+|---|---|
+| `WHERE test_run_id = $1` | **136** |
+| `+ time >= $2 AND time <= $3` (literals or bind params) | **21** |
+| `+ time` bounds read via a **subquery** on `test_runs` | **150** |
+
+The end of that road is a hard `out of shared memory`, not degradation: the shared lock table
+holds `max_locks_per_transaction × (max_connections + max_prepared_transactions)` entries, and
+three concurrent year-old join queries exhaust the 25,600 a `max_connections = 100` deploy gets.
+Migration 1815 warns about the sizing; a `time` bound is what removes the growth.
+
+**The obvious refactor makes it worse — read the third row again.** Joining or subquerying
+`test_runs` for `start_time` / `end_time` in the same statement excludes *no* chunks and adds
+the `test_runs` relations on top. Chunk exclusion for locking purposes happens at **plan** time,
+and a correlated subquery is not available then; runtime exclusion is too late, the locks are
+already taken. So the window has to be fetched in its own round trip and passed as bind
+parameters — which is what `common/db/run-window.ts` (`TEST_RUN_TIMES_SQL` +
+`analysisBoundsFromRow`) exists for. Anyone "fixing" a site by reaching into `test_runs` inline
+has regressed it while appearing to do the right thing, and no behavioural test can see it: the
+result set is identical. The guard is an assertion on the **emitted SQL text** — see
+`test-runs-error-analysis.service.spec.ts`, "never reads the window from test_runs inside a
+hypertable query".
+
+Two things the helper settles that a hand-rolled bound gets wrong:
+
+1. **The window is padded an hour each side**, because ingest lags the recorded timestamps —
+   `requests_raw` rows have been observed arriving up to 36 s past `end_time`, and a load
+   generator's clock can run ahead of `start_time`. An unpadded bound silently drops rows the
+   unbounded query returned. An hour costs at most one extra daily chunk per side.
+2. **The window is not the analysis timerange.** `excludeRampUp` narrows the same bounds to the
+   Performance Analysis toggle's window; with the toggle *off* the padded run window still
+   applies, because the lock bound is not optional. A run with no `end_time` keeps an unbounded
+   upper end on purpose — there are no chunks past now() to exclude.
+
+Converted so far: `test-runs-error-analysis.service.ts` (all 9 sites). Still unbounded, by the
+`FROM <table>` + 700-character lookahead heuristic that issue #674 used for triage: 7 sites in
+`test-runs-performance-query.service.ts`, 6 in `reports/services/report-data-fetcher.service.ts`,
+and the worker's `scenario-processors`, `ApdexCalculator`, `TransactionStatsRollupPipeline` and
+`PerformanceTestMetricsPipeline`. That heuristic is triage, not a verdict — a bound inside a CTE
+can sit outside the window, and an unrelated `time` mention can read as "bounded". Re-measure a
+converted site with
+`BEGIN; <query>; SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'relation'; ROLLBACK;`.
+
+Two of those seven are `repairEmptySamplerRollup`'s probe, and converting it needs a decision
+rather than a patch: its comment argues for being unbounded because a row arriving outside the
+recorded window is the case it exists to detect. The hour of padding covers the 36 s lag that
+comment measured, so a padded bound is probably right — but the probe also *joins* `test_runs`
+already, so bounding it means splitting that into two round trips in a repair path, not adding
+a predicate.
