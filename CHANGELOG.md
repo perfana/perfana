@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.29] - 2026-10-18
+
+### Security
+- **Twenty-nine of the thirty-three vulnerabilities Snyk reports against the API were already fixed upstream; we were just not picking them up.** Every one of them sits inside the version range the project already asks for, so nothing was blocking the upgrade and no code had to change. Refreshing the locked versions takes them: axios (twenty-two findings, including a server-side request forgery and a denial-of-service rated high), the gRPC client (the one critical, a certificate-validation flaw reached through the Docker client library), the query-string and body parsers behind Express, and the websocket engine behind Socket.IO.
+
+  Four are left and none of them is a lockfile refresh. Two need a major-version upgrade of a library we use directly (`csv-parse`, `zod`), one is only fixed in a beta release of a library we deliberately pin (`ioredis`), and one sits inside the Docker client library's own pinned dependency. They are tracked rather than fixed here.
+
+  The reason they went unpicked is worth recording, because it will do it again otherwise. Automated security updates are switched off for the repository, and the routine dependency-update lane has been at its ten-open-pull-request ceiling since April, five of those proposing versions the project has long since passed. Nothing could open a pull request for any of this.
+
 ## [0.2.97.28] - 2026-10-16
 
 ### Fixed
