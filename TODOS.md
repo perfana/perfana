@@ -3343,6 +3343,27 @@ this was not caught by the panel-301 trace; it needs a dot INSIDE the code.
 drill-down differently broken, not about restoring working behaviour.
 
 
+## Dependency hygiene
+
+### Nothing can open a dependency PR, and four Snyk findings need a human decision
+
+**Priority:** P1
+**Origin:** `/investigate` of the Snyk `@perfana/api` snapshot of 2026-10-16 (33 issues: 1 critical, 11 high, 21 medium). v0.2.97.29 cleared 29 of them with a plain `npm update axios qs @grpc/grpc-js body-parser engine.io` — every one was already inside the declared range.
+
+**Why:** two things, either sufficient on its own, kept the lockfile frozen. (1) `gh api repos/perfana/perfana --jq .security_and_analysis` reports `dependabot_security_updates: disabled`, so GitHub never opens a security PR; alerts themselves are on (`/vulnerability-alerts` → 204) but the alert list is empty, so GitHub is not a second signal here — Snyk is the only thing watching. (2) `.github/dependabot.yml` sets `open-pull-requests-limit: 10` on the npm lane and there are exactly 10 open npm PRs, saturated since **2026-04-06**; five are obsolete (#107 proposes `@nestjs/common 10.4.22 → 11.1.18` while `apps/api/package.json` declares `^11.1.24`; same for #108, #105, #15, #14). With the lane full nothing new can open, and `npm ci` freezes transitives until a human runs `npm update`. The previous manual sweep was #640 on 2026-09-29 — this recurs on a ~3-week cycle.
+
+**What to do:** enable Dependabot security updates; close #107, #108, #105, #15, #14 to unwedge the lane. Then the four findings a lockfile refresh cannot reach, each needing a judgement call:
+
+| Finding | Severity | Fix | Why it is not automatic |
+|---|---|---|---|
+| `csv-parse` Prototype Pollution | M 6.9 | `csv-parse@7.0.2` | major; `apps/api` declares `^6.1.0` |
+| `zod` Allocation of Resources Without Limits | H 8.7 | `zod@4.6.6` | major; `packages/shared` declares `^3.22.0`, no 3.x fix exists |
+| `ioredis` Uncontrolled Recursion | H 8.7 | `ioredis@6.0.0-beta.1` | fix is a **beta**, and the root `overrides` pins `"ioredis": "5.10.1"` deliberately |
+| `uuid` Improper Validation of Index | M 6.3 | `uuid@11.1.1` or `@14.0.0` | `dockerode@4.0.12` pins its own `uuid@10`; needs dockerode 5.x (major) or an override |
+
+Note the Snyk UI also reports "You have used your limit of private tests this billing period", so the CI `snyk monitor` step may be degraded — worth checking before trusting the next snapshot's freshness.
+
+
 ## Completed
 
 ### `findDashboardByLabel` matches a label across every system and environment
