@@ -3367,6 +3367,17 @@ drill-down differently broken, not about restoring working behaviour.
 
 Note the Snyk UI also reports "You have used your limit of private tests this billing period", so the CI `snyk monitor` step may be degraded — worth checking before trusting the next snapshot's freshness.
 
+**Update 2026-10-19 (v0.2.97.30).** The next snapshot (12 issues: 2 critical, 8 high, 2 medium) added
+a wave of seven **undici** disclosures, both criticals among them, reached through `@perfana/shared`
+and through `cheerio`. All seven were one patch behind their fix and were cleared by `npm update
+undici` (6.29.0 → 6.29.1, 7.30.0 → 7.30.1). Two things that wave teaches: a transitive is only as
+current as the last `npm update` naming it — the v0.2.97.29 sweep named five packages explicitly and
+undici was not one of them — and `undici@5.29.0` under the worker's `testcontainers@10.28.0` is out
+of range for every fix, a dev-only dependency that will keep reporting until that testcontainers
+major is bumped to match `apps/api`'s 11.x. The four findings in the table above are unchanged; only
+`uuid` did not appear in the 2026-10-19 snapshot's listing, and `uuid@10.0.0` is still in the tree
+under `dockerode@4.0.12`, so treat its absence as a listing artefact rather than a fix.
+
 
 ## Completed
 

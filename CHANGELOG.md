@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.30] - 2026-10-19
+
+### Security
+- **Seven new vulnerabilities were disclosed overnight in the HTTP library the API and the worker use to reach Grafana, two of them rated critical. All seven are fixed by moving one patch release.** The library is `undici`, Node's HTTP client; it reaches us twice, once because `@perfana/shared` asks for it directly to make its Grafana calls, and once underneath the HTML parser the report renderer uses. The two critical ones both weaken who the client believes it is talking to: a certificate check that can be bypassed (CVE-2026-109383) and an origin check that can be fooled (CVE-2026-109829), both scored 9.1. The remaining five are ways a hostile or broken server can make the client throw an uncatchable error or consume memory without a ceiling.
+
+  Every affected copy was exactly one patch behind the fix, and both moved: 6.29.0 to 6.29.1 where the shared package asks for it, 7.30.0 to 7.30.1 under the HTML parser. No code changes, no behaviour changes.
+
+  Three findings from the previous release are still open and still need a decision, all of them major-version or pre-release upgrades: `csv-parse`, `zod` and `ioredis`. A fourth, inside the Docker client library's own pinned `uuid`, is unchanged.
+
 ## [0.2.97.29] - 2026-10-18
 
 ### Security
