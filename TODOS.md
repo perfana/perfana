@@ -3345,14 +3345,18 @@ drill-down differently broken, not about restoring working behaviour.
 
 ## Dependency hygiene
 
-### Nothing can open a dependency PR, and four Snyk findings need a human decision
+### Four Snyk findings need a human decision
 
 **Priority:** P1
 **Origin:** `/investigate` of the Snyk `@perfana/api` snapshot of 2026-10-16 (33 issues: 1 critical, 11 high, 21 medium). v0.2.97.29 cleared 29 of them with a plain `npm update axios qs @grpc/grpc-js body-parser engine.io` — every one was already inside the declared range.
 
-**Why:** two things, either sufficient on its own, kept the lockfile frozen. (1) `gh api repos/perfana/perfana --jq .security_and_analysis` reports `dependabot_security_updates: disabled`, so GitHub never opens a security PR; alerts themselves are on (`/vulnerability-alerts` → 204) but the alert list is empty, so GitHub is not a second signal here — Snyk is the only thing watching. (2) `.github/dependabot.yml` sets `open-pull-requests-limit: 10` on the npm lane and there are exactly 10 open npm PRs, saturated since **2026-04-06**; five are obsolete (#107 proposes `@nestjs/common 10.4.22 → 11.1.18` while `apps/api/package.json` declares `^11.1.24`; same for #108, #105, #15, #14). With the lane full nothing new can open, and `npm ci` freezes transitives until a human runs `npm update`. The previous manual sweep was #640 on 2026-09-29 — this recurs on a ~3-week cycle.
+**Why:** two things, either sufficient on its own, kept the lockfile frozen. (1) `gh api repos/perfana/perfana --jq .security_and_analysis` reported `dependabot_security_updates: disabled`, so GitHub never opened a security PR; alerts themselves were on (`/vulnerability-alerts` → 204) but the alert list was empty, so GitHub was not a second signal — Snyk was the only thing watching. (2) `.github/dependabot.yml` sets `open-pull-requests-limit: 10` on the npm lane and there were exactly 10 open npm PRs, saturated since **2026-04-06**; five were obsolete (#107 proposes `@nestjs/common 10.4.22 → 11.1.18` while `apps/api/package.json` declared `^11.1.24`; same for #108, #105, #15, #14). With the lane full nothing new could open, and `npm ci` freezes transitives until a human runs `npm update`. The previous manual sweep was #640 on 2026-09-29 — it was recurring on a ~3-week cycle.
 
-**What to do:** enable Dependabot security updates; close #107, #108, #105, #15, #14 to unwedge the lane. Then the four findings a lockfile refresh cannot reach, each needing a judgement call:
+**Both causes are closed as of 2026-10-18.** Security updates are enabled (`gh api -X PUT repos/perfana/perfana/automated-security-fixes`; verified `{"status":"enabled"}`), and #107, #108, #105, #15, #14 are closed, leaving the npm lane at 5 of 10. The five still open — #11 eslint-config-prettier, #12 jest-environment-jsdom, #103 pg, #104 lucide-react, #106 @playwright/test — are **not** obsolete and will hold their slots until someone acts on them; three are major bumps. Watch the lane: at 10 again, the same freeze returns silently.
+
+**What enabling it does not buy you.** GitHub reports **0** Dependabot alerts, before and after, while Snyk reports 33. Alerts were already on, so that zero is a database gap, not a setting: several of these are Snyk-only ids (`SNYK-JS-AXIOS-20245060` and siblings) with no GHSA twin. So Dependabot will catch a future GHSA-published vulnerability, and Snyk stays the earlier and broader signal. Do not read a quiet Dependabot as a clean tree.
+
+**What to do:** decide on the four findings a lockfile refresh cannot reach, each needing a judgement call:
 
 | Finding | Severity | Fix | Why it is not automatic |
 |---|---|---|---|
