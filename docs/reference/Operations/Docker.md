@@ -79,6 +79,54 @@ For production deployments, Helm charts are available:
 
 The charts include manifests for all Perfana services, with configurable replicas, resource limits, health probes, and ingress.
 
+## OpenShift / arbitrary UID
+
+Every runtime image runs under OpenShift's default **restricted-v2** SCC, which
+ignores the image `USER` and starts the container as a random UID from the
+namespace range (e.g. `1000680000`) with GID 0 supplementary, no passwd entry,
+all capabilities dropped and no privilege escalation. No `runAsUser` override,
+no custom SCC and no service-account exception are needed.
+
+Reproduce locally:
+
+```bash
+docker run --rm --user 1000680000:0 --cap-drop ALL --security-opt no-new-privileges \
+  -p 3000:3000 -e NEXT_PUBLIC_API_URL=https://api.example.com/api \
+  -e NEXT_PUBLIC_CSP_FRAME_SRC=https://grafana.example.com perfana/perfana-web:<tag>
+```
+
+**What makes this work, and what breaks it.** Reads are never the problem —
+everything under `/app` is world-readable, so an arbitrary UID loads the app
+fine. Writes are. `apps/web/scripts/start-server.js` writes twice at startup,
+`__env.js` into `apps/web/public/` and the patched CSP into
+`apps/web/.next/routes-manifest.json`, and under restricted-v2 those are the
+only two writes any image makes outside `/tmp`. Both are **warnings, not
+errors**: the server starts, the page works (the client reads `/api/config`),
+and the CSP silently stays at its looser build-time value. Nothing fails
+loudly, which is why `scripts/check-openshift-uid.sh` exists and runs in CI on
+every web build.
+
+The Dockerfile handles it the way OpenShift's own guidance does:
+`chmod -R g=u` on those two trees in the builder stage (stage 5), and
+`--chown=<user>:0` on each runtime stage's `COPY --from=runtime-prep`. Group 0
+plus the owner's bits means the arbitrary UID can write them through its GID 0
+membership. `USER nonroot` stays, so plain Docker and Kubernetes still run as
+65532 and nothing changes for them. The final stages are distroless and have no
+shell, which is why the mode is set in the builder stage and carried by `COPY`
+rather than set with a `RUN chmod` at the end.
+
+`perfana-report` pins `HOME=/tmp` and the XDG dirs beside it, because with no
+passwd entry nothing resolves a home directory for the arbitrary UID. Chromium
+falls back on its own — measured, it renders a PDF with `HOME=/` too — so this
+is belt and braces rather than load-bearing; it keeps the profile and cache off
+a path that may be read-only. `/tmp` is 1777 in the image, so this needs no
+`emptyDir`; mount one only if the pod sets `readOnlyRootFilesystem`. Chromium is launched with `--disable-dev-shm-usage`,
+so `/dev/shm` needs no mount either.
+
+The other images — api, worker, grafana-sync and the migration runner — write
+nothing to the filesystem at all, so they need no change beyond the group
+ownership. None of them listens on a port below 1024 or needs a capability.
+
 ## Related
 
 - [[Getting Started]] — Development setup

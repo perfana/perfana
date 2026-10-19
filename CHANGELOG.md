@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.31] - 2026-10-19
+
+### Changed
+- **Every runtime image now runs under OpenShift's default security policy, as a random user id, with no exception needed.** OpenShift's `restricted-v2` policy ignores the user an image asks to run as and picks an arbitrary one per namespace, with no account entry for it and no privileges. The web container ran, but it could not do either of the two things it does at startup: write the file that carries the runtime settings to the browser, and tighten the content security policy for this environment. Both are warnings rather than errors, so the page came up and looked healthy while quietly serving the looser, build-time policy — which is the kind of failure nobody notices.
+
+  The fix is the convention OpenShift documents: the two directories the startup script writes are given to group 0 with the same permissions as their owner, so whichever user id the platform picks can write them through its group membership. Nothing else in the image becomes writable, and the image still asks to run as its own non-root user, so plain Docker and Kubernetes are unchanged.
+
+  The deployment can now drop its `runAsUser` pin and its dedicated service account for the web container.
+
+  The report service additionally pins a home directory for Chromium, which has nowhere to look for one when the user id has no account entry. The other four images — api, worker, grafana-sync and the migration runner — write nothing to disk and needed no change; all four were verified under an arbitrary user id.
+
+### Added
+- **A build-time check that this cannot regress unnoticed.** `scripts/check-openshift-uid.sh` starts the freshly built web image as a random user id with every privilege dropped, and fails the build unless both startup writes actually happened and carried their runtime values. It runs in CI on every web image build. Checking only that no warning appeared would have passed if the writes stopped happening at all, so it asserts the writes, not the absence of a complaint.
+
 ## [0.2.97.29] - 2026-10-18
 
 ### Security

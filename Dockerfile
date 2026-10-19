@@ -178,6 +178,17 @@ RUN rm -rf node_modules \
     && rm -rf apps/web/.next/trace \
     && mkdir -p apps/web/node_modules apps/grafana-sync/node_modules apps/worker/node_modules apps/perfana-report/node_modules
 
+# OpenShift's default restricted-v2 SCC ignores the image USER and runs the
+# container as an arbitrary UID (e.g. 1000680000) with GID 0 supplementary and
+# no passwd entry. Reads already work — everything here is world-readable — but
+# the two startup writes in apps/web/scripts/start-server.js do not: __env.js
+# into public/, and the CSP patch into .next/routes-manifest.json. Give group 0
+# the owner's bits on exactly those two trees and nothing else, so an arbitrary
+# UID can write them while the rest of /app stays read-only to it.
+# The final stages are distroless (no shell), so the mode has to be set here;
+# COPY --from preserves it, and their --chown=<user>:0 carries the group.
+RUN chmod -R g=u apps/web/public apps/web/.next
+
 # ================================================================================================
 # STAGE 5b: OpenSSL patch overlay for distroless
 # ================================================================================================
@@ -270,7 +281,7 @@ LABEL \
 WORKDIR /app
 
 # Copy runtime files from prep stage
-COPY --from=runtime-prep --chown=nonroot:nonroot /app ./
+COPY --from=runtime-prep --chown=nonroot:0 /app ./
 
 # Environment variables for production
 ENV NODE_ENV=production \
@@ -317,7 +328,7 @@ LABEL \
 WORKDIR /app
 
 # Copy runtime files from prep stage
-COPY --from=runtime-prep --chown=nonroot:nonroot /app ./
+COPY --from=runtime-prep --chown=nonroot:0 /app ./
 
 # Environment variables for production
 ENV NODE_ENV=production \
@@ -358,7 +369,7 @@ LABEL \
 WORKDIR /app
 
 # Copy runtime files from prep stage
-COPY --from=runtime-prep --chown=nonroot:nonroot /app ./
+COPY --from=runtime-prep --chown=nonroot:0 /app ./
 
 # Environment variables for production
 ENV NODE_ENV=production \
@@ -399,7 +410,7 @@ LABEL \
 WORKDIR /app
 
 # Copy runtime files from prep stage
-COPY --from=runtime-prep --chown=nonroot:nonroot /app ./
+COPY --from=runtime-prep --chown=nonroot:0 /app ./
 
 # Environment variables for production
 ENV NODE_ENV=production
@@ -454,13 +465,23 @@ RUN addgroup -g 10001 -S perfana \
 WORKDIR /app
 
 # Copy runtime files from prep stage
-COPY --from=runtime-prep --chown=perfana:perfana /app ./
+COPY --from=runtime-prep --chown=perfana:0 /app ./
 
-# Tell Puppeteer to use the system Chromium instead of downloading its own
+# Tell Puppeteer to use the system Chromium instead of downloading its own.
+# HOME and the XDG dirs are pinned to /tmp because under OpenShift's
+# restricted-v2 SCC there is no passwd entry for the arbitrary UID, so nothing
+# resolves a home directory for it and /home/perfana would not be writable
+# anyway. Chromium does fall back on its own (measured: it renders a PDF with
+# HOME=/ too), so this is belt and braces rather than load-bearing -- it keeps
+# the profile and cache off a path that may be read-only. /tmp is 1777, so no
+# emptyDir is needed; mount one only if the pod sets readOnlyRootFilesystem.
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
     NODE_ENV=production \
-    PORT=3003
+    PORT=3003 \
+    HOME=/tmp \
+    XDG_CONFIG_HOME=/tmp/.chromium \
+    XDG_CACHE_HOME=/tmp/.chromium
 
 # Expose port (non-privileged)
 EXPOSE 3003
