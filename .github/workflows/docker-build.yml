@@ -107,6 +107,29 @@ jobs:
             CSP_UPGRADE_INSECURE=${{ secrets.CSP_UPGRADE_INSECURE || 'false' }}
             NEXT_PUBLIC_CSP_FRAME_SRC=${{ secrets.NEXT_PUBLIC_CSP_FRAME_SRC || '' }}
 
+      # OpenShift's restricted-v2 SCC runs the image as an arbitrary UID with
+      # GID 0 and ignores USER. start-server.js's two startup writes fail with
+      # a warning, not an error, so a regression here is silent: the server
+      # starts and keeps the build-time CSP. Rebuild amd64 only (every layer is
+      # a cache hit from the push build above) and prove the writes land.
+      - name: Build web image for the OpenShift UID check
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: web
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: perfana-web:ocp-check
+          cache-from: type=gha
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api' }}
+            NEXT_PUBLIC_CSP_FRAME_SRC=${{ secrets.NEXT_PUBLIC_CSP_FRAME_SRC || '' }}
+
+      - name: Check the web image runs under an arbitrary UID
+        run: ./scripts/check-openshift-uid.sh perfana-web:ocp-check
+
   build-api:
     needs: [read-version]
     name: Build API (NestJS)
