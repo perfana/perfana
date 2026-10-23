@@ -25,11 +25,28 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * So fixing only the `application_dashboards` side moves the same timeout into phase 6.
  *
  * This migration indexes the referencing column on every child whose size scales with data
- * volume — runs x dashboards x panels x metrics. The remaining children are deliberately
- * left unindexed: `benchmarks`, `application_dashboards`, `dynatrace_queries`,
- * `provisioned_template_ds_compare_configs` and the two filter-preset tables are bounded by
- * human action, hundreds of rows, and a seq scan of them costs microseconds. An index there
- * would be write overhead bought for nothing.
+ * volume — runs x dashboards x panels x metrics — plus one reached a level down:
+ * `ds_compare_config` is CASCADE from `application_dashboards`, so its own children are
+ * probed as well, and `pending_ds_compare_config_changes` showed up in the EXPLAIN trace at
+ * 250 calls for a single 24-dashboard system.
+ *
+ * The 14 remaining gaps in the schema are deliberately left alone: `benchmarks`,
+ * `application_dashboards`, `dynatrace_queries`, `dynatrace_entity_mappings`,
+ * `provisioned_template_ds_compare_configs`, `tracing_services`, `teams`,
+ * `systems_under_test` and the two filter-preset tables are all bounded by human action —
+ * tens to hundreds of rows, microseconds to scan. An index there is write overhead bought
+ * for nothing. The query that produced both lists is in apps/api/CLAUDE.md.
+ *
+ * Measured on the dev database (326,160 `ds_metrics` rows, 24 dashboards), as the per-trigger
+ * timings of `EXPLAIN (ANALYZE) DELETE FROM application_dashboards WHERE
+ * system_under_test_id = …`:
+ *
+ *   before   582.022 ms   of which 543.7 ms (93%) was the ds_metrics FK, fired THREE times
+ *                         — once for the root plus once per chunk
+ *   after     15.324 ms   no ds_metrics trigger at all; ds_adapt_results 12.675 -> 2.573 ms
+ *
+ * Production's `ds_metrics` is far larger and has far more chunks, each compressed one
+ * ColumnarScanning every row (see 1817), which is how that becomes 300 s.
  *
  * Every column indexed here is additionally nullable on some tables; those get a partial
  * index, matching the existing `IDX_9225364cbd7174db8a78ac4c86` / `IDX_f7ef2f635a3a3e941e19404e76`
@@ -84,6 +101,10 @@ const INDEXES: ReadonlyArray<readonly [string, string, string, boolean]> = [
   // benchmarks children
   ['idx_ds_metric_statistics_benchmark', 'ds_metric_statistics', 'benchmark_id', true],
   ['idx_ds_tracked_differences_benchmark', 'ds_tracked_differences', 'benchmark_id', true],
+  // ds_compare_config child, reached one level down: `ds_compare_config` is itself CASCADE
+  // from `application_dashboards`, so its own children are probed too — observed in the
+  // EXPLAIN trace at 250 calls for one 24-dashboard system.
+  ['idx_pending_ds_compare_config_changes_config', 'pending_ds_compare_config_changes', 'ds_compare_config_id', false],
 ];
 
 /**

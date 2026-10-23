@@ -1232,11 +1232,27 @@ cascade's parents had unindexed children (dev database, 2026-10-23):
 | `metrics_sources` | phase 6, **last** | 17 of 17 |
 
 So indexing only the `application_dashboards` side moves the identical timeout into phase 6.
-Migration 1816 adds 17 indexes, covering every child whose size scales with runs x dashboards
-x panels x metrics. The bounded config tables (`benchmarks`, `application_dashboards`,
-`dynatrace_queries`, `provisioned_template_ds_compare_configs`, both filter-preset tables) are
-deliberately left unindexed — hundreds of rows, microseconds to scan, and an index there is
-write overhead bought for nothing.
+Migration 1816 adds 18 indexes, covering every child whose size scales with runs x dashboards
+x panels x metrics — plus one reached a level down, since `ds_compare_config` is itself CASCADE
+from `application_dashboards` and so its own children are probed as well
+(`pending_ds_compare_config_changes`, 250 calls for one 24-dashboard system). The 14 remaining
+gaps in the schema are deliberately left alone: `benchmarks`, `application_dashboards`,
+`dynatrace_queries`, `dynatrace_entity_mappings`, `provisioned_template_ds_compare_configs`,
+`tracing_services`, `teams`, `systems_under_test` and both filter-preset tables are bounded by
+human action — tens to hundreds of rows, microseconds to scan, and an index there is write
+overhead bought for nothing.
+
+Measured on the dev database (326,160 `ds_metrics` rows, 24 dashboards) as the per-trigger
+timings of `EXPLAIN (ANALYZE) DELETE FROM application_dashboards WHERE system_under_test_id = …`:
+
+| | total | ds_metrics FK | ds_adapt_results FK |
+|---|---|---|---|
+| before | **582.022 ms** | 543.7 ms across **three** trigger firings (root + one per chunk) | 12.675 ms |
+| after | **15.324 ms** | gone (1817) | 2.573 ms |
+
+93% of the old cost was one constraint, counted once per chunk. That is the number to scale:
+production's `ds_metrics` is far larger and has far more chunks, each compressed one
+ColumnarScanning every row.
 
 Find the remaining gaps with:
 
