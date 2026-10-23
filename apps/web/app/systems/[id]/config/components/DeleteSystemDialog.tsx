@@ -162,6 +162,14 @@ export default function DeleteSystemDialog({ open, onClose, systemId, systemName
               This action cannot be undone.
             </Alert>
 
+            {/* The cascade is queued, not awaited — it can run for minutes on a system with a
+                lot of runs, which is longer than any request may take. Say so, or the user
+                reads the redirect as "done" and the row still being there as a failure. */}
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Deletion runs in the background. The system stays in the list, marked{' '}
+              <strong>Deleting…</strong>, until it finishes.
+            </Alert>
+
             {nonZeroCounts.length > 0 ? (
               <>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
