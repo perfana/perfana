@@ -659,6 +659,45 @@ Three rules follow:
 the server's `UpdateGraphPresetDto` omits it too and the global `ValidationPipe` strips it, so
 sending it is a silent no-op that reads like a re-scope.
 
+### A compare preset's baseline is restored for both preset types, and they differ only in who wins
+
+Every `compare_filter_presets` row carries `baseline_test_run_id`, and `ComparePresetsTable`
+prints it inside the preset's own description ("Baseline: …-00003"). `applyPreset`
+(`compare/hooks/useComparePresets.ts`) used to gate the restore on
+`preset_type === PresetType.SPECIFIC`, so for a **generic** preset — what the Save dialog
+produces by default, and what both presets on the dev database are — the baseline was read,
+printed, and then never applied.
+
+The symptom is not an error. The preset's series load, the toast says "Applied preset: … (22
+series)", the footer reads `22 series added`, and the card **renders nothing at all**, because
+`Metrics Comparison` needs a selected comparison run. The only way out is to open the selector
+and pick the run the preset just named. Nothing is logged. Fixed in v0.2.97.33.
+
+Three rules, all three load-bearing:
+
+1. **Both types restore; they differ in who wins.** `SPECIFIC` is locked to its baseline and
+   overrides the current selection. `GENERIC` fills an **empty** selector only — overriding
+   there would silently discard a comparison the user set up by hand before applying the
+   preset, which is the whole meaning of "generic". That is why the hook needs
+   `selectedTestRun` as a prop and not just `setSelectedTestRun`; `setSelectedTestRun` takes a
+   value, not an updater, so the current value cannot be read from inside the setter.
+2. **A baseline missing from `relatedTestRuns` leaves the selector alone, never clears it.**
+   The run may have been deleted or may sit outside this run's comparable set
+   (`test_run_id` has no foreign key). The series are still applied, so the user can pick any
+   other run and the preset is not wasted.
+3. **The Baseline COLUMN in `ComparePresetsTable` is a different thing and correctly stays
+   specific-only** (`ComparePresetsTable.tsx:198`). It renders "Locked to: …" plus version and
+   annotations — a statement that the preset is pinned. A generic preset shows "-" there and
+   still restores its baseline. Do not "fix" that column to match this behaviour; the two
+   answer different questions.
+
+`useComparePresets.baseline.test.ts` pins all five cases and is mutation-verified in both
+directions: narrowing the guard to `isLocked` alone fails the generic-restore case, and widening
+it to unconditional fails the don't-override case. Its `setup()` deliberately does **not**
+`await act(...)` to flush the preset-list effect — that effect re-triggers on its own state, so
+awaiting it never settles and every case times out at 10 s. The unwrapped-act warning is noise;
+the hang is not.
+
 ### An SLO with no targets must not borrow the panel's series
 
 `useSLOMetricsChart` falls back to "every series on the panel" when a target matches no

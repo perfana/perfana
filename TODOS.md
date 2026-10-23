@@ -2243,6 +2243,40 @@ and `ResponsivePlot` does not replace it. Same for `kickPlotlyResize` in
 ## Compare card
 
 
+### `ComparePresetsService.findAll` post-filters in a loop, and one shape escapes it (P2)
+
+**Priority:** P2
+**Origin:** browser verification during /ship on `fix/compare-preset-restore-baseline` (2026-10-23),
+while confirming the baseline-restore fix.
+**Why:** `findAll` resolves `accessibleOrgIds` via `withOrgFilter` but never puts it in the SQL. It
+loads every preset matching `createdBy = userId OR isGlobal = true`, then filters in application
+code: for each preset the caller does not own it calls `validateTestRunAccess` on
+`baselineTestRunId` and again on `createdForTestRunId`. Two problems ride along:
+
+1. **A generic global preset carrying NEITHER run id escapes the check entirely.** `hasAccess`
+   starts `true` and is only reassigned inside those two `if` blocks, so such a row is pushed
+   unchecked — visible across organizations. The SQL explicitly ORs
+   `preset.createdForTestRunId IS NULL`, so that shape is reachable by design, not an edge case.
+2. **It is an N+1**: two access queries per preset per list, where the org filter could be one
+   predicate. Invisible at 2 presets; not at 200.
+
+Neither is observable as a global admin — `withOrgFilter` returns `null` and the whole loop is
+skipped — which is why it survived the live check that found the baseline bug.
+
+**What:** Copy the shape `graph-presets` adopted in v0.2.96.27 (see "Graph presets are scoped by
+their series' dashboards, and `findAll` alone is half a fix" in `apps/api/CLAUDE.md`): resolve
+`accessibleOrgIds` once, pass it as a **required** parameter to every route, filter in SQL, answer
+404 not 403 for a resource outside it, and return `[]` early on an empty org list. Note
+`compare_filter_presets.organization_id` is NOT NULL already, so the predicate has something to key
+on. **There is no RLS backstop** — `DB_ENABLE_RLS_ROLE` defaults to `'false'` and is set in none of
+the shipped compose files.
+
+**Where:** `apps/api/src/modules/compare-presets/compare-presets.service.ts`, `findAll` and the
+`validateTestRunAccess` loop. Check `trends-presets` for the same shape while in there.
+
+---
+
+
 ### The series dropdown is not virtualised, so a whole-system selection renders every option
 
 **Priority:** P3

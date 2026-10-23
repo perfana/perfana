@@ -57,6 +57,7 @@ export default function CompareCard({
     addedSeries: compareData.addedSeries,
     dashboards: compareData.dashboards,
     relatedTestRuns: compareData.relatedTestRuns,
+    selectedTestRun: compareData.selectedTestRun,
     setSelectedSource: compareData.setSelectedSource,
     setSelectedDashboard: compareData.setSelectedDashboard,
     setSelectedMetric: compareData.setSelectedMetric,
