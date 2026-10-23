@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.33] - 2026-10-23
+
+### Fixed
+- **Applying a saved comparison preset left the comparison empty until you re-picked the run it was already saved against.** Every compare preset records which test run it was comparing to, and prints it in its own description — "Baseline: …-00003". Applying one restored its series and said so in a toast, then left the "Select Test Run for Comparison" box blank, so the card showed nothing at all. The only way forward was to open that box and choose the exact run the preset had just named. Nothing was logged; it read as a preset that had lost its data.
+
+  The restore was there, but it only ran for presets locked to one specific run. Presets saved the ordinary way are not locked, so for them it never ran at all.
+
+  Both kinds restore their baseline now, and they differ only in who wins. A locked preset still overrides whatever is selected, because being pinned to that one run is the point of it. An ordinary preset fills the box only when it is empty — if you set up a comparison by hand and then apply a preset, your choice stands. A baseline whose run has since been deleted leaves the box alone rather than clearing it, so the series still load and you can pick any other run.
+
+  Verified against a live test run: applying a preset now draws all 22 series against the stored baseline in one click, and applying a second preset over a hand-picked run keeps that run.
+
+  Note the version skips 0.2.97.32, which is claimed by a separate in-flight change.
+
 ## [0.2.97.31] - 2026-10-19
 
 ### Changed

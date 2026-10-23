@@ -26,6 +26,12 @@ interface UseComparePresetsProps {
   addedSeries: CompareSeries[];
   dashboards: ApplicationDashboard[];
   relatedTestRuns: RelatedTestRun[];
+  /**
+   * Needed so a generic preset can restore its stored baseline WITHOUT overriding a run the
+   * user has already picked. A specific preset is locked to its baseline and overrides either
+   * way; see `applyPreset`.
+   */
+  selectedTestRun: RelatedTestRun | null;
 
   // State setters
   setSelectedSource: (source: DataSource) => void;
@@ -48,6 +54,7 @@ export function useComparePresets({
   addedSeries: _addedSeries,
   dashboards,
   relatedTestRuns,
+  selectedTestRun,
   setSelectedSource: _setSelectedSource,
   setSelectedDashboard,
   setSelectedMetric,
@@ -109,11 +116,33 @@ export function useComparePresets({
         setAddedSeries(restoredSeries);
       }
 
-      // For specific presets, also try to select the baseline test run
-      if (preset.preset_type === PresetType.SPECIFIC && preset.baseline_test_run_id) {
-        const baselineTestRun = relatedTestRuns.find(tr => tr.test_run_id === preset.baseline_test_run_id);
-        if (baselineTestRun) {
-          setSelectedTestRun(baselineTestRun);
+      // Restore the baseline the preset was saved against.
+      //
+      // Every preset stores `baseline_test_run_id` and prints it in its own description
+      // ("Baseline: <run>"), but this used to be gated on `preset_type === SPECIFIC`. A
+      // generic preset therefore applied its series, said so in a toast, and left the
+      // comparison selector empty — so the card showed nothing at all until the user
+      // re-picked the very run the preset names. Nothing was logged; it read as a broken
+      // preset. Observed on PerfanaWebshop-acc-loadTest-k6-00004, whose two presets are both
+      // generic and both carry a baseline.
+      //
+      // The two types differ in who wins, not in whether the baseline is restored:
+      //   SPECIFIC — locked to that baseline, so it always overrides the current selection.
+      //   GENERIC  — the baseline is a starting point, so it fills an EMPTY selector only.
+      //              Overriding here would silently undo a comparison the user set up by
+      //              hand before applying the preset, which is the whole point of "generic".
+      if (preset.baseline_test_run_id) {
+        const isLocked = preset.preset_type === PresetType.SPECIFIC;
+        if (isLocked || !selectedTestRun) {
+          const baselineTestRun = relatedTestRuns.find(
+            tr => tr.test_run_id === preset.baseline_test_run_id,
+          );
+          // A baseline that is not in `relatedTestRuns` was deleted, or is outside this
+          // run's comparable set. Leave the selector alone rather than clearing it: the
+          // series are still applied and the user can pick any other run.
+          if (baselineTestRun) {
+            setSelectedTestRun(baselineTestRun);
+          }
         }
       }
 
@@ -141,7 +170,7 @@ export function useComparePresets({
       showToast('Failed to apply preset');
     }
   }, [
-    relatedTestRuns, dashboards, showToast, setSeriesSearchText, setShowPercentiles,
+    relatedTestRuns, dashboards, selectedTestRun, showToast, setSeriesSearchText, setShowPercentiles,
     setDisplayConfig, setAddedSeries, setSelectedTestRun, setSelectedDashboard, setSelectedMetric,
   ]);
 
