@@ -15,7 +15,8 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TableRow
+  TableRow,
+  Chip
 } from '@mui/material';
 import {
   Settings as SettingsIcon,
@@ -37,6 +38,12 @@ interface System {
   description?: string;
   environments: SystemEnvironment[];
   created_at: string;
+  /**
+   * Background-deletion state. The SUT cascade runs on a queue, so the row stays in the list
+   * wearing a badge while it runs and says so if it failed, rather than looking ordinary and
+   * then vanishing on some later reload.
+   */
+  deletion_status?: 'queued' | 'deleting' | 'failed' | null;
 }
 
 export default function SystemsPage() {
@@ -167,9 +174,20 @@ export default function SystemsPage() {
                     sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                   >
                     <TableCell component="th" scope="row">
-                      <Typography variant="h6" component="div">
-                        {system.name}
-                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography variant="h6" component="div">
+                          {system.name}
+                        </Typography>
+                        {system.deletion_status === 'failed' ? (
+                          <Chip label="Deletion failed" size="small" color="error" variant="outlined" />
+                        ) : system.deletion_status ? (
+                          <Chip
+                            label={system.deletion_status === 'deleting' ? 'Deleting…' : 'Queued for deletion'}
+                            size="small"
+                            variant="outlined"
+                          />
+                        ) : null}
+                      </Box>
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" color="text.secondary">

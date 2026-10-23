@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.32] - 2026-10-23
+
+### Fixed
+- **Deleting a system under test failed after five minutes with nothing deleted. It now runs in the background, and the database work behind it is no longer quadratic in the size of the installation.** Reported from production on 2026-10-23: the request ran for 300 seconds and returned an error, and the system was still there. The system in question had no test runs at all, so there was almost nothing to delete — all five minutes went into one step.
+
+  That step was removing the system's dashboards. Every table that refers to a dashboard has to be checked before one can be removed, and for ten of the thirteen such tables the database had no way to look the reference up directly, so it read each table from end to end — once per dashboard. The same was true, and worse, for the metrics connections removed later in the same operation: seventeen tables, none of them searchable by the reference. Eighteen lookup indexes were added, covering every table whose size grows with the amount of measurement data held. On the development database — a fraction of production's size — the same step went from 582 ms to 15 ms, with 93% of the old cost coming from a single reference checked once per storage chunk.
+
+  The measurement table itself could not be fixed that way. It is stored compressed, and the value being searched for sits inside the compressed data where an index cannot reach it — verified by building the index and watching the database ignore it. The two references it carried have therefore been removed. They were enforcing something nothing in the product relied upon, and they cost a full scan of the compressed data for every dashboard and every connection removed; the four other tables of the same kind never had them. The trade is that measurement rows belonging to a deleted dashboard are no longer rejected by the database, only by the code that deletes them, which already does.
+
+  Separately, the whole operation no longer runs inside the request. It is queued, the system stays in the list marked **Deleting…** until it finishes, and says **Deletion failed** if it does not — the same treatment test runs and dashboards already get. The old behaviour was bounded only by how long the client would wait for a reply: when that ran out the client hung up while the database carried on working on a deletion nobody would hear the result of. A system with hundreds of test runs can legitimately take minutes, however fast the lookups are.
+
 ## [0.2.97.31] - 2026-10-19
 
 ### Changed

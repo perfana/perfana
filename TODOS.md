@@ -11,6 +11,37 @@ with the version it landed in.
 
 ---
 
+## System under test deletion
+
+### The dashboard delete still writes a non-segmentby `ds_metrics` predicate (P2)
+
+**Origin:** v0.2.97.32, dropping `ds_metrics`' two foreign keys (migration 1817).
+
+`ApplicationDashboardsService.remove` issues `DELETE FROM ds_metrics WHERE
+application_dashboard_id = $1` — no `test_run_id`, no `time`. That is a predicate on neither
+`compress_segmentby` nor the partitioning column, i.e. the exact shape root issue #23 is about:
+TimescaleDB decompresses to apply it, which on the measured production case was 162,743 ms and
+11 GB of WAL against 181 ms and 41 MB for the segment-targeted form.
+
+It was **mandatory** while the FK existed — the parent DELETE would have been refused
+otherwise. Now it is only what stops orphan measurement rows accumulating, so it has options it
+did not have before: run it per `test_run_id` (segment-targeted, many statements), or leave the
+orphans to a periodic sweep on the deletion queue's own budget.
+
+Not touched in v0.2.97.32, which was already three migrations wide. The cost is unchanged from
+before that version — this is a newly *available* fix, not a new defect.
+
+### Nothing asserts the FK-index invariant (P3)
+
+**Origin:** same version.
+
+Migration 1816's 17 indexes were derived from a `pg_constraint`/`pg_index` query (recorded in
+apps/api/CLAUDE.md). A new FK on a data-volume table re-opens the hole silently — the symptom
+is a delete that gets slower, with nothing logged. `check:schema-constraints` is the natural
+home for it, but that script needs two live databases and is not in preflight.
+
+---
+
 ## Graph presets
 
 ### Saved presets cannot carry their metrics source
