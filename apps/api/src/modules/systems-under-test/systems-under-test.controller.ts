@@ -169,7 +169,7 @@ export class SystemsUnderTestController {
     summary: 'Queue a system under test and all related data for deletion',
     description:
       'Answers 202 once the job is enqueued; the row carries `deletion_status` until the ' +
-      'cascade finishes. The cascade is far too long for a request — before v0.2.97.32 it ran ' +
+      'cascade finishes. The cascade is far too long for a request — before v0.2.97.34 it ran ' +
       'inline and a large system hit the client-side 300s query_timeout, which returns a 500 ' +
       'having deleted nothing while Postgres keeps running the transaction.',
   })

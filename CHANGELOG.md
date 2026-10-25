@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.97.32] - 2026-10-23
+## [0.2.97.34] - 2026-10-25
 
 ### Fixed
 - **Deleting a system under test failed after five minutes with nothing deleted. It now runs in the background, and the database work behind it is no longer quadratic in the size of the installation.** Reported from production on 2026-10-23: the request ran for 300 seconds and returned an error, and the system was still there. The system in question had no test runs at all, so there was almost nothing to delete — all five minutes went into one step.
@@ -14,6 +14,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   The measurement table itself could not be fixed that way. It is stored compressed, and the value being searched for sits inside the compressed data where an index cannot reach it — verified by building the index and watching the database ignore it. The two references it carried have therefore been removed. They were enforcing something nothing in the product relied upon, and they cost a full scan of the compressed data for every dashboard and every connection removed; the four other tables of the same kind never had them. The trade is that measurement rows belonging to a deleted dashboard are no longer rejected by the database, only by the code that deletes them, which already does.
 
   Separately, the whole operation no longer runs inside the request. It is queued, the system stays in the list marked **Deleting…** until it finishes, and says **Deletion failed** if it does not — the same treatment test runs and dashboards already get. The old behaviour was bounded only by how long the client would wait for a reply: when that ran out the client hung up while the database carried on working on a deletion nobody would hear the result of. A system with hundreds of test runs can legitimately take minutes, however fast the lookups are.
+## [0.2.97.33] - 2026-10-23
+
+### Fixed
+- **Applying a saved comparison preset left the comparison empty until you re-picked the run it was already saved against.** Every compare preset records which test run it was comparing to, and prints it in its own description — "Baseline: …-00003". Applying one restored its series and said so in a toast, then left the "Select Test Run for Comparison" box blank, so the card showed nothing at all. The only way forward was to open that box and choose the exact run the preset had just named. Nothing was logged; it read as a preset that had lost its data.
+
+  The restore was there, but it only ran for presets locked to one specific run. Presets saved the ordinary way are not locked, so for them it never ran at all.
+
+  Both kinds restore their baseline now, and they differ only in who wins. A locked preset still overrides whatever is selected, because being pinned to that one run is the point of it. An ordinary preset fills the box only when it is empty — if you set up a comparison by hand and then apply a preset, your choice stands. A baseline whose run has since been deleted leaves the box alone rather than clearing it, so the series still load and you can pick any other run.
+
+  Verified against a live test run: applying a preset now draws all 22 series against the stored baseline in one click, and applying a second preset over a hand-picked run keeps that run.
+
+  Note the version skips 0.2.97.32, which was claimed by a change that ended up shipping as 0.2.97.34. That number is permanently unused.
 
 ## [0.2.97.31] - 2026-10-19
 
