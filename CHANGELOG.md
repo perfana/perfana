@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.35] - 2026-10-25
+
+### Fixed
+- **A test run event could be delivered to every signed-in user, whatever organization they belong to.** The realtime gateway puts all tenants on one Socket.IO namespace and relied on its callers to say which organization an event belongs to. When that information was missing it did not stop — it broadcast the event to every connected client, and said so in its own code: *"This ensures non-admin users receive events when org/team info is not available."* Two of the three delivery paths ended in a server-wide emit, one of them reached simply by a caller omitting an optional argument, which committed code already does (`broadcastTestRunDeleted` passes nothing for all three).
+
+  Unresolved targeting is now a failure rather than a broadcast. An event with no user, organization or team is logged at ERROR and delivered to the global admin room only; an event that names its own organization is routed from that, so a caller omitting the argument no longer widens delivery. Nothing can reach a server-wide emit any more — there is no longer one in the file.
+
+  The visible change: on a test run that carries no organization at all, non-admin users stop receiving its live updates instead of everyone receiving them. That is the point of the fix, and the ERROR line names the caller to repair.
+
+- **Subscribing to a specific test run was not checked against the caller's organizations.** `subscribe:test-run` compared the run's organization to the one on the caller's token, but only when the token carried one — and the code 70 lines above it resolves organization membership from the database precisely because *"Keycloak JWTs don't carry Perfana organization_id/team_id claims"*. For an ordinary login the comparison therefore never ran, and the subscription was granted. A run with no organization, or any error in the lookup, also fell through to the join.
+
+  The check now resolves the caller's actual memberships from `organization_members` — the same authority the connection handler already uses — and requires the run's organization to be among them. An unknown run, a run with no organization, a caller with no memberships and a failed lookup all deny. Admins are unaffected. A JWT claim alone is no longer an authorization decision anywhere on this gateway.
+
+  No data was reachable through this today: nothing currently emits to a run-specific room, so the subscription granted membership of a room that receives nothing. It is fixed as an access-control defect, before something starts emitting there.
+
+- **The WebSocket JWT path accepted a token minted for any other Keycloak client in the same realm.** The gateway's own verification — the one that actually authenticates connections — passed no audience at all, and the guard class passed `audience: clientId || undefined`, which disables the check entirely when `KEYCLOAK_CLIENT_ID` is unset. Both now require the client id and refuse a token they cannot audience-check, logging at ERROR, rather than verifying it without one.
+
+  Found by `/cso`; 13 tests pin the two tenant-isolation invariants, each verified to fail against the old behaviour.
+
 ## [0.2.97.33] - 2026-10-23
 
 ### Fixed

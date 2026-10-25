@@ -181,19 +181,16 @@ export class TestRunsGateway
 
     // Join organization rooms — look up DB memberships because Keycloak JWTs
     // don't carry Perfana organization_id/team_id claims.
-    const orgRows = await this.dataSource.query<{ organization_id: string }[]>(
-      `SELECT organization_id FROM organization_members WHERE user_id = $1`,
-      [client.userId],
-    ).catch(() => [] as { organization_id: string }[]);
+    const memberOrgIds = await this.lookupMemberOrganizationIds(client.userId);
 
-    for (const row of orgRows) {
-      const orgRoom = TestRunRooms.organization(row.organization_id);
+    for (const organizationId of memberOrgIds) {
+      const orgRoom = TestRunRooms.organization(organizationId);
       await client.join(orgRoom);
       this.logger.debug(`Client ${client.id} joined room: ${orgRoom}`);
     }
 
     // Also honour JWT claim if present (e.g. API-key auth paths that do carry it)
-    if (client.organizationId && !orgRows.find(r => r.organization_id === client.organizationId)) {
+    if (client.organizationId && !memberOrgIds.includes(client.organizationId)) {
       const orgRoom = TestRunRooms.organization(client.organizationId);
       await client.join(orgRoom);
       this.logger.debug(`Client ${client.id} joined room (from JWT): ${orgRoom}`);
@@ -250,21 +247,11 @@ export class TestRunsGateway
     }
 
     // Verify user has access to this test run's organization
-    if (!this.isAdmin(client)) {
-      try {
-        const result = await this.dataSource.query(
-          `SELECT organization_id FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
-          [data.testRunId],
-        );
-        if (result.length > 0 && result[0].organization_id && client.organizationId) {
-          if (result[0].organization_id !== client.organizationId) {
-            this.logger.warn(`Client ${client.id} denied access to test run ${data.testRunId} (org mismatch)`);
-            return { success: false, error: 'Access denied to this test run' };
-          }
-        }
-      } catch (error) {
-        this.logger.error(`Failed to verify test run access: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`);
-      }
+    if (!this.isAdmin(client) && !(await this.mayReadTestRun(client, data.testRunId))) {
+      this.logger.warn(
+        `Client ${client.id} denied access to test run ${data.testRunId} (not a member of its organization)`,
+      );
+      return { success: false, error: 'Access denied to this test run' };
     }
 
     const room = TestRunRooms.testRun(data.testRunId);
@@ -315,23 +302,26 @@ export class TestRunsGateway
       this.logger.debug(`TestRun keys after serialization: ${Object.keys(serializedEvent.testRun).join(', ')}`);
     }
 
-    // Empty array explicitly means broadcast to all (no room filtering)
-    if (targetRooms !== undefined && targetRooms.length === 0) {
-      this.server.emit(event.eventType, serializedEvent);
-      this.logger.log(`Event ${event.eventType} broadcasted to all connected clients`);
-    } else if (targetRooms && targetRooms.length > 0) {
-      // Emit to specific rooms
-      targetRooms.forEach((room) => {
-        this.server.to(room).emit(event.eventType, serializedEvent);
-      });
-      this.logger.log(
-        `Event ${event.eventType} emitted to rooms: ${targetRooms.join(', ')}`,
+    // Unresolved targeting is a failure, never a broadcast: this gateway serves
+    // every tenant on one namespace, so a server-wide emit crosses the
+    // organization boundary. Fall back to the event's own ids, then give up.
+    const rooms =
+      targetRooms && targetRooms.length > 0
+        ? targetRooms
+        : this.determineTargetRooms(event.userId, event.organizationId, event.teamId);
+
+    if (rooms.length === 0) {
+      this.logger.error(
+        `Dropping ${event.eventType}: no rooms could be resolved for it. ` +
+        'Refusing to broadcast a test run event to every connected client.',
       );
-    } else {
-      // Fallback: Emit to all connected clients if no rooms specified
-      this.server.emit(event.eventType, serializedEvent);
-      this.logger.log(`Event ${event.eventType} emitted to all clients (no rooms specified)`);
+      return;
     }
+
+    rooms.forEach((room) => {
+      this.server.to(room).emit(event.eventType, serializedEvent);
+    });
+    this.logger.log(`Event ${event.eventType} emitted to rooms: ${rooms.join(', ')}`);
   }
 
   /**
@@ -388,9 +378,73 @@ export class TestRunsGateway
   }
 
   /**
+   * Organization ids this socket's identity is actually a member of.
+   *
+   * This is the only authority for tenant identity on this gateway. Do NOT key
+   * an authorization decision on `client.organizationId`: that is an optional
+   * Keycloak custom claim, and handleConnection resolves memberships from
+   * `organization_members` precisely because Keycloak JWTs do not carry it. A
+   * check gated on an absent claim does not run at all.
+   *
+   * Returns an empty list on failure, so every caller fails closed.
+   */
+  private async lookupMemberOrganizationIds(userId: string): Promise<string[]> {
+    try {
+      const rows = await this.dataSource.query<{ organization_id: string }[]>(
+        `SELECT organization_id FROM organization_members WHERE user_id = $1`,
+        [userId],
+      );
+      return rows.map((row) => row.organization_id).filter(Boolean);
+    } catch (error) {
+      this.logger.error(
+        `Failed to resolve organization membership for ${userId}: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Whether this socket may observe a specific test run.
+   *
+   * Fails closed on every uncertainty: an unknown test run, a run whose
+   * organization_id is NULL, a caller with no membership rows, and any error in
+   * either lookup all deny. Admins are handled by the caller.
+   */
+  private async mayReadTestRun(
+    client: AuthenticatedSocket,
+    testRunId: string,
+  ): Promise<boolean> {
+    if (!client.userId) {
+      return false;
+    }
+
+    let organizationId: string | null | undefined;
+    try {
+      const rows = await this.dataSource.query<{ organization_id: string | null }[]>(
+        `SELECT organization_id FROM test_runs WHERE id::text = $1 OR test_run_id = $1 LIMIT 1`,
+        [testRunId],
+      );
+      organizationId = rows[0]?.organization_id;
+    } catch (error) {
+      this.logger.error(
+        `Failed to verify test run access: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
+      );
+      return false;
+    }
+
+    if (!organizationId) {
+      return false;
+    }
+
+    const memberOrgIds = await this.lookupMemberOrganizationIds(client.userId);
+    return memberOrgIds.includes(organizationId);
+  }
+
+  /**
    * Determine which rooms should receive the event
-   * Strategy: Send to user, org, and team rooms as applicable
-   * If no rooms are specified, return empty array to broadcast to ALL clients
+   * Strategy: send to the user, org and team rooms that were resolved, plus the
+   * global room for admin monitoring. Missing targeting is NOT a broadcast — see
+   * emitTestRunEvent.
    */
   private determineTargetRooms(
     userId?: string,
@@ -411,17 +465,15 @@ export class TestRunsGateway
       rooms.push(TestRunRooms.team(teamId));
     }
 
-    // Always broadcast to global room for admin monitoring
+    // Global room is admin monitoring only; it is never a stand-in for tenant
+    // targeting, and reaching it alone must not widen delivery to everyone.
     rooms.push(TestRunRooms.global());
 
-    // If we only have the global room and no other targeting, broadcast to all clients
-    // This ensures non-admin users receive events when org/team info is not available
-    if (rooms.length === 1 && rooms[0] === TestRunRooms.global()) {
-      this.logger.warn(
-        'Broadcasting to all clients because no org/team information available. ' +
-        'This may indicate missing team or organization data in the test run.'
+    if (rooms.length === 1) {
+      this.logger.error(
+        'Test run event has no user/org/team targeting; delivering to the global (admin) room only. ' +
+        'The caller must pass the test run\'s organization.'
       );
-      return []; // Empty array signals broadcast to all
     }
 
     return rooms;
@@ -532,8 +584,20 @@ export class TestRunsGateway
         ];
       }
 
+      // Validate audience so a token minted for another Keycloak client in the
+      // same realm cannot authenticate here. No client id configured means no
+      // audience check is possible, so refuse the token rather than skip it.
+      const clientId = this.configService.get<string>('KEYCLOAK_CLIENT_ID');
+      if (!clientId) {
+        this.logger.error(
+          'KEYCLOAK_CLIENT_ID is not configured; refusing a WebSocket JWT that cannot be audience-checked',
+        );
+        return null;
+      }
+
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: acceptedIssuers,
+        audience: clientId,
         clockTolerance: 60,
       });
 

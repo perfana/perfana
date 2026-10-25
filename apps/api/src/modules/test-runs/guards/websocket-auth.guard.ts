@@ -166,11 +166,20 @@ export class WebSocketAuthGuard implements CanActivate {
         ];
       }
 
-      // Validate audience to prevent tokens from other Keycloak clients being accepted
-      const clientId = this.configService.get('KEYCLOAK_CLIENT_ID');
+      // Validate audience to prevent tokens from other Keycloak clients being
+      // accepted. `audience: undefined` disables the check entirely, so a
+      // missing client id must refuse the token, not wave it through.
+      const clientId = this.configService.get<string>('KEYCLOAK_CLIENT_ID');
+      if (!clientId) {
+        this.logger.error(
+          'KEYCLOAK_CLIENT_ID is not configured; refusing a WebSocket JWT that cannot be audience-checked',
+        );
+        return null;
+      }
+
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: acceptedIssuers,
-        audience: clientId || undefined,
+        audience: clientId,
         clockTolerance: 60,
       });
 
