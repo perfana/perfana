@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Delete, Param, Patch, Body, Query, NotFoundException, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Patch, Body, Query, NotFoundException, Logger, HttpException, HttpStatus, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiParam, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { SystemsUnderTestService } from './systems-under-test.service';
 import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-test.handler';
+import { SystemUnderTestDeletionProcessor } from './processors/system-under-test-deletion.processor';
 import { CreateSystemUnderTestDto, UpdatePyroscopeConfigDto, UpdateSystemUnderTestDto } from './dto';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 import { AuthorizationService } from '../../common/services/authorization.service';
@@ -16,6 +17,7 @@ export class SystemsUnderTestController {
   constructor(
     private readonly systemsUnderTestService: SystemsUnderTestService,
     private readonly deleteHandler: DeleteSystemUnderTestHandler,
+    private readonly deletionProcessor: SystemUnderTestDeletionProcessor,
     private readonly authzService: AuthorizationService,
   ) {}
 
@@ -160,15 +162,42 @@ export class SystemsUnderTestController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a system under test and all related data' })
+  // 202 for both arms. The development fallback deletes synchronously but still answers 202,
+  // because the only client reads `response.ok` and the body says which happened.
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Queue a system under test and all related data for deletion',
+    description:
+      'Answers 202 once the job is enqueued; the row carries `deletion_status` until the ' +
+      'cascade finishes. The cascade is far too long for a request — before v0.2.97.34 it ran ' +
+      'inline and a large system hit the client-side 300s query_timeout, which returns a 500 ' +
+      'having deleted nothing while Postgres keeps running the transaction.',
+  })
   @ApiParam({ name: 'id', description: 'System under test UUID' })
-  @ApiResponse({ status: 200, description: 'System under test deleted successfully' })
+  @ApiResponse({ status: 202, description: 'Deletion queued' })
+  @ApiResponse({ status: 202, description: 'System under test deleted synchronously (Redis unavailable, development only) — same status, different body' })
   @ApiResponse({ status: 404, description: 'System under test not found' })
   async remove(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     // Verify access via existing findOne (throws 404 if unauthorized)
     const isAdmin = await this.resolveIsAdmin(ctx.userId, ctx.roles);
-    await this.systemsUnderTestService.findOne(id, ctx.userId, isAdmin);
+    const system = await this.systemsUnderTestService.findOne(id, ctx.userId, isAdmin);
 
+    // Already in flight. Returning 202 again rather than an error keeps the button idempotent:
+    // the job is deduplicated by jobId anyway, and a `failed` row is deliberately re-queueable.
+    if (system.deletion_status === 'queued' || system.deletion_status === 'deleting') {
+      return { queued: true, systemName: system.name, status: system.deletion_status };
+    }
+
+    if (this.deletionProcessor.isAvailable()) {
+      await this.deletionProcessor.addJob(id, ctx.userId);
+      return { queued: true, systemName: system.name, status: 'queued' };
+    }
+
+    // Development fallback only — in production the processor throws at boot if Redis is
+    // unreachable, so this branch cannot be the silent path back to the 300s hang.
+    this.logger.warn(
+      `Deletion queue unavailable — deleting system ${id} synchronously (development fallback)`,
+    );
     try {
       return await this.deleteHandler.execute(id);
     } catch (error) {

@@ -47,6 +47,16 @@ export class SystemUnderTest {
   @Column({ type: 'jsonb', nullable: true, default: '[]', name: 'pyroscope_configurations' })
   pyroscope_configurations?: Array<{ application: string; profiler: string }>;
 
+  /**
+   * Background-deletion state, mirroring `test_runs.deletion_status` and
+   * `application_dashboards.deletion_status`: NULL when idle, `queued` before the job is
+   * enqueued, `deleting` while a worker holds it, `failed` once retries are exhausted. The
+   * cascade is far too long to run inside an HTTP request — see
+   * 1818000000000-AddSystemUnderTestDeletionStatus.
+   */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  deletion_status?: 'queued' | 'deleting' | 'failed' | null;
+
   @CreateDateColumn()
   created_at!: Date;
 

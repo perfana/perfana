@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SystemsUnderTestController } from './systems-under-test.controller';
 import { SystemsUnderTestService, SystemSummary } from './systems-under-test.service';
 import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-test.handler';
+import { SystemUnderTestDeletionProcessor } from './processors/system-under-test-deletion.processor';
 import { SystemUnderTest as SystemUnderTestEntity } from '../../entities';
 import { NotFoundException } from '@nestjs/common';
 import { UserContext } from '../../common/decorators/user-context.decorator';
@@ -11,6 +12,8 @@ import { createAuthorizationServiceMock } from '../../../test/mocks/authorizatio
 describe('SystemsUnderTestController', () => {
   let controller: SystemsUnderTestController;
   let service: jest.Mocked<SystemsUnderTestService>;
+  let deletionProcessor: jest.Mocked<SystemUnderTestDeletionProcessor>;
+  let deleteHandler: jest.Mocked<DeleteSystemUnderTestHandler>;
 
   // Mock user context for authorization
   const mockUserContext: UserContext = {
@@ -80,6 +83,13 @@ describe('SystemsUnderTestController', () => {
           },
         },
         {
+          provide: SystemUnderTestDeletionProcessor,
+          useValue: {
+            isAvailable: jest.fn().mockReturnValue(true),
+            addJob: jest.fn(),
+          },
+        },
+        {
           provide: AuthorizationService,
           useValue: createAuthorizationServiceMock(),
         },
@@ -88,6 +98,8 @@ describe('SystemsUnderTestController', () => {
 
     controller = module.get<SystemsUnderTestController>(SystemsUnderTestController);
     service = module.get(SystemsUnderTestService);
+    deletionProcessor = module.get(SystemUnderTestDeletionProcessor);
+    deleteHandler = module.get(DeleteSystemUnderTestHandler);
   });
 
   afterEach(() => {
@@ -454,6 +466,64 @@ describe('SystemsUnderTestController', () => {
     it('should have findOne method', () => {
       expect(controller.findOne).toBeDefined();
       expect(typeof controller.findOne).toBe('function');
+    });
+  });
+
+  /**
+   * The cascade used to run inline here and a large system blew the client-side 300s
+   * query_timeout — a 500 with nothing deleted while Postgres kept running the transaction
+   * (production, 2026-10-23). These three cases are what stops it going back: the queued arm
+   * must not call the handler, an in-flight delete must not enqueue a second time, and the
+   * synchronous arm must be reachable only when the queue is not.
+   */
+  describe('remove', () => {
+    it('queues the cascade and does not run it in the request', async () => {
+      service.findOne.mockResolvedValue(mockSystemUnderTest);
+
+      const result = await controller.remove('sys-123', mockUserContext);
+
+      expect(deletionProcessor.addJob).toHaveBeenCalledWith('sys-123', 'test-user-123');
+      expect(deleteHandler.execute).not.toHaveBeenCalled();
+      expect(result).toEqual({ queued: true, systemName: 'payment-service', status: 'queued' });
+    });
+
+    it.each(['queued', 'deleting'] as const)(
+      'is a no-op while a delete is already %s',
+      async (status) => {
+        service.findOne.mockResolvedValue({
+          ...mockSystemUnderTest,
+          deletion_status: status,
+        } as SystemUnderTestEntity);
+
+        const result = await controller.remove('sys-123', mockUserContext);
+
+        expect(deletionProcessor.addJob).not.toHaveBeenCalled();
+        expect(deleteHandler.execute).not.toHaveBeenCalled();
+        expect(result).toEqual({ queued: true, systemName: 'payment-service', status });
+      },
+    );
+
+    it('falls back to a synchronous delete only when the queue is unavailable', async () => {
+      service.findOne.mockResolvedValue(mockSystemUnderTest);
+      deletionProcessor.isAvailable.mockReturnValue(false);
+      deleteHandler.execute.mockResolvedValue({ success: true, systemName: 'payment-service' });
+
+      const result = await controller.remove('sys-123', mockUserContext);
+
+      expect(deletionProcessor.addJob).not.toHaveBeenCalled();
+      expect(deleteHandler.execute).toHaveBeenCalledWith('sys-123');
+      expect(result).toEqual({ success: true, systemName: 'payment-service' });
+    });
+
+    it('re-queues a system whose previous deletion failed', async () => {
+      service.findOne.mockResolvedValue({
+        ...mockSystemUnderTest,
+        deletion_status: 'failed',
+      } as SystemUnderTestEntity);
+
+      await controller.remove('sys-123', mockUserContext);
+
+      expect(deletionProcessor.addJob).toHaveBeenCalledWith('sys-123', 'test-user-123');
     });
   });
 });
