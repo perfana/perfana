@@ -15,7 +15,7 @@ The Next.js frontend provides the user interface for Perfana — a performance a
 
 ## Architecture
 
-- **Framework**: Next.js 15.5.9 (App Router)
+- **Framework**: Next.js 15.5 (App Router)
 - **UI Library**: Material-UI (MUI) 7.3 + Tailwind CSS
 - **State Management**: React Context + React Query + WebSocket
 - **Forms**: React Hook Form + Zod validation
