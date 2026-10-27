@@ -360,6 +360,12 @@ export interface SystemsSummary {
     workloads: string[];
   }>;
   created_at: string;
+  /**
+   * Background-deletion state, so the list can show a badge rather than keeping a row that
+   * looks ordinary while its cascade runs. NULL when idle. See
+   * 1818000000000-AddSystemUnderTestDeletionStatus.
+   */
+  deletion_status?: 'queued' | 'deleting' | 'failed' | null;
 }
 
 /**

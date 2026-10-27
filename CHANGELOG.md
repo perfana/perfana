@@ -21,6 +21,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   The lockfile delta is larger than the three version lines suggest and is all mechanical: 45 entries added, 16 removed, 13 changed — of those 13, two are version moves, ten are `@unrs/resolver-binding-linux-*` entries that gained a `libc` field, and one is the `apps/web` workspace's own dependency ranges. The `libc` additions are not cosmetic: that is the field npm filters optional platform packages on, so a Linux install now reifies only the matching binding where before, with no `libc` field, both the `-gnu` and `-musl` variants matched. Every removal is a relocation — `next`, its `@next/swc-*` binaries and `eslint-config-next` hoist out of `apps/web/node_modules` to the root — and the only two additions that are neither optional nor dev-only are `next` and `@next/env`, both of them those same hoisted copies. The rest is Next's new optional image stack: `sharp` 0.35.5, 26 `@img/sharp-*` platform packages and `@img/colour` — of which only the platform-matching pair plus `@img/colour` ever install, the last having no `os`/`cpu`/`libc` fields to filter on. That is the three entries observed in the built Alpine image. Two incidental moves: `semver` 7.8.1 → 7.8.5 (forced by `sharp`) and the dev-only `napi-postinstall` 0.3.4 → 0.3.7. No package was dropped and the lockfile version is unchanged.
 
+## [0.2.97.34] - 2026-10-25
+
+### Fixed
+- **Deleting a system under test failed after five minutes with nothing deleted. It now runs in the background, and the database work behind it is no longer quadratic in the size of the installation.** Reported from production on 2026-10-23: the request ran for 300 seconds and returned an error, and the system was still there. The system in question had no test runs at all, so there was almost nothing to delete — all five minutes went into one step.
+
+  That step was removing the system's dashboards. Every table that refers to a dashboard has to be checked before one can be removed, and for ten of the thirteen such tables the database had no way to look the reference up directly, so it read each table from end to end — once per dashboard. The same was true, and worse, for the metrics connections removed later in the same operation: seventeen tables, none of them searchable by the reference. Eighteen lookup indexes were added, covering every table whose size grows with the amount of measurement data held. On the development database — a fraction of production's size — the same step went from 582 ms to 15 ms, with 93% of the old cost coming from a single reference checked once per storage chunk.
+
+  The measurement table itself could not be fixed that way. It is stored compressed, and the value being searched for sits inside the compressed data where an index cannot reach it — verified by building the index and watching the database ignore it. The two references it carried have therefore been removed. They were enforcing something nothing in the product relied upon, and they cost a full scan of the compressed data for every dashboard and every connection removed; the four other tables of the same kind never had them. The trade is that measurement rows belonging to a deleted dashboard are no longer rejected by the database, only by the code that deletes them, which already does.
+
+  Separately, the whole operation no longer runs inside the request. It is queued, the system stays in the list marked **Deleting…** until it finishes, and says **Deletion failed** if it does not — the same treatment test runs and dashboards already get. The old behaviour was bounded only by how long the client would wait for a reply: when that ran out the client hung up while the database carried on working on a deletion nobody would hear the result of. A system with hundreds of test runs can legitimately take minutes, however fast the lookups are.
 ## [0.2.97.33] - 2026-10-23
 
 ### Fixed
@@ -32,7 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   Verified against a live test run: applying a preset now draws all 22 series against the stored baseline in one click, and applying a second preset over a hand-picked run keeps that run.
 
-  Note the version skips 0.2.97.32, which is claimed by a separate in-flight change.
+  Note the version skips 0.2.97.32, which was claimed by a change that ended up shipping as 0.2.97.34. That number is permanently unused.
 
 ## [0.2.97.31] - 2026-10-19
 

@@ -1206,6 +1206,141 @@ ACTUAL column at all), and a passing averaged check still shows `panel_average`,
 genuinely is the actual value. **A report generated before v0.2.97.24 keeps its old number** — the HTML is
 stored, so it has to be regenerated.
 
+### A parent-side foreign-key check is a scan per child, and the SUT cascade pays it per row
+
+`DeleteSystemUnderTestHandler` deletes a system in seven phases inside one transaction. On
+2026-10-23 that timed out in production on a system with **no test runs at all** — phases 1-4
+logged nothing, and all 300 s of a 300,966 ms request went into phase 5:
+
+```
+11:09:23  Starting cascade deletion for system under test "Polis"
+11:09:24  Deleted 20 rows from ds_compare_config
+          query failed: DELETE FROM application_dashboards WHERE system_under_test_id = $1
+          error: Query read timeout
+11:14:24  SlowRequest DELETE /api/systems-under-test/97e75ab9… 500 300966ms pool=20/20idle/0waiting jobs=none
+```
+
+The cost is not the rows deleted. For each deleted parent row Postgres runs
+`SELECT 1 FROM <child> WHERE <fk_col> = $1 FOR KEY SHARE` against **every** referencing table,
+and a child with no index leading on that column answers with a full scan. Three of the
+cascade's parents had unindexed children (dev database, 2026-10-23):
+
+| parent | deleted in | children with no leading index |
+|---|---|---|
+| `application_dashboards` | phase 5 | 10 of 13 |
+| `benchmarks` | phase 6 | 2 |
+| `metrics_sources` | phase 6, **last** | 17 of 17 |
+
+So indexing only the `application_dashboards` side moves the identical timeout into phase 6.
+Migration 1816 adds 18 indexes, covering every child whose size scales with runs x dashboards
+x panels x metrics — plus one reached a level down, since `ds_compare_config` is itself CASCADE
+from `application_dashboards` and so its own children are probed as well
+(`pending_ds_compare_config_changes`, 250 calls for one 24-dashboard system). The 14 remaining
+gaps in the schema are deliberately left alone: `benchmarks`, `application_dashboards`,
+`dynatrace_queries`, `dynatrace_entity_mappings`, `provisioned_template_ds_compare_configs`,
+`tracing_services`, `teams`, `systems_under_test` and both filter-preset tables are bounded by
+human action — tens to hundreds of rows, microseconds to scan, and an index there is write
+overhead bought for nothing.
+
+Measured on the dev database (326,160 `ds_metrics` rows, 24 dashboards) as the per-trigger
+timings of `EXPLAIN (ANALYZE) DELETE FROM application_dashboards WHERE system_under_test_id = …`:
+
+| | total | ds_metrics FK | ds_adapt_results FK |
+|---|---|---|---|
+| before | **582.022 ms** | 543.7 ms across **three** trigger firings (root + one per chunk) | 12.675 ms |
+| after | **15.324 ms** | gone (1817) | 2.573 ms |
+
+93% of the old cost was one constraint, counted once per chunk. That is the number to scale:
+production's `ds_metrics` is far larger and has far more chunks, each compressed one
+ColumnarScanning every row.
+
+Find the remaining gaps with:
+
+```sql
+SELECT c.confrelid::regclass, c.conrelid::regclass, a.attname
+FROM pg_constraint c
+JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+WHERE c.contype = 'f'
+  AND NOT EXISTS (SELECT 1 FROM pg_index i
+                  WHERE i.indrelid = c.conrelid AND i.indkey[0] = c.conkey[1]);
+```
+
+**`ds_metrics` cannot be fixed with an index, and its two FKs were dropped instead**
+(migration 1817). Four things about that, each measured rather than reasoned:
+
+1. **TimescaleDB clones each FK onto every chunk, and each clone installs its own pair of
+   parent-side RI triggers on the referenced table.** Verified in `pg_trigger`: a two-chunk dev
+   `ds_metrics` puts four extra triggers on `application_dashboards`. The probe count therefore
+   grows with the chunk count, forever, and `ds_metrics` has no retention policy.
+2. **An index on a column outside `compress_segmentby` is created on the compressed chunk and
+   never used.** `compress_segmentby` is `test_run_id`, so `application_dashboard_id` lives
+   inside the compressed payload. Reproduced on a throwaway hypertable of the same shape:
+
+   ```
+   Custom Scan (ColumnarScan) on _hyper_21_26_chunk x
+     Vectorized Filter: (pid = '0000…'::uuid)
+     Rows Removed by Filter: 1000          <- every row, index ignored
+     ->  Seq Scan on _hyper_21_26_chunk_compressed
+   indexes on chunk: …_time_idx, …_pid_idx  <- present and unusable
+   ```
+
+   On production everything older than two days is compressed, so that is nearly the whole
+   table, scanned once per deleted parent row, per FK.
+3. **The FK was genuinely enforced over that compressed data** — the parent DELETE is refused
+   when the only referencing rows are compressed — so the probe really does read it. What is
+   given up is the guarantee that no `ds_metrics` row points at a deleted dashboard or metrics
+   source. Severity is low: every read filters by an id that came from a live row, so an orphan
+   is invisible rather than wrong, and uuids are not reused.
+4. **Nothing read the FKs for anything else.** Both are `NO ACTION` on delete and update. No
+   code treats their 23503 as a signal — the 409 handlers in `grafana-dashboards.service.ts`
+   are for `grafana_dashboards <- application_dashboards`, and
+   `ApplicationDashboardsService.remove` pre-deletes `ds_metrics` to **avoid** the violation
+   rather than to rely on it. `requests_raw`, `transactions`, `virtual_users` and
+   `requests_error` carry no FKs at all; `ds_metrics` was the only hypertable with any, which is
+   the strongest argument they were an artefact of the `@ManyToOne` on `DsMetrics` rather than a
+   decision. Those two decorators are gone, with a comment in the entity, so nobody restores the
+   FKs by writing a relation.
+
+One planner consequence: Postgres uses foreign keys for join-selectivity estimation, so
+estimates for `ds_metrics ⋈ application_dashboards` change. Nothing joins them in a hot path,
+but a plan regression there would point here. `down()` re-adds both `NOT VALID` — a plain
+`ADD CONSTRAINT` validates by reading the whole hypertable under ACCESS EXCLUSIVE.
+
+**Known residue, pre-existing and now optional.** `ApplicationDashboardsService.remove` issues
+`DELETE FROM ds_metrics WHERE application_dashboard_id = $1` with no `test_run_id` and no
+`time` — a predicate on neither the segmentby key nor the partitioning column, which is the
+shape root issue #23 is about (decompression, WAL, locks on every chunk). It was mandatory
+while the FK existed; it is now only the thing that stops orphans accumulating, so it is a
+candidate for being moved onto the deletion queue's own budget or rewritten per run. Not
+touched here. See TODOS.md.
+
+### SUT deletion is queued, not awaited
+
+`DELETE /api/systems-under-test/:id` answers **202** and carries the state on
+`systems_under_test.deletion_status` (migration 1818), exactly as test runs and application
+dashboards already do. `SystemUnderTestDeletionProcessor` runs the cascade at concurrency 1.
+
+Three things that matter:
+
+- **The old inline version was bounded only by the client.** `query_timeout` is 300000 ms
+  (`packages/shared/src/config/typeorm.config.ts`), and when node-postgres gives up it
+  **destroys the connection while Postgres keeps executing the statement** — hence a 500 with
+  nothing deleted and a transaction nobody is waiting for. 1816 and 1817 make the cascade fast;
+  they do not make it bounded. A system with hundreds of runs issues five hypertable DELETEs
+  per run plus every other phase.
+- **The synchronous fallback is development-only, by construction.** The processor throws at
+  boot when Redis is unreachable and `NODE_ENV !== 'development'`, so production cannot
+  silently take the path back to the 300 s hang.
+- **`deletion_status` must be projected by hand into `/config/systems`.**
+  `getSystemsSummary` builds its own object rather than returning the entity, so a new column
+  does not reach the systems list on its own — which is how the badge would quietly stop
+  rendering.
+
+`remove` is idempotent: a system already `queued` or `deleting` returns 202 without enqueuing
+again, and a `failed` one is deliberately re-queueable. `systems-under-test.controller.spec.ts`
+pins all three arms (mutation-verified: narrowing the in-flight guard to `'queued'` alone fails
+the `deleting` case).
+
 ### A raw-hypertable read takes a lock per chunk, and the window has to be fetched first
 
 A query on `requests_raw`, `transactions`, `requests_error` or `virtual_users` that filters on
