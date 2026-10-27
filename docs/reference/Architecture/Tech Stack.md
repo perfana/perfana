@@ -21,7 +21,7 @@ tags:
 
 | Technology | Version | Purpose |
 |---|---|---|
-| **Next.js** | 15.5.9 | React framework (App Router) |
+| **Next.js** | 15.5 | React framework (App Router) |
 | **React** | 18.2 | UI library |
 | **MUI (Material-UI)** | 7.3 | Component library |
 | **Tailwind CSS** | 3.3 | Utility-first CSS |

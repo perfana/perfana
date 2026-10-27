@@ -3444,6 +3444,107 @@ major is bumped to match `apps/api`'s 11.x. The four findings in the table above
 under `dockerode@4.0.12`, so treat its absence as a listing artefact rather than a fix.
 
 
+### Next's new `sharp` stack is built for musl and shipped into glibc images
+
+**Priority:** P1
+**Origin:** the v0.2.97.35 supply-chain review (2026-10-26), while reviewing the `next` 15.5.25 → 15.5.28 advisory bump that first introduced `sharp` into the tree at all.
+
+**Why:** `sharp` was **absent from the lockfile** before that bump, so `/_next/image` was already inert — but not because Next did not ask for it. `next` 15.5.25 already declared `sharp` as an optional dependency (`^0.34.3 || ^0.35.4`); the lockfile had simply been version-bumped without re-resolving, so nothing reified. That is a trap worth remembering on its own: a declared-but-unreified optional dependency can appear at any future lockfile refresh with no manifest change at all. 15.5.28 declares `sharp` (`^0.34.3 || ^0.35.5`) and eight `@next/swc-*` binaries; `sharp` in turn declares 25 `@img/sharp-*` platform packages, with a 26th arriving transitively. Optional is **not** omitted by default: npm's `omit` default is `NODE_ENV === 'production' ? ['dev'] : []` (npm 11.19.0 `definitions.js:1603`), `dev` only. So `npm ci --only=production --ignore-scripts` at `Dockerfile:79` and `:174` installs the platform-matching pair.
+
+The builder is `node:24-alpine3.23` (musl), so npm's `libc` filtering selects `@img/sharp-linuxmusl-*`. `runtime-prep` then copies `/app/node_modules` wholesale (`Dockerfile:257`) into `gcr.io/distroless/nodejs24-debian12` (glibc) for web, api, worker and grafana-sync. sharp's loader resolves the runtime as linux-x64/glibc, finds no `@img/sharp-linux-x64`, and throws. Only `perfana-report` (also Alpine) gets a loadable copy, and nothing there uses it.
+
+**Not a regression** — image optimization was already dead — but roughly 18 MB of native libvips, librsvg and libheif now ships, unusable, in five images, including api and worker. Expect scanner findings against those three C libraries for the first time.
+
+**Related, same override:** the root `sharp` pin is `^0.35.5`, which on a 0.x version means `>=0.35.5 <0.36.0` — a ceiling as well as a floor. If the next libvips fix ships as 0.36.x, neither `npm update sharp` nor `npm audit fix` can cross it, and nothing fails loudly because sharp's advisories are rated high while the build gate only fails on critical. Revisit the range shape when sharp's minor moves; this is the same trap `"ioredis": "5.10.1"` and `"multer": "^2.4.0"` already carry in this file. Note the pin went from inert to load-bearing in v0.2.97.35: before it, `sharp` was not in the tree at all.
+
+**What to do:** either omit optional dependencies for the stages that do not need them, or make the builder's libc match the runtime's. Either way leave a one-line comment at the install, because the next person debugging "sharp failed to load" in the web container will not guess the builder is Alpine and the runtime is Debian.
+
+**Effort:** S
+
+### LGPL-3.0 code now ships inside images labelled PROPRIETARY — needs an owner decision
+
+**Priority:** P1
+**Origin:** the same v0.2.97.35 review. A GPL census of both lockfiles: base = **0** packages with GPL in the license field, after = **14**, all from that one bump.
+
+**Why:** ten `@img/sharp-libvips-*` are `LGPL-3.0-or-later`, three `@img/sharp-win32-*` are `Apache-2.0 AND LGPL-3.0-or-later`, and `@img/sharp-wasm32` adds MIT to that. They are optional, but per the finding above optional still installs, so the platform-matching `@img/sharp-libvips-linuxmusl-x64` (LGPL-3.0-or-later) lands in all five runtime images — each of which carries `org.opencontainers.image.licenses="PROPRIETARY"` (`Dockerfile:276, 323, 364, 405, 443`).
+
+Shipping a prebuilt LGPL-3.0 shared library inside a proprietary distributed container is the ordinary dynamic-linking compliance question. It is normally satisfiable, but it carries obligations — library source availability, or the ability to relink — that the PROPRIETARY label asserts the opposite of, and nothing in the repo tracks it today.
+
+**This is a licensing call, not an engineering one, and it is open.** If the answer is "we do not want the obligation", the omit-optional change in the item above removes the LGPL code from the four images that cannot use it anyway. If the answer is "fine", the image label and any customer-facing attribution need to say so.
+
+**Effort:** S (engineering) once the licensing answer exists
+**Depends on:** a decision from whoever owns licensing
+
+### `follow-redirects` can leak the Grafana/Dynatrace token on a cross-origin redirect
+
+**Priority:** P1
+**Origin:** the same v0.2.97.35 review, triaging the 18 high advisories that bump left behind. This is the one with a live credential path and an in-range fix.
+
+**Why:** `node_modules/follow-redirects` sits at 1.16.0, which `npm audit` reports as the exact vulnerable version for two advisories: array-form headers bypassing cross-origin credential stripping, and `sensitiveHeaders` regex escaping exposing credential headers. Its sole dependent is `axios` (`"follow-redirects": "^1.16.0"`), and api, worker and grafana-sync all reach Grafana and Dynatrace through axios with `Authorization` headers across five importing files. A hostile, compromised or merely misconfigured endpoint answering with a cross-origin 30x can therefore receive the stored credential.
+
+Unlike the ten puppeteer-chain highs (unreachable: `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true` at `Dockerfile:478` means `@puppeteer/browsers` never runs the `extract-zip`/`basic-ftp`/`proxy-agent` download path), and unlike `source-map-js` (build-time), `probe-image-size` (browser bundle) and `@modelcontextprotocol/sdk` (`apps/mcp`, which no Dockerfile stage copies), this one is on a live outbound authenticated request path.
+
+**What to do:** `npm update follow-redirects` — the fix is inside axios's existing `^1.16.0` range, so no `package.json` change and a one-line lockfile delta. `ip-address` (three SSRF/trust-boundary misclassification advisories) and `body-parser` are likewise `fixAvailable: true` and in range; worth the same small PR. `multer` 2.4.0 is **not** cheap: its `fixAvailable` points at `@nestjs/platform-express` 11.1.1 while the vulnerable range starts at 11.1.2, so it is a flagged downgrade, and the root `overrides` pins `multer: ^2.4.0` — at the top of the vulnerable range.
+
+**Effort:** S
+
+### The `deps` Dockerfile stage is built on every image build and consumed by nothing
+
+**Priority:** P3
+**Origin:** the same v0.2.97.35 review.
+
+**Why:** stage `deps` (`Dockerfile:63-79`) runs `npm ci --only=production --ignore-scripts`, but none of the file's 28 `COPY --from=` directives reads from `deps` (`grep -c 'COPY --from=deps'` returns 0); they read from `builder`, `runtime-prep` or a patch stage. It also derives from `security-base` and never sets `NODE_ENV`, so unlike the audit at `:159` — which is double-covered by `ENV NODE_ENV=production` at `:143` — it depends on the deprecated `--only=production` alone. If a future npm major drops that flag (npm only warns on unknown cli config, it does not fail), the stage silently becomes a full dev install. Harmless today precisely because nothing consumes it.
+
+**What to do:** delete the stage. Modernising its flag to `--omit=dev` treats the symptom of a stage that should not exist.
+
+**Effort:** S
+
+## Documentation
+
+### The build gate that can stop every release is documented nowhere
+
+**Priority:** P2
+**Origin:** the v0.2.97.35 docs audit (2026-10-26), run on the release that gate caused.
+
+**Why:** `Dockerfile:159` runs `npm audit --audit-level=critical --production`, and from 2026-10-23 a single critical advisory held **five of the six image builds** — api, worker, grafana-sync, perfana-report and web — across two releases: v0.2.97.33 and v0.2.97.34 both failed at it, and nothing has published since v0.2.97.31 on 2026-10-19. The migration runner survived only because `Dockerfile.migrations` has no `npm audit` step; it copies `apps/web/package*.json` (`:28`) and installs from the same root lockfile (`:34`), so it carries `next` as well. The gate is stage-scoped, not image-scoped: it sits in the shared `builder` ancestor, so one critical anywhere in the production tree stops every target derived from it. Document that, not per-image dependency scope. Neither `docs/reference/Operations/Docker.md` nor `docs/reference/Operations/CI-CD.md` mentions it: CI-CD's pipeline diagram stops at Lint / Type Check / Test / Build / SonarQube and its Quality Gates list has no audit line, and Docker.md's Build Commands and Security Hardening sections never say a build can fail on an advisory. The only record is CHANGELOG prose — and this is the second time (see v0.2.95.10).
+
+**What to do:** `/document-generate` against those two files. The audit left it alone deliberately: a new section is new content, not a factual correction.
+
+**Effort:** S
+
+### The Node floor is stated three different ways
+
+**Priority:** P2
+**Origin:** the v0.2.97.35 docs audit.
+
+**Why:** `README.md:45` and its badge on line 3 say Node.js 18+, `.github/workflows/README.md:236` says "Node 20 (required by worker dependencies)", and root `package.json` declares `engines.node >=24.0.0 <25.0.0` while the Dockerfile builds on `NODE_VERSION=24`. With `engine-strict=true` in `.npmrc`, the README promises an install the repo's own engines field refuses — a first-contributor trap. Observed live this release: `npm install` under the shell's default Node v22.14.0 refused with EBADENGINE, and the work had to run under nvm's 24.21.0.
+
+**What to do:** pick one source of truth and make the other two point at it.
+
+**Effort:** S
+
+### Patch-level version pins in prose drift by construction
+
+**Priority:** P3
+**Origin:** the v0.2.97.35 docs audit, which found two of them, plus that release's own red-team pass, which caught the fix re-introducing the same pattern.
+
+**Why:** `docs/reference/Architecture/Tech Stack.md:24` and `docs/reference/Apps/Web/Web Overview.md:18` both carried `Next.js 15.5.9` — stale through four Next bumps. The first fix replaced them with `15.5.28`, which is the same defect one patch later; both now read `15.5`, matching the neighbouring `React 18.2` and `MUI 7.3` rows. Under a caret range the installed patch floats, so any patch-level version in prose is wrong as soon as anything moves.
+
+**What remains:** the two files above are fixed. Sweep the rest of the docs tree for other restated dependency versions and give them the same treatment, or point at the manifest instead of copying from it.
+
+**Effort:** S
+
+### `docs/reference/Operations/Docker.md` describes a repo that no longer exists
+
+**Priority:** P3
+**Origin:** the v0.2.97.35 docs audit, found adjacent and left alone as out of that release's scope.
+
+**Why:** it lists six Dockerfiles where two exist (`Dockerfile`, `Dockerfile.migrations`), builds its entire Security Hardening section on a `Dockerfile.security` that is gone, and points at `./docker-security-scan.sh` and `./build-m1.sh`, neither of which is in the repo. Separately `docs/readmes/web-README.md` tells a reader to run `pnpm dev` and `vitest` where `apps/web` uses npm and jest, and its port (4001, matching README and `docs/reference/index.md`) disagrees with `next dev -p 4000`.
+
+**What to do:** removals and rewrites, not corrections — which is why the audit did not attempt it.
+
+**Effort:** M
+
 ## Completed
 
 ### `findDashboardByLabel` matches a label across every system and environment
