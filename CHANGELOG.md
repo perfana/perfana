@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.39] - 2026-10-28
+
+### Changed
+- **Backlog only, no code.** The multi-org tenancy item in `TODOS.md` is raised from "P3 today, P1 the moment a second organization exists in production" to a flat **P1 release gate**, because a second organization is planned this quarter. Every one of its six site groups is correct on a single-org deploy and wrong on the first multi-org one, silently.
+
+  Re-verified against `main` at v0.2.97.38, which turned up two things a reader would otherwise have re-derived: `test-runs-metrics.service.ts:86` is **already fixed** and is struck from the list (it org-filters non-admins through a query builder), and `test-runs-config.service.ts` has 8 unscoped name lookups rather than the 11 originally filed, now enumerated by line. The worker's default-Grafana bullet quoted SQL that no longer exists — `grafana-config-cache.ts:49` is now a TypeORM `find({ order: { createdAt: 'ASC' }, take: 1 })`, so a grep for `ORDER BY created_at ASC LIMIT 1` came up empty. Line numbers corrected throughout, including the three latent P4 entries.
+
+  The item now opens with a checkable precondition (`SELECT count(*) FROM organizations;`) and names the two sites to fix first — `getDefaultTeam()` and the grafana-sync label lookups — because those two write to the wrong tenant rather than read from it.
+
 ## [0.2.97.38] - 2026-10-28
 
 ### Fixed

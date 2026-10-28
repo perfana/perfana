@@ -1480,63 +1480,126 @@ do the work per group. `POST /reevaluate-batch` asserts per-run access but never
 - `apps/worker/.../simple-orchestrate-reevaluate-batch.ts:585` — `LIMIT 10` on
   `grafana_instances` silently truncates an 11-instance deploy. Different class, noticed in passing.
 
-### Needs a second organization to fire — close before the first multi-org deploy
+### RELEASE GATE: multi-org tenancy — blocks the first multi-org deploy (P1)
 
-**Priority:** P3 today, **P1 the moment a second organization exists in production**
+**Priority:** **P1** — raised from "P3 today, P1 the moment a second organization exists in
+production" on 2026-10-28, because a second organization is **planned this quarter**. It is a
+release gate, not a conditional: every item below is correct on a single-org deploy and wrong on
+the first multi-org one, silently, with no error and no log line.
 
-- `apps/grafana-sync/.../dashboard-finder.service.ts:53, 161, 193`,
-  `auto-config-updates.service.ts:111, 246`, `grafana-api.service.ts:319` — six sites resolving a
-  Grafana instance by `findOne({ where: { label } })`. **Verified: `grafana_instances.label` has
-  no unique constraint, and grafana-sync sets no RLS context anywhere**, so these see every
-  organization's rows. Duplicate labels across orgs are not an edge case — they are *required*
-  for one profile to auto-configure two orgs' systems. `insertApplicationDashboard` org-scopes the
-  SUT lookup and then resolves the instance org-blind, so org A's SUT can be given org B's
-  `grafana_instance_id`, and the dashboard builder is handed org B's `server_url` and API key.
-  Fix: thread the SUT's `organizationId` into every label lookup and fail closed on ambiguity;
-  longer term, a unique index on `(organization_id, label)`.
-- `apps/api/.../test-runs-config.service.ts` (11 sites), `test-runs-metrics.service.ts:86`,
-  `systems-under-test.service.ts:368`, `alerts.service.ts:128`, `events.service.ts:136` — a system
-  under test resolved by `name` alone. `uq_system_under_test_name_org` scopes the name **per
-  organization**. Several of these write and delete. `alerts.service.processAlert` is the sharpest:
-  it resolves by name and then reaches `checkAbortConditions`, which can abort running test runs.
-  Note the webhook is **not** public — it carries `@ApiBearerAuth()`, documents a 401 and is
-  guarded by default, so it needs a valid API key; and on an RLS-enabled deploy the lookup is
-  org-scoped. Neither is a reason to leave it: tenancy must not depend on RLS being on.
-  `test-run-lookup.service.ts:66` is the correct pattern to copy.
-- `apps/api/.../test-run-lookup.service.ts:243-246` — `getDefaultTeam()` is
-  `SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1` with **no organization predicate**,
-  and its result is stamped on every auto-created SUT. Org from the caller, team from whichever
-  organization was created first. `systems_under_test` RLS reads `can_access_resource(org, team,
-  created_by)`, so members of the owning org lose access to a system their own CI just created.
-  Reached from `/api/init` and on the first test run for any new SUT name.
-- `apps/api/.../metrics.service.ts:84-89, 1123-1129` — `resolveApplicationDashboardId` picks an
-  arbitrary `application_dashboards` row for a metrics source and uses it as the **authorization
-  subject**, and again at :1150 as the scoping run. One metrics source backs many dashboards
-  across systems, environments and teams. `ds_metrics` has no RLS policy of its own, which the
-  comment at :1116 says is precisely why this check is the only control.
-- `apps/worker/src/config/grafana-config-cache.ts:49` — the worker's default Grafana is
-  `ORDER BY created_at ASC LIMIT 1` over the whole table, cached process-wide. Stable but
-  org-blind. **Measured: the NULL-instance bucket on dev is 76 perf-test and 3 Dynatrace
-  artificial rows and zero real Grafana dashboards**, so the wrong-instance half is not currently
-  reachable. The half that IS real: `tryGetGrafanaConfig()` gates whole stages
-  (`PanelsPipeline`, `MetricsPipeline`), so one misconfigured legacy row fails panels-processing
-  and metrics-collection for **every** run, including runs whose dashboards live on a healthy
-  second instance. Make the gate a count over the run's own dashboards' instances.
-- `apps/web/app/settings/teams/page.tsx:77` — `organizations[0].id` when the org filter is "all"
-  and no org is selected, which is exactly the state `organization-context` leaves a multi-org
-  user in. Ask instead of guessing.
+**Verified against `main` at v0.2.97.38 on 2026-10-28.** Every line number below was re-checked;
+the drift and the one item that is already fixed are called out inline. Do not trust a line number
+in this item without re-grepping — it has drifted once and will again.
+
+**Checkable precondition.** `SELECT count(*) FROM organizations;` on the target deploy. At 1 this
+item is dormant; at 2 every bullet is live. `api.perfana.praegus.nl` holds API keys labelled
+*BeeldEnGeluid* and *TVOH*, which suggests it may already be at 2 — **confirm with that query
+before the next deploy to it**, because if so these are active defects rather than a gate.
+
+**Do these two first.** They are the ones that write to the wrong tenant rather than read from it:
+`getDefaultTeam()` (stamps a foreign org's team on every auto-created SUT, so the owning org loses
+access to a system its own CI just made) and the grafana-sync label lookups (hands org A's
+dashboard builder org B's `server_url` **and API key**).
+
+#### 1. grafana-sync resolves a Grafana instance by label, org-blind — 6 sites
+
+`apps/grafana-sync/src/modules/auto-config/dashboard-finder.service.ts:54, 162, 193`,
+`auto-config-updates.service.ts:112, 247`, `grafana-api/grafana-api.service.ts:320` — all
+`findOne({ where: { label } })`. *(Lines drifted +1 from the original filing.)*
+
+**Verified: `grafana_instances.label` has no unique constraint, and grafana-sync sets no RLS
+context anywhere**, so these see every organization's rows. Duplicate labels across orgs are not
+an edge case — they are *required* for one profile to auto-configure two orgs' systems.
+`insertApplicationDashboard` org-scopes the SUT lookup and then resolves the instance org-blind,
+so org A's SUT can be given org B's `grafana_instance_id`, and the dashboard builder is handed org
+B's `server_url` and API key.
+
+Fix: thread the SUT's `organizationId` into every label lookup and fail closed on ambiguity;
+longer term, a unique index on `(organization_id, label)`.
+
+#### 2. A system under test resolved by `name` alone — 11 sites
+
+`uq_system_under_test_name_org` scopes the name **per organization**, so a bare name is ambiguous
+the moment two orgs use the same system name — which they will, since the names are things like
+`Polis` and `webshop`.
+
+- `apps/api/src/modules/test-runs/services/test-runs-config.service.ts:131, 184, 428, 684, 753,
+  802, 843, 920` — **8 sites, not the 11 the original filing claimed.** All eight are
+  `withRequestEm(this.systemRepo).findOne({ where: { name: … }, select: ['id'] })` with no
+  organization predicate. The file mentions `organization` 17 times; none of them is on these
+  lookups.
+- `apps/api/src/modules/alerts/alerts.service.ts:128` and
+  `apps/api/src/modules/events/events.service.ts:136`. **`alerts.service.processAlert` is the
+  sharpest**: it resolves by name and then reaches `checkAbortConditions`, which can abort running
+  test runs. Note the webhook is **not** public — it carries `@ApiBearerAuth()`, documents a 401
+  and is guarded by default, so it needs a valid API key; and on an RLS-enabled deploy the lookup
+  is org-scoped. Neither is a reason to leave it: tenancy must not depend on RLS being on, and
+  `DB_ENABLE_RLS_ROLE` defaults to `'false'` and is set in none of the shipped compose files.
+- `apps/api/src/modules/systems-under-test/systems-under-test.service.ts:363` (`findByName`,
+  was :368) — resolves unscoped and authorizes afterwards, so with duplicate names it can pick the
+  wrong org's row and then deny access to a system the caller legitimately has.
+
+`apps/api/src/modules/test-runs/services/test-run-lookup.service.ts:66` is the correct pattern to
+copy.
+
+**STRUCK — already fixed:** `test-runs-metrics.service.ts:86` was on this list and no longer
+belongs. It resolves by name through a query builder that applies
+`sut.organization_id IN (:...orgIds)` for every non-admin caller (`:90`-`:97`), which is exactly
+the fix this bullet asks for. Nothing in TODOS.md recorded that, so it would have been
+re-investigated.
+
+#### 3. `getDefaultTeam()` has no organization predicate
+
+`apps/api/src/modules/test-runs/services/test-run-lookup.service.ts:240-245` —
+`SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1`, and its result is stamped on every
+auto-created SUT (`:52`). Org from the caller, team from whichever organization was created
+**first**. `systems_under_test` RLS reads `can_access_resource(org, team, created_by)`, so members
+of the owning org lose access to a system their own CI just created. Reached from `/api/init` and
+on the first test run for any new SUT name.
+
+#### 4. An arbitrary application dashboard is used as the authorization subject
+
+`apps/api/src/modules/metrics/metrics.service.ts` — `resolveApplicationDashboardId` at **`:95`**
+(was :84-89), called at **`:162`, `:1153`, `:1179`** (was :1123-1129 and :1150). It picks an
+arbitrary `application_dashboards` row for a metrics source and uses it as the authorization
+subject, and again as the scoping run. One metrics source backs many dashboards across systems,
+environments and teams. `ds_metrics` has no RLS policy of its own, which the comment at `:1116`
+says is precisely why this check is the only control.
+
+#### 5. The worker's default Grafana is the oldest row in the whole table
+
+`apps/worker/src/config/grafana-config-cache.ts:49-51` — still line 49, but **no longer raw SQL**:
+it is now `db.grafanaInstanceRepo.find({ order: { createdAt: 'ASC' }, take: 1 })`. A grep for the
+`ORDER BY created_at ASC LIMIT 1` the original filing quoted finds nothing. Same semantics, cached
+process-wide, org-blind.
+
+**Measured: the NULL-instance bucket on dev is 76 perf-test and 3 Dynatrace artificial rows and
+zero real Grafana dashboards**, so the wrong-instance half is not currently reachable. The half
+that IS real: `tryGetGrafanaConfig()` (`:137`) gates whole stages (`PanelsPipeline`,
+`MetricsPipeline`), so one misconfigured legacy row fails panels-processing and
+metrics-collection for **every** run, including runs whose dashboards live on a healthy second
+instance. Make the gate a count over the run's own dashboards' instances.
+
+Note `getGrafanaConfigById` (`:155`) is the correct per-instance path and already exists — the
+singleton is the legacy arm.
+
+#### 6. The teams page guesses an organization
+
+`apps/web/app/settings/teams/page.tsx:77` — `organizations[0].id` when the org filter is "all" and
+no org is selected, which is exactly the state `organization-context` leaves a multi-org user in.
+Ask instead of guessing.
 
 ### Latent — no callers today, shaped to be misused by the next one
 
-**Priority:** P4
+**Priority:** P4 (all three re-verified against `main` at v0.2.97.38 on 2026-10-28)
 
-- `apps/api/src/repositories/application-dashboard.repository.ts:87-100` —
+- `apps/api/src/repositories/application-dashboard.repository.ts:87, 96` —
   `findByGrafanaDashboardId` and `findByDashboardUid`, both unscoped `findOne`s. One
   `grafana_dashboards` row is referenced by many application dashboards, and a uid is unique only
   within an instance.
-- `apps/worker/src/common/database.service.ts:1241` — `getDynatraceConfigBySystemUnderTest`
-  returns the first entity mapping's config. `dynatrace_entity_mappings` holds one row per mapped
-  entity by construction.
+- `apps/worker/src/common/database.service.ts:1219` (**was :1241**) —
+  `getDynatraceConfigBySystemUnderTest` returns the first entity mapping's config.
+  `dynatrace_entity_mappings` holds one row per mapped entity by construction.
 - `apps/worker/src/services/dynatrace/DynatraceRepository.ts:127-151, 157` — dead code
   (`getDynatraceConfig(host)` on a non-unique `host` column), no caller anywhere.
 
