@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.36] - 2026-10-28
+
+### Fixed
+- **Seventeen in-range version moves clear 45 advisories, 34 of them in the production tree, without touching a single manifest.** Every fix here was already permitted by a range the repo declares, so this is a lockfile refresh: `npm update` on named packages, no `package.json` edited, `overrides` untouched, no package added, and the three entries that disappear do so because an upgraded parent stopped depending on them.
+
+  | | critical | high | moderate | low | total |
+  |---|---|---|---|---|---|
+  | production, before | 0 | 18 | 7 | 0 | 25 |
+  | production, after | 0 | **12** | **3** | 0 | **15** |
+  | dev included, before | 5 | 24 | 16 | 9 | 54 |
+  | dev included, after | **4** | **15** | **10** | 9 | **38** |
+
+  Sixteen packages had their advisories cleared entirely; `iconv-lite` moved too but carried none. Zero new advisories in either scope.
+
+  **The one critical is `handlebars` 4.7.10**, a development dependency that nonetheless runs in CI: two critical JavaScript injections — an own-property-check bypass and an AST type confusion in `compile` that bypassed the earlier fix — plus a moderate on unsafe inline embedding of precompiled templates.
+
+  **`ip-address` 10.7.5 is the biggest single haul at eight advisories** (leading-zero octets decoded as decimal, a CIDR suffix suppressing special-use classification, IPv4-mapped and NAT64 misclassification, cross-family `isInSubnet` comparison, `isLinkLocal` recognising fe80::/64 rather than /10, and two parser-complexity issues). Worth knowing that it is production-classified but has no shipped-image exposure: its only dependents are `express-rate-limit`, declared solely by `@modelcontextprotocol/sdk` — the `apps/mcp` tree that `.dockerignore` excludes — and `socks`, inside the puppeteer proxy chain. The API rate-limits with `@nestjs/throttler`, which depends on neither.
+
+  Also production: `follow-redirects` 1.16.2, `body-parser` 2.4.0, `probe-image-size` 7.5.0, `source-map-js` 1.2.2, `@modelcontextprotocol/sdk` 1.32.2, `hono` 4.13.14, `@hono/node-server` 2.1.5, `fast-copy` 3.1.0, `fast-uri` 3.1.9. Development: `handlebars` 4.7.10, `@faker-js/faker` 10.6.0, `immutable` 4.3.9, `smol-toml` 1.9.1, `moment` 2.31.0, `postcss-selector-parser` 6.1.5.
+
+  **Two of these are hardening rather than a closed hole here, and the distinction is worth stating.** `follow-redirects`' two advisories are about credential headers surviving a cross-origin redirect, which sounds like the most serious item in the list. Neither shape is reachable through axios as this repo uses it: the array-form header path is dead because `axios/lib/adapters/http.js:789` normalises headers to an object before handing them over, and the `sensitiveHeaders` regex-escaping path needs a custom `sensitiveHeaders`, which nothing first-party sets. Likewise `body-parser` 2.4.0 changes nothing the API depends on — request-size enforcement lives in `raw-body` 3.0.2, which did not move, so `API_BODY_LIMIT` behaviour is bit-identical, and nothing in the repo keys on a body-parser error code or sends `Content-Encoding`.
+
+  `@hono/node-server` crossing a major (1.19.14 → 2.1.5) is in-range for its only declarer, `@modelcontextprotocol/sdk` (`^1.19.9 || ^2.0.5`), and cannot reach an image at all: `.dockerignore` excludes `apps/mcp/`, and the `build-deps` stage never copies that workspace's `package.json`, so `npm ci` never installs its tree. Nothing else imports hono.
+
+  **What is left, and why none of it is free.** Twelve production highs remain and they are four decisions, not twelve problems. Nine fall to one `puppeteer@25.16.0` major and all nine hang off a browser-download path that `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true` (`Dockerfile:478`) disables — the biggest number is the least reachable. Two (`@nestjs/platform-express`, `multer`) need a clean but major `platform-express@12.3.2`; the root `overrides` pin of `multer: ^2.4.0` sits at the top of the vulnerable range and is what blocks a transitive-only fix. One (`zod`) has no 3.x fix and is declared by four workspaces. The four remaining criticals are the vitest toolchain in `apps/worker`. Each is filed rather than rushed.
+
+  Verified where it counts: `docker build --target build-deps` followed by `NODE_ENV=production npm audit --audit-level=critical --production` inside that Alpine image exits 0. Full suite green on Node 24 — shared 509, grafana-sync 360, api 6276, worker 78 files, web 4820; preflight 13/13.
+
 ## [0.2.97.35] - 2026-10-27
 
 ### Fixed

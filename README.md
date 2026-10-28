@@ -1,6 +1,6 @@
 # Perfana
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/) [![Node](https://img.shields.io/badge/node-18%2B-green.svg)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/) [![Node](https://img.shields.io/badge/node-24-green.svg)](https://nodejs.org/)
 
 Open-source performance analysis platform. Ingest load test results, collect metrics from Grafana/Dynatrace/Prometheus, detect regressions with the ADAPT algorithm, and track SLO compliance — all in one place.
 
@@ -42,7 +42,7 @@ Login: `perfana@example.com` / `perfana`
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 24 — pinned in `.nvmrc`; `engine-strict=true` in `.npmrc` means another major fails `npm install`
 - Docker & Docker Compose
 
 ### Manual Setup
