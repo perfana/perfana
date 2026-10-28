@@ -5,6 +5,7 @@ import { EventsService } from './events.service';
 import { Event, SystemUnderTest, ApplicationDashboard, GrafanaInstance } from '../../entities';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { GrafanaClientService } from '../grafana/grafana-client.service';
+import { stubScopedLookup, asOrgMember } from '../../test/org-scoped-lookup';
 
 describe('EventsService', () => {
   let service: EventsService;
@@ -211,7 +212,8 @@ describe('EventsService', () => {
 
   describe('create', () => {
     it('should create an event and attempt Grafana annotation sync', async () => {
-      sutRepo.findOne.mockResolvedValue({ id: 'sut-1', organization_id: 'org-1' });
+      asOrgMember(authzService, ['org-1']);
+      stubScopedLookup(sutRepo, [{ id: 'sut-1', organization_id: 'org-1' }]);
       eventRepo.create.mockReturnValue({ ...mockEvent, id: undefined });
       eventRepo.save.mockResolvedValue(mockEvent);
       eventRepo.findOne.mockResolvedValue(mockEvent);
@@ -234,7 +236,8 @@ describe('EventsService', () => {
     });
 
     it('should throw NotFoundException for unknown system under test', async () => {
-      sutRepo.findOne.mockResolvedValue(null);
+      asOrgMember(authzService, ['org-1']);
+      stubScopedLookup(sutRepo, []);
       await expect(
         service.create(
           { title: 'Deploy', systemUnderTest: 'unknown', testEnvironment: 'prod', timestamp: '2024-01-15T10:00:00Z' },
@@ -242,6 +245,51 @@ describe('EventsService', () => {
           ['user'],
         ),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('scopes the lookup to the caller organizations, by UUID as well as by name', async () => {
+      // BOTH arms needed the filter: a caller-supplied uuid is a request-body value, and
+      // can_access_resource's created_by fallback means RLS does not refuse an INSERT
+      // that references another tenant's system.
+      asOrgMember(authzService, ['org-1']);
+      const { predicates } = stubScopedLookup(sutRepo, [{ id: 'sut-1', organization_id: 'org-1' }]);
+      eventRepo.create.mockReturnValue({ ...mockEvent, id: undefined });
+      eventRepo.save.mockResolvedValue(mockEvent);
+      eventRepo.findOne.mockResolvedValue(mockEvent);
+      appDashboardRepo.find.mockResolvedValue([]);
+
+      await service.create(
+        {
+          title: 'Deploy',
+          systemUnderTest: '11111111-2222-3333-4444-555555555555',
+          testEnvironment: 'prod',
+          timestamp: '2024-01-15T10:00:00Z',
+        },
+        'user-1',
+        ['user'],
+      );
+
+      expect(predicates).toEqual([
+        ['sut.id = :key', { key: '11111111-2222-3333-4444-555555555555' }],
+        ['sut.organization_id IN (:...orgIds)', { orgIds: ['org-1'] }],
+      ]);
+    });
+
+    it('refuses for a caller with no organization memberships, without querying', async () => {
+      authzService.isGlobalAdmin.mockReturnValue(false);
+      authzService.getAccessibleOrganizations.mockResolvedValue([]);
+      stubScopedLookup(sutRepo, [{ id: 'sut-1', organization_id: 'org-1' }]);
+
+      await expect(
+        service.create(
+          { title: 'Deploy', systemUnderTest: 'sut-1', testEnvironment: 'prod', timestamp: '2024-01-15T10:00:00Z' },
+          'user-1',
+          ['user'],
+        ),
+      ).rejects.toThrow(NotFoundException);
+      // IN (:...orgIds) on an empty array renders IN (), a syntax error — so the early
+      // return is not a nicety, it is what keeps this from being a 500.
+      expect(sutRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 

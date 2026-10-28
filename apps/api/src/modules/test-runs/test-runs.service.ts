@@ -410,16 +410,16 @@ export class TestRunsService {
     return this.configService.getTestRunConfigs(testRunId, system, environment, workload, userId, roles);
   }
 
-  async addTestRunConfig(configDto: AddTestRunConfigDto): Promise<void> {
-    return this.configService.addTestRunConfig(configDto);
+  async addTestRunConfig(configDto: AddTestRunConfigDto, userId?: string, roles: string[] = []): Promise<void> {
+    return this.configService.addTestRunConfig(configDto, userId, roles);
   }
 
-  async addTestRunConfigs(configsDto: AddTestRunConfigsDto): Promise<void> {
-    return this.configService.addTestRunConfigs(configsDto);
+  async addTestRunConfigs(configsDto: AddTestRunConfigsDto, userId?: string, roles: string[] = []): Promise<void> {
+    return this.configService.addTestRunConfigs(configsDto, userId, roles);
   }
 
-  async addTestRunConfigJson(configJsonDto: AddTestRunConfigJsonDto): Promise<void> {
-    return this.configService.addTestRunConfigJson(configJsonDto);
+  async addTestRunConfigJson(configJsonDto: AddTestRunConfigJsonDto, userId?: string, roles: string[] = []): Promise<void> {
+    return this.configService.addTestRunConfigJson(configJsonDto, userId, roles);
   }
 
   async getLatestConfigKeys(system: string, environment: string, workload: string, userId?: string, roles: string[] = []): Promise<string[]> {
@@ -430,26 +430,26 @@ export class TestRunsService {
     return this.configService.getExpectedConfigChanges(system, environment, workload, userId, roles);
   }
 
-  async createExpectedConfigChange(createDto: CreateExpectedConfigChangeDto, _userId?: string, _roles?: string[]): Promise<ExpectedConfigChangeDto> {
-    return this.configService.createExpectedConfigChange(createDto);
+  async createExpectedConfigChange(createDto: CreateExpectedConfigChangeDto, userId?: string, roles: string[] = []): Promise<ExpectedConfigChangeDto> {
+    return this.configService.createExpectedConfigChange(createDto, userId, roles);
   }
 
-  async deleteExpectedConfigChange(system: string, environment: string, workload: string, configKey: string, _userId?: string, _roles?: string[]): Promise<void> {
-    return this.configService.deleteExpectedConfigChange(system, environment, workload, configKey);
+  async deleteExpectedConfigChange(system: string, environment: string, workload: string, configKey: string, userId?: string, roles: string[] = []): Promise<void> {
+    return this.configService.deleteExpectedConfigChange(system, environment, workload, configKey, userId, roles);
   }
 
   // ========== Sparse Metric Exclusion Methods (delegated to ConfigService) ==========
 
-  async getSparseMetricExclusions(system: string, environment: string, workload: string, _userId?: string, _roles?: string[]): Promise<SparseMetricExclusionDto[]> {
-    return this.configService.getSparseMetricExclusions(system, environment, workload);
+  async getSparseMetricExclusions(system: string, environment: string, workload: string, userId?: string, roles: string[] = []): Promise<SparseMetricExclusionDto[]> {
+    return this.configService.getSparseMetricExclusions(system, environment, workload, userId, roles);
   }
 
-  async createSparseMetricExclusion(createDto: CreateSparseMetricExclusionDto, _userId?: string, _roles?: string[]): Promise<SparseMetricExclusionDto> {
-    return this.configService.createSparseMetricExclusion(createDto);
+  async createSparseMetricExclusion(createDto: CreateSparseMetricExclusionDto, userId?: string, roles: string[] = []): Promise<SparseMetricExclusionDto> {
+    return this.configService.createSparseMetricExclusion(createDto, userId, roles);
   }
 
-  async deleteSparseMetricExclusion(system: string, environment: string, workload: string, dashboardLabel: string, metricName: string, _userId?: string, _roles?: string[]): Promise<void> {
-    return this.configService.deleteSparseMetricExclusion(system, environment, workload, dashboardLabel, metricName);
+  async deleteSparseMetricExclusion(system: string, environment: string, workload: string, dashboardLabel: string, metricName: string, userId?: string, roles: string[] = []): Promise<void> {
+    return this.configService.deleteSparseMetricExclusion(system, environment, workload, dashboardLabel, metricName, userId, roles);
   }
 
   // ========== Anomaly Methods (delegated to AnomalyService) ==========

@@ -21,6 +21,7 @@ import {
 } from '../../../entities';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { AuditService } from '../../audit/audit.service';
+import { stubScopedLookup } from '../../../test/org-scoped-lookup';
 
 describe('TestRunsConfigService — audit invariants (Phase 5a, PR13)', () => {
   let service: TestRunsConfigService;
@@ -98,7 +99,18 @@ describe('TestRunsConfigService — audit invariants (Phase 5a, PR13)', () => {
           },
         },
         { provide: DataSource, useValue: { query: jest.fn() } },
-        { provide: AuthorizationService, useValue: {} },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            // `withOrgFilter` calls isGlobalAdmin first and then
+            // getAccessibleOrganizations, so both have to exist or an incomplete mock
+            // surfaces as a TypeError rather than as an authorization failure. These
+            // tests drive the service as a global admin, so no org predicate is added
+            // and the audit assertions below are unaffected by scoping.
+            isGlobalAdmin: jest.fn().mockReturnValue(true),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+          },
+        },
         {
           provide: AuditService,
           useValue: {
@@ -112,6 +124,9 @@ describe('TestRunsConfigService — audit invariants (Phase 5a, PR13)', () => {
 
     service = module.get(TestRunsConfigService);
     systemRepo = module.get(getRepositoryToken(SystemEntity));
+    // The system is resolved by NAME through a query builder since v0.2.97.39; default
+    // it to "the one system exists" so each case below only stubs what it is about.
+    stubScopedLookup(systemRepo, [{ id: sutId } as SystemEntity]);
     expectedRepo = module.get(getRepositoryToken(ExpectedConfigChange));
     sparseRepo = module.get(getRepositoryToken(SparseMetricExclusion));
     auditService = module.get(AuditService);
@@ -256,7 +271,7 @@ describe('TestRunsConfigService — audit invariants (Phase 5a, PR13)', () => {
 
     it('skips audit log when no row matches the composite key', async () => {
       // re-stub system lookup so the delete branch reaches the findOne audit guard
-      systemRepo.findOne.mockResolvedValueOnce({ id: sutId } as SystemEntity);
+      stubScopedLookup(systemRepo, [{ id: sutId } as SystemEntity]);
       sparseRepo.findOne.mockResolvedValue(null);
       sparseRepo.delete.mockResolvedValue({ affected: 0 } as never);
 
@@ -264,5 +279,153 @@ describe('TestRunsConfigService — audit invariants (Phase 5a, PR13)', () => {
 
       expect(auditService.logDelete).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * `uq_system_under_test_name_org` scopes a system's name PER ORGANIZATION, so eight
+ * sites in this service resolved an ambiguous key with no predicate — and
+ * `deleteExpectedConfigChange` / `deleteSparseMetricExclusion` then DELETE against the
+ * id they got back. These cases pin `resolveSystemIdByName`, which all eight now share.
+ */
+describe('TestRunsConfigService — the system-by-name lookup is org-scoped', () => {
+  // createExpectedConfigChange maps the saved row into a DTO, so the stub needs the
+  // timestamp columns or the method throws before the assertion is reached.
+  const SAVED_ECC = {
+    id: 'ecc-1',
+    system_under_test_id: 'sut-1',
+    test_environment: 'prod',
+    workload: 'loadTest',
+    config_key: 'k',
+    description: null,
+    created_at: new Date('2026-01-01T00:00:00Z'),
+    updated_at: new Date('2026-01-01T00:00:00Z'),
+  };
+
+  let service: TestRunsConfigService;
+  let systemRepo: jest.Mocked<Repository<SystemEntity>>;
+  let expectedRepo: jest.Mocked<Repository<ExpectedConfigChange>>;
+  let authz: { isGlobalAdmin: jest.Mock; getAccessibleOrganizations: jest.Mock };
+
+  beforeEach(async () => {
+    authz = {
+      isGlobalAdmin: jest.fn().mockReturnValue(false),
+      getAccessibleOrganizations: jest.fn().mockResolvedValue(['org-1']),
+    };
+    const module = await Test.createTestingModule({
+      providers: [
+        TestRunsConfigService,
+        { provide: getRepositoryToken(TestRunEntity), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SystemEntity), useValue: { findOne: jest.fn(), createQueryBuilder: jest.fn() } },
+        {
+          provide: getRepositoryToken(ExpectedConfigChange),
+          useValue: { findOne: jest.fn(), create: jest.fn(), save: jest.fn(), delete: jest.fn(), find: jest.fn() },
+        },
+        { provide: getRepositoryToken(TestRunConfigEntity), useValue: { findOne: jest.fn() } },
+        { provide: getRepositoryToken(SparseMetricExclusion), useValue: { findOne: jest.fn() } },
+        { provide: AuthorizationService, useValue: authz },
+        { provide: AuditService, useValue: { logCreate: jest.fn(), logUpdate: jest.fn(), logDelete: jest.fn() } },
+      ],
+    }).compile();
+    service = module.get(TestRunsConfigService);
+    systemRepo = module.get(getRepositoryToken(SystemEntity));
+    expectedRepo = module.get(getRepositoryToken(ExpectedConfigChange));
+    jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    jest.spyOn(Logger.prototype, 'error').mockImplementation();
+  });
+
+  it('puts the caller organizations in the SQL, not just in the filtering', async () => {
+    const { predicates } = stubScopedLookup(systemRepo, [{ id: 'sut-1' } as SystemEntity]);
+    expectedRepo.findOne.mockResolvedValue(null);
+    expectedRepo.create.mockReturnValue({ id: 'ecc-1' } as never);
+    expectedRepo.save.mockResolvedValue(SAVED_ECC as never);
+
+    await service.createExpectedConfigChange(
+      { system: 'Polis', testEnvironment: 'prod', workload: 'loadTest', configKey: 'k' } as never,
+      'user-1',
+      ['user'],
+    );
+
+    // A version that fetched every name match and filtered in JS would satisfy a
+    // result-only assertion while still reading the other tenant's row.
+    expect(predicates).toEqual([
+      ['sut.name = :name', { name: 'Polis' }],
+      ['sut.organization_id IN (:...orgIds)', { orgIds: ['org-1'] }],
+    ]);
+  });
+
+  it('adds no predicate for a global admin', async () => {
+    authz.isGlobalAdmin.mockReturnValue(true);
+    const { predicates } = stubScopedLookup(systemRepo, [{ id: 'sut-1' } as SystemEntity]);
+    expectedRepo.findOne.mockResolvedValue(null);
+    expectedRepo.create.mockReturnValue({ id: 'ecc-1' } as never);
+    expectedRepo.save.mockResolvedValue(SAVED_ECC as never);
+
+    await service.createExpectedConfigChange(
+      { system: 'Polis', testEnvironment: 'prod', workload: 'loadTest', configKey: 'k' } as never,
+      'admin-1',
+      ['perfana-admin'],
+    );
+
+    expect(predicates).toEqual([['sut.name = :name', { name: 'Polis' }]]);
+  });
+
+  it('adds no predicate for a system call with no user, so ingest keeps working', async () => {
+    // `withOrgFilter` does NOT short-circuit on an empty userId — it asks for the
+    // memberships of '' and gets none. Without the explicit arm, every CI pipeline
+    // posting to /api/config would 404.
+    const { predicates } = stubScopedLookup(systemRepo, [{ id: 'sut-1' } as SystemEntity]);
+    expectedRepo.findOne.mockResolvedValue(null);
+    expectedRepo.create.mockReturnValue({ id: 'ecc-1' } as never);
+    expectedRepo.save.mockResolvedValue(SAVED_ECC as never);
+
+    await service.createExpectedConfigChange(
+      { system: 'Polis', testEnvironment: 'prod', workload: 'loadTest', configKey: 'k' } as never,
+    );
+
+    expect(predicates).toEqual([['sut.name = :name', { name: 'Polis' }]]);
+    expect(authz.getAccessibleOrganizations).not.toHaveBeenCalled();
+  });
+
+  it('refuses without querying when the caller has no memberships', async () => {
+    authz.getAccessibleOrganizations.mockResolvedValue([]);
+    stubScopedLookup(systemRepo, [{ id: 'sut-1' } as SystemEntity]);
+
+    await expect(
+      service.createExpectedConfigChange(
+        { system: 'Polis', testEnvironment: 'prod', workload: 'loadTest', configKey: 'k' } as never,
+        'user-1',
+        ['user'],
+      ),
+    ).rejects.toThrow();
+    // `IN (:...orgIds)` on an empty array renders `IN ()`, a syntax error — the early
+    // return is what keeps this a 404 instead of a 500.
+    expect(systemRepo.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('refuses rather than guessing when one name matches two of the caller organizations', async () => {
+    authz.getAccessibleOrganizations.mockResolvedValue(['org-1', 'org-2']);
+    stubScopedLookup(systemRepo, [{ id: 'sut-1' } as SystemEntity, { id: 'sut-2' } as SystemEntity]);
+
+    await expect(
+      service.createExpectedConfigChange(
+        { system: 'Polis', testEnvironment: 'prod', workload: 'loadTest', configKey: 'k' } as never,
+        'user-1',
+        ['user'],
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('scopes the DELETE paths too, which is where an org-blind id was a cross-tenant write', async () => {
+    const { predicates } = stubScopedLookup(systemRepo, [{ id: 'sut-1' } as SystemEntity]);
+    expectedRepo.findOne.mockResolvedValue(null);
+
+    await service.deleteExpectedConfigChange('Polis', 'prod', 'loadTest', 'k', 'user-1', ['user']);
+
+    expect(predicates).toEqual([
+      ['sut.name = :name', { name: 'Polis' }],
+      ['sut.organization_id IN (:...orgIds)', { orgIds: ['org-1'] }],
+    ]);
   });
 });

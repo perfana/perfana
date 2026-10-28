@@ -1,5 +1,6 @@
 import { Controller, Post, Body, Logger, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
 import { AlertsService } from './alerts.service';
 import { GrafanaAlertDto, AlertmanagerPayloadDto } from './dto/alert-webhook.dto';
 
@@ -16,10 +17,10 @@ export class AlertsWebhookController {
   @ApiOperation({ summary: 'Receive Grafana legacy alert notifications (requires API key)' })
   @ApiResponse({ status: 200, description: 'Alert processed' })
   @ApiResponse({ status: 401, description: 'Unauthorized - configure Bearer token in Grafana webhook' })
-  async receiveGrafanaAlert(@Body() dto: GrafanaAlertDto) {
+  async receiveGrafanaAlert(@Body() dto: GrafanaAlertDto, @UserCtx() ctx: UserContext) {
     this.logger.log(`Received Grafana alert: ${dto.ruleName || dto.title || 'unknown'}`);
     try {
-      const result = await this.alertsService.processGrafanaAlert(dto);
+      const result = await this.alertsService.processGrafanaAlert(dto, ctx.userId, ctx.roles);
       return { status: 'ok', ...result };
     } catch (err) {
       this.logger.error(`Error processing Grafana alert: ${err}`);
@@ -32,10 +33,13 @@ export class AlertsWebhookController {
   @ApiOperation({ summary: 'Receive Alertmanager / Grafana unified alerting notifications (requires API key)' })
   @ApiResponse({ status: 200, description: 'Alerts processed' })
   @ApiResponse({ status: 401, description: 'Unauthorized - configure Bearer token in Alertmanager http_config' })
-  async receiveAlertmanagerAlert(@Body() dto: AlertmanagerPayloadDto) {
+  async receiveAlertmanagerAlert(
+    @Body() dto: AlertmanagerPayloadDto,
+    @UserCtx() ctx: UserContext,
+  ) {
     this.logger.log(`Received Alertmanager payload: ${dto.alerts?.length || 0} alerts from ${dto.receiver || 'unknown'}`);
     try {
-      const result = await this.alertsService.processAlertmanagerPayload(dto);
+      const result = await this.alertsService.processAlertmanagerPayload(dto, ctx.userId, ctx.roles);
       return { status: 'ok', ...result };
     } catch (err) {
       this.logger.error(`Error processing Alertmanager payload: ${err}`);

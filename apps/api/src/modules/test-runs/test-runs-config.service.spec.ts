@@ -36,6 +36,7 @@ import { ResourceNotFoundException, ValidationException } from '../../common/exc
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuditService } from '../audit/audit.service';
+import { stubScopedLookup } from '../../test/org-scoped-lookup';
 
 describe('TestRunsConfigService', () => {
   let service: TestRunsConfigService;
@@ -248,7 +249,7 @@ describe('TestRunsConfigService', () => {
     };
 
     it('should add config for existing test run using upsert', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
       mockDataSource.query!.mockResolvedValue([{ id: '1' }]);
 
@@ -266,7 +267,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should store config with string ID when test run does not exist yet', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(null); // Test run doesn't exist
       mockDataSource.query!.mockResolvedValue([{ id: '1' }]);
 
@@ -279,7 +280,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should throw ResourceNotFoundException when system under test not found', async () => {
-      systemRepo.findOne.mockResolvedValue(null);
+      stubScopedLookup(systemRepo, []);
 
       await expect(service.addTestRunConfig(mockConfigDto)).rejects.toThrow(
         ResourceNotFoundException,
@@ -292,7 +293,7 @@ describe('TestRunsConfigService', () => {
         systemUnderTestId: 'different-system-uuid',
       };
 
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(differentSystemTestRun as any);
 
       await expect(service.addTestRunConfig(mockConfigDto)).rejects.toThrow(ValidationException);
@@ -313,7 +314,7 @@ describe('TestRunsConfigService', () => {
     };
 
     it('should add multiple configs for existing test run', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
       mockDataSource.query!.mockResolvedValue([{ id: '1' }, { id: '2' }]);
 
@@ -326,7 +327,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should store configs with string ID when test run does not exist', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(null);
       mockDataSource.query!.mockResolvedValue([]);
 
@@ -339,7 +340,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should throw ResourceNotFoundException when system not found', async () => {
-      systemRepo.findOne.mockResolvedValue(null);
+      stubScopedLookup(systemRepo, []);
 
       await expect(service.addTestRunConfigs(mockConfigsDto)).rejects.toThrow(
         ResourceNotFoundException,
@@ -369,7 +370,7 @@ describe('TestRunsConfigService', () => {
     };
 
     it('should add configs from JSON with include/exclude filtering', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
       mockDataSource.query!.mockResolvedValue([{ id: '1' }]);
 
@@ -382,7 +383,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should throw ResourceNotFoundException when system not found', async () => {
-      systemRepo.findOne.mockResolvedValue(null);
+      stubScopedLookup(systemRepo, []);
 
       await expect(service.addTestRunConfigJson(mockJsonConfigDto)).rejects.toThrow(
         ResourceNotFoundException,
@@ -390,7 +391,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should store configs with string ID when test run does not exist yet', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(null);
       mockDataSource.query!.mockResolvedValue([]);
 
@@ -427,7 +428,7 @@ describe('TestRunsConfigService', () => {
         json: { other: { field: 'value' } },
       };
 
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
 
       await service.addTestRunConfigJson(emptyResultDto);
@@ -491,7 +492,7 @@ describe('TestRunsConfigService', () => {
     };
 
     it('should create new expected config change', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       expectedConfigChangeRepo.findOne.mockResolvedValue(null); // Doesn't exist yet
       expectedConfigChangeRepo.create.mockReturnValue(mockExpectedConfigChange as any);
       expectedConfigChangeRepo.save.mockResolvedValue(mockExpectedConfigChange as any);
@@ -504,7 +505,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should update existing expected config change', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       expectedConfigChangeRepo.findOne.mockResolvedValue(mockExpectedConfigChange as any);
       expectedConfigChangeRepo.save.mockResolvedValue(mockExpectedConfigChange as any);
 
@@ -516,7 +517,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should throw ResourceNotFoundException when system not found', async () => {
-      systemRepo.findOne.mockResolvedValue(null);
+      stubScopedLookup(systemRepo, []);
 
       await expect(service.createExpectedConfigChange(createDto)).rejects.toThrow(
         ResourceNotFoundException,
@@ -526,7 +527,7 @@ describe('TestRunsConfigService', () => {
 
   describe('deleteExpectedConfigChange', () => {
     it('should delete expected config change', async () => {
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       expectedConfigChangeRepo.delete.mockResolvedValue({ affected: 1, raw: [] });
 
       await service.deleteExpectedConfigChange('my-app', 'production', 'load-test', 'jvm.heap.size');
@@ -540,7 +541,7 @@ describe('TestRunsConfigService', () => {
     });
 
     it('should throw ResourceNotFoundException when system not found', async () => {
-      systemRepo.findOne.mockResolvedValue(null);
+      stubScopedLookup(systemRepo, []);
 
       await expect(
         service.deleteExpectedConfigChange('non-existent', 'production', 'load-test', 'key'),
@@ -676,7 +677,7 @@ describe('TestRunsConfigService', () => {
           },
         };
 
-        systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+        stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
         testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
         mockDataSource.query!.mockResolvedValue([]);
 
@@ -704,7 +705,7 @@ describe('TestRunsConfigService', () => {
           },
         };
 
-        systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+        stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
         testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
         mockDataSource.query!.mockResolvedValue([]);
 
@@ -727,7 +728,7 @@ describe('TestRunsConfigService', () => {
           value: 'test-value',
         };
 
-        systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+        stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
         testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
         mockDataSource.query!.mockResolvedValue([]);
 
@@ -748,7 +749,7 @@ describe('TestRunsConfigService', () => {
           value: 'test-value',
         };
 
-        systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+        stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
         testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
         mockDataSource.query!.mockResolvedValue([]);
 
@@ -786,7 +787,7 @@ describe('TestRunsConfigService', () => {
 
     it('should propagate database errors in addTestRunConfig', async () => {
       const dbError = new Error('Database connection failed');
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
       mockDataSource.query!.mockRejectedValue(dbError);
 
@@ -805,7 +806,7 @@ describe('TestRunsConfigService', () => {
 
     it('should propagate database errors in addTestRunConfigs', async () => {
       const dbError = new Error('Database connection failed');
-      systemRepo.findOne.mockResolvedValue(mockSystemUnderTest as any);
+      stubScopedLookup(systemRepo, [mockSystemUnderTest as any]);
       testRunRepo.findOne.mockResolvedValue(mockTestRun as any);
       mockDataSource.query!.mockRejectedValue(dbError);
 

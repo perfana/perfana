@@ -519,9 +519,14 @@ describe('TestRunsService', () => {
         const configDto = { testRunId: 'test-run-id', key: 'setting', value: 'value' };
         mockConfigService.addTestRunConfig!.mockResolvedValue(undefined);
 
-        await service.addTestRunConfig(configDto as any);
+        await service.addTestRunConfig(configDto as any, 'user-1', ['user']);
 
-        expect(mockConfigService.addTestRunConfig).toHaveBeenCalledWith(configDto);
+        // The facade must FORWARD the caller, not swallow it: the config service
+        // resolves its system by name and `uq_system_under_test_name_org` scopes that
+        // name per organization. Four sibling delegations took `_userId`/`_roles` and
+        // discarded them until v0.2.97.39, which is what made the lookups cross-tenant
+        // while the controllers were already passing real context.
+        expect(mockConfigService.addTestRunConfig).toHaveBeenCalledWith(configDto, 'user-1', ['user']);
       });
     });
 

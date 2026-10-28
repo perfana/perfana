@@ -9,6 +9,11 @@ import {
 import { UserContext } from '../../common/decorators/user-context.decorator';
 
 describe('ConfigController', () => {
+  // Every write in this controller resolves its system under test BY NAME, and
+  // `uq_system_under_test_name_org` scopes that name per organization — so the caller's
+  // context has to reach the service. v0.2.97.39 added @UserCtx() for exactly that.
+  const ctx = { userId: 'user-1', roles: ['user'] } as never;
+
   let controller: ConfigController;
   let service: jest.Mocked<TestRunsService>;
 
@@ -144,13 +149,13 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfig(configDto);
+        const result = await controller.addTestRunConfig(configDto, ctx);
 
         // Assert
         expect(result).toEqual({
           message: 'Test run config key value pair added',
         });
-        expect(service.addTestRunConfig).toHaveBeenCalledWith(configDto);
+        expect(service.addTestRunConfig).toHaveBeenCalledWith(configDto, ctx.userId, ctx.roles);
         expect(service.addTestRunConfig).toHaveBeenCalledTimes(1);
       });
 
@@ -168,13 +173,13 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfig(configDto);
+        const result = await controller.addTestRunConfig(configDto, ctx);
 
         // Assert
         expect(result).toEqual({
           message: 'Test run config key value pair added',
         });
-        expect(service.addTestRunConfig).toHaveBeenCalledWith(configDto);
+        expect(service.addTestRunConfig).toHaveBeenCalledWith(configDto, ctx.userId, ctx.roles);
       });
 
       it('should add configuration with boolean value', async () => {
@@ -191,7 +196,7 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfig(configDto);
+        const result = await controller.addTestRunConfig(configDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -213,7 +218,7 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfig(configDto);
+        const result = await controller.addTestRunConfig(configDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -235,7 +240,7 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfig(configDto);
+        const result = await controller.addTestRunConfig(configDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -264,13 +269,13 @@ describe('ConfigController', () => {
         service.addTestRunConfigs.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigs(configsDto);
+        const result = await controller.addTestRunConfigs(configsDto, ctx);
 
         // Assert
         expect(result).toEqual({
           message: 'Test run config key value pairs added',
         });
-        expect(service.addTestRunConfigs).toHaveBeenCalledWith(configsDto);
+        expect(service.addTestRunConfigs).toHaveBeenCalledWith(configsDto, ctx.userId, ctx.roles);
         expect(service.addTestRunConfigs).toHaveBeenCalledTimes(1);
         expect(configsDto.configItems).toHaveLength(3);
       });
@@ -288,7 +293,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigs.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigs(configsDto);
+        const result = await controller.addTestRunConfigs(configsDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -314,7 +319,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigs.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigs(configsDto);
+        const result = await controller.addTestRunConfigs(configsDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -342,7 +347,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigs.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigs(configsDto);
+        const result = await controller.addTestRunConfigs(configsDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -380,13 +385,13 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
           message: 'Test run config json added',
         });
-        expect(service.addTestRunConfigJson).toHaveBeenCalledWith(configJsonDto);
+        expect(service.addTestRunConfigJson).toHaveBeenCalledWith(configJsonDto, ctx.userId, ctx.roles);
         expect(service.addTestRunConfigJson).toHaveBeenCalledTimes(1);
       });
 
@@ -409,7 +414,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -452,7 +457,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -479,7 +484,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -510,7 +515,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -534,7 +539,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -575,7 +580,7 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockRejectedValue(serviceError);
 
         // Act & Assert
-        await expect(controller.addTestRunConfig(configDto)).rejects.toThrow(
+        await expect(controller.addTestRunConfig(configDto, ctx)).rejects.toThrow(
           'Test run not found',
         );
       });
@@ -595,7 +600,7 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockRejectedValue(validationError);
 
         // Act & Assert
-        await expect(controller.addTestRunConfig(configDto)).rejects.toThrow(
+        await expect(controller.addTestRunConfig(configDto, ctx)).rejects.toThrow(
           'Invalid configuration key format',
         );
       });
@@ -619,7 +624,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigs.mockRejectedValue(serviceError);
 
         // Act & Assert
-        await expect(controller.addTestRunConfigs(configsDto)).rejects.toThrow(
+        await expect(controller.addTestRunConfigs(configsDto, ctx)).rejects.toThrow(
           'Database transaction failed',
         );
       });
@@ -642,7 +647,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockRejectedValue(serviceError);
 
         // Act & Assert
-        await expect(controller.addTestRunConfigJson(configJsonDto)).rejects.toThrow(
+        await expect(controller.addTestRunConfigJson(configJsonDto, ctx)).rejects.toThrow(
           'Invalid JSON structure',
         );
       });
@@ -663,7 +668,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockRejectedValue(redosError);
 
         // Act & Assert
-        await expect(controller.addTestRunConfigJson(configJsonDto)).rejects.toThrow(
+        await expect(controller.addTestRunConfigJson(configJsonDto, ctx)).rejects.toThrow(
           'Malicious regex detected',
         );
       });
@@ -738,7 +743,7 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfig(configDto);
+        const result = await controller.addTestRunConfig(configDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -761,7 +766,7 @@ describe('ConfigController', () => {
         service.addTestRunConfig.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfig(configDto);
+        const result = await controller.addTestRunConfig(configDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -787,7 +792,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigs.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigs(configsDto);
+        const result = await controller.addTestRunConfigs(configsDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -817,7 +822,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -844,7 +849,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -889,7 +894,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -918,7 +923,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigs.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigs(configsDto);
+        const result = await controller.addTestRunConfigs(configsDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -945,7 +950,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({
@@ -970,7 +975,7 @@ describe('ConfigController', () => {
         service.addTestRunConfigJson.mockResolvedValue(undefined);
 
         // Act
-        const result = await controller.addTestRunConfigJson(configJsonDto);
+        const result = await controller.addTestRunConfigJson(configJsonDto, ctx);
 
         // Assert
         expect(result).toEqual({

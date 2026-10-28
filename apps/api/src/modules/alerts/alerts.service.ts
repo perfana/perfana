@@ -5,6 +5,8 @@ import { TestRun, SystemUnderTest, AlertTagFilter } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { EventsService } from '../events/events.service';
 import { GrafanaAlertDto, AlertmanagerPayloadDto, AlertmanagerAlert } from './dto/alert-webhook.dto';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { withOrgFilter } from '../../common/utils/with-org-filter';
 
 interface ParsedAlert {
   systemUnderTest: string;
@@ -27,26 +29,35 @@ export class AlertsService {
     @InjectRepository(AlertTagFilter)
     private readonly filterRepo: Repository<AlertTagFilter>,
     private readonly eventsService: EventsService,
+    private readonly authzService: AuthorizationService,
   ) {}
 
   /**
    * Process a Grafana legacy alert webhook payload.
    */
-  async processGrafanaAlert(dto: GrafanaAlertDto): Promise<{ processed: number; matched: number }> {
+  async processGrafanaAlert(
+    dto: GrafanaAlertDto,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<{ processed: number; matched: number }> {
     const parsed = this.parseGrafanaLegacy(dto);
     if (!parsed) {
       this.logger.warn('Grafana alert missing system_under_test or test_environment tags, skipping');
       return { processed: 1, matched: 0 };
     }
 
-    const matched = await this.processAlert(parsed, 'grafana');
+    const matched = await this.processAlert(parsed, 'grafana', userId, roles);
     return { processed: 1, matched };
   }
 
   /**
    * Process an Alertmanager / Grafana unified alerting webhook payload.
    */
-  async processAlertmanagerPayload(dto: AlertmanagerPayloadDto): Promise<{ processed: number; matched: number }> {
+  async processAlertmanagerPayload(
+    dto: AlertmanagerPayloadDto,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<{ processed: number; matched: number }> {
     let totalMatched = 0;
 
     for (const alert of dto.alerts) {
@@ -58,7 +69,7 @@ export class AlertsService {
         continue;
       }
 
-      const matched = await this.processAlert(parsed, 'alertmanager');
+      const matched = await this.processAlert(parsed, 'alertmanager', userId, roles);
       totalMatched += matched;
     }
 
@@ -123,11 +134,47 @@ export class AlertsService {
   /**
    * Core alert processing: find running test runs, apply filters, create events, check abort.
    */
-  private async processAlert(parsed: ParsedAlert, source: string): Promise<number> {
-    // 1. Resolve system under test
-    const sut = await withRequestEm(this.sutRepo).findOne({ where: { name: parsed.systemUnderTest } });
+  private async processAlert(
+    parsed: ParsedAlert,
+    source: string,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<number> {
+    // 1. Resolve system under test, within the caller's organizations.
+    //
+    // This is the sharpest of the name-resolution sites: the matched runs reach
+    // `checkAbortConditions` below, which can ABORT a running test. The webhook is
+    // API-key authenticated, and `getAccessibleOrganizations` carries the api-key
+    // carve-out (a key's organization lives on `api_keys`, and keys frequently have no
+    // `organization_members` row), so this resolves to exactly the key's own tenant.
+    //
+    // `uq_system_under_test_name_org` scopes the name per organization, so unscoped,
+    // one tenant's Grafana or Alertmanager could abort another tenant's run by naming
+    // its system. On an RLS-enabled deploy the lookup was already scoped — but
+    // `DB_ENABLE_RLS_ROLE` defaults to 'false' and is set in none of the shipped
+    // compose files, so that was never the control.
+    // Explicit system-call arm: `withOrgFilter` does not short-circuit on an empty
+    // userId, it asks for the memberships of `''` and gets none. See
+    // `resolveSystemIdByName` in test-runs-config.service.ts.
+    const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
+    if (orgIds !== null && orgIds.length === 0) {
+      this.logger.warn(
+        `Alert for "${parsed.systemUnderTest}" dropped: caller has no organization memberships`,
+      );
+      return 0;
+    }
+
+    const sutQuery = withRequestEm(this.sutRepo)
+      .createQueryBuilder('sut')
+      .where('sut.name = :name', { name: parsed.systemUnderTest });
+    if (orgIds !== null) {
+      sutQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
+    }
+    const sut = await sutQuery.getOne();
     if (!sut) {
-      this.logger.warn(`No system under test found for name "${parsed.systemUnderTest}"`);
+      this.logger.warn(
+        `No system under test found for name "${parsed.systemUnderTest}"${orgIds !== null ? ' in the caller\'s organizations' : ''}`,
+      );
       return 0;
     }
 
