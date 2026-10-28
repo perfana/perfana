@@ -51,9 +51,7 @@ export async function resolveGrafanaInstanceByLabel(
   if (matches.length > 1) {
     logger.error(
       `Grafana label '${label}' matches ${matches.length}+ instances${
-        organizationId
-          ? ` in organization ${organizationId}`
-          : ' and no organization was supplied'
+        organizationId ? ` in organization ${organizationId}` : ' and no organization was supplied'
       } — refusing to guess. Give the instances distinct labels, or pass the organization.`,
     );
     return null;

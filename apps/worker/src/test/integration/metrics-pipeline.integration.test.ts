@@ -27,6 +27,7 @@ vi.mock('../../config/grafana-config-cache.js', () => ({
     token: 'test-token',
     timeout: 30000
   })),
+  hasUsableGrafanaForRun: vi.fn(async () => true),
   tryGetGrafanaConfig: vi.fn(async () => ({
     url: 'http://localhost:3000',
     token: 'test-token',

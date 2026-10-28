@@ -51,7 +51,12 @@ export class DashboardFinderService {
     label: string,
     organizationId?: string | null,
   ): Promise<GrafanaInstance | null> {
-    return resolveGrafanaInstanceByLabel(this.grafanaInstanceRepo, this.logger, label, organizationId);
+    return resolveGrafanaInstanceByLabel(
+      this.grafanaInstanceRepo,
+      this.logger,
+      label,
+      organizationId,
+    );
   }
 
   async findGrafanaDashboardOrNull(

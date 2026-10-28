@@ -108,6 +108,9 @@ describe('MetricsPipeline', () => {
     });
     // Default: Grafana is configured. The soft-skip test (issue #282) overrides
     // this to null per-test.
+    // The stage gate is per-RUN since v0.2.97.39 (hasUsableGrafanaForRun) rather than
+    // the global oldest-instance singleton, so that is what these tests drive.
+    vi.mocked(grafanaConfigCache.hasUsableGrafanaForRun).mockResolvedValue(true);
     vi.mocked(grafanaConfigCache.tryGetGrafanaConfig).mockResolvedValue({
       url: 'http://grafana.test',
       apiKey: 'test-api-key',
@@ -250,25 +253,43 @@ describe('MetricsPipeline', () => {
     });
   });
 
-  describe('Soft-skip when no Grafana configured (issue #282)', () => {
-    test('returns success with skipped marker and does not query Grafana or DB', async () => {
-      vi.mocked(grafanaConfigCache.tryGetGrafanaConfig).mockResolvedValueOnce(null);
+  describe('Soft-skip when this run has no usable Grafana (issue #282)', () => {
+    // The gate moved BELOW the test-run load in v0.2.97.39, because it is now asked per
+    // run (`hasUsableGrafanaForRun`) rather than against the oldest `grafana_instances`
+    // row in the whole table. So the run must be stubbed, and "does not touch DB" is no
+    // longer the invariant — "does no PANEL or Grafana work" is.
+    test('returns success with skipped marker and does no panel or Grafana work', async () => {
+      mockDb.getTestRunByTestRunId.mockResolvedValueOnce({
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        testRunId: 'test-run-no-grafana',
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'prod',
+        workload: 'loadTest',
+      } as never);
+      vi.mocked(grafanaConfigCache.hasUsableGrafanaForRun).mockResolvedValueOnce(false);
 
       const result = await pipeline.execute({ testRunId: 'test-run-no-grafana' });
 
       expect(result.success).toBe(true);
       expect((result.data as any)?.skipped).toBe('no-grafana-configured');
 
-      // Must short-circuit before client init, panel load, and Grafana queries
-      // — otherwise downstream stages get aborted on stacks with no Grafana.
       expect(grafanaConfigCache.getGrafanaConfig).not.toHaveBeenCalled();
-      expect(mockDb.getTestRunByTestRunId).not.toHaveBeenCalled();
       expect(mockDb.getDsPanelsByTestRun).not.toHaveBeenCalled();
       expect(mockGrafanaClient.queryPanelData).not.toHaveBeenCalled();
     });
 
-    test('still fails (returns error result) when Grafana row is invalid', async () => {
-      vi.mocked(grafanaConfigCache.tryGetGrafanaConfig).mockRejectedValueOnce(
+    test('fails the stage when the gate itself throws', async () => {
+      // A database error resolving the run's instances must not read as "no Grafana" —
+      // that would record the run as analysed with no metrics. hasUsableGrafanaForRun
+      // returns true on a lookup error for the same reason; a throw past that is real.
+      mockDb.getTestRunByTestRunId.mockResolvedValueOnce({
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        testRunId: 'test-run-invalid-grafana',
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'prod',
+        workload: 'loadTest',
+      } as never);
+      vi.mocked(grafanaConfigCache.hasUsableGrafanaForRun).mockRejectedValueOnce(
         new Error('Grafana config not available. A grafana_instances row exists but is invalid')
       );
 

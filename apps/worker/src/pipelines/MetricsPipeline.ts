@@ -1,7 +1,7 @@
 import { EntityManager } from 'typeorm';
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult, PanelDocument, PanelMetricsDocument } from '../types/pipeline.js';
-import { getGrafanaInstanceId, tryGetGrafanaConfig } from '../config/grafana-config-cache.js';
+import { getGrafanaInstanceId, hasUsableGrafanaForRun } from '../config/grafana-config-cache.js';
 import { groupPanelsByGrafanaInstance } from '../config/grafana-client-factory.js';
 
 /**
@@ -47,18 +47,6 @@ export class MetricsPipeline extends BasePipelineTypeORM {
 
       this.logger.info(`🔷 Starting metrics collection for test run: ${testRunId}`);
 
-      // Soft-skip when no Grafana instance is configured. Grafana is documented
-      // as an optional metric source — without one there is nothing to collect,
-      // but downstream stages must still run. See issue #282.
-      const grafanaConfig = await tryGetGrafanaConfig();
-      if (!grafanaConfig) {
-        this.logger.info('No Grafana instance configured — skipping metrics-collection');
-        return this.createSuccessResult({
-          testRunId,
-          skipped: 'no-grafana-configured',
-        }, Date.now() - startTime);
-      }
-
       // No cleanupStaleApplicationDashboards(['ds_metrics']) here: with no test_run_id
       // predicate it was a DML-decompressing DELETE over the whole hypertable on every
       // analyze — ~3 min of I/O and then a swallowed failure (see BasePipelineTypeORM).
@@ -68,6 +56,21 @@ export class MetricsPipeline extends BasePipelineTypeORM {
 
       if (!testRun) {
         throw new Error(`Test run not found: ${testRunId}`);
+      }
+
+      // Soft-skip when THIS RUN has no reachable Grafana. Grafana is documented as an
+      // optional metric source — without one there is nothing to collect, but
+      // downstream stages must still run. See issue #282.
+      //
+      // Asked per run rather than through `tryGetGrafanaConfig()`, which resolved the
+      // oldest row in the WHOLE TABLE — so one misconfigured legacy instance failed
+      // this stage for every run in the deployment. See hasUsableGrafanaForRun.
+      if (!(await hasUsableGrafanaForRun(testRun))) {
+        this.logger.info('No usable Grafana instance for this run — skipping metrics-collection');
+        return this.createSuccessResult({
+          testRunId,
+          skipped: 'no-grafana-configured',
+        }, Date.now() - startTime);
       }
 
       // Load panels (if not provided)

@@ -1616,3 +1616,77 @@ parts differ.
 
 Rule 6 above applies here unchanged — this is the fourth of the four JWT
 verifiers that do not check `aud`.
+
+## The first-row class: a key that is only unique per organization
+
+Six groups of org-blind lookups were closed in v0.2.97.39, before a second organization
+existed in production. They shared one shape — a `findOne`, `[0]`, `take: 1` or
+`LIMIT 1` on a key that is unique **per organization**, not globally — and the class is
+closed in code rather than prevented, so this is the reference for the next one.
+
+**The three keys that are not what they look like:**
+
+| Key | Actually unique on | Consequence of resolving it bare |
+|---|---|---|
+| `grafana_instances.label` | **nothing** — no unique constraint at all | another org's `server_url` **and API key** |
+| `systems_under_test.name` | `uq_system_under_test_name_org` → `(name, organization_id)` | writes and deletes against another tenant's system |
+| `application_dashboards.metrics_source_id` | nothing — one source backs many dashboards | authorizing against a row the query does not read |
+
+Duplicate Grafana labels across organizations are not an edge case, they are **required**:
+one auto-config profile configures several tenants by naming the same label in each. So
+"make the label unique" is not available without a per-org index.
+
+**Five rules, each of which something got wrong:**
+
+1. **`withOrgFilter` does NOT short-circuit on an empty `userId`.** It calls
+   `isGlobalAdmin(roles)` and then `getAccessibleOrganizations('')`, which answers with
+   an empty list — so a resolver that just forwards `userId ?? ''` resolves *nothing* for
+   every system call. Ingest reaches `/api/config` with no user context; without an
+   explicit `userId ? … : null` arm, every CI pipeline 404s. `resolveOrgFilter` in
+   `report-data-fetcher.service.ts` has this arm built in and `withOrgFilter` does not —
+   that asymmetry is the trap. Pin it with a test: it is the arm that breaks ingest rather
+   than security, so nothing else will notice.
+2. **Grep for `_userId` and `_roles` before concluding a service cannot see the caller.**
+   Four delegations in `test-runs.service.ts` **took** the context and discarded it,
+   underscore-prefixed so the unused-parameter lint was satisfied, while the controllers
+   were already passing `ctx.userId` and `ctx.roles`. The lookups were cross-tenant with
+   the fix's own plumbing already in place.
+3. **Refuse on ambiguity; do not pick.** Every resolver added here asks for **two** rows
+   (`take(2)`) rather than using `getOne()`, because `getOne()` hides the ambiguity behind
+   the same arbitrary pick the resolver exists to remove — and then every "it refuses"
+   test passes vacuously. A single match still resolves without an organization, which is
+   what keeps single-org deploys working unchanged.
+4. **Authorize the row the query READS, not one resolved beside it.**
+   `getDistinctMetricNames` checked an arbitrary dashboard resolved from the metrics
+   source while filtering on the caller's `applicationDashboardId`. Where a read spans
+   several owned rows — filtering `ds_metrics` on `metrics_source_id` crosses dashboards —
+   **all** of them have to be accessible (`validateSourceAccess`), not one.
+5. **Assert on the emitted predicate, not just the returned row.** A version that fetched
+   every match and filtered in JS satisfies a result-only assertion while still reading
+   the other tenant's rows out of the database. `stubScopedLookup`
+   (`src/test/org-scoped-lookup.ts`) captures the `where`/`andWhere` calls for exactly
+   this; the grafana-sync twin is `stubGrafanaInstanceLookup` in `test/helpers.ts`.
+
+**One failure mode is the inverse of a leak and is easy to misread.**
+`systems-under-test.service.ts` `findByName` authorizes *after* resolving, so unscoped it
+picked an arbitrary row and the membership check then rejected it — the caller's own
+system read as **missing** while plainly existing. A bug report of "my system disappeared"
+is a symptom of this class, not an argument against it. The membership and team checks
+below the scoped query are kept as defence in depth, and because
+`isOrganizationMember` carries the api-key carve-out that `getAccessibleOrganizations`
+resolves differently.
+
+**Two things outside this file.** `getDefaultTeam()` had no organization predicate and its
+result is stamped on every auto-created system under test, so RLS then denied the owning
+organization access to a system its own CI created — the fix takes the organization both
+callers already hold. And the worker's `tryGetGrafanaConfig()` is the oldest row in the
+**whole table** and throws on a bad one, so one misconfigured legacy instance failed
+`PanelsPipeline` and `MetricsPipeline` for *every* run in the deployment; the gate is now
+`hasUsableGrafanaForRun`, a count over the run's own dashboards' instances. That gate
+returns **true** on a lookup error on purpose — a transient database fault must not read
+as "this run has no Grafana", which would record the run as analysed with no panels.
+
+What is **not** closed: nothing stops the seventh site. The lint rule that would close the
+class, and the two unique indexes (`grafana_instances(organization_id, label)`,
+`dynatrace_queries(application_dashboard_id, label)`) that would make most of it
+unrepresentable, are filed in TODOS.md.
