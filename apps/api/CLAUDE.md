@@ -1573,12 +1573,46 @@ gateway, `WebSocketAuthGuard`, `job-progress.gateway`); tightening it needs a
 realm mapper first and all four moved together. Filed in TODOS.md. A first pass
 at v0.2.97.37 changed two of the four and would have shipped that outage.
 
-Two things this section does **not** cover. `WebSocketAuthGuard` is dead code —
+One thing this section does **not** cover: `WebSocketAuthGuard` is dead code —
 nothing references it in a `@UseGuards`, authentication lives in the gateway's
 own `afterInit` middleware — but it is a near-copy of the gateway's verifier, so
 an edit to one does not reach the other; it is kept consistent and filed for
-deletion. And `modules/data-science/gateways/job-progress.gateway.ts` has **no
-tenant isolation at all**: `handleSubscribeToScope` joins any scope room for any
-authenticated caller with no organization comparison, and `handleConnection`
-puts `getAllActiveJobs()` — every tenant's — into the connect acknowledgment.
-That is a separate P1 in TODOS.md, not fixed by v0.2.97.37.
+deletion.
+
+### The job-progress gateway is the same shape, and had none of it
+
+`modules/data-science/gateways/job-progress.gateway.ts` had **no tenant
+isolation at all** until v0.2.97.38 — not a weak check, the absence of one on
+three paths. It now mirrors the rules above; what is worth knowing is which
+parts differ.
+
+- **The ownership lookup is the system under test, not the run.** A scope room is
+  `job:scope:{systemUnderTestId}:{testEnvironment}:{workload}`, so
+  `mayReadSystemUnderTest` reads `systems_under_test.organization_id`. It denies
+  on a non-uuid id **before** issuing the statement: the id is bound as a uuid,
+  so a non-uuid would make the query throw rather than return no rows, and
+  `systems_under_test` has no non-uuid key a caller could legitimately be using
+  here (the web client sends `test_runs.system_under_test_id`).
+- **These rooms carry live traffic**, unlike the test-run room rule 5 is about:
+  `job:progress`, `job:completed`, `job:failed`, `job:stuck` and `job:blocked`
+  are all emitted to them. Joining one IS the read.
+- **The connect acknowledgment's job list was dropped, not scoped.** It carried
+  `getAllActiveJobs()` — every tenant's — for every authenticated socket, and
+  `JobProgress` names the test run, system, environment and workload, so that
+  was run-identifying detail rather than metadata. Nothing in the repo ever read
+  the field: the only client (`apps/web/hooks/useJobProgress.ts`) subscribes and
+  reads `activeJob` off the `subscribe:scope` ack, which is authorized. Admins
+  keep the whole picture through the `job:all` room they already join. **Do not
+  re-add it "scoped"** — there is no caller to serve.
+- **`query:job` answers on the job's own scope**, and a job in another
+  organization answers identically to a job that does not exist (`progress:
+  null` both ways), so it cannot be used to probe for job ids.
+- **The same leak exists over REST.** `GET /api/data/jobs/active` returns every
+  active job across all scopes and is `@AdminOnly()` as of the same version (an
+  API key with an admin role still reaches it — `isAdmin` checks roles, not auth
+  type). The per-scope route beside it is live for every user, so it needs the
+  organization check rather than a role gate; it and `jobs/:jobId/progress` are
+  filed in TODOS.md.
+
+Rule 6 above applies here unchanged — this is the fourth of the four JWT
+verifiers that do not check `aud`.

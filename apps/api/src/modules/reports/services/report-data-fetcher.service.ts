@@ -3087,6 +3087,19 @@ export class ReportDataFetcherService {
       params.push([...labels]);
       scopeFilter += ` AND s.dashboard_label = ANY($${params.length})`;
     }
+    // `baselineRunId` is arbitrary caller-supplied section config — only the CURRENT run id
+    // was ever access-checked. Without this, a member of org A could preview a Comparisons
+    // section naming a guessed run id from org B and read back that run's dashboard labels,
+    // panel titles, metric names and mean/q90/q95/q99. The sibling transactions branch above
+    // is the model: inner-join `test_runs` and append the org clause. The join is free —
+    // `test_runs.test_run_id` is unique, so the planner does not fan rows out.
+    // ponytail: the org filter is the fix; this read stays on `this.dataSource` rather than
+    // `withRequestEm(this.testRunRepo)` like its siblings, because the API's login role is
+    // `rolbypassrls` so RLS adds nothing today and the switch costs ~18 spec rewirings.
+    // Move it when `DB_ENABLE_RLS_ROLE` becomes the default.
+    const orgFilter = await this.resolveOrgFilter(
+      opts.userId ?? '', opts.roles ?? [], params.length + 1, 'tr');
+    params.push(...orgFilter.params);
     const rows: Array<{
       test_run_id: string;
       dashboard_label: string | null;
@@ -3101,8 +3114,9 @@ export class ReportDataFetcherService {
     }> = await this.dataSource.query(
       `SELECT s.test_run_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name, s.unit, s.mean, s.q90, s.q95, s.q99
        FROM ds_metric_statistics s
+       JOIN test_runs tr ON tr.test_run_id = s.test_run_id
        LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
-       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.source_type = $2)${scopeFilter}`,
+       WHERE s.test_run_id = ANY($1) AND (s.metrics_source_id IS NULL OR ms.source_type = $2)${scopeFilter}${orgFilter.clause}`,
       params,
     );
     if (rows.length === 0) return null;

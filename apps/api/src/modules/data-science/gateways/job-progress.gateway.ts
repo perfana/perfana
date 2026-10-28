@@ -11,12 +11,15 @@ import {
 import { Server } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { JobProgress, JobCompletedEvent, JobFailedEvent, JobStuckEvent, JobBlockedInfo } from '@perfana/shared/types';
 import { AuthenticatedSocket } from '../../test-runs/guards/websocket-auth.guard';
 import { ApiKeysService } from '../../api-keys/api-keys.service';
 import { JobProgressService } from '../services/job-progress.service';
+import { AuthorizationService } from '../../../common/services/authorization.service';
 
 /**
  * WebSocket Gateway for Job Progress real-time updates
@@ -40,7 +43,11 @@ import { JobProgressService } from '../services/job-progress.service';
  * - job:scope:{systemUnderTestId}:{testEnvironment}:{workload} - Scope-specific updates
  * - job:all - All job updates (admin monitoring)
  *
- * Authentication is handled by WebSocketAuthGuard at the connection level
+ * Authentication is handled by the middleware in afterInit. AUTHORIZATION is per
+ * subscription: a scope room is only joined when the caller is a member of the
+ * system under test's organization, mirroring TestRunsGateway's `subscribe:test-run`
+ * (v0.2.97.37). Everything here fails closed — an unknown SUT, a NULL organization,
+ * a non-uuid id and any error in either lookup all deny.
  */
 @WebSocketGateway({
   namespace: '/job-progress',
@@ -63,6 +70,8 @@ export class JobProgressGateway
     private readonly configService: ConfigService,
     private readonly apiKeysService: ApiKeysService,
     private readonly jobProgressService: JobProgressService,
+    private readonly authzService: AuthorizationService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -207,14 +216,18 @@ export class JobProgressGateway
       this.logger.log(`Client ${client.id} joined room: ${globalRoom} (admin)`);
     }
 
-    // Send connection acknowledgment with current active jobs
-    const activeJobs = await this.jobProgressService.getAllActiveJobs();
+    // The acknowledgment used to carry `getAllActiveJobs()` — EVERY tenant's active
+    // jobs, unconditionally, to every authenticated socket. `JobProgress` names the
+    // test run, system, environment and workload, so that was run-identifying detail
+    // and not just metadata. Nothing in the repo ever read the field: the only client
+    // (`apps/web/hooks/useJobProgress.ts`) subscribes and reads `activeJob` off the
+    // `subscribe:scope` ack, which is authorized. So it is dropped rather than scoped.
+    // Admins keep the whole picture through the `job:all` room joined above.
     client.emit('connected', {
       message: 'Successfully connected to job-progress updates',
       userId: client.userId,
       authType: client.authType,
       rooms: Array.from(client.rooms),
-      activeJobs: activeJobs,
     });
 
     this.logger.log(
@@ -245,6 +258,15 @@ export class JobProgressGateway
     if (!data?.systemUnderTestId || !data?.testEnvironment || !data?.workload) {
       this.logger.warn(`⚠️ Invalid subscribe:scope request - missing required fields`);
       return { success: false, error: 'systemUnderTestId, testEnvironment, and workload are required' };
+    }
+
+    // The room carries live `job:progress` / `job:completed` / `job:failed` /
+    // `job:stuck` / `job:blocked` traffic for the scope, so joining it IS the read.
+    if (!this.isAdmin(client) && !(await this.mayReadSystemUnderTest(client, data.systemUnderTestId))) {
+      this.logger.warn(
+        `⛔ Client ${client.id} (user: ${client.userId}) refused subscribe:scope for system ${data.systemUnderTestId}`,
+      );
+      return { success: false, error: 'Not authorized for this scope' };
     }
 
     const room = this.getScopeRoom(data.systemUnderTestId, data.testEnvironment, data.workload);
@@ -289,7 +311,7 @@ export class JobProgressGateway
    */
   @SubscribeMessage('query:job')
   async handleQueryJob(
-    @ConnectedSocket() _client: AuthenticatedSocket,
+    @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { jobId: string },
   ) {
     if (!data?.jobId) {
@@ -297,6 +319,17 @@ export class JobProgressGateway
     }
 
     const progress = await this.jobProgressService.getJobProgress(data.jobId);
+    // A job id is guessable and the progress names its run and system, so the answer is
+    // gated on the job's OWN scope rather than on anything the caller sent. A job that
+    // does not exist and a job the caller may not see are the same answer, deliberately:
+    // `progress: null` either way, so this cannot be used to probe for job ids.
+    if (
+      progress &&
+      !this.isAdmin(client) &&
+      !(await this.mayReadSystemUnderTest(client, progress.systemUnderTestId))
+    ) {
+      return { success: true, jobId: data.jobId, progress: null };
+    }
     return {
       success: true,
       jobId: data.jobId,
@@ -403,6 +436,75 @@ export class JobProgressGateway
 
       this.logger.log(`Emitted job:blocked for ${requestedTestRunId} to ${scopeRoom}`);
     }
+  }
+
+  /**
+   * Organization ids this socket's identity is actually a member of.
+   *
+   * Delegates to AuthorizationService for the same three reasons TestRunsGateway
+   * does: it is the authority the HTTP side authorizes on, so the two cannot drift;
+   * it is Redis-cached with explicit invalidation; and it carries the `api-key:`
+   * carve-out a raw `organization_members` query misses.
+   *
+   * Do NOT key a decision on `client.organizationId` instead — that is an unverified
+   * Keycloak claim, and reading it as permission is the v0.2.97.37 defect. Every
+   * caller fails closed, because an error resolves to an empty list.
+   */
+  private async resolveAccessibleOrganizationIds(userId: string): Promise<string[]> {
+    try {
+      return await this.authzService.getAccessibleOrganizations(userId);
+    } catch (error) {
+      this.logger.error(
+        `Failed to resolve organization membership for ${userId}: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Whether this socket may observe a system under test's jobs.
+   *
+   * Fails closed on every uncertainty: a socket with no userId, a non-uuid id, an
+   * unknown system, a system whose organization_id is NULL, a caller with no
+   * membership rows, and any error in either lookup all deny. Admins are handled by
+   * the caller, as in TestRunsGateway.mayReadTestRun.
+   */
+  private async mayReadSystemUnderTest(
+    client: AuthenticatedSocket,
+    systemUnderTestId: string,
+  ): Promise<boolean> {
+    if (!client.userId) {
+      return false;
+    }
+
+    // The id reaches SQL as a uuid parameter, so a non-uuid would make the statement
+    // throw rather than return no rows. Deny on the shape instead: `systems_under_test`
+    // has no non-uuid key a caller could legitimately be using here — the web client
+    // sends `test_runs.system_under_test_id`.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(systemUnderTestId)) {
+      return false;
+    }
+
+    let organizationId: string | null | undefined;
+    try {
+      const rows = await this.dataSource.query<{ organization_id: string | null }[]>(
+        `SELECT organization_id FROM systems_under_test WHERE id = $1::uuid LIMIT 1`,
+        [systemUnderTestId],
+      );
+      organizationId = rows[0]?.organization_id;
+    } catch (error) {
+      this.logger.error(
+        `Failed to verify system under test access: ${error && typeof error === 'object' && 'message' in error ? (error as Error).message : 'Unknown error'}`,
+      );
+      return false;
+    }
+
+    if (!organizationId) {
+      return false;
+    }
+
+    const accessibleOrgIds = await this.resolveAccessibleOrganizationIds(client.userId);
+    return accessibleOrgIds.includes(organizationId);
   }
 
   /**

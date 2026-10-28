@@ -10,7 +10,12 @@ const WINDOW_ROW = [{
   start_time: '2026-01-01T10:00:00.000Z', ramp_up: '60',
   end_time: '2026-01-01T11:00:00.000Z', ramp_down: '60',
 }];
-const authzStub = {} as any;
+// These tests pass `userId: 'u'` to mean "a real caller, not the background job", and
+// they are about PAIRING, not about scoping — so the shared stub answers as a global
+// admin and `resolveOrgFilter` contributes no clause and no params, keeping every
+// `$n` assertion below stable. The org filter on the statistics read is pinned in the
+// tenant-isolation describe at the bottom of this file.
+const authzStub = { isGlobalAdmin: () => true } as any;
 const dataSourceStub = {} as any;
 
 describe('ReportDataFetcherService.getBaselineRunComparison', () => {
@@ -400,7 +405,7 @@ describe('ReportDataFetcherService.getBaselineRunComparison — the row carries 
   const makeSvc = (rows: unknown[]) =>
     new ReportDataFetcherService(
       {} as any,
-      {} as any,
+      authzStub,
       { query: jest.fn().mockResolvedValue(rows) } as any,
     );
 
@@ -445,5 +450,93 @@ describe('ReportDataFetcherService.getBaselineRunComparison — the row carries 
       { metrics: ['avg'], userId: '', roles: [] });
     expect(data!.rows[0]!.panelId).toBeUndefined();
     expect(data!.rows[0]!.panelTitle).toBeUndefined();
+  });
+});
+
+/**
+ * `baselineTestRunId` is arbitrary caller-supplied section config, and only the CURRENT
+ * run id is access-checked before this point. So the statistics read has to carry the
+ * org filter itself — otherwise a member of org A can preview or generate a Comparisons
+ * section naming a guessed run id from org B and read back that run's dashboard labels,
+ * panel titles, metric names and mean/q90/q95/q99 values.
+ *
+ * The clause lives on `test_runs`, so the JOIN is what makes it reachable: drop the join
+ * and the SQL does not compile, drop the clause and nothing fails. Both are asserted.
+ */
+describe('ReportDataFetcherService.getBaselineRunComparison — the statistics read is org-scoped', () => {
+  const STATS = [
+    { test_run_id: 'cur', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 3, metric_name: 'used', mean: 110, q95: 220, q99: 300, unit: 'bytes' },
+    { test_run_id: 'base', dashboard_label: 'JVM', panel_title: 'Heap', panel_id: 3, metric_name: 'used', mean: 100, q95: 200, q99: 250, unit: 'bytes' },
+  ];
+
+  const svcFor = (orgs: string[] | 'admin') => {
+    const dataSource = { query: jest.fn().mockResolvedValue(STATS) };
+    const authz = {
+      isGlobalAdmin: () => orgs === 'admin',
+      getAccessibleOrganizations: jest.fn().mockResolvedValue(orgs === 'admin' ? [] : orgs),
+    } as any;
+    return { svc: new ReportDataFetcherService(repoStub, authz, dataSource as any), dataSource };
+  };
+
+  it('appends the org clause and params for a real user', async () => {
+    const { svc, dataSource } = svcFor(['org-1', 'org-2']);
+
+    await svc.getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: [] });
+
+    const [sql, params] = dataSource.query.mock.calls[0]!;
+    expect(sql).toContain('JOIN test_runs tr ON tr.test_run_id = s.test_run_id');
+    expect(sql).toContain('AND tr.organization_id IN ($3, $4)');
+    expect(params.slice(2)).toEqual(['org-1', 'org-2']);
+  });
+
+  it('places the org params AFTER the dashboard-scope param, so neither $n collides', async () => {
+    // scopeFilter pushes its label array first and numbers itself off params.length;
+    // the org filter has to start one past that or the two read each other's values.
+    const { svc, dataSource } = svcFor(['org-1']);
+
+    await svc.getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: [], selections: [{ dashboardLabel: 'JVM', panelId: 3 }] });
+
+    const [sql, params] = dataSource.query.mock.calls[0]!;
+    expect(sql).toContain('s.dashboard_label = ANY($3)');
+    expect(sql).toContain('AND tr.organization_id IN ($4)');
+    expect(params[2]).toEqual(['JVM']);
+    expect(params[3]).toBe('org-1');
+  });
+
+  it('refuses everything for a user with no memberships, rather than falling open', async () => {
+    const { svc, dataSource } = svcFor([]);
+
+    await svc.getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: [] });
+
+    const [sql] = dataSource.query.mock.calls[0]!;
+    expect(sql).toContain('AND FALSE');
+  });
+
+  it('adds no clause for a global admin', async () => {
+    const { svc, dataSource } = svcFor('admin');
+
+    await svc.getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: ['perfana-admin'] });
+
+    const [sql, params] = dataSource.query.mock.calls[0]!;
+    expect(sql).not.toContain('organization_id');
+    expect(params).toHaveLength(2);
+  });
+
+  it('adds no clause for the background report job (empty userId), which has no user context', async () => {
+    // The fetcher's system-call convention: report HTML generation runs with no user.
+    // Breaking this makes every scheduled report render empty.
+    const { svc, dataSource } = svcFor(['org-1']);
+
+    const data = await svc.getBaselineRunComparison('cur', 'base', 'grafana',
+      { metrics: ['avg'], userId: '', roles: [] });
+
+    const [sql, params] = dataSource.query.mock.calls[0]!;
+    expect(sql).not.toContain('organization_id');
+    expect(params).toHaveLength(2);
+    expect(data!.rows).toHaveLength(1);
   });
 });

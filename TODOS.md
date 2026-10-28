@@ -2483,29 +2483,6 @@ that sorts or dedupes points by time would silently relabel runs.
 lay out categories without going through `Date`.
 **Where:** `graphs-renderer.ts` (`renderTrendPresetCharts`, `renderChart`).
 
-### A Comparisons section reads another organization's run through the statistics path
-
-**Priority:** P1
-**Origin:** pre-landing review during /ship on `chore/misc-improvements` (2026-08-30).
-Pre-existing — present on `main` at two sites before that release, which only added a comment in
-the function.
-**Why:** `getBaselineRunComparisonFromStatistics` issues `this.dataSource.query` on the plain
-pooled connection. That is neither org-filtered nor under RLS — the API's login role is
-`rolbypassrls`, so the policies do not apply to it — and `opts.userId` / `opts.roles` are never
-consulted on this branch. `config.baselineTestRunId` is arbitrary caller-supplied JSON, and only
-the CURRENT run id is access-checked. A member of org A can preview or generate a Comparisons
-section with `source: 'grafana'` and a guessed `test_run_id` from org B and read back that run's
-dashboard labels, panel titles, metric names and mean/q90/q95/q99 values. The sibling
-performance-metrics branch ~100 lines above is the model for how it should look: it resolves an
-org filter and runs through `withRequestEm`.
-**What:** mirror the transactions branch — `resolveOrgFilter(opts.userId ?? '', opts.roles ?? [],
-params.length + 1, 'tr')`, join `test_runs tr ON tr.test_run_id = s.test_run_id`, append
-`orgFilter.clause`, and issue it via `withRequestEm(this.testRunRepo).query(...)` so RLS is in
-force too. Wants its own branch and its own review: it is auth-sensitive query construction, and
-the empty-userId system-call convention has to keep working for background report generation.
-**Where:** `apps/api/src/modules/reports/services/report-data-fetcher.service.ts` (the two
-`ds_metric_statistics` reads, ~line 2595 and ~line 2972).
-
 ### An SLO-passing predecessor lookup scans the whole scope when nothing ever passed
 
 **Priority:** P4
@@ -3597,21 +3574,31 @@ Do not do 2 without 1, and do not do either one verifier at a time.
 
 **Effort:** M (realm + rollout), S (the collapse)
 
-### job-progress.gateway has no tenant isolation at all
+### Two job-progress REST routes still answer on a caller-supplied id
 
-**Priority:** P1
-**Origin:** read while fixing v0.2.97.37's `subscribe:test-run`, expecting the same claim-gated check. It is not the same shape — it is the absence of one. Verified against the file, not inferred.
+**Priority:** P2
+**Origin:** v0.2.97.38, closing the gateway's three holes. These are the same shape over REST and
+were deliberately left out of a branch that was already two unrelated fixes wide.
 
-**Why:** `apps/api/src/modules/data-science/gateways/job-progress.gateway.ts` authorizes nothing beyond "is authenticated". Two separate paths, either one sufficient:
+**Why:** `GET /api/data/jobs/active/:systemId/:env/:workload` and `GET /api/data/jobs/:jobId/progress`
+(`modules/data-science/controllers/data-science.controller.ts`) authorize nothing beyond "is
+authenticated", exactly as `subscribe:scope` and `query:job` did. The all-scopes sibling
+`GET /api/data/jobs/active` was closed with `@AdminOnly()` in the same version because no client
+calls it; **these two cannot take that fix.** `apps/web/hooks/useJobProgress.ts:156` calls the
+per-scope route on every mount for every user, so a role gate would break the UI for non-admins.
 
-1. **`handleSubscribeToScope` (`:239`) joins any scope room for any caller.** It validates that the three fields are present and then calls `client.join(room)` — no organization comparison, claim-gated or otherwise, and no admin branch. It then returns `getActiveJobForScope(systemUnderTestId, testEnvironment, workload)` for whatever ids the caller sent. The room goes on to receive `job:progress`, `job:completed`, `job:failed`, `job:stuck` and `job:blocked` for that scope (`:322`-`:402`), so unlike the test-run room this fix was about, these rooms carry live traffic.
-2. **`handleConnection` (`:211`) sends every tenant's active jobs in the connect acknowledgment.** `getAllActiveJobs()` is called unconditionally and its result goes into the `connected` payload for every authenticated socket, admin or not. No subscribe is needed to receive it, and the only thing the `isAdmin` check above it gates is the `job:all` room.
+**What to do:** the per-scope route needs `mayReadSystemUnderTest`'s check — resolve the caller's
+memberships, read `systems_under_test.organization_id`, require membership, fail closed on a
+non-uuid id / unknown system / NULL org / error. The by-job route needs the same thing keyed on the
+progress record's own `systemUnderTestId`, and should answer identically for "no such job" and "not
+yours" so it cannot be used to probe ids. The controller already injects `AuthorizationService` and
+`DataSource`, so the parts are there.
 
-The claim-gated comparison I expected to find — the v0.2.97.37 defect — is not here because there is no comparison. `client.organizationId` is set at `:482` and then read nowhere.
-
-**What to do:** mirror the v0.2.97.37 shape. Resolve the caller's memberships through `AuthorizationService.getAccessibleOrganizations`, look up the `systemUnderTestId`'s organization, and require it to be among them before joining — fail closed on an unknown SUT, a NULL organization and a failed lookup. Scope the connect acknowledgment's `getAllActiveJobs()` to those organizations, or drop it from the payload and let the client subscribe. Then copy the gateway spec across; it is the same set of cases.
-
-Size the impact before deciding how fast: what `job:progress` and `job:completed` actually carry (a job id and a scope, or run-identifying detail) decides whether this is a metadata leak or more.
+**The reason it is not a 20-line copy:** `JobProgressGateway.mayReadSystemUnderTest` would then
+exist in two places with the uuid guard, the fail-closed branches and the error logging duplicated
+— which is the shape that drifts. Extract it (a small `SystemUnderTestAccessService` in
+`common/services/`, or a method on `AuthorizationService` beside `canAccessResource`) and point the
+gateway at it in the same change, or the next fix to either copy only lands in one.
 
 **Effort:** M
 
@@ -3653,6 +3640,48 @@ It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that 
 **Effort:** S
 
 ## Completed
+
+### job-progress.gateway had no tenant isolation at all
+
+**Shipped in v0.2.97.38.** All three paths closed. `subscribe:scope` resolves the caller's
+memberships through `AuthorizationService.getAccessibleOrganizations`, reads the system under
+test's `organization_id` and requires membership, failing closed on a non-uuid id (denied before
+the statement is issued, since the id is bound as a uuid), an unknown system, a NULL organization,
+an empty membership list and any error in either lookup. `query:job` is gated on the job's own
+scope and answers a job in another organization identically to one that does not exist.
+
+Two decisions worth keeping: **the connect acknowledgment's `getAllActiveJobs()` was dropped
+rather than scoped** — nothing in the repo ever read the field, the only client subscribes and
+reads `activeJob` off the authorized `subscribe:scope` ack, and admins keep the whole picture
+through the `job:all` room they already join. And the impact question this item asked to size
+first was answered by the type: `JobProgress` carries `testRunId`, `systemUnderTestId`,
+`testEnvironment` and `workload`, so it was run-identifying detail, not metadata.
+
+`job-progress.gateway.spec.ts` is new — the gateway had no spec. 13 cases, mutation-verified
+(6 fail on reverting the membership comparison or restoring the job list). The REST siblings are
+still open, as "Two job-progress REST routes still answer on a caller-supplied id" above.
+
+### A Comparisons section reads another organization's run through the statistics path
+
+**Shipped in v0.2.97.38.** `getBaselineRunComparisonFromStatistics` inner-joins `test_runs` and
+carries `resolveOrgFilter`'s clause, mirroring the sibling transactions branch ~100 lines above.
+The background report job's empty-userId convention still bypasses the filter and a spec case
+pins it, alongside the `$n` ordering (the dashboard-scope param is pushed first, so the org params
+have to start one past it) and the `AND FALSE` arm for a user with no memberships.
+
+The read deliberately stays on `this.dataSource` rather than `withRequestEm(this.testRunRepo)`
+like its siblings: the API's login role is `rolbypassrls`, so RLS adds nothing today, and the
+switch costs ~18 spec rewirings. Marked with a `ponytail:` comment naming the condition that
+would change it (`DB_ENABLE_RLS_ROLE` becoming the default).
+
+Two sites checked and NOT changed, recorded so the next reader does not re-derive it:
+`getMetricTrends` reads the same table on caller-supplied `testRunIds`, but both call sites
+(`graphs-renderer.ts`, `trends-renderer.ts`) derive those ids from `getTrendRunWindow` /
+`getTrendsData`, which are org-scoped — so it is not reachable today, only shaped to be misused.
+`resolveTrendWindowStart` reads one `start_time` for a caller-pinned run id unfiltered; it leaks a
+single timestamp used as a window floor, and threading `userId`/`roles` through it is the fix if
+it is ever worth doing. The other seven raw `dataSource.query` sites in the file all key on the
+run the report is for, which the caller is already authorized for.
 
 ### `follow-redirects` can leak the Grafana/Dynatrace token on a cross-origin redirect
 
