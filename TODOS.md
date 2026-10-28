@@ -3475,19 +3475,6 @@ Shipping a prebuilt LGPL-3.0 shared library inside a proprietary distributed con
 **Effort:** S (engineering) once the licensing answer exists
 **Depends on:** a decision from whoever owns licensing
 
-### `follow-redirects` can leak the Grafana/Dynatrace token on a cross-origin redirect
-
-**Priority:** P1
-**Origin:** the same v0.2.97.35 review, triaging the 18 high advisories that bump left behind. This is the one with a live credential path and an in-range fix.
-
-**Why:** `node_modules/follow-redirects` sits at 1.16.0, which `npm audit` reports as the exact vulnerable version for two advisories: array-form headers bypassing cross-origin credential stripping, and `sensitiveHeaders` regex escaping exposing credential headers. Its sole dependent is `axios` (`"follow-redirects": "^1.16.0"`), and api, worker and grafana-sync all reach Grafana and Dynatrace through axios with `Authorization` headers across five importing files. A hostile, compromised or merely misconfigured endpoint answering with a cross-origin 30x can therefore receive the stored credential.
-
-Unlike the ten puppeteer-chain highs (unreachable: `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true` at `Dockerfile:478` means `@puppeteer/browsers` never runs the `extract-zip`/`basic-ftp`/`proxy-agent` download path), and unlike `source-map-js` (build-time), `probe-image-size` (browser bundle) and `@modelcontextprotocol/sdk` (`apps/mcp`, which no Dockerfile stage copies), this one is on a live outbound authenticated request path.
-
-**What to do:** `npm update follow-redirects` — the fix is inside axios's existing `^1.16.0` range, so no `package.json` change and a one-line lockfile delta. `ip-address` (three SSRF/trust-boundary misclassification advisories) and `body-parser` are likewise `fixAvailable: true` and in range; worth the same small PR. `multer` 2.4.0 is **not** cheap: its `fixAvailable` points at `@nestjs/platform-express` 11.1.1 while the vulnerable range starts at 11.1.2, so it is a flagged downgrade, and the root `overrides` pins `multer: ^2.4.0` — at the top of the vulnerable range.
-
-**Effort:** S
-
 ### The `deps` Dockerfile stage is built on every image build and consumed by nothing
 
 **Priority:** P3
@@ -3498,6 +3485,52 @@ Unlike the ten puppeteer-chain highs (unreachable: `PUPPETEER_SKIP_CHROMIUM_DOWN
 **What to do:** delete the stage. Modernising its flag to `--omit=dev` treats the symptom of a stage that should not exist.
 
 **Effort:** S
+
+### The advisories that are left all need a major, and the biggest number is the least reachable
+
+**Priority:** P2
+**Origin:** the v0.2.97.36 in-range sweep (2026-10-28), which cleared everything fixable without a manifest change and left exactly this.
+
+**State after that sweep.** Production: **12 high, 3 moderate, 0 critical** (15 total). Dev included: **4 critical, 15 high, 10 moderate, 9 low** (38 total). Verified: `npm audit` reports **zero** advisories with `fixAvailable: true` and zero with no fix at all, so every one of the 38 needs a semver-major bump. None of it is a lockfile refresh.
+
+| group | advisories | target | reachable here? |
+|---|---|---|---|
+| puppeteer chain | 9 high | `puppeteer@25.16.0` | **No.** `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true` (`Dockerfile:478`) with `PUPPETEER_EXECUTABLE_PATH` pointed at the apk chromium means `@puppeteer/browsers` never runs the download path that `extract-zip`, `basic-ftp`, `get-uri`, `proxy-agent` and `pac-proxy-agent` all hang off. `chromium-bidi` -> `zod` needs the BiDi transport and puppeteer defaults to CDP, so that path is dead too — but the `zod` high is still counted in its own row below, because first-party code reaches zod directly. |
+| vitest toolchain | 4 critical, 1 high | `vitest@5.0.5` | Dev only, but it executes in CI with repo credentials. `tinypool` is prototype-pollution-to-RCE; `vitest`/`@vitest/ui` are arbitrary file read and execute when the UI server listens, plus a `@vitest/mocker` path traversal. Scope is **one** workspace: `vitest`, `@vitest/ui` and `@vitest/coverage-v8` are declared only by `apps/worker` (98 test files; the suite reports 78 passed + 5 skipped). `packages/shared` runs jest, so its 509 tests are not in scope. vitest majors do move mocking and config APIs. |
+| express/multer | 2 high | `@nestjs/platform-express@12.3.2` | `multer` yes — three live `FileInterceptor` endpoints (`jtl-upload.controller.ts:38`, `sut-transfer.controller.ts:99` at a 500 MB limit, `awr-reports.controller.ts:151`). Authenticated DoS via a pending async `fileFilter` after request teardown. The fix is clean, if major: the vulnerable range is bounded (`10.4.18 - 10.4.22 || 11.1.2 - 12.2.x`) and `fixAvailable` points at **12.3.2**, above it. What blocks a transitive-only fix is the root `overrides` pin of `multer: ^2.4.0`, which sits at the top of multer's own vulnerable range and has to move with it. |
+| zod | 1 high | `zod@4.6.7` | **No 3.x fix exists**, and the scope is four workspaces, not one: `packages/shared` `^3.22.0`, `apps/web` `^3.25.76` (the binding floor, which puts the hoisted copy at 3.25.76), `apps/worker` `^3.22.4`, `apps/mcp` `^3.22.4`, with eight first-party importing files. Memory exhaustion while validating oversized constrained collections. Reachable through first-party code, independently of `chromium-bidi`'s nested copy — which is why it is counted here and not in the puppeteer row. |
+| csv-parse, dockerode/uuid | 3 moderate | `csv-parse@7.0.3`, `dockerode@5.0.1` | `csv-parse` is already tracked in the Snyk item above; `dockerode` carries `uuid` with it. |
+
+**Why the order is not by count.** The puppeteer bump clears nine of the twelve production highs for one version change, which makes it look like the obvious first move. It is the lowest-value one here: those nine are unreachable in this deployment. The two that actually buy something are the vitest chain (CI credential exposure, four criticals) and `multer` (a reachable authenticated DoS on three upload endpoints) — and both are the expensive ones.
+
+**What to do:** take them one major at a time, each as its own PR with its own gate run. Suggested order: vitest 5 (clears all four remaining criticals), then platform-express/multer, then puppeteer and zod whenever convenient. Do **not** batch them; a failed vitest migration should not block a security bump.
+
+**Effort:** M (vitest — one workspace, 98 files), M (platform-express + the multer override), S (puppeteer), L (zod — four workspaces, eight importing files)
+
+### `API_BODY_LIMIT`'s documented default is a fifth of the real one
+
+**Priority:** P3
+**Origin:** the v0.2.97.36 adversarial pass (2026-10-28), surfaced while tracing whether `body-parser` 2.4.0 changed request-size handling. It did not — the limit is enforced by `raw-body` 3.0.2, which has not moved — but the trace walked into this.
+
+**Why:** `apps/api/src/main.ts:42` reads `const bodyLimit = process.env.API_BODY_LIMIT || '10mb';` while `CLAUDE.md:124` documents the default as `2mb`. A deploy that leaves the variable unset and trusts the documentation is accepting **five times** the body size it thinks it is, on `app.useBodyParser('json')` and `('urlencoded')` — so the unauthenticated request-size ceiling is 5x the documented one.
+
+**What to do:** pick one. Either correct `CLAUDE.md:124` to `10mb`, or lower `main.ts:42` to `'2mb'` and confirm the report-section preview payload still fits (that payload is why the limit was raised above Express's 100 kB in the first place, so check before tightening).
+
+**Effort:** S
+
+### The image build audits production dependencies only, so nothing guards the dev tree
+
+**Priority:** P2
+**Origin:** noticed while reading the v0.2.97.35 Snyk job, which printed `45 vulnerabilities (16 moderate, 24 high, 5 critical)` where the release notes had said 18 high and 0 critical.
+
+**Why:** both numbers were right and they are different populations. `Dockerfile:159` runs `npm audit --audit-level=critical --production`, so it audits only what ships in the image — correct for an image gate. The consequence is that **no gate anywhere looks at development dependencies**: at that moment the tree held 5 criticals, all in the vitest toolchain, and every build was green. Snyk does see them but is monitor-only and warn-not-fail (`|| echo "::warning::"` in `docker-build.yml`), so it cannot stop anything either.
+
+Dev dependencies execute in CI with credentials that can push images. A prototype-pollution RCE in `tinypool` or a path traversal in `vitest` is a supply-chain path, not a test-only inconvenience, and "dev" is not a severity ceiling.
+
+**What to do:** add a CI step that fails on critical dev advisories. It will go red immediately on the four vitest criticals, so it needs either an allowlist with expiry dates or the vitest 5 bump first — which is the argument for doing vitest 5 ahead of the other majors. Keep it in CI rather than in the Dockerfile: the image gate's production scope is right for the image.
+
+**Effort:** S (the step), gated on the vitest work above
+**Depends on:** vitest 5, or an allowlist
 
 ## Documentation
 
@@ -3546,6 +3579,22 @@ Unlike the ten puppeteer-chain highs (unreachable: `PUPPETEER_SKIP_CHROMIUM_DOWN
 **Effort:** M
 
 ## Completed
+
+### `follow-redirects` can leak the Grafana/Dynatrace token on a cross-origin redirect
+
+**Completed:** v0.2.97.36 (2026-10-28) — `follow-redirects` 1.16.0 -> 1.16.2 via an in-range `npm update`, exactly as this item predicted: no `package.json` change, a one-line lockfile delta. The two advisories it carried are gone from the production tree.
+
+**Priority:** P1
+**Origin:** the same v0.2.97.35 review, triaging the 18 high advisories that bump left behind. This is the one with a live credential path and an in-range fix.
+
+**Why:** `node_modules/follow-redirects` sits at 1.16.0, which `npm audit` reports as the exact vulnerable version for two advisories: array-form headers bypassing cross-origin credential stripping, and `sensitiveHeaders` regex escaping exposing credential headers. Its sole dependent is `axios` (`"follow-redirects": "^1.16.0"`), and api, worker and grafana-sync all reach Grafana and Dynatrace through axios with `Authorization` headers across five importing files. A hostile, compromised or merely misconfigured endpoint answering with a cross-origin 30x can therefore receive the stored credential.
+
+Unlike the ten puppeteer-chain highs (unreachable: `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true` at `Dockerfile:478` means `@puppeteer/browsers` never runs the `extract-zip`/`basic-ftp`/`proxy-agent` download path), and unlike `source-map-js` (build-time), `probe-image-size` (browser bundle) and `@modelcontextprotocol/sdk` (`apps/mcp`, which no Dockerfile stage copies), this one is on a live outbound authenticated request path.
+
+**What to do:** `npm update follow-redirects` — the fix is inside axios's existing `^1.16.0` range, so no `package.json` change and a one-line lockfile delta. `ip-address` (three SSRF/trust-boundary misclassification advisories) and `body-parser` are likewise `fixAvailable: true` and in range; worth the same small PR. `multer` 2.4.0 is **not** cheap: its `fixAvailable` points at `@nestjs/platform-express` 11.1.1 while the vulnerable range starts at 11.1.2, so it is a flagged downgrade, and the root `overrides` pins `multer: ^2.4.0` — at the top of the vulnerable range.
+
+**Effort:** S
+
 
 ### `findDashboardByLabel` matches a label across every system and environment
 
