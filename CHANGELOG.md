@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.38] - 2026-10-28
+
+### Fixed
+- **The job-progress gateway had no tenant isolation at all, and a Comparisons report section could read another organization's test run.** Two unrelated cross-tenant reads, both closed. Neither was a weak check — each was the absence of one.
+
+  **`job-progress.gateway.ts` authorized nothing beyond "is authenticated", on three paths.** `subscribe:scope` validated that the three scope fields were present and then joined the room, with no organization comparison and no admin branch, and returned that scope's active job for whatever ids the caller sent — and unlike the test-run room v0.2.97.37 was about, these rooms carry live traffic: `job:progress`, `job:completed`, `job:failed`, `job:stuck` and `job:blocked`. `handleConnection` put `getAllActiveJobs()` — **every tenant's** — into the connect acknowledgment for every authenticated socket, admin or not, with no subscribe needed to receive it. `query:job` answered on a caller-supplied job id with no check. `client.organizationId` was set and then read nowhere.
+
+  Subscribing now resolves the caller's memberships through `AuthorizationService.getAccessibleOrganizations`, looks up the system under test's organization and requires it to be among them, failing closed on a non-uuid id, an unknown system, a NULL organization, an empty membership list and any error in either lookup. `query:job` is gated on the job's **own** scope, and a job in another organization answers exactly like a job that does not exist — `progress: null` either way, so it cannot be used to probe for ids. The connect acknowledgment's job list is **dropped rather than scoped**: nothing in the repo ever read it (the only client, `apps/web/hooks/useJobProgress.ts`, subscribes and reads `activeJob` off the authorized `subscribe:scope` ack), and admins keep the whole picture through the `job:all` room they already join.
+
+  **`GET /api/data/jobs/active` is the same leak over REST and is now `@AdminOnly()`.** It returns every active job across all scopes, so across all tenants; no client in the repo calls it. An API key carrying an admin role still reaches it — `isAdmin` checks roles, not auth type. The per-scope route below it is live for every user and needs the organization check instead, not a role gate; that and `jobs/:jobId/progress` are filed in TODOS.md.
+
+  **`report-data-fetcher.service.ts`'s baseline-comparison statistics read was neither org-filtered nor under RLS.** `baselineTestRunId` is arbitrary caller-supplied section config and only the *current* run id is access-checked, so a member of org A could preview or generate a Comparisons section with a guessed run id from org B and read back that run's dashboard labels, panel titles, metric names and mean/q90/q95/q99 values. It now inner-joins `test_runs` and carries the org clause, exactly like the sibling transactions branch ~100 lines above. The background report job (empty `userId`) still bypasses the filter — that convention is what makes scheduled reports render at all, and a spec case pins it. The read stays on the plain pooled connection rather than `withRequestEm`, because the API's login role is `rolbypassrls` so RLS adds nothing today; marked at the call site with the condition that would change it.
+
+  Both fixes are mutation-verified: reverting either makes the new specs fail (6 of 13 in the new gateway spec, 3 of 5 in the new report describe). `job-progress.gateway.spec.ts` is new — the gateway had no spec.
+
 ## [0.2.97.37] - 2026-10-28
 
 ### Fixed

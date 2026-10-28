@@ -698,10 +698,17 @@ export class DataScienceController {
   }
 
   @Get('jobs/active')
+  // Across ALL scopes, so across all tenants — the same leak the job-progress gateway's
+  // connect acknowledgment carried until v0.2.97.38, and `JobProgress` names the test run,
+  // system, environment and workload. No client in the repo calls this route; it exists for
+  // admin monitoring, so it is gated rather than org-filtered. The per-scope route below is
+  // live for every user and needs the org check instead — see TODOS.md.
+  @AdminOnly()
   @ApiOperation({
     summary: 'Get all active jobs',
-    description: 'Returns all jobs currently in progress across all scopes'
+    description: 'Returns all jobs currently in progress across all scopes. Admin only.'
   })
+  @ApiResponse({ status: 403, description: 'Caller is not a Perfana admin' })
   @ApiResponse({
     status: 200,
     description: 'List of active jobs retrieved successfully',
