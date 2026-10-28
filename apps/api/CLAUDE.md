@@ -1499,3 +1499,86 @@ helper itself has `packages/shared/src/database/__tests__/run-window.spec.ts`, w
 rules a reader is most likely to "tidy": the hour of padding, that a toggle with no ramp
 configured still bounds, that `spanBounds` gives up entirely when a run has no start, and that
 `timeBoundsSql` emits no predicate rather than a `<= NULL` that would match nothing.
+
+## The realtime gateway earns its rooms, and its ownership comes from the run
+
+`modules/test-runs/gateways/test-runs.gateway.ts` serves **every tenant on one
+Socket.IO namespace** (`/test-runs`). There is no RLS backstop on a socket and
+no per-connection database role, so the room set a connection holds *is* the
+authorization boundary. Six rules, each of which something got wrong before
+v0.2.97.37.
+
+**1. Nothing may reach a server-wide emit.** The old code broadcast an event it
+could not target, commented as *"This ensures non-admin users receive events
+when org/team info is not available"* — which is true and is also the leak. An
+event with no resolvable user, organization or team now goes to the `global`
+admin room only and is logged at ERROR naming the caller to repair. There is no
+`server.emit` in the file; keep it that way.
+
+**2. The organization comes from the test run, not from the request.**
+`UserCtx.organizationId` is filled only from an API key or
+`request.user.organizations`, and `keycloak-enhanced-auth.guard.ts` never
+populates the latter, so it is `undefined` for every ordinary Keycloak login.
+Nine of the fourteen emit call sites pass `undefined` for the organization
+unconditionally. Routing on the caller's organization alone is therefore not a
+stricter version of rule 1 — it is a silent outage for same-organization
+colleagues. `organizationId` and `teamId` travel on the event payload, from the
+entity's own ownership columns, and `targetRoomsFor` falls back to them.
+
+Two seams that make this easy to half-do:
+
+- There are **two** `TestRun` interfaces in this module —
+  `types/test-run.types.ts`, which the mappers return, and the one in
+  `test-runs.service.ts`, which the event payload is typed against. A field has
+  to be on both or the mappers do not compile. (Same trap as `apps/web`'s local
+  `ReportSectionType` registry.)
+- There are **four** entity-to-API mappers, not one: the shared
+  `handlers/entity-mapper.ts` plus private copies in `create-test-run.handler`,
+  `update-test-run.handler` and `services/test-runs-mapper.service`
+  (`test-runs-mutation.service`'s delegates to the shared one). A copy that
+  omits the fields compiles, passes, and silently loses the fallback for its own
+  call sites.
+
+**3. A fallback inside `emitTestRunEvent` alone is dead code.** All four
+`emitTestRunCreated`/`Updated`/`Deleted`/`StatusChanged` helpers pre-resolve
+rooms and hand the result over as an explicit, non-empty list, which skips that
+method's own fallback. Every one of them — and `emitTestRunEvent` itself — goes
+through `targetRoomsFor`. The first version of the fix put the fallback only in
+`emitTestRunEvent`; a test caught it, nothing else would have.
+
+**4. A JWT claim may narrow the room set, never widen it.** `handleConnection`
+used to union the unverified `organization_id` claim into the rooms it joined,
+and joined the `team_id` claim with no check at all. Membership is resolved
+through `AuthorizationService.getAccessibleOrganizations` — the same authority
+the HTTP side authorizes on, Redis-cached with explicit invalidation, and
+carrying the `api-key:` carve-out that a raw `organization_members` query
+misses, since a key's organization lives on `api_keys` and keys frequently have
+no membership row. A claim outside that set is logged at WARN and dropped; a
+`team_id` is honoured only when `teams.organization_id` is in the set. Do not
+"optimise" this back into a union to save the `teams` lookup.
+
+**5. `subscribe:test-run` fails closed on every uncertainty.** Unknown run, run
+with a NULL `organization_id`, caller with no memberships, either lookup
+throwing — all deny. The run lookup branches on whether the id is a uuid rather
+than using `WHERE id::text = $1 OR test_run_id = $1`: that cast makes the PK arm
+non-indexable and sends the OR to a sequential scan with a per-row cast, on a
+path that now decides access and must not be the thing that times out.
+
+**6. No audience check, deliberately.** The browser authenticates against the
+`perfana-web` client, so its token's `aud` never contains `KEYCLOAK_CLIENT_ID`
+(`perfana-api`), and the shipped realm defines no audience mapper. Enforcing it
+rejects every browser connection — and silently, because the throw lands in a
+debug-level catch. Four verifiers hold this position (`KeycloakJwtService`, this
+gateway, `WebSocketAuthGuard`, `job-progress.gateway`); tightening it needs a
+realm mapper first and all four moved together. Filed in TODOS.md. A first pass
+at v0.2.97.37 changed two of the four and would have shipped that outage.
+
+Two things this section does **not** cover. `WebSocketAuthGuard` is dead code —
+nothing references it in a `@UseGuards`, authentication lives in the gateway's
+own `afterInit` middleware — but it is a near-copy of the gateway's verifier, so
+an edit to one does not reach the other; it is kept consistent and filed for
+deletion. And `modules/data-science/gateways/job-progress.gateway.ts` has **no
+tenant isolation at all**: `handleSubscribeToScope` joins any scope room for any
+authenticated caller with no organization comparison, and `handleConnection`
+puts `getAllActiveJobs()` — every tenant's — into the connect acknowledgment.
+That is a separate P1 in TODOS.md, not fixed by v0.2.97.37.

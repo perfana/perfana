@@ -3578,6 +3578,80 @@ Dev dependencies execute in CI with credentials that can push images. A prototyp
 
 **Effort:** M
 
+## Realtime WebSocket gateway
+
+### Four Keycloak JWT verifiers, none of them checking audience, and no one place to change it
+
+**Priority:** P2
+**Origin:** the v0.2.97.37 tenant-isolation fix (2026-10-28), whose first pass added an audience check to two of the four and would have taken realtime updates out for every logged-in user.
+
+**Why:** the repo verifies Keycloak tokens in four independent places, each with its own copy of the issuer list, clock tolerance and options object: `apps/api/src/modules/auth/keycloak-jwt.service.ts` (the REST path), `modules/test-runs/gateways/test-runs.gateway.ts`, `modules/test-runs/guards/websocket-auth.guard.ts` and `modules/data-science/gateways/job-progress.gateway.ts`. None validates `aud`, and all four now say why in a comment — but a comment per file is four places to drift, and the first version of v0.2.97.37 changed two of them without touching the other two, which is exactly the shape that produces a half-migrated realm.
+
+The reason none of them can check it today is a realm fact, not an oversight: the browser authenticates against the `perfana-web` client, so its token's `aud` never contains `KEYCLOAK_CLIENT_ID` (`perfana-api`), and the shipped realm defines no audience mapper. Enforcing it rejects every browser connection, and silently — in all four the throw lands in a debug-level catch, so the symptom is "realtime stopped working" with nothing in the log at WARN or above.
+
+**What to do:** two steps, in order and separable.
+1. Add a dedicated audience mapper to the shipped `perfana-prod` realm export so a `perfana-web` token carries `perfana-api` in `aud`, and document the upgrade for existing deploys (an existing realm has to be edited; a token minted before the mapper exists keeps working until it expires).
+2. Collapse the four verifiers onto `KeycloakJwtService` — the gateways cannot use the HTTP guard, but they can inject the service — and turn the check on there once. One file, one option, one test.
+
+Do not do 2 without 1, and do not do either one verifier at a time.
+
+**Effort:** M (realm + rollout), S (the collapse)
+
+### job-progress.gateway has no tenant isolation at all
+
+**Priority:** P1
+**Origin:** read while fixing v0.2.97.37's `subscribe:test-run`, expecting the same claim-gated check. It is not the same shape — it is the absence of one. Verified against the file, not inferred.
+
+**Why:** `apps/api/src/modules/data-science/gateways/job-progress.gateway.ts` authorizes nothing beyond "is authenticated". Two separate paths, either one sufficient:
+
+1. **`handleSubscribeToScope` (`:239`) joins any scope room for any caller.** It validates that the three fields are present and then calls `client.join(room)` — no organization comparison, claim-gated or otherwise, and no admin branch. It then returns `getActiveJobForScope(systemUnderTestId, testEnvironment, workload)` for whatever ids the caller sent. The room goes on to receive `job:progress`, `job:completed`, `job:failed`, `job:stuck` and `job:blocked` for that scope (`:322`-`:402`), so unlike the test-run room this fix was about, these rooms carry live traffic.
+2. **`handleConnection` (`:211`) sends every tenant's active jobs in the connect acknowledgment.** `getAllActiveJobs()` is called unconditionally and its result goes into the `connected` payload for every authenticated socket, admin or not. No subscribe is needed to receive it, and the only thing the `isAdmin` check above it gates is the `job:all` room.
+
+The claim-gated comparison I expected to find — the v0.2.97.37 defect — is not here because there is no comparison. `client.organizationId` is set at `:482` and then read nowhere.
+
+**What to do:** mirror the v0.2.97.37 shape. Resolve the caller's memberships through `AuthorizationService.getAccessibleOrganizations`, look up the `systemUnderTestId`'s organization, and require it to be among them before joining — fail closed on an unknown SUT, a NULL organization and a failed lookup. Scope the connect acknowledgment's `getAllActiveJobs()` to those organizations, or drop it from the payload and let the client subscribe. Then copy the gateway spec across; it is the same set of cases.
+
+Size the impact before deciding how fast: what `job:progress` and `job:completed` actually carry (a job id and a scope, or run-identifying detail) decides whether this is a metadata leak or more.
+
+**Effort:** M
+
+### A DELETED realtime event cannot name its organization, so it only ever reaches admins
+
+**Priority:** P3
+**Origin:** v0.2.97.37, which made unresolved targeting admin-only instead of a broadcast and left this one caller unable to resolve.
+
+**Why:** `TestRunDeletedEvent` carries `testRunId` and `id` but no `testRun`, so the ownership fallback v0.2.97.37 added has nothing to read. `realtime.service.ts:332` (`broadcastTestRunDeleted`) passes `undefined` for user, organization and team, because its input is a Redis message that does not carry them. Delivery is therefore the global admin room only, logged at ERROR — correct and deliberate, but it means a non-admin's test run list does not update itself when a run is deleted on another instance.
+
+Note `delete-test-run.handler.ts:328` is a separate caller and may well have the organization to hand; check it before assuming both are affected.
+
+**What to do:** put `organizationId` (and `teamId`) on the Redis payload that `broadcastTestRunDeleted` reads, or look the run's ownership up before it is deleted and pass it. Either way the ERROR line stops firing, which is the signal that this is done.
+
+**Effort:** S
+
+### `WebSocketAuthGuard` is dead code with a live-looking spec
+
+**Priority:** P3
+**Origin:** v0.2.97.37, which had to decide whether to fix it or delete it and chose neither.
+
+**Why:** nothing references `WebSocketAuthGuard` in a `@UseGuards` anywhere. `TestRunsGateway` authenticates in its own Socket.IO middleware (`afterInit`), and the guard is only a provider in `TestRunsModule`. It is nonetheless a near-copy of the gateway's verifier, so an edit to one does not reach the other — and v0.2.97.37 had to change both to keep them consistent, which is the cost of leaving it.
+
+It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that file and imported by the gateway and its spec, so the type has to move first.
+
+**What to do:** move `AuthenticatedSocket` to `modules/test-runs/types/`, delete the guard and its spec, drop it from `TestRunsModule`'s providers. If instead it should become the real auth path for both gateways, that is a different and larger change — pick one, do not leave it as a copy.
+
+**Effort:** S
+
+### `emitTestRunStatusChanged` has no callers
+
+**Priority:** P3
+**Origin:** v0.2.97.37, found while routing all four emit helpers through one room resolver.
+
+**Why:** `TestRunsGateway.emitTestRunStatusChanged` and the `TestRunStatusChangedEvent` type it takes are never used — no handler, service or realtime path emits `test-run:status-changed`. The web client may or may not listen for it; check before deleting, because a listener with no emitter is a different and more interesting bug than an emitter with no listener.
+
+**What to do:** if nothing listens, delete the method and the event type. If something does, find out what was meant to emit it.
+
+**Effort:** S
+
 ## Completed
 
 ### `follow-redirects` can leak the Grafana/Dynatrace token on a cross-origin redirect

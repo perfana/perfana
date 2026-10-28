@@ -166,20 +166,16 @@ export class WebSocketAuthGuard implements CanActivate {
         ];
       }
 
-      // Validate audience to prevent tokens from other Keycloak clients being
-      // accepted. `audience: undefined` disables the check entirely, so a
-      // missing client id must refuse the token, not wave it through.
-      const clientId = this.configService.get<string>('KEYCLOAK_CLIENT_ID');
-      if (!clientId) {
-        this.logger.error(
-          'KEYCLOAK_CLIENT_ID is not configured; refusing a WebSocket JWT that cannot be audience-checked',
-        );
-        return null;
-      }
-
+      // Audience is deliberately NOT validated. The browser authenticates against
+      // the `perfana-web` client, so its token's `aud` never contains
+      // KEYCLOAK_CLIENT_ID (`perfana-api`), and the shipped realm defines no
+      // audience mapper — enforcing it rejects every browser connection, and
+      // silently, because the throw lands in the debug catch below. Same position
+      // as the two other authorities: KeycloakJwtService (the REST path) and
+      // job-progress.gateway. Tightening it needs a realm change first, and all
+      // four verifiers moved together — see TODOS.md.
       const { payload } = await jwtVerify(token, JWKS, {
         issuer: acceptedIssuers,
-        audience: clientId,
         clockTolerance: 60,
       });
 

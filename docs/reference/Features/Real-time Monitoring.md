@@ -138,9 +138,19 @@ During test execution, metrics are collected in real-time:
 ## Server-Side Implementation
 
 ### TestRunsGateway (Socket.IO)
-- NestJS WebSocket gateway
-- `WebSocketAuthGuard` validates connections
-- Broadcasts events to connected clients
+- NestJS WebSocket gateway on the `/test-runs` namespace, with a Redis adapter
+  for multi-instance delivery
+- Authenticates in its own Socket.IO middleware (`afterInit`): API key first,
+  then Keycloak JWT. `WebSocketAuthGuard` is **not** wired to it — nothing
+  references that class in a `@UseGuards`
+- Delivers to rooms, never to every connected client. All tenants share one
+  namespace, so an event with no resolvable organization is logged at ERROR and
+  reaches the `global` admin room only, rather than being broadcast (v0.2.97.37)
+- Rooms are earned, not claimed: `user:{id}` always, `org:{id}` for every
+  organization the identity is a verified member of (resolved through
+  `AuthorizationService`, since a Keycloak token carries no Perfana
+  `organization_id`), `team:{id}` only when that team belongs to one of those
+  organizations, and `global` only for `perfana-admin`/`admin`
 - Custom Socket.IO adapter with CORS
 
 ### RealtimeService

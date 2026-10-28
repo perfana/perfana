@@ -14,6 +14,24 @@ export interface TestRun {
   id: string;
   test_run_id: string;
   system_under_test_id: string;
+  /**
+   * Ownership, carried on the payload so the realtime gateway can target the
+   * owning organization's room without a query per event.
+   *
+   * The request context cannot be that source: `UserCtx` fills
+   * `organizationId` only from an API key or `request.user.organizations`, and
+   * `keycloak-enhanced-auth.guard.ts` never populates the latter — so it is
+   * undefined for every ordinary Keycloak login, and a caller that passes no
+   * organization is the normal case rather than the exception. See the
+   * targeting comment in `gateways/test-runs.gateway.ts`.
+   *
+   * NOTE there are TWO `TestRun` interfaces in this module — this one, which
+   * the entity mappers return, and the one in `test-runs.service.ts`, which the
+   * realtime event payload is typed against. A field has to be added to both or
+   * the mapper will not compile.
+   */
+  organizationId?: string;
+  teamId?: string;
   test_environment: string;
   workload: string;
   start_time?: string;

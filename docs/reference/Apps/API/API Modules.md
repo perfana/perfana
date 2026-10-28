@@ -51,11 +51,16 @@ The largest module, split into multiple controllers and services for separation 
 
 ### WebSocket Gateway
 
-`TestRunsGateway` — Socket.IO gateway for real-time test run updates:
-- `testRunCreated` event
-- `testRunUpdated` event
-- `testRunDeleted` event
-- `WebSocketAuthGuard` for connection authentication
+`TestRunsGateway` — Socket.IO gateway for real-time test run updates on the
+`/test-runs` namespace:
+- `test-run:created`, `test-run:updated`, `test-run:deleted` and
+  `test-run:status-changed` events (the values of `TestRunEventType`; the
+  last has no emitter today)
+- Connection authentication lives in the gateway's own Socket.IO middleware,
+  not in `WebSocketAuthGuard`, which no `@UseGuards` references
+- Room-scoped delivery only — see [[Real-time Monitoring]] for which rooms an
+  identity earns and why an unresolvable event goes to admins instead of
+  everyone
 
 ## Benchmarks Module
 

@@ -33,6 +33,9 @@ export class TestRunsMapperService {
       id: entity.id,
       test_run_id: entity.testRunId,
       system_under_test_id: entity.systemUnderTestId,
+      // Ownership travels with the event — see the shared mapper and TestRun.
+      organizationId: entity.organizationId,
+      teamId: entity.teamId,
       test_environment: entity.testEnvironment,
       workload: entity.workload,
       start_time: entity.startTime?.toISOString(),
