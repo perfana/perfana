@@ -13,7 +13,7 @@ Development setup guide for Perfana.
 
 ## Prerequisites
 
-- **Node.js** 18+
+- **Node.js** 24 — pinned in `.nvmrc`; `engine-strict=true` in `.npmrc` means another major fails `npm install`
 - **npm** 8+
 - **Docker** (for PostgreSQL, Redis, Keycloak)
 - **Redis** (for BullMQ job queue)
