@@ -1013,7 +1013,10 @@ export class TestRunsCrudQueryService {
           id: system.id,
           name: system.name,
           environments,
-          created_at: system.created_at.toISOString()
+          created_at: system.created_at.toISOString(),
+          // Projected explicitly: this response is a hand-built shape, not the entity, so a
+          // new column does not reach the list on its own.
+          deletion_status: system.deletion_status ?? null
         };
       });
 

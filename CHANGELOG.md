@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.97.35] - 2026-10-25
+## [0.2.97.37] - 2026-10-28
 
 ### Fixed
 - **A test run event could be delivered to every signed-in user, whatever organization they belong to.** The realtime gateway puts all tenants on one Socket.IO namespace and relied on its callers to say which organization an event belongs to. When that information was missing it did not stop — it broadcast the event to every connected client, and said so in its own code: *"This ensures non-admin users receive events when org/team info is not available."* Two of the three delivery paths ended in a server-wide emit, one of them reached simply by a caller omitting an optional argument, which committed code already does (`broadcastTestRunDeleted` passes nothing for all three).
@@ -23,6 +23,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   Found by `/cso`; 13 tests pin the two tenant-isolation invariants, each verified to fail against the old behaviour.
 
+## [0.2.97.36] - 2026-10-28
+
+### Fixed
+- **Seventeen in-range version moves clear 45 advisories, 34 of them in the production tree, without touching a single manifest.** Every fix here was already permitted by a range the repo declares, so this is a lockfile refresh: `npm update` on named packages, no `package.json` edited, `overrides` untouched, no package added, and the three entries that disappear do so because an upgraded parent stopped depending on them.
+
+  | | critical | high | moderate | low | total |
+  |---|---|---|---|---|---|
+  | production, before | 0 | 18 | 7 | 0 | 25 |
+  | production, after | 0 | **12** | **3** | 0 | **15** |
+  | dev included, before | 5 | 24 | 16 | 9 | 54 |
+  | dev included, after | **4** | **15** | **10** | 9 | **38** |
+
+  Sixteen packages had their advisories cleared entirely; `iconv-lite` moved too but carried none. Zero new advisories in either scope.
+
+  **The one critical is `handlebars` 4.7.10**, a development dependency that nonetheless runs in CI: two critical JavaScript injections — an own-property-check bypass and an AST type confusion in `compile` that bypassed the earlier fix — plus a moderate on unsafe inline embedding of precompiled templates.
+
+  **`ip-address` 10.7.5 is the biggest single haul at eight advisories** (leading-zero octets decoded as decimal, a CIDR suffix suppressing special-use classification, IPv4-mapped and NAT64 misclassification, cross-family `isInSubnet` comparison, `isLinkLocal` recognising fe80::/64 rather than /10, and two parser-complexity issues). Worth knowing that it is production-classified but has no shipped-image exposure: its only dependents are `express-rate-limit`, declared solely by `@modelcontextprotocol/sdk` — the `apps/mcp` tree that `.dockerignore` excludes — and `socks`, inside the puppeteer proxy chain. The API rate-limits with `@nestjs/throttler`, which depends on neither.
+
+  Also production: `follow-redirects` 1.16.2, `body-parser` 2.4.0, `probe-image-size` 7.5.0, `source-map-js` 1.2.2, `@modelcontextprotocol/sdk` 1.32.2, `hono` 4.13.14, `@hono/node-server` 2.1.5, `fast-copy` 3.1.0, `fast-uri` 3.1.9. Development: `handlebars` 4.7.10, `@faker-js/faker` 10.6.0, `immutable` 4.3.9, `smol-toml` 1.9.1, `moment` 2.31.0, `postcss-selector-parser` 6.1.5.
+
+  **Two of these are hardening rather than a closed hole here, and the distinction is worth stating.** `follow-redirects`' two advisories are about credential headers surviving a cross-origin redirect, which sounds like the most serious item in the list. Neither shape is reachable through axios as this repo uses it: the array-form header path is dead because `axios/lib/adapters/http.js:789` normalises headers to an object before handing them over, and the `sensitiveHeaders` regex-escaping path needs a custom `sensitiveHeaders`, which nothing first-party sets. Likewise `body-parser` 2.4.0 changes nothing the API depends on — request-size enforcement lives in `raw-body` 3.0.2, which did not move, so `API_BODY_LIMIT` behaviour is bit-identical, and nothing in the repo keys on a body-parser error code or sends `Content-Encoding`.
+
+  `@hono/node-server` crossing a major (1.19.14 → 2.1.5) is in-range for its only declarer, `@modelcontextprotocol/sdk` (`^1.19.9 || ^2.0.5`), and cannot reach an image at all: `.dockerignore` excludes `apps/mcp/`, and the `build-deps` stage never copies that workspace's `package.json`, so `npm ci` never installs its tree. Nothing else imports hono.
+
+  **What is left, and why none of it is free.** Twelve production highs remain and they are four decisions, not twelve problems. Nine fall to one `puppeteer@25.16.0` major and all nine hang off a browser-download path that `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true` (`Dockerfile:478`) disables — the biggest number is the least reachable. Two (`@nestjs/platform-express`, `multer`) need a clean but major `platform-express@12.3.2`; the root `overrides` pin of `multer: ^2.4.0` sits at the top of the vulnerable range and is what blocks a transitive-only fix. One (`zod`) has no 3.x fix and is declared by four workspaces. The four remaining criticals are the vitest toolchain in `apps/worker`. Each is filed rather than rushed.
+
+  Verified where it counts: `docker build --target build-deps` followed by `NODE_ENV=production npm audit --audit-level=critical --production` inside that Alpine image exits 0. Full suite green on Node 24 — shared 509, grafana-sync 360, api 6276, worker 78 files, web 4820; preflight 13/13.
+
+## [0.2.97.35] - 2026-10-27
+
+### Fixed
+- **No Docker image has published since v0.2.97.31 on 2026-10-19, because a critical advisory fails the build's own audit gate.** Every image build runs `npm audit --audit-level=critical --production` *before* it compiles anything (`Dockerfile:159`, right after `ENV NODE_ENV=production` at `:143` and before `npm run build` at `:169`). Two releases have now been lost to it: v0.2.97.33 on 2026-10-23 and v0.2.97.34 on 2026-10-27, neither of which ever shipped an image. On 2026-10-23 one critical matched `next` 15.5.25 — [GHSA-2464-fhr4-w9xw](https://github.com/advisories/GHSA-2464-fhr4-w9xw), unauthenticated remote code execution in the Image Optimization API when SVG files are used — and **five of the six image builds stopped there**: API, Worker, Grafana Sync, Perfana Report and Web. Only the Migration Runner survived, and not because it avoids the web dependencies — `Dockerfile.migrations:28` copies `apps/web/package*.json` and `:34` installs from the same root lockfile, so it carries `next` too. It survived because it has no `npm audit` step at all.
+
+  That is the mechanism worth remembering: the gate lives in one shared ancestor stage (`Dockerfile:159`, in `builder`), so a single critical anywhere in the monorepo's production tree stops every target derived from it. It is stage-scoped, not image-scoped.
+
+  **Next.js 15.5.25 → 15.5.28**, which clears it. `eslint-config-next` moves with it, and the coupling is real rather than ceremonial: `apps/web/.eslintrc.json` extends `next/core-web-vitals`, whose `index.js:81` names `parser: './parser.js'`, and that file's line 4 is `require('next/dist/compiled/babel/eslint-parser')`. ESLint resolves a referenced parser while normalizing the config, so plain `eslint` reaches into Next's internals exactly as `next lint` would — which is the module this repo's own CHANGELOG records as the error text the last time these two drifted. They have to stay in lockstep whichever command runs them.
+
+  This deployment was not exposed to the advisory in practice: `apps/web/next.config.js` configures no `images:` block, so `dangerouslyAllowSVG` stays at its default `false`, which is the precondition the RCE needs, and no application code imports `next/image`. The gate is severity-based and does not know that, which is correct — it is a floor, not a judgement.
+
+  The root `sharp` override moves **^0.35.4 → ^0.35.5** in the same change, because the Next advisory is not a Next bug. Its own text says so: the flaw is in libvips, reached through `sharp`, and the workaround is "ensure the version of `sharp` used by Next.js is greater than or equal to 0.35.5". Next 15.5.28 is "patched" only in the sense that it declares `sharp: "^0.34.3 || ^0.35.5"` — a range whose lower branch is still vulnerable. The override is what pins resolution, and at `^0.35.4` its floor sat one patch below the advisory's. Nothing was exposed (resolution lands on 0.35.5), but a pin or a yank could have reached 0.35.4 with the build gate still green, since `sharp`'s own advisory is rated high and this gate only fails on critical. Raising the floor costs nothing: the lockfile is byte-identical either way.
+
+  Eighteen high and seven moderate advisories remain in the production tree. They are below this gate's threshold and are not addressed here.
+
+  The lockfile delta is larger than the three version lines suggest and is all mechanical: 45 entries added, 16 removed, 13 changed — of those 13, two are version moves, ten are `@unrs/resolver-binding-linux-*` entries that gained a `libc` field, and one is the `apps/web` workspace's own dependency ranges. The `libc` additions are not cosmetic: that is the field npm filters optional platform packages on, so a Linux install now reifies only the matching binding where before, with no `libc` field, both the `-gnu` and `-musl` variants matched. Every removal is a relocation — `next`, its `@next/swc-*` binaries and `eslint-config-next` hoist out of `apps/web/node_modules` to the root — and the only two additions that are neither optional nor dev-only are `next` and `@next/env`, both of them those same hoisted copies. The rest is Next's new optional image stack: `sharp` 0.35.5, 26 `@img/sharp-*` platform packages and `@img/colour` — of which only the platform-matching pair plus `@img/colour` ever install, the last having no `os`/`cpu`/`libc` fields to filter on. That is the three entries observed in the built Alpine image. Two incidental moves: `semver` 7.8.1 → 7.8.5 (forced by `sharp`) and the dev-only `napi-postinstall` 0.3.4 → 0.3.7. No package was dropped and the lockfile version is unchanged.
+
+## [0.2.97.34] - 2026-10-25
+
+### Fixed
+- **Deleting a system under test failed after five minutes with nothing deleted. It now runs in the background, and the database work behind it is no longer quadratic in the size of the installation.** Reported from production on 2026-10-23: the request ran for 300 seconds and returned an error, and the system was still there. The system in question had no test runs at all, so there was almost nothing to delete — all five minutes went into one step.
+
+  That step was removing the system's dashboards. Every table that refers to a dashboard has to be checked before one can be removed, and for ten of the thirteen such tables the database had no way to look the reference up directly, so it read each table from end to end — once per dashboard. The same was true, and worse, for the metrics connections removed later in the same operation: seventeen tables, none of them searchable by the reference. Eighteen lookup indexes were added, covering every table whose size grows with the amount of measurement data held. On the development database — a fraction of production's size — the same step went from 582 ms to 15 ms, with 93% of the old cost coming from a single reference checked once per storage chunk.
+
+  The measurement table itself could not be fixed that way. It is stored compressed, and the value being searched for sits inside the compressed data where an index cannot reach it — verified by building the index and watching the database ignore it. The two references it carried have therefore been removed. They were enforcing something nothing in the product relied upon, and they cost a full scan of the compressed data for every dashboard and every connection removed; the four other tables of the same kind never had them. The trade is that measurement rows belonging to a deleted dashboard are no longer rejected by the database, only by the code that deletes them, which already does.
+
+  Separately, the whole operation no longer runs inside the request. It is queued, the system stays in the list marked **Deleting…** until it finishes, and says **Deletion failed** if it does not — the same treatment test runs and dashboards already get. The old behaviour was bounded only by how long the client would wait for a reply: when that ran out the client hung up while the database carried on working on a deletion nobody would hear the result of. A system with hundreds of test runs can legitimately take minutes, however fast the lookups are.
 ## [0.2.97.33] - 2026-10-23
 
 ### Fixed
@@ -34,7 +89,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   Verified against a live test run: applying a preset now draws all 22 series against the stored baseline in one click, and applying a second preset over a hand-picked run keeps that run.
 
-  Note the version skips 0.2.97.32, which is claimed by a separate in-flight change.
+  Note the version skips 0.2.97.32, which was claimed by a change that ended up shipping as 0.2.97.34. That number is permanently unused.
 
 ## [0.2.97.31] - 2026-10-19
 

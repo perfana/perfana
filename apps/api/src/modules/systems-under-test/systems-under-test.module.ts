@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SystemsUnderTestController } from './systems-under-test.controller';
 import { SystemsUnderTestService } from './systems-under-test.service';
 import { DeleteSystemUnderTestHandler } from './handlers/delete-system-under-test.handler';
+import { SystemUnderTestDeletionProcessor } from './processors/system-under-test-deletion.processor';
 import { SystemUnderTest, SystemUnderTestTestEnvironment, SystemUnderTestWorkload, TestRun, PyroscopeInstance } from '../../entities';
 import { CommonModule } from '../../common/common.module';
 import { AuditModule } from '../audit/audit.module';
@@ -15,7 +16,7 @@ import { AuditResourceRegistry } from '../audit/audit-resource-registry';
     AuditModule, // Phase 5a: provides AuditService + AuditResourceRegistry
   ],
   controllers: [SystemsUnderTestController],
-  providers: [SystemsUnderTestService, DeleteSystemUnderTestHandler],
+  providers: [SystemsUnderTestService, DeleteSystemUnderTestHandler, SystemUnderTestDeletionProcessor],
   exports: [SystemsUnderTestService],
 })
 export class SystemsUnderTestModule implements OnModuleInit {

@@ -1,6 +1,4 @@
-import { Entity, PrimaryColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
-import { ApplicationDashboard } from './application-dashboard.entity';
-import { MetricsSource } from './metrics-source.entity';
+import { Entity, PrimaryColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('ds_metrics')
 export class DsMetrics {
@@ -67,11 +65,17 @@ export class DsMetrics {
   @Column({ type: 'uuid', nullable: true })
   metrics_source_id?: string;
 
-  @ManyToOne(() => ApplicationDashboard)
-  @JoinColumn({ name: 'application_dashboard_id' })
-  application_dashboard!: ApplicationDashboard;
-
-  @ManyToOne(() => MetricsSource)
-  @JoinColumn({ name: 'metrics_source_id' })
-  metrics_source?: MetricsSource;
+  // No `@ManyToOne` relations here, on purpose, and no foreign keys on this table.
+  //
+  // Both FKs were dropped in 1817000000000-DropDsMetricsForeignKeys: `ds_metrics` is a
+  // compressed hypertable whose `compress_segmentby` is `test_run_id`, so a foreign key on
+  // `application_dashboard_id` or `metrics_source_id` cannot be served by an index and makes
+  // every delete of a dashboard or a metrics source scan the compressed payload of every
+  // chunk — once per deleted parent row, per chunk, since TimescaleDB clones each FK onto
+  // every chunk. That is what timed SUT deletion out in production on 2026-10-23.
+  //
+  // The other four raw hypertables (`requests_raw`, `transactions`, `virtual_users`,
+  // `requests_error`) carry no foreign keys either. Declaring a relation here re-creates one
+  // the next time somebody generates a migration from the entities, so join on the id column
+  // instead.
 }
