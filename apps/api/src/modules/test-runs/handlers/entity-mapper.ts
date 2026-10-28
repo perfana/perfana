@@ -53,6 +53,10 @@ export function mapEntityToTestRun(entity: TestRunEntity): TestRun {
     team_id: entity.teamId,
     created_by: entity.createdBy,
     updated_by: entity.updatedBy,
+    // Ownership travels with the event so the realtime gateway can resolve the
+    // owning org room; the request context does not carry it. See TestRun.
+    organizationId: entity.organizationId,
+    teamId: entity.teamId,
     created_at: entity.createdAt.toISOString(),
     updated_at: entity.updatedAt.toISOString(),
     systems_under_test: entity.systemUnderTest

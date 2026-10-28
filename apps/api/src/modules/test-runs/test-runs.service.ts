@@ -78,6 +78,15 @@ export interface TestRun {
   is_changepoint?: boolean;
   is_control_group?: boolean;
   system_name?: string;
+  /**
+   * Ownership, carried on the payload so the realtime gateway can target the
+   * owning organization's room. Mirrors the same two fields on the OTHER
+   * `TestRun` interface (`types/test-run.types.ts`), which the entity mappers
+   * return and which carries the full rationale; both copies are needed or the
+   * mappers do not compile.
+   */
+  organizationId?: string;
+  teamId?: string;
 }
 
 /**
