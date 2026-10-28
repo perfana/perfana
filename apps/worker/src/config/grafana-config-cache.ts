@@ -212,3 +212,87 @@ export function clearGrafanaConfigCache(): void {
   cachedMeta = null;
   byInstanceId.clear();
 }
+
+/**
+ * Whether THIS RUN has any Grafana-backed dashboard whose instance is usable.
+ *
+ * This is the gate `PanelsPipeline` and `MetricsPipeline` use, and it replaces
+ * `tryGetGrafanaConfig()` for that purpose. The difference matters on any deploy with
+ * more than one Grafana instance:
+ *
+ * `tryGetGrafanaConfig()` resolves the **oldest row in the whole table** and throws
+ * `'invalid'` when that row is missing `server_url` or `apiKey`. Since those two stages
+ * were gated on it, **one misconfigured legacy row failed panels-processing and
+ * metrics-collection for every run in the deployment** — including runs whose
+ * dashboards live on a perfectly healthy second instance. The singleton's identity was
+ * also org-blind, though that half was not reachable: the NULL-instance bucket measured
+ * on dev was 76 perf-test and 3 Dynatrace artificial rows and zero real Grafana
+ * dashboards.
+ *
+ * So the question is asked per run instead: do any of this run's application dashboards
+ * name a Grafana instance we can actually reach? Each candidate is resolved through
+ * `getGrafanaConfigById`, which is per-instance, cached per id, and returns null for a
+ * row that is missing or invalid rather than poisoning every other instance.
+ *
+ * Three rules:
+ *
+ * - **A run with no Grafana-backed dashboards is a soft skip**, exactly as before. That
+ *   is the documented "Grafana is optional" case (issue #282) — a JMeter-only run still
+ *   needs rollup, statistics and checks to run.
+ * - **A run whose dashboards all point at broken instances is also a soft skip**, and
+ *   says which. Failing the stage would stop the load-test data being analysed over a
+ *   metrics source the operator may not even use any more.
+ * - **An error resolving the dashboards returns true**, not false. A transient database
+ *   problem must not silently convert into "this run has no Grafana", which would
+ *   record the run as analysed with no panels. Letting the stage proceed surfaces the
+ *   failure where the retry machinery can see it.
+ */
+export async function hasUsableGrafanaForRun(
+  testRun: { systemUnderTestId: string; testEnvironment: string; organizationId?: string | null },
+): Promise<boolean> {
+  let instanceIds: string[];
+  try {
+    const db = getDatabaseService();
+    const dashboards = await db.getApplicationDashboards({
+      systemUnderTestId: testRun.systemUnderTestId,
+      testEnvironment: testRun.testEnvironment,
+      ...(testRun.organizationId ? { organizationId: testRun.organizationId } : {}),
+    });
+    instanceIds = [
+      ...new Set(
+        dashboards
+          .map((d) => d.grafanaInstanceId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+  } catch (error) {
+    logger.warn(
+      `Could not determine this run's Grafana instances, letting the stage proceed: ${error}`,
+    );
+    return true;
+  }
+
+  if (instanceIds.length === 0) {
+    return false;
+  }
+
+  const resolved = await Promise.all(instanceIds.map((id) => getGrafanaConfigById(id)));
+  const usable = resolved.filter((r) => r !== null).length;
+
+  if (usable === 0) {
+    logger.warn(
+      `This run names ${instanceIds.length} Grafana instance(s) and none is usable (missing server_url or apiKey) — skipping the Grafana stages for it`,
+    );
+    return false;
+  }
+
+  if (usable < instanceIds.length) {
+    // Not a skip: the usable instances still have panels worth collecting. Said once,
+    // loudly, because the unusable one's panels will silently produce no data.
+    logger.warn(
+      `${instanceIds.length - usable} of this run's ${instanceIds.length} Grafana instances are unusable; proceeding with the rest`,
+    );
+  }
+
+  return true;
+}

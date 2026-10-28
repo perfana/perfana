@@ -38,6 +38,73 @@ export class TestRunsConfigService {
     private readonly auditService: AuditService,
   ) {}
 
+  /**
+   * The id of a system under test, by NAME, within the caller's organizations.
+   *
+   * **`uq_system_under_test_name_org` scopes the name per organization**, so a bare
+   * name is ambiguous the moment two tenants use the same one — and they will, because
+   * the names are things like `Polis` and `webshop`. Eight sites in this file resolved
+   * `findOne({ where: { name } })` with no predicate, several of which then write or
+   * delete against the id they got back.
+   *
+   * `getLatestConfigKeys` already carried this shape; this is that logic extracted so
+   * the other eight cannot drift from it.
+   *
+   * Three rules it encodes:
+   *
+   * - **An empty org list returns null, it does not fall through.** A non-admin with no
+   *   memberships must resolve nothing. Rendering `IN (:...orgIds)` on an empty array
+   *   is a syntax error rather than an empty result, so the early return is load-bearing.
+   * - **`userId` of `''` is a system call and skips the filter**, matching `withOrgFilter`
+   *   and the convention the report fetcher documents. Ingest endpoints reach here
+   *   without a user; removing that arm takes `/api/config` out for every CI pipeline.
+   * - **Not found and not accessible are the same answer.** The caller turns null into a
+   *   `ResourceNotFoundException` naming only what was asked for, so a caller cannot
+   *   use this to discover that another tenant owns that name.
+   */
+  private async resolveSystemIdByName(
+    name: string,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<string | null> {
+    // `withOrgFilter` does NOT short-circuit on an empty userId — it calls
+    // `isGlobalAdmin` and then `getAccessibleOrganizations('')`, which answers with an
+    // empty list. So the system-call arm has to be explicit here, or an ingest request
+    // with no user context resolves nothing and `/api/config/*` returns 404 for every
+    // CI pipeline. (`resolveOrgFilter` in report-data-fetcher.service.ts has this arm
+    // built in; `withOrgFilter` is the lower-level helper and does not.)
+    const orgIds = userId
+      ? await withOrgFilter(userId, roles, this.authzService)
+      : null;
+    if (orgIds !== null && orgIds.length === 0) {
+      this.logger.warn(`System under test '${name}' not resolved: caller has no organization memberships`);
+      return null;
+    }
+
+    const query = withRequestEm(this.systemRepo)
+      .createQueryBuilder('sut')
+      .where('sut.name = :name', { name })
+      .select(['sut.id']);
+
+    if (orgIds !== null) {
+      query.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
+    }
+
+    // take(2): two systems can legitimately share a name across organizations, and if
+    // the caller is a member of both then neither is "the" one. Picking either is the
+    // bug; refuse and say so.
+    const matches = await query.orderBy('sut.id', 'ASC').take(2).getMany();
+
+    if (matches.length > 1) {
+      this.logger.error(
+        `System name '${name}' matches ${matches.length} systems across the caller's organizations — refusing to guess. Pass systemUnderTestId instead.`,
+      );
+      return null;
+    }
+
+    return matches[0]?.id ?? null;
+  }
+
 
   async getTestRunConfigs(
     testRunId: string,
@@ -122,15 +189,18 @@ export class TestRunsConfigService {
     }
   }
 
-  async addTestRunConfig(configDto: AddTestRunConfigDto): Promise<void> {
+  async addTestRunConfig(
+    configDto: AddTestRunConfigDto,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<void> {
     try {
       this.logger.log(`Looking up test run with test_run_id: ${configDto.testRunId}`);
 
-      // Validate system under test exists
-      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
-        where: { name: configDto.systemUnderTest },
-        select: ['id']
-      });
+      // Validate system under test exists, within the caller's organizations
+      const systemUnderTestId = await this.resolveSystemIdByName(
+        configDto.systemUnderTest, userId, roles);
+      const systemUnderTest = systemUnderTestId ? { id: systemUnderTestId } : null;
 
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('System under test', configDto.systemUnderTest);
@@ -177,13 +247,16 @@ export class TestRunsConfigService {
     }
   }
 
-  async addTestRunConfigs(configsDto: AddTestRunConfigsDto): Promise<void> {
+  async addTestRunConfigs(
+    configsDto: AddTestRunConfigsDto,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<void> {
     try {
-      // Validate system under test exists
-      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
-        where: { name: configsDto.systemUnderTest },
-        select: ['id']
-      });
+      // Validate system under test exists, within the caller's organizations
+      const systemUnderTestId = await this.resolveSystemIdByName(
+        configsDto.systemUnderTest, userId, roles);
+      const systemUnderTest = systemUnderTestId ? { id: systemUnderTestId } : null;
 
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('System under test', configsDto.systemUnderTest);
@@ -356,7 +429,11 @@ export class TestRunsConfigService {
     }
   }
 
-  async addTestRunConfigJson(configJsonDto: AddTestRunConfigJsonDto): Promise<void> {
+  async addTestRunConfigJson(
+    configJsonDto: AddTestRunConfigJsonDto,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<void> {
     try {
       // Validate regex patterns
       for (const include of configJsonDto.includes) {
@@ -423,11 +500,10 @@ export class TestRunsConfigService {
         }
       });
 
-      // Find system under test
-      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
-        where: { name: configJsonDto.systemUnderTest },
-        select: ['id']
-      });
+      // Find system under test, within the caller's organizations
+      const systemUnderTestId = await this.resolveSystemIdByName(
+        configJsonDto.systemUnderTest, userId, roles);
+      const systemUnderTest = systemUnderTestId ? { id: systemUnderTestId } : null;
 
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('System under test', configJsonDto.systemUnderTest);
@@ -677,13 +753,16 @@ export class TestRunsConfigService {
     }
   }
 
-  async createExpectedConfigChange(createDto: CreateExpectedConfigChangeDto): Promise<ExpectedConfigChangeDto> {
+  async createExpectedConfigChange(
+    createDto: CreateExpectedConfigChangeDto,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<ExpectedConfigChangeDto> {
     try {
-      // Find system under test
-      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
-        where: { name: createDto.system },
-        select: ['id']
-      });
+      // Find system under test, within the caller's organizations
+      const systemUnderTestId = await this.resolveSystemIdByName(
+        createDto.system, userId, roles);
+      const systemUnderTest = systemUnderTestId ? { id: systemUnderTestId } : null;
 
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('System under test', createDto.system);
@@ -746,13 +825,19 @@ export class TestRunsConfigService {
     }
   }
 
-  async deleteExpectedConfigChange(system: string, environment: string, workload: string, configKey: string): Promise<void> {
+  async deleteExpectedConfigChange(
+    system: string,
+    environment: string,
+    workload: string,
+    configKey: string,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<void> {
     try {
-      // Find system under test
-      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
-        where: { name: system },
-        select: ['id']
-      });
+      // Find system under test, within the caller's organizations. This method
+      // DELETES against the id, so an org-blind resolve was a cross-tenant write.
+      const systemUnderTestId = await this.resolveSystemIdByName(system, userId, roles);
+      const systemUnderTest = systemUnderTestId ? { id: systemUnderTestId } : null;
 
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('System under test', system);
@@ -796,12 +881,12 @@ export class TestRunsConfigService {
     system: string,
     environment: string,
     workload: string,
+    userId?: string,
+    roles: string[] = [],
   ): Promise<SparseMetricExclusionDto[]> {
     try {
-      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
-        where: { name: system },
-        select: ['id'],
-      });
+      const systemUnderTestId = await this.resolveSystemIdByName(system, userId, roles);
+      const systemUnderTest = systemUnderTestId ? { id: systemUnderTestId } : null;
 
       if (!systemUnderTest) {
         this.logger.warn(`System under test not found: ${system}`);
@@ -834,15 +919,17 @@ export class TestRunsConfigService {
     }
   }
 
-  async createSparseMetricExclusion(createDto: CreateSparseMetricExclusionDto): Promise<SparseMetricExclusionDto> {
+  async createSparseMetricExclusion(
+    createDto: CreateSparseMetricExclusionDto,
+    userId?: string,
+    roles: string[] = [],
+  ): Promise<SparseMetricExclusionDto> {
     try {
       // Use provided UUID directly, fall back to name lookup
       let sutId = createDto.systemUnderTestId;
       if (!sutId) {
-        const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
-          where: { name: createDto.system },
-          select: ['id'],
-        });
+        const resolvedId = await this.resolveSystemIdByName(createDto.system, userId, roles);
+        const systemUnderTest = resolvedId ? { id: resolvedId } : null;
         if (!systemUnderTest) {
           throw new ResourceNotFoundException('System under test', createDto.system);
         }
@@ -914,12 +1001,13 @@ export class TestRunsConfigService {
     workload: string,
     dashboardLabel: string,
     metricName: string,
+    userId?: string,
+    roles: string[] = [],
   ): Promise<void> {
     try {
-      const systemUnderTest = await withRequestEm(this.systemRepo).findOne({
-        where: { name: system },
-        select: ['id'],
-      });
+      // DELETES against the id — see deleteExpectedConfigChange above.
+      const systemUnderTestId = await this.resolveSystemIdByName(system, userId, roles);
+      const systemUnderTest = systemUnderTestId ? { id: systemUnderTestId } : null;
 
       if (!systemUnderTest) {
         throw new ResourceNotFoundException('System under test', system);

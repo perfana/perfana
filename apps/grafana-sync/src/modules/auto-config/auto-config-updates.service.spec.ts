@@ -20,7 +20,7 @@ jest.mock('@perfana/shared/entities', () => ({
 import { Test, TestingModule } from '@nestjs/testing';
 import { AutoConfigUpdatesService } from './auto-config-updates.service';
 // Use entity types directly instead of mapped interfaces
-import { createMockRepository } from '../../../test/helpers';
+import { createMockRepository, stubGrafanaInstanceLookup } from '../../../test/helpers';
 
 describe('AutoConfigUpdatesService', () => {
   let service: AutoConfigUpdatesService;
@@ -107,7 +107,7 @@ describe('AutoConfigUpdatesService', () => {
         };
 
         systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
-        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, [mockGrafanaInstance]);
         applicationDashboardRepo.save.mockResolvedValue(mockSavedDashboard);
 
         // Act
@@ -116,9 +116,7 @@ describe('AutoConfigUpdatesService', () => {
         // Assert
         expect(result).toEqual({ insertedId: 'dashboard-1' });
         expect(systemUnderTestRepo.findOne).toHaveBeenCalledWith({ where: { name: 'my-app' } });
-        expect(grafanaInstanceRepo.findOne).toHaveBeenCalledWith({
-          where: { label: 'grafana-prod' },
-        });
+        expect(grafanaInstanceRepo.createQueryBuilder).toHaveBeenCalled();
         expect(applicationDashboardRepo.save).toHaveBeenCalledWith(
           expect.objectContaining({
             systemUnderTestId: 'sut-1',
@@ -149,7 +147,7 @@ describe('AutoConfigUpdatesService', () => {
         };
 
         systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
-        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, [mockGrafanaInstance]);
         grafanaDashboardRepo.findOne.mockResolvedValue(mockTemplateDashboard);
         applicationDashboardRepo.save.mockResolvedValue(mockSavedDashboard);
 
@@ -190,7 +188,7 @@ describe('AutoConfigUpdatesService', () => {
         };
 
         systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
-        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, [mockGrafanaInstance]);
         grafanaDashboardRepo.findOne.mockResolvedValue(null);
         applicationDashboardRepo.save.mockResolvedValue(mockSavedDashboard);
 
@@ -247,7 +245,7 @@ describe('AutoConfigUpdatesService', () => {
         };
 
         systemUnderTestRepo.findOne.mockResolvedValue(mockSut);
-        grafanaInstanceRepo.findOne.mockResolvedValue(null);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, []);
 
         // Act & Assert
         await expect(service.insertApplicationDashboard(dashboardData)).rejects.toThrow(
@@ -334,7 +332,7 @@ describe('AutoConfigUpdatesService', () => {
           panels: [],
         };
 
-        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, [mockGrafanaInstance]);
         grafanaDashboardRepo.findOne.mockResolvedValueOnce(null);
         grafanaDashboardRepo.save.mockResolvedValue(mockSavedDashboard);
 
@@ -370,7 +368,7 @@ describe('AutoConfigUpdatesService', () => {
           id: 123,
         };
 
-        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, [mockGrafanaInstance]);
         grafanaDashboardRepo.findOne
           .mockResolvedValueOnce(mockExistingDashboard)
           .mockResolvedValueOnce(mockUpdatedDashboard);
@@ -402,7 +400,7 @@ describe('AutoConfigUpdatesService', () => {
           grafanaJson: '{"panels": []}',
         };
 
-        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, [mockGrafanaInstance]);
         grafanaDashboardRepo.findOne.mockResolvedValue(null);
         grafanaDashboardRepo.save.mockResolvedValue(mockSavedDashboard);
 
@@ -428,7 +426,7 @@ describe('AutoConfigUpdatesService', () => {
           id: 123,
         };
 
-        grafanaInstanceRepo.findOne.mockResolvedValue(null);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, []);
 
         // Act & Assert
         await expect(service.upsertGrafanaDashboard(dashboardData)).rejects.toThrow(
@@ -447,7 +445,7 @@ describe('AutoConfigUpdatesService', () => {
           id: 123,
         };
 
-        grafanaInstanceRepo.findOne.mockResolvedValue(mockGrafanaInstance);
+        stubGrafanaInstanceLookup(grafanaInstanceRepo, [mockGrafanaInstance]);
         grafanaDashboardRepo.findOne
           .mockResolvedValueOnce(mockExisting)
           .mockResolvedValueOnce(null);

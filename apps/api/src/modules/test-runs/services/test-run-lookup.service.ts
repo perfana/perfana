@@ -16,7 +16,6 @@ import { Repository, DataSource } from 'typeorm';
 import { withRequestEm } from '../../../common/db/request-em';
 import {
   SystemUnderTest as SystemEntity,
-  Organization,
   Team,
 } from '../../../entities';
 import { DatabaseException } from '../../../common/exceptions/business.exception';
@@ -29,8 +28,6 @@ export class TestRunLookupService {
   constructor(
     @InjectRepository(SystemEntity)
     private readonly systemRepo: Repository<SystemEntity>,
-    @InjectRepository(Organization)
-    private readonly organizationRepo: Repository<Organization>,
     @InjectRepository(Team)
     private readonly teamRepo: Repository<Team>,
     private readonly dataSource: DataSource,
@@ -49,7 +46,7 @@ export class TestRunLookupService {
     organizationId: string,
   ): Promise<SystemUnderTest> {
     try {
-      const team = await this.getDefaultTeam();
+      const team = await this.getDefaultTeam(organizationId);
 
       // Atomic upsert: INSERT ON CONFLICT to prevent duplicate systems
       // when concurrent /api/init calls race for the same name+org.
@@ -235,54 +232,74 @@ export class TestRunLookupService {
   }
 
   /**
-   * Get or create the default team and organization
+   * The default team **of one organization**, created if that organization has none.
+   *
+   * `organizationId` is not optional and must not be made so. This result is stamped
+   * on every auto-created system under test (`findOrCreateSystemUnderTest`), and
+   * `systems_under_test` RLS reads `can_access_resource(org, team, created_by)` — so a
+   * team belonging to a different organization than the system does not merely look
+   * untidy, it makes members of the owning organization lose access to a system their
+   * own CI just created. Before v0.2.97.39 this was
+   * `SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1` with no predicate at
+   * all: organization from the caller, team from whichever organization was created
+   * first in the deployment. Single-org deploys never noticed.
+   *
+   * Returns null rather than throwing when the team cannot be resolved — the caller
+   * writes `team_id` as nullable and a system with no team is valid. Returning
+   * *someone else's* team is what is not.
    */
-  async getDefaultTeam(): Promise<{ id: string; name: string } | null> {
+  async getDefaultTeam(organizationId: string): Promise<{ id: string; name: string } | null> {
     try {
-      // Use raw SQL to find the oldest team — TypeORM findOne requires a where clause
+      // A system under test with no organization cannot be given a team at all: every
+      // candidate would belong to an organization this system does not. Fail soft, as
+      // the catch below does.
+      if (!organizationId) {
+        this.logger.warn('getDefaultTeam called with no organizationId; no team will be assigned');
+        return null;
+      }
+
+      // Raw SQL rather than the repository: this runs on the pooled connection on
+      // purpose. `teams` carries an RLS SELECT policy, and this path is reached from
+      // `/api/init` and from the first test run for a new system name — both of which
+      // are API-key principals whose membership rows frequently do not exist (see the
+      // api-key carve-out in apps/api/CLAUDE.md). The organization predicate is what
+      // makes that safe: it is the caller's own organization, resolved upstream, not
+      // something read out of the request.
       const teamRows = await this.dataSource.query(
-        `SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1`
+        `SELECT id, name FROM teams WHERE organization_id = $1 ORDER BY created_at ASC LIMIT 1`,
+        [organizationId],
       );
       let team = teamRows.length > 0 ? teamRows[0] as { id: string; name: string } : null;
 
       if (!team) {
-        // Use INSERT ON CONFLICT for org creation to handle concurrent calls.
-        // organizations has UNIQUE(name), so this is safe.
-        await this.dataSource.query(
-          `INSERT INTO organizations (name, description, created_at, updated_at)
-           VALUES ($1, $2, NOW(), NOW())
-           ON CONFLICT (name) DO NOTHING`,
-          ['Default Organization', 'Auto-created default organization'],
-        );
-
-        const org = await this.organizationRepo.findOne({
-          where: { name: 'Default Organization' },
-          select: ['id'],
-        });
-
-        if (org) {
-          // Create team, handling possible concurrent creation
-          try {
-            const newTeam = this.teamRepo.create({
-              name: 'Default Team',
-              description: 'Auto-created default team',
-              organization_id: org.id,
-            });
-            const saved = await this.teamRepo.save(newTeam);
-            team = { id: saved.id, name: saved.name };
-          } catch {
-            // Concurrent creation, fetch the existing team
-            const rows = await this.dataSource.query(
-              `SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1`
-            );
-            team = rows.length > 0 ? rows[0] as { id: string; name: string } : null;
-          }
+        // The organization already exists — it was resolved before we got here — so
+        // this branch only creates the team. It used to also INSERT a
+        // 'Default Organization' row, which was unreachable: both callers of
+        // findOrCreateSystemUnderTest receive a resolved organizationId.
+        try {
+          const newTeam = this.teamRepo.create({
+            name: 'Default Team',
+            description: 'Auto-created default team',
+            organization_id: organizationId,
+          });
+          const saved = await this.teamRepo.save(newTeam);
+          team = { id: saved.id, name: saved.name };
+        } catch {
+          // Concurrent creation. Re-read within the same organization — `teams` has no
+          // unique on (organization_id, name), so this is a re-read rather than an
+          // ON CONFLICT, and it must carry the predicate or the recovery path
+          // reintroduces exactly the bug this method was fixed for.
+          const rows = await this.dataSource.query(
+            `SELECT id, name FROM teams WHERE organization_id = $1 ORDER BY created_at ASC LIMIT 1`,
+            [organizationId],
+          );
+          team = rows.length > 0 ? rows[0] as { id: string; name: string } : null;
         }
       }
 
       return team ? { id: team.id, name: team.name } : null;
     } catch (error) {
-      this.logger.warn('Failed to get default team:', error);
+      this.logger.warn(`Failed to get default team for organization ${organizationId}:`, error);
       return null;
     }
   }

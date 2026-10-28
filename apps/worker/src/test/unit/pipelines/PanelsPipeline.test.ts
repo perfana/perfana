@@ -36,6 +36,7 @@ vi.mock('../../../pipelines/panels/helpers.js', () => ({
 // tests pass; the soft-skip test overrides this to null per-test.
 vi.mock('../../../config/grafana-config-cache.js', () => ({
   tryGetGrafanaConfig: vi.fn(),
+  hasUsableGrafanaForRun: vi.fn(),
   getGrafanaConfig: vi.fn(),
   getGrafanaInstanceId: vi.fn(() => 'instance-1'),
   initializeGrafanaConfig: vi.fn(),
@@ -48,7 +49,7 @@ import {
   getBenchmarksForTestRun,
   createPanelDocuments
 } from '../../../pipelines/panels/helpers.js';
-import { tryGetGrafanaConfig } from '../../../config/grafana-config-cache.js';
+import { tryGetGrafanaConfig, hasUsableGrafanaForRun } from '../../../config/grafana-config-cache.js';
 
 // Create mock database service
 const mockDatabaseService = {
@@ -92,6 +93,8 @@ describe('PanelsPipeline', () => {
     });
 
     // Default: Grafana is configured. Soft-skip tests override to null.
+    // The stage gate is per-RUN since v0.2.97.39, not the global singleton.
+    (hasUsableGrafanaForRun as any).mockResolvedValue(true);
     (tryGetGrafanaConfig as any).mockResolvedValue({
       url: 'http://grafana.test',
       apiKey: 'test-api-key',
@@ -151,31 +154,48 @@ describe('PanelsPipeline', () => {
     });
   });
 
-  describe('Soft-skip when no Grafana configured (issue #282)', () => {
-    test('returns success with skipped marker and does not touch DB or helpers', async () => {
-      (tryGetGrafanaConfig as any).mockResolvedValueOnce(null);
+  describe('Soft-skip when this run has no usable Grafana (issue #282)', () => {
+    // The gate moved BELOW the test-run load in v0.2.97.39, because it is now asked per
+    // run (`hasUsableGrafanaForRun`) rather than against the oldest `grafana_instances`
+    // row in the whole table. So the run must be stubbed, and "does not touch DB" is no
+    // longer the invariant — "does not touch the Grafana HELPERS" is.
+    const stubRun = () =>
+      mockDatabaseService.getTestRunByTestRunId.mockResolvedValueOnce({
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        testRunId: 'test-run-no-grafana',
+        systemUnderTestId: 'sut-1',
+        testEnvironment: 'prod',
+        workload: 'loadTest',
+      } as never);
+
+    test('returns success with skipped marker and does no Grafana work', async () => {
+      stubRun();
+      (hasUsableGrafanaForRun as any).mockResolvedValueOnce(false);
 
       const result = await pipeline.execute({ testRunId: 'test-run-no-grafana' });
 
       expect(result.success).toBe(true);
       expect(result.data).toEqual({ skipped: 'no-grafana-configured' });
 
-      // The pipeline must short-circuit before any helper or DB call so a
-      // Grafana-less stack still flows through to downstream stages cleanly.
+      // Short-circuits before any Grafana helper or write so a Grafana-less stack still
+      // flows through to downstream stages cleanly.
       expect(getApplicationDashboardsForTestRun).not.toHaveBeenCalled();
       expect(getGrafanaDashboardsForApplicationDashboards).not.toHaveBeenCalled();
       expect(getBenchmarksForTestRun).not.toHaveBeenCalled();
       expect(createPanelDocuments).not.toHaveBeenCalled();
-      expect(mockDatabaseService.getTestRunByTestRunId).not.toHaveBeenCalled();
       expect(mockDatabaseService.transaction).not.toHaveBeenCalled();
     });
 
-    test('still fails (returns success: false) when Grafana row is invalid', async () => {
-      (tryGetGrafanaConfig as any).mockRejectedValueOnce(
+    test('fails the stage when the gate itself throws', async () => {
+      // A database error resolving the run's instances must not read as "no Grafana" —
+      // that would record the run as analysed with no panels. hasUsableGrafanaForRun
+      // returns true on a lookup error for the same reason; a throw past that is real.
+      stubRun();
+      (hasUsableGrafanaForRun as any).mockRejectedValueOnce(
         new Error('Grafana config not available. A grafana_instances row exists but is invalid')
       );
 
-      const result = await pipeline.execute({ testRunId: 'test-run-invalid-grafana' });
+      const result = await pipeline.execute({ testRunId: 'test-run-no-grafana' });
 
       expect(result.success).toBe(false);
       expect(result.error?.message).toContain('invalid');

@@ -11,6 +11,7 @@ import {
   Alert,
   Box,
   Typography,
+  MenuItem,
 } from '@mui/material';
 import { Groups } from '@mui/icons-material';
 import { useCreateTeam } from '@/lib/hooks/use-teams';
@@ -18,7 +19,19 @@ import { useCreateTeam } from '@/lib/hooks/use-teams';
 interface CreateTeamDialogProps {
   open: boolean;
   onClose: () => void;
-  organizationId: string;
+  /**
+   * The organization to create in, when it is unambiguous — a selected filter, or the
+   * single organization the user belongs to. Pass `null` when it is NOT, and give
+   * `organizations` instead: the dialog then asks rather than guessing.
+   */
+  organizationId: string | null;
+  /**
+   * Candidates, used only when `organizationId` is null. The page used to resolve that
+   * case with `organizations[0].id` — which is exactly the state `organization-context`
+   * leaves a multi-organization user in, so a team was silently created in whichever
+   * organization happened to sort first.
+   */
+  organizations?: Array<{ id: string; name: string }>;
   onSuccess?: () => void;
 }
 
@@ -26,17 +39,26 @@ export function CreateTeamDialog({
   open,
   onClose,
   organizationId,
+  organizations = [],
   onSuccess,
 }: CreateTeamDialogProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Deliberately NOT defaulted to organizations[0]: an unset Select shows its label and
+  // the submit button stays disabled, so the user has to make the choice. Defaulting it
+  // would reintroduce the silent first-row pick behind a control that looks deliberate.
+  const [pickedOrgId, setPickedOrgId] = useState('');
+
+  const mustPick = !organizationId;
+  const targetOrgId = organizationId ?? pickedOrgId;
 
   const createTeam = useCreateTeam();
 
   const handleClose = () => {
     setName('');
     setDescription('');
+    setPickedOrgId('');
     setError(null);
     onClose();
   };
@@ -50,11 +72,16 @@ export function CreateTeamDialog({
       return;
     }
 
+    if (!targetOrgId) {
+      setError('Select an organization');
+      return;
+    }
+
     try {
       await createTeam.mutateAsync({
         name: name.trim(),
         description: description.trim() || undefined,
-        organization_id: organizationId,
+        organization_id: targetOrgId,
       });
       handleClose();
       onSuccess?.();
@@ -110,8 +137,30 @@ export function CreateTeamDialog({
             </Alert>
           )}
 
+          {mustPick && (
+            <TextField
+              select
+              autoFocus
+              margin="dense"
+              label="Organization"
+              fullWidth
+              variant="outlined"
+              value={pickedOrgId}
+              onChange={(e) => setPickedOrgId(e.target.value)}
+              required
+              helperText="You belong to more than one organization — choose where this team lives."
+              sx={{ mb: 2 }}
+            >
+              {organizations.map((org) => (
+                <MenuItem key={org.id} value={org.id}>
+                  {org.name}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
+
           <TextField
-            autoFocus
+            autoFocus={!mustPick}
             margin="dense"
             label="Team Name"
             placeholder="e.g., Backend Team, QA Engineers"
@@ -152,7 +201,7 @@ export function CreateTeamDialog({
           <Button
             type="submit"
             variant="contained"
-            disabled={createTeam.isPending || !name.trim()}
+            disabled={createTeam.isPending || !name.trim() || !targetOrgId}
             sx={{
               background:
                 'linear-gradient(135deg, rgba(25, 118, 210, 1) 0%, rgba(30, 136, 229, 1) 100%)',

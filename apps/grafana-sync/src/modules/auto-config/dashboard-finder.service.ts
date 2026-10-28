@@ -10,6 +10,7 @@ import {
 } from '@perfana/shared/entities';
 import { DashboardUid } from './dashboard-uid.util';
 import { DashboardVariable } from './types';
+import { resolveGrafanaInstanceByLabel } from './grafana-instance-resolver';
 
 @Injectable()
 export class DashboardFinderService {
@@ -45,14 +46,26 @@ export class DashboardFinderService {
     }
   }
 
+  /** See {@link resolveGrafanaInstanceByLabel} — scoped, and fails closed on ambiguity. */
+  private resolveGrafanaInstanceByLabel(
+    label: string,
+    organizationId?: string | null,
+  ): Promise<GrafanaInstance | null> {
+    return resolveGrafanaInstanceByLabel(
+      this.grafanaInstanceRepo,
+      this.logger,
+      label,
+      organizationId,
+    );
+  }
+
   async findGrafanaDashboardOrNull(
     grafana: string,
     dashboardUids: string[],
+    organizationId?: string | null,
   ): Promise<GrafanaDashboard | null> {
     try {
-      const grafanaInstance = await this.grafanaInstanceRepo.findOne({
-        where: { label: grafana },
-      });
+      const grafanaInstance = await this.resolveGrafanaInstanceByLabel(grafana, organizationId);
 
       if (!grafanaInstance) {
         return null;
@@ -156,11 +169,10 @@ export class DashboardFinderService {
   async findExistingGrafanaDashboards(
     grafana: string,
     dashboardUids: string[],
+    organizationId?: string | null,
   ): Promise<GrafanaDashboard[]> {
     try {
-      const grafanaInstance = await this.grafanaInstanceRepo.findOne({
-        where: { label: grafana },
-      });
+      const grafanaInstance = await this.resolveGrafanaInstanceByLabel(grafana, organizationId);
 
       if (!grafanaInstance) {
         return [];
@@ -186,12 +198,17 @@ export class DashboardFinderService {
   }
 
   /**
-   * Find grafana configuration by label
+   * Find grafana configuration by label, within one organization.
+   *
+   * See resolveGrafanaInstanceByLabel — this is the site whose result reaches the
+   * dashboard builder as `server_url` + API key, so it is the one that mattered most.
    */
-  async findGrafanaConfiguration(grafana: string): Promise<GrafanaInstance | null> {
+  async findGrafanaConfiguration(
+    grafana: string,
+    organizationId?: string | null,
+  ): Promise<GrafanaInstance | null> {
     try {
-      const data = await this.grafanaInstanceRepo.findOne({ where: { label: grafana } });
-      return data || null;
+      return await this.resolveGrafanaInstanceByLabel(grafana, organizationId);
     } catch (e) {
       this.logger.error('findGrafanaConfiguration failed:', e);
       return null;

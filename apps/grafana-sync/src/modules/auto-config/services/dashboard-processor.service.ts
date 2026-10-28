@@ -87,9 +87,13 @@ export class DashboardProcessorService {
     templateDashboard: any,
   ): Promise<void> {
     const applicationDashboard = applicationDashboards[0];
+    // The instance is already resolved here, so pass its organization rather than
+    // re-resolving the label globally — with duplicate labels across tenants the
+    // round trip could come back with a DIFFERENT instance than the one in hand.
     const storedGrafanaDashboard = await this.dashboardFinderService.findGrafanaDashboardOrNull(
       grafanaInstance.label,
       [applicationDashboard.dashboardUid],
+      grafanaInstance.organizationId,
     );
 
     if (!storedGrafanaDashboard) {
@@ -333,6 +337,7 @@ export class DashboardProcessorService {
     // Upsert to grafana_dashboards table
     const upsertResult = await this.updatesService.upsertGrafanaDashboard({
       grafana: grafanaInstance.label,
+      organizationId: grafanaInstance.organizationId,
       uid: newDashboardUid,
       title: newDashboardJson.dashboard.title,
       id: createdDashboardDetails.dashboard.id,

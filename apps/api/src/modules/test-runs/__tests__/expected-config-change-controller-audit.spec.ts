@@ -97,6 +97,19 @@ describe('TestRunsComparisonController — expected-config-change audit chain (P
           provide: getRepositoryToken(SystemEntity),
           useValue: {
             findOne: jest.fn().mockResolvedValue({ id: SUT_ID }),
+            // The system is resolved by NAME through a query builder since v0.2.97.39
+            // — `uq_system_under_test_name_org` scopes the name per organization, so a
+            // bare findOne was cross-tenant. This chain is about audit, not scoping, so
+            // the builder just answers with the one system.
+            createQueryBuilder: jest.fn(() => {
+              const qb: Record<string, unknown> = {};
+              for (const k of ['where', 'andWhere', 'select', 'orderBy', 'take']) {
+                qb[k] = jest.fn(() => qb);
+              }
+              qb.getMany = jest.fn().mockResolvedValue([{ id: SUT_ID }]);
+              qb.getOne = jest.fn().mockResolvedValue({ id: SUT_ID });
+              return qb;
+            }),
           },
         },
         {
@@ -119,7 +132,18 @@ describe('TestRunsComparisonController — expected-config-change audit chain (P
           },
         },
         { provide: DataSource, useValue: { query: jest.fn() } },
-        { provide: AuthorizationService, useValue: {} },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            // `withOrgFilter` calls isGlobalAdmin first and then
+            // getAccessibleOrganizations, so both have to exist or an incomplete mock
+            // surfaces as a TypeError rather than as an authorization failure. These
+            // tests drive the service as a global admin, so no org predicate is added
+            // and the audit assertions below are unaffected by scoping.
+            isGlobalAdmin: jest.fn().mockReturnValue(true),
+            getAccessibleOrganizations: jest.fn().mockResolvedValue([]),
+          },
+        },
         {
           provide: AuditService,
           useValue: {

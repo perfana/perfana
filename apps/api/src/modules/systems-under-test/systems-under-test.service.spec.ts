@@ -7,6 +7,7 @@ import { NotFoundException } from '@nestjs/common';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { createAuthorizationServiceMock } from '../../../test/mocks/authorization-service.mock';
 import { AuditService } from '../audit/audit.service';
+import { stubScopedLookup } from '../../test/org-scoped-lookup';
 
 describe('SystemsUnderTestService', () => {
   let service: SystemsUnderTestService;
@@ -326,21 +327,24 @@ describe('SystemsUnderTestService', () => {
     });
   });
 
+  /**
+   * `uq_system_under_test_name_org` scopes the name PER ORGANIZATION, so `name` alone
+   * can match several rows. This method authorizes AFTER resolving, which made the old
+   * unscoped `findOne` a false NEGATIVE rather than a leak: it picked an arbitrary row,
+   * and if that was another tenant's the membership check rejected it — so a user's own
+   * system became invisible while plainly existing.
+   */
   describe('findByName', () => {
     it('should return system by name', async () => {
-      repository.findOne.mockResolvedValue(mockSystemUnderTest);
+      stubScopedLookup(repository, [mockSystemUnderTest]);
 
       const result = await service.findByName('payment-service', testUserId, testIsAdmin);
 
       expect(result).toEqual(mockSystemUnderTest);
-      expect(repository.findOne).toHaveBeenCalledWith({
-        where: { name: 'payment-service' },
-        relations: ['team'],
-      });
     });
 
     it('should return null when system not found', async () => {
-      repository.findOne.mockResolvedValue(null);
+      stubScopedLookup(repository, []);
 
       const result = await service.findByName('nonexistent-service', testUserId, testIsAdmin);
 
@@ -349,9 +353,50 @@ describe('SystemsUnderTestService', () => {
 
     it('should handle database errors', async () => {
       const error = new Error('Database query failed');
-      repository.findOne.mockRejectedValue(error);
+      const { qb } = stubScopedLookup(repository, []);
+      qb.getMany!.mockRejectedValue(error);
 
       await expect(service.findByName('payment-service', testUserId, testIsAdmin)).rejects.toThrow('Database query failed');
+    });
+
+    it('puts the caller organizations in the query for a non-admin', async () => {
+      mockAuthzService.getAccessibleOrganizations.mockResolvedValue(['org-1', 'org-2']);
+      const { predicates } = stubScopedLookup(repository, [mockSystemUnderTest]);
+
+      await service.findByName('payment-service', testUserId, false);
+
+      expect(predicates).toEqual([
+        ['sut.name = :name', { name: 'payment-service' }],
+        ['sut.organization_id IN (:...orgIds)', { orgIds: ['org-1', 'org-2'] }],
+      ]);
+    });
+
+    it('adds no organization predicate for a global admin', async () => {
+      const { predicates } = stubScopedLookup(repository, [mockSystemUnderTest]);
+
+      await service.findByName('payment-service', testUserId, true);
+
+      expect(predicates).toEqual([['sut.name = :name', { name: 'payment-service' }]]);
+      expect(mockAuthzService.getAccessibleOrganizations).not.toHaveBeenCalled();
+    });
+
+    it('returns null without querying when the caller has no memberships', async () => {
+      mockAuthzService.getAccessibleOrganizations.mockResolvedValue([]);
+      stubScopedLookup(repository, [mockSystemUnderTest]);
+
+      expect(await service.findByName('payment-service', testUserId, false)).toBeNull();
+      // IN (:...orgIds) on an empty array renders IN (), a syntax error.
+      expect(repository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('refuses rather than guessing when one name matches two visible systems', async () => {
+      mockAuthzService.getAccessibleOrganizations.mockResolvedValue(['org-1', 'org-2']);
+      stubScopedLookup(repository, [
+        mockSystemUnderTest,
+        { ...mockSystemUnderTest, id: 'other', organization_id: 'org-2' },
+      ]);
+
+      expect(await service.findByName('payment-service', testUserId, false)).toBeNull();
     });
   });
 

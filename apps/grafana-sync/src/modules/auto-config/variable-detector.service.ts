@@ -120,8 +120,8 @@ export class VariableDetectorService {
       // nothing for every series those values select (issue #657).
       const datasourceUid = this.resolveTemplatedDatasourceUid(grafanaDashboard, rawUid);
       if (datasourceUid) {
-        datasource = await this.grafanaApiService.getDatasourceByUidWithLabel(
-          grafanaInstance.label,
+        datasource = await this.grafanaApiService.getDatasourceByUidForInstance(
+          grafanaInstance,
           datasourceUid,
         );
       } else {
@@ -149,13 +149,13 @@ export class VariableDetectorService {
           );
           return [];
         }
-        datasource = await this.grafanaApiService.getDatasourceByUidWithLabel(
-          grafanaInstance.label,
+        datasource = await this.grafanaApiService.getDatasourceByUidForInstance(
+          grafanaInstance,
           resolvedUid,
         );
       } else {
-        datasource = await this.grafanaApiService.getDatasourceByNameWithLabel(
-          grafanaInstance.label,
+        datasource = await this.grafanaApiService.getDatasourceByNameForInstance(
+          grafanaInstance,
           templatingVariable.datasource,
         );
       }
@@ -222,7 +222,7 @@ export class VariableDetectorService {
     const variableValues: string[] = [];
 
     try {
-      const response = await this.grafanaApiService.getByLabel(grafanaInstance.label, queryUrl);
+      const response = await this.grafanaApiService.getForInstance(grafanaInstance, queryUrl);
 
       if (response.results) {
         response.results.forEach((result: any) => {
@@ -284,7 +284,7 @@ export class VariableDetectorService {
     const variableValues: string[] = [];
 
     try {
-      const response = await this.grafanaApiService.getByLabel(grafanaInstance.label, queryUrl);
+      const response = await this.grafanaApiService.getForInstance(grafanaInstance, queryUrl);
 
       if (isLabelValuesQuery) {
         const match = queryRegex.exec(query);
@@ -347,8 +347,8 @@ export class VariableDetectorService {
     try {
       this.logger.debug(`PostgreSQL query for variable "${variable.name}": ${query}`);
 
-      const response = await this.grafanaApiService.postByLabel(
-        grafanaInstance.label,
+      const response = await this.grafanaApiService.postForInstance(
+        grafanaInstance,
         '/api/ds/query',
         queryPayload,
       );

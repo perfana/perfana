@@ -442,8 +442,8 @@ export class TestRunsMutationService {
     }
   }
 
-  async getDefaultTeam(): Promise<{ id: string; name: string } | null> {
-    return this.lookupService.getDefaultTeam();
+  async getDefaultTeam(organizationId: string): Promise<{ id: string; name: string } | null> {
+    return this.lookupService.getDefaultTeam(organizationId);
   }
 
   /**

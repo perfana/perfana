@@ -2270,3 +2270,133 @@ describe('MetricsService', () => {
     });
   });
 });
+
+/**
+ * One metrics source backs MANY application dashboards — `application_dashboards` has
+ * no unique on `metrics_source_id` — across different systems, environments and teams.
+ * And neither `ds_metrics` nor `ds_metric_statistics` carries an RLS policy, so the
+ * check in `getDistinctMetricNames` is the ONLY control on that data.
+ *
+ * Until v0.2.97.39 the no-run branch resolved one arbitrary dashboard for the source
+ * and authorized against it, while the query filtered by the caller-supplied
+ * `applicationDashboardId` — routinely a different row with a different owner.
+ */
+describe('MetricsService — the access check subject is what the query reads', () => {
+  let service: MetricsService;
+  let appDashboardRepo: jest.Mocked<Repository<ApplicationDashboard>>;
+  let testRunRepo: jest.Mocked<Repository<TestRunEntity>>;
+  let metricsRepo: jest.Mocked<Repository<DsMetrics>>;
+  let authzMock: ReturnType<typeof createAuthorizationServiceMock>;
+
+  const repo = () => ({
+    find: jest.fn(),
+    findOne: jest.fn(),
+    count: jest.fn(),
+    query: jest.fn(),
+    createQueryBuilder: jest.fn(),
+    save: jest.fn(),
+    delete: jest.fn(),
+    manager: {
+      query: jest.fn().mockResolvedValue([]),
+      transaction: jest.fn(async (cb: (em: { query: jest.Mock }) => unknown) =>
+        cb({ query: jest.fn().mockResolvedValue([]) })),
+    },
+  });
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        MetricsService,
+        ...[DsMetrics, DsMetricStatistics, DsControlGroups, DsChangePoints, DsAdaptResults,
+            TestRunEntity, ApplicationDashboard].map((e) => ({
+          provide: getRepositoryToken(e),
+          useValue: repo(),
+        })),
+        { provide: AuthorizationService, useValue: createAuthorizationServiceMock() },
+      ],
+    }).compile();
+    service = module.get(MetricsService);
+    appDashboardRepo = module.get(getRepositoryToken(ApplicationDashboard));
+    testRunRepo = module.get(getRepositoryToken(TestRunEntity));
+    metricsRepo = module.get(getRepositoryToken(DsMetrics));
+    authzMock = module.get(AuthorizationService);
+    // resolveLatestRunForDashboard runs past the access check; these cases are about
+    // the check, so it resolves to no run and the method returns [].
+    metricsRepo.query.mockResolvedValue([]);
+  });
+
+  it('authorizes the dashboard the caller named, not one resolved from the source', async () => {
+    // The source resolves to a DIFFERENT dashboard than the one being queried. The old
+    // code authorized 'other-tenant-dash'; the fix must authorize 'mine'.
+    appDashboardRepo.find.mockResolvedValue([{ id: 'other-tenant-dash' }] as never);
+    appDashboardRepo.findOne.mockImplementation(async (opts: never) => {
+      const id = (opts as { where?: { id?: string } }).where?.id;
+      return { id, organizationId: id === 'mine' ? 'org-1' : 'org-999', createdBy: 'x' } as never;
+    });
+    authzMock.canAccessResource.mockImplementation(async (_u, _r, res: never) => ({
+      allowed: (res as { organization_id: string }).organization_id === 'org-1',
+      reason: '',
+    }));
+
+    const names = await service.getDistinctMetricNames('mine', 7, 'user-1', ['user'], 'src-1');
+
+    // It got past the check, so the subject was 'mine'. Under the old behaviour the
+    // subject was the source's arbitrary dashboard (org-999) and this returned [].
+    const subjects = authzMock.canAccessResource.mock.calls.map(
+      (c) => (c[2] as { organization_id: string }).organization_id,
+    );
+    expect(subjects).toContain('org-1');
+    expect(subjects).not.toContain('org-999');
+    expect(names).toEqual([]);
+  });
+
+  it('requires EVERY dashboard of a source to be accessible when no dashboard is named', async () => {
+    // The read filters ds_metrics on metrics_source_id, which crosses dashboards — so
+    // one accessible dashboard is not enough to justify it.
+    appDashboardRepo.find.mockResolvedValue([{ id: 'mine' }, { id: 'theirs' }] as never);
+    appDashboardRepo.findOne.mockImplementation(async (opts: never) => {
+      const id = (opts as { where?: { id?: string } }).where?.id;
+      return { id, organizationId: id === 'mine' ? 'org-1' : 'org-999', createdBy: 'x' } as never;
+    });
+    authzMock.canAccessResource.mockImplementation(async (_u, _r, res: never) => ({
+      allowed: (res as { organization_id: string }).organization_id === 'org-1',
+      reason: '',
+    }));
+
+    expect(await service.getDistinctMetricNames('', 7, 'user-1', ['user'], 'src-1')).toEqual([]);
+  });
+
+  it('allows a source whose dashboards are all accessible', async () => {
+    appDashboardRepo.find.mockResolvedValue([{ id: 'mine' }, { id: 'also-mine' }] as never);
+    appDashboardRepo.findOne.mockResolvedValue({ id: 'mine', organizationId: 'org-1', createdBy: 'x' } as never);
+    authzMock.canAccessResource.mockResolvedValue({ allowed: true, reason: '' } as never);
+
+    expect(await service.getDistinctMetricNames('', 7, 'user-1', ['user'], 'src-1')).toEqual([]);
+    expect(authzMock.canAccessResource).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed on a source that backs no dashboard at all', async () => {
+    // There is no owner to check, so there is nothing that can justify the read.
+    appDashboardRepo.find.mockResolvedValue([] as never);
+    authzMock.canAccessResource.mockResolvedValue({ allowed: true, reason: '' } as never);
+
+    expect(await service.getDistinctMetricNames('', 7, 'user-1', ['user'], 'src-1')).toEqual([]);
+    expect(authzMock.canAccessResource).not.toHaveBeenCalled();
+  });
+
+  it('refuses with neither a run, a dashboard nor a source', async () => {
+    expect(await service.getDistinctMetricNames('', 7, 'user-1', ['user'])).toEqual([]);
+    expect(authzMock.canAccessResource).not.toHaveBeenCalled();
+  });
+
+  it('still prefers the test run when one is supplied', async () => {
+    testRunRepo.query.mockResolvedValue([{ organization_id: 'org-1', created_by: 'creator' }]);
+    authzMock.canAccessResource.mockResolvedValue({ allowed: true, reason: '' } as never);
+
+    await service.getDistinctMetricNames('mine', 7, 'user-1', ['user'], 'src-1', 'run-1');
+
+    // The run is the more direct check and short-circuits the dashboard lookups.
+    expect(testRunRepo.query).toHaveBeenCalled();
+    expect(appDashboardRepo.find).not.toHaveBeenCalled();
+  });
+});

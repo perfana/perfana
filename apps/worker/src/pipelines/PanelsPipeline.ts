@@ -1,7 +1,7 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
-import { tryGetGrafanaConfig } from '../config/grafana-config-cache.js';
+import { hasUsableGrafanaForRun } from '../config/grafana-config-cache.js';
 import { maxRowsPerStatement } from '../utils/bind-params.js';
 import {
   getApplicationDashboardsForTestRun,
@@ -32,20 +32,6 @@ export class PanelsPipeline extends BasePipelineTypeORM {
     const overallStartTime = Date.now();
 
     try {
-      // Soft-skip when no Grafana instance is configured. Grafana is documented
-      // as an optional metric source; without one, there are no panels to build,
-      // but downstream stages (rollup, statistics, checks) still need to run on
-      // the load-test data already in TimescaleDB. See issue #282.
-      const grafanaConfig = await tryGetGrafanaConfig();
-      if (!grafanaConfig) {
-        this.logger.info('No Grafana instance configured — skipping panels-processing');
-        return {
-          success: true,
-          duration: Date.now() - overallStartTime,
-          data: { skipped: 'no-grafana-configured' },
-        };
-      }
-
       // Step 1: Load all data using TypeORM
       let stepStart = Date.now();
       this.logger.info(`⏱️  [TIMING] Starting test run query at ${new Date().toISOString()}`);
@@ -62,6 +48,24 @@ export class PanelsPipeline extends BasePipelineTypeORM {
       }
 
       this.logger.info(`🔍 Test run loaded: ${Date.now() - stepStart}ms`);
+
+      // Soft-skip when THIS RUN has no reachable Grafana. Grafana is documented as an
+      // optional metric source; without one there are no panels to build, but
+      // downstream stages (rollup, statistics, checks) still need to run on the
+      // load-test data already in TimescaleDB. See issue #282.
+      //
+      // Asked per run rather than through `tryGetGrafanaConfig()`, which resolved the
+      // oldest row in the WHOLE TABLE — so one misconfigured legacy instance failed
+      // this stage for every run in the deployment, including runs whose dashboards
+      // live on a healthy second instance. See hasUsableGrafanaForRun.
+      if (!(await hasUsableGrafanaForRun(testRun))) {
+        this.logger.info('No usable Grafana instance for this run — skipping panels-processing');
+        return {
+          success: true,
+          duration: Date.now() - overallStartTime,
+          data: { skipped: 'no-grafana-configured' },
+        };
+      }
 
       // Load system name for template variables
       stepStart = Date.now();

@@ -13,6 +13,7 @@ import { createTestScenario, clearTestData } from '../helpers/database.js';
 // grafana_instances row from the test DB. Returning a non-null config keeps
 // the existing happy-path tests on their original code path.
 vi.mock('../../config/grafana-config-cache.js', () => ({
+  hasUsableGrafanaForRun: vi.fn(async () => true),
   tryGetGrafanaConfig: vi.fn(async () => ({
     url: 'http://localhost:3000',
     apiKey: 'test-api-key',

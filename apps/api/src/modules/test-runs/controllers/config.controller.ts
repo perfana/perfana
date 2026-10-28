@@ -10,6 +10,11 @@ import { AddTestRunConfigDto, AddTestRunConfigsDto, AddTestRunConfigJsonDto } fr
 export class ConfigController {
   private readonly logger = new Logger(ConfigController.name);
 
+  // Every write here resolves its system under test BY NAME, and
+  // `uq_system_under_test_name_org` scopes that name per organization — so the caller's
+  // context has to reach the service or the lookup is cross-tenant. See
+  // `resolveSystemIdByName` in test-runs-config.service.ts. An API-key principal with no
+  // membership rows still works: `withOrgFilter` treats an empty userId as a system call.
   constructor(private readonly testRunsService: TestRunsService) {}
 
   @Get('/systems')
@@ -30,10 +35,10 @@ export class ConfigController {
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 404, description: 'Test run not found' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
-  async addTestRunConfig(@Body() configDto: AddTestRunConfigDto) {
+  async addTestRunConfig(@Body() configDto: AddTestRunConfigDto, @UserCtx() ctx: UserContext) {
     this.logger.debug('Adding test run config', { configDto });
 
-    await this.testRunsService.addTestRunConfig(configDto);
+    await this.testRunsService.addTestRunConfig(configDto, ctx.userId, ctx.roles);
 
     return {
       message: 'Test run config key value pair added'
@@ -46,10 +51,10 @@ export class ConfigController {
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 404, description: 'Test run not found' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
-  async addTestRunConfigs(@Body() configsDto: AddTestRunConfigsDto) {
+  async addTestRunConfigs(@Body() configsDto: AddTestRunConfigsDto, @UserCtx() ctx: UserContext) {
     this.logger.debug('Adding multiple test run configs', { count: configsDto.configItems?.length });
 
-    await this.testRunsService.addTestRunConfigs(configsDto);
+    await this.testRunsService.addTestRunConfigs(configsDto, ctx.userId, ctx.roles);
 
     return {
       message: 'Test run config key value pairs added'
@@ -61,14 +66,17 @@ export class ConfigController {
   @ApiResponse({ status: 200, description: 'Test run config json added (stored immediately if test run exists, or queued for future association if not)' })
   @ApiResponse({ status: 400, description: 'Validation error or malicious regex detected' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
-  async addTestRunConfigJson(@Body() configJsonDto: AddTestRunConfigJsonDto) {
+  async addTestRunConfigJson(
+    @Body() configJsonDto: AddTestRunConfigJsonDto,
+    @UserCtx() ctx: UserContext,
+  ) {
     this.logger.debug('Adding test run config from JSON', {
       testRunId: configJsonDto.testRunId,
       includePatterns: configJsonDto.includes?.length,
       excludePatterns: configJsonDto.excludes?.length
     });
 
-    await this.testRunsService.addTestRunConfigJson(configJsonDto);
+    await this.testRunsService.addTestRunConfigJson(configJsonDto, ctx.userId, ctx.roles);
 
     return {
       message: 'Test run config json added'

@@ -1480,63 +1480,44 @@ do the work per group. `POST /reevaluate-batch` asserts per-run access but never
 - `apps/worker/.../simple-orchestrate-reevaluate-batch.ts:585` — `LIMIT 10` on
   `grafana_instances` silently truncates an 11-instance deploy. Different class, noticed in passing.
 
-### Needs a second organization to fire — close before the first multi-org deploy
+### Multi-org: the first-row class is closed in code, not prevented
 
-**Priority:** P3 today, **P1 the moment a second organization exists in production**
+**Priority:** P3
+**Origin:** v0.2.97.39, which fixed all six groups of the multi-org release gate.
 
-- `apps/grafana-sync/.../dashboard-finder.service.ts:53, 161, 193`,
-  `auto-config-updates.service.ts:111, 246`, `grafana-api.service.ts:319` — six sites resolving a
-  Grafana instance by `findOne({ where: { label } })`. **Verified: `grafana_instances.label` has
-  no unique constraint, and grafana-sync sets no RLS context anywhere**, so these see every
-  organization's rows. Duplicate labels across orgs are not an edge case — they are *required*
-  for one profile to auto-configure two orgs' systems. `insertApplicationDashboard` org-scopes the
-  SUT lookup and then resolves the instance org-blind, so org A's SUT can be given org B's
-  `grafana_instance_id`, and the dashboard builder is handed org B's `server_url` and API key.
-  Fix: thread the SUT's `organizationId` into every label lookup and fail closed on ambiguity;
-  longer term, a unique index on `(organization_id, label)`.
-- `apps/api/.../test-runs-config.service.ts` (11 sites), `test-runs-metrics.service.ts:86`,
-  `systems-under-test.service.ts:368`, `alerts.service.ts:128`, `events.service.ts:136` — a system
-  under test resolved by `name` alone. `uq_system_under_test_name_org` scopes the name **per
-  organization**. Several of these write and delete. `alerts.service.processAlert` is the sharpest:
-  it resolves by name and then reaches `checkAbortConditions`, which can abort running test runs.
-  Note the webhook is **not** public — it carries `@ApiBearerAuth()`, documents a 401 and is
-  guarded by default, so it needs a valid API key; and on an RLS-enabled deploy the lookup is
-  org-scoped. Neither is a reason to leave it: tenancy must not depend on RLS being on.
-  `test-run-lookup.service.ts:66` is the correct pattern to copy.
-- `apps/api/.../test-run-lookup.service.ts:243-246` — `getDefaultTeam()` is
-  `SELECT id, name FROM teams ORDER BY created_at ASC LIMIT 1` with **no organization predicate**,
-  and its result is stamped on every auto-created SUT. Org from the caller, team from whichever
-  organization was created first. `systems_under_test` RLS reads `can_access_resource(org, team,
-  created_by)`, so members of the owning org lose access to a system their own CI just created.
-  Reached from `/api/init` and on the first test run for any new SUT name.
-- `apps/api/.../metrics.service.ts:84-89, 1123-1129` — `resolveApplicationDashboardId` picks an
-  arbitrary `application_dashboards` row for a metrics source and uses it as the **authorization
-  subject**, and again at :1150 as the scoping run. One metrics source backs many dashboards
-  across systems, environments and teams. `ds_metrics` has no RLS policy of its own, which the
-  comment at :1116 says is precisely why this check is the only control.
-- `apps/worker/src/config/grafana-config-cache.ts:49` — the worker's default Grafana is
-  `ORDER BY created_at ASC LIMIT 1` over the whole table, cached process-wide. Stable but
-  org-blind. **Measured: the NULL-instance bucket on dev is 76 perf-test and 3 Dynatrace
-  artificial rows and zero real Grafana dashboards**, so the wrong-instance half is not currently
-  reachable. The half that IS real: `tryGetGrafanaConfig()` gates whole stages
-  (`PanelsPipeline`, `MetricsPipeline`), so one misconfigured legacy row fails panels-processing
-  and metrics-collection for **every** run, including runs whose dashboards live on a healthy
-  second instance. Make the gate a count over the run's own dashboards' instances.
-- `apps/web/app/settings/teams/page.tsx:77` — `organizations[0].id` when the org filter is "all"
-  and no org is selected, which is exactly the state `organization-context` leaves a multi-org
-  user in. Ask instead of guessing.
+The six site groups are fixed and tested, but nothing stops the seventh. The durable fix
+below is still the durable fix: **a lint rule is the only thing that closes the class.**
+The shape to flag: an index-0 access, a `take: 1`, a `findOne` or a SQL `LIMIT 1` with no
+`ORDER BY`, on a query whose `where` omits a column of the table's unique key.
+
+Two concrete gaps the v0.2.97.39 sweep deliberately left:
+
+- **`resolveApplicationDashboardId` refuses on ambiguity rather than resolving it.** In
+  `findDSMetricsForPanel` an ambiguous metrics source now yields `undefined`, which falls
+  through to "first dashboard with rows for this panel/run" — correct, but it means the
+  caller never learns the source was ambiguous. Passing `applicationDashboardId`
+  explicitly from the web client is the real fix; the warn line is the stopgap.
+- **`ApplicationDashboardsService.copyToScope`'s `makeKey` still collapses every
+  workload's artificial Dynatrace row for one host to one key** (`instance|uid|label`,
+  all three of which now match since the instance column went NULL). Pre-existing, noted
+  in apps/api/CLAUDE.md, untouched here.
+
+Two unique indexes would make most of this unrepresentable rather than merely checked:
+`(organization_id, label)` on `grafana_instances`, and one on
+`dynatrace_queries(application_dashboard_id, label)`. Both need a dedupe migration first,
+on the 1812 model.
 
 ### Latent — no callers today, shaped to be misused by the next one
 
-**Priority:** P4
+**Priority:** P4 (all three re-verified against `main` at v0.2.97.38 on 2026-10-28)
 
-- `apps/api/src/repositories/application-dashboard.repository.ts:87-100` —
+- `apps/api/src/repositories/application-dashboard.repository.ts:87, 96` —
   `findByGrafanaDashboardId` and `findByDashboardUid`, both unscoped `findOne`s. One
   `grafana_dashboards` row is referenced by many application dashboards, and a uid is unique only
   within an instance.
-- `apps/worker/src/common/database.service.ts:1241` — `getDynatraceConfigBySystemUnderTest`
-  returns the first entity mapping's config. `dynatrace_entity_mappings` holds one row per mapped
-  entity by construction.
+- `apps/worker/src/common/database.service.ts:1219` (**was :1241**) —
+  `getDynatraceConfigBySystemUnderTest` returns the first entity mapping's config.
+  `dynatrace_entity_mappings` holds one row per mapped entity by construction.
 - `apps/worker/src/services/dynatrace/DynatraceRepository.ts:127-151, 157` — dead code
   (`getDynatraceConfig(host)` on a non-unique `host` column), no caller anywhere.
 
@@ -3640,6 +3621,67 @@ It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that 
 **Effort:** S
 
 ## Completed
+
+### RELEASE GATE: multi-org tenancy
+
+**Shipped in v0.2.97.39.** All six groups fixed, with tests. The item was raised to P1 in
+the same version because a second organization is planned this quarter; it closed before
+one existed, which is the only cheap time to do it.
+
+What each group turned out to be:
+
+1. **grafana-sync's six label lookups** — `grafana_instances.label` has no unique
+   constraint and grafana-sync sets no RLS context, so these saw every organization.
+   Now one `resolveGrafanaInstanceByLabel` (its own file, used by both services that need
+   it) that **fails closed on ambiguity** and asks for two rows so the ambiguity is
+   visible at all. Separately, the four `*ByLabel`/`*WithLabel` methods on
+   `GrafanaApiService` were **replaced** by instance-taking ones rather than scoped:
+   every caller already held the resolved entity and was passing `.label` only because
+   that was the public method, so the round trip could return a different instance and
+   then query it with its API key.
+2. **11 system-under-test-by-name lookups** — 8 in `test-runs-config.service.ts` now
+   share one `resolveSystemIdByName`; plus `alerts.service.ts` (the sharpest: matched runs
+   reach `checkAbortConditions`, which can abort a running test), `events.service.ts`
+   (**both** arms, uuid as well as name) and `systems-under-test.service.ts`
+   `findByName`. The plumbing was the story: four facade delegations in
+   `test-runs.service.ts` **took** the caller as `_userId`/`_roles` and **discarded** it,
+   underscore-prefixed so lint was satisfied while the controllers were already passing
+   real context. `config.controller.ts` had no `@UserCtx()` at all.
+3. **`getDefaultTeam()`** — now takes the organization both callers already hold. Its
+   "create a Default Organization" branch was unreachable and is gone.
+4. **`metrics.service.ts`** — the no-run branch of `getDistinctMetricNames` authorized
+   against one arbitrary dashboard resolved from the metrics source while the query
+   filtered on the caller's `applicationDashboardId`. The subject is now what the query
+   reads; with no dashboard named, `validateSourceAccess` requires **every** dashboard the
+   source backs, because that is what filtering on `metrics_source_id` actually spans.
+5. **The worker's Grafana singleton** — `PanelsPipeline` and `MetricsPipeline` were gated
+   on `tryGetGrafanaConfig()`, the oldest row in the whole table, which throws `invalid`
+   on a bad row — so **one misconfigured legacy instance failed both stages for every run
+   in the deployment**, including runs on a healthy second instance. The gate is now
+   `hasUsableGrafanaForRun`, a count over the run's own dashboards' instances, each
+   resolved through the per-instance `getGrafanaConfigById`. It returns **true** on a
+   lookup error, deliberately: a transient database fault must not read as "this run has
+   no Grafana", which would record it as analysed with no panels.
+6. **`settings/teams/page.tsx`** — stopped guessing `organizations[0].id`. A user with
+   exactly one organization still needs no extra click; a multi-organization user with the
+   filter on "all" is asked, through a Select in `CreateTeamDialog` that is deliberately
+   **not** defaulted (defaulting it would reintroduce the silent first-row pick behind a
+   control that looks deliberate).
+
+Two things worth keeping from the fixing:
+
+- **`withOrgFilter` does NOT short-circuit on an empty userId** — it calls `isGlobalAdmin`
+  and then `getAccessibleOrganizations('')`, which answers with an empty list. Every new
+  resolver needs an explicit system-call arm or ingest breaks: without it every CI
+  pipeline posting to `/api/config` would 404. That arm is pinned by its own test, because
+  it is the one that breaks ingest rather than security.
+- **Four of the sites were already half-plumbed.** The controllers passed `ctx.userId` and
+  `ctx.roles`; the facade dropped them. Grep for `_userId` and `_roles` before concluding
+  a service has no access to the caller.
+
+The remaining residue is filed as "Multi-org: the first-row class is closed in code, not
+prevented" above — the lint rule, and the two unique indexes that would make most of this
+unrepresentable.
 
 ### job-progress.gateway had no tenant isolation at all
 

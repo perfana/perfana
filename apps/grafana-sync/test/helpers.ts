@@ -184,3 +184,39 @@ export function advanceTimersByTime(ms: number): void {
 export function runAllTimers(): void {
   jest.runAllTimers();
 }
+
+/**
+ * Stub the query builder `resolveGrafanaInstanceByLabel` uses
+ * (`apps/grafana-sync/src/modules/auto-config/grafana-instance-resolver.ts`).
+ *
+ * Pass the rows the label should match: `[]` for "no such instance", one row for the
+ * normal case, and TWO rows to exercise the fail-closed ambiguity branch — which is
+ * the case that matters, because that resolver exists to stop an org-blind label
+ * lookup picking another tenant's Grafana.
+ *
+ * The returned `predicates` collects the WHERE clauses so a test can assert the organization was
+ * actually part of the query, rather than only that the right row came back.
+ */
+export function stubGrafanaInstanceLookup(
+  repo: { createQueryBuilder: jest.Mock },
+  instances: unknown[],
+): { predicates: Array<[string, unknown]> } {
+  const predicates: Array<[string, unknown]> = [];
+  const qb: Record<string, jest.Mock> = {
+    where: jest.fn(),
+    andWhere: jest.fn(),
+    orderBy: jest.fn(),
+    take: jest.fn(),
+    getMany: jest.fn().mockResolvedValue(instances),
+  };
+  for (const key of ['where', 'andWhere'] as const) {
+    qb[key]!.mockImplementation((sql: string, params: unknown) => {
+      predicates.push([sql, params]);
+      return qb;
+    });
+  }
+  qb.orderBy!.mockReturnValue(qb);
+  qb.take!.mockReturnValue(qb);
+  repo.createQueryBuilder.mockReturnValue(qb as never);
+  return { predicates };
+}

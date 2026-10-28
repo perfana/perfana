@@ -89,15 +89,72 @@ export class MetricsService {
   ) {}
 
   /**
-   * Resolve an applicationDashboardId from a metricsSourceId by looking up the
-   * application_dashboards table.  Returns undefined when no match is found.
+   * Every application dashboard backed by a metrics source.
+   *
+   * One metrics source backs MANY dashboards, across different systems, environments
+   * and teams — `application_dashboards` has no unique on `metrics_source_id`. So
+   * "the" dashboard for a source does not exist, and the old
+   * `findOne({ where: { metricsSourceId } })` returned whichever row the planner
+   * handed back first.
    */
-  private async resolveApplicationDashboardId(metricsSourceId: string): Promise<string | undefined> {
-    const row = await withRequestEm(this.applicationDashboardRepo).findOne({
+  private async resolveApplicationDashboardIdsForSource(metricsSourceId: string): Promise<string[]> {
+    const rows = await withRequestEm(this.applicationDashboardRepo).find({
       where: { metricsSourceId },
       select: ['id'],
+      order: { id: 'ASC' },
     });
-    return row?.id;
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * One application dashboard for a metrics source, or undefined when that is not a
+   * well-defined question.
+   *
+   * Used only where the id is a QUERY FILTER rather than an authorization subject —
+   * `findDSMetricsForPanel`, which has already proved access to the test run and is
+   * merely narrowing `ds_metrics`. Refuses on ambiguity rather than picking: a wrong
+   * dashboard there produces a graph of the wrong series, which is worse than an empty
+   * one because nothing says it happened.
+   *
+   * For the authorization decision see `validateSourceAccess`, which needs ALL of them.
+   */
+  private async resolveApplicationDashboardId(metricsSourceId: string): Promise<string | undefined> {
+    const ids = await this.resolveApplicationDashboardIdsForSource(metricsSourceId);
+    if (ids.length > 1) {
+      this.logger.warn(
+        `Metrics source ${metricsSourceId} backs ${ids.length} application dashboards — refusing to pick one. Pass applicationDashboardId.`,
+      );
+      return undefined;
+    }
+    return ids[0];
+  }
+
+  /**
+   * Access check for data identified only by a metrics SOURCE.
+   *
+   * Requires **every** dashboard the source backs to be accessible, because that is
+   * what the read actually spans: the query filters `ds_metrics` on
+   * `metrics_source_id`, which crosses dashboards, and neither `ds_metrics` nor
+   * `ds_metric_statistics` carries an RLS policy, so this check is the only control.
+   *
+   * Before v0.2.97.39 this resolved ONE arbitrary dashboard and authorized against it —
+   * so on a source shared across tenants the caller could be authorized against their
+   * own dashboard and then served rows belonging to someone else's, or authorized
+   * against a stranger's and refused their own.
+   *
+   * Fails closed on a source that backs nothing: there is no owner to check.
+   */
+  private async validateSourceAccess(
+    metricsSourceId: string,
+    userId: string,
+    roles: string[],
+  ): Promise<boolean> {
+    const ids = await this.resolveApplicationDashboardIdsForSource(metricsSourceId);
+    if (ids.length === 0) return false;
+    const results = await Promise.all(
+      ids.map((id) => this.validateDashboardAccess(id, userId, roles)),
+    );
+    return results.every(Boolean);
   }
 
   /**
@@ -1146,15 +1203,21 @@ export class MetricsService {
       // run AND the dashboard/source, so a row can only be returned when both belong to
       // the same organization, and proving access to either one rules out a cross-tenant
       // read. Prefer the run when it is supplied; it is the more direct check.
+      // The subject of the check must be what the QUERY reads, not a row resolved
+      // alongside it. Until v0.2.97.39 the no-run branch resolved ONE arbitrary
+      // dashboard for the metrics source and authorized against that, while the query
+      // went on to filter by the caller-supplied `applicationDashboardId` — a source
+      // backs many dashboards across systems, environments and teams, so the two were
+      // routinely different rows with different owners.
       const permitted = testRunId
         ? await this.validateTestRunAccess(testRunId, userId, roles)
-        : await this.validateDashboardAccess(
-            metricsSourceId
-              ? ((await this.resolveApplicationDashboardId(metricsSourceId)) ?? '')
-              : applicationDashboardId,
-            userId,
-            roles,
-          );
+        : applicationDashboardId
+          ? await this.validateDashboardAccess(applicationDashboardId, userId, roles)
+          : metricsSourceId
+            // No dashboard named: the read spans every dashboard the source backs, so
+            // all of them have to be accessible. See validateSourceAccess.
+            ? await this.validateSourceAccess(metricsSourceId, userId, roles)
+            : false;
       if (!permitted) {
         return [];
       }
@@ -1174,10 +1237,13 @@ export class MetricsService {
       // So when the caller has no run, resolve one: the dashboard's most recent run gives
       // the series the panel produces TODAY, which is what a report-template author is
       // choosing between. Correctness and speed happen to want the same thing here.
+      // Prefer the caller's dashboard: it is the one authorized above and the one the
+      // query filters on. The source fallback only applies when no dashboard was named,
+      // and resolveApplicationDashboardId refuses an ambiguous source rather than
+      // picking — which here degrades to the unscoped scan below, not to a wrong run.
       const scopedRunId = testRunId ?? (await this.resolveLatestRunForDashboard(
-        metricsSourceId
-          ? ((await this.resolveApplicationDashboardId(metricsSourceId)) ?? '')
-          : applicationDashboardId,
+        applicationDashboardId
+          || (metricsSourceId ? ((await this.resolveApplicationDashboardId(metricsSourceId)) ?? '') : ''),
       ));
 
       const scopedNames = scopedRunId

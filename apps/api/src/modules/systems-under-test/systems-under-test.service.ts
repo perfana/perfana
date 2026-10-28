@@ -364,10 +364,44 @@ export class SystemsUnderTestService {
     try {
       this.logger.debug(`findByName: name=${name}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
 
-      const system = await withRequestEm(this.systemRepo).findOne({
-        where: { name },
-        relations: ['team'],
-      });
+      // `uq_system_under_test_name_org` scopes the name PER ORGANIZATION, so `name`
+      // alone can match several rows. This method authorizes AFTER resolving, which
+      // makes the unscoped version a false NEGATIVE rather than a leak: `findOne`
+      // picked an arbitrary row, and if that was another tenant's the membership check
+      // below rejected it — so a user's own system became invisible to them while
+      // plainly existing. Resolving within the caller's organizations first is what
+      // fixes that; the membership and team checks below stay as defence in depth.
+      const accessibleOrgIds = isAdmin
+        ? null
+        : await this.authzService.getAccessibleOrganizations(userId);
+
+      if (accessibleOrgIds !== null && accessibleOrgIds.length === 0) {
+        this.logger.warn(`findByName('${name}'): caller has no organization memberships`);
+        return null;
+      }
+
+      const query = withRequestEm(this.systemRepo)
+        .createQueryBuilder('sut')
+        .leftJoinAndSelect('sut.team', 'team')
+        .where('sut.name = :name', { name });
+
+      if (accessibleOrgIds !== null) {
+        query.andWhere('sut.organization_id IN (:...orgIds)', { orgIds: accessibleOrgIds });
+      }
+
+      // A global admin, and a user who belongs to two organizations that both use this
+      // name, can legitimately match more than one row. Refuse rather than pick: the
+      // caller has to disambiguate by id.
+      const matches = await query.orderBy('sut.id', 'ASC').take(2).getMany();
+
+      if (matches.length > 1) {
+        this.logger.error(
+          `System name '${name}' matches ${matches.length} systems visible to ${userId} — refusing to guess. Resolve by id instead.`,
+        );
+        return null;
+      }
+
+      const system = matches[0] ?? null;
 
       if (!system) {
         return null;
@@ -375,7 +409,9 @@ export class SystemsUnderTestService {
 
       // Check organization-based access
       if (!isAdmin) {
-        // Check if user is a member of the system's organization
+        // Redundant against the predicate above, and kept: it is the authority the rest
+        // of this service authorizes on, and it covers the api-key carve-out that
+        // `getAccessibleOrganizations` resolves differently from a membership row.
         const isMember = await this.authzService.isOrganizationMember(userId, system.organization_id);
         if (!isMember) {
           this.logger.warn(`Access denied: user ${userId} attempted to access system '${name}' in organization ${system.organization_id}`);

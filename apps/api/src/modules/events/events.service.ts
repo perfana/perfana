@@ -125,17 +125,32 @@ export class EventsService {
     return event;
   }
 
-  async create(dto: CreateEventDto, userId: string, _roles: string[]): Promise<Event> {
-    // Resolve system under test by UUID or name
-    let sut: SystemUnderTest | null;
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dto.systemUnderTest);
-
-    if (isUuid) {
-      sut = await withRequestEm(this.sutRepo).findOne({ where: { id: dto.systemUnderTest } });
-    } else {
-      sut = await withRequestEm(this.sutRepo).findOne({ where: { name: dto.systemUnderTest } });
+  async create(dto: CreateEventDto, userId: string, roles: string[]): Promise<Event> {
+    // Resolve system under test by UUID or name, within the caller's organizations.
+    //
+    // BOTH arms needed the filter, not just the name one. `uq_system_under_test_name_org`
+    // scopes the name per organization, so a bare name is ambiguous across tenants — but
+    // a caller-supplied UUID is no safer: it is a value from the request body, and
+    // `can_access_resource`'s `created_by` fallback means RLS does not refuse an INSERT
+    // that references it (see "RLS does not backstop a caller-named organization_id on
+    // create" in apps/api/CLAUDE.md). Unscoped, either arm plants an event on another
+    // organization's system. `roles` used to arrive here as `_roles` and be discarded.
+    const orgIds = await withOrgFilter(userId ?? '', roles, this.authzService);
+    if (orgIds !== null && orgIds.length === 0) {
+      throw new NotFoundException(`System under test "${dto.systemUnderTest}" not found`);
     }
 
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dto.systemUnderTest);
+    const sutQuery = withRequestEm(this.sutRepo)
+      .createQueryBuilder('sut')
+      .where(isUuid ? 'sut.id = :key' : 'sut.name = :key', { key: dto.systemUnderTest });
+    if (orgIds !== null) {
+      sutQuery.andWhere('sut.organization_id IN (:...orgIds)', { orgIds });
+    }
+    const sut: SystemUnderTest | null = await sutQuery.getOne();
+
+    // Not found and not accessible are the same 404 on purpose — a distinguishable
+    // refusal would confirm another tenant owns that name or id.
     if (!sut) {
       throw new NotFoundException(`System under test "${dto.systemUnderTest}" not found`);
     }

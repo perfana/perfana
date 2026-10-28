@@ -65,7 +65,18 @@ export default function TeamsPage() {
     return org?.name || 'Unknown';
   };
 
-  // Determine which organization to use for creating a new team
+  /**
+   * The organization a new team belongs to, when that is unambiguous.
+   *
+   * Returns null when it is NOT, and `CreateTeamDialog` then asks. This used to fall
+   * through to `organizations[0].id`, which is precisely the state
+   * `organization-context` leaves a multi-organization user in: filter on "all", no
+   * current organization selected. The team was created in whichever organization
+   * sorted first, with nothing in the UI saying which.
+   *
+   * A user with exactly ONE organization is still unambiguous, so the common case needs
+   * no extra click.
+   */
   const getOrganizationIdForCreate = (): string | null => {
     if (selectedOrgFilter !== 'all') {
       return selectedOrgFilter;
@@ -73,15 +84,18 @@ export default function TeamsPage() {
     if (currentOrganizationId) {
       return currentOrganizationId;
     }
-    if (organizations.length > 0) {
+    if (organizations.length === 1) {
       return organizations[0].id;
     }
     return null;
   };
 
+  // Whether the create flow can run at all: either we know the organization, or there
+  // are candidates for the dialog to offer. Zero organizations means neither.
+  const canCreateTeam = getOrganizationIdForCreate() !== null || organizations.length > 0;
+
   const handleCreateClick = () => {
-    const orgId = getOrganizationIdForCreate();
-    if (!orgId) {
+    if (!canCreateTeam) {
       return;
     }
     setCreateDialogOpen(true);
@@ -154,7 +168,7 @@ export default function TeamsPage() {
             variant="contained"
             startIcon={<Add />}
             onClick={handleCreateClick}
-            disabled={!orgIdForCreate}
+            disabled={!canCreateTeam}
             sx={{
               textTransform: 'none',
               fontWeight: 600,
@@ -211,7 +225,7 @@ export default function TeamsPage() {
                 ? 'Create your first team to start organizing your members.'
                 : 'Create an organization first, then you can create teams.'}
           </Typography>
-          {orgIdForCreate && (
+          {canCreateTeam && (
             <Button
               variant="outlined"
               startIcon={<Add />}
@@ -245,11 +259,12 @@ export default function TeamsPage() {
       )}
 
       {/* Create Team Dialog */}
-      {orgIdForCreate && (
+      {canCreateTeam && (
         <CreateTeamDialog
           open={createDialogOpen}
           onClose={() => setCreateDialogOpen(false)}
           organizationId={orgIdForCreate}
+          organizations={organizations}
         />
       )}
     </Box>
