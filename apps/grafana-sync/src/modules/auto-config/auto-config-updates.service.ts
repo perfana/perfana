@@ -23,6 +23,7 @@ import type { OwnedResource } from '@perfana/shared/entities';
 import { isDuplicateSloTargetError } from '@perfana/shared/utils';
 import { GrafanaSyncAuditService } from '../audit/grafana-sync-audit.service';
 import { DashboardVariable } from './types';
+import { resolveGrafanaInstanceByLabel } from './grafana-instance-resolver';
 
 /**
  * Application dashboard data for insertion
@@ -53,6 +54,13 @@ export interface GrafanaDashboardUpsertData {
   grafanaJson?: string | any;
   usedBySUT?: string[];
   panels?: any;
+  /**
+   * Which organization's Grafana `grafana` names. Optional only so a single-org
+   * deploy keeps working; every caller should pass it, because `grafana` is a label
+   * and labels are not unique across organizations. See
+   * {@link resolveGrafanaInstanceByLabel}.
+   */
+  organizationId?: string | null;
 }
 
 @Injectable()
@@ -107,13 +115,21 @@ export class AutoConfigUpdatesService {
         );
       }
 
-      // Get grafana_instance_id
-      const grafanaInstance = await this.grafanaInstanceRepo.findOne({
-        where: { label: applicationDashboard.grafana },
-      });
+      // Get grafana_instance_id, scoped to the SAME organization the system-under-test
+      // lookup above was scoped to. Unscoped, this is the site that handed org A's
+      // system org B's grafana_instance_id — and with it org B's server_url and API
+      // key. See resolveGrafanaInstanceByLabel.
+      const grafanaInstance = await resolveGrafanaInstanceByLabel(
+        this.grafanaInstanceRepo,
+        this.logger,
+        applicationDashboard.grafana,
+        applicationDashboard.organizationId,
+      );
 
       if (!grafanaInstance) {
-        throw new Error(`Grafana instance '${applicationDashboard.grafana}' not found`);
+        throw new Error(
+          `Grafana instance '${applicationDashboard.grafana}' not found for organization ${applicationDashboard.organizationId}`,
+        );
       }
 
       // Get grafana_dashboard_id if template dashboard UID is provided
@@ -242,10 +258,15 @@ export class AutoConfigUpdatesService {
     grafanaDashboard: GrafanaDashboardUpsertData,
   ): Promise<{ value: GrafanaDashboard }> {
     try {
-      // Get grafana_instance_id
-      const grafanaInstance = await this.grafanaInstanceRepo.findOne({
-        where: { label: grafanaDashboard.grafana },
-      });
+      // Get grafana_instance_id. See resolveGrafanaInstanceByLabel — the label alone
+      // is ambiguous across organizations, and this result decides which instance's
+      // row the dashboard JSON is written against.
+      const grafanaInstance = await resolveGrafanaInstanceByLabel(
+        this.grafanaInstanceRepo,
+        this.logger,
+        grafanaDashboard.grafana,
+        grafanaDashboard.organizationId,
+      );
 
       if (!grafanaInstance) {
         throw new Error(`Grafana instance '${grafanaDashboard.grafana}' not found`);

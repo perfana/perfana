@@ -22,7 +22,7 @@ describe('VariableDetectorService — templated datasource on a query variable',
   let grafanaApiService: jest.Mocked<GrafanaApiService>;
   let loggerWarnSpy: jest.SpyInstance;
 
-  const instance = { label: 'Grafana Production' } as never;
+  const instance = { label: 'Grafana Production', organizationId: 'org-1' } as never;
 
   const dashboardWith = (currentValue?: unknown): never =>
     ({
@@ -50,10 +50,10 @@ describe('VariableDetectorService — templated datasource on a query variable',
         {
           provide: GrafanaApiService,
           useValue: {
-            getDatasourceByUidWithLabel: jest.fn(),
-            getDatasourceByNameWithLabel: jest.fn(),
-            postByLabel: jest.fn().mockResolvedValue({ data: { result: [] } }),
-            getByLabel: jest.fn().mockResolvedValue({ data: [] }),
+            getDatasourceByUidForInstance: jest.fn(),
+            getDatasourceByNameForInstance: jest.fn(),
+            postForInstance: jest.fn().mockResolvedValue({ data: { result: [] } }),
+            getForInstance: jest.fn().mockResolvedValue({ data: [] }),
           },
         },
       ],
@@ -70,7 +70,7 @@ describe('VariableDetectorService — templated datasource on a query variable',
   afterEach(() => jest.clearAllMocks());
 
   it('resolves ${datasource} to the concrete uid before looking it up', async () => {
-    grafanaApiService.getDatasourceByUidWithLabel.mockResolvedValue({
+    grafanaApiService.getDatasourceByUidForInstance.mockResolvedValue({
       uid: 'prometheus-main',
       type: 'prometheus',
       name: 'Prometheus',
@@ -88,11 +88,11 @@ describe('VariableDetectorService — templated datasource on a query variable',
       'label_values(pod)',
     );
 
-    expect(grafanaApiService.getDatasourceByUidWithLabel).toHaveBeenCalledWith(
-      'Grafana Production',
+    expect(grafanaApiService.getDatasourceByUidForInstance).toHaveBeenCalledWith(
+      instance,
       'prometheus-main',
     );
-    expect(grafanaApiService.getDatasourceByUidWithLabel).not.toHaveBeenCalledWith(
+    expect(grafanaApiService.getDatasourceByUidForInstance).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.stringContaining('$'),
     );
@@ -112,12 +112,12 @@ describe('VariableDetectorService — templated datasource on a query variable',
     );
 
     expect(result).toEqual([]);
-    expect(grafanaApiService.getDatasourceByUidWithLabel).not.toHaveBeenCalled();
+    expect(grafanaApiService.getDatasourceByUidForInstance).not.toHaveBeenCalled();
     expect(loggerWarnSpy).toHaveBeenCalledWith(expect.stringContaining('did not resolve'));
   });
 
   it('resolves a legacy bare-string "$datasource" instead of looking it up by name', async () => {
-    grafanaApiService.getDatasourceByUidWithLabel.mockResolvedValue({
+    grafanaApiService.getDatasourceByUidForInstance.mockResolvedValue({
       uid: 'prometheus-main',
       type: 'prometheus',
     } as never);
@@ -129,15 +129,15 @@ describe('VariableDetectorService — templated datasource on a query variable',
       'label_values(pod)',
     );
 
-    expect(grafanaApiService.getDatasourceByUidWithLabel).toHaveBeenCalledWith(
-      'Grafana Production',
+    expect(grafanaApiService.getDatasourceByUidForInstance).toHaveBeenCalledWith(
+      instance,
       'prometheus-main',
     );
-    expect(grafanaApiService.getDatasourceByNameWithLabel).not.toHaveBeenCalled();
+    expect(grafanaApiService.getDatasourceByNameForInstance).not.toHaveBeenCalled();
   });
 
   it('still looks a real datasource NAME up by name', async () => {
-    grafanaApiService.getDatasourceByNameWithLabel.mockResolvedValue({
+    grafanaApiService.getDatasourceByNameForInstance.mockResolvedValue({
       uid: 'influx-uid',
       type: 'influxdb',
     } as never);
@@ -149,14 +149,14 @@ describe('VariableDetectorService — templated datasource on a query variable',
       'SHOW TAG VALUES',
     );
 
-    expect(grafanaApiService.getDatasourceByNameWithLabel).toHaveBeenCalledWith(
-      'Grafana Production',
+    expect(grafanaApiService.getDatasourceByNameForInstance).toHaveBeenCalledWith(
+      instance,
       'InfluxDB',
     );
   });
 
   it('passes a concrete uid through untouched', async () => {
-    grafanaApiService.getDatasourceByUidWithLabel.mockResolvedValue({
+    grafanaApiService.getDatasourceByUidForInstance.mockResolvedValue({
       uid: 'prometheus-uid',
       type: 'prometheus',
     } as never);
@@ -173,8 +173,8 @@ describe('VariableDetectorService — templated datasource on a query variable',
       'label_values(pod)',
     );
 
-    expect(grafanaApiService.getDatasourceByUidWithLabel).toHaveBeenCalledWith(
-      'Grafana Production',
+    expect(grafanaApiService.getDatasourceByUidForInstance).toHaveBeenCalledWith(
+      instance,
       'prometheus-uid',
     );
   });

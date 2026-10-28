@@ -313,53 +313,62 @@ export class GrafanaApiService {
   }
 
   /**
-   * Get Grafana instance by label
+   * GET / POST against an instance the caller already holds.
+   *
+   * These, and the datasource pair below, replace the four `*ByLabel` /
+   * `*WithLabel` methods, which took a LABEL and re-resolved it with
+   * `findOne({ where: { label } })`. `grafana_instances.label` has no unique
+   * constraint and grafana-sync sets no RLS context, so on a multi-organization
+   * deploy that round trip could return a **different instance than the one the
+   * caller was holding** — and then query it with its API key. Every caller already
+   * had the entity and was passing `.label` only because that was the public method.
+   *
+   * Do not reintroduce a label-taking variant. If one is ever genuinely needed, scope
+   * it with `resolveGrafanaInstanceByLabel`
+   * (`../auto-config/grafana-instance-resolver.ts`), which fails closed on ambiguity.
    */
-  async getInstanceByLabel(label: string): Promise<GrafanaInstance> {
-    const instance = await this.grafanaInstanceRepo.findOne({
-      where: { label },
-    });
-
-    if (!instance) {
-      throw new Error(`Grafana instance with label "${label}" not found`);
-    }
-
-    if (!instance.apiKey) {
-      throw new Error(`Grafana instance ${instance.label} has no API key configured`);
-    }
-
-    return instance;
-  }
-
-  /**
-   * Make GET request using instance label instead of ID
-   */
-  async getByLabel(label: string, endpoint: string): Promise<any> {
-    const instance = await this.getInstanceByLabel(label);
+  async getForInstance(instance: GrafanaInstance, endpoint: string): Promise<any> {
+    this.assertUsable(instance);
     return this.get(instance, endpoint);
   }
 
+  async postForInstance(instance: GrafanaInstance, endpoint: string, data: any): Promise<any> {
+    this.assertUsable(instance);
+    return this.post(instance, endpoint, data);
+  }
+
   /**
-   * Get datasource by UID using instance label
+   * The one check the deleted label path did that `get`/`post` do not: a row with no
+   * API key would otherwise send `Authorization: Bearer undefined` and fail as a 401
+   * from Grafana rather than as a configuration error.
    */
-  async getDatasourceByUidWithLabel(label: string, datasourceUid: string): Promise<any> {
-    const instance = await this.getInstanceByLabel(label);
+  /**
+   * Datasource lookups against an instance the caller already holds. These replace
+   * `getDatasourceBy{Uid,Name}WithLabel` for the same reason as the pair above:
+   * `variable-detector.service.ts` holds the entity and was passing `.label`, which
+   * was then re-resolved globally.
+   */
+  async getDatasourceByUidForInstance(
+    instance: GrafanaInstance,
+    datasourceUid: string,
+  ): Promise<any> {
+    this.assertUsable(instance);
     return this.get(instance, `/api/datasources/uid/${encodeURIComponent(datasourceUid)}`);
   }
 
-  /**
-   * Get datasource by name using instance label
-   */
-  async getDatasourceByNameWithLabel(label: string, datasourceName: string): Promise<any> {
-    const instance = await this.getInstanceByLabel(label);
+  async getDatasourceByNameForInstance(
+    instance: GrafanaInstance,
+    datasourceName: string,
+  ): Promise<any> {
+    this.assertUsable(instance);
     return this.get(instance, `/api/datasources/name/${encodeURIComponent(datasourceName)}`);
   }
 
-  /**
-   * Make POST request using instance label instead of ID
-   */
-  async postByLabel(label: string, endpoint: string, data: any): Promise<any> {
-    const instance = await this.getInstanceByLabel(label);
-    return this.post(instance, endpoint, data);
+  private assertUsable(instance: GrafanaInstance): void {
+    if (!instance?.apiKey) {
+      throw new Error(
+        `Grafana instance ${instance?.label ?? '(unknown)'} has no API key configured`,
+      );
+    }
   }
 }

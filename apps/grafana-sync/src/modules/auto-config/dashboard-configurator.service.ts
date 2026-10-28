@@ -30,12 +30,19 @@ export class DashboardConfiguratorService {
     );
 
     // Step 1: Get and validate template dashboard
-    const templateDashboard = await this.getAndValidateTemplateDashboard(autoConfigDashboard);
+    const templateDashboard = await this.getAndValidateTemplateDashboard(
+      autoConfigDashboard,
+      testRun.organizationId,
+    );
     if (!templateDashboard) return;
 
-    // Step 2: Get Grafana instance
+    // Step 2: Get Grafana instance.
+    // Scoped to the RUN's organization, not the profile's: a profile may legitimately
+    // carry a null organization (it configures several tenants by naming one label in
+    // each), so the profile cannot say which Grafana a given run means. The run can.
     const grafanaInstance = await this.dashboardFinderService.findGrafanaConfiguration(
       autoConfigDashboard.grafanaLabel,
+      testRun.organizationId,
     );
     if (!grafanaInstance) {
       this.logger.error(`No grafana instance found for: ${autoConfigDashboard.grafanaLabel}`);
@@ -78,10 +85,12 @@ export class DashboardConfiguratorService {
    */
   private async getAndValidateTemplateDashboard(
     autoConfigDashboard: ProfileGrafanaDashboard,
+    organizationId?: string | null,
   ): Promise<any | null> {
     const templateDashboard = await this.dashboardFinderService.findGrafanaDashboardOrNull(
       autoConfigDashboard.grafanaLabel,
       [autoConfigDashboard.dashboardUid],
+      organizationId,
     );
 
     if (!templateDashboard) {
