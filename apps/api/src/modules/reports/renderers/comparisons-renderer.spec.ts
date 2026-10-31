@@ -7,6 +7,44 @@ import { ReportSectionConfig, TestRun } from '@perfana/shared';
 import { percentDiffScaled } from './comparison-bands';
 // The real chart builder: the SVG assertions below are what prove a graph was drawn.
 import { ChartSvgService } from './chart-svg.service';
+import { JSDOM } from 'jsdom';
+import { REPORT_GROUP_FILTER_CSS } from './report-style';
+
+/**
+ * What the shipped filter CSS hides in a rendered section, read off the CSS itself.
+ *
+ * The selectors and the markup are each pinned as strings in their own specs, so a rename
+ * on one side alone (a `data-has-*` attribute, a radio value, the chip's direct-child
+ * input) leaves both green while the filter hides nothing. This runs one against the other.
+ * jsdom's selector engine evaluates these `:has()` rules, except an adjacent-sibling step
+ * after a `:not(:has())` scope, so that arm (a row's graph) is resolved by hand.
+ */
+const hiddenByFilterCss = (doc: Document): Set<Element> => {
+  const screen = /@media screen \{([\s\S]*?)\n {4}\}/.exec(REPORT_GROUP_FILTER_CSS)?.[1] ?? '';
+  const selectors = [...screen.matchAll(/([^{}]+)\{\s*display: none;\s*\}/g)]
+    .flatMap((rule) => rule[1]!.split(',').map((s) => s.trim()).filter(Boolean));
+  expect(selectors.length).toBeGreaterThan(0);
+  const hidden = new Set<Element>();
+  for (const selector of selectors) {
+    const graphRow = / \+ tr:not\(\[data-band\]\)$/.exec(selector);
+    if (graphRow) {
+      doc.querySelectorAll(selector.slice(0, graphRow.index)).forEach((row) => {
+        const next = row.nextElementSibling;
+        if (next && !next.hasAttribute('data-band')) hidden.add(next);
+      });
+    } else {
+      doc.querySelectorAll(selector).forEach((el) => hidden.add(el));
+    }
+  }
+  return hidden;
+};
+
+/** Tick a filter input the way a click would leave it. */
+const tick = (doc: Document, selector: string, checked = true): void => {
+  const input = doc.querySelector<HTMLInputElement>(selector);
+  expect(input).not.toBeNull();
+  input!.checked = checked;
+};
 
 const makeSection = (
   overrides?: Partial<ReportSectionConfig>,
@@ -745,42 +783,268 @@ describe('ComparisonsRenderer', () => {
       expect(html).toContain('data-band="ok"');
     });
 
-    it('scopes the group so a chip only filters its own tables', async () => {
-      dataFetcher.getBaselineRunComparison.mockResolvedValue({
-        source: 'performance-metrics',
-        rows: [
-          {
-            group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: 'a',
-            metrics: [{ key: 'avg', current: 300, baseline: 100, diffPercent: 200 }],
-          },
-        ],
-        metrics: ['avg'],
-      } as never);
+    const oneGroup = (...diffs: number[]) => dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      source: 'performance-metrics',
+      rows: diffs.map((diffPercent, i) => ({
+        group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: `T0${i}`,
+        metrics: [{ key: 'avg', current: 100 + diffPercent, baseline: 100, diffPercent }],
+      })),
+      metrics: ['avg'],
+    } as never);
+
+    it('puts the band chips inside the group, under its heading, not in it', async () => {
+      oneGroup(200, 2);
 
       const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
 
+      const summary = /<summary>[\s\S]*?<\/summary>/.exec(html)?.[0] ?? '';
+      // The heading keeps the counts, as plain chips: a filter in the toggle opened and
+      // filtered a closed group on one double-click.
+      expect(summary).toContain('1 regressions');
+      expect(summary).toContain('1 within range');
+      expect(summary).not.toContain('data-band-filter');
+      // The filter controls open the group's content, scoped to it.
+      expect(html).toMatch(/<\/summary>\s*<div style="margin-top:14px;">\s*<div class="report-band-filter"[\s\S]*?data-band-filter="regression"[\s\S]*?data-band-filter="ok"[\s\S]*?<table/);
       expect(html).toContain('data-band-scope');
-      // The summary chips double as filter controls
-      expect(html).toContain('data-band-filter="regression"');
     });
 
-    it('omits a chip for a band with no rows', async () => {
+    it('offers a chip only for a band the group holds, and no filter for a single band', async () => {
+      oneGroup(30, 2);
+      const twoBands = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      expect(twoBands).toContain('data-band-filter="ok"');
+      expect(twoBands).toContain('data-band-filter="warning"');
+      expect(twoBands).not.toContain('data-band-filter="regression"');
+
+      oneGroup(1, 2);
+      const oneBand = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      // Nothing to choose between, so no filter; the heading still says what the rows are.
+      expect(oneBand).not.toContain('report-band-filter');
+      expect(oneBand).toContain('2 within range');
+    });
+
+    const twoDashboards = () => dataFetcher.getBaselineRunComparison.mockResolvedValue({
+      source: 'performance-metrics',
+      rows: ['ApiChecks', 'Checkout'].map((dashboardLabel) => ({
+        group: `${dashboardLabel} / RT`, dashboardLabel, panelTitle: 'RT', label: 'T01',
+        metrics: [{ key: 'avg', current: 102, baseline: 100, diffPercent: 2 }],
+      })),
+      metrics: ['avg'],
+    } as never);
+
+    it('renders each group as a collapsed disclosure whose summary is its heading', async () => {
+      twoDashboards();
+
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      const groups = html.match(/<details class="report-group" data-band-scope[^>]*>/g) ?? [];
+      expect(groups).toHaveLength(2);
+      // Collapsed: a section of many groups is read by its headings first.
+      for (const tag of groups) expect(tag).not.toMatch(/\sopen/);
+      // The heading is the summary: a title and chips, and nothing a <summary> may not hold.
+      const summary = /<summary>([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? '';
+      expect(summary).toMatch(/^<h3[^>]*>ApiChecks<\/h3>/);
+      expect(summary).toContain('1 within range');
+      expect(summary).not.toContain('<div');
+      // The table is inside the disclosure, after the summary.
+      expect(html).toMatch(/<\/summary>\s*<div style="margin-top:14px;">[\s\S]*?<table/);
+    });
+
+    it('opens a group holding a regression, so its rows are in reach of find and copy', async () => {
       dataFetcher.getBaselineRunComparison.mockResolvedValue({
         source: 'performance-metrics',
         rows: [
-          {
-            group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: 'fine',
-            metrics: [{ key: 'avg', current: 101, baseline: 100, diffPercent: 1 }],
-          },
-        ],
+          { dashboardLabel: 'ApiChecks', diffPercent: 2 },
+          { dashboardLabel: 'Checkout', diffPercent: 200 },
+        ].map(({ dashboardLabel, diffPercent }, i) => ({
+          group: `${dashboardLabel} / RT`, dashboardLabel, panelTitle: 'RT', label: `T0${i}`,
+          metrics: [{ key: 'avg', current: 100 + diffPercent, baseline: 100, diffPercent }],
+        })),
         metrics: ['avg'],
       } as never);
 
       const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
 
-      expect(html).toContain('data-band-filter="ok"');
-      expect(html).not.toContain('data-band-filter="regression"');
-      expect(html).not.toContain('data-band-filter="warning"');
+      const tags = html.match(/<details class="report-group"[^>]*>/g) ?? [];
+      expect(tags[0]).not.toMatch(/\sopen/);
+      expect(tags[1]).toMatch(/\sopen/);
+    });
+
+    it('stamps each group with the bands it holds, for the Show only filter', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [
+          { dashboardLabel: 'ApiChecks', diffPercent: 2 },
+          { dashboardLabel: 'Checkout', diffPercent: 200 },
+          { dashboardLabel: 'Checkout', diffPercent: 2 },
+        ].map(({ dashboardLabel, diffPercent }, i) => ({
+          group: `${dashboardLabel} / RT`, dashboardLabel, panelTitle: 'RT', label: `T0${i}`,
+          metrics: [{ key: 'avg', current: 100 + diffPercent, baseline: 100, diffPercent }],
+        })),
+        metrics: ['avg'],
+      } as never);
+
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      const tags = html.match(/<details class="report-group"[^>]*>/g) ?? [];
+      expect(tags[0]).toMatch(/ data-has-ok[ >]/);
+      expect(tags[0]).not.toContain('data-has-regression');
+      expect(tags[1]).toMatch(/ data-has-regression data-has-ok[ >]/);
+    });
+
+    it('offers the Show only filter as radios, counting groups and disabling empty bands', async () => {
+      twoDashboards();
+
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      const filter = /<div class="report-group-filter"[\s\S]*?<\/div>/.exec(html)?.[0] ?? '';
+      // Above the groups, so it reads before what it filters.
+      expect(html.indexOf('report-group-filter')).toBeLessThan(html.indexOf('class="report-group"'));
+      const radios = filter.match(/<input type="radio"[^>]*>/g) ?? [];
+      expect(radios).toHaveLength(4);
+      // One name for the four, unique to this section: radios group by name document-wide.
+      const names = new Set(radios.map((r) => /name="([^"]+)"/.exec(r)![1]));
+      expect(names.size).toBe(1);
+      expect([...names][0]).toMatch(/^report-group-filter-[0-9a-f-]{36}$/);
+      expect(filter).toMatch(/value="all" checked> All 2</);
+      expect(filter).toMatch(/value="regression" disabled> Regressions 0</);
+      expect(filter).toMatch(/value="warning" disabled> Warnings 0</);
+      expect(filter).toMatch(/value="ok"> Within range 2</);
+
+      // Value: protects=each comparisons section gets its own radio name, so two sections' Show only filters never share one radio group; fails_when=the name is hoisted to a module/class constant or fixed string; why_new=the shape check above passes for a constant uuid; seam=none; no_claim=uniqueness across separately compiled reports
+      const again = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+      const againName = /<input type="radio" name="([^"]+)"/.exec(again)?.[1];
+      expect(againName).toMatch(/^report-group-filter-[0-9a-f-]{36}$/);
+      expect(againName).not.toBe([...names][0]);
+    });
+
+    // Value: protects=Show only counts GROUPS holding a band (All = group count) and keeps a band some group holds enabled; fails_when=holding() sums row counts, or All counts rows; why_new=existing fixtures have one row per group, so group and row counts coincide; seam=none; no_claim=that the radios hide anything in a browser (CSS :has)
+    it('counts groups rather than rows in the Show only filter', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [
+          // ApiChecks: three rows within range and one warning; Checkout: one row within range.
+          { dashboardLabel: 'ApiChecks', diffPercent: 2 },
+          { dashboardLabel: 'ApiChecks', diffPercent: 3 },
+          { dashboardLabel: 'ApiChecks', diffPercent: 4 },
+          { dashboardLabel: 'ApiChecks', diffPercent: 30 },
+          { dashboardLabel: 'Checkout', diffPercent: 2 },
+        ].map(({ dashboardLabel, diffPercent }, i) => ({
+          group: `${dashboardLabel} / RT`, dashboardLabel, panelTitle: 'RT', label: `T0${i}`,
+          metrics: [{ key: 'avg', current: 100 + diffPercent, baseline: 100, diffPercent }],
+        })),
+        metrics: ['avg'],
+      } as never);
+
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      const filter = /<div class="report-group-filter"[\s\S]*?<\/div>/.exec(html)?.[0] ?? '';
+      // Five rows, two groups: every count is the number of groups a reader would see.
+      expect(filter).toMatch(/value="all" checked> All 2</);
+      expect(filter).toMatch(/value="regression" disabled> Regressions 0</);
+      expect(filter).toMatch(/value="warning"> Warnings 1</);
+      expect(filter).toMatch(/value="ok"> Within range 2</);
+      // And the group holding the warning is the one the Warnings view keeps.
+      const tags = html.match(/<details class="report-group"[^>]*>/g) ?? [];
+      expect(tags[0]).toMatch(/ data-has-warning data-has-ok[ >]/);
+      expect(tags[1]).not.toContain('data-has-warning');
+    });
+
+    // Value: protects=the shipped Show only and chip selectors hide exactly the groups and rows the rendered markup says they should; fails_when=a data-has-*, radio value, chip input or group scope is renamed on one side only; why_new=CSS and markup were only pinned as separate strings; seam=none; no_claim=real-browser :has() support and layout (jsdom selector engine)
+    it('hides what the shipped filter CSS says it hides, against the rendered markup', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [
+          { dashboardLabel: 'ApiChecks', diffPercent: 2 },
+          { dashboardLabel: 'ApiChecks', diffPercent: 3 },
+          { dashboardLabel: 'ApiChecks', diffPercent: 30 },
+          { dashboardLabel: 'Checkout', diffPercent: 2 },
+        ].map(({ dashboardLabel, diffPercent }, i) => ({
+          group: `${dashboardLabel} / RT`, dashboardLabel, panelTitle: 'RT', label: `T0${i}`,
+          metrics: [{ key: 'avg', current: 100 + diffPercent, baseline: 100, diffPercent }],
+        })),
+        metrics: ['avg'],
+      } as never);
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+      const doc = new JSDOM(html).window.document;
+      const groups = [...doc.querySelectorAll('.report-group')];
+      const title = (el: Element) => el.querySelector('h3')?.textContent;
+      const hiddenGroups = () => groups.filter((g) => hiddenByFilterCss(doc).has(g)).map(title);
+      const shownRows = (group: Element) => [...group.querySelectorAll('tbody tr')]
+        .filter((row) => !hiddenByFilterCss(doc).has(row)).map((row) => row.getAttribute('data-band'));
+
+      // Nothing ticked: nothing hidden.
+      expect(hiddenGroups()).toEqual([]);
+      expect(shownRows(groups[0]!)).toEqual(['ok', 'ok', 'warning']);
+
+      // Show only Warnings: the group without one goes.
+      tick(doc, '.report-group-filter input[value="warning"]');
+      expect(hiddenGroups()).toEqual(['Checkout']);
+      tick(doc, '.report-group-filter input[value="all"]');
+      expect(hiddenGroups()).toEqual([]);
+
+      // A group's warning chip: its other rows go, and the other group's rows stay.
+      tick(doc, '.report-group:first-of-type [data-band-filter="warning"] > input');
+      expect(shownRows(groups[0]!)).toEqual(['warning']);
+      expect(shownRows(groups[1]!)).toEqual(['ok']);
+      // Ticking the other band too shows both again.
+      tick(doc, '.report-group:first-of-type [data-band-filter="ok"] > input');
+      expect(shownRows(groups[0]!)).toEqual(['ok', 'ok', 'warning']);
+    });
+
+    it('leaves a section with a single group open', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [{
+          group: 'Perf / RT', dashboardLabel: 'Perf', panelTitle: 'RT', label: 'a',
+          metrics: [{ key: 'avg', current: 102, baseline: 100, diffPercent: 2 }],
+        }],
+        metrics: ['avg'],
+      } as never);
+
+      const html = await renderer.renderComparisonsSection(bandSection(), makeTestRun(), 'u', ['user']);
+
+      // One collapsed group would hide the whole section behind a click.
+      expect(html).toMatch(/<details class="report-group" data-band-scope[^>]*\sopen>/);
+      // Nothing to filter between.
+      expect(html).not.toContain('report-group-filter');
+    });
+
+    it('collapses the scenario groups of the perf-test fallback the same way', async () => {
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: ['login', 'checkout'].map((group) => ({
+          group, label: 'T01', unit: 'ms',
+          metrics: [{ key: 'avg', current: 102, baseline: 100, diffPercent: 2 }],
+        })),
+        metrics: ['avg'],
+      } as never);
+
+      const html = await renderer.renderComparisonsSection(
+        makeSection({ config: { source: 'performance-metrics', baselineTestRunId: 'base-1', metrics: ['avg'] } }) as never,
+        makeTestRun(), 'u', ['user'],
+      );
+
+      const groups = html.match(/<details class="report-group" data-band-scope[^>]*>/g) ?? [];
+      expect(groups).toHaveLength(2);
+      for (const tag of groups) expect(tag).not.toMatch(/\sopen/);
+
+      // Value: protects=the perf-test fallback follows the same group rules: Show only offered for 2+ groups, a lone scenario group open; fails_when=the fallback branch hardcodes open or stops feeding the filter while the dashboard branch passes; why_new=only the dashboard branch pinned these; seam=none; no_claim=fallback group margins
+      expect(html).toContain('<div class="report-group-filter"');
+      expect(html).toMatch(/value="all" checked> All 2</);
+
+      dataFetcher.getBaselineRunComparison.mockResolvedValue({
+        source: 'performance-metrics',
+        rows: [{ group: 'login', label: 'T01', unit: 'ms', metrics: [{ key: 'avg', current: 102, baseline: 100, diffPercent: 2 }] }],
+        metrics: ['avg'],
+      } as never);
+      const single = await renderer.renderComparisonsSection(
+        makeSection({ config: { source: 'performance-metrics', baselineTestRunId: 'base-1', metrics: ['avg'] } }) as never,
+        makeTestRun(), 'u', ['user'],
+      );
+      expect(single).toMatch(/<details class="report-group" data-band-scope[^>]*\sopen>/);
+      expect(single).not.toContain('report-group-filter');
     });
   });
 
@@ -1066,18 +1330,36 @@ describe('ComparisonsRenderer row graphs', () => {
       makeTestRun(),
     );
 
+  // Value: protects=a band chip hides a row's graph row together with the row, and leaves a shown row's graph; fails_when=the chart-row CSS arm is dropped or the graph row gains a data-band; why_new=only the arm's selector text was pinned; seam=none; no_claim=real-browser rendering (jsdom selector engine)
+  it('hides a row\'s graph with the row when a band chip leaves it out', async () => {
+    const doc = new JSDOM(await render({ showRowGraphs: true })).window.document;
+    const used = [...doc.querySelectorAll('tr[data-band]')].find((row) => row.textContent?.includes('used'))!;
+    const graph = used.nextElementSibling!;
+    expect(graph.querySelector('details.report-row-graph')).not.toBeNull();
+
+    tick(doc, '[data-band-filter="ok"] > input');
+
+    const hidden = hiddenByFilterCss(doc);
+    expect(hidden.has(used)).toBe(true);
+    expect(hidden.has(graph)).toBe(true);
+    // The row the chip keeps is untouched, and so is anything after it.
+    const committed = [...doc.querySelectorAll('tr[data-band="ok"]')];
+    expect(committed.length).toBeGreaterThan(0);
+    for (const row of committed) expect(hidden.has(row)).toBe(false);
+  });
+
   it('draws nothing, and asks for no series, unless the author turned it on', async () => {
     const html = await render({});
-    expect(html).not.toContain('<details');
+    expect(html).not.toContain('<details class="report-row-graph"');
     // The cost is the point: no toggle, no queries.
     expect(dataFetcher.getMetricsTimeSeries).not.toHaveBeenCalled();
   });
 
   it('draws a collapsed disclosure per changed row, with both runs in one SVG', async () => {
     const html = await render({ showRowGraphs: true });
-    expect(html).toContain('<details');
+    expect(html).toContain('<details class="report-row-graph"');
     // Collapsed: no `open` attribute. Print CSS is what opens them on paper.
-    expect(html).not.toContain('<details open');
+    expect(html).not.toMatch(/<details class="report-row-graph"[^>]*\sopen/);
     expect(html).toContain('<svg');
     // Current solid, baseline dashed — the only thing telling two runs of one metric apart
     // in a greyscale print.
@@ -1088,7 +1370,7 @@ describe('ComparisonsRenderer row graphs', () => {
     const html = await render({ showRowGraphs: true });
     // `used` moved 200%; `committed` moved 1% and is not worth a picture. One graph, so
     // one detail row.
-    expect(html.match(/<details/g)).toHaveLength(1);
+    expect(html.match(/<details class="report-row-graph"/g)).toHaveLength(1);
     const selectors = (dataFetcher.getMetricsTimeSeries.mock.calls[0]![1] as unknown[]);
     expect(selectors).toEqual([
       { dashboardLabel: 'JVM', panelId: 3, panelTitle: 'Heap', metricName: 'used', key: 'JVM\u00003\u0000used' },
@@ -1110,7 +1392,7 @@ describe('ComparisonsRenderer row graphs', () => {
     // colspan spans the label column plus every metric column, and it is the ONLY cell.
     const detail = /<td colspan="3"[^>]*>([\s\S]*?)<\/td><\/tr>/.exec(html);
     expect(detail).not.toBeNull();
-    expect(detail![1]).toContain('<details');
+    expect(detail![1]).toContain('<details class="report-row-graph"');
     expect(detail![1]).not.toContain('<td');
   });
 
@@ -1150,7 +1432,7 @@ describe('ComparisonsRenderer row graphs', () => {
   it('draws no graph block at all when neither run has any series', async () => {
     dataFetcher.getMetricsTimeSeries.mockResolvedValue([]);
     const html = await render({ showRowGraphs: true });
-    expect(html).not.toContain('<details');
+    expect(html).not.toContain('<details class="report-row-graph"');
   });
 
   it('skips rows that carry no dashboard and panel — they cannot name a series', async () => {
@@ -1163,7 +1445,7 @@ describe('ComparisonsRenderer row graphs', () => {
       }],
     } as never);
     const html = await render({ showRowGraphs: true, source: 'performance-metrics' });
-    expect(html).not.toContain('<details');
+    expect(html).not.toContain('<details class="report-row-graph"');
     expect(dataFetcher.getMetricsTimeSeries).not.toHaveBeenCalled();
   });
 });
@@ -1238,7 +1520,7 @@ describe('ComparisonsRenderer row graphs — a renamed panel', () => {
     const selectors = dataFetcher.getMetricsTimeSeries.mock.calls[0]![1] as { panelId?: number }[];
     expect(selectors[0]!.panelId).toBe(101);
     // And the graph is actually there, under the name the table used.
-    expect(html).toContain('<details');
+    expect(html).toContain('<details class="report-row-graph"');
     expect(html).toContain('<svg');
   });
 
@@ -1283,7 +1565,7 @@ describe('ComparisonsRenderer row graphs — a renamed panel', () => {
       makeTestRun(),
     );
 
-    expect(html.match(/<details/g)).toHaveLength(4);
+    expect(html.match(/<details class="report-row-graph"/g)).toHaveLength(4);
     // Every panel's own maximum is printed on its own chart's axis. Keyed on the title,
     // all four charts carried panel 104's.
     for (const panelId of panelIds) {
@@ -1346,7 +1628,7 @@ describe('ComparisonsRenderer row graphs — the cap', () => {
       makeTestRun(),
     );
 
-    expect(html.match(/<details/g)).toHaveLength(20);
+    expect(html.match(/<details class="report-row-graph"/g)).toHaveLength(20);
     // And it does not ASK for the other five either — the queries are the expensive part.
     const selectors = dataFetcher.getMetricsTimeSeries.mock.calls[0]![1] as unknown[];
     expect(selectors).toHaveLength(20);

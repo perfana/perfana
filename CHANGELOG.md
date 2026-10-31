@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.40] - 2026-10-31
+
+### Added
+- **A report's Comparisons groups collapse, and the section can be filtered, with no script.** Each dashboard or scenario group is a native `<details>`: collapsed by default, except the section's only group and any group holding a regression — those rows are what a reader came for, and a closed group is out of reach of find and select-all. The heading keeps its counts as plain chips, so a collapsed group still says whether it needs opening.
+
+  Two filters, both radios or checkboxes plus `:has()` (`REPORT_GROUP_FILTER_CSS`), because the in-app viewer and the public share page render the report in an iframe with no `allow-scripts`: a script-built control would have existed only in a downloaded file. **Show only** (All / Regressions / Warnings / Within range) sits above the groups and hides every group that holds no row in the chosen band; its counts are groups, and a band no group holds is disabled rather than offered as an empty view. **Show rows**, at the top of a group with two or more bands, filters that group's rows — and each row's graph with it. Both are screen-only, so a filter left on still prints whole.
+
+  The band chips used to sit in the heading and do nothing in the viewer; once the heading became the `<summary>`, a click on one opened or closed the group instead. They moved into the group's content for that reason, and a fast double-click can no longer open and filter a closed group at once.
+
+### Fixed
+- **Per-row comparison graphs were missing from every PDF.** The print rule that opens collapsed disclosures styled their children, but Chromium hides a closed `<details>`' content with `content-visibility` on an internal slot, which no child rule reaches. It now targets `details::details-content`, verified by PDF text extraction against Chromium 149 (the PDF service's). The PDF service also opens every `<details>` itself before printing, so a report never depends on its unpinned Chromium supporting that pseudo-element.
+- **A downloaded report's row counter ignored the band chips.** It said "37 rows" with four on screen. It now counts only the rows the ticked chips leave visible, and the chip counts copy with the rest of a selection again.
+
+### Known limits
+- **Printing from Firefox before 143** (from the share page's Print button or a downloaded file) shows a closed group's heading and no rows: it has no `::details-content`. Chromium, current Safari and Firefox, and the PDF download print every row.
+- **Reports generated before this version keep their stored HTML**, including the old print CSS — regenerate the report, not just its PDF, to get the groups, the filters and the per-row graphs in print.
+
 ## [0.2.97.39] - 2026-10-28
 
 ### Fixed

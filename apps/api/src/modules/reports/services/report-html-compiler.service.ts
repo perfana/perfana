@@ -35,7 +35,7 @@ import { ErrorAnalysisRenderer } from '../renderers/error-analysis-renderer';
 import { DynatraceHostsRenderer } from '../renderers/dynatrace-hosts-renderer';
 import { PlaceholderRenderer } from '../renderers/placeholder-renderer';
 import { IndexRenderer } from '../renderers/index-renderer';
-import { REPORT_DETAILS_CSS } from '../renderers/report-style';
+import { REPORT_DETAILS_CSS, REPORT_GROUP_FILTER_CSS } from '../renderers/report-style';
 import { CHART_HOVER_CSS } from '../renderers/chart-tokens';
 import {
   REPORT_INTERACTIVITY_CSS,
@@ -546,6 +546,13 @@ export class ReportHtmlCompilerService {
        ~40 stacked boxes across the plot — because the only thing that hides them is
        this block. The preview iframe is sandbox="" , so its own <style> is all it gets. */
     ${CHART_HOVER_CSS}
+
+    /* Same reason: the comparisons groups and row graphs are <details>, and the group
+       filter is radios + :has(). Without these a group's summary shows the bare marker on
+       a line of its own and the filter is a row of raw radio buttons that hides nothing. */
+    ${REPORT_DETAILS_CSS}
+
+    ${REPORT_GROUP_FILTER_CSS}
 
     ${customCss}
   </style>
@@ -1165,6 +1172,8 @@ export class ReportHtmlCompilerService {
     }
 
     ${REPORT_DETAILS_CSS}
+
+    ${REPORT_GROUP_FILTER_CSS}
 
     ${CHART_HOVER_CSS}
 

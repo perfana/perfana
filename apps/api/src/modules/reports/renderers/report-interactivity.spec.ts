@@ -165,89 +165,74 @@ describe('report interactivity script', () => {
     expect(document.getElementById('r-checkout-detail')!.classList.contains('report-row-hidden')).toBe(true);
   });
 
-  describe('band chips', () => {
-    /** A group whose chips govern two panel tables, as the dashboard branch renders it. */
-    const GROUP = `
-      <div data-band-scope>
-        <span data-band-filter="regression">1 regressions</span>
-        <span data-band-filter="warning">1 warnings</span>
-        <span data-band-filter="ok">2 within range</span>
-        <div class="table-scroll">
-          <table>
-            <thead><tr><th>Metric</th><th>P95</th></tr></thead>
-            <tbody>
-              <tr id="b-reg" data-band="regression"><td>cpu</td><td>500</td></tr>
-              <tr id="b-warn" data-band="warning"><td>mem</td><td>300</td></tr>
-              <tr id="b-ok1" data-band="ok"><td>io</td><td>100</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="table-scroll">
-          <table>
-            <thead><tr><th>Metric</th><th>P95</th></tr></thead>
-            <tbody><tr id="b-ok2" data-band="ok"><td>net</td><td>50</td></tr></tbody>
-          </table>
-        </div>
-      </div>`;
+  describe('a group\'s band chips', () => {
+    /** A group as the comparisons renderer emits it: chips above a table of banded rows. */
+    const GROUP = `<details class="report-group" data-band-scope open><summary>Checkout</summary>
+      <div class="report-band-filter">
+        <label data-band-filter="regression"><input type="checkbox" value="regression">1 regressions</label>
+        <label data-band-filter="ok"><input type="checkbox" value="ok">3 within range</label>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Transaction</th><th>Avg</th></tr></thead>
+          <tbody>
+            <tr data-band="ok"><td>/login</td><td>98 ms</td></tr>
+            <tr data-band="regression"><td>/checkout</td><td>1,200 ms</td></tr>
+            <tr data-band="ok"><td>/search</td><td>340 ms</td></tr>
+            <tr data-band="ok"><td>/health</td><td>12 ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>`;
 
     const chip = (band: string): HTMLElement =>
       document.querySelector(`[data-band-filter="${band}"]`) as HTMLElement;
+    const counter = (): string | null => document.querySelector('.report-table-count')!.textContent;
 
     beforeEach(() => {
       document.body.innerHTML = GROUP;
       runScript();
     });
 
-    it('shows every band until a chip is clicked', () => {
-      expect(visibleLeaders()).toEqual(['b-reg', 'b-warn', 'b-ok1', 'b-ok2']);
-      expect(chip('regression').getAttribute('aria-pressed')).toBe('true');
+    it('leaves them alone: a click ticks the box, and the group stays open', () => {
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+
+      chip('regression').dispatchEvent(click);
+
+      // preventDefault here would stop the box from ticking, which is the whole filter.
+      expect(click.defaultPrevented).toBe(false);
+      expect(chip('regression').querySelector('input')!.checked).toBe(true);
+      expect(document.querySelector('details')!.open).toBe(true);
+      expect(chip('regression').getAttribute('role')).toBeNull();
     });
 
-    it('narrows to the clicked band', () => {
-      chip('regression').click();
+    // Value: protects=the row counter in a downloaded report counts only rows the ticked chips leave visible; fails_when=applyFilter stops reading the ticked chips or the change listener is dropped; why_new=the band filter moved to CSS and the counter kept counting every row; seam=none; no_claim=that the CSS hides those rows (comparisons-renderer contract spec)
+    it('counts only the rows the ticked chips leave visible', () => {
+      expect(counter()).toBe('4 rows');
 
-      expect(visibleLeaders()).toEqual(['b-reg']);
-      expect(chip('warning').classList.contains('report-chip-off')).toBe(true);
-      expect(chip('regression').classList.contains('report-chip-off')).toBe(false);
+      chip('regression').click();
+      expect(counter()).toBe('showing 1 of 4');
+
+      chip('ok').click();
+      expect(counter()).toBe('4 rows');
+
+      chip('regression').click();
+      chip('ok').click();
+      expect(counter()).toBe('4 rows');
     });
 
-    it('accumulates bands across clicks', () => {
-      chip('regression').click();
-      chip('warning').click();
-
-      expect(visibleLeaders()).toEqual(['b-reg', 'b-warn']);
-    });
-
-    it('returns to showing everything when the last chip is switched off', () => {
-      chip('regression').click();
-      chip('regression').click();
-
-      expect(visibleLeaders()).toEqual(['b-reg', 'b-warn', 'b-ok1', 'b-ok2']);
-      expect(chip('ok').classList.contains('report-chip-off')).toBe(false);
-    });
-
-    it('governs every table in its group, including ones too short for a toolbar', () => {
-      expect(document.querySelectorAll('.report-table-tools')).toHaveLength(1);
-
-      chip('regression').click();
-
-      expect(document.getElementById('b-ok2')!.classList.contains('report-row-hidden')).toBe(true);
-    });
-
-    it('combines the band filter with the text filter', () => {
+    it('combines the ticked chips with the text filter', () => {
       chip('ok').click();
       const input = filterInput();
-      input.value = 'net';
+      input.value = 'search';
       input.dispatchEvent(new Event('input'));
 
-      expect(visibleLeaders()).toEqual(['b-ok2']);
-    });
+      expect(counter()).toBe('showing 1 of 4');
 
-    it('only makes chips look clickable once they are wired', () => {
-      expect(document.querySelector('[data-band-scope]')!.classList.contains('report-bands-live')).toBe(true);
-
-      document.body.innerHTML = GROUP;
-      expect(document.querySelector('[data-band-scope]')!.classList.contains('report-bands-live')).toBe(false);
+      input.value = 'checkout';
+      input.dispatchEvent(new Event('input'));
+      // The one match is a regression row, which the ok chip hides.
+      expect(counter()).toBe('showing 0 of 4');
     });
   });
 
