@@ -28,6 +28,11 @@ export const REPORT_COLORS = {
   rowBorder: '#f0f2f5',
   cardBg: '#f8f9fa',
   cardBorder: '#e9ecef',
+  /** Text of a control at rest (the filter pills), and the baseline name in a caption. */
+  secondaryInk: '#4b5563',
+  /** Outline and fill of a control at rest. */
+  controlBorder: '#e2e5ea',
+  controlBg: '#ffffff',
   emptyBg: '#f5f5f5',
   emptyInk: '#999999',
   dot: { good: '#43a047', warn: '#f59e0b', bad: '#e04944', neutral: '#bdbdbd' },
@@ -51,16 +56,26 @@ const PILL_FILLS: Record<PillKind, { bg: string; fg: string }> = {
 };
 
 /**
- * `<details>` disclosure, used by the comparisons section's per-row graphs.
+ * `<details>` disclosure, used by the comparisons section for its per-row graphs and for
+ * each dashboard / scenario group (`.report-group`).
  *
  * Collapsed is the on-screen default — twenty expanded charts would bury the table they
- * belong to. Paper has no disclosure triangle to click, so print forces every one open:
- * `display` alone is not enough in Chrome, which hides a closed `details`' content with
- * `content-visibility` on an internal slot, and Chrome is what Puppeteer prints with.
+ * belong to, and a section of many groups is read by its headings first. Paper has no
+ * disclosure triangle to click, so print forces every one open, and the rule that does it
+ * is `::details-content`: Chrome hides a closed `details`' content with
+ * `content-visibility` on that internal slot, so styling the CHILDREN — all this block did
+ * before v0.2.97.40 — printed an empty disclosure. Verified by PDF text extraction against
+ * Chromium 149, the PDF service's: the per-row graphs were missing from every PDF.
+ *
+ * The print rules that drop a toggle and keep a block on one page name the row graphs: a
+ * group's summary IS its heading, so it must survive print, and a group can run for pages,
+ * so `break-inside: avoid` would strand whole pages blank. Firefox before 143 has no
+ * `::details-content`, so printing from it shows a closed group's heading and nothing else;
+ * the PDF service (Chromium) and current Chrome, Safari and Firefox print every row.
  *
  * Deliberately NOT in `report-interactivity.ts`: that file's CSS only ever matters when its
- * script ran, and this needs no script at all — which is the reason the graphs use
- * `<details>` rather than a JS expander in the first place.
+ * script ran, and this needs no script at all — which is the reason both use `<details>`
+ * rather than a JS expander in the first place. Both compiler entry points emit it.
  */
 export const REPORT_DETAILS_CSS = `
     details > summary {
@@ -71,18 +86,214 @@ export const REPORT_DETAILS_CSS = `
       background: #f8fafc;
     }
 
+    /* The chevron replaces the marker: a marker sits above a flex row, never beside it. */
+    .report-group > summary {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      list-style: none;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+
+    .report-group > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .report-group > summary::before {
+      content: '';
+      flex: none;
+      width: 6px;
+      height: 6px;
+      margin-left: 4px;
+      border-right: 2px solid ${REPORT_COLORS.mutedInk};
+      border-bottom: 2px solid ${REPORT_COLORS.mutedInk};
+      transform: rotate(-45deg);
+      transition: transform 0.15s ease;
+    }
+
+    .report-group[open] > summary::before {
+      transform: rotate(45deg);
+    }
+
+    .report-group > summary:focus-visible {
+      outline: 2px solid ${ACCENT};
+      outline-offset: 2px;
+    }
+
     @media print {
-      details > summary {
+      .report-row-graph > summary {
         display: none;
       }
 
-      details > *:not(summary) {
+      details::details-content {
         display: block !important;
         content-visibility: visible !important;
       }
 
-      details {
+      .report-row-graph {
         break-inside: avoid;
+      }
+
+      .report-group > summary::before {
+        display: none;
+      }
+    }
+`;
+
+/** Pressed-state palette per group filter option: a row's `data-band` values, plus `all`. */
+const GROUP_FILTER_TONES = [
+  ['all', REPORT_COLORS.primary, PILL_FILLS.info],
+  ['regression', REPORT_COLORS.dot.bad, PILL_FILLS.bad],
+  ['warning', REPORT_COLORS.dot.warn, PILL_FILLS.warn],
+  ['ok', REPORT_COLORS.dot.good, PILL_FILLS.good],
+] as const;
+
+const BANDS = ['regression', 'warning', 'ok'] as const satisfies readonly ReportBand[];
+
+/**
+ * The comparisons section's two filters, with no script: the "Show only" radios over
+ * whole groups, and each group's band chips over its own rows.
+ *
+ * Inputs plus `:has()`, not the interactivity script, because the in-app viewer and the
+ * public share page load the report into an iframe with no `allow-scripts` — a script-built
+ * control would work only in a downloaded HTML file, never where reports are read. The
+ * renderer stamps each group `data-has-<band>` and emits the radios (`groupFilter` in
+ * `comparisons-renderer.ts`) and, at the top of each group's content, the chip checkboxes
+ * (`bandFilterChip`); rows carry `data-band`, and a row's chart follows it as an unbanded
+ * row. The chips are not in the `<summary>`: there a fast double-click on a closed group
+ * opened it AND filtered it. The heading keeps the same counts as plain chips.
+ *
+ * The "Show only" rules start from the filter bar and reach the groups with `~`, so the bar
+ * must stay a preceding SIBLING of the groups (`groupFilter()` before `bodyHtml`). Anchored
+ * on the section instead, every recalculation walked every row of every group.
+ *
+ * Every hiding rule is `@media screen` only, so a filter left on still prints whole.
+ * Both compiler entry points emit this block.
+ */
+export const REPORT_GROUP_FILTER_CSS = `
+    .report-group-filter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid ${REPORT_COLORS.rowBorder};
+    }
+
+    .report-group-filter-label {
+      margin-right: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: ${REPORT_COLORS.mutedInk};
+    }
+
+    .report-group-filter label {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid ${REPORT_COLORS.controlBorder};
+      background: ${REPORT_COLORS.controlBg};
+      color: ${REPORT_COLORS.secondaryInk};
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .report-group-filter label::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--tone-dot);
+    }
+
+    /* Visually hidden, still focusable: arrow keys move between the radios, Space ticks a chip. */
+    .report-group-filter input,
+    [data-band-filter] > input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: 0;
+      opacity: 0;
+    }
+
+    .report-group-filter label:has(input:checked) {
+      background: var(--tone-bg);
+      color: var(--tone-fg);
+      border-color: var(--tone-fg);
+    }
+
+    .report-group-filter label:has(input:disabled) {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    .report-group-filter label:has(input:focus-visible),
+    [data-band-filter]:has(> input:focus-visible) {
+      outline: 2px solid ${ACCENT};
+      outline-offset: 2px;
+    }
+${GROUP_FILTER_TONES.map(([band, dot, fill]) => `
+    .report-group-filter [data-band-pick="${band}"] {
+      --tone-dot: ${dot};
+      --tone-bg: ${fill.bg};
+      --tone-fg: ${fill.fg};
+    }`).join('')}
+
+    /* A group's own band chips (bandFilterChip): checkboxes, and none ticked means every band. */
+    .report-band-filter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+
+    [data-band-filter] {
+      position: relative;
+      cursor: pointer;
+    }
+
+    [data-band-filter]:hover {
+      box-shadow: 0 0 0 1px currentColor;
+    }
+
+    @media screen {
+${BANDS.map((band) => `
+      .report-group-filter:has(input[value="${band}"]:checked) ~ .report-group:not([data-has-${band}]) {
+        display: none;
+      }`).join('')}
+
+      .report-band-filter:has(input:checked) [data-band-filter]:not(:has(> input:checked)) {
+        opacity: 0.35;
+      }
+${BANDS.map((band) => {
+  // Every band left unticked while another is ticked; a row's chart sits in the next row.
+  // Anchored on the group, not on the chip bar with `~`: that is cheaper per recalc, but
+  // jsdom's selector engine misses `~ div tr` on this markup, which would leave the
+  // contract spec in comparisons-renderer.spec.ts unable to check these rules.
+  const scope = `[data-band-scope]:has(.report-band-filter input:checked):not(:has(.report-band-filter input[value="${band}"]:checked))`;
+  return `
+      ${scope} tr[data-band="${band}"],
+      ${scope} tr[data-band="${band}"] + tr:not([data-band]) {
+        display: none;
+      }`;
+}).join('')}
+    }
+
+    @media print {
+      .report-group-filter,
+      .report-band-filter {
+        display: none;
       }
     }
 `;
@@ -173,9 +384,9 @@ export function statusPill(status: ReportStatus): string {
   return pill(STATUS_LABEL[status], STATUS_PILL_KIND[status]);
 }
 
-function chipHtml(label: string, kind: PillKind, attrs: string): string {
+function chipHtml(label: string, kind: PillKind, attrs: string, tag = 'span', lead = ''): string {
   const { bg, fg } = PILL_FILLS[kind];
-  return `<span${attrs} style="display:inline-block; padding:4px 11px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:12px; font-weight:700;">${escapeHtml(label)}</span>`;
+  return `<${tag}${attrs} style="display:inline-block; padding:4px 11px; border-radius:999px; overflow-wrap:normal; background:${bg}; color:${fg}; font-size:12px; font-weight:700;">${lead}${escapeHtml(label)}</${tag}>`;
 }
 
 /** Summary chip (counts in section/group headers). Not uppercased. */
@@ -185,8 +396,8 @@ export function chip(label: string, kind: PillKind): string {
 
 /**
  * The three-state band a compared row falls in. Stamped on each row as
- * `data-band` and named by the summary chips, so the report's interactivity
- * script can filter one against the other.
+ * `data-band` and on each group as `data-has-<band>`, which the group's band chips
+ * and the section's Show only radios match in `REPORT_GROUP_FILTER_CSS`.
  */
 export type ReportBand = 'regression' | 'warning' | 'ok';
 
@@ -194,13 +405,13 @@ export type ReportBand = 'regression' | 'warning' | 'ok';
 export const BAND_FOR_RANK: readonly ReportBand[] = ['ok', 'warning', 'regression'];
 
 /**
- * A summary chip that doubles as a filter control once the interactivity script
- * runs. Byte-identical to {@link chip} apart from the data attribute, which is
- * inert on its own — so the chip looks and prints exactly as it does today in
- * the PDF and in the script-blocked viewers.
+ * A count chip that is also its group's filter over that band's rows: a `<label>` around a
+ * visually hidden checkbox, driven by `REPORT_GROUP_FILTER_CSS`. A checkbox rather than the
+ * interactivity script, because the viewer's iframe runs no scripts — a script-wired chip
+ * there did nothing. It sits in the group's content, not its `<summary>` (see that CSS).
  */
 export function bandFilterChip(label: string, kind: PillKind, band: ReportBand): string {
-  return chipHtml(label, kind, ` data-band-filter="${band}"`);
+  return chipHtml(label, kind, ` data-band-filter="${band}"`, 'label', `<input type="checkbox" value="${band}">`);
 }
 
 /** Compact in-table marker chip (e.g. a CURRENT run marker) sized for table rows. */
@@ -363,6 +574,11 @@ export function sectionHeader(title: string, opts: SectionHeaderOptions = {}): s
 // Rule 05 · Group headers & metric names
 // ---------------------------------------------------------------------------
 
+/** A group heading's title. An `<h3>` alone, so it can also sit directly in a `<summary>`. */
+export function groupTitle(label: string): string {
+  return `<h3 style="margin:0; font-size:17px; font-weight:700; color:${REPORT_COLORS.headingInk}; padding-left:14px; border-left:4px solid ${ACCENT};">${escapeHtml(label)}</h3>`;
+}
+
 /**
  * Group header inside a section (h3): source label + chips (host, metric count),
  * right-aligned summary chips.
@@ -372,7 +588,7 @@ export function groupHeader(label: string, chipsLeftHtml: string[] = [], chipsRi
   const right = chipsRightHtml.filter(Boolean).join('');
   return `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
     <div style="display:flex; align-items:center; gap:10px;">
-      <h3 style="margin:0; font-size:17px; font-weight:700; color:${REPORT_COLORS.headingInk}; padding-left:14px; border-left:4px solid ${ACCENT};">${escapeHtml(label)}</h3>
+      ${groupTitle(label)}
       ${left}
     </div>
     ${right ? `<div style="display:flex; gap:8px;">${right}</div>` : ''}

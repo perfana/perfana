@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
@@ -18,6 +19,8 @@ import {
   TH_TEXT,
   THEAD_ROW,
   bandFilterChip,
+  type PillKind,
+  type ReportBand,
   chip,
   sectionText,
   deltaChip,
@@ -25,7 +28,7 @@ import {
   escapeHtml,
   formatInt,
   formatNum,
-  groupHeader,
+  groupTitle,
   sectionHeader,
   splitHostLabel,
 } from './report-style';
@@ -86,9 +89,13 @@ export class ComparisonsRenderer {
    * It goes in a DETAIL ROW — `<tr><td colspan=N>` immediately after the data row — not in
    * a block after the table. `report-interactivity.ts` recognises a single-cell spanning
    * row as belonging to the row above it (`collectUnits`), so the graph travels with its
-   * row when a column is sorted and hides with it when a band chip or the filter box
-   * excludes it. The SLO section's failing-targets block is the same shape. A block after
-   * the table would have been detached from the row it describes the moment anyone sorted.
+   * row when a column is sorted and hides with it when the filter box excludes it. The SLO
+   * section's failing-targets block is the same shape. A block after the table would have
+   * been detached from the row it describes the moment anyone sorted.
+   *
+   * A band chip hides the graph by CSS adjacency instead (`tr[data-band=…] +
+   * tr:not([data-band])` in `REPORT_GROUP_FILTER_CSS`), which reaches ONE unbanded row: a
+   * second detail row under the same data row would stay visible.
    *
    * `<details>` and not a script: the in-app viewer and the public share page render the
    * report in an iframe with no `allow-scripts` (see `report-interactivity.ts`), so a
@@ -203,7 +210,7 @@ export class ComparisonsRenderer {
       // The summary is the whole row's width and says what the graph is; the row above
       // already names the metric, so this only has to say "graph" and flag a missing
       // baseline.
-      charts.set(ComparisonsRenderer.rowKey(r), `<details style="margin:0;">
+      charts.set(ComparisonsRenderer.rowKey(r), `<details class="report-row-graph" style="margin:0;">
         <summary style="cursor:pointer; font-size:12px; color:${REPORT_COLORS.mutedInk};">
           Graph &middot; current solid, baseline dashed, both from their own start
           ${base ? '' : '<span style="color:' + REPORT_COLORS.faintInk + ';"> &mdash; baseline has no series for this metric</span>'}
@@ -362,7 +369,7 @@ export class ComparisonsRenderer {
       return labels.size === 1 ? [...labels][0] ?? '' : '';
     };
 
-    /** The heading's unit chip, or '' — groupHeader/panel headings drop empty strings. */
+    /** The heading's unit chip, or '' — group and panel headings drop empty strings. */
     const unitChip = (rows: BaselineComparisonRow[]): string => {
       const label = sharedUnitLabel(rows);
       return label ? chip(label, 'neutral') : '';
@@ -404,13 +411,30 @@ export class ComparisonsRenderer {
         ${url ? `<div style="margin-top:3px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10.5px; font-weight:400; color:${REPORT_COLORS.faintInk}; overflow-wrap:anywhere; word-break:break-word;">${this.utils.escapeHtml(url)}</div>` : ''}
       </td>`;
 
-    // These double as the group's band filters once the report's interactivity
-    // script runs; without it they are the same count chips as before.
-    const summaryChips = (reg: number, warn: number, ok: number): string[] => [
-      reg > 0 ? bandFilterChip(`${reg} regressions`, 'bad', 'regression') : '',
-      warn > 0 ? bandFilterChip(`${warn} warnings`, 'warn', 'warning') : '',
-      ok > 0 ? bandFilterChip(`${ok} within range`, 'good', 'ok') : '',
+    const BAND_CHIPS: [ReportBand, PillKind, string][] = [
+      ['regression', 'bad', 'regressions'],
+      ['warning', 'warn', 'warnings'],
+      ['ok', 'good', 'within range'],
     ];
+
+    // The group heading's counts are plain chips: a chip that filtered from inside the
+    // <summary> was also part of the toggle, so a double-click on a closed group opened it
+    // and filtered it at once.
+    const bandCounts = (bands: Record<ReportBand, number>): string =>
+      BAND_CHIPS.filter(([band]) => bands[band] > 0)
+        .map(([band, kind, noun]) => chip(`${bands[band]} ${noun}`, kind)).join('');
+
+    // The same counts as row filters, at the top of the group's content — checkboxes, so
+    // they work with no script (see bandFilterChip). Offered only with two bands to choose
+    // between: one band leaves nothing to filter.
+    const bandFilter = (bands: Record<ReportBand, number>): string => {
+      const present = BAND_CHIPS.filter(([band]) => bands[band] > 0);
+      if (present.length < 2) return '';
+      return `<div class="report-band-filter" role="group" aria-label="Show rows with">
+        <span class="report-group-filter-label" aria-hidden="true">Show rows</span>
+        ${present.map(([band, kind, noun]) => bandFilterChip(`${bands[band]} ${noun}`, kind, band)).join('')}
+      </div>`;
+    };
 
     // Name the two runs being compared explicitly, so the report is unambiguous
     // when read out of context (current run vs the chosen baseline run id).
@@ -456,12 +480,82 @@ export class ComparisonsRenderer {
      * One cell spanning the table is what makes `report-interactivity.ts` treat it as a
      * DETAIL row of the one above (`collectUnits`): it then travels with that row through
      * a sort and hides with it through a filter. Two cells, or a colspan of 1, and it
-     * becomes an independent row that a sort scatters.
+     * becomes an independent row that a sort scatters. Carrying no `data-band` is what lets
+     * the band chips' CSS hide it with its row.
      */
     const chartRow = (row: BaselineComparisonRow, background: string): string => {
       const chart = rowCharts.get(ComparisonsRenderer.rowKey(row));
       if (!chart) return '';
       return `<tr style="background:${background};"><td colspan="${metrics.length + 1}" style="padding:0 16px 12px; border-bottom:1px solid ${REPORT_COLORS.rowBorder};">${chart}</td></tr>`;
+    };
+
+    /**
+     * One dashboard or scenario group as a native disclosure. Collapsed by default — a
+     * section is read by its group headings first, and the counts in the heading already
+     * say whether a group needs opening — except the section's only group, and any group
+     * holding a regression: those rows are what a reader came for, and a closed group's
+     * rows are out of reach of the browser's find and of select-all. Native `<details>`
+     * because the viewer's iframe runs no scripts; the print rules that open it on paper are
+     * in `REPORT_DETAILS_CSS`.
+     *
+     * The `<summary>` holds the title and plain chips only (`<h3>` plus phrasing content,
+     * which is all a summary may contain). The content sits in ONE wrapper that carries the
+     * gap the heading used to, so an open group lays out as before and a closed one ends at
+     * its heading.
+     *
+     * `data-has-<band>` is what the section's "Show only" filter matches on.
+     */
+    type GroupBands = Record<ReportBand, number>;
+    const groupBands: GroupBands[] = [];
+    const groupDisclosure = (
+      marginTop: number,
+      title: string,
+      chipsLeft: string[],
+      content: string,
+      onlyGroup: boolean,
+      bands: GroupBands,
+      intro = '',
+    ): string => {
+      groupBands.push(bands);
+      const has = (Object.keys(bands) as (keyof GroupBands)[])
+        .filter((band) => bands[band] > 0)
+        .map((band) => ` data-has-${band}`)
+        .join('');
+      const open = onlyGroup || bands.regression > 0;
+      const counts = bandCounts(bands);
+      return `<details class="report-group" data-band-scope${has} style="margin-top:${marginTop}px;"${open ? ' open' : ''}>
+          <summary>${groupTitle(title)}${chipsLeft.filter(Boolean).join('')}${counts ? `<span style="display:flex; gap:8px; margin-left:auto;">${counts}</span>` : ''}</summary>
+          <div style="margin-top:14px;">
+          ${intro}
+          ${bandFilter(bands)}
+          ${content}
+          </div>
+        </details>`;
+    };
+
+    /**
+     * "Show only": hides whole groups that hold no row in the checked band. Radios, so it
+     * works with no script — see `REPORT_GROUP_FILTER_CSS`. Counts are groups, not rows,
+     * and a band no group holds is disabled rather than offered as an empty view.
+     */
+    const groupFilter = (): string => {
+      if (groupBands.length < 2) return '';
+      // Radios group by name across the whole document, so two comparisons sections in one
+      // report need two names.
+      const name = `report-group-filter-${randomUUID()}`;
+      const holding = (band: keyof GroupBands): number => groupBands.filter((g) => g[band] > 0).length;
+      const options: [ReportBand | 'all', string, number][] = [
+        ['all', 'All', groupBands.length],
+        ['regression', 'Regressions', holding('regression')],
+        ['warning', 'Warnings', holding('warning')],
+        ['ok', 'Within range', holding('ok')],
+      ];
+      return `<div class="report-group-filter" role="radiogroup" aria-label="Show only groups with">
+      <span class="report-group-filter-label" aria-hidden="true">Show only</span>
+      ${options.map(([band, label, count]) =>
+        `<label data-band-pick="${band}"><input type="radio" name="${name}" value="${band}"${band === 'all' ? ' checked' : ''}${count === 0 ? ' disabled' : ''}> ${label} ${formatInt(count)}</label>`,
+      ).join('')}
+    </div>`;
     };
 
     let bodyHtml: string;
@@ -494,7 +588,7 @@ export class ComparisonsRenderer {
             <span style="display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:8px; background:#f6f7f9; border:1px solid #e6e8ec;">
               <span style="width:8px; height:8px; border-radius:50%; background:#9aa2ab;"></span>
               <span style="text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px; font-weight:700; color:${REPORT_COLORS.faintInk};">Baseline</span>
-              <span style="font-weight:600; color:#4b5563;">${this.utils.escapeHtml(p.baseline)}</span>
+              <span style="font-weight:600; color:${REPORT_COLORS.secondaryInk};">${this.utils.escapeHtml(p.baseline)}</span>
             </span>
           </div>`).join('');
       };
@@ -562,11 +656,15 @@ export class ComparisonsRenderer {
           chip(`${formatInt(dashboardRows)} metrics`, 'neutral'),
         ];
 
-        return `<div data-band-scope style="margin-top:30px;">
-          ${groupHeader(dashboard, headingChips, summaryChips(reg, warn, ok))}
-          ${mappingCaption(dashboard)}
-          ${panelBlocks}
-        </div>`;
+        return groupDisclosure(
+          30,
+          dashboard,
+          headingChips,
+          panelBlocks,
+          byDashboard.size === 1,
+          { regression: reg, warning: warn, ok },
+          mappingCaption(dashboard),
+        );
       }).join('\n');
     } else {
       // ---- performance metrics with no dashboard selection: grouped by scenario ----
@@ -589,9 +687,11 @@ export class ComparisonsRenderer {
             ${cells}</tr>`;
         }).join('');
 
-        return `<div data-band-scope style="margin-top:38px;">
-          ${groupHeader(group, [chip(`${formatInt(rows.length)} transactions`, 'neutral'), unitChip(rows)], summaryChips(reg, warn, ok))}
-          <div class="table-scroll">
+        return groupDisclosure(
+          38,
+          group,
+          [chip(`${formatInt(rows.length)} transactions`, 'neutral'), unitChip(rows)],
+          `<div class="table-scroll">
             <table style="width:100%; border-collapse:collapse;">
             <thead><tr style="${THEAD_ROW}">
               <th style="${TH_TEXT}">Transaction</th>
@@ -599,8 +699,10 @@ export class ComparisonsRenderer {
             </tr></thead>
             <tbody>${body}</tbody>
           </table>
-          </div>
-        </div>`;
+          </div>`,
+          groups.size === 1,
+          { regression: reg, warning: warn, ok },
+        );
       }).join('\n');
     }
 
@@ -610,11 +712,13 @@ export class ComparisonsRenderer {
       dynatrace: 'Dynatrace',
     };
 
+    // The filter bar must stay a sibling BEFORE the groups: its CSS reaches them with `~`.
     return `<section class="comparisons-section">
       ${sectionHeader(title, { chipsHtml: [chip(SOURCE_LABELS[source] ?? source, 'neutral')] })}
       ${runIds}
       ${sectionText(text)}
       ${legend}
+      ${groupFilter()}
       ${bodyHtml}
     </section>`;
   }

@@ -76,18 +76,6 @@ export const REPORT_INTERACTIVITY_CSS = `
       display: none;
     }
 
-    /* Only added once the chips are wired, so a script-blocked viewer keeps
-       plain, unclickable count chips. */
-    .report-bands-live [data-band-filter] {
-      cursor: pointer;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-
-    .report-chip-off {
-      opacity: 0.35;
-    }
-
     @media print {
       /* Paper has no controls, and a filtered view must still print whole. */
       .report-table-tools {
@@ -96,11 +84,6 @@ export const REPORT_INTERACTIVITY_CSS = `
 
       .report-row-hidden {
         display: table-row;
-      }
-
-      /* A chip deselected on screen is still just a count on paper. */
-      .report-chip-off {
-        opacity: 1;
       }
     }
 `;
@@ -168,26 +151,24 @@ export const REPORT_INTERACTIVITY_SCRIPT = `<script>
     var wrapper = table.parentNode;
     var tbody = table.tBodies[0];
     var head = table.tHead;
-    if (!tbody || !head || !head.rows.length) return null;
+    if (!tbody || !head || !head.rows.length) return;
 
     var units = collectUnits(tbody);
-    if (!units.length) return null;
+    if (!units.length) return;
 
     var original = units.slice();
     var headers = head.rows[0].cells;
     var sortIndex = -1;
     var sortDir = 0;
 
-    // The band filter is owned by the surrounding group and shared with the
-    // other tables under the same chips; wireBands swaps in that shared array.
-    // Empty means "no band filter", which is also what deselecting every chip
-    // leaves behind — never an empty table.
-    var entry = { scope: table.closest ? table.closest('[data-band-scope]') : null, bands: [] };
-
     table.className = table.className ? table.className + ' report-sortable' : 'report-sortable';
 
-    // A table too short to be worth searching still needs to answer to the
-    // band chips, so only the toolbar is conditional — never the registration.
+    // A table too short to be worth searching still sorts; only the toolbar is
+    // conditional. (A group's band chips are not this script's: they are
+    // checkboxes driven by REPORT_GROUP_FILTER_CSS, so they work with no script.
+    // The counter only reads them, so it never counts a row the CSS hid.)
+    var scope = table.closest ? table.closest('[data-band-scope]') : null;
+    var bar = scope ? scope.querySelector('.report-band-filter') : null;
     var input = null;
     var count = null;
     if (units.length >= 3) {
@@ -204,16 +185,22 @@ export const REPORT_INTERACTIVITY_SCRIPT = `<script>
       wrapper.parentNode.insertBefore(tools, wrapper);
     }
 
+    function tickedBands() {
+      var bands = [];
+      var boxes = bar ? bar.querySelectorAll('[data-band-filter] > input:checked') : [];
+      for (var b = 0; b < boxes.length; b++) bands.push(boxes[b].value);
+      return bands;
+    }
+
     function applyFilter() {
       var query = input ? input.value.toLowerCase().trim() : '';
-      var bands = entry.bands;
+      var bands = tickedBands();
       var shown = 0;
       for (var i = 0; i < units.length; i++) {
         var unit = units[i];
+        var match = !query || unit.leader.textContent.toLowerCase().indexOf(query) !== -1;
         var band = unit.leader.getAttribute('data-band');
-        var bandOk = !band || !bands.length || bands.indexOf(band) !== -1;
-        var match = bandOk && (!query || unit.leader.textContent.toLowerCase().indexOf(query) !== -1);
-        if (match) shown++;
+        if (match && (!bands.length || !band || bands.indexOf(band) !== -1)) shown++;
         for (var r = 0; r < unit.rows.length; r++) {
           if (match) unit.rows[r].classList.remove('report-row-hidden');
           else unit.rows[r].classList.add('report-row-hidden');
@@ -296,79 +283,17 @@ export const REPORT_INTERACTIVITY_SCRIPT = `<script>
     }
 
     if (input) input.addEventListener('input', applyFilter);
+    if (count && bar) bar.addEventListener('change', applyFilter);
     applyFilter();
-
-    entry.refresh = applyFilter;
-    return entry;
-  }
-
-  // The group's summary chips ("4 warnings", "37 within range") become toggles
-  // over the rows their counts describe.
-  function wireBands(scope, entries) {
-    var chips = scope.querySelectorAll('[data-band-filter]');
-    if (!chips.length || !entries.length) return;
-
-    var bands = [];
-    for (var e = 0; e < entries.length; e++) entries[e].bands = bands;
-
-    function paint() {
-      for (var c = 0; c < chips.length; c++) {
-        var on = !bands.length || bands.indexOf(chips[c].getAttribute('data-band-filter')) !== -1;
-        chips[c].setAttribute('aria-pressed', on ? 'true' : 'false');
-        if (on) chips[c].classList.remove('report-chip-off');
-        else chips[c].classList.add('report-chip-off');
-      }
-      for (var i = 0; i < entries.length; i++) entries[i].refresh();
-    }
-
-    function toggle(band) {
-      // All-on is the empty set, so the first click means "just this one" and
-      // clearing the last selection goes back to showing everything.
-      var at = bands.indexOf(band);
-      if (at !== -1) bands.splice(at, 1);
-      else bands.push(band);
-      paint();
-    }
-
-    for (var c = 0; c < chips.length; c++) {
-      (function (element) {
-        var band = element.getAttribute('data-band-filter');
-        element.setAttribute('role', 'button');
-        element.setAttribute('tabindex', '0');
-        element.addEventListener('click', function () { toggle(band); });
-        element.addEventListener('keydown', function (event) {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            toggle(band);
-          }
-        });
-      })(chips[c]);
-    }
-
-    // Only now do the chips look clickable — a script-blocked viewer keeps the
-    // plain count chips it has always shown.
-    scope.classList.add('report-bands-live');
-    paint();
   }
 
   function init() {
     var tables = document.querySelectorAll('.table-scroll table');
-    var entries = [];
     for (var i = 0; i < tables.length; i++) {
       // A nested table is a detail block inside another table's row; the outer
       // table already owns those rows.
       if (tables[i].parentNode.closest && tables[i].parentNode.closest('table')) continue;
-      var entry = enhance(tables[i]);
-      if (entry) entries.push(entry);
-    }
-
-    var scopes = document.querySelectorAll('[data-band-scope]');
-    for (var s = 0; s < scopes.length; s++) {
-      var owned = [];
-      for (var e = 0; e < entries.length; e++) {
-        if (entries[e].scope === scopes[s]) owned.push(entries[e]);
-      }
-      wireBands(scopes[s], owned);
+      enhance(tables[i]);
     }
   }
 

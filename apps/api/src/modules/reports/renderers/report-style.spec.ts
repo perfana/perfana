@@ -278,20 +278,24 @@ describe('status pills in a table cell', () => {
 });
 
 describe('bandFilterChip', () => {
-  it('renders the same chip as chip(), plus an inert data attribute', () => {
-    // The attribute is what the report's interactivity script binds to. It must
-    // change nothing about how the chip looks or prints — a script-blocked
-    // viewer and the PDF both keep the plain count chip.
+  it('is the same chip as chip(), as a label around a checkbox', () => {
+    // A label around a checkbox, so a click ticks the box with no script — which the
+    // viewer's iframe never runs.
     const plain = chip('4 warnings', 'warn');
     const filterable = bandFilterChip('4 warnings', 'warn', 'warning');
 
-    expect(filterable).toContain('data-band-filter="warning"');
-    expect(filterable.replace(' data-band-filter="warning"', '')).toBe(plain);
+    expect(filterable).toMatch(/^<label data-band-filter="warning" [^>]*><input type="checkbox" value="warning">4 warnings<\/label>$/);
+    expect(
+      filterable
+        .replace(/^<label data-band-filter="warning"/, '<span')
+        .replace('<input type="checkbox" value="warning">', '')
+        .replace(/<\/label>$/, '</span>'),
+    ).toBe(plain);
   });
 
   it('carries the band it filters for', () => {
-    expect(bandFilterChip('3 regressions', 'bad', 'regression')).toContain('data-band-filter="regression"');
-    expect(bandFilterChip('9 within range', 'good', 'ok')).toContain('data-band-filter="ok"');
+    expect(bandFilterChip('3 regressions', 'bad', 'regression')).toMatch(/data-band-filter="regression"[^>]*><input type="checkbox" value="regression">/);
+    expect(bandFilterChip('9 within range', 'good', 'ok')).toMatch(/data-band-filter="ok"[^>]*><input type="checkbox" value="ok">/);
   });
 
   it('escapes the label like every other chip', () => {

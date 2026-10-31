@@ -668,6 +668,45 @@ negative excursion the chart existed to show, and on an ALL-negative series it p
 the gridline labels counted the wrong way down. Both sides now floor at zero only when the data
 never goes negative.
 
+### The Comparisons groups and filters run with no script, so they live in markup and CSS
+
+Since v0.2.97.40 each Comparisons group is a native `<details class="report-group">` and the
+section carries two filters: **Show only** (radios over whole groups) and each group's
+**Show rows** chips (checkboxes over its rows). All of it is markup plus `:has()` in
+`REPORT_GROUP_FILTER_CSS` (`renderers/report-style.ts`), because the in-app viewer and the share
+page render the report in an iframe with no `allow-scripts`. A control built by
+`report-interactivity.ts` exists only in a downloaded file; the band chips were exactly that until
+this version, and in the viewer they did nothing. Five things that are easy to undo:
+
+1. **Nothing interactive goes in the `<summary>`.** A chip there is part of the toggle, so a
+   click opened or closed the group, and a fast double-click on a closed group opened AND
+   filtered it. The heading carries an `<h3>` (`groupTitle`) and plain `chip()` counts only —
+   which is also all a `<summary>` may legally hold (phrasing content plus a heading, no `<div>`).
+   The clickable chips sit in `.report-band-filter` at the top of the group's content.
+2. **The two sides are a contract, and the spec checks it.** The CSS matches `data-has-<band>`,
+   the radio values, `.report-band-filter input` and `tr[data-band]` followed by ONE unbanded
+   row (the row's graph). `hiddenByFilterCss` in `comparisons-renderer.spec.ts` reads the hiding
+   rules out of the shipped CSS and runs them against the rendered section in jsdom — a rename on
+   either side alone fails it. Mutation-verified: renaming `data-has-*`, the chip bar's class or
+   a radio value, or dropping the graph arm, each fails a case.
+3. **jsdom's selector engine (nwsapi) decides which selector shapes are testable.** It misses
+   `~ * tr` and `~ div tr` on this markup while browsers match them, which is why the row rules
+   stay anchored on the whole group (`[data-band-scope]:has(…)`) rather than on the chip bar —
+   cheaper per recalculation, but the spec could no longer check it. The adjacent graph-row arm
+   is resolved by hand in the helper for the same reason. Check any new selector in jsdom first.
+4. **Print opens every disclosure two ways.** The print CSS uses `details::details-content` —
+   styling the CHILDREN printed an empty disclosure in Chromium, which is how the per-row graphs
+   were missing from every PDF until this version — and the PDF service additionally sets `open`
+   on every `<details>` before `page.pdf()`, so it does not depend on its unpinned Chromium.
+   **Firefox before 143 has no `::details-content`**: printing from it (the share page's Print
+   button, or a downloaded file) shows a closed group's heading and no rows. Accepted; the PDF is
+   complete.
+5. **Groups holding a regression start open.** A closed group is out of reach of the browser's
+   find and of select-all, and the regression rows are what a reader came for.
+
+The downloaded file's row counter reads the ticked chips too (`tickedBands`), so it never counts a
+row the CSS hid. Deferred follow-ups from the review are in TODOS.md under Reports.
+
 ### The host metric list has ONE definition, and the disk metrics must fold explicitly
 
 `HOST_METRICS` in `modules/dynatrace/dynatrace.service.ts` is the single list behind both
