@@ -126,6 +126,15 @@ export class PdfService {
 
       this.logger.debug('Page content loaded, generating PDF...');
 
+      // Paper has nothing to click, so open every disclosure (the comparisons groups and
+      // row graphs). The report's print CSS does the same through ::details-content, but
+      // only on a Chromium that supports it, and this image's Chromium is not pinned.
+      await page.evaluate(() => {
+        document
+          .querySelectorAll('details')
+          .forEach(d => d.setAttribute('open', ''));
+      });
+
       // Configure PDF options
       const pdfOptions: PdfOptions = {
         format: 'A4',
