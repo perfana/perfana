@@ -2320,6 +2320,34 @@ scroll container, which may make the shared hook unnecessary; check before reach
 
 ## Reports
 
+### Comparisons group filters: review follow-ups deferred from v0.2.97.40
+
+**Priority:** P3
+**Origin:** the second /ship review pass on `feat/report-collapsible-scenario-groups`
+(2026-10-31). Nothing critical; the user chose to ship with these listed rather than run a
+third full review cycle.
+**What:**
+- **Band vocabulary is hand-listed in four places** (`BANDS` and `GROUP_FILTER_TONES` in
+  `report-style.ts`, `BAND_CHIPS` and the `groupFilter` options in `comparisons-renderer.ts`).
+  `satisfies readonly ReportBand[]` rejects an unknown band but does not require every band. Key
+  the per-band metadata on a `Record<ReportBand, …>` and derive the lists from it.
+- **"Show only" depends on build order.** `groupDisclosure` pushes each group's bands into a
+  closure array that `groupFilter()` reads later, and "only group" is computed twice (map size
+  for `open`, array length for the filter). Build an explicit `{ bands, html }` list per branch
+  and derive both from it.
+- **The chip rules anchor `:has()` on the whole group**, so a row hover re-walks the group. The
+  cheaper anchor (`.report-band-filter:has(…) ~ div tr`) works in browsers, but jsdom's nwsapi
+  misses `~ div tr` on this markup, so the contract spec could no longer check it. Needs a
+  selector the spec's engine also evaluates, or a hand-resolved sibling step in
+  `hiddenByFilterCss`.
+- **Test strength:** the row-graph chip spec never checks the graph of a row that stays visible;
+  the print-guard regexes only reject the exact old selectors; the downloaded-HTML counter spec
+  uses a hand fixture rather than the renderer's output; nothing runs the closed-group print rule
+  in a real Chromium (PDF text extraction was manual).
+- **`jsdom` and `jest-environment-jsdom` are not declared in `apps/api`** — both resolve only
+  because `apps/web` hoists them. The contract spec's meaning depends on that jsdom's selector
+  engine, so a bump on the web side changes what it proves.
+
 ### The SLO ACTUAL column carries three statistics with nothing marking which
 
 **Priority:** P2
