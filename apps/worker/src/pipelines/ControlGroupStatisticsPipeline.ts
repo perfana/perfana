@@ -723,6 +723,45 @@ export class ControlGroupStatisticsPipeline extends BasePipelineTypeORM {
       this.logger.warn(`⚠️ No metrics were available to aggregate`);
     }
 
+    if (!useFastPath) {
+      await this.warnIfGroupedSeriesLeftOut(manager, controlGroupId, controlGroup.test_runs);
+    }
+
     return rowCount;
+  }
+
+  /**
+   * Series grouping vs the legacy path. The legacy path re-reads raw ds_metrics by RAW series
+   * name and inner-joins that to the control runs' ds_metric_statistics names. A series-grouping
+   * group name (docs/design/2026-11-01-series-grouping-design.md) has no raw counterpart there, so
+   * grouped series drop out of this baseline and read `incomparable` — a smaller baseline, not a
+   * wrong verdict. Grouped statistics rows always carry pct_agg and backfillMissingSketches reruns
+   * StatisticsPipeline (and so the grouping) first, so this only happens when that best-effort
+   * backfill failed. Say so, rather than duplicating the grouping SQL into this path.
+   *
+   * Runs inside the aggregation transaction, after the work, and cannot fail there: to_regclass
+   * is NULL for a missing table, and the EXISTS is only issued when the table exists.
+   */
+  private async warnIfGroupedSeriesLeftOut(
+    manager: EntityManager,
+    controlGroupId: string,
+    testRuns: string[]
+  ): Promise<void> {
+    const table = await manager.query<Array<{ present?: unknown }>>(
+      "SELECT to_regclass('public.ds_metric_series_groups') IS NOT NULL AS present"
+    );
+    if (table?.[0]?.present !== true) {
+      return;
+    }
+    const grouped = await manager.query<Array<{ grouped?: unknown }>>(
+      'SELECT EXISTS (SELECT 1 FROM ds_metric_series_groups WHERE test_run_id = ANY($1::varchar[])) AS grouped',
+      [testRuns]
+    );
+    if (grouped?.[0]?.grouped === true) {
+      this.logger.warn(
+        `series-grouping: control group ${controlGroupId} took the legacy path; grouped series are left out of ` +
+          'this baseline and will read incomparable until the baseline statistics are recalculated'
+      );
+    }
   }
 }

@@ -61,6 +61,24 @@ describe('ResultsProcessor.deleteOrphanedResults', () => {
     expect(sql).toContain('ms.metric_name = ar.metric_name');
   });
 
+  // Series grouping relies on this (docs/design/2026-11-01-series-grouping-plan.md, Task 4): once a
+  // rule groups a panel, StatisticsPipeline writes `api` instead of `api-7d9f8c6b5-x2k4p`, so the
+  // per-pod ds_adapt_results rows lose their statistics row. They must go in the same stage, or
+  // their old verdicts keep counting in buildConclusionSQL beside the group's new one. The anti-join
+  // on metric_name is what removes them; pin it as the mechanism the feature depends on.
+  it('removes per-pod results once grouping replaces their statistics rows with a group row', async () => {
+    manager.query.mockResolvedValue([[], 3]);
+
+    const deleted = await processor.deleteOrphanedResults(manager as unknown as EntityManager, ['run-1']);
+
+    expect(deleted).toBe(3);
+    // Keyed on the statistics row's metric_name, never on the result's own name or a pattern:
+    // a group row named `api` cannot keep a pod's result alive.
+    expect(sqlOf()).toMatch(/NOT EXISTS\s*\(\s*SELECT 1\s+FROM ds_metric_statistics ms/);
+    expect(sqlOf()).toContain('ms.metric_name = ar.metric_name');
+    expect(sqlOf()).not.toMatch(/LIKE|~|regexp/i);
+  });
+
   it('stays inside the metric filter, so a single-metric re-analysis cannot wipe the rest', async () => {
     await processor.deleteOrphanedResults(manager as unknown as EntityManager, ['run-1'], {
       applicationDashboardId: 'dash-uuid',

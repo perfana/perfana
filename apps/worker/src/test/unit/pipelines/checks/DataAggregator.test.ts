@@ -442,6 +442,28 @@ describe('DataAggregator', () => {
       expect(result.targets[0].isArtificial).toBe(true);
     });
 
+    // Series grouping (docs/design/2026-11-01-series-grouping-plan.md, Task 4): a grouped panel
+    // that collapses to ONE constant group — e.g. a memory limit identical on every pod — becomes
+    // the artificial `default` target exactly like any single-constant-series panel. Pinned so
+    // the interaction is documented rather than discovered: the target is not named after the group.
+    it('treats a single constant group like any single constant series (artificial default target)', async () => {
+      const testRun = createMockTestRun();
+      const benchmark = createMockBenchmark();
+      mockManager.query.mockResolvedValue([
+        {
+          metric_name: 'api',
+          mean: 512, median: 512, min_value: 512, max_value: 512, std_dev: 0,
+          q10: 512, q25: 512, q75: 512, q90: 512, q95: 512, q99: 512, last_value: 512,
+          count: 30, is_constant: true, all_missing: false, pct_missing: 0,
+        },
+      ]);
+
+      const result = await aggregator.aggregateMetricsForBenchmark(testRun, benchmark);
+
+      expect(result.targets).toEqual([{ target: 'default', value: 512, isArtificial: true }]);
+      expect(result.panel_average).toBe(512);
+    });
+
     it('should throw error when benchmark has no panel ID', async () => {
       // Arrange
       const testRun = createMockTestRun();
