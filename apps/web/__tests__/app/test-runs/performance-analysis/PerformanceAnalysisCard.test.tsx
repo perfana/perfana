@@ -14,11 +14,12 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import PerformanceAnalysisCard from '@/app/test-runs/[id]/components/performance-analysis/PerformanceAnalysisCard';
 import { authenticatedFetch } from '@/lib/api';
+import { TestRun } from '@/types/test-runs';
 
 // Mock authenticated fetch
 jest.mock('@/lib/api', () => ({
@@ -1494,6 +1495,135 @@ describe('PerformanceAnalysisCard', () => {
         expect(table).toBeInTheDocument();
         // Table should have sticky header (implementation detail)
       });
+    });
+  });
+
+  describe('Live refresh controls', () => {
+    const runningTestRun = {
+      id: testRunId,
+      completed: false,
+      start_time: '2026-07-20T10:00:00Z',
+      updated_at: '2026-07-20T10:05:00Z',
+    } as unknown as TestRun;
+
+    const renderLive = () =>
+      render(
+        <PerformanceAnalysisCard
+          testRunId={testRunId}
+          testRun={runningTestRun}
+          expanded={true}
+          onExpand={mockOnExpand}
+          showToast={mockShowToast}
+        />
+      );
+
+    const transactionFetches = () =>
+      (authenticatedFetch as jest.Mock).mock.calls.filter(([url]) => String(url).includes('/transactions?')).length;
+
+    // The picked period is remembered per browser; start every case from the default.
+    beforeEach(() => localStorage.clear());
+
+    // Value: protects=each period picked in the Refresh dropdown sets the live refetch cadence; fails_when=the timer ignores the picked value (e.g. a hard-coded 30 s) or an option carries the wrong milliseconds; why_new=tests only covered Off and the 30 s default; seam=none; no_claim=does not check server load
+    it.each([['10s', 10_000], ['1m', 60_000], ['5m', 300_000]])(
+      'refetches every %s once that period is picked',
+      async (label, ms) => {
+        jest.useFakeTimers();
+        try {
+          renderLive();
+          const refreshSelect = await screen.findByRole('combobox', { name: /Refresh/ });
+          await waitFor(() => expect(transactionFetches()).toBeGreaterThan(0));
+          fireEvent.mouseDown(refreshSelect);
+          fireEvent.click(await screen.findByRole('option', { name: label as string }));
+
+          const before = transactionFetches();
+          await act(async () => { jest.advanceTimersByTime(ms as number); });
+          expect(transactionFetches()).toBe(before + 1);
+          await act(async () => { jest.advanceTimersByTime(ms as number); });
+          expect(transactionFetches()).toBe(before + 2);
+        } finally {
+          jest.useRealTimers();
+        }
+      }
+    );
+
+    // Value: protects=the live header shows when the figures were last fetched; fails_when=lastUpdatedAt is not wired to LiveWindowSelector or the label is dropped; why_new=new behaviour; seam=none; no_claim=does not check the time format
+    it('shows when the figures were last updated', async () => {
+      renderLive();
+      expect(await screen.findByText(/^Updated /)).toBeInTheDocument();
+    });
+
+    // Value: protects=choosing Off in the Refresh dropdown puts a working manual refresh button in the header; fails_when=the button stays gated on autoRefreshDisabled alone, or the dropdown is not wired to the hook; why_new=no card test rendered a running run, so the live controls never mounted; seam=none; no_claim=does not check the timer stops (hook test)
+    it('shows a manual refresh button once auto-refresh is set to Off', async () => {
+      renderLive();
+      const refreshSelect = await screen.findByRole('combobox', { name: /Refresh/ });
+      await waitFor(() => expect(transactionFetches()).toBeGreaterThan(0));
+      // Default 30 s: the timer refreshes, so no manual button.
+      expect(screen.queryByLabelText(/^Refresh metrics/)).toBeNull();
+
+      fireEvent.mouseDown(refreshSelect);
+      fireEvent.click(await screen.findByRole('option', { name: 'Off' }));
+
+      const button = await screen.findByRole('button', { name: 'Refresh metrics (auto-refresh off)' });
+      // The state is visible text (a polite live region), not only a hover tooltip.
+      expect(screen.getByText(/· auto-refresh off$/)).toHaveAttribute('role', 'status');
+      expect(screen.getByLabelText('Test is running — auto-refresh is off')).toBeInTheDocument();
+      await waitFor(() => expect(button).toBeEnabled());
+      const before = transactionFetches();
+      fireEvent.click(button);
+      expect(transactionFetches()).toBe(before + 1);
+    });
+
+    // Value: protects=after a >=5 s fetch on a live run the card offers manual refresh and names the slow fetch as the reason; fails_when=the button condition drops autoRefreshDisabled, or the tooltip ternary is inverted; why_new=no card test rendered a running run; seam=none; no_claim=does not prove the timer is paused (hook test)
+    it('offers manual refresh when a slow fetch paused auto-refresh', async () => {
+      jest.useFakeTimers();
+      try {
+        const fast = (authenticatedFetch as jest.Mock).getMockImplementation()!;
+        (authenticatedFetch as jest.Mock).mockImplementation(async (url: string) => {
+          if (url.includes('/transactions?')) await new Promise((resolve) => setTimeout(resolve, 6_000));
+          return fast(url);
+        });
+
+        renderLive();
+        await act(async () => { jest.advanceTimersByTime(6_000); });
+
+        expect(
+          await screen.findByRole('button', { name: 'Refresh metrics (auto-refresh paused — last fetch took >5s)' })
+        ).toBeInTheDocument();
+        expect(screen.queryByLabelText('Refresh metrics (auto-refresh off)')).toBeNull();
+        // Paused is not live: the caption and the LIVE chip both say so.
+        expect(screen.getByText(/· auto-refresh paused$/)).toHaveAttribute('role', 'status');
+        expect(screen.getByLabelText('Test is running — auto-refresh paused (last fetch took >5s)')).toBeInTheDocument();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    // Value: protects=re-picking the period the Refresh dropdown already shows resumes a slow-fetch pause; fails_when=only the Select's onChange calls the setter, which MUI skips for an unchanged value; why_new=the hook test picks a different period through the setter; seam=none; no_claim=does not cover keyboard selection
+    it('resumes a paused refresh when the shown period is picked again', async () => {
+      jest.useFakeTimers();
+      try {
+        const fast = (authenticatedFetch as jest.Mock).getMockImplementation()!;
+        let slow = true;
+        (authenticatedFetch as jest.Mock).mockImplementation(async (url: string) => {
+          if (slow && url.includes('/transactions?')) await new Promise((resolve) => setTimeout(resolve, 6_000));
+          return fast(url);
+        });
+
+        renderLive();
+        await act(async () => { jest.advanceTimersByTime(6_000); });
+        expect(await screen.findByText(/· auto-refresh paused$/)).toBeInTheDocument();
+
+        slow = false;
+        fireEvent.mouseDown(screen.getByRole('combobox', { name: /Refresh/ }));
+        fireEvent.click(await screen.findByRole('option', { name: '30s' }));
+
+        await waitFor(() => expect(screen.queryByText(/auto-refresh paused/)).toBeNull());
+        const before = transactionFetches();
+        await act(async () => { jest.advanceTimersByTime(30_000); });
+        expect(transactionFetches()).toBe(before + 1);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });

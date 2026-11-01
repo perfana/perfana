@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.42] - 2026-11-01
+
+### Added
+- **You can choose how often Performance Analysis refreshes while a test is running.** A **Refresh** dropdown, in a row of live controls under the card title, offers Off, 10s, 30s, 1m and 5m, defaulting to 30s. A rate you pick is remembered in this browser, so a tab switch or the next run keeps it; **Off is not remembered**, so the next run refreshes again. A stored value the dropdown no longer offers falls back to 30s rather than leaving the control blank.
+- **The card now says when its figures were fetched and whether they are still refreshing.** An "Updated hh:mm:ss" caption moves on every refresh, so a refresh is visible even when the numbers do not change. When auto-refresh is Off, or paused because a fetch took 5 s or more, the caption says so ("· auto-refresh off" / "· auto-refresh paused"), the LIVE tooltip agrees, and a manual refresh button appears. Picking a rate, including the one already shown, resumes a pause.
+
+### Changed
+- **Live refresh follows the rate you pick instead of the test-run WebSocket.** The card used to refetch whenever the run's record changed over the socket — in practice the load generator's ~30 s keep-alive. It now runs its own timer; Off means no automatic refetch at all.
+- **A run that finishes while you watch ends on freshly fetched figures.** Completion now triggers one more fetch of the whole-run figures, where previously a card already showing the whole run kept whatever its last refresh had fetched. (A "Last N minutes" window already switched to the whole run on completion, and still does.)
+- **An older answer can no longer overwrite a newer one.** When a window or filter change overtakes a slow transactions request, the late answer is dropped instead of replacing the newer figures. Background refreshes wait for the request still out rather than piling up behind a slow server.
+- The manual refresh button is announced by its own name to screen readers; it used to be read as an unlabelled button.
+- The refresh timer pauses while the Results tab is hidden. Since 0.2.97.41 the details page keeps a visited tab loaded behind the others, so the card would otherwise keep polling while you look at Root Cause Analysis or Reporting; it now stops there and refreshes once when you come back.
+
+### Known limits
+- Only the transactions request is ordered and timed; the virtual-users and throughput tiles still show whichever answer arrives last, and the 5 s pause measures transactions only.
+
 ## [0.2.97.41] - 2026-11-01
 
 ### Added

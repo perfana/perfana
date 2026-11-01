@@ -3701,6 +3701,95 @@ It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that 
 
 **Effort:** S
 
+## Performance Analysis live refresh
+
+Follow-ups from the v0.2.97.42 refresh-rate dropdown.
+
+### Live refresh load and ordering gaps left by v0.2.97.42
+
+**Priority:** P2
+**Origin:** /ship review cycles 1-3 and adversarial review, 2026-11-01 (user decisions D7, D10, D11).
+**Why:** each gap is bounded or pre-existing, but the user-picked cadence (as fast as 10 s) makes them
+more frequent than under the old ~30 s WebSocket trigger.
+**What:**
+- Only `/transactions` has the latest-request guard. `/virtual-users`, `/throughput` and the threshold
+  still write whichever answer arrives last — after a ramp-up toggle, or at run completion when a slow
+  last-tick answer lands after the completion refetch (then nothing corrects it until reload). Give
+  each refresh pass one generation token that all four fetches check.
+- The ≥5 s pause times `/transactions` only; `/virtual-users` and `/throughput` (the multi-second reads
+  in root CLAUDE.md #34) are not timed and not deduped, so they can overlap at 10 s. The 5 s threshold
+  is also absolute, ~50% duty cycle per viewer at 10 s.
+- The timer runs while the browser tab is hidden and while the card is collapsed (it does stop while
+  the Results tab is hidden behind another details-page tab). Skip ticks while
+  `document.visibilityState !== 'visible'` and refresh once on return.
+- A `/transactions` request that never settles keeps the background gate closed until it does
+  (bounded by the API's 300 s `query_timeout`); add `AbortSignal.timeout(~60 s)` and abort superseded
+  requests (they are dropped, not cancelled).
+- A failed background refresh blanks the table (`setTransactions([])`) and nulls the stats; keep the
+  last good figures like `fetchSamplesFor` does.
+- Editing the analysis window on a live run no longer refetches immediately; refetch when
+  `analysis_start_offset` / `analysis_end_offset` change on the `testRun` prop.
+- `sortedTransactions` / `scenarioGroups` are rebuilt every render; memoize them.
+**Where:** `.../hooks/usePerformanceAnalysisData.ts`.
+
+### Completion and resume can still show stale figures
+
+**Priority:** P2
+**Origin:** /ship red-team cycles 2-3 and adversarial review, 2026-11-01.
+**Why:** v0.2.97.42 refetches once on completion and resumes the timer on a pick, but:
+- The completion refetch fires the instant `completed` flips, before late `requests_raw` rows
+  (up to ~36 s) and the analyze rollup land; nothing fetches after. Schedule one more refetch
+  (~60 s later, or when the analysis result arrives).
+- Resuming from a pause (or picking a rate) does not fetch at once; the first refresh comes a full
+  period later (5 min at 5m).
+- An expanded row whose sampler fetch is still out at completion keeps pre-completion figures:
+  `inFlightSamplesRef` skips the completion refetch, and it is keyed on name only, ignoring the
+  samples epoch, so a re-expand during a window change can show an empty request table.
+- If the browser misses the completion WebSocket event (sleep, API restart), the card polls on, and a
+  "Last N minutes" window drains to empty after the run. Refetch the run on socket reconnect
+  (`useTestRunRealtime` re-subscribes but never refetches).
+**Where:** `.../hooks/usePerformanceAnalysisData.ts`, `apps/web/app/test-runs/[id]/hooks/useTestRunRealtime.ts`.
+
+### Live refresh polish and accessibility
+
+**Priority:** P3
+**Origin:** /ship review cycle 3, 2026-11-01 (user decision D11).
+**What:**
+- The caption gains `role="status"` in the same render as its "· auto-refresh paused" text, so the
+  entry into paused is likely not announced. Keep one always-mounted live region whose text changes
+  only with the refresh state.
+- The paused copy (tooltip, button label, caption) says why but not how to resume.
+- The manual refresh button sits at the start of the live-controls row, away from the Refresh
+  select that summons it; the select is labelled "Refresh" while the tooltips say "auto-refresh",
+  beside a button named "Refresh metrics" ("Auto-refresh" would read unambiguously).
+- The LIVE dot keeps pulsing when refresh is Off or paused, and ignores `prefers-reduced-motion`.
+- The manual refresh button drops keyboard focus because it disables itself while loading
+  (`aria-disabled` instead).
+- The comment above the manual button's `aria-label` gives the wrong reason (with `describeChild` the
+  tooltip is a description, so the icon button needs its own name).
+- `autoRefreshDisabled` now means "paused"; rename it `autoRefreshPaused`, or return `refreshState` from
+  the hook so the card and the timer guard cannot drift.
+- One comment still says expanded rows update "in realtime"; the 5 s threshold is spelled out in two
+  user-facing strings; `REFRESH_OPTIONS` is a mutable exported array (`as const`); `lastUpdatedAt` is
+  not reset when the run changes; a superseded response body is never cancelled.
+**Where:** `.../components/LiveWindowSelector.tsx`, `.../PerformanceAnalysisCard.tsx`, `.../hooks/usePerformanceAnalysisData.ts`.
+
+### Tests the live refresh review proposed but did not add
+
+**Priority:** P3
+**Origin:** /ship coverage reassessment and testing review, cycle 3, 2026-11-01 (both generation passes
+were used). Each is correct code without a test; mutations noted survive today.
+**What:**
+- Only the newest request re-opens the background gate: moving `latestTransactionsSettledRef.current = true`
+  above the stale check passes all tests. A ready stub: mount request 3 s, window change at 1 s
+  answering at 15 s, 10 s period; expect 2 requests and `['call-2']`.
+- Off outranks paused (pick Off, slow manual refresh): swapping the `refreshState` ternary passes all tests.
+- The gate re-opens after the latest request *fails* (a fast 502 on a tick, then a 200 on the next).
+- The post-json stale check: delay `json()` (not `fetch`) on the older request, then change the window.
+- The caption carries no `role`/`aria-live` while refresh is on.
+**Where:** `.../hooks/__tests__/usePerformanceAnalysisData.test.ts`,
+`apps/web/__tests__/app/test-runs/performance-analysis/PerformanceAnalysisCard.test.tsx`.
+
 ## Completed
 
 ### A landed card-link could not be recovered after a tab switch, and its key omitted the run
