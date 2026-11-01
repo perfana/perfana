@@ -2,7 +2,8 @@
 
 **Date:** 2026-11-01
 **Status:** Design agreed. All five open questions were decided on 2026-11-01 (see Decisions at the
-end); ready for an implementation plan.
+end). Implementation plan: [`2026-11-01-series-grouping-plan.md`](2026-11-01-series-grouping-plan.md).
+Corrections found while planning are applied below.
 **Scope:** worker (`StatisticsPipeline`), API (rules, preview, group-aware `ds_metrics` reads), web
 (anomaly-detection card, Compare card, system config, series picker), `packages/shared` (one
 grouping function).
@@ -212,6 +213,8 @@ The membership a run's statistics were computed with: one row per raw series of 
 | `rule_id` | FK → `series_grouping_rules` ON DELETE SET NULL |
 | `rule_hash` | Hash of the rule fields at the time it was applied; used for stale detection. |
 | `aggregation` | Copied from the rule, so a chart can redraw the group without the rule. |
+| `dashboard_label`, `panel_title` | Copied from `ds_metrics`. Some readers (`getMetricTimeSeries`, the reports) address a panel by label and title rather than by id. |
+| `avg_members` | Average members reporting per timestamp, from the grouped aggregation; the alignment signal. |
 | `organization_id`, `team_id` | |
 
 - A plain table, not a hypertable. Size is the number of raw series on grouped panels, per run:
@@ -227,34 +230,40 @@ The membership a run's statistics were computed with: one row per raw series of 
 
 ### `StatisticsPipeline.aggregateMetricStatistics`
 
-1. **Load the rules** for each run's `(system_under_test, environment, workload)`. This lookup **fails
-   open**: if the table does not exist yet (a worker rolled out before the migration, `42P01`), or the
-   read throws, log a warning and aggregate with no rules. Without that, a rollout-order mistake fails
-   every `statistics-calculation`; the worker has no boot-time schema probe (worker `CLAUDE.md`,
-   Trend SLO item 3).
-2. **Read the raw names** of each grouped panel: `SELECT DISTINCT metric_name FROM ds_metrics WHERE
-   test_run_id = $1 AND application_dashboard_id = $2 AND panel_id = $3`. With the leading index
-   columns fixed, TimescaleDB answers this with a SkipScan (3.9 ms measured for the same shape in
-   worker `CLAUDE.md` item 7). Do not widen it into a run-wide `GROUP BY`; that same item explains
-   why that shape is a full scan.
+1. **Load the rules** for each run's `(system_under_test, environment, workload)` **before**
+   `withAnalyticsTransaction`, through the pooled connection, after a `to_regclass` probe for the
+   table. This lookup **fails open**: if the table does not exist yet (a worker rolled out before the
+   migration) or the read throws, log a warning and aggregate with no rules. Without that, a
+   rollout-order mistake fails every `statistics-calculation`; the worker has no boot-time schema probe
+   (worker `CLAUDE.md`, Trend SLO item 3). It must run outside the transaction because an error inside
+   one aborts it (25P02), and `statistics-calculation` is not `softFail`, so it would fail the whole
+   re-evaluate batch.
+2. **Read the raw names** of the dashboards the rules touch, once per run: `SELECT
+   application_dashboard_id, panel_id, metric_name … FROM ds_metrics WHERE test_run_id = $1 AND
+   application_dashboard_id = ANY($2) GROUP BY 1, 2, 3`. This reads those dashboards' rows once, the
+   same order of cost as the aggregation itself. If measurement shows it matters, fall back to
+   per-panel `SELECT DISTINCT metric_name … AND panel_id = $3` probes, which TimescaleDB SkipScans
+   when the leading index columns are fixed (worker `CLAUDE.md` item 7).
 3. **Build the mapping** with `applySeriesGrouping` and insert it into `ds_metric_series_groups`.
-4. **Aggregate in two branches** inside the existing CTE chain:
-   - Panels with no rule go through `metrics_filtered → statistics_aggregated` exactly as today.
-   - Grouped panels go through a new step that joins `metrics_filtered` to the mapping, then
-     `GROUP BY (test_run_id, application_dashboard_id, panel_id, group_name, time)`, producing the
-     per-timestamp `avg` / `sum` / `max`. When `track_member_count` is on, it also produces
-     `COUNT(DISTINCT metric_name)` as the member count series. The result is `UNION ALL`-ed into the
-     input of `statistics_aggregated`.
+4. **Aggregate grouped panels in a second statement, never inside the existing one:**
+   - The existing `INSERT` gains one predicate that excludes the grouped `(run, dashboard, panel)`
+     triples, and only when there are any. With no rules its SQL is byte-identical to today's.
+   - A second `INSERT INTO ds_metric_statistics` reads only the grouped panels' rows, combines them per
+     timestamp (`avg` / `sum` / `max`, plus the member count series when tracked), and feeds the result
+     into the same statistics chain, extracted into a builder both statements share.
+   - A `UNION ALL` into the existing CTE was rejected: it references `metrics_filtered` twice, and a
+     CTE referenced twice is materialised, which would push the whole run's raw rows through a
+     tuplestore (worker `CLAUDE.md`, panel 304, "Group once, then roll up").
 5. Everything downstream is unchanged: `pct_agg`, `sum_value` / `sum_sq_value`, `last_value`, trend,
    and the `INSERT INTO ds_metric_statistics`.
 
 Three planner cautions, each a lesson already written down in worker `CLAUDE.md`:
 
-- **The ungrouped branch must keep its current plan.** The `ds_metrics_groupkey` statistics object
-  (#13) is what stops `statistics_aggregated` spilling an `external merge` sort. Prove with `EXPLAIN
-  (ANALYZE, BUFFERS)` on a production-sized run that the `UNION ALL` does not move that estimate, and
-  that output for runs with no rules is byte-identical before and after (a `FULL JOIN` of old against
-  new, as the v0.2.93.1 fix did).
+- **The ungrouped statement must keep its current plan.** The `ds_metrics_groupkey` statistics object
+  (#13) is what stops `statistics_aggregated` spilling an `external merge` sort. Pin today's SQL with a
+  snapshot test before refactoring. Prove with `EXPLAIN (ANALYZE, BUFFERS)` on a production-sized run
+  that the plan is unchanged, and that output for runs with no rules is byte-identical before and after
+  (a `FULL JOIN` of old against new, as the v0.2.93.1 fix did).
 - **Rows inserted in the same transaction are invisible to the planner.** The mapping is written
   moments before the aggregation reads it, the same shape that made `deleteOrphanedResults` go
   quadratic (worker `CLAUDE.md`, "`ds_adapt_results` is written by an upsert", item 3). Pass the
@@ -267,9 +276,18 @@ Three planner cautions, each a lesson already written down in worker `CLAUDE.md`
 **Timestamp alignment (v1):** members are combined on exact `time`. Prometheus range queries are
 aligned to the step, so pods share timestamps. A source that does not align them would produce
 "groups" whose timestamps each have one member. v1 detects this (average members per timestamp ≈ 1
-while the group has more than one member) and warns in the worker log and in the dialog preview,
-instead of silently storing a meaningless average. Bucketing on `timestep` for unaligned sources is
-deferred to v2.
+while the group has more than one member, stored as `avg_members`) and warns in the worker log, in the
+anomaly card's status notice, and in the dialog preview of a panel that has been grouped before,
+instead of silently storing a meaningless average. A first-time preview cannot know it without reading
+raw series, which the preview never does. Bucketing on `timestep` for unaligned sources is deferred to
+v2.
+
+- **Baselines that take the legacy control-group path lose their groups.** When any control run has
+  `pct_agg IS NULL`, `ControlGroupStatisticsPipeline` re-reads raw `ds_metrics` by raw name, and a
+  group name has no raw counterpart there. `backfillMissingSketches` reruns `StatisticsPipeline`, and
+  so the grouping, first, so this bites only when that best-effort backfill fails. The result is
+  `incomparable`, not a wrong verdict, and v1 logs a warning rather than duplicating the grouping SQL
+  into the legacy path.
 
 ### Unchanged, and why that is correct
 
@@ -325,16 +343,21 @@ workload }]` listing other workloads of the **same system**:
 ### Preview
 
 `POST /series-grouping-rules/preview` with `{ testRunId, applicationDashboardId, panelId?, rule }`.
-Read-only. For the run and for each run of its current control group (taken from the latest ADAPT
-conclusion's `details.controlRuns`, as the **Recalculate baseline statistics** button already does),
-it returns:
+Read-only. It covers the run and each run of its current control group. The control group comes from
+the latest `ds_adapt_conclusion` row's `control_group_id` → `ds_control_groups.test_runs`.
+(`details.controlRuns`, which the **Recalculate baseline statistics** button reads, is written only
+for an INSUFFICIENT_DATA conclusion caused by a failed baseline aggregation, so it is not a general
+source.) A run with no conclusion yet falls back to the workload's most recent completed runs. It
+returns:
 
-- raw name → group name, and members per group;
-- how many groups match between the run and the baseline, before vs after the rule;
-- the timestamp-alignment warning above;
-- the SLOs on the panel whose `matchPattern` would match nothing after grouping.
+- each run's raw names per panel; the client computes groups with `applySeriesGrouping`, so the
+  preview is fetched once per dialog, not per keystroke;
+- the SLOs on the panel whose `matchPattern` would match nothing after grouping;
+- raw baseline names that equal a new group name (see "Applying a rule");
+- the timestamp-alignment signal, for panels a previous rule already grouped.
 
-Names come from the SkipScan `DISTINCT` above; nothing scans series data.
+Names come from `ds_metric_statistics` and, for grouped panels, `ds_metric_series_groups`. Both are
+small tables; the preview never reads `ds_metrics`.
 
 ### Suggestions
 
@@ -409,10 +432,10 @@ fetch the members and combine them per timestamp with the stored aggregation.
 | `GET /metrics/ds-metrics/:testRunId/:panelId`, `GET /metrics/ds-metrics/time-series/:testRunId` (Graphs, Trends, Compare charts) | Expand a group name and aggregate. `?members=true` returns the per-pod series for drill-down. |
 | `GET /metrics/ds-metrics-comparison` (Compare chart) | Expand per run independently: the two runs have different members. |
 | `report-data-fetcher.service.ts` | Same helper, so a report section built from a preset that holds a group name renders. |
-| MCP tools (`get_available_metrics` and the time-series tools) | Same helper (v1.1). |
+| MCP tools (`get_available_metrics`, `get_metric_trends`) | No change of their own: `apps/mcp` reads over the API routes above, so it gets group names with them. |
 
-These must ship in the same release as the worker change, or the first saved preset that holds a group
-name draws an empty chart.
+These must ship no later than the first way to create a rule, or the first saved preset that holds a
+group name draws an empty chart. The implementation plan ships them in the first, inert PR.
 
 ## UI
 
@@ -536,7 +559,6 @@ Behaviour:
   - grafana-sync auto-config suggesting a rule when a legend contains `{{pod}}` or the dashboard has a
     `pod` template variable;
   - rules in profiles, so provisioning creates them;
-  - MCP tools;
   - node-name preset.
 - **v2:**
   - capture `field.labels` per series (one row per series per run in a side table, never per point);
