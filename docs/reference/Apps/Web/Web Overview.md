@@ -53,13 +53,14 @@ RootLayout
 - Dashboard metrics and SLOs
 - Anomaly detection results
 - Performance analysis
+- Deep links to external tools
+- Events
 
 **Root Cause Analysis Tab**:
 - Dynatrace service/host analysis
 - Distributed tracing
 - Pyroscope profiling
 - AWR reports
-- Deep links to external tools
 
 **Reporting Tab**:
 - Report generation and download
@@ -67,7 +68,7 @@ RootLayout
 - Test run comparison
 - Graph visualizations
 
-**Deep link into a card** (v0.2.96.5): `/test-runs/[id]?card=graphs|compare|trends&dashboard=<label>&panel=<id>&metric=<name>` opens the Reporting tab with that card expanded and the named series **already plotted** — since v0.2.97.1 the link adds outright rather than preselecting a draft the user still had to confirm, because Graphs and Trends open their picker from a `+ add series` button and a staged pick behind a closed panel could not be committed. The row context menus' **Open in Graphs / Compare / Trends** items build these links (`components/shared/metric-card-links.tsx`); the shared `MetricSeriesCascade` reads the three series params once per page load, so removing a landed series is not undone by collapsing and re-expanding the card. Omit `panel` and `metric` and the link is a wildcard over the whole dashboard, capped at 50 series with a toast. The card's add-series panel therefore stays **mounted while closed** — the walk lives in the cascade's effects; see "The add-series cascade is app-typed, and the chart inside it is not" in [apps/web/CLAUDE.md](../../../../apps/web/CLAUDE.md).
+**Deep link into a card** (v0.2.96.5): `/test-runs/[id]?card=graphs|compare|trends&dashboard=<label>&panel=<id>&metric=<name>` opens the Reporting tab with that card expanded and the named series **already plotted** — since v0.2.97.1 the link adds outright rather than preselecting a draft the user still had to confirm, because Graphs and Trends open their picker from a `+ add series` button and a staged pick behind a closed panel could not be committed. The row context menus' **Open in Graphs / Compare / Trends** items build these links (`components/shared/metric-card-links.tsx`), and since v0.2.97.41 a built link also carries the page's own `system`, `environment`, `workload` and `organizationId` params. Since the same version a plain click on one of those items does not navigate: it hands the series to the card on the same page (`OpenCardLinkContext` / `CardLinkRequestContext`, provided by `page.tsx`), switching tab and expanding the card with no reload and no URL change, and every click adds, including a series removed a moment earlier. The item stays a real `<a href>`, so its trailing icon, the platform's new-tab modifier (Cmd on Apple platforms, Ctrl elsewhere), Shift, a middle click or Copy link still open the URL form in a new tab or window. The shared `MetricSeriesCascade` walks either form once per link: the walked link keys live in a set the page owns, so removing a landed series is not undone by collapsing and re-expanding the card, while a fresh page (reload, Back, prev/next) walks a URL link again. Omit `panel` and `metric` and the link is a wildcard over the whole dashboard, capped at 50 series with a toast. The card's add-series panel therefore stays **mounted while closed** — the walk lives in the cascade's effects; see "The add-series cascade is app-typed, and the chart inside it is not" in [apps/web/CLAUDE.md](../../../../apps/web/CLAUDE.md).
 
 **Out of a card** (v0.2.97.2): clicking a point on the Trends chart opens that run at `/test-runs/<id>` in a new tab, and hovering one names the run, its application release and its annotations in the card header. The Analyst chart standard draws no floating tooltip — `hoverinfo: 'none'` plus a crosshair — so that header readout is the only place a hover answers "which run"; it is capped at 55% of the header width and ellipsized, with the full string on the element's `title`, because an annotation is unbounded free text.
 

@@ -446,6 +446,36 @@ This is the repo's recurring **first-row-selection** shape — `configs[0]`, `LI
 The same commit that introduced this one got it right one line away, for the Dynatrace config:
 `configs.find((c) => c.id === selectedHost.dynatraceConfigId) ?? configs[0]`.
 
+### Visited test-run tabs stay mounted while hidden
+
+Since v0.2.97.41 `app/test-runs/[id]/page.tsx` mounts a tab on its first visit and then keeps it
+mounted and hidden, so a card's own state (expanded rows, picker drafts, added series, a search
+box) survives a switch to another tab and back. Each rule below fails silently when broken:
+
+- **A hidden tab does not re-render.** Each tab sits in a memoised `TabBody` whose comparator
+  skips every render while `active` is false; it catches up when shown. Context still crosses the
+  memo, so a Provider whose value must change while the tab is hidden (`TabActiveContext`,
+  `CardLinkRequestContext`) has to wrap `TabBody` from **outside**. A Provider inside the frozen
+  subtree never receives a new value.
+- **Timers keep running unless they read `TabActiveContext`** (`context/TabActiveContext.ts`,
+  `true` outside the page). The AWR report poll and the Performance Analysis rollup poll gate on
+  it and refetch once when shown again, because re-arming a poll does not fire it: react-query
+  does not fetch when the AWR card's `refetchInterval` goes from 0 back to N, and the rollup
+  poll's fresh `setInterval` waits its full 5 s. A new poll in a test-run card must do the same.
+- **A render error stays in its tab.** `TabErrorBoundary`, keyed on the run id, replaces only
+  that tab's cards with a "Try again" alert instead of Next's page-wide "Application error".
+- **A drill-down lands on a fresh RCA card.** `useExpansionState` bumps `drillDownSeq` per
+  drill-down and the Dynatrace and Distributed Tracing cards are keyed on it. Without the key a
+  kept-mounted card keeps whatever its filter effect does not overwrite: that effect sets only the
+  scenario, transaction and sampler the new drill-down matches, so an earlier sampler, the
+  tracing card's durations and the Dynatrace card's Hosts/Services tab (defaulted once per
+  mount) carry over.
+- **Only the shown panel's charts are resized on a switch**, by `Plots.resize` on its
+  `.js-plotly-plot` nodes, never by a window resize event, which every chart on every tab
+  would answer.
+- **`TAB_CARDS` must match the panels in `page.tsx`.** A re-click on the active tab collapses
+  exactly that tab's `TAB_CARDS` entries, and `revealCard` picks the tab from the same list.
+
 ### The add-series cascade is app-typed, and the chart inside it is not
 
 `MetricSeriesCascade` (`app/test-runs/[id]/components/shared/`) and its presentation half
@@ -503,9 +533,12 @@ added-only one while only the draft half is counted and re-sent; it is filed in 
 ("A series can be both drafted and already added").
 
 **A card link is an instruction, not a draft — and that is why the panel stays mounted.**
-The cascade is also what walks an `?card=…&dashboard=…&panel=…&metric=…` link
-(`metric-card-links.tsx` builds them; see "Deep link into a card" in
-`docs/reference/Apps/Web/Web Overview.md`). Two rules fall out of that, both of which fail
+The cascade is also what walks a card link: a new tab's `?card=…&dashboard=…&panel=…&metric=…`
+params (`metric-card-links.tsx` builds them), or, since v0.2.97.41, the in-page
+`CardLinkRequest` that a plain "Open in …" click hands over through `CardLinkRequestContext`
+without navigating. `page.tsx` provides that context outside every tab's memoised `TabBody`,
+because a Provider inside a frozen subtree never gets a new value (see "Deep link into a card"
+in `docs/reference/Apps/Web/Web Overview.md`). Two rules fall out of that, both of which fail
 silently when broken — v0.2.97.0 broke the first and v0.2.97.1 is the repair:
 
 - **`AnalystChartCard` keeps the add-series panel mounted while the picker is closed**, hidden
@@ -541,7 +574,11 @@ details that are load-bearing:
 - **The effect is single-shot by construction**: `disarm()` runs synchronously in the same tick,
   so it reads `isAdded` without listing it as a dependency. Anything that makes it re-enter has
   to revisit those deps, or a second armed run dedupes against a stale snapshot.
-  `MetricSeriesCascade.preselect.test.tsx` pins both modes.
+  `MetricSeriesCascade.preselect.test.tsx` pins both modes. Single-shot is per link, not per
+  page load (v0.2.97.41): `MetricSeriesCascade` is a thin wrapper that remounts its body
+  (`CascadeBody`) per link key, and `disarm()` records that key in the page-owned `consumed` set
+  from `CardLinkRequestContext` rather than in the module-level set it used to keep, so every
+  in-page click is a fresh walk while a collapse and re-expand of the same link is not.
 
 **Cancel drops the draft.** Because the panel survives a close, a cancelled selection would
 otherwise still be ticked — with an armed "Add 3 series" — the next time the picker is opened.

@@ -12,7 +12,7 @@
  * columns instead of three Autocomplete popups. The popups hid the levels behind each
  * other — you could not see which panels a dashboard had while choosing the dashboard —
  * and each one closed over the chart it was feeding. Every behaviour below is unchanged:
- * the fetches, the card-link preselect and its once-per-page-load consumption, dropping
+ * the fetches, the card-link preselect and its once-per-link consumption, dropping
  * child selections when a parent is unpicked, the already-added greying, and the counts.
  *
  * Its LAYOUT is the chart standard's; its TYPE is the app's. The two are not the same
@@ -26,7 +26,7 @@
  * 12% and 4/6%), so routing them through `useTheme()` would be churn with nothing to see.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Typography, Button, useTheme } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
@@ -57,7 +57,7 @@ import {
   panelKey,
   seriesKey,
 } from './metric-options';
-import { LinkableCard, readCardLinkPreselect } from './metric-card-links';
+import { CardLinkRequestContext, LinkableCard, MetricSeriesRef, readCardLinkPreselect } from './metric-card-links';
 
 /** The identity every card's added-series list carries, used to grey out picked series. */
 export interface AddedSeriesKey {
@@ -80,7 +80,7 @@ interface MetricSeriesCascadeProps {
   onPrimaryChange?: (dashboard: ApplicationDashboard | null, panel: PanelOption | null) => void;
   /** Which per-card extras the panel list gets; see PanelListOptions. */
   panelListOptions?: PanelListOptions;
-  /** Which card this is, so a `?card=…&dashboard=…&panel=…&metric=…` link preselects it. */
+  /** Which card this is: picks the `?card=…` URL link or the in-page CardLinkRequest it walks. */
   card: LinkableCard;
   /** Only used to report a capped wildcard link; the cards own every other message. */
   showToast?: (message: string) => void;
@@ -96,11 +96,6 @@ interface MetricSeriesCascadeProps {
   onRemoveSeries?: (key: AddedSeriesKey) => void;
 }
 
-// ponytail: a link is applied once per page load, not once per mount. The card unmounts on
-// every tab switch and collapse while the URL keeps its params, so without this the picks
-// the user cleared come back on re-expand. Module state resets on reload, which re-applies.
-const consumedLinks = new Set<string>();
-
 /**
  * Ceiling on what a DASHBOARD-ONLY link (`?dashboard=…` with no panel and no metric) may add
  * by itself. That shape is a wildcard — every panel, every series — and only
@@ -113,7 +108,30 @@ const LINK_WILDCARD_MAX_SERIES = 50;
 
 const plural = (n: number, word: string) => `${word}${n === 1 ? '' : 's'}`;
 
-export function MetricSeriesCascade({
+/**
+ * Picks this card's link and remounts the picker on each new one, so it is walked as on a fresh
+ * load. An in-page "Open in …" click (CardLinkRequestContext) is a new link every time; the URL's
+ * `?card=` link only counts until the first in-page click, so a click into another card never
+ * swaps this card back to it. The last key is held in state rather than a ref, so a render that
+ * React abandons cannot leave it pointing at a link it never committed. The card's added series
+ * live above the picker, so a remount keeps them; the page's consumed set stops a collapse and
+ * re-expand from walking the same link twice.
+ */
+export function MetricSeriesCascade(props: MetricSeriesCascadeProps) {
+  const { request } = useContext(CardLinkRequestContext);
+  const urlLink = readCardLinkPreselect(useSearchParams(), props.card);
+  const own = request
+    ? (request.card === props.card ? { ref: request.ref, key: `request:${request.id}` } : null)
+    : (urlLink ? { ref: urlLink, key: `url:${props.testRun?.test_run_id}:${props.card}:${JSON.stringify(urlLink)}` } : null);
+  const [last, setLast] = useState(own);
+  if (own && own.key !== last?.key) setLast(own);
+  const current = own ?? last;
+  return <CascadeBody key={current?.key ?? ''} link={current?.ref ?? null} linkKey={current?.key ?? ''} {...props} />;
+}
+
+function CascadeBody({
+  link,
+  linkKey,
   allDashboards,
   dashboardsLoading,
   testRun,
@@ -121,11 +139,10 @@ export function MetricSeriesCascade({
   onAddSeries,
   onPrimaryChange,
   panelListOptions,
-  card,
   showToast,
   onCancel,
   onRemoveSeries,
-}: MetricSeriesCascadeProps) {
+}: MetricSeriesCascadeProps & { link: MetricSeriesRef | null; linkKey: string }) {
   const instant = Boolean(onRemoveSeries);
   // Read off the app theme, NOT taken as a prop. As a `mode = 'light'` prop, two of the
   // three call sites never passed one, so in dark mode the Trends and Compare pickers drew
@@ -249,13 +266,12 @@ export function MetricSeriesCascade({
   };
 
   // Preselect from a row's "Open in …" link: one step per level, each as its options land,
-  // then never again — the user can clear what the link picked. The ref is disarmed the
+  // then not again for that link — the user can clear what it picked. The ref is disarmed the
   // moment a level cannot be satisfied (option missing, or the list loaded empty), or the
   // user picks by hand; an armed ref would otherwise hijack the next manual pick.
-  const searchParams = useSearchParams();
-  const linkKey = `${card}?${searchParams.toString()}`;
-  const preselect = useRef(consumedLinks.has(linkKey) ? null : readCardLinkPreselect(searchParams, card));
-  const disarm = () => { preselect.current = null; consumedLinks.add(linkKey); };
+  const { consumed } = useContext(CardLinkRequestContext);
+  const preselect = useRef(link && !consumed.has(linkKey) ? link : null);
+  const disarm = () => { preselect.current = null; if (linkKey) consumed.add(linkKey); };
   useEffect(() => {
     const want = preselect.current;
     if (!want || selectedDashboards.length > 0 || dashboardsLoading) return;
