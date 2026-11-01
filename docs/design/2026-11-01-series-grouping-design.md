@@ -310,11 +310,13 @@ workload }]` listing other workloads of the **same system**:
 
 - Each entry becomes its own rule row with `origin = 'copy'`, so the copies can diverge later.
 - Each target is authorized on its own, exactly like the primary rule.
-- Application dashboards are per workload, so a copy points at the **target workload's** application
-  dashboard for the same Grafana dashboard, with the same `panel_id`. Match on `dashboard_uid` **and**
-  `grafana_instance_id`, since a uid is unique only within one Grafana instance (root `CLAUDE.md`,
-  "`grafana_dashboards` is a mixed table", trap 3). A target workload without that dashboard is
-  skipped.
+- Application dashboards are per **system and environment**, shared by every workload of that
+  environment (`uq_application_dashboards_unique` has no workload column). A copy to another workload
+  of the **same environment** therefore keeps the same `application_dashboard_id` and `panel_id`. A
+  copy to a **different environment** resolves that environment's application dashboard for the same
+  Grafana dashboard, matching on `dashboard_uid` **and** `grafana_instance_id`, since a uid is unique
+  only within one Grafana instance (root `CLAUDE.md`, "`grafana_dashboards` is a mixed table", trap
+  3). A target environment without that dashboard is skipped.
 - A target slot that already has a rule is skipped, never overwritten.
 - The response lists created and skipped targets with the reason for each.
 - Recalculation runs only for the current workload. The copied workloads show the stale notice until
@@ -500,9 +502,9 @@ Behaviour:
   - RBAC: another organization's rule is a 404 on read, update and delete; an empty org list returns
     `[]`.
   - Preview and suggestions against fixtures.
-  - `copyTo`: resolves the target's application dashboard by uid **and** instance; skips a target
-    without the dashboard and a slot that already has a rule; rejects a target the caller cannot
-    write; stores `origin = 'copy'`.
+  - `copyTo`: keeps the application dashboard within one environment and resolves it by uid **and**
+    instance across environments; skips a target without the dashboard and a slot that already has a
+    rule; rejects a target the caller cannot write; stores `origin = 'copy'`.
   - Group-aware readers return the aggregated series and `?members=true`.
 - **Web:** dialog preview and validation; the picker badge and the toggle; a saved preset holding a
   group name draws a line (the regression this design exists to prevent).
