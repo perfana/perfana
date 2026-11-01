@@ -30,6 +30,14 @@ export class DsMetricSeriesGroup {
   @Column({ type: 'varchar', length: 255 })
   group_name!: string;
 
+  /**
+   * The group's member-count series name (e.g. `api (pod count)`), when the rule tracks it.
+   * That series exists only in ds_metric_statistics, never in ds_metrics, so a chart reader
+   * draws it as COUNT(*) of the members per timestamp. NULL when not tracked.
+   */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  member_count_name!: string | null;
+
   /** Copied from ds_metrics: some readers address a panel by label and title, not by id. */
   @Column({ type: 'varchar', length: 255, nullable: true })
   dashboard_label!: string | null;

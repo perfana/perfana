@@ -1903,6 +1903,7 @@ CREATE TABLE public.ds_metric_series_groups (
     panel_id integer NOT NULL,
     metric_name character varying(255) NOT NULL,
     group_name character varying(255) NOT NULL,
+    member_count_name character varying(255),
     dashboard_label character varying(255),
     panel_title character varying(255),
     aggregation character varying(8) NOT NULL,
