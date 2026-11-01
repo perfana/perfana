@@ -1,6 +1,26 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
 import { PipelineResult } from '../types/pipeline.js';
 import { EntityManager } from 'typeorm';
+import { buildStatisticsInsertSQL } from './helpers/statistics-sql.js';
+import {
+  alignmentKey,
+  buildGroupedExclusion,
+  buildGroupedStatisticsSQL,
+  buildMembership,
+  DELETE_MEMBERSHIP_SQL,
+  groupedPanelTriples,
+  groupedStatementParams,
+  INSERT_MEMBERSHIP_SQL,
+  loadSeriesGroupingContext,
+  membersPerGroup,
+  membershipInsertParams,
+  MISALIGNED_AVG_MEMBERS,
+  NO_SERIES_GROUPING,
+  SERIES_OF_DASHBOARDS_SQL,
+  type MembershipRow,
+  type SeriesGroupingContext,
+  type SeriesRow,
+} from './helpers/series-grouping-plan.js';
 
 export interface StatisticsInput {
   testRunIds: string[];
@@ -168,6 +188,11 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
         await this.db.decompressChunksForRange('ds_metrics', run.from, run.to);
       }
 
+      // Series grouping rules, loaded on the pooled connection BEFORE the transaction opens: an
+      // error inside it would abort the transaction (25P02), and this stage is not softFail.
+      // Never throws; a deploy without migration 1819 gets NO_SERIES_GROUPING.
+      const grouping = await loadSeriesGroupingContext(this.db, runIds, this.logger);
+
       const result = await this.withAnalyticsTransaction(async (manager: EntityManager) => {
         // First statement in the transaction, not next to the INSERT: SET LOCAL is
         // transaction-scoped, and refreshRampUpFlags below rewrites a compressed run
@@ -182,7 +207,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
             `🕒 ramp_up flags already match the current analysis offsets for ${runIds.length} run(s) — no update needed`
           );
         }
-        return await this.aggregateMetricStatistics(manager, runIds);
+        return await this.aggregateMetricStatistics(manager, runIds, grouping);
       });
 
       // Deliberately does NOT recompress here. refreshRampUpFlags guards on `ramp_up`, which
@@ -375,9 +400,79 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     );
   }
 
+  /**
+   * The raw -> group membership of these runs' grouped panels. One read per run of the
+   * dashboards its rules touch; nothing at all when no rule covers the batch.
+   */
+  private async buildSeriesMembership(
+    manager: EntityManager,
+    runIds: string[],
+    grouping: SeriesGroupingContext
+  ): Promise<MembershipRow[]> {
+    if (grouping.rules.length === 0) {return [];}
+    const series: SeriesRow[] = [];
+    for (const runId of runIds) {
+      const dashboards = Array.from(
+        new Set(grouping.rules.filter((r) => r.testRunId === runId).map((r) => r.applicationDashboardId))
+      );
+      if (dashboards.length === 0) {continue;}
+      const rows: Array<Omit<SeriesRow, 'test_run_id'>> =
+        (await manager.query(SERIES_OF_DASHBOARDS_SQL, [runId, dashboards])) ?? [];
+      for (const row of rows) {
+        series.push({ ...row, test_run_id: runId, panel_id: Number(row.panel_id) });
+      }
+    }
+    return buildMembership(grouping.rules, series);
+  }
+
+  /**
+   * Statistics for the grouped panels, in their own statement (the main one skipped them), plus
+   * the alignment check: a multi-member group whose members never share a timestamp is not being
+   * combined at all, and that must be said rather than stored as a quiet average of one.
+   */
+  private async aggregateGroupedPanels(
+    manager: EntityManager,
+    runIds: string[],
+    membership: MembershipRow[],
+    grouping: SeriesGroupingContext,
+    startedAt: number
+  ): Promise<void> {
+    const alignment: Array<Record<string, unknown>> =
+      (await manager.query(
+        buildGroupedStatisticsSQL(runIds.length),
+        groupedStatementParams(runIds, membership)
+      )) ?? [];
+
+    const members = membersPerGroup(membership);
+    for (const row of alignment) {
+      const count = members.get(alignmentKey(row as never)) ?? 0;
+      const avg = Number(row.avg_members);
+      if (count >= 2 && Number.isFinite(avg) && avg < MISALIGNED_AVG_MEMBERS) {
+        const sample = membership.find((m) => alignmentKey(m) === alignmentKey(row as never));
+        this.logger.warn(
+          `series-grouping: ${sample?.dashboard_label ?? row.application_dashboard_id}/${sample?.panel_title ?? row.panel_id} ` +
+            `group "${String(row.group_name)}" has ${count} members but ${avg.toFixed(2)} per timestamp; ` +
+            `timestamps are not aligned, so values are not combined`
+        );
+      }
+    }
+
+    const groups = new Set(membership.map((m) => alignmentKey(m)));
+    const memberCountSeries = new Set(
+      membership.filter((m) => m.track_member_count && m.member_count_name).map((m) => alignmentKey(m))
+    );
+    const [panelRuns] = groupedPanelTriples(membership);
+    this.logger.info(
+      `series-grouping: runs=${new Set(membership.map((m) => m.test_run_id)).size} rules=${grouping.rules.length} ` +
+        `panels=${panelRuns.length} rawSeries=${membership.length} groups=${groups.size} ` +
+        `memberCountSeries=${memberCountSeries.size} in ${Date.now() - startedAt}ms`
+    );
+  }
+
   private async aggregateMetricStatistics(
     manager: EntityManager,
-    testRunIds: string[]
+    testRunIds: string[],
+    grouping: SeriesGroupingContext = NO_SERIES_GROUPING
   ): Promise<{ success: boolean; rowCount: number }> {
 
     this.logger.info(`📊 Aggregating statistics for ${testRunIds.length} test run(s): ${testRunIds.join(', ')}`);
@@ -393,328 +488,18 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     // Build parameterized query placeholders
     const placeholders = targetRunIds.map((_, i) => `$${i + 1}`).join(', ');
 
-    const aggregationSQL = `
-      -- The runs being aggregated, read once. Everything below joins this
-      -- instead of test_runs, so the table is scanned a single time.
-      WITH run_orgs AS MATERIALIZED (
-          SELECT test_run_id, organization_id, team_id, start_time
-          FROM test_runs
-          WHERE test_run_id IN (${placeholders})
-      ),
+    // Series grouping: the membership of every grouped panel, computed in JS (one regex dialect)
+    // from the series that panel actually has. Empty unless a rule covers these runs.
+    const groupingStart = Date.now();
+    const membership = await this.buildSeriesMembership(manager, targetRunIds, grouping);
+    const [groupedRuns, groupedDashboards, groupedPanels] = groupedPanelTriples(membership);
 
-      -- Dashboards whose metrics belong in this run's statistics, resolved ONCE.
-      -- This used to be two correlated IN (...) subqueries on tr.organization_id
-      -- inside the ds_metrics filter below, so Postgres re-ran them across the
-      -- metric scan — millions of rows against a few hundred dashboards. Both
-      -- MATERIALIZED keywords are load-bearing: without them the planner is free
-      -- to inline these back into the scan and the correlation returns.
-      -- (The organization_id IS NULL arms look dead under Phase 4, but a
-      -- deployment mid-backfill still has null-org rows and dropping them here
-      -- would silently drop their metrics from every statistic.)
-      allowed_dashboards AS MATERIALIZED (
-          SELECT ad.id
-          FROM application_dashboards ad
-          WHERE ad.organization_id IN (SELECT organization_id FROM run_orgs)
-             OR ad.organization_id IS NULL
-          UNION
-          SELECT dq.application_dashboard_id
-          FROM dynatrace_queries dq
-          WHERE dq.organization_id IN (SELECT organization_id FROM run_orgs)
-             OR dq.organization_id IS NULL
-      ),
-
-      metrics_filtered AS (
-          SELECT
-              m.test_run_id,
-              m.application_dashboard_id,
-              m.panel_id,
-              m.metric_name,
-              m.value,
-              m.time,
-              m.dashboard_uid,
-              m.panel_title,
-              m.dashboard_label,
-              m.benchmark_ids[1] as first_benchmark_id,
-              m.unit,
-              tr.organization_id,
-              tr.team_id,
-              m.metrics_source_id
-          FROM ds_metrics m
-          INNER JOIN run_orgs tr ON m.test_run_id = tr.test_run_id
-          WHERE m.test_run_id IN (${placeholders})
-            AND m.ramp_up = false
-            AND m.value IS NOT NULL
-            AND m.application_dashboard_id IN (SELECT id FROM allowed_dashboards)
-      ),
-
-      statistics_aggregated AS (
-          SELECT
-              test_run_id,
-              application_dashboard_id,
-              panel_id,
-              metric_name,
-
-              COUNT(*) as count,
-              AVG(value) as mean,
-              MIN(value) as min_value,
-              MAX(value) as max_value,
-              STDDEV_POP(value) as std_dev,
-
-              -- Persisted alongside pct_agg so ControlGroupStatisticsPipeline can
-              -- recombine pooled population mean and std_dev exactly across
-              -- per-run rows without rescanning ds_metrics (issue #289).
-              -- Sketches don't preserve enough info to recover STDDEV_POP across
-              -- the pooled distribution, so we keep the two raw moments.
-              SUM(value::double precision) as sum_value,
-              SUM((value::double precision) * (value::double precision)) as sum_sq_value,
-
-              -- TimescaleDB percentile_agg builds a uddsketch sketch in O(n).
-              -- Stored on ds_metric_statistics so ControlGroupStatisticsPipeline
-              -- can pool across control runs via rollup(pct_agg) (issue #289)
-              -- instead of re-scanning ds_metrics for every re-evaluate.
-              percentile_agg(value) as pct_agg,
-
-              -- TimescaleDB last(): value at the greatest time, in the pass that is
-              -- already running. This used to be a LEFT JOIN LATERAL on ds_metrics in
-              -- final_statistics, one probe per output group. ds_metrics is compressed
-              -- with segmentby=test_run_id, so a compressed chunk cannot narrow a probe
-              -- by application_dashboard_id/panel_id/metric_name. TimescaleDB does push
-              -- ORDER BY time DESC LIMIT 1 into the columnar scan, so a metric still
-              -- reporting at the end of the run was found in the first batch (~0.04ms);
-              -- the cost is metrics that STOP reporting early, which force a deep
-              -- backward walk (~0.97ms, 24x worse). Enough of those and the aggregation
-              -- exceeds ANALYTICS_STATEMENT_TIMEOUT_MS: 60.1s measured over 12,370
-              -- groups, against 1.19s for the aggregate below.
-              --
-              -- The FILTER is not decoration: every other aggregate here skips NULLs by
-              -- definition, but last() returns the value AT the greatest time even when
-              -- that value is NULL. The lateral carried its own "value IS NOT NULL", so
-              -- this keeps the predicate local instead of leaning on metrics_filtered
-              -- forty lines above.
-              last(value, time) FILTER (WHERE value IS NOT NULL) as last_value,
-
-              -- Trend SLO: OLS slope of value against time, normalised to % of the
-              -- series mean per hour so one threshold fits fast and slow series alike,
-              -- and Pearson r so the check can tell a drift from noise. Core Postgres
-              -- aggregates, one pass, same window as everything else here.
-              -- date_part, not EXTRACT: on PG14+ EXTRACT returns numeric, and the per-row
-              -- numeric divide + cast cost +75% on a 1.66 M-row run (measured); date_part
-              -- is float8 and the /3600 is exact after aggregation (slope is linear in x).
-              -- A constant zero series (an error count with no errors) is a flat line, not
-              -- "no data": emit 0 so it takes the weak-trend path instead of vanishing.
-              CASE WHEN AVG(value) <> 0
-                   THEN regr_slope(value, date_part('epoch', time)) * 3600 / ABS(AVG(value)) * 100
-                   WHEN MIN(value) = MAX(value) THEN 0
-              END as trend_pct_per_hour,
-              corr(value, date_part('epoch', time)) as trend_corr,
-
-              -- n_missing: always 0 here because WHERE filters out NULLs, but kept
-              -- for schema compatibility. Downstream code may re-count from raw data.
-              COUNT(CASE WHEN value IS NULL THEN 1 END) as n_missing,
-              COUNT(CASE WHEN value > 0 THEN 1 END) as n_non_zero,
-
-              -- These columns are identical within each group; MIN() is just a
-              -- deterministic way to pick one value without a window function.
-              MIN(unit) as unit,
-              MIN(organization_id::text)::uuid as organization_id,
-              MIN(team_id::text)::uuid as team_id,
-              MIN(dashboard_uid) as dashboard_uid,
-              MIN(panel_title) as panel_title,
-              MIN(dashboard_label) as dashboard_label,
-              MIN(first_benchmark_id::text)::uuid as first_benchmark_id,
-              MIN(metrics_source_id::text)::uuid as metrics_source_id
-
-          FROM metrics_filtered
-          GROUP BY
-              test_run_id,
-              application_dashboard_id,
-              panel_id,
-              metric_name
-      ),
-
-      final_statistics AS (
-          SELECT
-              sa.test_run_id,
-              sa.application_dashboard_id,
-              sa.panel_id,
-              sa.metric_name,
-
-              CASE
-                  WHEN sa.first_benchmark_id IS NOT NULL
-                  THEN sa.first_benchmark_id::uuid
-                  ELSE NULL
-              END as benchmark_id,
-
-              sa.dashboard_uid,
-              COALESCE(sa.dashboard_label, 'missing') as dashboard_label,
-              COALESCE(sa.panel_title, 'missing') as panel_title,
-              sa.unit,
-
-              sa.count,
-              sa.mean,
-              sa.sum_value,
-              sa.sum_sq_value,
-              sa.pct_agg,
-              -- Extract percentiles from single-pass aggregation
-              approx_percentile(0.50, sa.pct_agg) as median,
-              sa.min_value,
-              sa.max_value,
-              sa.std_dev,
-              sa.last_value,
-              sa.trend_pct_per_hour,
-              sa.trend_corr,
-
-              sa.n_missing,
-              sa.n_non_zero,
-
-              approx_percentile(0.10, sa.pct_agg) as q10,
-              approx_percentile(0.25, sa.pct_agg) as q25,
-              approx_percentile(0.75, sa.pct_agg) as q75,
-              approx_percentile(0.90, sa.pct_agg) as q90,
-              approx_percentile(0.95, sa.pct_agg) as q95,
-              approx_percentile(0.99, sa.pct_agg) as q99,
-
-              -- Build JSON from same single-pass aggregation (no duplicate computation)
-              jsonb_build_object(
-                  'p10', approx_percentile(0.10, sa.pct_agg),
-                  'p25', approx_percentile(0.25, sa.pct_agg),
-                  'p50', approx_percentile(0.50, sa.pct_agg),
-                  'p75', approx_percentile(0.75, sa.pct_agg),
-                  'p90', approx_percentile(0.90, sa.pct_agg),
-                  'p95', approx_percentile(0.95, sa.pct_agg),
-                  'p99', approx_percentile(0.99, sa.pct_agg)
-              ) as percentiles,
-
-              -- IQR (Interquartile Range): robust measure of spread, less sensitive
-              -- to outliers than std_dev. Used by ADAPT's IQR threshold check.
-              (approx_percentile(0.75, sa.pct_agg) - approx_percentile(0.25, sa.pct_agg)) as iqr,
-              -- IDR (Interdecile Range): captures 80% of the distribution (p10..p90),
-              -- useful for understanding tail behavior in response time metrics.
-              (approx_percentile(0.90, sa.pct_agg) - approx_percentile(0.10, sa.pct_agg)) as idr,
-
-              -- Constant ⇔ min = max. Derived here from the aggregates already
-              -- projected above rather than as a fourth aggregate expression, which
-              -- is what COUNT(DISTINCT value) used to be — that needed its own
-              -- per-group sort; this needs nothing.
-              (sa.min_value = sa.max_value) as is_constant,
-              (sa.min_value = sa.max_value) as constant_value,  -- alias kept for backward compat
-              (sa.count = sa.n_missing) as all_missing,
-
-              CASE
-                  WHEN sa.count > 0 THEN (sa.n_missing::float / sa.count::float) * 100.0
-                  ELSE 0.0
-              END as pct_missing,
-
-              CASE
-                  WHEN sa.count > 0 THEN (sa.n_missing::float / sa.count::float) * 100.0
-                  ELSE 0.0
-              END as missing_percentage,
-
-              NOW() as updated_at,
-              tr.start_time as test_run_start,
-              sa.organization_id,
-              sa.team_id,
-              'worker-pipeline' as created_by,
-              'worker-pipeline' as updated_by,
-              sa.metrics_source_id
-
-          FROM statistics_aggregated sa
-          LEFT JOIN run_orgs tr ON tr.test_run_id = sa.test_run_id
-      )
-
-      INSERT INTO ds_metric_statistics (
-          test_run_id,
-          application_dashboard_id,
-          panel_id,
-          metric_name,
-          benchmark_id,
-          dashboard_uid,
-          dashboard_label,
-          panel_title,
-          unit,
-          count,
-          mean,
-          median,
-          min_value,
-          max_value,
-          std_dev,
-          last_value,
-          trend_pct_per_hour,
-          trend_corr,
-          n_missing,
-          n_non_zero,
-          q10,
-          q25,
-          q75,
-          q90,
-          q95,
-          q99,
-          percentiles,
-          iqr,
-          idr,
-          is_constant,
-          constant_value,
-          all_missing,
-          pct_missing,
-          missing_percentage,
-          updated_at,
-          test_run_start,
-          organization_id,
-          team_id,
-          created_by,
-          updated_by,
-          metrics_source_id,
-          pct_agg,
-          sum_value,
-          sum_sq_value
-      )
-      SELECT
-          test_run_id,
-          application_dashboard_id,
-          panel_id,
-          metric_name,
-          benchmark_id,
-          dashboard_uid,
-          dashboard_label,
-          panel_title,
-          unit,
-          count,
-          mean,
-          median,
-          min_value,
-          max_value,
-          std_dev,
-          last_value,
-          trend_pct_per_hour,
-          trend_corr,
-          n_missing,
-          n_non_zero,
-          q10,
-          q25,
-          q75,
-          q90,
-          q95,
-          q99,
-          percentiles,
-          iqr,
-          idr,
-          is_constant,
-          constant_value,
-          all_missing,
-          pct_missing,
-          missing_percentage,
-          updated_at,
-          test_run_start,
-          organization_id,
-          team_id,
-          created_by,
-          updated_by,
-          metrics_source_id,
-          pct_agg,
-          sum_value,
-          sum_sq_value
-      FROM final_statistics
-    `;
+    // With no grouped panel both the SQL and its parameters are exactly what this pipeline
+    // issued before series grouping existed (pinned by the "SQL pin" snapshot test).
+    const groupedExclusion = groupedRuns.length > 0 ? buildGroupedExclusion(targetRunIds.length + 1) : '';
+    const aggregationParams =
+      groupedRuns.length > 0 ? [...targetRunIds, groupedRuns, groupedDashboards, groupedPanels] : targetRunIds;
+    const aggregationSQL = buildStatisticsInsertSQL(placeholders, groupedExclusion);
 
     // Step 1: DELETE existing statistics for these test runs INSIDE the transaction
     // This prevents duplicate key constraint violations when re-analyzing test runs
@@ -734,10 +519,24 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       `✅ Deleted ${deletedRows ?? 'an unknown number of'} existing statistic records for test runs: ${targetRunIds.join(', ')}`
     );
 
+    // Series grouping membership, rewritten with the statistics it describes. Deleted whenever a
+    // rule exists or a removed rule left rows behind; skipped entirely otherwise, so a deploy
+    // that never uses grouping issues nothing extra here.
+    if (grouping.tablesPresent && (grouping.rules.length > 0 || grouping.hasExistingMembership)) {
+      await manager.query(DELETE_MEMBERSHIP_SQL(placeholders), targetRunIds);
+    }
+    if (membership.length > 0) {
+      await manager.query(INSERT_MEMBERSHIP_SQL, membershipInsertParams(membership));
+    }
+
     // Step 2: INSERT new statistics (no ON CONFLICT needed since we deleted existing records)
     this.logger.info(`🚀 Executing statistics aggregation INSERT...`);
 
-    await manager.query(aggregationSQL, targetRunIds);
+    await manager.query(aggregationSQL, aggregationParams);
+
+    if (membership.length > 0) {
+      await this.aggregateGroupedPanels(manager, targetRunIds, membership, grouping, groupingStart);
+    }
 
     // For CTE-based INSERT...SELECT, TypeORM doesn't return rowCount reliably
     // Verify the actual count from the database

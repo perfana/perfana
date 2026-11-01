@@ -76,30 +76,41 @@ export const SERIES_NAME_MAX_LENGTH = 255;
 export const SUGGEST_MAX_MATCHED_BEFORE = 0.5;
 export const SUGGEST_MIN_MATCHED_AFTER = 0.9;
 
-export type CompiledSeriesGroupingRule =
-  | { ok: true; regex: RegExp; replacement: string }
-  | { ok: false; error: string };
+/**
+ * One flat shape rather than a discriminated union on purpose: the API's test tsconfig runs with
+ * `strictNullChecks: false`, where narrowing on a boolean discriminant does not work, and every
+ * consumer of this type would then fail to type-check there. Check `ok`; `regex` is set exactly
+ * when it is true, `error` exactly when it is false.
+ */
+export interface CompiledSeriesGroupingRule {
+  ok: boolean;
+  regex: RegExp | null;
+  replacement: string;
+  error: string | null;
+}
+
+const refused = (error: string): CompiledSeriesGroupingRule => ({ ok: false, regex: null, replacement: '', error });
 
 export function compileSeriesGroupingRule(rule: SeriesGroupingRuleSpec): CompiledSeriesGroupingRule {
   let pattern: string;
   let replacement: string;
   if (rule.preset === 'custom') {
     if (typeof rule.pattern !== 'string' || rule.pattern.length === 0) {
-      return { ok: false, error: 'A custom series grouping rule needs a pattern' };
+      return refused('A custom series grouping rule needs a pattern');
     }
     pattern = rule.pattern;
     replacement = rule.replacement ?? '';
   } else {
     const preset = SERIES_GROUPING_PRESETS[rule.preset];
-    if (!preset) return { ok: false, error: `Unknown series grouping preset: ${String(rule.preset)}` };
+    if (!preset) return refused(`Unknown series grouping preset: ${String(rule.preset)}`);
     pattern = preset.pattern;
     replacement = preset.replacement;
   }
   const result = validateRegexPattern(pattern, { flags: 'g' });
   if (!result.safe || !result.regex) {
-    return { ok: false, error: result.error ?? 'Invalid pattern' };
+    return refused(result.error ?? 'Invalid pattern');
   }
-  return { ok: true, regex: result.regex, replacement };
+  return { ok: true, regex: result.regex, replacement, error: null };
 }
 
 export interface SeriesGroupingResult {
@@ -143,7 +154,8 @@ function groupNameFor(compiled: { regex: RegExp; replacement: string }, raw: str
  */
 export function applySeriesGrouping(rule: SeriesGroupingRuleSpec, names: readonly string[]): SeriesGroupingResult {
   const compiled = compileSeriesGroupingRule(rule);
-  if (!compiled.ok) throw new Error(compiled.error);
+  if (!compiled.ok || !compiled.regex) throw new Error(compiled.error ?? 'Invalid series grouping rule');
+  const rewrite = { regex: compiled.regex, replacement: compiled.replacement };
 
   const unique = Array.from(new Set(names)).sort(byCodeUnit);
   const mapping = new Map<string, string>();
@@ -152,7 +164,7 @@ export function applySeriesGrouping(rule: SeriesGroupingRuleSpec, names: readonl
   let renamedCount = 0;
 
   for (const raw of unique) {
-    const group = groupNameFor(compiled, raw);
+    const group = groupNameFor(rewrite, raw);
     mapping.set(raw, group);
     if (group !== raw) {
       renamedCount += 1;

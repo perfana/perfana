@@ -94,20 +94,21 @@ describe('series grouping presets', () => {
 describe('compileSeriesGroupingRule', () => {
   it('compiles a custom pattern with a capture-group replacement', () => {
     const spec = rule({ preset: 'custom', pattern: '^(\\w+)-\\d+$', replacement: '$1' });
-    expect(compileSeriesGroupingRule(spec).ok).toBe(true);
+    expect(compileSeriesGroupingRule(spec)).toMatchObject({ ok: true, error: null, replacement: '$1' });
     expect(groupOf(spec, 'db-12')).toBe('db');
   });
 
   it('refuses a custom rule without a pattern', () => {
     const compiled = compileSeriesGroupingRule(rule({ preset: 'custom', pattern: null }));
     expect(compiled.ok).toBe(false);
-    if (!compiled.ok) expect(compiled.error).toMatch(/pattern/i);
+    expect(compiled.regex).toBeNull();
+    expect(compiled.error).toMatch(/pattern/i);
   });
 
   it('refuses an unsafe custom pattern with the guard message', () => {
     const compiled = compileSeriesGroupingRule(rule({ preset: 'custom', pattern: '(a+)+' }));
     expect(compiled.ok).toBe(false);
-    if (!compiled.ok) expect(compiled.error).toMatch(/ReDoS/);
+    expect(compiled.error).toMatch(/ReDoS/);
   });
 
   it('ignores pattern and replacement on a preset', () => {
