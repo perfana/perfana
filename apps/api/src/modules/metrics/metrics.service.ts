@@ -14,6 +14,14 @@ import { withRequestEm } from '../../common/db/request-em';
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import type { OwnedResource } from '@perfana/shared';
+import {
+  SeriesGroupResolver,
+  buildSeriesRelation,
+  mapNamesToGroups,
+  seriesPanelKey,
+  type PanelRef,
+  type SeriesGroup,
+} from './series-group-resolver';
 
 /**
  * A zoom window on a panel's data. Narrowing the query is what buys resolution back: the
@@ -66,6 +74,13 @@ export interface ControlGroupTrendResult {
   annotations: string | null;
 }
 
+/** What a group-aware read hands `buildSeriesRelation`. */
+interface GroupedRead {
+  groups: SeriesGroup[];
+  rawNames?: string[];
+  excludeNames?: string[];
+}
+
 @Injectable()
 export class MetricsService {
   private readonly logger = new Logger(MetricsService.name);
@@ -86,7 +101,18 @@ export class MetricsService {
     @InjectRepository(ApplicationDashboard)
     private applicationDashboardRepo: Repository<ApplicationDashboard>,
     private readonly authzService: AuthorizationService,
+    private readonly seriesGroups: SeriesGroupResolver,
   ) {}
+
+  /**
+   * The executor for grouping lookups. They read `test_runs` and `application_dashboards`
+   * (RLS tables), so they run on the request's own manager when there is one, exactly like
+   * the access checks in this file. Never the repository's `query()`: that is the
+   * `ds_metrics` read path, and the lookup is not.
+   */
+  private groupingExecutor(): EntityManager {
+    return withRequestEm(this.metricsRepo).manager;
+  }
 
   /**
    * Every application dashboard backed by a metrics source.
@@ -204,7 +230,7 @@ export class MetricsService {
     return accessResult.allowed;
   }
 
-  async findDSMetricsForPanel(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, userId: string = '', roles: string[] = [], metricsSourceId?: string, range?: MetricTimeRange): Promise<MetricDataPoint[] | null> {
+  async findDSMetricsForPanel(testRunId: string, panelId: number, applicationDashboardId?: string, metricName?: string, userId: string = '', roles: string[] = [], metricsSourceId?: string, range?: MetricTimeRange, members: boolean = false): Promise<MetricDataPoint[] | null> {
     try {
       // Validate test run access
       const hasAccess = await this.validateTestRunAccess(testRunId, userId, roles);
@@ -236,6 +262,20 @@ export class MetricsService {
       // Check if downsampling is needed using an efficient existence check
       // that stops scanning after maxDataPoints+1 rows instead of counting millions
       const maxDataPoints = 4000;
+
+      // A series group is not a name in ds_metrics, so a read for one (or for a whole grouped
+      // panel) is answered from the members instead. `undefined` is the common case — nothing
+      // groups — and falls through to the code below, untouched.
+      const grouped = await this.planGroupedPanelRead(
+        { testRunId, applicationDashboardId: finalApplicationDashboardId, panelId },
+        metricName,
+        members,
+      );
+      if (grouped) {
+        return await this.readGroupedPanel(
+          grouped, testRunId, panelId, finalApplicationDashboardId, metricsSourceId, range, maxDataPoints,
+        );
+      }
 
       const conditions = [`test_run_id = $1`, `panel_id = $2`];
       const countParams: (string | number)[] = [testRunId, panelId];
@@ -433,6 +473,111 @@ export class MetricsService {
       return this.executeRegularQuery(
         testRunId, panelId, applicationDashboardId, metricName, metricsSourceId, range,
       );
+    }
+  }
+
+  /**
+   * What a group-aware read of one panel asks of `buildSeriesRelation`, or `undefined` when
+   * nothing groups — the common case, which must leave the caller's existing code path (and
+   * its SQL) exactly as it was.
+   *
+   * - A group (or member-count) name: that series, combined from its members.
+   * - No name: every group of the panel combined, plus the series no group replaces.
+   * - `members`: never combine. A group name stands for its raw members; with no name, the
+   *   panel is read as before, without so much as a lookup.
+   */
+  private async planGroupedPanelRead(
+    ref: PanelRef,
+    metricName: string | undefined,
+    members: boolean,
+  ): Promise<GroupedRead | undefined> {
+    // Without a dashboard id there is no panel to look a group up on: the panel has no
+    // ds_metrics row at all (that is where an id is discovered), so there is nothing to expand.
+    if (!ref.applicationDashboardId) return undefined;
+    if (!metricName) {
+      if (members) return undefined;
+      const groups = await this.seriesGroups.groupsForPanel(this.groupingExecutor(), ref);
+      return groups.length === 0 ? undefined : { groups, excludeNames: groups.flatMap((g) => g.members) };
+    }
+    const { groups } = await this.seriesGroups.expand(this.groupingExecutor(), ref, [metricName]);
+    if (groups.length === 0) return undefined;
+    return members ? { groups: [], rawNames: groups[0]!.members } : { groups };
+  }
+
+  /**
+   * The grouped twin of the existence probe + regular / LTTB pair in `findDSMetricsForPanel`.
+   * Same filters, same 4000-point budget, same fallback from `lttb()` to the plain read; the
+   * only difference is the relation, which is built from the members instead of naming a
+   * `ds_metrics` column. The group is aggregated BEFORE it is downsampled, so the budget is
+   * spent on the series the user sees rather than on every pod behind it.
+   */
+  private async readGroupedPanel(
+    plan: GroupedRead,
+    testRunId: string,
+    panelId: number,
+    applicationDashboardId: string | undefined,
+    metricsSourceId: string | undefined,
+    range: MetricTimeRange | undefined,
+    maxDataPoints: number,
+  ): Promise<MetricDataPoint[] | null> {
+    const conditions = ['m.test_run_id = $1', 'm.panel_id = $2'];
+    const params: unknown[] = [testRunId, panelId];
+    // Prefer metricsSourceId over applicationDashboardId, as the ungrouped path does.
+    if (metricsSourceId) {
+      params.push(metricsSourceId);
+      conditions.push(`m.metrics_source_id = $${params.length}`);
+    } else if (applicationDashboardId) {
+      params.push(applicationDashboardId);
+      conditions.push(`m.application_dashboard_id = $${params.length}`);
+    }
+    if (range) {
+      params.push(range.from, range.to);
+      conditions.push(
+        `m."time" >= $${params.length - 1}::timestamptz`,
+        `m."time" <= $${params.length}::timestamptz`,
+      );
+    }
+    const relation = buildSeriesRelation({ alias: 'm', conditions, params, ...plan });
+
+    const [{ needs_downsampling }] = await this.metricsRepo.query(
+      `SELECT EXISTS (
+          SELECT 1 FROM (
+            SELECT 1 FROM (${relation.sql}) s LIMIT ${maxDataPoints + 1} OFFSET ${maxDataPoints}
+          ) sub
+        ) as needs_downsampling`,
+      relation.params,
+    );
+
+    const readRegular = async (): Promise<MetricDataPoint[] | null> => {
+      const rows: MetricDataPoint[] = await this.metricsRepo.query(
+        `SELECT "time", metric_name, value, timestep, ramp_up FROM (${relation.sql}) s ORDER BY timestep ASC`,
+        relation.params,
+      );
+      return rows && rows.length > 0 ? rows : null;
+    };
+    if (!needs_downsampling) return readRegular();
+
+    try {
+      const [{ count: metricCount }] = await this.metricsRepo.query(
+        `SELECT COUNT(DISTINCT metric_name)::int AS count FROM (${relation.sql}) s`,
+        relation.params,
+      );
+      const resolutionPerMetric = Math.max(10, Math.floor(maxDataPoints / Math.max(1, metricCount)));
+      const rows: { metric_name: string; time: Date; value: number }[] = await this.metricsRepo.query(
+        `SELECT sub.metric_name, (sub.dp).time AS time, (sub.dp).value AS value
+           FROM (
+             SELECT metric_name, unnest(lttb("time", value, ${resolutionPerMetric})) AS dp
+               FROM (${relation.sql}) s
+              GROUP BY metric_name
+           ) sub
+          ORDER BY sub.metric_name, (sub.dp).time`,
+        relation.params,
+      );
+      if (!rows || rows.length === 0) return null;
+      return rows.map((row) => ({ time: row.time, metric_name: row.metric_name, value: row.value }));
+    } catch (error) {
+      this.logger.warn(`Grouped LTTB query failed, falling back to regular query: ${(error as Error).message}`);
+      return readRegular();
     }
   }
 
@@ -1186,6 +1331,30 @@ export class MetricsService {
   }
 
   /**
+   * Replace the raw names a series group covers with the group names (and member-count
+   * names). The names were just read for this run, so the live-run fallback applies the
+   * current rule to them instead of reading `ds_metrics` a second time.
+   */
+  private async groupMetricNames(
+    names: string[],
+    testRunId: string,
+    applicationDashboardId: string | undefined,
+    panelId: number,
+    metricsSourceId: string | undefined,
+  ): Promise<string[]> {
+    if (names.length === 0) return names;
+    const dashboardId =
+      applicationDashboardId || (metricsSourceId ? await this.resolveApplicationDashboardId(metricsSourceId) : undefined);
+    if (!dashboardId) return names;
+    const groups = await this.seriesGroups.groupsForPanel(
+      this.groupingExecutor(),
+      { testRunId, applicationDashboardId: dashboardId, panelId },
+      names,
+    );
+    return groups.length === 0 ? names : mapNamesToGroups(names, groups).names;
+  }
+
+  /**
    * Get distinct metric names for a specific dashboard and panel
    */
   async getDistinctMetricNames(
@@ -1195,6 +1364,7 @@ export class MetricsService {
     roles: string[],
     metricsSourceId?: string,
     testRunId?: string,
+    members: boolean = false,
   ): Promise<string[]> {
     try {
       // Neither ds_metrics nor ds_metric_statistics has an RLS policy, so nothing below
@@ -1252,7 +1422,11 @@ export class MetricsService {
 
       // An explicit run is the caller's choice and is returned as-is, empty or not.
       if (testRunId || scopedNames.length > 0) {
-        return scopedNames;
+        // Group names are per run, so only a run-scoped answer can be grouped; the unscoped
+        // fallback below spans runs and has no membership to ask. `members` is the per-pod view.
+        return members || !scopedRunId
+          ? scopedNames
+          : this.groupMetricNames(scopedNames, scopedRunId, applicationDashboardId, panelId, metricsSourceId);
       }
 
       // The resolved run had nothing for this panel — a dashboard added after that run,
@@ -1279,7 +1453,12 @@ export class MetricsService {
   /**
    * List available dashboards and panels for a test run.
    */
-  async getAvailableDashboards(testRunId: string, userId: string, roles: string[]): Promise<Record<string, unknown>[]> {
+  async getAvailableDashboards(
+    testRunId: string,
+    userId: string,
+    roles: string[],
+    members: boolean = false,
+  ): Promise<Record<string, unknown>[]> {
     const hasAccess = await this.validateTestRunAccess(testRunId, userId, roles);
     if (!hasAccess) {
       return [];
@@ -1314,7 +1493,62 @@ export class MetricsService {
       [testRunId],
     );
 
-    return rows;
+    // `members` is the per-pod view: raw names, and no lookup.
+    return members ? rows : this.groupAvailableDashboards(testRunId, rows);
+  }
+
+  /**
+   * Replace each grouped panel's raw names with its group names, additively: `metric_names`
+   * and `metric_count` (still a bigint string, of the names now returned) change, and a
+   * `series_groups` field says what each group stands for. A panel nothing groups is returned
+   * as the query produced it, with no `series_groups` key, so a run without grouping is
+   * byte-identical to before.
+   */
+  private async groupAvailableDashboards(
+    testRunId: string,
+    rows: Record<string, unknown>[],
+  ): Promise<Record<string, unknown>[]> {
+    const run = await this.seriesGroups.loadRun(this.groupingExecutor(), testRunId);
+    if (run.isEmpty) return rows;
+
+    // A panel is split across rows by unit, but a group belongs to the panel.
+    const panelOf = (row: Record<string, unknown>) => ({
+      dashboardLabel: (row.dashboard_label as string | null) ?? null,
+      panelTitle: (row.panel_title as string | null) ?? null,
+      panelId: Number(row.panel_id),
+    });
+    const namesByPanel = new Map<string, string[]>();
+    for (const row of rows) {
+      const p = panelOf(row);
+      const key = seriesPanelKey(p.dashboardLabel, p.panelTitle, p.panelId);
+      namesByPanel.set(key, [...(namesByPanel.get(key) ?? []), ...((row.metric_names as string[] | null) ?? [])]);
+    }
+
+    const groupsByPanel = new Map<string, SeriesGroup[]>();
+    return rows.map((row) => {
+      const p = panelOf(row);
+      const key = seriesPanelKey(p.dashboardLabel, p.panelTitle, p.panelId);
+      let groups = groupsByPanel.get(key);
+      if (!groups) {
+        groups = this.seriesGroups.groupsInRun(run, p, namesByPanel.get(key) ?? []);
+        groupsByPanel.set(key, groups);
+      }
+      if (groups.length === 0) return row;
+
+      const { names, seriesGroups } = mapNamesToGroups((row.metric_names as string[] | null) ?? [], groups);
+      if (seriesGroups.length === 0) return row;
+      return {
+        ...row,
+        metric_names: names,
+        metric_count: String(names.length),
+        series_groups: seriesGroups.map((g) => ({
+          group: g.group,
+          members: g.members,
+          aggregation: g.aggregation,
+          ...(g.memberCountName ? { member_count_name: g.memberCountName } : {}),
+        })),
+      };
+    });
   }
 
   /**
@@ -1328,10 +1562,36 @@ export class MetricsService {
     excludeRampUp: boolean = false,
     userId: string = '',
     roles: string[] = [],
+    members: boolean = false,
   ): Promise<MetricDataPoint[]> {
     const hasAccess = await this.validateTestRunAccess(testRunId, userId, roles);
     if (!hasAccess) {
       return [];
+    }
+
+    // A group name (chosen from the statistics) is answered from its members. Only a named
+    // series is looked up; a raw name or no name takes the query below, untouched.
+    if (metricName) {
+      const { groups } = await this.seriesGroups.expand(
+        this.groupingExecutor(),
+        { testRunId, dashboardLabel, panelTitle },
+        [metricName],
+      );
+      if (groups.length > 0) {
+        const conditions = ['m.test_run_id = $1', 'm.dashboard_label = $2', 'm.panel_title = $3'];
+        if (excludeRampUp) conditions.push('m.ramp_up = false');
+        const relation = buildSeriesRelation({
+          alias: 'm',
+          conditions,
+          params: [testRunId, dashboardLabel, panelTitle],
+          attributes: ['unit'],
+          ...(members ? { rawNames: groups[0]!.members } : { groups }),
+        });
+        return this.metricsRepo.query(
+          `SELECT "time", metric_name, value, timestep, ramp_up, unit FROM (${relation.sql}) s ORDER BY metric_name, "time"`,
+          relation.params,
+        );
+      }
     }
 
     const qb = this.metricsRepo

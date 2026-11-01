@@ -37,6 +37,7 @@ import { DynatraceHostsRenderer } from './renderers/dynatrace-hosts-renderer';
 import { DynatraceModule } from '../dynatrace/dynatrace.module';
 import { PlaceholderRenderer } from './renderers/placeholder-renderer';
 import { IndexRenderer } from './renderers/index-renderer';
+import { SeriesGroupResolver } from '../metrics/series-group-resolver';
 
 @Module({
   imports: [
@@ -59,6 +60,9 @@ import { IndexRenderer } from './renderers/index-renderer';
     // Report Generation Services (Orchestrator Pattern)
     ReportGenerationValidatorService,
     ReportDataFetcherService,
+    // A stateless class with no dependencies: provided here rather than importing MetricsModule,
+    // which would pull its repositories into the reports module for one lookup helper.
+    SeriesGroupResolver,
     ReportUtilsService,
     ReportHtmlCompilerService,
 

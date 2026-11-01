@@ -29,6 +29,14 @@ export function parseMetricTimeRange(from?: string, to?: string): MetricTimeRang
   return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() };
 }
 
+/**
+ * Shared by the four routes that can answer a series GROUP (v0.2.97+): a group is a set of
+ * series whose names differ only by a generated segment such as a Kubernetes pod name, and
+ * the statistics are stored under its name. `ds_metrics` only holds the raw series.
+ */
+const SERIES_MEMBERS_DESCRIPTION =
+  'Set to `true` to skip series grouping and get the raw per-pod series: a group name is then answered by its members, unaggregated. Default: group names, each combined from its members.';
+
 @ApiTags('metrics')
 @ApiBearerAuth()
 @Controller('metrics')
@@ -43,15 +51,18 @@ export class MetricsController {
 
   @Get('ds-metrics/available/:testRunId')
   @ApiOperation({ summary: 'List available dashboards and panels for a test run' })
+  @ApiQuery({ name: 'members', required: false, description: SERIES_MEMBERS_DESCRIPTION })
   async getAvailableDashboards(
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
+    @Query('members') members?: string,
   ) {
-    return this.metricsService.getAvailableDashboards(testRunId, ctx.userId, ctx.roles);
+    return this.metricsService.getAvailableDashboards(testRunId, ctx.userId, ctx.roles, members === 'true');
   }
 
   @Get('ds-metrics/time-series/:testRunId')
   @ApiOperation({ summary: 'Get time-series metric data filtered by dashboard label, panel title, and optional metric name' })
+  @ApiQuery({ name: 'members', required: false, description: SERIES_MEMBERS_DESCRIPTION })
   async getMetricTimeSeries(
     @Param('testRunId') testRunId: string,
     @UserCtx() ctx: UserContext,
@@ -59,6 +70,7 @@ export class MetricsController {
     @Query('panelTitle') panelTitle: string,
     @Query('metricName') metricName?: string,
     @Query('excludeRampUp') excludeRampUp?: string,
+    @Query('members') members?: string,
   ) {
     if (!dashboardLabel || !panelTitle) {
       throw new BadRequestException('dashboardLabel and panelTitle are required');
@@ -72,6 +84,7 @@ export class MetricsController {
       excludeRampUp === 'true',
       ctx.userId,
       ctx.roles,
+      members === 'true',
     );
   }
 
@@ -80,6 +93,7 @@ export class MetricsController {
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   @ApiQuery({ name: 'from', required: false, description: 'ISO-8601 start of the window to return. With `to`, the downsample budget is spent on this window instead of the whole run — what a chart zoom uses.' })
   @ApiQuery({ name: 'to', required: false, description: 'ISO-8601 end of the window. Both or neither; one alone is a 400.' })
+  @ApiQuery({ name: 'members', required: false, description: SERIES_MEMBERS_DESCRIPTION })
   async getDSMetricsForPanel(
     @Param('testRunId') testRunId: string,
     @Param('panelId') panelId: string,
@@ -89,6 +103,7 @@ export class MetricsController {
     @Query('metricsSourceId') metricsSourceId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('members') members?: string,
   ) {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
@@ -126,7 +141,7 @@ export class MetricsController {
       }
     }
 
-    const result = await this.metricsService.findDSMetricsForPanel(testRunId, panelIdNumber, finalApplicationDashboardId, undefined, ctx.userId, ctx.roles, metricsSourceId, range);
+    const result = await this.metricsService.findDSMetricsForPanel(testRunId, panelIdNumber, finalApplicationDashboardId, undefined, ctx.userId, ctx.roles, metricsSourceId, range, members === 'true');
 
     if (result === null) {
       throw new NotFoundException(`DS metrics not found for test run ${testRunId} and panel ${panelIdNumber}`);
@@ -312,12 +327,14 @@ export class MetricsController {
   @ApiOperation({ summary: 'Get distinct metric names for a dashboard/panel' })
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   @ApiQuery({ name: 'testRunId', required: false, description: 'Limit to the series this run recorded. Without it the answer spans every run the panel ever had, including series whose names are no longer produced.' })
+  @ApiQuery({ name: 'members', required: false, description: SERIES_MEMBERS_DESCRIPTION })
   async getDistinctMetricNames(
     @UserCtx() ctx: UserContext,
     @Query('applicationDashboardId', new ParseUUIDPipe({ optional: true })) applicationDashboardId: string,
     @Query('panelId') panelId: string,
     @Query('metricsSourceId', new ParseUUIDPipe({ optional: true })) metricsSourceId?: string,
     @Query('testRunId') testRunId?: string,
+    @Query('members') members?: string,
   ): Promise<string[]> {
     const panelIdNumber = parseInt(panelId, 10);
     if (isNaN(panelIdNumber)) {
@@ -334,6 +351,7 @@ export class MetricsController {
       ctx.roles,
       metricsSourceId,
       testRunId,
+      members === 'true',
     );
   }
 }
