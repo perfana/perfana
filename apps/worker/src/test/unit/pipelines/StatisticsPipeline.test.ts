@@ -1141,4 +1141,30 @@ describe('StatisticsPipeline', () => {
     });
   });
 
+  /**
+   * Pins what a batch with NO series grouping sends to Postgres inside the transaction,
+   * byte for byte. Series grouping (docs/design/2026-11-01-series-grouping-plan.md, Task 3)
+   * adds a second statement for grouped panels only; a batch without rules must keep
+   * exactly this SQL and these parameters. Taken before that change, on purpose: a snapshot
+   * written afterwards would only pin whatever the change produced.
+   */
+  describe('SQL pin — a batch with no series grouping', () => {
+    test('issues exactly today\'s in-transaction statements and parameters', async () => {
+      mockEntityManager.query
+        .mockResolvedValueOnce([[], 4])
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ count: 4 }]);
+
+      const result = await pipeline.execute({ testRunIds: ['run-a', 'run-b'] });
+      expect(result.success).toBe(true);
+
+      const inTransaction = mockEntityManager.query.mock.calls.map((c: any[]) => ({
+        sql: String(c[0]),
+        params: c[1],
+      }));
+      expect(inTransaction).toHaveLength(3);
+      expect(inTransaction).toMatchSnapshot();
+    });
+  });
+
 });
