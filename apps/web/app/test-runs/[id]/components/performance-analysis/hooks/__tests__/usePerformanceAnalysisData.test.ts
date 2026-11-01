@@ -6,10 +6,12 @@
  * expand-time values because rowSamples was cached and never refetched.
  */
 
+import React from 'react';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { usePerformanceAnalysisData } from '../usePerformanceAnalysisData';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
+import { TabActiveContext } from '../../../../context/TabActiveContext';
 
 jest.mock('@/lib/api', () => ({
   authenticatedFetch: jest.fn(),
@@ -198,5 +200,37 @@ describe('usePerformanceAnalysisData — expanded row samples on refresh', () =>
     await waitFor(() => {
       expect(result.current.rowSamples['checkout']).toEqual([sample(300)]);
     });
+  });
+});
+
+describe('usePerformanceAnalysisData — rollup-pending poll while its tab is hidden', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('pauses the 5s poll while the Results tab is hidden, and checks at once when it is shown again', async () => {
+    // Value: protects=a hidden Results tab does not poll /transactions, and on being shown checks immediately then resumes every 5s; fails_when=the TabActiveContext guard is dropped/inverted, or the resume fetch is lost (a finished rollup would stay "pending" up to 5s); why_new=testing+design review cycle 3: the gate and the resume had no test; seam=none; no_claim=that the page provides the context (page tests cover the provider placement)
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+    mockFetch.mockImplementation(async (url: string) =>
+      url.includes('/transactions') ? jsonResponse({ progress: undefined }, 202) : jsonResponse({}));
+    let active = true;
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      React.createElement(TabActiveContext.Provider, { value: active }, children);
+    const completedRun = { ...runningTestRun, completed: true } as unknown as TestRun;
+    const { result, rerender } = renderHook(() => usePerformanceAnalysisData({ testRunId: 'run-1', testRun: completedRun }), { wrapper });
+    await waitFor(() => expect(result.current.rollupPending).not.toBeNull());
+    const tx = () => mockFetch.mock.calls.filter(([u]) => String(u).includes('/transactions')).length;
+
+    active = false;
+    rerender();
+    const hidden = tx();
+    await act(async () => { jest.advanceTimersByTime(15000); });
+    expect(tx()).toBe(hidden);
+
+    active = true;
+    rerender();
+    await act(async () => { await Promise.resolve(); });
+    expect(tx()).toBe(hidden + 1);
+    await act(async () => { jest.advanceTimersByTime(5000); });
+    expect(tx()).toBe(hidden + 2);
   });
 });

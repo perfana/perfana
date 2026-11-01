@@ -23,7 +23,7 @@
  * ```
  */
 
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useContext, useEffect } from 'react';
 import {
   Box,
   Card,
@@ -62,6 +62,7 @@ import type {
   AwrTabConfig,
 } from './types';
 import { useAwrReports} from './hooks/useAwrReports';
+import { TabActiveContext } from '../../context/TabActiveContext';
 import { useAwrAnalysis } from './hooks/useAwrAnalysis';
 import { deleteAwrReport } from '@/lib/api/awr-reports';
 import {
@@ -101,6 +102,8 @@ export function AwrReportCard({
   className,
 }: AwrReportCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const tabActive = useContext(TabActiveContext);
+  const wasTabActive = useRef(tabActive);
 
   // Internal state for report selection if not controlled
   const [internalReportId, setInternalReportId] = useState<string | null>(null);
@@ -124,8 +127,15 @@ export function AwrReportCard({
     invalidateCache: invalidateReportsCache,
   } = useAwrReports(testRun.id, {
     enabled: true,
-    refetchInterval: expanded ? 10000 : 0, // Refetch every 10s when expanded
+    // Every 10s while expanded and on screen: the RCA tab stays mounted when the user leaves it.
+    refetchInterval: expanded && tabActive ? 10000 : 0,
   });
+  // Turning the interval back on only restarts its timer, so check at once when the tab is shown
+  // again: a report may have finished parsing while it was hidden.
+  useEffect(() => {
+    if (tabActive && !wasTabActive.current && expanded) refetchReports();
+    wasTabActive.current = tabActive;
+  }, [tabActive, expanded, refetchReports]);
 
   // Auto-select the first completed report if none selected
   const effectiveReportId = useMemo(() => {
