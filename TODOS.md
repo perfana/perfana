@@ -11,6 +11,49 @@ with the version it landed in.
 
 ---
 
+## Series grouping
+
+Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.41
+shipped PR A (the inert engine): no rule can be created yet except by hand-written SQL, so none of
+the items below can affect a deploy until PR B (the rules API) lands. Do them before PR B merges.
+
+### Measure the grouped statistics read on a production-sized run (P1)
+
+**Origin:** v0.2.97.41, plan Task 12.
+
+`StatisticsPipeline` reads the series of every dashboard a rule touches once per run
+(`SERIES_OF_DASHBOARDS_SQL`, a `GROUP BY` over that dashboard's rows) and then runs a second
+`INSERT` for the grouped panels that reads them again. On a compressed chunk both are transient
+decompressions of the run's segment. Nothing has been measured at production scale: the
+statement was executed only on a scratch PostgreSQL 16 with stand-ins for the Toolkit
+functions. Capture `EXPLAIN (ANALYZE, BUFFERS)` for (1) the main statistics INSERT of a run with
+no rule, against `main` — the plan must be identical; (2) the same run with one dashboard-wide
+rule — no `Sort Method: external merge Disk:`, `statistics_aggregated` still a HashAggregate (root
+CLAUDE.md #13). If the series read costs more than ~10 % of the aggregation, switch it to per-panel
+`SELECT DISTINCT metric_name … AND panel_id = $3` probes, which TimescaleDB SkipScans.
+
+### Run the Postgres-backed suites the series-grouping PR could not (P1)
+
+**Origin:** v0.2.97.41. The session that built PR A had no TimescaleDB.
+
+- `apps/worker`: `npm run test:integration` (CI never runs it — `pr-quality-gate.yml` runs
+  `test:coverage` only). There is no series-grouping integration case yet; add the one the plan's
+  Task 3 step 6 describes (two runs, three pods each, a rule with `avg` and member count; assert
+  per-group mean, timestamp count, non-NULL `pct_agg`, no raw pod name in `ds_metric_statistics`,
+  and an ungrouped panel byte-identical to a no-rule run, including a NULL-unit row).
+- `apps/api`: `sut-import.service.spec.ts`'s new export → delete → import round trip for both
+  tables, and the RLS suite (`npm run test:rls`), whose coverage snapshot was updated by hand.
+- `npm run preflight` end to end. PR A was pushed with `--no-verify` for this reason only.
+
+### `lttb()` over a grouped series is untested (P3)
+
+**Origin:** v0.2.97.41, Task 7. `findDSMetricsForPanel`'s grouped read downsamples the combined
+series through the Toolkit's `lttb()`; the scratch database had no Toolkit, so only the plain
+grouped read and the `lttb()`-failure fallback were exercised. One run on a TimescaleDB database
+with a grouped panel over 4000 points closes it.
+
+---
+
 ## System under test deletion
 
 ### The dashboard delete still writes a non-segmentby `ds_metrics` predicate (P2)

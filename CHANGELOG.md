@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.41] - 2026-11-01
+
+### Added
+- **Series grouping engine: Kubernetes pod series can be compared across deployments (inert until the rules API ships).** Kubernetes resource dashboards name series after pods, and pod names change on every deployment, so two runs of one build shared no series name and ADAPT read every pod as `incomparable` — a CPU or memory regression on those panels was never reported. A per-workload `series_grouping_rules` row (migration 1819) now rewrites raw names to a group name with built-in presets (Kubernetes Deployment/ReplicaSet pods, DaemonSet/Job pods, IP address and port, trailing id) or a custom regex, and combines the members per timestamp with `avg` (default), `sum` or `max`, optionally with a per-group pod-count series. Design: `docs/design/2026-11-01-series-grouping-design.md`.
+
+  **Grouping happens at the statistics layer and `ds_metrics` is never written.** `StatisticsPipeline` records each run's raw → group membership in `ds_metric_series_groups` and writes the grouped panels' statistics in a second `INSERT`, so ADAPT, the Compare table, SLO checks and tracked regressions see group names with no change of their own, and old baselines can be regrouped by recalculating statistics without re-fetching from Grafana. A batch with no grouping issues byte-identical SQL, pinned by a snapshot taken before the change. Rules load before the analytics transaction and never throw, so a worker deployed before the migration aggregates exactly as before.
+
+  **Every raw `ds_metrics` reader expands a group name.** The series pickers, the panel and time-series reads, the Compare chart, report graphs and the MCP tools (through the same routes) answer a group by combining its members, and accept `?members=true` for the raw per-pod series. Without this, a group name saved in a preset or a report would draw an empty chart. An ungrouped panel keeps its SQL, also pinned by snapshots.
+
+  Grouping rules travel in a SUT export/import and are removed by SUT and test-run deletion. **No rule can be created yet except by hand-written SQL**: the rules API and the UI are the next two releases, so this version changes no behaviour on its own.
+
+### Fixed
+- **The system delete dialog showed a blank label for transaction statistics.** The delete preview has always returned `transactionStats`; the dialog had no label for it.
+
+### Known limits
+- **Not measured at production scale yet.** The grouped statistics statements were executed only against a PostgreSQL 16 without TimescaleDB, with stand-ins for the Toolkit functions, and the Postgres-backed suites (worker integration tests, the SUT import round trip, the RLS suite) did not run. Both are filed in TODOS.md under "Series grouping" and are due before the rules API ships.
+
 ## [0.2.97.40] - 2026-10-31
 
 ### Added

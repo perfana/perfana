@@ -979,6 +979,42 @@ Cancelling still leaves a 0-byte file at the chosen location: the picker creates
 before the first byte arrives, and `abort()` discards the swap file, not the entry.
 
 
+### A series group is not a `ds_metrics` series, so every raw reader expands it
+
+Series grouping (v0.2.97.41, migration 1819; design in
+`docs/design/2026-11-01-series-grouping-design.md`) stores a group's statistics under the group
+name — `api` for the pods `api-7d9f8c6b5-x2k4p` and `api-7d9f8c6b5-z9w2t` — in
+`ds_metric_statistics`. `ds_metrics` is never rewritten and holds only the raw names. A reader that
+receives a group name from a picker, a saved preset, a report section or a deep link and looks it
+up in `ds_metrics` finds nothing and draws an **empty chart with nothing logged**, the same silent
+symptom as root `CLAUDE.md` #18, #20 and #49.
+
+`SeriesGroupResolver` (`modules/metrics/series-group-resolver.ts`) is the one place that maps a
+group name back to its members. Five things about it:
+
+1. **Membership beats the rule.** `ds_metric_series_groups` is what the run's statistics were
+   computed with, so a chart drawn from it agrees with the numbers beside it even after the rule
+   changed. Only a run with no membership for the panel (live, or not yet recalculated) falls back
+   to the current enabled rule, applied in JavaScript with `applySeriesGrouping`. No regex ever
+   reaches SQL, and no name is interpolated: groups, members and aggregations are bound arrays.
+2. **A member-count name is a group too.** `api (pod count)` exists only in `ds_metric_statistics`;
+   the resolver answers it as `COUNT(*)` of the members per timestamp.
+3. **It probes for its tables with `to_regclass` and never throws.** The API can start before
+   migration 1819 runs, and a statement on a missing table inside the request's RLS transaction
+   aborts it (25P02) and takes every later query of the request with it. Only a positive probe is
+   cached. Any lookup failure reads as "nothing grouped".
+4. **The ungrouped path keeps its SQL.** Every reader's statements were snapshotted before the
+   change (`metrics.service.ungrouped-sql.spec.ts`, `report-data-fetcher.ungrouped-sql.spec.ts`);
+   an ungrouped panel costs one extra indexed lookup against two small tables and nothing in
+   `ds_metrics`. Update those snapshots only on purpose.
+5. **A new raw reader has to call it.** The covered set is `getAvailableDashboards`,
+   `getDistinctMetricNames`, `getMetricTimeSeries`, `findDSMetricsForPanel` (and through it
+   `ds-metrics-comparison`), and the report fetcher's `getMetricsTimeSeries` /
+   `getAvailableMetricsPanels`. MCP reads those routes over HTTP and needs nothing. Readers of
+   `ds_metric_statistics` (`getMetricTrends`, `getBaselineRunComparisonFromStatistics`, the Compare
+   table, ADAPT, SLO checks) already see group names and must **not** expand them. `?members=true`
+   on the metric routes returns the raw per-pod series for drill-down.
+
 ### `hasData` probes one index per dashboard, and that inverted when the index landed
 
 `filterToDashboardsWithData` narrows a page of application dashboards to the ones

@@ -3,7 +3,9 @@
 **Date:** 2026-11-01
 **Status:** Design agreed. All five open questions were decided on 2026-11-01 (see Decisions at the
 end). Implementation plan: [`2026-11-01-series-grouping-plan.md`](2026-11-01-series-grouping-plan.md).
-Corrections found while planning are applied below.
+Corrections found while planning are applied below. **PR A (the inert engine) shipped in
+v0.2.97.41**; PR B (rules API) and PR C (web) are next. Open verification items are in `TODOS.md`
+under "Series grouping".
 **Scope:** worker (`StatisticsPipeline`), API (rules, preview, group-aware `ds_metrics` reads), web
 (anomaly-detection card, Compare card, system config, series picker), `packages/shared` (one
 grouping function).
