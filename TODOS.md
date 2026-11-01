@@ -3732,7 +3732,6 @@ were used). Each is correct code without a test; mutations noted survive today.
 - Off outranks paused (pick Off, slow manual refresh): swapping the `refreshState` ternary passes all tests.
 - The gate re-opens after the latest request *fails* (a fast 502 on a tick, then a 200 on the next).
 - The post-json stale check: delay `json()` (not `fetch`) on the older request, then change the window.
-- A stored Off (`'0'`) round-trips (guards against a `Number(raw) || DEFAULT` rewrite).
 - The caption carries no `role`/`aria-live` while refresh is on.
 **Where:** `.../hooks/__tests__/usePerformanceAnalysisData.test.ts`,
 `apps/web/__tests__/app/test-runs/performance-analysis/PerformanceAnalysisCard.test.tsx`.
