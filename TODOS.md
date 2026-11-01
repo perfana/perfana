@@ -3650,40 +3650,7 @@ It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that 
 
 ## Performance Analysis live refresh
 
-Follow-ups from the v0.2.97.41 refresh-rate dropdown. The first two block marking that PR ready.
-
-### The live header controls overflow the card title, and on narrow windows the sidebar
-
-**Priority:** P1
-**Origin:** /ship QA on 2026-11-01 (v0.2.97.41), ISSUE-001; design review cycles 1 and 3; adversarial review.
-**Why:** the live-test controls sit in a `position: absolute; right: 96` box with no wrap beside the
-centred title. v0.2.97.41 added a 90 px Refresh select and an "Updated hh:mm:ss · auto-refresh off|paused"
-caption (~200 px, `whiteSpace: nowrap`), so the group grew ~300 px. Verified live at an 882 px window:
-the group covers the title and the manual refresh button lands at x≈202 under the sidebar — a click hit
-the sidebar's Integrations link, and `elementFromPoint` at the button's centre returns a sidebar `LI`.
-An estimate (not measured — the shared `perfana-web` container was redeployed by another session) puts
-the title overlap on the 1302 px content column of a 16" MacBook with the sidebar open too, ~190 px when
-Off or paused.
-**What:** put the header in normal flex flow (title and controls in one row that wraps the controls
-below the title when they do not fit), or move the caption to a second row. Give the caption
-`fontVariantNumeric: 'tabular-nums'` so it stops nudging the controls on every tick. Verify with
-screenshots at 900, 1280, 1440 and 1728 px, sidebar open and closed, in the on / off / paused states.
-**Where:** `apps/web/app/test-runs/[id]/components/performance-analysis/PerformanceAnalysisCard.tsx`
-(header `Box` around `LiveWindowSelector`), `.../components/LiveWindowSelector.tsx`.
-
-### "Off" is remembered per browser, and the collapsed card has no live indicator
-
-**Priority:** P1
-**Origin:** adversarial review, 2026-11-01 (v0.2.97.41).
-**Why:** the picked period persists in `localStorage` for every later run. The collapsed card
-(`PerformanceAnalysisCollapsedView`) shows no LIVE / off / paused state and no manual refresh, so a user
-who chose Off once sees its headline Apdex frozen at page-load values for a whole live run with nothing
-saying so. Before v0.2.97.41 the collapsed card refreshed on every WebSocket test-run update.
-**What:** either persist only non-zero periods (Off lasts until the card remounts), or show the refresh
-state and a manual refresh on the collapsed card too. The first is a one-line change in the setter plus
-a hook test that remounts after Off.
-**Where:** `.../hooks/usePerformanceAnalysisData.ts` (`setRefreshIntervalMs`, `readStoredRefreshInterval`),
-`.../components/PerformanceAnalysisCollapsedView.tsx`.
+Follow-ups from the v0.2.97.41 refresh-rate dropdown.
 
 ### Live refresh load and ordering gaps left by v0.2.97.41
 
@@ -3738,6 +3705,9 @@ more frequent than under the old ~30 s WebSocket trigger.
   entry into paused is likely not announced. Keep one always-mounted live region whose text changes
   only with the refresh state.
 - The paused copy (tooltip, button label, caption) says why but not how to resume.
+- The manual refresh button sits at the start of the live-controls row, away from the Refresh
+  select that summons it; the select is labelled "Refresh" while the tooltips say "auto-refresh",
+  beside a button named "Refresh metrics" ("Auto-refresh" would read unambiguously).
 - The LIVE dot keeps pulsing when refresh is Off or paused, and ignores `prefers-reduced-motion`.
 - The manual refresh button drops keyboard focus because it disables itself while loading
   (`aria-disabled` instead).

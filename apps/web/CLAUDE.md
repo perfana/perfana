@@ -805,9 +805,11 @@ Five things hold it together:
 5. **Re-picking the shown period must resume a pause.** MUI's `Select` fires `onChange` only for a
    different value, so each `MenuItem` has an `onClick` guarded on `opt.value === refreshIntervalMs`.
 
-The picked period is remembered per browser in `localStorage`, read once through
-`readStoredRefreshInterval`: missing, blank (`Number('')` is 0, which is Off) or a value the
-dropdown no longer offers all fall back to 30s, and storage that throws is ignored. The card derives
+A picked period is remembered per browser in `localStorage`, read once through
+`readStoredRefreshInterval`: missing, blank (`Number('')` is 0, which is Off), 0, or a value the
+dropdown no longer offers all fall back to 30s, and storage that throws is ignored. **Off is never
+persisted** (the setter returns before writing it): the collapsed card shows no refresh state, so a
+remembered Off would freeze its figures on every later run with nothing on screen saying so. The card derives
 one `refreshState` (`on` / `off` / `paused`, Off outranking paused) for the caption, the LIVE
 tooltip and the manual button's label.
 
@@ -817,5 +819,12 @@ written after an awaited fetch is only visible through `jest.advanceTimersByTime
 commits only between `act()` calls: one `act` spanning an answer and the next tick lets that tick
 fire before the pause it should have seen.
 
-Known gaps (header layout on narrow windows, the collapsed card with Off remembered, the sibling
-endpoints' ordering) are in TODOS.md under "Performance Analysis live refresh".
+The live controls (LIVE chip, Time window, Refresh, the "Updated" caption, the manual button) sit
+in their **own wrapping row inside the sticky header block, under the title** — not in the title
+row. Everything in the title row is `position: absolute` at fixed offsets around a centred title,
+so a group placed there cannot wrap: before this was moved, the group ran over the title and, at an
+~880 px window, pushed the manual refresh button under the sidebar where it could not be clicked.
+Keep new live controls in that row.
+
+Known gaps (the sibling endpoints' ordering, polling while hidden, polish) are in TODOS.md under
+"Performance Analysis live refresh".
