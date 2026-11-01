@@ -67,6 +67,8 @@ describe('StatisticsPipeline — series grouping', () => {
   let alignmentRows: Array<Record<string, unknown>>;
   let pooled: Array<{ sql: string; params?: unknown[] }>;
   let tx: Array<{ sql: string; params?: unknown[] }>;
+  /** Every in-transaction statement, settings included, in order. */
+  let txAll: string[];
 
   const txWith = (needle: string) => tx.filter((c) => c.sql.includes(needle));
 
@@ -80,6 +82,7 @@ describe('StatisticsPipeline — series grouping', () => {
     alignmentRows = [];
     pooled = [];
     tx = [];
+    txAll = [];
 
     logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     vi.mocked(getLogger).mockReturnValue(logger as any);
@@ -87,6 +90,8 @@ describe('StatisticsPipeline — series grouping', () => {
     const manager = {
       query: vi.fn(async (sql: string, params?: unknown[]) => {
         const text = String(sql);
+        txAll.push(text);
+        if (text.includes("current_setting('enable_mergejoin')")) return [{ previous: 'on' }];
         if (text.includes('set_config') || text.includes('SET LOCAL') || text.includes('UPDATE ds_metrics')) return undefined;
         tx.push({ sql: text, params });
         if (text.includes('grouped_points')) return alignmentRows;
@@ -262,6 +267,23 @@ describe('StatisticsPipeline — series grouping', () => {
       expect(aggregations).toEqual(['avg', 'avg', 'avg']);
       expect(tracked).toEqual([true, true, true]);
       expect(memberCounts).toEqual(['api (pod count)', 'api (pod count)', 'worker (pod count)']);
+    });
+
+    // Measured on TimescaleDB 2026-11-01 (1.87 M ds_metrics rows, compressed): the planner
+    // estimates the join to the bound member arrays at 1 row against 432,000, picks a merge join
+    // and spills a 1.15 M-row sort to disk — 8.5 s. With merge joins off it hash-joins: 3.0 s.
+    test('runs the grouped statement with merge joins off, and restores the setting after', async () => {
+      await pipeline.execute({ testRunIds: ['run-a'] });
+
+      const grouped = txAll.findIndex((sql) => sql.includes('grouped_points'));
+      const off = txAll.findIndex((sql) => sql.includes("set_config('enable_mergejoin', 'off', true)"));
+      const restore = txAll.findIndex((sql, i) => i > grouped && sql.includes("set_config('enable_mergejoin'"));
+      expect(off).toBeGreaterThan(-1);
+      expect(off).toBeLessThan(grouped);
+      expect(restore).toBeGreaterThan(grouped);
+      // The main statement is planned with the setting untouched.
+      const main = txAll.findIndex((sql) => sql.includes('INSERT INTO ds_metric_statistics') && !sql.includes('grouped_points'));
+      expect(main).toBeLessThan(off);
     });
 
     test('warns about a multi-member group whose timestamps do not line up', async () => {

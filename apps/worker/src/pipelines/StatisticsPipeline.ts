@@ -437,11 +437,27 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     grouping: SeriesGroupingContext,
     startedAt: number
   ): Promise<void> {
+    // Merge joins off for THIS statement only. The planner estimates the join from ds_metrics to
+    // the bound member arrays at ~1 row (it cannot see into them), picks a merge join and sorts
+    // the run's whole decompressed segment for it. Measured on TimescaleDB, 1.87 M rows compressed,
+    // a dashboard-wide rule over 432 k of them: 8.5 s with a 272 MB external-merge spill, against
+    // 3.0 s and no spill with merge joins off. Pre-filtering the scan by the members' dashboards,
+    // panels and names was tried and is far worse (53.6 s: the lower estimate tips it into nested
+    // loops). Same discipline as AdaptPipeline's `jit = off`: scoped to the statement that needs
+    // it, and the previous value is put back so nothing later in the transaction inherits it.
+    const [setting] =
+      ((await manager.query(
+        "SELECT current_setting('enable_mergejoin') AS previous, set_config('enable_mergejoin', 'off', true)"
+      )) as Array<{ previous?: string }> | undefined) ?? [];
     const alignment: Array<Record<string, unknown>> =
       (await manager.query(
         buildGroupedStatisticsSQL(runIds.length),
         groupedStatementParams(runIds, membership)
       )) ?? [];
+    // Restored on success only, deliberately not in a `finally`: a failed statement has already
+    // aborted the transaction (25P02), a restore would fail too and mask the real error, and the
+    // local setting dies with the transaction anyway.
+    await manager.query("SELECT set_config('enable_mergejoin', $1, true)", [setting?.previous ?? 'on']);
 
     const members = membersPerGroup(membership);
     for (const row of alignment) {
