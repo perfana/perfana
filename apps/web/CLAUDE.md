@@ -775,3 +775,47 @@ part of the contract: `handleConfigSave` above always overwrites `source` with `
 `'panel'` on any UI save, which is what makes a user edit distinguishable from the Dynatrace
 boilerplate in the first place — a future save path that skips this field would make every row it
 touches look machine-seeded again.
+
+### Performance Analysis live refresh is a client timer, and background callers wait for the latest request
+
+Since v0.2.97.41 the card no longer refetches on the test run's WebSocket `updated_at`; while a
+run is live it refetches on its own timer, at the period picked in the **Refresh** dropdown
+(`REFRESH_OPTIONS` in `performance-analysis/hooks/usePerformanceAnalysisData.ts`: Off, 10s, 30s,
+1m, 5m; default 30s). Test-run status and job progress are still WebSocket-driven.
+
+Five things hold it together:
+
+1. **Only the latest `/transactions` request may write state.** `fetchTransactions` takes a
+   sequence number and checks `isStale()` after every `await`, in `catch`, and before its
+   `finally` sets `loading` and the ≥5 s pause. A user-driven fetch (window or filter change,
+   manual refresh, run completion) overtakes one still out, and the late answer is dropped.
+2. **Background callers wait while that latest request is out.** The timer tick and the 5 s
+   rollup-pending poll skip while `latestTransactionsSettledRef` is false. Without this the two
+   rules livelock: a fixed-interval caller starts a new request every period, so once answers are
+   slower than the period every one is stale on arrival, `loading` sticks, the pause never
+   engages, and the rollup poll never leaves pending (that last one was a regression against the
+   old code). It is a **flag, not a counter**: a counter leaks on the stale early returns and lets
+   a superseded slow request block ticks. Only the non-stale `finally` sets it true — moving that
+   assignment above the stale check reintroduces the livelock and no test catches it yet
+   (TODOS.md, "Tests the live refresh review proposed but did not add").
+3. **`refreshAll` is read through a ref**, so expanding a row or changing a filter does not restart
+   the timer, and the next tick still refreshes the newly expanded row.
+4. **Completion refetches once.** On running → completed the hook calls `refreshAll`, or resets
+   `sinceMinutes` to null (which refetches through the mount effect) when a window was picked.
+5. **Re-picking the shown period must resume a pause.** MUI's `Select` fires `onChange` only for a
+   different value, so each `MenuItem` has an `onClick` guarded on `opt.value === refreshIntervalMs`.
+
+The picked period is remembered per browser in `localStorage`, read once through
+`readStoredRefreshInterval`: missing, blank (`Number('')` is 0, which is Off) or a value the
+dropdown no longer offers all fall back to 30s, and storage that throws is ignored. The card derives
+one `refreshState` (`on` / `off` / `paused`, Off outranking paused) for the caption, the LIVE
+tooltip and the manual button's label.
+
+Testing it: `npx jest` takes a regex, so a path containing `[id]` matches nothing — use
+`'performance-analysis/hooks/__tests__/usePerformanceAnalysisData'`. With fake timers, state
+written after an awaited fetch is only visible through `jest.advanceTimersByTimeAsync`, and React
+commits only between `act()` calls: one `act` spanning an answer and the next tick lets that tick
+fire before the pause it should have seen.
+
+Known gaps (header layout on narrow windows, the collapsed card with Off remembered, the sibling
+endpoints' ordering) are in TODOS.md under "Performance Analysis live refresh".

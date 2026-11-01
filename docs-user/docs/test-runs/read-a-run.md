@@ -33,6 +33,16 @@ Open a single test run and find your way around its tabs to understand how the t
 **Result**
 You can read a run's metadata, move between the Results, Root Cause Analysis, and Reporting tabs, and edit its tags and annotations.
 
+**While the test is still running**
+Expand **Performance Analysis** to see its live controls next to the **LIVE** badge:
+- **Time window** — show the whole test so far, or only the last 1, 5, 15 or 30 minutes.
+- **Refresh** — how often the figures update: **Off**, **10s**, **30s** (the default), **1m** or **5m**. Your choice is remembered in this browser for later runs.
+- **Updated** — the time the figures were last fetched, so you can see a refresh happened even when the numbers did not change.
+- With **Off**, nothing updates on its own; use the refresh button that appears to update now.
+- If a refresh takes 5 seconds or more, automatic refresh pauses and the caption says **auto-refresh paused**. To resume, pick a rate in **Refresh** (picking the one already shown works too), or press the refresh button: automatic refresh resumes if that refresh finishes in under 5 seconds.
+
+When the test finishes, the card fetches its final figures once and the live controls disappear.
+
 **Related**
 - [Check SLO results](slo-check-results.md)
 - [Understand ADAPT verdicts](understand-adapt.md)
