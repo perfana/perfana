@@ -1,8 +1,8 @@
 # Series grouping: compare Kubernetes metrics whose names change every deployment
 
 **Date:** 2026-11-01
-**Status:** Draft design, open questions at the end. Every open question has a working default, so the
-implementation plan can start from it.
+**Status:** Design agreed. All five open questions were decided on 2026-11-01 (see Decisions at the
+end); ready for an implementation plan.
 **Scope:** worker (`StatisticsPipeline`), API (rules, preview, group-aware `ds_metrics` reads), web
 (anomaly-detection card, Compare card, system config, series picker), `packages/shared` (one
 grouping function).
@@ -182,6 +182,7 @@ what the worker does.
 | `aggregation` | varchar(8) CHECK in (`avg`,`sum`,`max`) | |
 | `track_member_count` | boolean NOT NULL DEFAULT false | |
 | `enabled` | boolean NOT NULL DEFAULT true | |
+| `origin` | varchar(16) NOT NULL DEFAULT `'manual'` CHECK in (`manual`,`suggestion`,`copy`) | How the rule was created. Lets the suggestion thresholds be tuned from real acceptance data (Decision 5). |
 | `organization_id` | uuid NOT NULL | Pattern A in root `CLAUDE.md`: inherit from the application dashboard, using the camelCase `organizationId` in `repo.create`. |
 | `team_id`, `created_by`, `updated_by`, `created_at`, `updated_at` | | Standard ownership columns. |
 
@@ -304,6 +305,21 @@ Creating the second rule on a slot that already has one is a constraint violatio
 on: a 409 with no body. See "Turning a constraint violation into a 409" in
 `apps/api/CODING_RULES.md`.
 
+**Copying to other workloads (Decision 2).** `POST` accepts an optional `copyTo: [{ environment,
+workload }]` listing other workloads of the **same system**:
+
+- Each entry becomes its own rule row with `origin = 'copy'`, so the copies can diverge later.
+- Each target is authorized on its own, exactly like the primary rule.
+- Application dashboards are per workload, so a copy points at the **target workload's** application
+  dashboard for the same Grafana dashboard, with the same `panel_id`. Match on `dashboard_uid` **and**
+  `grafana_instance_id`, since a uid is unique only within one Grafana instance (root `CLAUDE.md`,
+  "`grafana_dashboards` is a mixed table", trap 3). A target workload without that dashboard is
+  skipped.
+- A target slot that already has a rule is skipped, never overwritten.
+- The response lists created and skipped targets with the reason for each.
+- Recalculation runs only for the current workload. The copied workloads show the stale notice until
+  someone recalculates them, because one save must not fan out into re-evaluating several workloads.
+
 ### Preview
 
 `POST /series-grouping-rules/preview` with `{ testRunId, applicationDashboardId, panelId?, rule }`.
@@ -330,6 +346,17 @@ Names come from the SkipScan `DISTINCT` above; nothing scans series data.
 It reads only small tables: `ds_adapt_results` labels, `ds_metric_statistics` names and
 `ds_control_group_statistics` names. Panels that already have a rule are excluded. Computing this on
 request keeps detection out of the worker entirely.
+
+**Measuring the thresholds (Decision 5).** v1 ships with the 50% / 90% defaults as named constants and
+collects the data to tune them:
+
+- Every suggestion served is logged at info as `series-grouping suggestion <testRunId>
+  <dashboardId>/<panelId> preset=<p> matched <before>% -> <after>% incomparable=<n>`.
+- A rule saved from a suggestion is stored with `origin = 'suggestion'`.
+
+The acceptance rate per preset and per threshold band then comes from joining the two. Dismissals are
+per viewer (in `localStorage`) and are not measured server-side; a suggestion that is ignored and a
+suggestion that is dismissed look the same in this data.
 
 ### Applying a rule to runs that already exist
 
@@ -424,6 +451,7 @@ Pattern   (•) Kubernetes pod name   (detected)
 Combine   (•) Average per pod   ( ) Total   ( ) Highest pod
           [x] Also track the number of pods
 Applies   (•) This panel   ( ) All panels on this dashboard
+          [ ] Also create for other workloads of this system   [Test / Peak, Acc / Peak ▾]
 
   This run                    Baseline (5 runs)             Group
   api-7d9f8c6b5-x2k4p         api-5c4d9b7f8-q8r2m           api     ✓ in baseline
@@ -472,6 +500,9 @@ Behaviour:
   - RBAC: another organization's rule is a 404 on read, update and delete; an empty org list returns
     `[]`.
   - Preview and suggestions against fixtures.
+  - `copyTo`: resolves the target's application dashboard by uid **and** instance; skips a target
+    without the dashboard and a slot that already has a rule; rejects a target the caller cannot
+    write; stores `origin = 'copy'`.
   - Group-aware readers return the aggregated series and `?members=true`.
 - **Web:** dialog preview and validation; the picker badge and the toggle; a saved preset holding a
   group name draws a line (the regression this design exists to prevent).
@@ -494,9 +525,10 @@ Behaviour:
   - statistics-layer grouping, membership table, member count series;
   - group-aware picker, time-series, Compare-chart and report reads;
   - suggestions banner in the anomaly card;
-  - the dialog with preview;
+  - the dialog with preview, and copying a rule to other workloads;
   - apply to this run plus its baseline;
-  - stale notice.
+  - stale notice;
+  - suggestion logging and `origin` tracking for threshold tuning.
 - **v1.1:**
   - Compare card hint;
   - grafana-sync auto-config suggesting a rule when a legend contains `{{pod}}` or the dashboard has a
@@ -517,19 +549,25 @@ Behaviour:
 - Grouping perf-test (JMeter / Gatling) series.
 - Grouping across panels or dashboards.
 
-## Open questions (with the default this design assumes)
+## Decisions (2026-11-01)
 
-1. **Default aggregation:** `avg`. It is unaffected by replica count, so autoscaling does not produce
-   false regressions. Is `sum` the more natural default for any team using this?
-2. **Scope beyond one workload:** rules are per workload. Should the dialog offer *"also create for
-   the other workloads of this system"*, writing one rule per workload, as the Dynatrace copy features
-   do? Default: yes, as a checkbox, off.
-3. **Label-based grouping (v2):** is it worth storing the series labels Grafana returns today? It is
-   the most intuitive UI ("compare by container"), but it is a new table and covers Prometheus-like
-   sources only.
-4. **Non-Prometheus Kubernetes dashboards:** do any users' Kubernetes dashboards use datasources whose
-   timestamps do not align (InfluxDB with irregular intervals, Elasticsearch)? If so, time bucketing
-   moves from v2 into v1.
-5. **Suggestion thresholds:** the "under 50% matched → over 90% matched" heuristic needs calibrating
-   against real runs. Does a deployment with representative Kubernetes dashboards exist to measure
-   against?
+1. **Default aggregation is `avg`** (average per pod). It is unaffected by replica count, so an
+   autoscaler scale-out does not read as a regression. `sum` and `max` stay one click away in the
+   dialog. Pairing `sum` with the member count series remains the documented way to judge total
+   footprint.
+2. **Rules are per workload, with an opt-in copy.** The dialog has *"Also create for other workloads
+   of this system"*, off by default. It writes one independent rule per selected workload
+   (`origin = 'copy'`) and recalculates only the current one. A single system-wide rule was rejected:
+   editing it would silently regroup every workload at once. See "Copying to other workloads" under
+   API changes.
+3. **Label-based grouping is v2.** v1 ships regex presets and custom regex. v2 adds label capture and
+   *Compare by labels* as a second way to define the same rule, compiled to the same grouping engine,
+   so nothing built in v1 is thrown away.
+4. **Datasource alignment: warn in v1, bucket in v2.** It is not known whether any users' Kubernetes
+   dashboards use non-Prometheus datasources. v1 combines on exact timestamps and warns when a group
+   averages about one member per timestamp. If that warning appears in practice, time bucketing moves
+   up from v2.
+5. **Suggestion thresholds ship as defaults and are tuned from usage.** v1 uses 50% / 90% as named
+   constants, logs every suggestion served, and records `origin = 'suggestion'` on rules created from
+   one. No deployment with representative Kubernetes dashboards is available to calibrate against
+   beforehand. See "Measuring the thresholds" under API changes.
