@@ -12,6 +12,9 @@ export * from './url-column.transformer';
 // Export safe regex utilities (ReDoS prevention)
 export * from './safe-regex';
 
+// Export series grouping (worker statistics, API previews, web dialog share one implementation)
+export * from './series-grouping';
+
 // Export audit-log diff helpers (used by API + grafana-sync audit dispatchers)
 export * from './audit-diff';
 
