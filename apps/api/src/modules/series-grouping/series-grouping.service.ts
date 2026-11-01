@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -15,6 +16,8 @@ import {
   type SeriesGroupingPreset,
 } from '@perfana/shared/utils';
 import { getRequestEm, withRequestEm } from '../../common/db/request-em';
+import { AuthorizationService } from '../../common/services/authorization.service';
+import { Capability } from '../../constants/capabilities.constants';
 import { AuditService } from '../audit/audit.service';
 import type { CreateSeriesGroupingRuleDto, SeriesGroupingCopyTargetDto } from './dto/create-series-grouping-rule.dto';
 import type { UpdateSeriesGroupingRuleDto } from './dto/update-series-grouping-rule.dto';
@@ -56,6 +59,11 @@ interface RuleFields {
  * BEFORE it is inherited — RLS does not backstop a caller-named organization on create
  * (apps/api/CLAUDE.md).
  *
+ * Writing a rule needs `benchmark:manage` in the rule's organization — the SLO capability, since a
+ * rule changes ADAPT verdicts the way an SLO does (org admins and members; not viewers). It is
+ * checked AFTER the 404 scoping, so a 403 only reaches someone who can already read the rule. An
+ * API-key principal passes: its organization scope is the key itself, as in TestRunsMutationService.
+ *
  * A saved rule changes nothing by itself: it takes effect on the next statistics recalculation
  * of a run (`POST /series-grouping-rules/apply`).
  */
@@ -69,7 +77,21 @@ export class SeriesGroupingService {
     @InjectRepository(ApplicationDashboard)
     private readonly appDashRepo: Repository<ApplicationDashboard>,
     private readonly auditService: AuditService,
+    private readonly authzService: AuthorizationService,
   ) {}
+
+  /** Whether the caller may write series grouping rules in that organization. */
+  private async canManage(userId: string, roles: string[], organizationId: string, teamId?: string | null): Promise<boolean> {
+    if (userId.startsWith('api-key:')) return true;
+    const caps = await this.authzService.getCapabilities(userId, roles, organizationId, teamId ?? null);
+    return caps.includes(Capability.BenchmarkManage);
+  }
+
+  private async assertCanManage(userId: string, roles: string[], organizationId: string, teamId?: string | null): Promise<void> {
+    if (await this.canManage(userId, roles, organizationId, teamId)) return;
+    this.logger.warn(`Write denied: capability=${Capability.BenchmarkManage} userId=${userId} orgId=${organizationId}`);
+    throw new ForbiddenException('You do not have permission to manage series grouping rules');
+  }
 
   async findAll(query: SeriesGroupingRuleQuery, accessibleOrgIds: string[] | null): Promise<SeriesGroupingRuleResponseDto[]> {
     if (accessibleOrgIds !== null && accessibleOrgIds.length === 0) return [];
@@ -93,12 +115,14 @@ export class SeriesGroupingService {
   async create(
     dto: CreateSeriesGroupingRuleDto,
     userId: string,
+    roles: string[],
     accessibleOrgIds: string[] | null,
   ): Promise<SeriesGroupingCreateResultDto> {
     const fields = this.ruleFields(dto.preset, dto.pattern ?? null, dto.replacement ?? null, dto.aggregation, dto.trackMemberCount);
 
     // Authorize the caller-supplied parent BEFORE inheriting its organization.
     const dashboard = await this.loadAuthorizedDashboard(dto.applicationDashboardId, dto.systemUnderTestId, dto.testEnvironment, accessibleOrgIds);
+    await this.assertCanManage(userId, roles, dashboard.organizationId, dashboard.teamId);
     this.refusePerfTestDashboard(dashboard);
 
     const panelId = dto.panelId ?? null;
@@ -126,7 +150,7 @@ export class SeriesGroupingService {
     }
     this.auditService.logCreate(saved as unknown as OwnedResource, { organizationIdOverride: saved.organizationId });
 
-    const copies = await this.createCopies(saved, dashboard, dto.copyTo ?? [], userId, accessibleOrgIds);
+    const copies = await this.createCopies(saved, dashboard, dto.copyTo ?? [], userId, roles, accessibleOrgIds);
     return { rule: this.toDto(saved), copies };
   }
 
@@ -134,9 +158,11 @@ export class SeriesGroupingService {
     id: string,
     dto: UpdateSeriesGroupingRuleDto,
     userId: string,
+    roles: string[],
     accessibleOrgIds: string[] | null,
   ): Promise<SeriesGroupingRuleResponseDto> {
     const rule = await this.loadAuthorized(id, accessibleOrgIds);
+    await this.assertCanManage(userId, roles, rule.organizationId, rule.teamId);
     const before = Object.assign(new SeriesGroupingRule(), rule);
 
     // `PartialType` + `@IsOptional()` lets `null` through as well as an absent key; nothing here
@@ -159,8 +185,9 @@ export class SeriesGroupingService {
     return this.toDto(saved);
   }
 
-  async remove(id: string, accessibleOrgIds: string[] | null): Promise<void> {
+  async remove(id: string, userId: string, roles: string[], accessibleOrgIds: string[] | null): Promise<void> {
     const rule = await this.loadAuthorized(id, accessibleOrgIds);
+    await this.assertCanManage(userId, roles, rule.organizationId, rule.teamId);
     const snapshot = Object.assign(new SeriesGroupingRule(), rule);
     await withRequestEm(this.ruleRepo).remove(rule);
     this.auditService.logDelete(snapshot as unknown as OwnedResource, { organizationIdOverride: snapshot.organizationId });
@@ -241,6 +268,7 @@ export class SeriesGroupingService {
     sourceDashboard: ApplicationDashboard,
     targets: SeriesGroupingCopyTargetDto[],
     userId: string,
+    roles: string[],
     accessibleOrgIds: string[] | null,
   ): Promise<{ created: SeriesGroupingRuleResponseDto[]; skipped: SeriesGroupingCopySkipDto[] }> {
     const created: SeriesGroupingRuleResponseDto[] = [];
@@ -269,6 +297,13 @@ export class SeriesGroupingService {
         continue;
       }
       if (accessibleOrgIds !== null && !accessibleOrgIds.includes(resolved.organizationId)) {
+        skip('not-writable');
+        continue;
+      }
+      if (
+        resolved.organizationId !== sourceDashboard.organizationId &&
+        !(await this.canManage(userId, roles, resolved.organizationId, resolved.teamId))
+      ) {
         skip('not-writable');
         continue;
       }

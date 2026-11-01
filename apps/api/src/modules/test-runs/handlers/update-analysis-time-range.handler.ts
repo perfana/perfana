@@ -116,13 +116,37 @@ export function offsetsFitRun(
   return length > analysisStartOffset + analysisEndOffset;
 }
 
-export function partitionAnalysisTimeRangeScope(
-  candidates: TestRunEntity[],
-  target: TestRunEntity,
-  analysisStartOffset: number,
-  analysisEndOffset: number,
-): { applicable: TestRunEntity[]; skipped: AnalysisTimeRangeScopeEntry[] } {
-  const applicable: TestRunEntity[] = [];
+/** The columns `partitionWritableCompletedRuns` reads, and nothing else. */
+export type WritableCompletedRun = Pick<TestRunEntity, 'id' | 'testRunId' | 'completed' | 'organizationId' | 'teamId'>;
+
+/**
+ * The two checks every bulk re-evaluate of a workload shares, whatever it is re-evaluating FOR:
+ * a run the caller cannot write, and a run that has not completed. The analysis-window apply
+ * and the series-grouping apply both go through here so the two cannot drift — a dialog that
+ * promises a count the write does not honour is worse than no dialog.
+ *
+ *  - `not-writable`: the run's (organization, team) pair differs from the target's. team_id is
+ *    per-row and nullable, not derived from the system under test, so a workload can span
+ *    teams. The caller proved write permission on the target's pair only.
+ *  - `running`: the run has not completed. MetricsPipeline bakes ds_metrics.ramp_up at
+ *    INGESTION, so moving the offsets mid-run leaves the run carrying rows flagged under two
+ *    different settings, and a live run's final analysis picks up any rule on its own.
+ *
+ * The TARGET is always applicable, even while running: the caller is acting on that run, and
+ * refusing it here would make the single-run and bulk paths disagree about the same click. A
+ * caller for whom a running target is not valid (re-evaluation) filters it out itself.
+ *
+ * `not-writable` is reported ahead of `running`: "on another team" is actionable, "still
+ * running" would be a lie about a run the caller cannot touch either way.
+ *
+ * `skipped` is in candidate order and holds exactly one entry per skipped candidate;
+ * `partitionAnalysisTimeRangeScope` relies on that to interleave its own reason.
+ */
+export function partitionWritableCompletedRuns<T extends WritableCompletedRun>(
+  candidates: T[],
+  target: WritableCompletedRun,
+): { applicable: T[]; skipped: AnalysisTimeRangeScopeEntry[] } {
+  const applicable: T[] = [];
   const skipped: AnalysisTimeRangeScopeEntry[] = [];
 
   for (const run of candidates) {
@@ -135,17 +159,37 @@ export function partitionAnalysisTimeRangeScope(
       completed: run.completed === true,
     };
     if (run.organizationId !== target.organizationId || run.teamId !== target.teamId) {
-      // team_id is per-row and nullable, not derived from the system under test, so a
-      // workload can span teams. The caller proved write permission on the target's
-      // (org, team) pair only.
       skipped.push({ ...entry, skipped: 'not-writable' });
     } else if (run.completed !== true) {
-      // MetricsPipeline bakes ds_metrics.ramp_up at INGESTION, so moving the offsets
-      // mid-run leaves the run carrying rows flagged under two different settings —
-      // one of the ways a run ends up with partial statistics.
       skipped.push({ ...entry, skipped: 'running' });
-    } else if (!offsetsFitRun(run, analysisStartOffset, analysisEndOffset)) {
-      skipped.push({ ...entry, skipped: 'too-short' });
+    } else {
+      applicable.push(run);
+    }
+  }
+
+  return { applicable, skipped };
+}
+
+export function partitionAnalysisTimeRangeScope(
+  candidates: TestRunEntity[],
+  target: TestRunEntity,
+  analysisStartOffset: number,
+  analysisEndOffset: number,
+): { applicable: TestRunEntity[]; skipped: AnalysisTimeRangeScopeEntry[] } {
+  const { applicable: writable, skipped: held } = partitionWritableCompletedRuns(candidates, target);
+  const writableSet = new Set(writable);
+
+  // Walk the candidates once more, in order, so `skipped` keeps the candidate order the
+  // single-pass version produced: `held` holds one entry per non-writable candidate, in
+  // order, and the analysis-window-only reason slots in between them.
+  const applicable: TestRunEntity[] = [];
+  const skipped: AnalysisTimeRangeScopeEntry[] = [];
+  let heldIndex = 0;
+  for (const run of candidates) {
+    if (!writableSet.has(run)) {
+      skipped.push(held[heldIndex++]!);
+    } else if (run.id !== target.id && !offsetsFitRun(run, analysisStartOffset, analysisEndOffset)) {
+      skipped.push({ testRunId: run.testRunId, completed: run.completed === true, skipped: 'too-short' });
     } else {
       applicable.push(run);
     }

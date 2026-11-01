@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { SeriesGroupingRule } from '@perfana/shared/entities';
 import { SeriesGroupingService } from './series-grouping.service';
 import type { CreateSeriesGroupingRuleDto } from './dto/create-series-grouping-rule.dto';
@@ -58,6 +58,7 @@ describe('SeriesGroupingService', () => {
   let ruleRepo: any;
   let appDashRepo: any;
   let audit: { logCreate: jest.Mock; logUpdate: jest.Mock; logDelete: jest.Mock };
+  let authz: { getCapabilities: jest.Mock };
   let saved: SeriesGroupingRule[];
   let knownWorkloads: Set<string>;
 
@@ -83,14 +84,15 @@ describe('SeriesGroupingService', () => {
       find: jest.fn(async () => []),
     };
     audit = { logCreate: jest.fn(), logUpdate: jest.fn(), logDelete: jest.fn() };
+    authz = { getCapabilities: jest.fn(async () => ['benchmark:manage']) };
     (getRequestEm as jest.Mock).mockReturnValue(null);
-    service = new SeriesGroupingService(ruleRepo, appDashRepo, audit as any);
+    service = new SeriesGroupingService(ruleRepo, appDashRepo, audit as any, authz as any);
   });
 
   describe('create', () => {
     it('inherits organization and team from the application dashboard, in camelCase', async () => {
       appDashRepo.findOne.mockResolvedValue(dashboard({ teamId: 'team-1' }));
-      const result = await service.create(dto(), 'user-1', [ORG]);
+      const result = await service.create(dto(), 'user-1', ['user'], [ORG]);
 
       expect(ruleRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ organizationId: ORG, teamId: 'team-1', createdBy: 'user-1', updatedBy: 'user-1' }),
@@ -100,27 +102,27 @@ describe('SeriesGroupingService', () => {
     });
 
     it('audits with an entity instance, so the audit row carries its field diff', async () => {
-      await service.create(dto(), 'user-1', [ORG]);
+      await service.create(dto(), 'user-1', ['user'], [ORG]);
       expect(audit.logCreate).toHaveBeenCalledTimes(1);
       expect(audit.logCreate.mock.calls[0][0]).toBeInstanceOf(SeriesGroupingRule);
       expect(audit.logCreate.mock.calls[0][1]).toEqual({ organizationIdOverride: ORG });
     });
 
     it('stores a preset without a pattern, and a custom rule with its pattern and replacement', async () => {
-      await service.create(dto({ preset: 'k8s-pod', pattern: '.*', replacement: 'x' }), 'user-1', [ORG]);
+      await service.create(dto({ preset: 'k8s-pod', pattern: '.*', replacement: 'x' }), 'user-1', ['user'], [ORG]);
       expect(saved[0]).toMatchObject({ pattern: null, replacement: '' });
 
-      await service.create(dto({ preset: 'custom', pattern: '^(\\w+)-\\d+$', replacement: '$1', panelId: 8 }), 'user-1', [ORG]);
+      await service.create(dto({ preset: 'custom', pattern: '^(\\w+)-\\d+$', replacement: '$1', panelId: 8 }), 'user-1', ['user'], [ORG]);
       expect(saved[1]).toMatchObject({ preset: 'custom', pattern: '^(\\w+)-\\d+$', replacement: '$1' });
     });
 
     it('records a dashboard-wide rule as panelId null', async () => {
-      await service.create(dto({ panelId: undefined }), 'user-1', [ORG]);
+      await service.create(dto({ panelId: undefined }), 'user-1', ['user'], [ORG]);
       expect(saved[0]!.panelId).toBeNull();
     });
 
     it('stores origin=suggestion when the dialog says so', async () => {
-      await service.create(dto({ origin: 'suggestion' }), 'user-1', [ORG]);
+      await service.create(dto({ origin: 'suggestion' }), 'user-1', ['user'], [ORG]);
       expect(saved[0]!.origin).toBe('suggestion');
     });
 
@@ -131,32 +133,32 @@ describe('SeriesGroupingService', () => {
       ['a dashboard that does not exist', () => appDashRepo.findOne.mockResolvedValue(null)],
     ])('answers 404, indistinguishable from not-found, for %s', async (_label, arrange) => {
       arrange();
-      await expect(service.create(dto(), 'user-1', [ORG])).rejects.toThrow(NotFoundException);
+      await expect(service.create(dto(), 'user-1', ['user'], [ORG])).rejects.toThrow(NotFoundException);
       expect(ruleRepo.save).not.toHaveBeenCalled();
     });
 
     it('lets a global admin (null org scope) create on any organization', async () => {
       appDashRepo.findOne.mockResolvedValue(dashboard({ organizationId: OTHER_ORG }));
-      const result = await service.create(dto(), 'admin', null);
+      const result = await service.create(dto(), 'admin', ['perfana-admin'], null);
       expect(result.rule.applicationDashboardId).toBe(DASH);
     });
 
     it('refuses a perf-test dashboard with 400', async () => {
       appDashRepo.findOne.mockResolvedValue(dashboard({ dashboardUid: 'performance-test-metrics-checkout' }));
-      await expect(service.create(dto(), 'user-1', [ORG])).rejects.toThrow(BadRequestException);
+      await expect(service.create(dto(), 'user-1', ['user'], [ORG])).rejects.toThrow(BadRequestException);
     });
 
     it.each([
       ['an unsafe pattern', { preset: 'custom' as const, pattern: '(a+)+' }, /ReDoS/],
       ['a custom rule without a pattern', { preset: 'custom' as const, pattern: undefined }, /pattern/i],
     ])('refuses %s with the guard message', async (_label, overrides, message) => {
-      await expect(service.create(dto(overrides), 'user-1', [ORG])).rejects.toThrow(message);
+      await expect(service.create(dto(overrides), 'user-1', ['user'], [ORG])).rejects.toThrow(message);
       expect(ruleRepo.save).not.toHaveBeenCalled();
     });
 
     it('answers 409 on a duplicate slot, including two dashboard-wide rules', async () => {
       ruleRepo.save.mockRejectedValueOnce(duplicateSlot());
-      await expect(service.create(dto({ panelId: null }), 'user-1', [ORG])).rejects.toThrow(ConflictException);
+      await expect(service.create(dto({ panelId: null }), 'user-1', ['user'], [ORG])).rejects.toThrow(ConflictException);
       expect(audit.logCreate).not.toHaveBeenCalled();
     });
 
@@ -164,18 +166,18 @@ describe('SeriesGroupingService', () => {
       ruleRepo.save.mockRejectedValueOnce(
         Object.assign(new Error('x'), { driverError: { code: '23505', constraint: 'uq_series_grouping_rules_slot' } }),
       );
-      await expect(service.create(dto(), 'user-1', [ORG])).rejects.toThrow(ConflictException);
+      await expect(service.create(dto(), 'user-1', ['user'], [ORG])).rejects.toThrow(ConflictException);
     });
 
     it('does not turn an unrelated database error into a 409', async () => {
       ruleRepo.save.mockRejectedValueOnce(Object.assign(new Error('boom'), { code: '23503' }));
-      await expect(service.create(dto(), 'user-1', [ORG])).rejects.toThrow('boom');
+      await expect(service.create(dto(), 'user-1', ['user'], [ORG])).rejects.toThrow('boom');
     });
   });
 
   describe('create with copyTo', () => {
     it('keeps the dashboard and panel within the same environment and stores origin=copy', async () => {
-      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'acc', workload: 'soak' }] }), 'user-1', [ORG]);
+      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'acc', workload: 'soak' }] }), 'user-1', ['user'], [ORG]);
 
       expect(result.copies.skipped).toEqual([]);
       expect(result.copies.created).toHaveLength(1);
@@ -185,7 +187,7 @@ describe('SeriesGroupingService', () => {
 
     it('resolves another environment\'s dashboard by uid AND Grafana instance', async () => {
       appDashRepo.find.mockResolvedValue([dashboard({ id: DASH_OTHER_ENV, testEnvironment: 'prod' })]);
-      await service.create(dto({ copyTo: [{ testEnvironment: 'prod', workload: 'peak' }] }), 'user-1', [ORG]);
+      await service.create(dto({ copyTo: [{ testEnvironment: 'prod', workload: 'peak' }] }), 'user-1', ['user'], [ORG]);
 
       const where = appDashRepo.find.mock.calls[0][0].where;
       expect(where).toMatchObject({
@@ -215,18 +217,18 @@ describe('SeriesGroupingService', () => {
       ],
     ])('skips a target as %s', async (reason, arrange) => {
       arrange();
-      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'prod', workload: 'peak' }] }), 'user-1', [ORG]);
+      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'prod', workload: 'peak' }] }), 'user-1', ['user'], [ORG]);
       expect(result.copies).toEqual({ created: [], skipped: [{ testEnvironment: 'prod', workload: 'peak', reason }] });
     });
 
     it('skips a workload the system has never configured or run', async () => {
-      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'acc', workload: 'nope' }] }), 'user-1', [ORG]);
+      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'acc', workload: 'nope' }] }), 'user-1', ['user'], [ORG]);
       expect(result.copies.skipped).toEqual([{ testEnvironment: 'acc', workload: 'nope', reason: 'unknown-workload' }]);
     });
 
     it('skips a slot that already has a rule, never overwriting it', async () => {
       ruleRepo.findOne.mockImplementation(async ({ where }: any) => (where.workload === 'soak' ? new SeriesGroupingRule() : null));
-      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'acc', workload: 'soak' }] }), 'user-1', [ORG]);
+      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'acc', workload: 'soak' }] }), 'user-1', ['user'], [ORG]);
       expect(result.copies.skipped).toEqual([{ testEnvironment: 'acc', workload: 'soak', reason: 'exists' }]);
       expect(saved).toHaveLength(1);
     });
@@ -235,6 +237,7 @@ describe('SeriesGroupingService', () => {
       const result = await service.create(
         dto({ copyTo: [{ testEnvironment: 'acc', workload: 'peak' }, { testEnvironment: 'acc', workload: 'soak' }, { testEnvironment: 'acc', workload: 'soak' }] }),
         'user-1',
+        ['user'],
         [ORG],
       );
       expect(result.copies.skipped).toEqual([{ testEnvironment: 'acc', workload: 'peak', reason: 'same-slot' }]);
@@ -252,6 +255,7 @@ describe('SeriesGroupingService', () => {
       const result = await service.create(
         dto({ copyTo: [{ testEnvironment: 'acc', workload: 'soak' }, { testEnvironment: 'prod', workload: 'peak' }] }),
         'user-1',
+        ['user'],
         [ORG],
       );
       // prod has no matching dashboard (find() defaults to []), so it is skipped after the race.
@@ -278,15 +282,20 @@ describe('SeriesGroupingService', () => {
       expect(ruleRepo.find.mock.calls[1][0].where.organizationId).toBeUndefined();
     });
 
-    it.each(['findOne', 'remove'] as const)('%s answers 404 for a rule in another organization', async (method) => {
+    it('findOne answers 404 for a rule in another organization', async () => {
       ruleRepo.findOne.mockResolvedValue(Object.assign(new SeriesGroupingRule(), { id: 'r1', organizationId: OTHER_ORG }));
-      await expect((service as any)[method]('r1', [ORG])).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('r1', [ORG])).rejects.toThrow(NotFoundException);
+    });
+
+    it('remove answers 404 for a rule in another organization', async () => {
+      ruleRepo.findOne.mockResolvedValue(Object.assign(new SeriesGroupingRule(), { id: 'r1', organizationId: OTHER_ORG }));
+      await expect(service.remove('r1', 'user-1', ['user'], [ORG])).rejects.toThrow(NotFoundException);
       expect(ruleRepo.remove).not.toHaveBeenCalled();
     });
 
     it('update answers 404 for a rule in another organization', async () => {
       ruleRepo.findOne.mockResolvedValue(Object.assign(new SeriesGroupingRule(), { id: 'r1', organizationId: OTHER_ORG }));
-      await expect(service.update('r1', { aggregation: 'sum' }, 'user-1', [ORG])).rejects.toThrow(NotFoundException);
+      await expect(service.update('r1', { aggregation: 'sum' }, 'user-1', ['user'], [ORG])).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -311,7 +320,7 @@ describe('SeriesGroupingService', () => {
 
     it('changes rule fields, keeps the slot, audits before and after as entity instances', async () => {
       ruleRepo.findOne.mockResolvedValue(existing());
-      const result = await service.update('r1', { aggregation: 'sum', trackMemberCount: true, enabled: false }, 'user-2', [ORG]);
+      const result = await service.update('r1', { aggregation: 'sum', trackMemberCount: true, enabled: false }, 'user-2', ['user'], [ORG]);
 
       expect(result).toMatchObject({ aggregation: 'sum', trackMemberCount: true, enabled: false, panelId: 7, workload: 'peak' });
       expect(saved[0]!.updatedBy).toBe('user-2');
@@ -323,45 +332,87 @@ describe('SeriesGroupingService', () => {
 
     it('treats an explicit null like an absent key', async () => {
       ruleRepo.findOne.mockResolvedValue(existing());
-      await service.update('r1', { aggregation: null as never, enabled: null as never }, 'user-2', [ORG]);
+      await service.update('r1', { aggregation: null as never, enabled: null as never }, 'user-2', ['user'], [ORG]);
       expect(saved[0]).toMatchObject({ aggregation: 'avg', enabled: true });
     });
 
     it('ignores slot fields even if a client sends them', async () => {
       ruleRepo.findOne.mockResolvedValue(existing());
-      await service.update('r1', { panelId: 99, workload: 'other' } as never, 'user-2', [ORG]);
+      await service.update('r1', { panelId: 99, workload: 'other' } as never, 'user-2', ['user'], [ORG]);
       expect(saved[0]).toMatchObject({ panelId: 7, workload: 'peak' });
     });
 
     it('switching to custom requires a valid pattern, switching away clears it', async () => {
       ruleRepo.findOne.mockResolvedValue(existing());
-      await expect(service.update('r1', { preset: 'custom' }, 'user-2', [ORG])).rejects.toThrow(BadRequestException);
+      await expect(service.update('r1', { preset: 'custom' }, 'user-2', ['user'], [ORG])).rejects.toThrow(BadRequestException);
 
       ruleRepo.findOne.mockResolvedValue(existing());
-      await service.update('r1', { preset: 'custom', pattern: '-\\d+$' }, 'user-2', [ORG]);
+      await service.update('r1', { preset: 'custom', pattern: '-\\d+$' }, 'user-2', ['user'], [ORG]);
       expect(saved[0]).toMatchObject({ preset: 'custom', pattern: '-\\d+$' });
 
       ruleRepo.findOne.mockResolvedValue(Object.assign(existing(), { preset: 'custom', pattern: '-\\d+$', replacement: 'x' }));
-      await service.update('r1', { preset: 'ip-port' }, 'user-2', [ORG]);
+      await service.update('r1', { preset: 'ip-port' }, 'user-2', ['user'], [ORG]);
       expect(saved[1]).toMatchObject({ preset: 'ip-port', pattern: null, replacement: '' });
     });
 
     it('refuses an unsafe pattern on update', async () => {
       ruleRepo.findOne.mockResolvedValue(Object.assign(existing(), { preset: 'custom', pattern: 'a' }));
-      await expect(service.update('r1', { pattern: '(a+)+' }, 'user-2', [ORG])).rejects.toThrow(/ReDoS/);
+      await expect(service.update('r1', { pattern: '(a+)+' }, 'user-2', ['user'], [ORG])).rejects.toThrow(/ReDoS/);
+    });
+  });
+
+  // A rule changes ADAPT verdicts like an SLO does, so writing one needs the SLO capability
+  // (`benchmark:manage`: org admins and members, not viewers). Checked after the 404 scoping, so a
+  // 403 only ever reaches someone who can already read the rule.
+  describe('write capability', () => {
+    const existingRule = () =>
+      Object.assign(new SeriesGroupingRule(), {
+        id: 'r1', organizationId: ORG, teamId: 'team-1', preset: 'k8s-pod', pattern: null, replacement: '',
+        aggregation: 'avg', trackMemberCount: false, enabled: true,
+      });
+
+    it.each([
+      ['create', () => service.create(dto(), 'viewer', ['user'], [ORG])],
+      ['update', () => { ruleRepo.findOne.mockResolvedValue(existingRule()); return service.update('r1', { enabled: false }, 'viewer', ['user'], [ORG]); }],
+      ['remove', () => { ruleRepo.findOne.mockResolvedValue(existingRule()); return service.remove('r1', 'viewer', ['user'], [ORG]); }],
+    ])('%s is refused with 403 without benchmark:manage', async (_name, call) => {
+      authz.getCapabilities.mockResolvedValue(['test-run:read']);
+      await expect(call()).rejects.toThrow(ForbiddenException);
+      expect(ruleRepo.save).not.toHaveBeenCalled();
+      expect(ruleRepo.remove).not.toHaveBeenCalled();
+    });
+
+    it('checks the capability against the resource organization and team', async () => {
+      ruleRepo.findOne.mockResolvedValue(existingRule());
+      await service.update('r1', { enabled: false }, 'user-1', ['user'], [ORG]);
+      expect(authz.getCapabilities).toHaveBeenCalledWith('user-1', ['user'], ORG, 'team-1');
+    });
+
+    it('lets an API-key principal through, since its organization scope is the key itself', async () => {
+      authz.getCapabilities.mockResolvedValue([]);
+      await service.create(dto(), 'api-key:abc', [], [ORG]);
+      expect(authz.getCapabilities).not.toHaveBeenCalled();
+      expect(saved).toHaveLength(1);
+    });
+
+    it('skips a copy target in an organization where the caller lacks the capability', async () => {
+      appDashRepo.find.mockResolvedValue([dashboard({ id: DASH_OTHER_ENV, testEnvironment: 'prod', organizationId: OTHER_ORG })]);
+      authz.getCapabilities.mockImplementation(async (_u: string, _r: string[], org: string) => (org === ORG ? ['benchmark:manage'] : []));
+      const result = await service.create(dto({ copyTo: [{ testEnvironment: 'prod', workload: 'peak' }] }), 'user-1', ['user'], [ORG, OTHER_ORG]);
+      expect(result.copies.skipped).toEqual([{ testEnvironment: 'prod', workload: 'peak', reason: 'not-writable' }]);
     });
   });
 
   describe('remove', () => {
     it('deletes and audits', async () => {
       ruleRepo.findOne.mockResolvedValue(Object.assign(new SeriesGroupingRule(), { id: 'r1', organizationId: ORG }));
-      await service.remove('r1', [ORG]);
+      await service.remove('r1', 'user-1', ['user'], [ORG]);
       expect(ruleRepo.remove).toHaveBeenCalledTimes(1);
       expect(audit.logDelete.mock.calls[0][0]).toBeInstanceOf(SeriesGroupingRule);
     });
 
     it('answers 404 for an unknown id', async () => {
-      await expect(service.remove('missing', [ORG])).rejects.toThrow(NotFoundException);
+      await expect(service.remove('missing', 'user-1', ['user'], [ORG])).rejects.toThrow(NotFoundException);
     });
   });
 });

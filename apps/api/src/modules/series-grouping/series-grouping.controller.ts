@@ -82,13 +82,14 @@ export class SeriesGroupingController {
   })
   @ApiResponse({ status: 201, type: SeriesGroupingCreateResultDto })
   @ApiResponse({ status: 400, description: 'Invalid or unsafe pattern, or a performance-test dashboard' })
+  @ApiResponse({ status: 403, description: 'Missing benchmark:manage in the dashboard\'s organization' })
   @ApiResponse({ status: 404, description: 'Application dashboard not found in that system and environment, or outside your organizations' })
   @ApiResponse({
     status: 409,
     description: 'A rule already exists for this slot. A constraint violation the user has to act on, with no resource body: edit or delete the existing rule.',
   })
   async create(@Body() dto: CreateSeriesGroupingRuleDto, @UserCtx() ctx: UserContext): Promise<SeriesGroupingCreateResultDto> {
-    return this.service.create(dto, ctx.userId, await this.orgScope(ctx));
+    return this.service.create(dto, ctx.userId, ctx.roles, await this.orgScope(ctx));
   }
 
   @Patch(':id')
@@ -99,13 +100,14 @@ export class SeriesGroupingController {
   @ApiParam({ name: 'id' })
   @ApiResponse({ status: 200, type: SeriesGroupingRuleResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid or unsafe pattern' })
+  @ApiResponse({ status: 403, description: 'Missing benchmark:manage in the rule\'s organization' })
   @ApiResponse({ status: 404, description: 'Not found, or outside your organizations' })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateSeriesGroupingRuleDto,
     @UserCtx() ctx: UserContext,
   ): Promise<SeriesGroupingRuleResponseDto> {
-    return this.service.update(id, dto, ctx.userId, await this.orgScope(ctx));
+    return this.service.update(id, dto, ctx.userId, ctx.roles, await this.orgScope(ctx));
   }
 
   @Delete(':id')
@@ -116,8 +118,9 @@ export class SeriesGroupingController {
   })
   @ApiParam({ name: 'id' })
   @ApiResponse({ status: 204 })
+  @ApiResponse({ status: 403, description: 'Missing benchmark:manage in the rule\'s organization' })
   @ApiResponse({ status: 404, description: 'Not found, or outside your organizations' })
   async remove(@Param('id', ParseUUIDPipe) id: string, @UserCtx() ctx: UserContext): Promise<void> {
-    await this.service.remove(id, await this.orgScope(ctx));
+    await this.service.remove(id, ctx.userId, ctx.roles, await this.orgScope(ctx));
   }
 }

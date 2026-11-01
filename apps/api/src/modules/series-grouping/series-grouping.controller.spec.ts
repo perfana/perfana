@@ -42,9 +42,9 @@ describe('SeriesGroupingController', () => {
   });
 
   it.each([
-    ['create', (c: SeriesGroupingController) => c.create({} as never, ctx), (s: Record<string, jest.Mock>) => s.create, [{}, 'user-1', ['org-1']]],
-    ['update', (c: SeriesGroupingController) => c.update('rule-1', {} as never, ctx), (s: Record<string, jest.Mock>) => s.update, ['rule-1', {}, 'user-1', ['org-1']]],
-    ['remove', (c: SeriesGroupingController) => c.remove('rule-1', ctx), (s: Record<string, jest.Mock>) => s.remove, ['rule-1', ['org-1']]],
+    ['create', (c: SeriesGroupingController) => c.create({} as never, ctx), (s: Record<string, jest.Mock>) => s.create, [{}, 'user-1', ['user'], ['org-1']]],
+    ['update', (c: SeriesGroupingController) => c.update('rule-1', {} as never, ctx), (s: Record<string, jest.Mock>) => s.update, ['rule-1', {}, 'user-1', ['user'], ['org-1']]],
+    ['remove', (c: SeriesGroupingController) => c.remove('rule-1', ctx), (s: Record<string, jest.Mock>) => s.remove, ['rule-1', 'user-1', ['user'], ['org-1']]],
   ])('%s passes the resolved scope', async (_name, call, method, args) => {
     await call(controller);
     expect(method(service)).toHaveBeenCalledWith(...args);
