@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.41] - 2026-11-01
+
+### Added
+- **Click the tab you are on to collapse its cards.** On a test run's details page, a single click on the already-selected Results, Root Cause Analysis or Reporting tab collapses every expanded card on that tab, and only that tab. The other tabs keep what you left open, and a double-click on another tab or pressing Enter on a tab never collapses anything by accident.
+- **"Open in Graphs / Compare / Trends" no longer has to open a new browser tab.** A plain click on the menu item stays on the page: it switches to Reporting, expands the card and adds the series, without reloading anything or changing the address bar. Every click adds its series, including one you removed a moment ago. To get a new tab, use the ↗ icon at the end of the item, Cmd-click (Ctrl-click on Windows/Linux), Shift-click, middle-click or Copy link; keyboard users hear how (Cmd/Ctrl+Enter). Links opened in a new tab carry the page's system, environment, workload and organization along.
+
+### Changed
+- **The details page's tabs keep their state.** A tab loads the first time you open it and then stays loaded while you look at another one, so added series, a selected comparison run, filters, searches and inner tabs are all still there when you come back. A tab you are not looking at no longer refreshes on every live-run update; the AWR report list and the "statistics are still being calculated" check pause while their tab is hidden and check straight away when you return. A "View in Dynatrace / Distributed Tracing" drill-down still lands on a freshly loaded card showing just that drill-down's filters.
+- **A card that fails to render no longer takes the whole page down.** The error stays inside that tab, with a "Try again" button; the other tabs keep working.
+
+### Fixed
+- **The Reporting tab's report card refetched its summary on every page update** once a report had finished generating — every keystroke, toast or live-run update. It now refreshes only when a report settles.
+- **"Open in …" from the Dynatrace hosts table also opened that host's detail view**, because the click reached the table row behind the menu.
+
+### Known limits
+- **Two "Open in …" clicks into the same card in quick succession**, before the first series has loaded, add only the second one.
+- **A link to a dashboard that appeared after the card first loaded its list** (a new scenario mid-run, a host mapped meanwhile) does nothing until the page is reloaded.
+
 ## [0.2.97.40] - 2026-10-31
 
 ### Added
