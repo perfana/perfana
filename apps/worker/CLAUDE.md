@@ -581,6 +581,19 @@ rewrites raw names to a group name with `applySeriesGrouping` (`@perfana/shared/
    referenced twice is materialised, which would push the whole run's raw rows through a tuplestore
    (panel 304's "Group once, then roll up" below). `count` on a group row is its number of
    **timestamps**, so `ADAPT_MIN_SAMPLE_COUNT` keeps meaning per-run density.
+
+   **The grouped statement runs with `enable_mergejoin = off`**, set immediately before it and put
+   back to its previous value after (on success only: a failed statement has aborted the
+   transaction, and a restore would mask the error). The planner estimates the join from
+   `ds_metrics` to the bound member arrays at ~1 row, picks a merge join and sorts the run's whole
+   decompressed segment. Measured 2026-11-01 on `timescaledb-ha:pg15` with 1.87 M compressed rows
+   and a dashboard-wide rule over 432 k of them: 8.5 s and a 272 MB external-merge spill, against
+   3.0 s with merge joins off, bit-identical output. **Do not "fix" it by pre-filtering the scan** on
+   the members' dashboards, panels and names: tried, 53.6 s — the lower estimate tips the plan into
+   nested loops. Same measurement: the main INSERT took 5.8 s with no rule and 5.4 s with the
+   grouped panels excluded, and the series read 85 ms for two runs. An ungrouped panel in a grouped
+   batch matches a no-rule run exactly except `std_dev` and the two trend columns, which differ by
+   at most 1e-13 — floating-point summation order under a different plan, not a different answer.
 3. **Rules load before the transaction and never throw.** `loadSeriesGroupingContext` runs on the
    pooled connection after a `to_regclass` probe: an error inside `withAnalyticsTransaction` aborts it
    (25P02), and `statistics-calculation` is not `softFail`, so it would fail the whole re-evaluate

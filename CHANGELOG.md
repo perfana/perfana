@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.42] - 2026-11-01
+
+### Added
+- **Series grouping rules API: rules can now be created, previewed, suggested and applied.** `/series-grouping-rules` lists, creates, updates and deletes per-workload rules (Kubernetes pod presets or a custom regex, combined by `avg`/`sum`/`max`, optionally with a pod-count series), and can create the same rule for other workloads of the system in one call (`copyTo`; a copy never overwrites an existing rule and reports what it skipped). `POST /series-grouping-rules/preview` returns a run's and its baseline's raw names per panel, the SLOs whose match pattern would judge nothing after grouping, and raw baseline names that collide with a new group name. `GET /test-runs/:id/series-grouping-suggestions` lists panels whose series read `incomparable` because their names changed between runs and that a preset would match, and `GET /test-runs/:id/series-grouping-status` lists panels whose stored grouping no longer matches the current rules. `POST /series-grouping-rules/apply` re-evaluates the run and its baseline (or the workload's latest 100 completed runs) with recalculated statistics, which is when a rule takes effect. MCP reaches all of it through the same routes. The web UI is the next release.
+
+  **Who may do what.** Reads are scoped to the caller's organizations like every owned resource (another organization's rule is a 404, never a 403). Writing a rule needs `benchmark:manage` — the SLO capability, since a rule changes ADAPT verdicts the way an SLO does — and apply needs `test-run:update` on the run, as the analysis-window apply does. Both are org-member capabilities; an org viewer can read and preview but not write or re-evaluate. Every write is audited.
+
+### Fixed
+- **The grouped statistics statement spilled to disk on any sizeable run.** Measured on TimescaleDB with 1.87 M compressed rows and a dashboard-wide rule over 432 k of them, the planner estimated the join to the rule's member list at one row, chose a merge join and spilled a 272 MB sort: 8.5 s. It now runs with merge joins off for that one statement: 3.0 s, bit-identical output. Pre-dates any rule being creatable, so no deploy ran the slow plan.
+
+### Known limits
+- **Measured at 1.87 M rows, not at production scale.** A dashboard-wide rule over a quarter of a run's series added ~3 s to a ~5.8 s statistics stage; re-measuring on a ~20 M-row run is filed in TODOS.md.
+- **Found while verifying, not caused by this release:** a fresh install that runs every migration in one batch stops at migration 1799 (`SAVEPOINT can only be used in transaction blocks`), because 1791 ends the batch transaction with a bare `COMMIT`. Existing deploys are unaffected; running the migrations with per-migration transactions works. Filed in TODOS.md.
+
 ## [0.2.97.41] - 2026-11-01
 
 ### Added

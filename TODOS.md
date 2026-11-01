@@ -14,43 +14,45 @@ with the version it landed in.
 ## Series grouping
 
 Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.41
-shipped PR A (the inert engine): no rule can be created yet except by hand-written SQL, so none of
-the items below can affect a deploy until PR B (the rules API) lands. Do them before PR B merges.
+shipped PR A (the engine), v0.2.97.42 PR B (the rules API); PR C (the web) is next.
 
-### Measure the grouped statistics read on a production-sized run (P1)
+**Verified on 2026-11-01** against `timescaledb-ha:pg15` with every migration through 1819 applied
+(see the v0.2.97.42 CHANGELOG entry for numbers): the full preflight including the RLS suite (the
+hand-edited coverage snapshot matches); the RLS policy matrix for `series_grouping_rules`; the
+Postgres-backed SUT export/import round trip; the grouped statistics on 1.87 M compressed rows
+with real Toolkit functions (which found the merge-join plan, fixed in v0.2.97.42); `lttb()` over
+a grouped series; and every rules route through a running API. What is still owed:
 
-**Origin:** v0.2.97.41, plan Task 12.
+### Re-measure the grouped statistics at production scale (P2)
 
-`StatisticsPipeline` reads the series of every dashboard a rule touches once per run
-(`SERIES_OF_DASHBOARDS_SQL`, a `GROUP BY` over that dashboard's rows) and then runs a second
-`INSERT` for the grouped panels that reads them again. On a compressed chunk both are transient
-decompressions of the run's segment. Nothing has been measured at production scale: the
-statement was executed only on a scratch PostgreSQL 16 with stand-ins for the Toolkit
-functions. Capture `EXPLAIN (ANALYZE, BUFFERS)` for (1) the main statistics INSERT of a run with
-no rule, against `main` — the plan must be identical; (2) the same run with one dashboard-wide
-rule — no `Sort Method: external merge Disk:`, `statistics_aggregated` still a HashAggregate (root
-CLAUDE.md #13). If the series read costs more than ~10 % of the aggregation, switch it to per-panel
-`SELECT DISTINCT metric_name … AND panel_id = $3` probes, which TimescaleDB SkipScans.
+**Origin:** v0.2.97.41, plan Task 12. Measured at 1.87 M rows, not at the ~20 M of a large
+production run: main INSERT 5.8 s with no rule, 5.4 s + 3.0 s (grouped statement, merge joins off)
+with a dashboard-wide rule over 23 % of the rows, series read 85 ms. Repeat on a production-sized
+run before rules are used widely: `EXPLAIN (ANALYZE, BUFFERS)` the grouped statement and confirm a
+Hash Join to the member arrays, no `external merge`, and that its time stays well under
+`AGGREGATION_STATEMENT_TIMEOUT_MS`. The grouped statement reads the run's whole segment (it filters
+on `test_run_id` only, by design — see the worker CLAUDE.md section), so it scales with the run, not
+with the grouped panels.
 
-### Run the Postgres-backed suites the series-grouping PR could not (P1)
+### The worker integration suite cannot run against a migrated database (P3)
 
-**Origin:** v0.2.97.41. The session that built PR A had no TimescaleDB.
+**Origin:** v0.2.97.41. `apps/worker/src/test/integration/*.integration.test.ts` create their own
+simplified tables with `CREATE TABLE IF NOT EXISTS` and never run migrations, so against a migrated
+database the statements are no-ops and the fixtures no longer match the real schema; CI never runs
+the suite (`pr-quality-gate.yml` runs `test:coverage` only). The series-grouping path was verified
+instead by replaying the pipeline's own helpers against a migrated database. Give the suite its own
+empty database (or migrations) and add the grouping case the plan's Task 3 step 6 describes.
 
-- `apps/worker`: `npm run test:integration` (CI never runs it — `pr-quality-gate.yml` runs
-  `test:coverage` only). There is no series-grouping integration case yet; add the one the plan's
-  Task 3 step 6 describes (two runs, three pods each, a rule with `avg` and member count; assert
-  per-group mean, timestamp count, non-NULL `pct_agg`, no raw pod name in `ds_metric_statistics`,
-  and an ungrouped panel byte-identical to a no-rule run, including a NULL-unit row).
-- `apps/api`: `sut-import.service.spec.ts`'s new export → delete → import round trip for both
-  tables, and the RLS suite (`npm run test:rls`), whose coverage snapshot was updated by hand.
-- `npm run preflight` end to end. PR A was pushed with `--no-verify` for this reason only.
+### A fresh install cannot migrate in one batch: 1799 fails after 1791's COMMIT (P1)
 
-### `lttb()` over a grouped series is untested (P3)
-
-**Origin:** v0.2.97.41, Task 7. `findDSMetricsForPanel`'s grouped read downsamples the combined
-series through the Toolkit's `lttb()`; the scratch database had no Toolkit, so only the plain
-grouped read and the `lttb()`-failure fallback were exercised. One run on a TimescaleDB database
-with a grouped panel over 4000 points closes it.
+**Origin:** found 2026-11-01 while building the series-grouping verification database; pre-existing.
+Both runners (`packages/shared/ormconfig.js` and `Dockerfile.migrations`) use TypeORM's default
+`transaction: 'all'`, so 1791's bare `COMMIT` ends the batch transaction and
+`1799000000000-WidenCaggRefreshWindows.ts`'s `SAVEPOINT` then fails with `SAVEPOINT can only be
+used in transaction blocks`. Existing deploys never saw it because 1791 and 1799 shipped in
+different batches. `npx typeorm migration:run -d ormconfig.js -t each` completes cleanly. Make
+both runners agree on `'each'` (or make 1799 savepoint only inside a transaction), and correct the
+comments in 1799 and in "The consolidated schema's policy loops…" below that assume `'each'`.
 
 ---
 

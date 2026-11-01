@@ -1015,6 +1015,44 @@ group name back to its members. Five things about it:
    table, ADAPT, SLO checks) already see group names and must **not** expand them. `?members=true`
    on the metric routes returns the raw per-pod series for drill-down.
 
+### Series grouping rules: who may write them, and what apply does
+
+`modules/series-grouping/` (v0.2.97.42) holds the rules API: CRUD with copy-to-other-workloads
+(`series-grouping.service.ts`), and preview, suggestions, apply and status
+(`series-grouping-insights.service.ts`). Five decisions in it are easy to undo:
+
+1. **Two capability checks, both after the 404 scoping.** Creating, editing or deleting a rule
+   needs `benchmark:manage` in the rule's organization, because a rule changes ADAPT verdicts the
+   way an SLO does (org admins and members; not viewers). `POST /series-grouping-rules/apply` needs
+   `test-run:update` on the target run, exactly like the analysis-window apply:
+   `partitionWritableCompletedRuns` skips every run outside the target's (organization, team) on
+   the premise that the caller proved write permission on that pair, and this check IS that proof.
+   An `api-key:` principal passes both, as in `TestRunsMutationService`.
+2. **A rule's organization comes from its application dashboard**, which must belong to the named
+   system AND environment and is authorized before it is inherited. Application dashboards are per
+   system and environment, shared by its workloads, so a copy to another workload of the same
+   environment keeps the dashboard id; a copy to another environment resolves it by `dashboard_uid`
+   AND `grafana_instance_id` and refuses an ambiguous match (`take: 2`). A copy never overwrites an
+   occupied slot, and one that loses a race rolls back to a SAVEPOINT inside the RLS transaction.
+3. **Apply truncates; the analysis window refuses.** `scope: 'recent'` keeps the 100 most recent
+   completed runs, where the analysis-window bulk apply refuses past 100. Partial application is
+   safe here: an unrecalculated run contributes NO group row to a baseline rather than a wrong one.
+   A still-running target is reported `running` and not enqueued — its own analysis applies the
+   rule on completion — while its baseline runs are.
+4. **Nothing in preview, suggestions or status reads `ds_metrics`.** Names come from
+   `ds_metric_statistics`, the membership table and `ds_control_group_statistics`. Every statement
+   is asserted against `\bds_metrics\b` in the specs.
+5. **Baseline runs come from the latest ADAPT conclusion's `control_group_id`**, not
+   `details.controlRuns` (written only for a failed baseline aggregation). A run with no conclusion
+   falls back to the workload's five previous completed runs; a conclusion with an EMPTY control
+   group answers `[]` rather than inventing a baseline ADAPT never used.
+
+Suggestions log one line per served suggestion (`series-grouping suggestion <run> <dash>/<panel>
+preset=… matched <b>% -> <a>% incomparable=<n>`) and rules carry `origin`; together they are how
+`SUGGEST_MAX_MATCHED_BEFORE` / `SUGGEST_MIN_MATCHED_AFTER` get tuned (design Decision 5). The test
+helper for the insights specs lives in `src/test/`, which the build excludes — beside the module it
+was compiled into `dist`.
+
 ### `hasData` probes one index per dashboard, and that inverted when the index landed
 
 `filterToDashboardsWithData` narrows a page of application dashboards to the ones
