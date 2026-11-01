@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.41] - 2026-11-01
+
+### Added
+- **You can choose how often Performance Analysis refreshes while a test is running.** A **Refresh** dropdown beside the time window offers Off, 10s, 30s, 1m and 5m, defaulting to 30s. The choice is remembered in this browser, so a tab switch or the next run keeps it; a stored value the dropdown no longer offers falls back to 30s rather than leaving the control blank.
+- **The card now says when its figures were fetched and whether they are still refreshing.** An "Updated hh:mm:ss" caption moves on every refresh, so a refresh is visible even when the numbers do not change. When auto-refresh is Off, or paused because a fetch took 5 s or more, the caption says so ("· auto-refresh off" / "· auto-refresh paused"), the LIVE tooltip agrees, and a manual refresh button appears. Picking a rate, including the one already shown, resumes a pause.
+
+### Changed
+- **Live refresh follows the rate you pick instead of the test-run WebSocket.** The card used to refetch whenever the run's record changed over the socket — in practice the load generator's ~30 s keep-alive. It now runs its own timer; Off means no automatic refetch at all.
+- **A run that finishes while you watch ends on freshly fetched figures.** Completion now triggers one more fetch of the whole-run figures, where previously a card already showing the whole run kept whatever its last refresh had fetched. (A "Last N minutes" window already switched to the whole run on completion, and still does.)
+- **An older answer can no longer overwrite a newer one.** When a window or filter change overtakes a slow transactions request, the late answer is dropped instead of replacing the newer figures. Background refreshes wait for the request still out rather than piling up behind a slow server.
+- The manual refresh button is announced by its own name to screen readers; it used to be read as an unlabelled button.
+
+### Known limits
+- **The live controls can overlap the card title on narrower windows.** They are positioned absolutely beside the centred title and do not wrap; at an ~880 px window the manual refresh button slides under the sidebar and cannot be clicked. A layout fix is planned before this release is marked ready.
+- **The collapsed card has no live indicator**, so with auto-refresh Off (which is remembered) its headline figures stay at their last fetch for the whole run.
+- Only the transactions request is ordered and timed; the virtual-users and throughput tiles still show whichever answer arrives last, and the 5 s pause measures transactions only.
+
 ## [0.2.97.40] - 2026-10-31
 
 ### Added

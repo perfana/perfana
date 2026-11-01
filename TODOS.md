@@ -3648,6 +3648,125 @@ It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that 
 
 **Effort:** S
 
+## Performance Analysis live refresh
+
+Follow-ups from the v0.2.97.41 refresh-rate dropdown. The first two block marking that PR ready.
+
+### The live header controls overflow the card title, and on narrow windows the sidebar
+
+**Priority:** P1
+**Origin:** /ship QA on 2026-11-01 (v0.2.97.41), ISSUE-001; design review cycles 1 and 3; adversarial review.
+**Why:** the live-test controls sit in a `position: absolute; right: 96` box with no wrap beside the
+centred title. v0.2.97.41 added a 90 px Refresh select and an "Updated hh:mm:ss · auto-refresh off|paused"
+caption (~200 px, `whiteSpace: nowrap`), so the group grew ~300 px. Verified live at an 882 px window:
+the group covers the title and the manual refresh button lands at x≈202 under the sidebar — a click hit
+the sidebar's Integrations link, and `elementFromPoint` at the button's centre returns a sidebar `LI`.
+An estimate (not measured — the shared `perfana-web` container was redeployed by another session) puts
+the title overlap on the 1302 px content column of a 16" MacBook with the sidebar open too, ~190 px when
+Off or paused.
+**What:** put the header in normal flex flow (title and controls in one row that wraps the controls
+below the title when they do not fit), or move the caption to a second row. Give the caption
+`fontVariantNumeric: 'tabular-nums'` so it stops nudging the controls on every tick. Verify with
+screenshots at 900, 1280, 1440 and 1728 px, sidebar open and closed, in the on / off / paused states.
+**Where:** `apps/web/app/test-runs/[id]/components/performance-analysis/PerformanceAnalysisCard.tsx`
+(header `Box` around `LiveWindowSelector`), `.../components/LiveWindowSelector.tsx`.
+
+### "Off" is remembered per browser, and the collapsed card has no live indicator
+
+**Priority:** P1
+**Origin:** adversarial review, 2026-11-01 (v0.2.97.41).
+**Why:** the picked period persists in `localStorage` for every later run. The collapsed card
+(`PerformanceAnalysisCollapsedView`) shows no LIVE / off / paused state and no manual refresh, so a user
+who chose Off once sees its headline Apdex frozen at page-load values for a whole live run with nothing
+saying so. Before v0.2.97.41 the collapsed card refreshed on every WebSocket test-run update.
+**What:** either persist only non-zero periods (Off lasts until the card remounts), or show the refresh
+state and a manual refresh on the collapsed card too. The first is a one-line change in the setter plus
+a hook test that remounts after Off.
+**Where:** `.../hooks/usePerformanceAnalysisData.ts` (`setRefreshIntervalMs`, `readStoredRefreshInterval`),
+`.../components/PerformanceAnalysisCollapsedView.tsx`.
+
+### Live refresh load and ordering gaps left by v0.2.97.41
+
+**Priority:** P2
+**Origin:** /ship review cycles 1-3 and adversarial review, 2026-11-01 (user decisions D7, D10, D11).
+**Why:** each gap is bounded or pre-existing, but the user-picked cadence (as fast as 10 s) makes them
+more frequent than under the old ~30 s WebSocket trigger.
+**What:**
+- Only `/transactions` has the latest-request guard. `/virtual-users`, `/throughput` and the threshold
+  still write whichever answer arrives last — after a ramp-up toggle, or at run completion when a slow
+  last-tick answer lands after the completion refetch (then nothing corrects it until reload). Give
+  each refresh pass one generation token that all four fetches check.
+- The ≥5 s pause times `/transactions` only; `/virtual-users` and `/throughput` (the multi-second reads
+  in root CLAUDE.md #34) are not timed and not deduped, so they can overlap at 10 s. The 5 s threshold
+  is also absolute, ~50% duty cycle per viewer at 10 s.
+- The timer runs while the tab is hidden and while the card is collapsed. Skip ticks while
+  `document.visibilityState !== 'visible'` and refresh once on return.
+- A `/transactions` request that never settles keeps the background gate closed until it does
+  (bounded by the API's 300 s `query_timeout`); add `AbortSignal.timeout(~60 s)` and abort superseded
+  requests (they are dropped, not cancelled).
+- A failed background refresh blanks the table (`setTransactions([])`) and nulls the stats; keep the
+  last good figures like `fetchSamplesFor` does.
+- Editing the analysis window on a live run no longer refetches immediately; refetch when
+  `analysis_start_offset` / `analysis_end_offset` change on the `testRun` prop.
+- `sortedTransactions` / `scenarioGroups` are rebuilt every render; memoize them.
+**Where:** `.../hooks/usePerformanceAnalysisData.ts`.
+
+### Completion and resume can still show stale figures
+
+**Priority:** P2
+**Origin:** /ship red-team cycles 2-3 and adversarial review, 2026-11-01.
+**Why:** v0.2.97.41 refetches once on completion and resumes the timer on a pick, but:
+- The completion refetch fires the instant `completed` flips, before late `requests_raw` rows
+  (up to ~36 s) and the analyze rollup land; nothing fetches after. Schedule one more refetch
+  (~60 s later, or when the analysis result arrives).
+- Resuming from a pause (or picking a rate) does not fetch at once; the first refresh comes a full
+  period later (5 min at 5m).
+- An expanded row whose sampler fetch is still out at completion keeps pre-completion figures:
+  `inFlightSamplesRef` skips the completion refetch, and it is keyed on name only, ignoring the
+  samples epoch, so a re-expand during a window change can show an empty request table.
+- If the browser misses the completion WebSocket event (sleep, API restart), the card polls on, and a
+  "Last N minutes" window drains to empty after the run. Refetch the run on socket reconnect
+  (`useTestRunRealtime` re-subscribes but never refetches).
+**Where:** `.../hooks/usePerformanceAnalysisData.ts`, `apps/web/app/test-runs/[id]/hooks/useTestRunRealtime.ts`.
+
+### Live refresh polish and accessibility
+
+**Priority:** P3
+**Origin:** /ship review cycle 3, 2026-11-01 (user decision D11).
+**What:**
+- The caption gains `role="status"` in the same render as its "· auto-refresh paused" text, so the
+  entry into paused is likely not announced. Keep one always-mounted live region whose text changes
+  only with the refresh state.
+- The paused copy (tooltip, button label, caption) says why but not how to resume.
+- The LIVE dot keeps pulsing when refresh is Off or paused, and ignores `prefers-reduced-motion`.
+- The manual refresh button drops keyboard focus because it disables itself while loading
+  (`aria-disabled` instead).
+- The comment above the manual button's `aria-label` gives the wrong reason (with `describeChild` the
+  tooltip is a description, so the icon button needs its own name).
+- `autoRefreshDisabled` now means "paused"; rename it `autoRefreshPaused`, or return `refreshState` from
+  the hook so the card and the timer guard cannot drift.
+- One comment still says expanded rows update "in realtime"; the 5 s threshold is spelled out in two
+  user-facing strings; `REFRESH_OPTIONS` is a mutable exported array (`as const`); `lastUpdatedAt` is
+  not reset when the run changes; a superseded response body is never cancelled.
+**Where:** `.../components/LiveWindowSelector.tsx`, `.../PerformanceAnalysisCard.tsx`, `.../hooks/usePerformanceAnalysisData.ts`.
+
+### Tests the live refresh review proposed but did not add
+
+**Priority:** P3
+**Origin:** /ship coverage reassessment and testing review, cycle 3, 2026-11-01 (both generation passes
+were used). Each is correct code without a test; mutations noted survive today.
+**What:**
+- Only the newest request re-opens the background gate: moving `latestTransactionsSettledRef.current = true`
+  above the stale check passes all tests. A ready stub: mount request 3 s, window change at 1 s
+  answering at 15 s, 10 s period; expect 2 requests and `['call-2']`.
+- Off outranks paused (pick Off, slow manual refresh): swapping the `refreshState` ternary passes all tests.
+- The gate re-opens after the latest request *fails* (a fast 502 on a tick, then a 200 on the next).
+- The post-json stale check: delay `json()` (not `fetch`) on the older request, then change the window.
+- A stored Off (`'0'`) round-trips (guards against a `Number(raw) || DEFAULT` rewrite).
+- The caption carries no `role`/`aria-live` while refresh is on.
+**Where:** `.../hooks/__tests__/usePerformanceAnalysisData.test.ts`,
+`apps/web/__tests__/app/test-runs/performance-analysis/PerformanceAnalysisCard.test.tsx`.
+
 ## Completed
 
 ### RELEASE GATE: multi-org tenancy
