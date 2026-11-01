@@ -1894,6 +1894,61 @@ CREATE TABLE public.ds_metric_collection_status (
 
 
 --
+-- Name: ds_metric_series_groups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ds_metric_series_groups (
+    test_run_id character varying(255) NOT NULL,
+    application_dashboard_id uuid NOT NULL,
+    panel_id integer NOT NULL,
+    metric_name character varying(255) NOT NULL,
+    group_name character varying(255) NOT NULL,
+    dashboard_label character varying(255),
+    panel_title character varying(255),
+    aggregation character varying(8) NOT NULL,
+    avg_members real,
+    rule_id uuid,
+    rule_hash character varying(16) NOT NULL,
+    organization_id uuid,
+    team_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: series_grouping_rules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.series_grouping_rules (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    system_under_test_id uuid NOT NULL,
+    test_environment character varying(255) NOT NULL,
+    workload character varying(255) NOT NULL,
+    application_dashboard_id uuid NOT NULL,
+    panel_id integer,
+    preset character varying(32) NOT NULL,
+    pattern text,
+    replacement text DEFAULT ''::text NOT NULL,
+    aggregation character varying(8) DEFAULT 'avg'::character varying NOT NULL,
+    track_member_count boolean DEFAULT false NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    origin character varying(16) DEFAULT 'manual'::character varying NOT NULL,
+    organization_id uuid NOT NULL,
+    team_id uuid,
+    created_by character varying(255),
+    updated_by character varying(255),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_series_grouping_rules_aggregation CHECK (((aggregation)::text = ANY ((ARRAY['avg'::character varying, 'sum'::character varying, 'max'::character varying])::text[]))),
+    CONSTRAINT ck_series_grouping_rules_custom_pattern CHECK ((((preset)::text = 'custom'::text) = (pattern IS NOT NULL))),
+    CONSTRAINT ck_series_grouping_rules_origin CHECK (((origin)::text = ANY ((ARRAY['manual'::character varying, 'suggestion'::character varying, 'copy'::character varying])::text[]))),
+    CONSTRAINT ck_series_grouping_rules_preset CHECK (((preset)::text = ANY ((ARRAY['k8s-pod'::character varying, 'k8s-daemonset'::character varying, 'ip-port'::character varying, 'trailing-id'::character varying, 'custom'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY public.series_grouping_rules FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: ds_metric_statistics; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3329,6 +3384,30 @@ ALTER TABLE ONLY public.test_run_configs
 
 ALTER TABLE ONLY public.deep_links
     ADD CONSTRAINT "PK_4c5c1e10a902f951e58475b50f9" PRIMARY KEY (id);
+
+
+--
+-- Name: ds_metric_series_groups pk_ds_metric_series_groups; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_metric_series_groups
+    ADD CONSTRAINT pk_ds_metric_series_groups PRIMARY KEY (test_run_id, application_dashboard_id, panel_id, metric_name);
+
+
+--
+-- Name: series_grouping_rules series_grouping_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.series_grouping_rules
+    ADD CONSTRAINT series_grouping_rules_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: series_grouping_rules uq_series_grouping_rules_slot; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.series_grouping_rules
+    ADD CONSTRAINT uq_series_grouping_rules_slot UNIQUE NULLS NOT DISTINCT (system_under_test_id, test_environment, workload, application_dashboard_id, panel_id);
 
 
 --
@@ -5522,6 +5601,41 @@ CREATE UNIQUE INDEX uniq_ds_control_groups_cgid ON public.ds_control_groups USIN
 
 
 --
+-- Name: idx_ds_metric_series_groups_app_dashboard; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ds_metric_series_groups_app_dashboard ON public.ds_metric_series_groups USING btree (application_dashboard_id);
+
+
+--
+-- Name: idx_ds_metric_series_groups_group; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ds_metric_series_groups_group ON public.ds_metric_series_groups USING btree (test_run_id, application_dashboard_id, panel_id, group_name);
+
+
+--
+-- Name: idx_ds_metric_series_groups_label; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ds_metric_series_groups_label ON public.ds_metric_series_groups USING btree (test_run_id, dashboard_label, panel_title, panel_id);
+
+
+--
+-- Name: idx_ds_metric_series_groups_rule; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ds_metric_series_groups_rule ON public.ds_metric_series_groups USING btree (rule_id);
+
+
+--
+-- Name: idx_series_grouping_rules_app_dashboard; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_series_grouping_rules_app_dashboard ON public.series_grouping_rules USING btree (application_dashboard_id);
+
+
+--
 -- Name: uniq_ds_metric_statistics; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6006,6 +6120,38 @@ ALTER TABLE ONLY public.generated_reports
 
 ALTER TABLE ONLY public.benchmarks
     ADD CONSTRAINT "FK_2e765498731db929f6c706dc4ab" FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id);
+
+
+--
+-- Name: ds_metric_series_groups ds_metric_series_groups_application_dashboard_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_metric_series_groups
+    ADD CONSTRAINT ds_metric_series_groups_application_dashboard_id_fkey FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ds_metric_series_groups ds_metric_series_groups_rule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ds_metric_series_groups
+    ADD CONSTRAINT ds_metric_series_groups_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES public.series_grouping_rules(id) ON DELETE SET NULL;
+
+
+--
+-- Name: series_grouping_rules series_grouping_rules_application_dashboard_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.series_grouping_rules
+    ADD CONSTRAINT series_grouping_rules_application_dashboard_id_fkey FOREIGN KEY (application_dashboard_id) REFERENCES public.application_dashboards(id) ON DELETE CASCADE;
+
+
+--
+-- Name: series_grouping_rules series_grouping_rules_system_under_test_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.series_grouping_rules
+    ADD CONSTRAINT series_grouping_rules_system_under_test_id_fkey FOREIGN KEY (system_under_test_id) REFERENCES public.systems_under_test(id) ON DELETE CASCADE;
 
 
 --
@@ -6533,6 +6679,13 @@ ALTER TABLE ONLY public.test_run_events
 --
 
 ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: series_grouping_rules; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.series_grouping_rules ENABLE ROW LEVEL SECURITY;
+
 
 --
 -- Name: application_dashboards; Type: ROW SECURITY; Schema: public; Owner: -
@@ -7294,6 +7447,34 @@ CREATE POLICY rls_pyroscope_instances_select ON public.pyroscope_instances FOR S
 --
 
 CREATE POLICY rls_pyroscope_instances_update ON public.pyroscope_instances FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: series_grouping_rules rls_series_grouping_rules_delete; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_series_grouping_rules_delete ON public.series_grouping_rules FOR DELETE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: series_grouping_rules rls_series_grouping_rules_insert; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_series_grouping_rules_insert ON public.series_grouping_rules FOR INSERT WITH CHECK (public.is_global_admin() OR public.can_access_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: series_grouping_rules rls_series_grouping_rules_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_series_grouping_rules_select ON public.series_grouping_rules FOR SELECT USING (public.can_access_resource(organization_id, team_id, (created_by)::text));
+
+
+--
+-- Name: series_grouping_rules rls_series_grouping_rules_update; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY rls_series_grouping_rules_update ON public.series_grouping_rules FOR UPDATE USING (public.can_modify_resource(organization_id, team_id, (created_by)::text));
 
 
 --
@@ -8099,6 +8280,22 @@ GRANT SELECT,USAGE ON SEQUENCE public.ds_control_groups_id_seq TO perfana_system
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metric_collection_status TO perfana_app;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metric_collection_status TO perfana_system;
+
+
+--
+-- Name: TABLE ds_metric_series_groups; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metric_series_groups TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ds_metric_series_groups TO perfana_system;
+
+
+--
+-- Name: TABLE series_grouping_rules; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.series_grouping_rules TO perfana_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.series_grouping_rules TO perfana_system;
 
 
 --
