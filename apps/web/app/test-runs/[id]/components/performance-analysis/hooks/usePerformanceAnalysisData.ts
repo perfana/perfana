@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useContext } from 'react';
+import { TabActiveContext } from '../../../context/TabActiveContext';
 import { authenticatedFetch } from '@/lib/api';
 import { TestRun } from '@/types/test-runs';
 import {
@@ -349,13 +350,20 @@ export function usePerformanceAnalysisData({
   // runs, where the live auto-refresh timer no longer runs.
   // The interval is cleared on unmount AND when rollupPending flips to null
   // (effect re-runs, cleanup tears down the old interval, the new run early-returns).
+  // Paused while the Results tab is hidden (it stays mounted). On being shown again it checks at
+  // once: the rollup may have finished meanwhile, and the next tick is up to 5s away.
+  const tabActive = useContext(TabActiveContext);
+  const wasTabActive = useRef(tabActive);
   useEffect(() => {
-    if (!rollupPending) return;
+    const resumed = tabActive && !wasTabActive.current;
+    wasTabActive.current = tabActive;
+    if (!rollupPending || !tabActive) return;
+    if (resumed) fetchTransactions();
     const interval = setInterval(() => {
       if (latestTransactionsSettledRef.current) fetchTransactions();
     }, 5000);
     return () => clearInterval(interval);
-  }, [rollupPending, fetchTransactions]);
+  }, [rollupPending, tabActive, fetchTransactions]);
 
   // When the time window or ramp-up filter changes, invalidate any cached sampler
   // data because it was fetched for different parameters and is now stale. The

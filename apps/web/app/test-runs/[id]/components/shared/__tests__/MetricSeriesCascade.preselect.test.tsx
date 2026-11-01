@@ -4,9 +4,10 @@
  * level's options arrive, then never again.
  */
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import { useSearchParams } from 'next/navigation';
 import MetricSeriesCascade from '../MetricSeriesCascade';
+import { CardLinkRequestContext, type CardLinkRequest } from '../metric-card-links';
 import type { ApplicationDashboard, PanelOption, SeriesOption } from '../metric-options';
 
 jest.mock('../metric-options', () => ({
@@ -127,7 +128,8 @@ it('gives up at the first level it cannot match, and touches nothing on a link f
 });
 
 it('preselects once: clearing and re-picking after the link has been applied selects nothing by itself', async () => {
-  // A link is consumed per page load (module state), so this one must differ from the first test's.
+  // Outside a page provider the consumed set is the context default, shared by every test in this
+  // file, so this link must differ from the first test's.
   linkTo('compare', perf.dashboard_label, 101, 'T01');
   const { onAddSeries } = setup({ allDashboards: [perf] });
   await waitFor(() => expect(onAddSeries).toHaveBeenCalled());
@@ -311,4 +313,142 @@ it('leaves a wildcard link under the ceiling untouched, and stays quiet', async 
   await waitFor(() => expect(onAddSeries).toHaveBeenCalled());
   expect((onAddSeries.mock.calls[0]![0] as unknown[]).length).toBe(50);
   expect(showToast).not.toHaveBeenCalled();
+});
+
+it('keys a URL link by run, so the same link on another run walks again', async () => {
+  // Value: protects=a URL link's consumed key carries the run id; fails_when=the url key drops the run id; why_new=without a page provider the default consumed set is shared, so the run in the key is all that separates runs; seam=none; no_claim=prev/next itself (the page remounts with a fresh set)
+  const again: ApplicationDashboard = {
+    id: 'dash-again', dashboard_label: 'Performance test metrics Again', dashboard_name: 'Again', dashboard_uid: 'again-uid', source_type: 'performance_test',
+  };
+  const rt = panelOf(again, 101, 'Transaction RT');
+  (fetchPanelsForDashboards as jest.Mock).mockResolvedValue([[rt]]);
+  (fetchSeriesForPanels as jest.Mock).mockResolvedValue([seriesOf(rt, 'T01')]);
+  linkTo('graphs', again.dashboard_label, 101, 'T01');
+  const pick = [{ dashboard: again, panel: rt, metricName: 'T01' }];
+
+  const onRun1 = jest.fn();
+  const run1 = render(cascade(onRun1, { card: 'graphs', allDashboards: [again], testRun: { test_run_id: 'run-1' } as never }));
+  await waitFor(() => expect(onRun1).toHaveBeenCalledWith(pick));
+  run1.unmount();
+
+  const onRun2 = jest.fn();
+  render(cascade(onRun2, { card: 'graphs', allDashboards: [again], testRun: { test_run_id: 'run-2' } as never }));
+  await waitFor(() => expect(onRun2).toHaveBeenCalledWith(pick));
+});
+
+it('walks a URL link that arrives while mounted', async () => {
+  // A client navigation to new search params changes the URL under a picker that is already up.
+  const onAddSeries = jest.fn();
+  const { rerender } = render(cascade(onAddSeries, { card: 'graphs' }));
+  await screen.findByText('2 available');
+  expect(fetchPanelsForDashboards).not.toHaveBeenCalled();
+
+  linkTo('graphs', perf.dashboard_label, 101, 'T02');
+  rerender(cascade(onAddSeries, { card: 'graphs' }));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledWith([{ dashboard: perf, panel: rtAvg, metricName: 'T02' }]));
+});
+
+// Lets a walk's chained fetches settle, so a re-walk that should NOT happen would have landed.
+const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+
+it('keeps its picker when a link for another card replaces its own', async () => {
+  // Value: protects=a link into another card does not remount this card's picker; fails_when=the wrapper keys on the current link alone (null for another card); why_new=found by maintainability+testing review; seam=none; no_claim=what the other card does
+  const run = { test_run_id: 'run-keep' } as never;
+  linkTo('compare', perf.dashboard_label, 101, 'T02');
+  const onAddSeries = jest.fn();
+  const { rerender } = render(cascade(onAddSeries, { card: 'compare', testRun: run }));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(1));
+
+  // The URL's link moves to another card. A remount would show an empty picker.
+  linkTo('graphs', jvm.dashboard_label, 5, 'used');
+  rerender(cascade(onAddSeries, { card: 'compare', testRun: run }));
+  await flush();
+  expect(screen.getAllByText('2 available across 1 dashboard').length).toBeGreaterThan(0);
+  expect(onAddSeries).toHaveBeenCalledTimes(1);
+});
+
+it('walks every in-page "Open in …" request once: A, then B, then A again after its removal', async () => {
+  // Value: protects=each explicit click adds its series (A->B->A, re-open after removal) while a re-render or another card's request does not; fails_when=the wrapper stops keying on the request id or the page-scoped consumed set is lost; why_new=testing review cycle 2: the URL re-arm missed A->B->A; seam=none; no_claim=the page minting the ids (integration test covers the click)
+  const consumed = new Set<string>();
+  const onAddSeries = jest.fn();
+  const at = (request: CardLinkRequest | null) => (
+    <CardLinkRequestContext.Provider value={{ request, consumed }}>
+      {cascade(onAddSeries, { card: 'graphs', testRun: { test_run_id: 'run-requests' } as never })}
+    </CardLinkRequestContext.Provider>
+  );
+  const A = { dashboardLabel: perf.dashboard_label, panelId: 101, metricName: 'T01' };
+  const B = { dashboardLabel: perf.dashboard_label, panelId: 101, metricName: 'T02' };
+
+  const { rerender } = render(at({ card: 'graphs', ref: A, id: 1 }));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(1));
+  rerender(at({ card: 'graphs', ref: A, id: 1 }));
+  await flush();
+  expect(onAddSeries).toHaveBeenCalledTimes(1);
+
+  // A request for another card leaves this picker (and its walk) alone.
+  rerender(at({ card: 'compare', ref: B, id: 2 }));
+  await flush();
+  expect(onAddSeries).toHaveBeenCalledTimes(1);
+  expect(screen.getAllByText('2 available across 1 dashboard').length).toBeGreaterThan(0);
+
+  rerender(at({ card: 'graphs', ref: B, id: 3 }));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(2));
+  rerender(at({ card: 'graphs', ref: A, id: 4 }));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(3));
+  expect(onAddSeries.mock.calls.map((c) => c[0][0].metricName)).toEqual(['T01', 'T02', 'T01']);
+});
+
+it('never walks a link twice on one page: a collapse and re-expand (remount) skips it, a fresh page walks it', async () => {
+  // Value: protects=the page-scoped consumed set stops a remount re-adding a series the user removed, on both arms; fails_when=disarm stops recording the key or the preselect ref stops checking it; why_new=testing review cycle 3: no test remounted under a walked key; seam=none; no_claim=the page creating one set per page instance
+  const run = { test_run_id: 'run-remount' } as never;
+  const request: CardLinkRequest = { card: 'graphs', ref: { dashboardLabel: perf.dashboard_label, panelId: 101, metricName: 'T01' }, id: 1 };
+  const onAddSeries = jest.fn();
+  const tree = (value: { request: CardLinkRequest | null; consumed: Set<string> }) => (
+    <CardLinkRequestContext.Provider value={value}>{cascade(onAddSeries, { card: 'graphs', testRun: run })}</CardLinkRequestContext.Provider>
+  );
+
+  // Request arm.
+  const page = { request, consumed: new Set<string>() };
+  const first = render(tree(page));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(1));
+  first.unmount();
+  const second = render(tree(page));
+  await flush();
+  expect(onAddSeries).toHaveBeenCalledTimes(1);
+  second.unmount();
+  render(tree({ request, consumed: new Set() }));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(2));
+  cleanup();
+
+  // URL arm (a landing ?card= link, before any in-page click).
+  linkTo('graphs', perf.dashboard_label, 101, 'T02');
+  const landing = { request: null, consumed: new Set<string>() };
+  const third = render(tree(landing));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(3));
+  third.unmount();
+  render(tree(landing));
+  await flush();
+  expect(onAddSeries).toHaveBeenCalledTimes(3);
+});
+
+it('lets the first in-page click win over the landing URL link, and keeps the picker for other cards\' clicks', async () => {
+  // Value: protects=a landing ?card= link counts only until the first in-page request; fails_when=the URL arm is preferred over a request (later clicks would be ignored); why_new=testing review cycle 3: no test combined the two; seam=none; no_claim=none beyond protects
+  const run = { test_run_id: 'run-precedence' } as never;
+  const consumed = new Set<string>();
+  const onAddSeries = jest.fn();
+  const tree = (request: CardLinkRequest | null) => (
+    <CardLinkRequestContext.Provider value={{ request, consumed }}>{cascade(onAddSeries, { card: 'graphs', testRun: run })}</CardLinkRequestContext.Provider>
+  );
+  linkTo('graphs', perf.dashboard_label, 101, 'T01');
+  const { rerender } = render(tree(null));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(1));
+
+  rerender(tree({ card: 'graphs', ref: { dashboardLabel: perf.dashboard_label, panelId: 101, metricName: 'T02' }, id: 7 }));
+  await waitFor(() => expect(onAddSeries).toHaveBeenCalledTimes(2));
+  expect(onAddSeries).toHaveBeenLastCalledWith([{ dashboard: perf, panel: rtAvg, metricName: 'T02' }]);
+
+  rerender(tree({ card: 'compare', ref: { dashboardLabel: perf.dashboard_label, panelId: 101, metricName: 'T01' }, id: 8 }));
+  await flush();
+  expect(onAddSeries).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByText('2 available across 1 dashboard').length).toBeGreaterThan(0);
 });

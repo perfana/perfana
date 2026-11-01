@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Box, CircularProgress, Alert, Snackbar, Tabs, Tab } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
@@ -12,6 +12,9 @@ import {
   useConfigurationStatus,
   useRelatedTestRuns,
   scrollToCard,
+  TAB,
+  tabOfCard,
+  type TabIndex,
 } from './hooks';
 import { useEventsData } from './components/events/hooks';
 import { useHasDeepLinks } from './components/deep-links/hooks';
@@ -41,17 +44,61 @@ import PendingReports from './components/reporting/PendingReports';
 import { JobProgressIndicator } from '@/components/job-progress/JobProgressIndicator';
 import { GenerateReportDialog } from '@/components/reports/report-generation/GenerateReportDialog';
 import { HtmlReportViewerModal } from '@/components/reports/HtmlReportViewerModal';
-import { LINKABLE_CARDS, LinkableCard, PerformanceAnalysisDrillDownContext } from './components/shared/metric-card-links';
+import {
+  CardLinkRequest,
+  CardLinkRequestContext,
+  LINKABLE_CARDS,
+  LinkableCard,
+  MetricSeriesRef,
+  OpenCardLinkContext,
+  PerformanceAnalysisDrillDownContext,
+} from './components/shared/metric-card-links';
+import { TabActiveContext } from './context/TabActiveContext';
+import { TabErrorBoundary } from './components/shared/TabErrorBoundary';
+import { getPlotly } from '@/lib/plotly';
+
+const TAB_PANEL_IDS: Record<TabIndex, string> = {
+  [TAB.results]: 'tabpanel-results',
+  [TAB.rca]: 'tabpanel-rca',
+  [TAB.reporting]: 'tabpanel-reporting',
+};
+
+/**
+ * A hidden tab's subtree does not re-render: it keeps the props it last rendered with, so a live
+ * run's updates, a keystroke on another tab or a toast cost it nothing, and it catches up the
+ * moment it is shown. State inside its cards still updates; their timers check TabActiveContext.
+ * `active` exists for the comparator only. A Provider whose value must change while the tab is
+ * hidden (TabActiveContext, CardLinkRequestContext) must wrap TabBody, never sit inside it:
+ * context crosses the memo, but a frozen subtree's own Provider never gets a new value.
+ */
+const TabBody = React.memo(
+  function TabBody({ children }: { active: boolean; children: React.ReactNode }) {
+    return <>{children}</>;
+  },
+  (_prev, next) => !next.active,
+);
 
 export default function TestRunDetailsPage() {
   const params = useParams();
   const testRunId = params.id as string;
 
   // Tab state
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState<TabIndex>(TAB.results);
+  // A tab mounts on first visit and then stays mounted (hidden), so its cards keep their own
+  // state — added series, selected runs, filters — across tab switches. Recorded below the
+  // loading return: a ?card= landing switches tabs while the spinner shows, and must not mount
+  // the Results tab it never displayed.
+  const [visitedTabs, setVisitedTabs] = useState<TabIndex[]>([]);
+  // A chart in a hidden panel keeps whatever size it had; relayout the ones just shown. Only
+  // that panel's: a window resize would wake every chart in every kept-mounted tab.
+  useEffect(() => {
+    document.querySelectorAll(`#${TAB_PANEL_IDS[activeTab]} .js-plotly-plot`).forEach((gd) => {
+      getPlotly()?.Plots.resize(gd as HTMLElement).catch(() => undefined);
+    });
+  }, [activeTab]);
+  // Prev/next changes the [id] segment, which Next 15 keys the page on, so the page remounts with
+  // fresh state: drill-down filters, visited tabs and link requests never carry over to another run.
   const [perfAnalysisFilters, setPerfAnalysisFilters] = useState<DrillDownFilters | undefined>(undefined);
-  // Prev/next keeps the page mounted; a drill-down must not re-filter the next run.
-  useEffect(() => setPerfAnalysisFilters(undefined), [testRunId]);
 
   // Toast notification state
   const [snackbarOpen, setSnackbarOpen] = useState(false);
@@ -76,8 +123,10 @@ export default function TestRunDetailsPage() {
     expansionState,
     anomalyState,
     drillDownFilters,
+    drillDownSeq,
     toggleExpansion,
     setExpansion,
+    collapseTab,
     setAnomalyActiveTab,
     setAnomalyConclusionFilter,
     handleAnomalyExpand,
@@ -158,23 +207,37 @@ export default function TestRunDetailsPage() {
   const onDrillDownToPerformanceAnalysis = useCallback(
     (filters: DrillDownFilters) => {
       setPerfAnalysisFilters(filters);
-      const needsTabSwitch = activeTab !== 0;
-      setActiveTab(0);
+      const needsTabSwitch = activeTab !== TAB.results;
+      setActiveTab(TAB.results);
       setExpansion('performanceExpanded', true);
       scrollToCard('performance-analysis-card-expanded', needsTabSwitch ? { delay: 150, maxRetries: 8 } : undefined);
     },
     [activeTab, setExpansion]
   );
 
-  // A row's "Open in Graphs / Compare / Trends" link lands here with ?card=…; the card's
-  // cascade reads the series itself.
+  // A row's "Open in Graphs / Compare / Trends" link, opened in a new tab, lands here with
+  // ?card=…; the card's cascade reads the series itself. A plain click on this page never
+  // navigates: openCardLink hands the series to the card instead (CardLinkRequestContext).
+  const revealCard = useCallback((card: LinkableCard) => {
+    setActiveTab(tabOfCard(`${card}Expanded`));
+    setExpansion(`${card}Expanded`, true);
+    scrollToCard(`${card}-card-expanded`, { delay: 150, maxRetries: 8 });
+  }, [setExpansion]);
   const linkedCard = useSearchParams().get('card');
   useEffect(() => {
-    if (!LINKABLE_CARDS.includes(linkedCard as LinkableCard)) return;
-    setActiveTab(2);
-    setExpansion(`${linkedCard as LinkableCard}Expanded`, true);
-    scrollToCard(`${linkedCard}-card-expanded`, { delay: 150, maxRetries: 8 });
-  }, [linkedCard, setExpansion]);
+    if (LINKABLE_CARDS.includes(linkedCard as LinkableCard)) revealCard(linkedCard as LinkableCard);
+  }, [linkedCard, revealCard]);
+  const [cardLinkRequest, setCardLinkRequest] = useState<CardLinkRequest | null>(null);
+  const consumedCardLinks = useRef(new Set<string>()).current;
+  const lastCardLinkRequestId = useRef(0);
+  const cardLinkContext = useMemo(() => ({ request: cardLinkRequest, consumed: consumedCardLinks }), [cardLinkRequest, consumedCardLinks]);
+  const openCardLink = useCallback((card: LinkableCard, ref: MetricSeriesRef) => {
+    setCardLinkRequest({ card, ref, id: ++lastCardLinkRequestId.current });
+    revealCard(card);
+  }, [revealCard]);
+  // ReportCard's refresh effect depends on this callback, so an inline arrow refetched the
+  // report summary on every page render once a report had settled.
+  const onReportSnackbar = useCallback((message: string) => showToast(message), [showToast]);
 
   // Anomaly expansion handler
   const onAnomalyExpand = useCallback(
@@ -212,6 +275,8 @@ export default function TestRunDetailsPage() {
     );
   }
 
+  if (!visitedTabs.includes(activeTab)) setVisitedTabs([...visitedTabs, activeTab]);
+
   const gridStyle = {
     display: 'grid',
     gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(3, minmax(0, 1fr))' },
@@ -228,6 +293,8 @@ export default function TestRunDetailsPage() {
 
   return (
     <PerformanceAnalysisDrillDownContext.Provider value={onDrillDownToPerformanceAnalysis}>
+    <OpenCardLinkContext.Provider value={openCardLink}>
+    <CardLinkRequestContext.Provider value={cardLinkContext}>
     <Box sx={{ backgroundColor: 'background.default', pb: 4 }}>
       {/* Deletion status banner */}
       {testRun.deletion_status === 'queued' || testRun.deletion_status === 'deleting' ? (
@@ -272,15 +339,20 @@ export default function TestRunDetailsPage() {
             aria-label="Test run details tabs"
             sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.95rem', minHeight: 48, px: 3 }, '& .Mui-selected': { color: 'primary.main' } }}
           >
-            <Tab label="Results" id="tab-results" aria-controls="tabpanel-results" />
-            <Tab label="Root Cause Analysis" id="tab-rca" aria-controls="tabpanel-rca" />
-            <Tab label="Reporting" id="tab-reporting" aria-controls="tabpanel-reporting" />
+            {/* onChange skips a click on the active tab; onClick then sees the pre-switch activeTab, so only a re-click collapses.
+                detail === 1: a single pointer click. A double-click's second click (2) and keyboard activation (0) never collapse. */}
+            <Tab label="Results" id="tab-results" aria-controls={TAB_PANEL_IDS[TAB.results]} onClick={(e) => e.detail === 1 && activeTab === TAB.results && collapseTab(TAB.results)} />
+            <Tab label="Root Cause Analysis" id="tab-rca" aria-controls={TAB_PANEL_IDS[TAB.rca]} onClick={(e) => e.detail === 1 && activeTab === TAB.rca && collapseTab(TAB.rca)} />
+            <Tab label="Reporting" id="tab-reporting" aria-controls={TAB_PANEL_IDS[TAB.reporting]} onClick={(e) => e.detail === 1 && activeTab === TAB.reporting && collapseTab(TAB.reporting)} />
           </Tabs>
         </Box>
 
         {/* Results Tab */}
-        <Box role="tabpanel" hidden={activeTab !== 0} id="tabpanel-results" aria-labelledby="tab-results">
-          {activeTab === 0 && (
+        <Box role="tabpanel" hidden={activeTab !== TAB.results} id={TAB_PANEL_IDS[TAB.results]} aria-labelledby="tab-results">
+          {visitedTabs.includes(TAB.results) && (
+            <TabActiveContext.Provider value={activeTab === TAB.results}>
+            <TabErrorBoundary key={testRunId}>
+            <TabBody active={activeTab === TAB.results}>
             <Box sx={gridStyle}>
               <Box sx={cardBoxStyle(expansionState.expanded)}>
                 <TestRunDetailsCard
@@ -331,28 +403,40 @@ export default function TestRunDetailsPage() {
                 </Box>
               )}
             </Box>
+            </TabBody>
+            </TabErrorBoundary>
+            </TabActiveContext.Provider>
           )}
         </Box>
 
         {/* Root Cause Analysis Tab */}
-        <Box role="tabpanel" hidden={activeTab !== 1} id="tabpanel-rca" aria-labelledby="tab-rca">
-          {activeTab === 1 && (
+        <Box role="tabpanel" hidden={activeTab !== TAB.rca} id={TAB_PANEL_IDS[TAB.rca]} aria-labelledby="tab-rca">
+          {visitedTabs.includes(TAB.rca) && (
+            <TabActiveContext.Provider value={activeTab === TAB.rca}>
+            <TabErrorBoundary key={testRunId}>
+            <TabBody active={activeTab === TAB.rca}>
             <Box sx={gridStyle}>
-              <DynatraceCard testRun={testRun} expanded={expansionState.dynatraceExpanded} onExpand={() => { const wasCollapsed = !expansionState.dynatraceExpanded; toggleExpansion('dynatraceExpanded'); if (wasCollapsed) scrollToCard('dynatrace-card-expanded'); }} initialFilters={drillDownFilters.dynatrace} onConfigurationStatus={setHasDynatrace} />
-              <DistributedTracingCard testRun={testRun as unknown as Parameters<typeof DistributedTracingCard>[0]['testRun']} expanded={expansionState.distributedTracingExpanded} onExpand={() => { const wasCollapsed = !expansionState.distributedTracingExpanded; toggleExpansion('distributedTracingExpanded'); if (wasCollapsed) scrollToCard('distributed-tracing-card-expanded'); }} initialFilters={drillDownFilters.distributedTracing} onConfigurationStatus={setHasDistributedTracing} />
-              {(testRun?.systems_under_test?.pyroscope_instance_id || testRun?.system_under_test?.pyroscope_instance_id) && (
+              <DynatraceCard key={`dynatrace-${drillDownSeq.dynatrace}`} testRun={testRun} expanded={expansionState.dynatraceExpanded} onExpand={() => { const wasCollapsed = !expansionState.dynatraceExpanded; toggleExpansion('dynatraceExpanded'); if (wasCollapsed) scrollToCard('dynatrace-card-expanded'); }} initialFilters={drillDownFilters.dynatrace} onConfigurationStatus={setHasDynatrace} />
+              <DistributedTracingCard key={`tracing-${drillDownSeq.distributedTracing}`} testRun={testRun as unknown as Parameters<typeof DistributedTracingCard>[0]['testRun']} expanded={expansionState.distributedTracingExpanded} onExpand={() => { const wasCollapsed = !expansionState.distributedTracingExpanded; toggleExpansion('distributedTracingExpanded'); if (wasCollapsed) scrollToCard('distributed-tracing-card-expanded'); }} initialFilters={drillDownFilters.distributedTracing} onConfigurationStatus={setHasDistributedTracing} />
+              {(testRun.systems_under_test?.pyroscope_instance_id || testRun.system_under_test?.pyroscope_instance_id) && (
                 <PyroscopeCard testRun={testRun as unknown as Parameters<typeof PyroscopeCard>[0]['testRun']} expanded={expansionState.pyroscopeExpanded} onExpand={() => { const wasCollapsed = !expansionState.pyroscopeExpanded; toggleExpansion('pyroscopeExpanded'); if (wasCollapsed) scrollToCard('pyroscope-card-expanded'); }} />
               )}
               <Box sx={cardBoxStyle(expansionState.awrExpanded)}>
                 <AwrReportCard testRun={testRun} expanded={expansionState.awrExpanded} onExpand={() => { const wasCollapsed = !expansionState.awrExpanded; toggleExpansion('awrExpanded'); if (wasCollapsed) scrollToCard('awr-report-card-expanded'); }} />
               </Box>
             </Box>
+            </TabBody>
+            </TabErrorBoundary>
+            </TabActiveContext.Provider>
           )}
         </Box>
 
         {/* Reporting Tab */}
-        <Box role="tabpanel" hidden={activeTab !== 2} id="tabpanel-reporting" aria-labelledby="tab-reporting">
-          {activeTab === 2 && (
+        <Box role="tabpanel" hidden={activeTab !== TAB.reporting} id={TAB_PANEL_IDS[TAB.reporting]} aria-labelledby="tab-reporting">
+          {visitedTabs.includes(TAB.reporting) && (
+            <TabActiveContext.Provider value={activeTab === TAB.reporting}>
+            <TabErrorBoundary key={testRunId}>
+            <TabBody active={activeTab === TAB.reporting}>
             <Box sx={gridStyle}>
               <Box sx={cardBoxStyle(expansionState.reportExpanded)}>
                 <ReportCard
@@ -364,7 +448,7 @@ export default function TestRunDetailsPage() {
                     if (wasCollapsed) scrollToCard('report-card-expanded');
                   }}
                   onGenerateReport={() => setGenerateReportDialogOpen(true)}
-                  onSnackbar={(message, _severity) => showToast(message)}
+                  onSnackbar={onReportSnackbar}
                   refreshTrigger={reportRefreshTrigger}
                 />
               </Box>
@@ -378,6 +462,9 @@ export default function TestRunDetailsPage() {
                 <GraphsCard testRun={testRun} testRunId={testRunId} graphsExpanded={expansionState.graphsExpanded} onGraphsExpand={() => { const wasCollapsed = !expansionState.graphsExpanded; toggleExpansion('graphsExpanded'); if (wasCollapsed) scrollToCard('graphs-card-expanded'); }} showToast={showToast} events={events} />
               </Box>
             </Box>
+            </TabBody>
+            </TabErrorBoundary>
+            </TabActiveContext.Provider>
           )}
         </Box>
       </Box>
@@ -427,6 +514,8 @@ export default function TestRunDetailsPage() {
         onError={(error) => showToast(error)}
       />
     </Box>
+    </CardLinkRequestContext.Provider>
+    </OpenCardLinkContext.Provider>
     </PerformanceAnalysisDrillDownContext.Provider>
   );
 }

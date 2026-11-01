@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.97.41] - 2026-11-01
+## [0.2.97.42] - 2026-11-01
 
 ### Added
 - **You can choose how often Performance Analysis refreshes while a test is running.** A **Refresh** dropdown, in a row of live controls under the card title, offers Off, 10s, 30s, 1m and 5m, defaulting to 30s. A rate you pick is remembered in this browser, so a tab switch or the next run keeps it; **Off is not remembered**, so the next run refreshes again. A stored value the dropdown no longer offers falls back to 30s rather than leaving the control blank.
@@ -15,9 +15,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **A run that finishes while you watch ends on freshly fetched figures.** Completion now triggers one more fetch of the whole-run figures, where previously a card already showing the whole run kept whatever its last refresh had fetched. (A "Last N minutes" window already switched to the whole run on completion, and still does.)
 - **An older answer can no longer overwrite a newer one.** When a window or filter change overtakes a slow transactions request, the late answer is dropped instead of replacing the newer figures. Background refreshes wait for the request still out rather than piling up behind a slow server.
 - The manual refresh button is announced by its own name to screen readers; it used to be read as an unlabelled button.
+- The refresh timer pauses while the Results tab is hidden. Since 0.2.97.41 the details page keeps a visited tab loaded behind the others, so the card would otherwise keep polling while you look at Root Cause Analysis or Reporting; it now stops there and refreshes once when you come back.
 
 ### Known limits
 - Only the transactions request is ordered and timed; the virtual-users and throughput tiles still show whichever answer arrives last, and the 5 s pause measures transactions only.
+
+## [0.2.97.41] - 2026-11-01
+
+### Added
+- **Click the tab you are on to collapse its cards.** On a test run's details page, a single click on the already-selected Results, Root Cause Analysis or Reporting tab collapses every expanded card on that tab, and only that tab. The other tabs keep what you left open, and a double-click on another tab or pressing Enter on a tab never collapses anything by accident.
+- **"Open in Graphs / Compare / Trends" no longer has to open a new browser tab.** A plain click on the menu item stays on the page: it switches to Reporting, expands the card and adds the series, without reloading anything or changing the address bar. Every click adds its series, including one you removed a moment ago. To get a new tab, use the ↗ icon at the end of the item, Cmd-click (Ctrl-click on Windows/Linux), Shift-click, middle-click or Copy link; keyboard users hear how (Cmd/Ctrl+Enter). Links opened in a new tab carry the page's system, environment, workload and organization along.
+
+### Changed
+- **The details page's tabs keep their state.** A tab loads the first time you open it and then stays loaded while you look at another one, so added series, a selected comparison run, filters, searches and inner tabs are all still there when you come back. A tab you are not looking at no longer refreshes on every live-run update; the AWR report list and the "statistics are still being calculated" check pause while their tab is hidden and check straight away when you return. A "View in Dynatrace / Distributed Tracing" drill-down still lands on a freshly loaded card showing just that drill-down's filters.
+- **A card that fails to render no longer takes the whole page down.** The error stays inside that tab, with a "Try again" button; the other tabs keep working.
+
+### Fixed
+- **The Reporting tab's report card refetched its summary on every page update** once a report had finished generating — every keystroke, toast or live-run update. It now refreshes only when a report settles.
+- **"Open in …" from the Dynatrace hosts table also opened that host's detail view**, because the click reached the table row behind the menu.
+
+### Known limits
+- **Two "Open in …" clicks into the same card in quick succession**, before the first series has loaded, add only the second one.
+- **A link to a dashboard that appeared after the card first loaded its list** (a new scenario mid-run, a host mapped meanwhile) does nothing until the page is reloaded.
 
 ## [0.2.97.40] - 2026-10-31
 

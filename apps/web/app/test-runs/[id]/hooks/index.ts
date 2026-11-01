@@ -1,5 +1,6 @@
 export { useTestRunData } from './useTestRunData';
-export { useExpansionState, scrollToCard } from './useExpansionState';
+export { useExpansionState, scrollToCard, TAB, tabOfCard } from './useExpansionState';
+export type { TabIndex } from './useExpansionState';
 export { useConfigurationStatus } from './useConfigurationStatus';
 export { useRelatedTestRuns } from './useRelatedTestRuns';
 
