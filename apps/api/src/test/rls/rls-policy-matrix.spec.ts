@@ -125,6 +125,35 @@ const ENTITY_FIXTURES: Record<string, FixtureFn> = {
     );
     return { id: rows[0].id };
   },
+
+  // Series grouping (migration 1819): a rule hangs off a system under test and one of its
+  // application dashboards, all three in the same organization. The parents are left behind,
+  // like the notification_channels fixture's SUT.
+  series_grouping_rules: async (ds, orgId) => {
+    const suffix = `${orgId}-${Date.now()}-${Math.random()}`;
+    const sut = await ds.query(
+      `INSERT INTO systems_under_test (id, organization_id, name, description, created_by)
+       VALUES (gen_random_uuid(), $1, $2, 'Parent for series grouping fixture', 'fixture-creator')
+       RETURNING id`,
+      [orgId, `rls-fixture-sgr-sut-${suffix}`],
+    );
+    const dashboard = await ds.query(
+      `INSERT INTO application_dashboards
+         (id, system_under_test_id, test_environment, dashboard_name, dashboard_label, organization_id, created_by)
+       VALUES (gen_random_uuid(), $1, 'env', $2, $2, $3, 'fixture-creator')
+       RETURNING id`,
+      [sut[0].id, `rls-fixture-sgr-dash-${suffix}`, orgId],
+    );
+    const rows = await ds.query(
+      `INSERT INTO series_grouping_rules
+         (id, system_under_test_id, test_environment, workload, application_dashboard_id, panel_id, preset,
+          organization_id, created_by)
+       VALUES (gen_random_uuid(), $1, 'env', 'wl', $2, 7, 'k8s-pod', $3, 'fixture-creator')
+       RETURNING id`,
+      [sut[0].id, dashboard[0].id, orgId],
+    );
+    return { id: rows[0].id };
+  },
 };
 
 const TABLES = Object.keys(ENTITY_FIXTURES);
