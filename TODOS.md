@@ -282,6 +282,23 @@ as the two badges that report a fault, so colour no longer encodes severity. Eit
 
 ## RBAC
 
+### A non-admin can read another organization's test runs by naming it in `organizationId` (P0)
+
+**Priority:** P0
+**Origin:** security specialist, review cycle 2 of /ship on `feat/test-run-tabs-keep-state`
+(2026-11-01, v0.2.97.41). Pre-existing, not touched by that branch; proposed as its own session.
+**Why:** `TestRunsCrudQueryService` (`apps/api/src/modules/test-runs/services/test-runs-crud-query.service.ts`)
+takes an optional explicit `organizationId` and, when it is set, filters on
+`sut.organization_id = :organizationId` **instead of** the caller's resolved `organizationIds` —
+it never checks that the caller belongs to it. `findAllPaginated`, the list/count method beside
+it and `findByTestRunIdAndParams` all have the shape (`if (organizationId) { … }` ahead of the
+`organizationIds` arm). Only the admin bypass is meant to skip the membership set. On a
+single-organization deploy this is inert; it becomes a cross-tenant read with the second org.
+**What:** intersect an explicit `organizationId` with the resolved set for non-admins (outside it:
+an empty result or a 404, never a 403, see item 48 in the root CLAUDE.md), and grep the rest of
+`apps/api` for the same "explicit id wins" arm. RLS is no backstop on a default deploy.
+**Where:** the three methods above, and their controllers' `organizationId` query params.
+
 ### Schema changes reach new databases only, and the code assumes otherwise
 
 **Priority:** P3 (was P0 — part 1 shipped in v0.2.75.0; what is left is the dead-code cleanup at the bottom)
@@ -2066,6 +2083,54 @@ are unaffected. Either scope `unmountOnExit` to the Apdex branch or give the cha
 
 ---
 
+## Test run detail tabs
+
+Follow-ups from /ship on `feat/test-run-tabs-keep-state` (2026-11-01, v0.2.97.41), which kept
+visited tabs mounted and made "Open in Graphs / Compare / Trends" hand its series to the card
+in-page. All were judged edge cases or judgment calls and deferred on purpose.
+
+### Two quick "Open in…" clicks into the same card can drop the first
+
+**Priority:** P3
+**Why:** the page holds one `CardLinkRequest` slot (`page.tsx`), and `MetricSeriesCascade` remounts
+`CascadeBody` keyed on the request id. A second link into the same card before the first walk has
+finished fetching replaces the request, the first walk's body is unmounted mid-fetch, and its
+series is never added. No toast, nothing logged.
+**What:** a per-card FIFO of pending requests, popped when a walk adds or disarms. Not a debounce:
+both clicks are real instructions.
+
+### A new link remounts the picker, discarding its draft
+
+**Priority:** P3
+**Why:** the per-link `key` on `CascadeBody` is what re-arms the walk, and a remount drops any
+staged-but-not-added selection in an open picker. Compare's primary selection, fed by
+`onPrimaryChange`, keeps the old dashboard until the walk selects again.
+**What:** re-arm the walk without a remount (reset `preselect` on a new `linkKey` inside one
+body), so the draft survives and `onPrimaryChange` fires once for the new link.
+
+### A re-click that collapses cards can land right after a link switched the tab
+
+**Priority:** P3 (judgment call)
+**Why:** clicking the active tab collapses that tab's cards (single pointer click only,
+`e.detail === 1`). An "Open in…" link or a drill-down switches tabs programmatically, so the user's
+next click on that tab, often just to orient, collapses the card the link opened.
+**What:** if it shows up in use, ignore a collapse within ~1 s of a programmatic tab switch, or only
+collapse when the click started on the already-active tab before any switch. Do nothing until a
+real report.
+
+### The tracing and Pyroscope iframes keep running while the RCA tab is hidden
+
+**Priority:** P3
+**Why:** hidden tabs stay mounted and `TabBody` stops React re-renders, but an embedded iframe is
+its own document: `distributed-tracing/components/VisualiseTab.tsx` and
+`pyroscope/components/PyroscopeFlameGraph.tsx` keep their pages, scripts and any polling alive.
+`TabActiveContext` gates only our own timers (AWR reports, the rollup poll).
+**What:** read `TabActiveContext` in those two and unmount the iframe (or swap `src` to
+`about:blank`) while hidden, if their cost shows up. Losing the iframe's own scroll/zoom is the
+trade.
+
+---
+
 ## Web charts
 
 ### Three residues of the Graphs card's zoom refetch
@@ -2121,37 +2186,6 @@ for free. Not worth it until someone complains.
 
 **Where:** `apps/web/lib/charts/layout.ts` (`yAxis`, `buildTimeSeriesLayout`).
 
-### A landed card-link cannot be recovered after a tab switch
-
-**Priority:** P2
-**Origin:** adversarial review of v0.2.97.1 (`fix/card-deeplinks-series-picker`). Pre-existing —
-the fix only made it reachable, because before it the link did not land in Graphs/Trends at all.
-**Why:** `consumedLinks` in `apps/web/app/test-runs/[id]/components/shared/MetricSeriesCascade.tsx`
-is module state keyed on `card + query string`, so a link applies once per page load. The Reporting
-tab is rendered as `{activeTab === 2 && (…)}` (`page.tsx`), so leaving the tab unmounts
-`useGraphsData`/`useTrendsData` **and** the cascade together. Coming back: `addedSeries` is gone with
-the hook state, the key is still in `consumedLinks`, so `preselect` initialises to `null` and the
-chart is permanently empty with no recovery but a full page reload.
-**Also wrong in the same place:** the comment defending `consumedLinks` says the card unmounts "on
-every tab switch and collapse". The collapse half is false — `GraphsCard`/`TrendsCard` use
-`<Collapse in={…}>` with no `unmountOnExit`, so collapsing unmounts nothing. And the tab half no
-longer argues for the guard, since the picks it claims to protect die with the hook state anyway.
-**What to do:** either key the Set on something whose lifetime matches the card's own state, or drop
-it for a per-card ref and let the link re-apply on remount. Decide what a second application should
-mean first — the original worry was a cleared selection coming back on re-expand, which the Collapse
-finding says cannot happen.
-
-### The `consumedLinks` key omits the test run id
-
-**Priority:** P4
-**Origin:** same review. Low realism, silent failure, one-token fix.
-**Why:** `const linkKey = \`${card}?${searchParams.toString()}\`` — the run id lives in the path, not
-the query. Two different runs reached by soft navigation with identical query strings share a key,
-and the second link silently no-ops. Not reachable today because `buildCardLink` always opens
-`target="_blank"`, which is a fresh document with fresh module state.
-**What to do:** fold `useParams().id` into the key. Not a memory leak — growth is bounded by distinct
-query strings per document, at most three per page load.
-
 ### A card-link that resolves nothing fails silently, with the picker closed
 
 **Priority:** P3
@@ -2164,6 +2198,10 @@ gone by design now. The cascade has a `showToast` prop as of v0.2.97.1 (added fo
 so the channel already exists.
 **What to do:** toast on each `disarm()`-without-match path, naming which level failed ("that
 dashboard is not on this run", "that panel no longer exists", "that series was not recorded").
+**Also since v0.2.97.41:** a plain click now hands the link to the card in the same tab, and a
+card's dashboard list is fetched once per page. On a live run a dashboard can appear after that (a
+Dynatrace host mapped mid-run), so a link naming it misses at the dashboard step for a reason a
+refetch would fix. Refetch once on a dashboard- or panel-level miss before toasting.
 
 ### The report's transactions table is a legend that cannot repeat its header in print
 
@@ -2248,6 +2286,21 @@ resizing its content, so the observed box holds its final size for the whole ani
 observer fires only on `observe()`. The one-shot window kick is the only thing covering that case,
 and `ResponsivePlot` does not replace it. Same for `kickPlotlyResize` in
 `shared/ExpandableCardHeader.tsx`, which the Compare, Trends and Graphs cards use.
+
+### Card-level window resize kicks relayout charts on hidden tabs
+
+**Priority:** P3
+**Origin:** review cycle 2 of /ship on `feat/test-run-tabs-keep-state` (2026-11-01, v0.2.97.41),
+decision D12.
+**Why:** visited test-run tabs now stay mounted while hidden. The page resizes only the shown
+panel's charts on a tab switch, but `kickPlotlyResize`, DynatraceCard's `onEntered`,
+`HostPerformanceGraphs` and the SLO charts dispatch a **window** resize, which every Plotly
+listener on the page answers, hidden tabs included. Wasted relayouts, and `Plots.resize` rejects
+on a hidden graph div.
+**What:** fold into the `ResponsivePlot` sweep above: a chart that observes its own container
+skips a zero-width box (hidden panel) and needs no window kick, except the `Collapse` case that
+section says to keep.
+
 
 ---
 
@@ -3649,6 +3702,13 @@ It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that 
 **Effort:** S
 
 ## Completed
+
+### A landed card-link could not be recovered after a tab switch, and its key omitted the run
+
+**Shipped in v0.2.97.41** (`feat/test-run-tabs-keep-state`). Visited tabs stay mounted, so a
+card's added series survive a switch, and the module-level `consumedLinks` became a page-scoped
+set on `CardLinkRequestContext` whose URL-link key carries the run id. Closes both the P2 entry
+and the P4 "`consumedLinks` key omits the test run id" entry from the v0.2.97.1 review.
 
 ### RELEASE GATE: multi-org tenancy
 
