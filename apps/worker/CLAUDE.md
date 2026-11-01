@@ -559,6 +559,54 @@ The distinction to hold on to: `ds_metric_statistics` answers "what did analysis
 first is genuinely the right source — the sparse-metric check in `DataSanityCheckPipeline`, item 7
 above — that is a deliberate change in what the number means, and it is documented as one.
 
+### Series grouping happens at the statistics layer, in its own INSERT
+
+Kubernetes dashboards name series after pods, and pod names change every deployment, so two runs
+of one build share no `metric_name` and ADAPT reads every pod as `incomparable` — a regression on
+those panels is never reported. A `series_grouping_rules` row (per workload; migration 1819, v0.2.97.41)
+rewrites raw names to a group name with `applySeriesGrouping` (`@perfana/shared/utils`), and
+`StatisticsPipeline` writes the group's statistics instead of the pods'. Design:
+`docs/design/2026-11-01-series-grouping-design.md`. Six things hold it together:
+
+1. **A batch with no grouping sends byte-identical SQL.** The statistics SQL lives in
+   `pipelines/helpers/statistics-sql.ts`, moved there verbatim; the "SQL pin" snapshot in
+   `StatisticsPipeline.test.ts` was taken before the move and pins every in-transaction statement and
+   parameter of a no-rule batch. An edit to that module changes what every analysis sends, grouped
+   or not — update the snapshot only on purpose.
+2. **Grouped panels go through a SECOND statement, never into `metrics_filtered`.** The main
+   statement gains one `NOT EXISTS` over the grouped `(run, dashboard, panel)` triples, added only when
+   there are any; `buildGroupedStatisticsSQL` (`helpers/series-grouping-plan.ts`) reads those panels'
+   rows itself, combines members per timestamp (`avg`/`sum`/`max`), and runs the same
+   `buildStatisticsCtes` chain over that. A `UNION ALL` into the existing CTE was rejected: a CTE
+   referenced twice is materialised, which would push the whole run's raw rows through a tuplestore
+   (panel 304's "Group once, then roll up" below). `count` on a group row is its number of
+   **timestamps**, so `ADAPT_MIN_SAMPLE_COUNT` keeps meaning per-run density.
+3. **Rules load before the transaction and never throw.** `loadSeriesGroupingContext` runs on the
+   pooled connection after a `to_regclass` probe: an error inside `withAnalyticsTransaction` aborts it
+   (25P02), and `statistics-calculation` is not `softFail`, so it would fail the whole re-evaluate
+   batch. A worker rolled out before migration 1819 finds no tables and aggregates exactly as before.
+   An invalid stored custom rule is skipped with a warning. Perf-test dashboards are never grouped.
+4. **Membership is written with the statistics it describes.** `ds_metric_series_groups` (one row per
+   raw series of a grouped panel, with the group name, the rule's hash and `member_count_name`) is
+   deleted and rewritten in the same transaction. It is deleted only when a rule exists or a removed
+   rule left rows behind, so a deploy that never uses grouping issues nothing extra in the transaction.
+   The grouped statement binds the membership as arrays rather than joining the table it just wrote:
+   rows inserted earlier in a transaction are invisible to the planner (the `deleteOrphanedResults`
+   lesson below).
+5. **The alignment check is the v1 answer to unaligned sources.** Members are combined on exact
+   `time`, which Prometheus range queries align. The grouped statement writes the average members per
+   timestamp onto the membership rows (`avg_members`) in the same round trip, and the pipeline warns
+   `series-grouping: … timestamps are not aligned` when a group of ≥ 2 averages under 1.2.
+6. **The legacy control-group path loses groups, loudly.** It re-reads raw `ds_metrics` by raw name,
+   where a group name has no counterpart. Grouped rows always carry `pct_agg` and
+   `backfillMissingSketches` regroups the runs first, so this happens only when that backfill failed;
+   the result is `incomparable`, not a wrong verdict, and `ControlGroupStatisticsPipeline` logs it.
+
+A rule takes effect on the next **statistics recalculation** — a plain re-evaluate does not run
+`StatisticsPipeline` (it is gated on `refreshMode` / `recalculateStatistics`). Recalculating fetches
+nothing from Grafana, so old baselines can be regrouped after their Prometheus retention expired.
+The per-pod `ds_adapt_results` go via `deleteOrphanedResults`, which is pinned for this.
+
 ### The perf-test pipeline writes one extra dashboard, and its series name was already taken
 
 `PerformanceTestMetricsPipeline` writes one dashboard per JMeter/Gatling scenario. Since v0.2.95.4
