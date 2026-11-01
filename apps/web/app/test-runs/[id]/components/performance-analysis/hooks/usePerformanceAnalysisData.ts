@@ -29,6 +29,31 @@ const isValidRollupProgress = (p: unknown): p is RollupPendingState['progress'] 
   );
 };
 
+// Auto-refresh periods offered in the card header while a test is running; 0 = off.
+export const REFRESH_OPTIONS: { label: string; value: number }[] = [
+  { label: 'Off', value: 0 },
+  { label: '10s', value: 10_000 },
+  { label: '30s', value: 30_000 },
+  { label: '1m', value: 60_000 },
+  { label: '5m', value: 300_000 },
+];
+const DEFAULT_REFRESH_INTERVAL_MS = 30_000;
+const REFRESH_STORAGE_KEY = 'perfana.performanceAnalysis.refreshIntervalMs';
+
+// The chosen period is a per-browser convenience: storage can be missing or throw
+// (private window, blocked site data), and a value the dropdown no longer offers
+// would render the Select blank, so both fall back to the default.
+const readStoredRefreshInterval = (): number => {
+  try {
+    const raw = window.localStorage.getItem(REFRESH_STORAGE_KEY);
+    // Number('') is 0 (Off), so a blank value counts as nothing stored.
+    const value = raw === null || raw.trim() === '' ? NaN : Number(raw);
+    return REFRESH_OPTIONS.some((o) => o.value === value) ? value : DEFAULT_REFRESH_INTERVAL_MS;
+  } catch {
+    return DEFAULT_REFRESH_INTERVAL_MS;
+  }
+};
+
 export interface UsePerformanceAnalysisDataProps {
   testRunId: string;
   /** Full test run object — used to determine running state and elapsed duration */
@@ -58,8 +83,14 @@ export interface UsePerformanceAnalysisDataReturn {
   sinceMinutes: number | null;
   setSinceMinutes: (value: number | null) => void;
 
-  // Auto-refresh state — true when the last fetch took ≥5 s (user must refresh manually)
+  // Auto-refresh paused — true when the latest fetch took ≥5 s; a fast manual refresh
+  // or picking a period (even the one shown) resumes it
   autoRefreshDisabled: boolean;
+  // Live auto-refresh period in ms; 0 = off
+  refreshIntervalMs: number;
+  setRefreshIntervalMs: (value: number) => void;
+  // When the transaction figures were last fetched successfully
+  lastUpdatedAt: Date | null;
 
   // Sorting
   sortField: SortField;
@@ -119,6 +150,21 @@ export function usePerformanceAnalysisData({
 
   // Auto-refresh: disabled when the last fetchTransactions call took ≥5 s
   const [autoRefreshDisabled, setAutoRefreshDisabled] = useState(false);
+  // Live auto-refresh period, user-selectable in the card header; 0 = off
+  const [refreshIntervalMs, setRefreshIntervalMsState] = useState(readStoredRefreshInterval);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+
+  // Picking a period also lifts a slow-fetch pause. LiveWindowSelector calls this for
+  // a re-pick of the shown period too, which a Select's onChange alone would not.
+  const setRefreshIntervalMs = useCallback((value: number) => {
+    setAutoRefreshDisabled(false);
+    setRefreshIntervalMsState(value);
+    try {
+      window.localStorage.setItem(REFRESH_STORAGE_KEY, String(value));
+    } catch {
+      // Storage unavailable: the choice lasts until the card remounts.
+    }
+  }, []);
 
   // Derive running state and elapsed duration from the testRun prop
   const isRunning = !!testRun && !testRun.completed;
@@ -142,14 +188,23 @@ export function usePerformanceAnalysisData({
   // Scenario expansion
   const [expandedScenarios, setExpandedScenarios] = useState<Set<string>>(new Set());
 
-  // Fetch transactions
+  // Fetch transactions. A user-driven fetch (window or filter change, manual refresh,
+  // run completion) can overtake one still out, and the two may answer out of order,
+  // so only the latest may write state. Background callers (the live timer and the
+  // rollup poll) instead wait while the latest is out: if they overtook it too, an
+  // answer slower than their period would always be stale and never land.
+  const transactionsSeqRef = useRef(0);
+  const latestTransactionsSettledRef = useRef(true);
   const fetchTransactions = useCallback(async () => {
+    const seq = ++transactionsSeqRef.current;
+    const isStale = () => seq !== transactionsSeqRef.current;
+    latestTransactionsSettledRef.current = false;
     const fetchStartMs = Date.now();
     try {
       setLoading(true);
       setError(null);
       // Note: do NOT optimistically clear rollupPending here. Clearing it before
-      // the response arrives causes a flash-of-empty-state on every realtime
+      // the response arrives causes a flash-of-empty-state on every auto-refresh
       // refetch (pending Alert -> spinner -> pending Alert). We clear it on the
       // 200 success path below and in the catch block instead.
 
@@ -165,9 +220,11 @@ export function usePerformanceAnalysisData({
           },
         }
       );
+      if (isStale()) return;
 
       if (response.status === 202) {
         const body = await response.json().catch(() => null) as { progress?: unknown } | null;
+        if (isStale()) return;
         setRollupPending({
           status: 'rollup-pending',
           stage: 'transaction-stats-rollup',
@@ -182,10 +239,13 @@ export function usePerformanceAnalysisData({
       }
 
       // 200: clear any prior pending state and store the data.
-      setRollupPending(null);
       const data = await response.json();
+      if (isStale()) return;
+      setRollupPending(null);
       setTransactions(data || []);
+      setLastUpdatedAt(new Date());
     } catch (err) {
+      if (isStale()) return;
       console.error('Error fetching transactions:', err);
       // Clear pending state on error so a transient failure doesn't keep the
       // pending UI on screen indefinitely; the user sees the error instead.
@@ -193,8 +253,11 @@ export function usePerformanceAnalysisData({
       setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to fetch transaction data');
       setTransactions([]);
     } finally {
-      setLoading(false);
-      setAutoRefreshDisabled(Date.now() - fetchStartMs >= 5000);
+      if (!isStale()) {
+        latestTransactionsSettledRef.current = true;
+        setLoading(false);
+        setAutoRefreshDisabled(Date.now() - fetchStartMs >= 5000);
+      }
     }
   }, [testRunId, excludeRampUp, sinceMinutes]);
 
@@ -280,26 +343,16 @@ export function usePerformanceAnalysisData({
 
   // While the rollup-pending gate is active, poll every 5s so the card transitions
   // out of the pending state once the post-test rollup completes — even on completed
-  // runs where the realtime entity-update trigger is no longer firing.
+  // runs, where the live auto-refresh timer no longer runs.
   // The interval is cleared on unmount AND when rollupPending flips to null
   // (effect re-runs, cleanup tears down the old interval, the new run early-returns).
   useEffect(() => {
     if (!rollupPending) return;
     const interval = setInterval(() => {
-      fetchTransactions();
+      if (latestTransactionsSettledRef.current) fetchTransactions();
     }, 5000);
     return () => clearInterval(interval);
   }, [rollupPending, fetchTransactions]);
-
-  // When the test stops running, reset sinceMinutes back to null (complete test)
-  // so the card shows full data once the run finishes.
-  const prevIsRunningRef = useRef(isRunning);
-  useEffect(() => {
-    if (prevIsRunningRef.current && !isRunning) {
-      setSinceMinutes(null);
-    }
-    prevIsRunningRef.current = isRunning;
-  }, [isRunning]);
 
   // When the time window or ramp-up filter changes, invalidate any cached sampler
   // data because it was fetched for different parameters and is now stale. The
@@ -313,7 +366,7 @@ export function usePerformanceAnalysisData({
 
   // Fetch sampler (request) stats for one transaction. The spinner is only shown
   // on the initial load — live refreshes update the figures in place.
-  // In-flight dedup: a WS tick arriving while a transaction's previous sampler
+  // In-flight dedup: a refresh (timer tick or manual) arriving while a transaction's previous sampler
   // fetch is still running skips that transaction, so slow queries can't pile up.
   const inFlightSamplesRef = useRef<Set<string>>(new Set());
   const fetchSamplesFor = useCallback(async (transactionName: string, showSpinner: boolean) => {
@@ -374,21 +427,32 @@ export function usePerformanceAnalysisData({
     expandedRows.forEach(name => fetchSamplesFor(name, false));
   }, [fetchTransactions, fetchTestLevelThreshold, fetchVirtualUserStats, fetchThroughputStats, expandedRows, fetchSamplesFor]);
 
-  // Auto-refresh: re-fetch whenever a WS update arrives (signalled by updated_at
-  // changing), unless the last fetch was slow (≥5 s). The initial load is handled
-  // by the mount effect above; this effect skips the first render via prevRef.
-  const prevUpdatedAtRef = useRef<string | undefined>(undefined);
+  // Auto-refresh: re-fetch every refreshIntervalMs while the run is live, unless
+  // the user switched it off or the last fetch was slow (≥5 s). The initial load
+  // is handled by the mount effect above. refreshAll is read through a ref so
+  // expanding a row or changing a filter does not restart the timer.
+  const refreshAllRef = useRef(refreshAll);
+  refreshAllRef.current = refreshAll;
   useEffect(() => {
-    if (!isRunning || autoRefreshDisabled) return;
-    const current = testRun?.updated_at;
-    const prev = prevUpdatedAtRef.current;
-    prevUpdatedAtRef.current = current;
-    // Skip on first run (prev is still the initial sentinel value)
-    if (prev === undefined) return;
-    // Skip when the value hasn't actually changed
-    if (current === prev) return;
-    refreshAll();
-  }, [testRun?.updated_at, isRunning, autoRefreshDisabled, refreshAll]);
+    if (!isRunning || autoRefreshDisabled || refreshIntervalMs <= 0) return;
+    const interval = setInterval(() => {
+      if (latestTransactionsSettledRef.current) refreshAllRef.current();
+    }, refreshIntervalMs);
+    return () => clearInterval(interval);
+  }, [isRunning, autoRefreshDisabled, refreshIntervalMs]);
+
+  // When the test stops running, show the final figures: the timer stops with it, and
+  // with auto-refresh Off or a long period the last fetch can be minutes old. Resetting
+  // sinceMinutes to null (complete test) refetches on its own; if it already was null,
+  // refetch here.
+  const prevIsRunningRef = useRef(isRunning);
+  useEffect(() => {
+    if (prevIsRunningRef.current && !isRunning) {
+      if (sinceMinutes === null) refreshAllRef.current();
+      else setSinceMinutes(null);
+    }
+    prevIsRunningRef.current = isRunning;
+  }, [isRunning, sinceMinutes]);
 
   // Sorting handler
   const handleSort = useCallback((field: SortField) => {
@@ -505,6 +569,9 @@ export function usePerformanceAnalysisData({
 
     // Auto-refresh
     autoRefreshDisabled,
+    refreshIntervalMs,
+    setRefreshIntervalMs,
+    lastUpdatedAt,
 
     // Sorting
     sortField,

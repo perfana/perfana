@@ -42,7 +42,7 @@ import {
   filterThroughputStats,
   filterVirtualUserStats,
 } from './utils/scenario-filter';
-import { LiveWindowSelector } from './components/LiveWindowSelector';
+import { LiveWindowSelector, type RefreshState } from './components/LiveWindowSelector';
 import Top10ListsTable from './Top10ListsTable';
 import Top10ListsRequests from './Top10ListsRequests';
 import Top10ListsUrls from './Top10ListsUrls';
@@ -121,7 +121,16 @@ export default function PerformanceAnalysisCard({
     sinceMinutes,
     setSinceMinutes,
     autoRefreshDisabled,
+    refreshIntervalMs,
+    setRefreshIntervalMs,
+    lastUpdatedAt,
   } = usePerformanceAnalysisData({ testRunId, testRun });
+  const refreshState: RefreshState =
+    refreshIntervalMs === 0 ? 'off' : autoRefreshDisabled ? 'paused' : 'on';
+  // On the IconButton itself: a Tooltip's own aria-label lands on the wrapping <span>.
+  const manualRefreshLabel = refreshState === 'off'
+    ? 'Refresh metrics (auto-refresh off)'
+    : 'Refresh metrics (auto-refresh paused — last fetch took >5s)';
 
   const availableScenarios = useMemo(
     () => deriveAvailableScenarios(transactions),
@@ -364,19 +373,19 @@ export default function PerformanceAnalysisCard({
                 />
               </Tooltip>
             )}
-            {/* Live-test controls: time-window selector (always shown when running) +
-                manual refresh button (shown only when auto-refresh is disabled because
-                the last fetch took ≥5 s). When auto-refresh is enabled the card
-                refreshes automatically on every WS update. */}
+            {/* Live-test controls: time-window and refresh-rate selectors (always shown
+                when running) + manual refresh button (shown when auto-refresh is off, or
+                paused because the last fetch took ≥5 s). */}
             {expanded && isRunning && (
               <Box
                 sx={{ position: 'absolute', right: 96, display: 'flex', gap: 0.5, alignItems: 'center' }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {autoRefreshDisabled && (
-                  <Tooltip title="Refresh metrics (auto-refresh paused — last fetch took >5s)" arrow>
+                {refreshState !== 'on' && (
+                  <Tooltip title={manualRefreshLabel} arrow describeChild>
                     <span>
                       <IconButton
+                        aria-label={manualRefreshLabel}
                         onClick={refreshAll}
                         size="small"
                         disabled={loading}
@@ -391,6 +400,10 @@ export default function PerformanceAnalysisCard({
                   elapsedMinutes={elapsedMinutes}
                   sinceMinutes={sinceMinutes}
                   onChange={setSinceMinutes}
+                  refreshIntervalMs={refreshIntervalMs}
+                  onRefreshIntervalChange={setRefreshIntervalMs}
+                  refreshState={refreshState}
+                  lastUpdatedAt={lastUpdatedAt}
                 />
               </Box>
             )}
