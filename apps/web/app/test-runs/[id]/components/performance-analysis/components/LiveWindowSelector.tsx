@@ -67,7 +67,7 @@ export function LiveWindowSelector({
   // the Select will show a blank — that's fine, it'll auto-correct on next change.
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 1 }}>
       <Tooltip title={LIVE_TOOLTIP[refreshState]}>
         <Chip
           icon={<FiberManualRecordIcon sx={{ fontSize: 10, color: '#f44336 !important', animation: 'pulse 1.5s infinite' }} />}
@@ -145,7 +145,8 @@ export function LiveWindowSelector({
         <Typography
           variant="caption"
           color="text.secondary"
-          sx={{ whiteSpace: 'nowrap' }}
+          // Tabular digits: the time changes on every refresh and must not nudge its neighbours.
+          sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
           {...(refreshState !== 'on' && { role: 'status', 'aria-live': 'polite' })}
         >
           {caption}

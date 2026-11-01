@@ -43,12 +43,14 @@ const REFRESH_STORAGE_KEY = 'perfana.performanceAnalysis.refreshIntervalMs';
 // The chosen period is a per-browser convenience: storage can be missing or throw
 // (private window, blocked site data), and a value the dropdown no longer offers
 // would render the Select blank, so both fall back to the default.
+// Off is never remembered: the collapsed card shows no refresh state, so a stored Off
+// would freeze it silently on every later run. A stored 0 from an older build reads as
+// nothing stored, and so does a blank value (Number('') is 0).
 const readStoredRefreshInterval = (): number => {
   try {
     const raw = window.localStorage.getItem(REFRESH_STORAGE_KEY);
-    // Number('') is 0 (Off), so a blank value counts as nothing stored.
     const value = raw === null || raw.trim() === '' ? NaN : Number(raw);
-    return REFRESH_OPTIONS.some((o) => o.value === value) ? value : DEFAULT_REFRESH_INTERVAL_MS;
+    return value > 0 && REFRESH_OPTIONS.some((o) => o.value === value) ? value : DEFAULT_REFRESH_INTERVAL_MS;
   } catch {
     return DEFAULT_REFRESH_INTERVAL_MS;
   }
@@ -159,6 +161,7 @@ export function usePerformanceAnalysisData({
   const setRefreshIntervalMs = useCallback((value: number) => {
     setAutoRefreshDisabled(false);
     setRefreshIntervalMsState(value);
+    if (value <= 0) return; // Off lasts until the card remounts; see readStoredRefreshInterval
     try {
       window.localStorage.setItem(REFRESH_STORAGE_KEY, String(value));
     } catch {

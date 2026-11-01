@@ -405,6 +405,28 @@ describe('usePerformanceAnalysisData — live auto-refresh interval', () => {
     }
   });
 
+  // Value: protects=Off is never remembered, so the next run (and its collapsed card, which shows no refresh state) refreshes again; fails_when=setRefreshIntervalMs persists 0, or a stored 0 is read back as Off; why_new=the remember test stores non-zero periods only; seam=none; no_claim=does not render the collapsed card
+  it('does not remember Off across remounts', async () => {
+    const first = renderHook(() => usePerformanceAnalysisData({ testRunId: 'run-1', testRun: runningTestRun }));
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    act(() => first.result.current.setRefreshIntervalMs(300_000));
+    act(() => first.result.current.setRefreshIntervalMs(0));
+    expect(first.result.current.refreshIntervalMs).toBe(0);
+    first.unmount();
+
+    // The last non-zero pick survives; Off does not.
+    const second = renderHook(() => usePerformanceAnalysisData({ testRunId: 'run-1', testRun: runningTestRun }));
+    expect(second.result.current.refreshIntervalMs).toBe(300_000);
+    await waitFor(() => expect(second.result.current.loading).toBe(false));
+    second.unmount();
+
+    // A 0 stored by an earlier build reads as nothing stored.
+    localStorage.setItem('perfana.performanceAnalysis.refreshIntervalMs', '0');
+    const third = renderHook(() => usePerformanceAnalysisData({ testRunId: 'run-1', testRun: runningTestRun }));
+    expect(third.result.current.refreshIntervalMs).toBe(30_000);
+    await waitFor(() => expect(third.result.current.loading).toBe(false));
+  });
+
   // Value: protects=every successful refresh moves the last-updated time, so a refresh is visible even when the figures did not change; fails_when=lastUpdatedAt is set once, or not on timer refreshes; why_new=nothing exposed refresh time before; seam=none; no_claim=does not check the label text (card test)
   it('moves lastUpdatedAt forward on each timer refresh', async () => {
     const { result } = renderHook(() =>

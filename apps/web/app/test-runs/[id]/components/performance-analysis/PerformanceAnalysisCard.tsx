@@ -283,102 +283,184 @@ export default function PerformanceAnalysisCard({
           pt: expanded ? 2 : 4,
           '&:last-child': { pb: expanded ? 2 : 3.5 }
         }}>
-          {/* SECTION 1: Header */}
+          {/* SECTION 1: Header. The sticky block holds the title row and, while a test
+              runs, a second row of live controls: in the title row they were absolutely
+              positioned, could not wrap, and ran over the title on narrower windows. */}
           <Box
-            display="flex"
-            justifyContent="center"
-            alignItems="center"
             mb={2}
-            sx={{
-              cursor: expanded ? 'pointer' : 'inherit',
-              py: expanded ? 0.5 : 0,
-              borderRadius: 2,
-              transition: 'all 0.2s ease',
-              position: expanded ? 'sticky' : 'relative',
-              ...(expanded ? { top: 0, zIndex: 10, bgcolor: 'background.paper', borderBottom: '1px solid', borderColor: 'divider' } : {}),
-              '&:hover': expanded ? {
-                backgroundColor: 'action.hover'
-              } : {}
-            }}
-            onClick={expanded ? handleExpand : undefined}
+            sx={expanded ? { position: 'sticky', top: 0, zIndex: 10, bgcolor: 'background.paper', borderBottom: '1px solid', borderColor: 'divider' } : {}}
           >
-            {expanded ? (
-              <Box textAlign="center" flex="1">
+            <Box
+              display="flex"
+              justifyContent="center"
+              alignItems="center"
+              sx={{
+                cursor: expanded ? 'pointer' : 'inherit',
+                py: expanded ? 0.5 : 0,
+                borderRadius: 2,
+                transition: 'all 0.2s ease',
+                position: 'relative',
+                '&:hover': expanded ? {
+                  backgroundColor: 'action.hover'
+                } : {}
+              }}
+              onClick={expanded ? handleExpand : undefined}
+            >
+              {expanded ? (
+                <Box textAlign="center" flex="1">
+                  <Typography
+                    variant="h5"
+                    component="h2"
+                    sx={{
+                      fontWeight: 600,
+                      color: 'text.primary',
+                      fontSize: '1.25rem',
+                      lineHeight: 1.2
+                    }}
+                  >
+                    Performance Analysis
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                    Click to collapse
+                  </Typography>
+                </Box>
+              ) : (
                 <Typography
-                  variant="h5"
+                  variant="subtitle1"
                   component="h2"
                   sx={{
                     fontWeight: 600,
-                    color: 'text.primary',
-                    fontSize: '1.25rem',
-                    lineHeight: 1.2
+                    color: 'text.secondary',
+                    fontSize: '0.875rem',
+                    letterSpacing: '0.01em',
+                    textTransform: 'uppercase',
+                    textAlign: 'center',
                   }}
                 >
                   Performance Analysis
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                  Click to collapse
-                </Typography>
-              </Box>
-            ) : (
-              <Typography
-                variant="subtitle1"
-                component="h2"
-                sx={{
-                  fontWeight: 600,
-                  color: 'text.secondary',
-                  fontSize: '0.875rem',
-                  letterSpacing: '0.01em',
-                  textTransform: 'uppercase',
-                  textAlign: 'center',
-                }}
-              >
-                Performance Analysis
-              </Typography>
-            )}
-            {/* Apply to analysis timerange only toggle */}
-            {expanded && (
-              <Tooltip title="Show only the configured analysis timerange — excludes ramp-up and ramp-down periods from all statistics" arrow>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={excludeRampUp}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        setExcludeRampUp(e.target.checked);
-                      }}
-                      size="small"
-                      sx={{
-                        '& .MuiSwitch-switchBase.Mui-checked': {
-                          color: 'primary.main',
-                        },
-                        '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
-                          backgroundColor: 'primary.main',
-                        },
-                      }}
-                    />
-                  }
-                  label="Analysis timerange"
-                  onClick={(e) => e.stopPropagation()}
+              )}
+              {/* Apply to analysis timerange only toggle */}
+              {expanded && (
+                <Tooltip title="Show only the configured analysis timerange — excludes ramp-up and ramp-down periods from all statistics" arrow>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={excludeRampUp}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setExcludeRampUp(e.target.checked);
+                        }}
+                        size="small"
+                        sx={{
+                          '& .MuiSwitch-switchBase.Mui-checked': {
+                            color: 'primary.main',
+                          },
+                          '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                            backgroundColor: 'primary.main',
+                          },
+                        }}
+                      />
+                    }
+                    label="Analysis timerange"
+                    onClick={(e) => e.stopPropagation()}
+                    sx={{
+                      position: 'absolute',
+                      left: 16,
+                      margin: 0,
+                      '& .MuiFormControlLabel-label': {
+                        fontSize: '0.875rem',
+                        fontWeight: 500,
+                        color: 'text.secondary',
+                      },
+                    }}
+                  />
+                </Tooltip>
+              )}
+              {/* Apdex actions menu button */}
+              {expanded && (
+                <Tooltip title="Apdex Options" arrow>
+                  <IconButton
+                    onClick={handleOpenApdexMenu}
+                    size="small"
+                    sx={{
+                      position: 'absolute',
+                      right: 48,
+                      width: 36,
+                      height: 36,
+                      backgroundColor: (theme) => `${theme.palette.secondary.main}14`,
+                      color: 'secondary.main',
+                      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                      boxShadow: (theme) => `0 2px 6px ${theme.palette.secondary.main}26`,
+                      '&:hover': {
+                        backgroundColor: 'secondary.main',
+                        color: 'secondary.contrastText',
+                        transform: 'scale(1.1)',
+                        boxShadow: (theme) => `0 4px 12px ${theme.palette.secondary.main}4D`,
+                      }
+                    }}
+                  >
+                    <MoreVertIcon />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {!expanded && (
+                <IconButton
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleExpand();
+                  }}
+                  size="small"
                   sx={{
                     position: 'absolute',
-                    left: 16,
-                    margin: 0,
-                    '& .MuiFormControlLabel-label': {
-                      fontSize: '0.875rem',
-                      fontWeight: 500,
-                      color: 'text.secondary',
+                    right: 0,
+                    width: 32,
+                    height: 32,
+                    color: 'text.secondary',
+                    '&:hover': {
+                      backgroundColor: `${overallApdex.color}15`,
+                      color: overallApdex.color,
                     },
+                    transition: 'all 0.2s ease',
                   }}
-                />
-              </Tooltip>
-            )}
+                >
+                  <ExpandMore />
+                </IconButton>
+              )}
+              {expanded && (
+                <IconButton
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleExpand();
+                  }}
+                  size="small"
+                  sx={{
+                    position: 'absolute',
+                    right: 0,
+                    width: 36,
+                    height: 36,
+                    backgroundColor: (theme) => `${theme.palette.primary.main}14`,
+                    color: 'primary.main',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: (theme) => `0 2px 6px ${theme.palette.primary.main}26`,
+                    '&:hover': {
+                      backgroundColor: 'primary.main',
+                      color: 'primary.contrastText',
+                      transform: 'scale(1.1)',
+                      boxShadow: (theme) => `0 4px 12px ${theme.palette.primary.main}4D`,
+                    }
+                  }}
+                >
+                  <ExpandLess />
+                </IconButton>
+              )}
+            </Box>
             {/* Live-test controls: time-window and refresh-rate selectors (always shown
                 when running) + manual refresh button (shown when auto-refresh is off, or
-                paused because the last fetch took ≥5 s). */}
+                paused because the last fetch took ≥5 s). Wraps rather than overflowing. */}
             {expanded && isRunning && (
               <Box
-                sx={{ position: 'absolute', right: 96, display: 'flex', gap: 0.5, alignItems: 'center' }}
+                sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 0.5, px: 1, pb: 1 }}
                 onClick={(e) => e.stopPropagation()}
               >
                 {refreshState !== 'on' && (
@@ -406,83 +488,6 @@ export default function PerformanceAnalysisCard({
                   lastUpdatedAt={lastUpdatedAt}
                 />
               </Box>
-            )}
-            {/* Apdex actions menu button */}
-            {expanded && (
-              <Tooltip title="Apdex Options" arrow>
-                <IconButton
-                  onClick={handleOpenApdexMenu}
-                  size="small"
-                  sx={{
-                    position: 'absolute',
-                    right: 48,
-                    width: 36,
-                    height: 36,
-                    backgroundColor: (theme) => `${theme.palette.secondary.main}14`,
-                    color: 'secondary.main',
-                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-                    boxShadow: (theme) => `0 2px 6px ${theme.palette.secondary.main}26`,
-                    '&:hover': {
-                      backgroundColor: 'secondary.main',
-                      color: 'secondary.contrastText',
-                      transform: 'scale(1.1)',
-                      boxShadow: (theme) => `0 4px 12px ${theme.palette.secondary.main}4D`,
-                    }
-                  }}
-                >
-                  <MoreVertIcon />
-                </IconButton>
-              </Tooltip>
-            )}
-            {!expanded && (
-              <IconButton
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleExpand();
-                }}
-                size="small"
-                sx={{
-                  position: 'absolute',
-                  right: 0,
-                  width: 32,
-                  height: 32,
-                  color: 'text.secondary',
-                  '&:hover': {
-                    backgroundColor: `${overallApdex.color}15`,
-                    color: overallApdex.color,
-                  },
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <ExpandMore />
-              </IconButton>
-            )}
-            {expanded && (
-              <IconButton
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleExpand();
-                }}
-                size="small"
-                sx={{
-                  position: 'absolute',
-                  right: 0,
-                  width: 36,
-                  height: 36,
-                  backgroundColor: (theme) => `${theme.palette.primary.main}14`,
-                  color: 'primary.main',
-                  transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-                  boxShadow: (theme) => `0 2px 6px ${theme.palette.primary.main}26`,
-                  '&:hover': {
-                    backgroundColor: 'primary.main',
-                    color: 'primary.contrastText',
-                    transform: 'scale(1.1)',
-                    boxShadow: (theme) => `0 4px 12px ${theme.palette.primary.main}4D`,
-                  }
-                }}
-              >
-                <ExpandLess />
-              </IconButton>
             )}
           </Box>
 
