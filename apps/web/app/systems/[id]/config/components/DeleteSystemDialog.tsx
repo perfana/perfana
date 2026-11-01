@@ -27,9 +27,12 @@ interface DeletePreviewCounts {
   testRunConfigs: number;
   requestsRaw: number;
   transactions: number;
+  transactionStats: number;
   apdexThresholds: number;
   graphPresets: number;
   filterPresets: number;
+  seriesGroupingRules: number;
+  seriesGroups: number;
 }
 
 interface DeletePreviewResult {
@@ -61,9 +64,12 @@ const RESOURCE_LABELS: Record<keyof DeletePreviewCounts, string> = {
   testRunConfigs: 'Test Run Configurations',
   requestsRaw: 'Request Data Points',
   transactions: 'Transaction Data Points',
+  transactionStats: 'Transaction Statistics',
   apdexThresholds: 'Apdex Thresholds',
   graphPresets: 'Graph Presets',
   filterPresets: 'Filter Presets',
+  seriesGroupingRules: 'Series Grouping Rules',
+  seriesGroups: 'Series Group Memberships',
 };
 
 export default function DeleteSystemDialog({ open, onClose, systemId, systemName }: DeleteSystemDialogProps) {

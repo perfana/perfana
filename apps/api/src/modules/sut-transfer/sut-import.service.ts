@@ -270,10 +270,16 @@ export class SutImportService {
     // import. Drop the orphans (logged) so the rest of the SUT still lands; a
     // re-export with the current code brings the templates — and the reports —
     // back. For self-contained bundles this prunes nothing.
+    //
+    // ds_metric_series_groups.rule_id is the opposite case: nullable, and the row is still a
+    // valid raw -> group mapping without its rule, so the reference is cleared instead of the
+    // row dropped. See nullRowsMissingParent.
     const toInsert =
       table === 'generated_reports'
         ? await this.dropRowsMissingParent(manager, table, rows, 'template_id', 'report_templates')
-        : rows;
+        : table === 'ds_metric_series_groups'
+          ? await this.nullRowsMissingParent(manager, table, rows, 'rule_id', 'series_grouping_rules')
+          : rows;
     const dropped = rows.length - toInsert.length;
     if (toInsert.length === 0) return { inserted: 0, dropped };
 
@@ -364,6 +370,56 @@ export class SutImportService {
       [scopes],
     );
     scopes.forEach((scope) => purgedScopes.add(`${table}:${scope}`));
+  }
+
+  /**
+   * Clear a nullable FK column on rows whose parent is absent from the target, keeping the rows.
+   *
+   * The case is `ds_metric_series_groups.rule_id` on a merge-import. A bundle's rule can lose
+   * `ON CONFLICT DO NOTHING` to a DIFFERENT rule already holding the same slot
+   * (`uq_series_grouping_rules_slot`: system, environment, workload, dashboard, panel), which is
+   * what happens when a user deleted and recreated a rule in the target before a top-up import.
+   * The rule is then skipped and counted as "already present", and the membership rows that
+   * reference its id would FK-violate (23503) and abort the whole import, which only translates
+   * 23505.
+   *
+   * `rule_id` is `ON DELETE SET NULL`, so NULL is exactly the "rule removed" state the stale
+   * detection already understands, and the row stays a valid raw -> group mapping for its run.
+   * The parent is looked up AFTER the parent table was flushed: the bundle orders
+   * `series_grouping_rules` first, and its rows are visible here inside the same transaction.
+   *
+   * Rows already carrying NULL, and rows whose parent exists, pass through untouched. The parent
+   * table is a trusted literal from the caller; ids are cast to text so this works regardless of
+   * the key type, as in dropRowsMissingParent.
+   */
+  private async nullRowsMissingParent(
+    manager: EntityManager,
+    table: string,
+    rows: Record<string, unknown>[],
+    column: string,
+    parentTable: string,
+  ): Promise<Record<string, unknown>[]> {
+    const ids = [...new Set(rows.map((r) => r[column]).filter((v) => v != null).map(String))];
+    if (ids.length === 0) return rows;
+    const present: Array<{ id: string }> = await manager.query(
+      `SELECT id::text AS id FROM ${parentTable} WHERE id::text = ANY($1::text[])`,
+      [ids],
+    );
+    const have = new Set(present.map((p) => p.id));
+    let cleared = 0;
+    const kept = rows.map((r) => {
+      if (r[column] == null || have.has(String(r[column]))) return r;
+      cleared++;
+      return { ...r, [column]: null };
+    });
+    if (cleared > 0) {
+      this.logger.warn(
+        `Cleared ${column} on ${cleared} ${table} row(s) referencing a ${parentTable} row that is ` +
+          `not in the target (typically because another rule already holds its slot). The rows were ` +
+          `imported without it.`,
+      );
+    }
+    return kept;
   }
 
   // Drop rows whose (NOT NULL) FK column points at a parent row absent from the

@@ -227,6 +227,95 @@ describe('SutImportService (integration)', () => {
     }
   });
 
+  // Series grouping (migration 1819). The rule FKs into the SUT and its application dashboard,
+  // and the membership rows FK into both the dashboard and the rule (rule_id), so this only
+  // lands if the bundle carries the rule first and neither id is remapped on the way in.
+  it('round-trips series grouping rules and membership rows with their foreign keys intact', async () => {
+    const sg = {
+      sut: '12121212-0000-0000-0000-000000000001',
+      gi: '12121212-0000-0000-0000-000000000002',
+      gd: '12121212-0000-0000-0000-000000000003',
+      ad: '12121212-0000-0000-0000-000000000004',
+      rule: '12121212-0000-0000-0000-000000000005',
+      run: '12121212-0000-0000-0000-000000000006',
+    };
+    const sgRunKey = 'series-grouping-run-1';
+    const otherRunKey = 'series-grouping-run-not-selected';
+    const cleanup = async (): Promise<void> => {
+      await dataSource.query(`DELETE FROM ds_metric_series_groups WHERE test_run_id = ANY($1)`, [[sgRunKey, otherRunKey]]);
+      await dataSource.query(`DELETE FROM series_grouping_rules WHERE id = $1`, [sg.rule]);
+      await dataSource.query(`DELETE FROM application_dashboards WHERE id = $1`, [sg.ad]);
+      await dataSource.query(`DELETE FROM grafana_dashboards WHERE id = $1`, [sg.gd]);
+      await dataSource.query(`DELETE FROM grafana_instances WHERE id = $1`, [sg.gi]);
+      await dataSource.query(`DELETE FROM test_runs WHERE id = $1`, [sg.run]);
+      await dataSource.query(`DELETE FROM systems_under_test WHERE id = $1`, [sg.sut]);
+    };
+    const insertMembership = (runKey: string, metric: string): Promise<unknown> =>
+      dataSource.query(
+        `INSERT INTO ds_metric_series_groups
+           (test_run_id, application_dashboard_id, panel_id, metric_name, group_name, aggregation, rule_id, rule_hash, organization_id)
+         VALUES ($1,$2,101,$3,'pod-a','avg',$4,'abc123',$5)`,
+        [runKey, sg.ad, metric, sg.rule, srcOrg],
+      );
+
+    try {
+      await dataSource.query(`INSERT INTO systems_under_test (id, name, description, organization_id) VALUES ($1,'series-grouping-sut','sg',$2)`, [sg.sut, srcOrg]);
+      await dataSource.query(`INSERT INTO test_runs (id, test_run_id, system_under_test_id, test_environment, workload, organization_id) VALUES ($1,$2,$3,'test','wl-1',$4)`, [sg.run, sgRunKey, sg.sut, srcOrg]);
+      await dataSource.query(`INSERT INTO grafana_instances (id, label, client_url, org_id, organization_id) VALUES ($1,'sg-grafana','https://g.example.com','1',$2)`, [sg.gi, srcOrg]);
+      await dataSource.query(`INSERT INTO grafana_dashboards (id, grafana_instance_id, grafana_id, uid, name, panels, organization_id) VALUES ($1,$2,1,'sg-uid','sg-dash','{}'::jsonb,$3)`, [sg.gd, sg.gi, srcOrg]);
+      await dataSource.query(`INSERT INTO application_dashboards (id, system_under_test_id, test_environment, grafana_instance_id, grafana_dashboard_id, dashboard_name, dashboard_label, organization_id) VALUES ($1,$2,'test',$3,$4,'sg-app','sg-label',$5)`, [sg.ad, sg.sut, sg.gi, sg.gd, srcOrg]);
+      await dataSource.query(
+        `INSERT INTO series_grouping_rules (id, system_under_test_id, test_environment, workload, application_dashboard_id, preset, organization_id)
+         VALUES ($1,$2,'test','wl-1',$3,'k8s-pod',$4)`,
+        [sg.rule, sg.sut, sg.ad, srcOrg],
+      );
+      await insertMembership(sgRunKey, 'pod-a-7d9f8c6b5-x2x4z');
+      await insertMembership(sgRunKey, 'pod-a-7d9f8c6b5-q8w3e');
+      // A run that is not in the export selection: its memberships must not travel.
+      await insertMembership(otherRunKey, 'pod-a-7d9f8c6b5-zzzzz');
+
+      const bundle = await exportService
+        .export(sg.sut, { testRunIds: [sg.run], includeOptional: false, includeRaw: false })
+        .then(streamToBuffer);
+
+      // Clean target: the importer needs the SUT absent to take the non-merge path. The bundle
+      // carries the grafana instance and dashboard too, so nothing is re-seeded here.
+      await cleanup();
+
+      const summary = await importService.import(bundle, targetOrg);
+      expect(summary.rowCounts['series_grouping_rules']).toBe(1);
+      expect(summary.rowCounts['ds_metric_series_groups']).toBe(2);
+
+      const rules = await dataSource.query(
+        `SELECT id, system_under_test_id, application_dashboard_id, organization_id, team_id FROM series_grouping_rules WHERE system_under_test_id = $1`,
+        [sg.sut],
+      );
+      expect(rules).toHaveLength(1);
+      expect(rules[0]).toMatchObject({
+        id: sg.rule, // same id: the memberships reference it
+        application_dashboard_id: sg.ad,
+        organization_id: targetOrg, // remapped
+        team_id: null,
+      });
+
+      const groups = await dataSource.query(
+        `SELECT test_run_id, application_dashboard_id, rule_id, organization_id FROM ds_metric_series_groups WHERE test_run_id = ANY($1)`,
+        [[sgRunKey, otherRunKey]],
+      );
+      expect(groups).toHaveLength(2);
+      for (const g of groups) {
+        expect(g).toMatchObject({ test_run_id: sgRunKey, application_dashboard_id: sg.ad, rule_id: sg.rule, organization_id: targetOrg });
+      }
+
+      // Replaying the same bundle is a no-op: the composite PK absorbs it, with no purge.
+      const replay = await importService.import(bundle, targetOrg);
+      expect(replay.rowCounts['ds_metric_series_groups']).toBe(0);
+      expect(replay.skippedCounts['ds_metric_series_groups']).toBe(2);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('rejects a bundle that targets a table outside the allowlist (SQL trust boundary)', async () => {
     const evilSutId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
     const lines = [

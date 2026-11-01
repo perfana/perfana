@@ -214,6 +214,8 @@ export class DeleteTestRunHandler implements ICommandHandler<DeleteTestRunComman
       { table: 'ds_adapt_conclusion', param: testRunId, label: 'adapt conclusion' },
       { table: 'ds_adapt_tracked_results', param: testRunId, label: 'adapt tracked results' },
       { table: 'ds_metric_statistics', param: testRunId, label: 'metric statistics' },
+      // Series grouping membership (migration 1819): varchar test_run_id, no FK to test_runs.
+      { table: 'ds_metric_series_groups', param: testRunId, label: 'series group memberships' },
       { table: 'ds_metric_collection_status', param: testRunId, label: 'metric collection status' },
       { table: 'ds_panels', param: testRunId, label: 'panels' },
       { table: 'ds_metrics', param: testRunId, label: 'metrics' },

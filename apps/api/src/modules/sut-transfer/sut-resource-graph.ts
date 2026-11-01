@@ -102,6 +102,11 @@ export const SUT_RESOURCES: SutResource[] = [
 
   // --- DS SUT-scoped tables ---
   { table: 'ds_compare_config', filter: 'bySut', group: 'core' },
+  // Series grouping rules (migration 1819). FK parents are systems_under_test and
+  // application_dashboards, both earlier in this list. Neither id is remapped on import (every
+  // row carries its source PK), and organization_id / team_id are rewritten by the importer's
+  // generic ownership remap. Must precede ds_metric_series_groups, whose rule_id points here.
+  { table: 'series_grouping_rules', filter: 'bySut', group: 'core' },
   { table: 'provisioned_template_ds_compare_configs', filter: 'bySut', group: 'core' },
   { table: 'ds_control_groups', filter: 'bySut', group: 'core' },
   // Note: this table has no system_under_test_id column of its own; it hangs
@@ -130,6 +135,12 @@ export const SUT_RESOURCES: SutResource[] = [
   { table: 'ds_change_points', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'check_results', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_metric_statistics', filter: 'byTestRunVarchar', group: 'core' },
+  // Derived raw -> group membership the statistics above were computed with (migration 1819).
+  // Keyed on the varchar test_run_id with no FK to test_runs, so it travels with the selected
+  // runs only. rule_id FKs into series_grouping_rules and application_dashboard_id into
+  // application_dashboards: keep it after both. Composite PK, so ON CONFLICT DO NOTHING makes a
+  // re-import idempotent without a purge.
+  { table: 'ds_metric_series_groups', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'test_run_transaction_stats', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_metric_collection_status', filter: 'byTestRunVarchar', group: 'core' },
   { table: 'ds_panels', filter: 'byTestRunVarchar', group: 'core' },
