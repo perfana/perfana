@@ -442,15 +442,21 @@ export function usePerformanceAnalysisData({
   // the user switched it off or the last fetch was slow (≥5 s). The initial load
   // is handled by the mount effect above. refreshAll is read through a ref so
   // expanding a row or changing a filter does not restart the timer.
+  // Like the rollup poll, it stops while the Results tab is hidden and refreshes once when shown:
+  // the figures are as old as the time spent on another tab.
   const refreshAllRef = useRef(refreshAll);
   refreshAllRef.current = refreshAll;
+  const wasTimerTabActive = useRef(tabActive);
   useEffect(() => {
-    if (!isRunning || autoRefreshDisabled || refreshIntervalMs <= 0) return;
+    const resumed = tabActive && !wasTimerTabActive.current;
+    wasTimerTabActive.current = tabActive;
+    if (!isRunning || autoRefreshDisabled || refreshIntervalMs <= 0 || !tabActive) return;
+    if (resumed && latestTransactionsSettledRef.current) refreshAllRef.current();
     const interval = setInterval(() => {
       if (latestTransactionsSettledRef.current) refreshAllRef.current();
     }, refreshIntervalMs);
     return () => clearInterval(interval);
-  }, [isRunning, autoRefreshDisabled, refreshIntervalMs]);
+  }, [isRunning, autoRefreshDisabled, refreshIntervalMs, tabActive]);
 
   // When the test stops running, show the final figures: the timer stops with it, and
   // with auto-refresh Off or a long period the last fetch can be minutes old. Resetting

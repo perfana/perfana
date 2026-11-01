@@ -234,6 +234,30 @@ describe('usePerformanceAnalysisData — live auto-refresh interval', () => {
     expect(transactionFetches()).toBe(initial + 1);
   });
 
+  it('stops while the Results tab is hidden and refreshes once when it is shown again', async () => {
+    let active = true;
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      React.createElement(TabActiveContext.Provider, { value: active }, children);
+    const { result, rerender } = renderHook(
+      () => usePerformanceAnalysisData({ testRunId: 'run-1', testRun: runningTestRun }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const initial = transactionFetches();
+
+    active = false;
+    rerender();
+    await act(async () => { await jest.advanceTimersByTimeAsync(120_000); });
+    expect(transactionFetches()).toBe(initial);
+
+    active = true;
+    rerender();
+    await act(async () => { await jest.advanceTimersByTimeAsync(0); });
+    expect(transactionFetches()).toBe(initial + 1);
+    await act(async () => { await jest.advanceTimersByTimeAsync(30_000); });
+    expect(transactionFetches()).toBe(initial + 2);
+  });
+
   it('does not auto-refresh a completed run', async () => {
     const { result } = renderHook(() =>
       usePerformanceAnalysisData({

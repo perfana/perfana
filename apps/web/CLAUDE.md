@@ -458,8 +458,8 @@ box) survives a switch to another tab and back. Each rule below fails silently w
   `CardLinkRequestContext`) has to wrap `TabBody` from **outside**. A Provider inside the frozen
   subtree never receives a new value.
 - **Timers keep running unless they read `TabActiveContext`** (`context/TabActiveContext.ts`,
-  `true` outside the page). The AWR report poll and the Performance Analysis rollup poll gate on
-  it and refetch once when shown again, because re-arming a poll does not fire it: react-query
+  `true` outside the page). The AWR report poll and the Performance Analysis rollup poll and live
+  refresh timer gate on it and refetch once when shown again, because re-arming a poll does not fire it: react-query
   does not fetch when the AWR card's `refetchInterval` goes from 0 back to N, and the rollup
   poll's fresh `setInterval` waits its full 5 s. A new poll in a test-run card must do the same.
 - **A render error stays in its tab.** `TabErrorBoundary`, keyed on the run id, replaces only
@@ -815,12 +815,12 @@ touches look machine-seeded again.
 
 ### Performance Analysis live refresh is a client timer, and background callers wait for the latest request
 
-Since v0.2.97.41 the card no longer refetches on the test run's WebSocket `updated_at`; while a
+Since v0.2.97.42 the card no longer refetches on the test run's WebSocket `updated_at`; while a
 run is live it refetches on its own timer, at the period picked in the **Refresh** dropdown
 (`REFRESH_OPTIONS` in `performance-analysis/hooks/usePerformanceAnalysisData.ts`: Off, 10s, 30s,
 1m, 5m; default 30s). Test-run status and job progress are still WebSocket-driven.
 
-Five things hold it together:
+Six things hold it together:
 
 1. **Only the latest `/transactions` request may write state.** `fetchTransactions` takes a
    sequence number and checks `isStale()` after every `await`, in `catch`, and before its
@@ -841,6 +841,9 @@ Five things hold it together:
    `sinceMinutes` to null (which refetches through the mount effect) when a window was picked.
 5. **Re-picking the shown period must resume a pause.** MUI's `Select` fires `onChange` only for a
    different value, so each `MenuItem` has an `onClick` guarded on `opt.value === refreshIntervalMs`.
+6. **The timer stops while the Results tab is hidden** (`TabActiveContext`, see "Visited test-run
+   tabs stay mounted while hidden") and refreshes once when the tab is shown again, as the rollup
+   poll does.
 
 A picked period is remembered per browser in `localStorage`, read once through
 `readStoredRefreshInterval`: missing, blank (`Number('')` is 0, which is Off), 0, or a value the

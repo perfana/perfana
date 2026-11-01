@@ -3703,9 +3703,9 @@ It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that 
 
 ## Performance Analysis live refresh
 
-Follow-ups from the v0.2.97.41 refresh-rate dropdown.
+Follow-ups from the v0.2.97.42 refresh-rate dropdown.
 
-### Live refresh load and ordering gaps left by v0.2.97.41
+### Live refresh load and ordering gaps left by v0.2.97.42
 
 **Priority:** P2
 **Origin:** /ship review cycles 1-3 and adversarial review, 2026-11-01 (user decisions D7, D10, D11).
@@ -3719,7 +3719,8 @@ more frequent than under the old ~30 s WebSocket trigger.
 - The ≥5 s pause times `/transactions` only; `/virtual-users` and `/throughput` (the multi-second reads
   in root CLAUDE.md #34) are not timed and not deduped, so they can overlap at 10 s. The 5 s threshold
   is also absolute, ~50% duty cycle per viewer at 10 s.
-- The timer runs while the tab is hidden and while the card is collapsed. Skip ticks while
+- The timer runs while the browser tab is hidden and while the card is collapsed (it does stop while
+  the Results tab is hidden behind another details-page tab). Skip ticks while
   `document.visibilityState !== 'visible'` and refresh once on return.
 - A `/transactions` request that never settles keeps the background gate closed until it does
   (bounded by the API's 300 s `query_timeout`); add `AbortSignal.timeout(~60 s)` and abort superseded
@@ -3735,7 +3736,7 @@ more frequent than under the old ~30 s WebSocket trigger.
 
 **Priority:** P2
 **Origin:** /ship red-team cycles 2-3 and adversarial review, 2026-11-01.
-**Why:** v0.2.97.41 refetches once on completion and resumes the timer on a pick, but:
+**Why:** v0.2.97.42 refetches once on completion and resumes the timer on a pick, but:
 - The completion refetch fires the instant `completed` flips, before late `requests_raw` rows
   (up to ~36 s) and the analyze rollup land; nothing fetches after. Schedule one more refetch
   (~60 s later, or when the analysis result arrives).
