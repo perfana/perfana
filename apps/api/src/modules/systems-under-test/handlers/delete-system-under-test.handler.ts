@@ -28,6 +28,8 @@ export interface DeletePreviewResult {
     apdexThresholds: number;
     graphPresets: number;
     filterPresets: number;
+    seriesGroupingRules: number;
+    seriesGroups: number;
   };
 }
 
@@ -110,6 +112,8 @@ export class DeleteSystemUnderTestHandler {
       apdexThresholds,
       graphPresets,
       filterPresets,
+      seriesGroupingRules,
+      seriesGroups,
     ] = await Promise.all([
       countQuery(`SELECT COUNT(*) FROM test_runs WHERE system_under_test_id = $1`),
       countQuery(`SELECT COUNT(*) FROM application_dashboards WHERE system_under_test_id = $1`),
@@ -157,6 +161,11 @@ export class DeleteSystemUnderTestHandler {
       countQuery(
         `SELECT (SELECT COUNT(*) FROM trends_filter_presets WHERE application_dashboard_id IN (SELECT id FROM application_dashboards WHERE system_under_test_id = $1)) + (SELECT COUNT(*) FROM compare_filter_presets WHERE application_dashboard_id IN (SELECT id FROM application_dashboards WHERE system_under_test_id = $1)) AS count`,
       ),
+      countQuery(`SELECT COUNT(*) FROM series_grouping_rules WHERE system_under_test_id = $1`),
+      // Not a hypertable, so no run window is needed; the primary key leads on test_run_id.
+      countQuery(
+        `SELECT COUNT(*) FROM ds_metric_series_groups WHERE test_run_id IN (SELECT test_run_id FROM test_runs WHERE system_under_test_id = $1)`,
+      ),
     ]);
 
     return {
@@ -182,6 +191,8 @@ export class DeleteSystemUnderTestHandler {
         apdexThresholds,
         graphPresets,
         filterPresets,
+        seriesGroupingRules,
+        seriesGroups,
       },
     };
   }
@@ -276,6 +287,11 @@ export class DeleteSystemUnderTestHandler {
       'ds_change_points',
       'check_results',
       'ds_metric_statistics',
+      // Series grouping membership (migration 1819): keyed on the run's varchar test_run_id with
+      // no FK to test_runs, so nothing cascades to it from the run. application_dashboard_id is
+      // ON DELETE CASCADE, not NO ACTION, so this is for the count and for not leaving it to
+      // the dashboard delete in phase 5.
+      'ds_metric_series_groups',
       'ds_metric_collection_status',
       'ds_panels',
     ];
@@ -339,6 +355,18 @@ export class DeleteSystemUnderTestHandler {
       manager,
       'ds_compare_config',
       `DELETE FROM ds_compare_config WHERE system_under_test_id = $1`,
+      [sutId],
+    );
+
+    // Series grouping rules (migration 1819) belong here and not in phase 6: their
+    // application_dashboard_id FK is ON DELETE CASCADE, so by the time phase 6 runs the phase 5
+    // `DELETE FROM application_dashboards` has already removed every one of them and an explicit
+    // delete would count 0. Phase 1 deleted the membership rows (rule_id is ON DELETE SET NULL,
+    // so the order is safe either way, but this one rewrites no rows).
+    await this.deleteWithLog(
+      manager,
+      'series_grouping_rules',
+      `DELETE FROM series_grouping_rules WHERE system_under_test_id = $1`,
       [sutId],
     );
   }

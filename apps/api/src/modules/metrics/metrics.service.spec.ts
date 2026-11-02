@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { MetricsService, MetricDataPoint } from './metrics.service';
+import { SeriesGroupResolver } from './series-group-resolver';
 import {
   DsMetrics,
   DsMetricStatistics,
@@ -46,6 +47,7 @@ describe('MetricsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MetricsService,
+        SeriesGroupResolver,
         {
           provide: getRepositoryToken(DsMetrics),
           useValue: createMockRepository(),
@@ -2307,6 +2309,7 @@ describe('MetricsService — the access check subject is what the query reads', 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MetricsService,
+        SeriesGroupResolver,
         ...[DsMetrics, DsMetricStatistics, DsControlGroups, DsChangePoints, DsAdaptResults,
             TestRunEntity, ApplicationDashboard].map((e) => ({
           provide: getRepositoryToken(e),

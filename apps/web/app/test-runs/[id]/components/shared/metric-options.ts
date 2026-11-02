@@ -64,12 +64,49 @@ export interface PanelOption extends Panel {
    * absent means it asks `/ds-metrics/distinct-names` as before.
    */
   metricNames?: string[];
+  /**
+   * Series groups among `metricNames` (group name -> its raw members in this run), from the
+   * same rows. Only set alongside `metricNames`, and only for a panel a grouping rule covers.
+   */
+  seriesMembers?: Record<string, string[]>;
 }
 
 /** One selectable series: a metric name plus the panel it belongs to. */
 export interface SeriesOption {
   metricName: string;
   panel: PanelOption;
+  /**
+   * Set when `metricName` is a series group: the raw series (pods) it combines in this run.
+   * The picker badges it and lists them; the chart endpoints expand the name themselves.
+   */
+  members?: string[];
+}
+
+/** One `series_groups` entry, as `/ds-metrics/available` and `/ds-metrics/distinct-series` return it. */
+export interface SeriesGroupSummary {
+  group: string;
+  members: string[];
+  aggregation: string;
+  member_count_name?: string;
+}
+
+/** Group name -> members, for the groups a response carries; undefined when it carries none. */
+export function membersByGroup(groups: SeriesGroupSummary[] | undefined): Record<string, string[]> | undefined {
+  if (!Array.isArray(groups) || groups.length === 0) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const g of groups) {
+    if (g && typeof g.group === 'string' && Array.isArray(g.members)) out[g.group] = g.members;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Options for `fetchSeriesForPanel`. */
+export interface SeriesFetchOptions {
+  /**
+   * The per-pod view: ask for the raw series a grouping rule would combine. Bypasses the
+   * panel list's names, which are grouped.
+   */
+  members?: boolean;
 }
 
 /** What the cascade hands back per picked series. */
@@ -193,6 +230,8 @@ interface AvailablePanelRow {
   unit?: string;
   /** Every series the run recorded on this panel — see `seriesFromAvailableRows`. */
   metric_names?: string[];
+  /** Present only when a series grouping rule groups the panel in this run. */
+  series_groups?: SeriesGroupSummary[];
 }
 
 /**
@@ -265,17 +304,19 @@ function ambiguousLabels(dashboards: ApplicationDashboard[]): Set<string> {
 function seriesFromAvailableRows(
   rows: AvailablePanelRow[],
   skipLabels: Set<string>,
-): Map<string, string[]> {
-  const byPanel = new Map<string, string[]>();
+): Map<string, { names: string[]; members?: Record<string, string[]> }> {
+  const byPanel = new Map<string, { names: string[]; members?: Record<string, string[]> }>();
   for (const row of rows) {
     if (!row.metric_names?.length) continue;
     if (skipLabels.has(row.dashboard_label)) continue;
     const key = panelKey({ id: row.panel_id, dashboardLabel: row.dashboard_label });
+    const groups = membersByGroup(row.series_groups);
     const existing = byPanel.get(key);
     if (existing) {
-      for (const name of row.metric_names) if (!existing.includes(name)) existing.push(name);
+      for (const name of row.metric_names) if (!existing.names.includes(name)) existing.names.push(name);
+      if (groups) existing.members = { ...(existing.members ?? {}), ...groups };
     } else {
-      byPanel.set(key, [...row.metric_names]);
+      byPanel.set(key, { names: [...row.metric_names], ...(groups ? { members: groups } : {}) });
     }
   }
   return byPanel;
@@ -374,15 +415,21 @@ export async function fetchPanelsForDashboard(
 export async function fetchSeriesForPanel(
   panel: PanelOption,
   testRun: TestRun | null,
+  { members = false }: SeriesFetchOptions = {},
 ): Promise<SeriesOption[]> {
   if (!testRun) return [];
-  const asOptions = (names: string[]): SeriesOption[] => names.map((metricName) => ({ metricName, panel }));
+  const asOptions = (names: string[], groups?: Record<string, string[]>): SeriesOption[] =>
+    names.map((metricName) => {
+      const groupMembers = groups?.[metricName];
+      return groupMembers ? { metricName, panel, members: groupMembers } : { metricName, panel };
+    });
 
   /** The run-wide aggregate is a series no panel has a row for; offered where it means something. */
-  const withAllAggregated = (names: string[]): SeriesOption[] =>
-    asOptions(shouldOfferAllAggregated(panel.source, panel.id, names)
-      ? [ALL_AGGREGATED_OPTION, ...names]
-      : names);
+  const withAllAggregated = (names: string[], groups?: Record<string, string[]>): SeriesOption[] =>
+    asOptions(
+      shouldOfferAllAggregated(panel.source, panel.id, names) ? [ALL_AGGREGATED_OPTION, ...names] : names,
+      groups,
+    );
 
   try {
     if (isUrlPanel(panel.id)) {
@@ -396,8 +443,10 @@ export async function fetchSeriesForPanel(
     // dashboard column, where before this change every panel tick re-asked. The panel list
     // beside it has always had exactly that staleness, from exactly this fetch, so the two are
     // now consistent rather than one being fresher than the other.
-    if (panel.metricNames) {
-      return withAllAggregated(panel.metricNames);
+    //
+    // Not for the per-pod view: these names are grouped, and the raw members are the point.
+    if (panel.metricNames && !members) {
+      return withAllAggregated(panel.metricNames, panel.seriesMembers);
     }
 
     const params = new URLSearchParams({
@@ -412,13 +461,30 @@ export async function fetchSeriesForPanel(
     });
     const metricsSourceId = panel.metricsSourceId || panel.dashboard.metrics_source_id;
     if (metricsSourceId) params.set('metricsSourceId', metricsSourceId);
+    if (members) params.set('members', 'true');
 
+    // `/distinct-series` is `/distinct-names` plus what each group name stands for, from the
+    // same reads. An API older than this client has no such route: a 404 falls back to the
+    // names alone, which costs the badge and nothing else.
     const res = await authenticatedFetch(
-      `/metrics/ds-metrics/distinct-names?${params.toString()}`,
+      `/metrics/ds-metrics/distinct-series?${params.toString()}`,
       { headers: { 'Content-Type': 'application/json' } },
     );
+    if (res.status === 404) {
+      const legacy = await authenticatedFetch(
+        `/metrics/ds-metrics/distinct-names?${params.toString()}`,
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+      if (!legacy.ok) return [];
+      return withAllAggregated(await legacy.json());
+    }
     if (!res.ok) return [];
-    return withAllAggregated(await res.json());
+    // A bare array is `/distinct-names`' shape; accepted so a proxy or test double that still
+    // answers with it degrades to "no badge" rather than to an empty dropdown.
+    const body = (await res.json()) as { metric_names?: string[]; series_groups?: SeriesGroupSummary[] } | string[];
+    if (Array.isArray(body)) return withAllAggregated(body);
+    const names = Array.isArray(body?.metric_names) ? body.metric_names : [];
+    return withAllAggregated(names, members ? undefined : membersByGroup(body?.series_groups));
   } catch (error) {
     console.error(`Error fetching series for panel ${panel.title}:`, error);
     return [];
@@ -468,15 +534,25 @@ export const fetchPanelsForDashboards = async (
   // ones that paid for the call: the rows cover whatever the run recorded, and a panel they
   // do not mention simply keeps asking.
   const knownSeries = seriesFromAvailableRows(rows, ambiguousLabels(allDashboards ?? dashboards));
-  return lists.map((panels) => panels.map((p) => ({
-    ...p,
-    metricNames: knownSeries.get(panelKey(p)),
-  })));
+  return lists.map((panels) => panels.map((p) => {
+    const known = knownSeries.get(panelKey(p));
+    return {
+      ...p,
+      metricNames: known?.names,
+      ...(known?.members ? { seriesMembers: known.members } : {}),
+    };
+  }));
 };
 
-/** Series for many panels, same bound. */
+/**
+ * Series for many panels, same bound. `memberPanels` holds the `panelKey`s the picker switched
+ * to the per-pod view ("Show individual pods").
+ */
 export const fetchSeriesForPanels = (
   panels: PanelOption[],
   testRun: TestRun | null,
+  memberPanels?: ReadonlySet<string>,
 ): Promise<SeriesOption[][]> =>
-  mapLimit(panels, OPTION_FETCH_CONCURRENCY, (p) => fetchSeriesForPanel(p, testRun));
+  mapLimit(panels, OPTION_FETCH_CONCURRENCY, (p) =>
+    fetchSeriesForPanel(p, testRun, memberPanels?.has(panelKey(p)) ? { members: true } : undefined),
+  );

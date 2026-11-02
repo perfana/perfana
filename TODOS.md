@@ -11,6 +11,64 @@ with the version it landed in.
 
 ---
 
+## Series grouping
+
+Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.43
+shipped all three stages in one release: PR A (the engine), PR B (the rules API) and PR C (the
+web), which were developed as separate versions on one branch and squash-merged together.
+
+**Verified on 2026-11-01** against `timescaledb-ha:pg15` with every migration through 1819 applied
+(see the v0.2.97.43 CHANGELOG entry for numbers): the full preflight including the RLS suite (the
+hand-edited coverage snapshot matches); the RLS policy matrix for `series_grouping_rules`; the
+Postgres-backed SUT export/import round trip; the grouped statistics on 1.87 M compressed rows
+with real Toolkit functions (which found the merge-join plan, fixed in v0.2.97.43); `lttb()` over
+a grouped series; and every rules route through a running API. What is still owed:
+
+### Walk the series grouping UI end to end in a browser (P2)
+
+**Origin:** v0.2.97.43, plan Task 12 for PR C. The web surfaces are covered by component tests and
+the new `/ds-metrics/distinct-series` route was exercised against a running API, but nobody has
+clicked through the real stack: analyse three runs with renamed pods (a Grafana Kubernetes dashboard
+with a `{{pod}}` legend, or seeded `ds_metrics`) → the anomaly card shows the suggestion → **Group
+series…** shows 0 % → 100 % → **Save and recalculate** → after the re-evaluate ADAPT compares the
+groups and the per-pod rows are gone → Compare shows baseline values → the Graphs picker badges the
+group and **show pods** works → a preset holding the group name draws after reload → a report
+section from it renders → SUT export/import keeps the rule → SUT delete removes both tables' rows →
+a copy to another workload reports its `origin` and skip reasons. Paste what you saw into the PR.
+
+### Re-measure the grouped statistics at production scale (P2)
+
+**Origin:** v0.2.97.43, plan Task 12. Measured at 1.87 M rows, not at the ~20 M of a large
+production run: main INSERT 5.8 s with no rule, 5.4 s + 3.0 s (grouped statement, merge joins off)
+with a dashboard-wide rule over 23 % of the rows, series read 85 ms. Repeat on a production-sized
+run before rules are used widely: `EXPLAIN (ANALYZE, BUFFERS)` the grouped statement and confirm a
+Hash Join to the member arrays, no `external merge`, and that its time stays well under
+`AGGREGATION_STATEMENT_TIMEOUT_MS`. The grouped statement reads the run's whole segment (it filters
+on `test_run_id` only, by design — see the worker CLAUDE.md section), so it scales with the run, not
+with the grouped panels.
+
+### The worker integration suite cannot run against a migrated database (P3)
+
+**Origin:** v0.2.97.43. `apps/worker/src/test/integration/*.integration.test.ts` create their own
+simplified tables with `CREATE TABLE IF NOT EXISTS` and never run migrations, so against a migrated
+database the statements are no-ops and the fixtures no longer match the real schema; CI never runs
+the suite (`pr-quality-gate.yml` runs `test:coverage` only). The series-grouping path was verified
+instead by replaying the pipeline's own helpers against a migrated database. Give the suite its own
+empty database (or migrations) and add the grouping case the plan's Task 3 step 6 describes.
+
+### A fresh install cannot migrate in one batch: 1799 fails after 1791's COMMIT (P1)
+
+**Origin:** found 2026-11-01 while building the series-grouping verification database; pre-existing.
+Both runners (`packages/shared/ormconfig.js` and `Dockerfile.migrations`) use TypeORM's default
+`transaction: 'all'`, so 1791's bare `COMMIT` ends the batch transaction and
+`1799000000000-WidenCaggRefreshWindows.ts`'s `SAVEPOINT` then fails with `SAVEPOINT can only be
+used in transaction blocks`. Existing deploys never saw it because 1791 and 1799 shipped in
+different batches. `npx typeorm migration:run -d ormconfig.js -t each` completes cleanly. Make
+both runners agree on `'each'` (or make 1799 savepoint only inside a transaction), and correct the
+comments in 1799 and in "The consolidated schema's policy loops…" below that assume `'each'`.
+
+---
+
 ## System under test deletion
 
 ### The dashboard delete still writes a non-segmentby `ds_metrics` predicate (P2)

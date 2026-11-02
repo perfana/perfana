@@ -813,6 +813,77 @@ describe('ControlGroupStatisticsPipeline', () => {
     });
   });
 
+  /**
+   * Series grouping vs the legacy (pct_agg IS NULL) path: that path re-reads raw ds_metrics by
+   * raw series name, so a group name has no counterpart there and grouped series drop out of
+   * the baseline. It must say so (docs/design/2026-11-01-series-grouping-plan.md, Task 4).
+   */
+  describe('series grouping on the legacy path', () => {
+    const seed = (missingSketches: number) => {
+      (mockEntityManager.query as any).mockResolvedValueOnce([
+        {
+          control_group_id: 'control-group-1',
+          system_under_test_id: 'system-1',
+          workload: 'load-test',
+          test_environment: 'production',
+          test_runs: ['test-run-1', 'test-run-2'],
+          n_test_runs: 2
+        }
+      ]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ count: '100' }]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ missing_sketches: missingSketches }]);
+      (mockEntityManager.query as any).mockResolvedValueOnce(Array.from({ length: 3 }, () => ({ '?column?': 1 })));
+    };
+    const groupingWarnings = () =>
+      (mockLogger.warn as any).mock.calls
+        .map((c: unknown[]) => String(c.at(-1)))
+        .filter((m: string) => m.startsWith('series-grouping:'));
+    const probeCalls = () =>
+      (mockEntityManager.query as any).mock.calls.filter((c: any[]) => String(c[0]).includes('ds_metric_series_groups'));
+
+    test('warns when a baseline run on the legacy path has grouped series', async () => {
+      seed(7);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ present: true }]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ grouped: true }]);
+
+      await pipeline.execute({ controlGroupIds: ['control-group-1'] });
+
+      expect(groupingWarnings()).toEqual([
+        expect.stringContaining('control group control-group-1 took the legacy path; grouped series are left out'),
+      ]);
+      const exists = probeCalls().find((c: any[]) => String(c[0]).includes('EXISTS'));
+      expect(exists[1]).toEqual([['test-run-1', 'test-run-2']]);
+    });
+
+    test('stays quiet when no baseline run is grouped', async () => {
+      seed(7);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ present: true }]);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ grouped: false }]);
+
+      await pipeline.execute({ controlGroupIds: ['control-group-1'] });
+
+      expect(groupingWarnings()).toEqual([]);
+    });
+
+    test('never queries the membership table when migration 1819 has not run', async () => {
+      seed(7);
+      (mockEntityManager.query as any).mockResolvedValueOnce([{ present: false }]);
+
+      await pipeline.execute({ controlGroupIds: ['control-group-1'] });
+
+      expect(probeCalls().filter((c: any[]) => String(c[0]).includes('EXISTS'))).toHaveLength(0);
+      expect(groupingWarnings()).toEqual([]);
+    });
+
+    test('the fast path does not probe at all', async () => {
+      seed(0);
+
+      await pipeline.execute({ controlGroupIds: ['control-group-1'] });
+
+      expect(probeCalls()).toHaveLength(0);
+    });
+  });
+
   describe('Row count after the INSERT', () => {
     const seedOneGroup = () => {
       (mockEntityManager.query as any).mockResolvedValueOnce([

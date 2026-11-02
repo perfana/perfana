@@ -15,6 +15,7 @@ import {
 import { authenticatedFetch } from '@/lib/api';
 import { DashboardVariable, DashboardVariableOption } from '@/lib/types';
 import { ApplicationDashboard, VariableValue } from './types';
+import SeriesGroupingRulesSection from './SeriesGroupingRulesSection';
 
 interface EditDashboardDialogProps {
   open: boolean;
@@ -24,6 +25,10 @@ interface EditDashboardDialogProps {
   loading: boolean;
   systemName?: string;
   selectedEnvironment?: string;
+  /** Needed for the series grouping section, which is hidden without it. */
+  systemId?: string;
+  /** Series grouping rules are per workload; '' shows the "select a workload" hint. */
+  selectedWorkload?: string;
 }
 
 export default function EditDashboardDialog({
@@ -33,7 +38,9 @@ export default function EditDashboardDialog({
   dashboard,
   loading,
   systemName,
-  selectedEnvironment
+  selectedEnvironment,
+  systemId,
+  selectedWorkload = '',
 }: EditDashboardDialogProps) {
   const [dashboardLabel, setDashboardLabel] = useState('');
   const [variableValues, setVariableValues] = useState<Record<string, string[]>>({});
@@ -244,6 +251,15 @@ export default function EditDashboardDialog({
                 );
               })}
             </Box>
+          )}
+
+          {systemId && selectedEnvironment && (
+            <SeriesGroupingRulesSection
+              systemId={systemId}
+              environment={selectedEnvironment}
+              workload={selectedWorkload}
+              dashboard={dashboard}
+            />
           )}
         </Box>
       </DialogContent>

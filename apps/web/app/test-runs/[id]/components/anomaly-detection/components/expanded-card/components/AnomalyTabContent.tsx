@@ -5,6 +5,7 @@ import { Box, Typography, CircularProgress } from '@mui/material';
 import FilterControls from '../../FilterControls';
 import AnomalyDetectionTable from '../../AnomalyDetectionTable';
 import { FeedbackBanner } from './FeedbackBanner';
+import { SeriesGroupingNotices } from '../../SeriesGroupingNotices';
 import type { AnomalyTabContentProps } from '../types';
 
 /**
@@ -115,6 +116,18 @@ export function AnomalyTabContent({
         onMarkAsRegression={onMarkAsRegression}
         onMarkAsVariability={onMarkAsVariability}
         onMarkAsChangepoint={onMarkAsChangepoint}
+      />
+
+      <SeriesGroupingNotices
+        testRunId={testRunId}
+        testRun={testRun}
+        anomalyRows={anomalyData}
+        onShowRows={(dashboardLabel, panelTitle) => {
+          // The dashboard filter resets the panel filter, so it goes first.
+          handleDashboardFilterChange({ target: { value: dashboardLabel } });
+          handlePanelFilterChange({ target: { value: panelTitle } });
+        }}
+        showToast={showToast}
       />
 
       <AnomalyDetectionTable

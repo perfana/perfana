@@ -137,6 +137,11 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     "policies": [],
     "rls": false,
   },
+  "ds_metric_series_groups": {
+    "force": false,
+    "policies": [],
+    "rls": false,
+  },
   "ds_metric_statistics": {
     "force": false,
     "policies": [],
@@ -361,6 +366,16 @@ exports[`RLS policy coverage snapshot every owned-resource and policy-bearing ta
     "force": false,
     "policies": [],
     "rls": false,
+  },
+  "series_grouping_rules": {
+    "force": true,
+    "policies": [
+      "DELETE:rls_series_grouping_rules_delete",
+      "INSERT:rls_series_grouping_rules_insert",
+      "SELECT:rls_series_grouping_rules_select",
+      "UPDATE:rls_series_grouping_rules_update",
+    ],
+    "rls": true,
   },
   "sparse_metric_exclusions": {
     "force": false,

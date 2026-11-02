@@ -979,6 +979,96 @@ Cancelling still leaves a 0-byte file at the chosen location: the picker creates
 before the first byte arrives, and `abort()` discards the swap file, not the entry.
 
 
+### A series group is not a `ds_metrics` series, so every raw reader expands it
+
+Series grouping (v0.2.97.43, migration 1819; design in
+`docs/design/2026-11-01-series-grouping-design.md`) stores a group's statistics under the group
+name — `api` for the pods `api-7d9f8c6b5-x2k4p` and `api-7d9f8c6b5-z9w2t` — in
+`ds_metric_statistics`. `ds_metrics` is never rewritten and holds only the raw names. A reader that
+receives a group name from a picker, a saved preset, a report section or a deep link and looks it
+up in `ds_metrics` finds nothing and draws an **empty chart with nothing logged**, the same silent
+symptom as root `CLAUDE.md` #18, #20 and #49.
+
+`SeriesGroupResolver` (`modules/metrics/series-group-resolver.ts`) is the one place that maps a
+group name back to its members. Five things about it:
+
+1. **Membership beats the rule.** `ds_metric_series_groups` is what the run's statistics were
+   computed with, so a chart drawn from it agrees with the numbers beside it even after the rule
+   changed. Only a run with no membership for the panel (live, or not yet recalculated) falls back
+   to the current enabled rule, applied in JavaScript with `applySeriesGrouping`. No regex ever
+   reaches SQL, and no name is interpolated: groups, members and aggregations are bound arrays.
+2. **A member-count name is a group too.** `api (pod count)` exists only in `ds_metric_statistics`;
+   the resolver answers it as `COUNT(*)` of the members per timestamp.
+3. **It probes for its tables with `to_regclass` and never throws.** The API can start before
+   migration 1819 runs, and a statement on a missing table inside the request's RLS transaction
+   aborts it (25P02) and takes every later query of the request with it. Only a positive probe is
+   cached. Any lookup failure reads as "nothing grouped".
+4. **The ungrouped path keeps its SQL.** Every reader's statements were snapshotted before the
+   change (`metrics.service.ungrouped-sql.spec.ts`, `report-data-fetcher.ungrouped-sql.spec.ts`);
+   an ungrouped panel costs one extra indexed lookup against two small tables and nothing in
+   `ds_metrics`. Update those snapshots only on purpose.
+5. **A new raw reader has to call it.** The covered set is `getAvailableDashboards`,
+   `getDistinctMetricNames` (and `getDistinctMetricSeries`, its `/ds-metrics/distinct-series` twin
+   that also returns `series_groups` for the picker's badge, v0.2.97.43), `getMetricTimeSeries`, `findDSMetricsForPanel` (and through it
+   `ds-metrics-comparison`), and the report fetcher's `getMetricsTimeSeries` /
+   `getAvailableMetricsPanels`. MCP reads those routes over HTTP and needs nothing. Readers of
+   `ds_metric_statistics` (`getMetricTrends`, `getBaselineRunComparisonFromStatistics`, the Compare
+   table, ADAPT, SLO checks) already see group names and must **not** expand them. `?members=true`
+   on the metric routes returns the raw per-pod series for drill-down.
+
+### Series grouping rules: who may write them, and what apply does
+
+`modules/series-grouping/` (v0.2.97.43) holds the rules API: CRUD with copy-to-other-workloads
+(`series-grouping.service.ts`), and preview, suggestions, apply and status
+(`series-grouping-insights.service.ts`). Five decisions in it are easy to undo:
+
+1. **Two capability checks, both after the 404 scoping.** Creating, editing or deleting a rule
+   needs `benchmark:manage` in the rule's organization, because a rule changes ADAPT verdicts the
+   way an SLO does (org admins and members; not viewers). `POST /series-grouping-rules/apply` needs
+   `test-run:update` on the target run, exactly like the analysis-window apply:
+   `partitionWritableCompletedRuns` skips every run outside the target's (organization, team) on
+   the premise that the caller proved write permission on that pair, and this check IS that proof.
+   An `api-key:` principal passes both, as in `TestRunsMutationService`.
+2. **A rule's organization comes from its application dashboard**, which must belong to the named
+   system AND environment and is authorized before it is inherited. Application dashboards are per
+   system and environment, shared by its workloads, so a copy to another workload of the same
+   environment keeps the dashboard id; a copy to another environment resolves it by `dashboard_uid`
+   AND `grafana_instance_id` and refuses an ambiguous match (`take: 2`). A copy never overwrites an
+   occupied slot, and one that loses a race rolls back to a SAVEPOINT inside the RLS transaction.
+3. **Apply truncates; the analysis window refuses.** `scope: 'recent'` keeps the 100 most recent
+   completed runs, where the analysis-window bulk apply refuses past 100. Partial application is
+   safe here: an unrecalculated run contributes NO group row to a baseline rather than a wrong one.
+   A still-running target is reported `running` and not enqueued — its own analysis applies the
+   rule on completion — while its baseline runs are.
+4. **Nothing in preview, suggestions or status reads `ds_metrics`.** Names come from
+   `ds_metric_statistics`, the membership table and `ds_control_group_statistics`. Every statement
+   is asserted against `\bds_metrics\b` in the specs.
+5. **Baseline runs come from the latest ADAPT conclusion's `control_group_id`**, not
+   `details.controlRuns` (written only for a failed baseline aggregation). A run with no conclusion
+   falls back to the workload's five previous completed runs; a conclusion with an EMPTY control
+   group answers `[]` rather than inventing a baseline ADAPT never used.
+6. **All three of preview, suggestions and status probe `groupingTablesPresent` first.** The API can
+   start before migration 1819 runs — nothing orders them, no service declares
+   `depends_on: perfana-migration` — and a statement on a missing table inside the request's RLS
+   transaction aborts it (25P02) and takes every later query of the request with it. `preview` went
+   straight to `series_grouping_rules` and `ds_metric_series_groups` until v0.2.97.43, so an
+   un-migrated deploy 500'd the grouping dialog's first request instead of previewing against a run
+   that simply has no grouping yet. Only a positive probe is cached.
+7. **`sg:alignment` has no threshold in SQL, so `loadAlignment` must filter like `loadMisaligned`.**
+   Both return every group of two or more members with a non-null `avg_members`; the threshold is
+   applied in JavaScript on the rounded value, because `avg_members` is a `REAL` and `1.2`
+   round-trips as `1.2000000476837158`, so a SQL `< 1.2` would call the threshold itself misaligned.
+   The dialog renders each `alignment` entry as a warning that the members report at different
+   timestamps — so an unfiltered list accuses every healthy group, printing "3.0 per timestamp"
+   inside a sentence claiming the values are mostly single pods. Fixed in v0.2.97.43; the preview
+   spec's cases fed only 1.1 and 1, which is why it shipped.
+
+Suggestions log one line per served suggestion (`series-grouping suggestion <run> <dash>/<panel>
+preset=… matched <b>% -> <a>% incomparable=<n>`) and rules carry `origin`; together they are how
+`SUGGEST_MAX_MATCHED_BEFORE` / `SUGGEST_MIN_MATCHED_AFTER` get tuned (design Decision 5). The test
+helper for the insights specs lives in `src/test/`, which the build excludes — beside the module it
+was compiled into `dist`.
+
 ### `hasData` probes one index per dashboard, and that inverted when the index landed
 
 `filterToDashboardsWithData` narrows a page of application dashboards to the ones

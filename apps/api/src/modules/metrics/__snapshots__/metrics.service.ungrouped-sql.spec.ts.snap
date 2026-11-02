@@ -1,0 +1,279 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned findDSMetricsForPanel downsampled path: existence probe, series count and lttb() 1`] = `
+[
+  [
+    "SELECT EXISTS (
+          SELECT 1 FROM (
+            SELECT 1 FROM ds_metrics WHERE test_run_id = $1 AND panel_id = $2 AND application_dashboard_id = $3 AND metric_name = $4 LIMIT 4001 OFFSET 4000
+          ) sub
+        ) as needs_downsampling",
+    [
+      "run-1",
+      201,
+      "dash-1",
+      "T01.login",
+    ],
+  ],
+  [
+    "SELECT COUNT(DISTINCT metric_name)::int AS count FROM ds_metrics WHERE test_run_id = $1 AND panel_id = $2 AND application_dashboard_id = $3 AND metric_name = $4",
+    [
+      "run-1",
+      201,
+      "dash-1",
+      "T01.login",
+    ],
+  ],
+  [
+    "
+        SELECT
+          sub.metric_name,
+          (sub.dp).time AS time,
+          (sub.dp).value AS value
+        FROM (
+          SELECT
+            metric_name,
+            unnest(lttb("time", value, 2000)) AS dp
+          FROM ds_metrics
+          WHERE test_run_id = $1 AND panel_id = $2 AND application_dashboard_id = $3 AND metric_name = $4
+          GROUP BY metric_name
+        ) sub
+        ORDER BY sub.metric_name, (sub.dp).time
+      ",
+    [
+      "run-1",
+      201,
+      "dash-1",
+      "T01.login",
+    ],
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned findDSMetricsForPanel regular path, dashboard id, no metric name 1`] = `
+[
+  [
+    "SELECT EXISTS (
+          SELECT 1 FROM (
+            SELECT 1 FROM ds_metrics WHERE test_run_id = $1 AND panel_id = $2 AND application_dashboard_id = $3 LIMIT 4001 OFFSET 4000
+          ) sub
+        ) as needs_downsampling",
+    [
+      "run-1",
+      201,
+      "dash-1",
+    ],
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned findDSMetricsForPanel regular path, dashboard id, no metric name 2`] = `
+[
+  [
+    {
+      "order": {
+        "timestep": "ASC",
+      },
+      "select": [
+        "time",
+        "metric_name",
+        "value",
+        "timestep",
+        "ramp_up",
+      ],
+      "where": {
+        "application_dashboard_id": "dash-1",
+        "panel_id": 201,
+        "test_run_id": "run-1",
+      },
+    },
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned findDSMetricsForPanel regular path, metrics source, metric name and zoom window 1`] = `
+[
+  [
+    "SELECT EXISTS (
+          SELECT 1 FROM (
+            SELECT 1 FROM ds_metrics WHERE test_run_id = $1 AND panel_id = $2 AND metrics_source_id = $3 AND metric_name = $4 AND "time" >= $5::timestamptz AND "time" <= $6::timestamptz LIMIT 4001 OFFSET 4000
+          ) sub
+        ) as needs_downsampling",
+    [
+      "run-1",
+      201,
+      "ms-1",
+      "T01.login",
+      "2024-01-01T00:00:00.000Z",
+      "2024-01-01T01:00:00.000Z",
+    ],
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned findDSMetricsForPanel regular path, metrics source, metric name and zoom window 2`] = `
+[
+  [
+    {
+      "order": {
+        "timestep": "ASC",
+      },
+      "select": [
+        "time",
+        "metric_name",
+        "value",
+        "timestep",
+        "ramp_up",
+      ],
+      "where": {
+        "metric_name": "T01.login",
+        "metrics_source_id": "ms-1",
+        "panel_id": 201,
+        "test_run_id": "run-1",
+        "time": FindOperator {
+          "@instanceof": Symbol(FindOperator),
+          "_getSql": undefined,
+          "_multipleParameters": true,
+          "_objectLiteralParameters": undefined,
+          "_type": "between",
+          "_useParameter": true,
+          "_value": [
+            2024-01-01T00:00:00.000Z,
+            2024-01-01T01:00:00.000Z,
+          ],
+        },
+      },
+    },
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned getAvailableDashboards distinct (panel, metric) tuples query 1`] = `
+[
+  [
+    "SELECT dashboard_label, panel_title, panel_id, unit,
+              COUNT(*) AS metric_count,
+              ARRAY_AGG(metric_name ORDER BY metric_name) AS metric_names
+         FROM (
+           SELECT DISTINCT dashboard_label, panel_title, panel_id, unit, metric_name
+             FROM ds_metrics
+            WHERE test_run_id = $1
+         ) d
+        GROUP BY dashboard_label, panel_title, panel_id, unit
+        ORDER BY dashboard_label, panel_title",
+    [
+      "run-1",
+    ],
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned getDistinctMetricNames names query for a run 1`] = `
+[
+  [
+    "SELECT DISTINCT metric_name FROM ds_metrics
+        WHERE panel_id = $1 AND test_run_id = $2 AND application_dashboard_id = $3
+        ORDER BY metric_name ASC",
+    [
+      201,
+      "run-1",
+      "dash-1",
+    ],
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned getDistinctMetricNames names query for a run through a metrics source 1`] = `
+[
+  [
+    "SELECT DISTINCT metric_name FROM ds_metrics
+        WHERE panel_id = $1 AND test_run_id = $2 AND metrics_source_id = $3
+        ORDER BY metric_name ASC",
+    [
+      201,
+      "run-1",
+      "ms-1",
+    ],
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned getMetricTimeSeries query builder calls for a label, title, metric name and ramp-up exclusion 1`] = `
+[
+  [
+    "m",
+  ],
+]
+`;
+
+exports[`MetricsService: SQL for a panel with no series grouping is pinned getMetricTimeSeries query builder calls for a label, title, metric name and ramp-up exclusion 2`] = `
+[
+  [
+    "select",
+    [
+      [
+        "m.time",
+        "m.metric_name",
+        "m.value",
+        "m.timestep",
+        "m.ramp_up",
+        "m.unit",
+      ],
+    ],
+  ],
+  [
+    "where",
+    [
+      "m.test_run_id = :testRunId",
+      {
+        "testRunId": "run-1",
+      },
+    ],
+  ],
+  [
+    "andWhere",
+    [
+      "m.dashboard_label = :dashboardLabel",
+      {
+        "dashboardLabel": "Perf",
+      },
+    ],
+  ],
+  [
+    "andWhere",
+    [
+      "m.panel_title = :panelTitle",
+      {
+        "panelTitle": "RT",
+      },
+    ],
+  ],
+  [
+    "orderBy",
+    [
+      "m.metric_name",
+    ],
+  ],
+  [
+    "addOrderBy",
+    [
+      "m.time",
+    ],
+  ],
+  [
+    "andWhere",
+    [
+      "m.metric_name = :metricName",
+      {
+        "metricName": "T01.login",
+      },
+    ],
+  ],
+  [
+    "andWhere",
+    [
+      "m.ramp_up = false",
+    ],
+  ],
+]
+`;

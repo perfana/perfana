@@ -27,6 +27,7 @@ describe('SUT_RESOURCES', () => {
       'ds_change_points', 'check_results', 'ds_metric_statistics',
       'ds_metric_collection_status', 'ds_panels', 'ds_query_executions',
       'ds_tracked_differences', 'test_run_transaction_stats',
+      'series_grouping_rules', 'ds_metric_series_groups',
     ].sort();
     expect([...tables].sort()).toEqual(expected);
   });
@@ -51,6 +52,46 @@ describe('SUT_RESOURCES', () => {
     expect(idx('application_dashboards')).toBeLessThan(idx('ds_control_group_statistics'));
     // report_templates is the NOT NULL FK parent of generated_reports.template_id.
     expect(idx('report_templates')).toBeLessThan(idx('generated_reports'));
+  });
+
+  // Series grouping (migration 1819). Order is the insert order: the rules FK into both
+  // systems_under_test and application_dashboards, and ds_metric_series_groups.rule_id FKs
+  // into the rules (ON DELETE SET NULL, but the FK is still checked on insert), while its
+  // application_dashboard_id FKs into application_dashboards. A membership row inserted
+  // before its rule is a 23503 that aborts the whole import transaction.
+  describe('series grouping tables', () => {
+    const find = (table: string): SutResource | undefined =>
+      SUT_RESOURCES.find((r) => r.table === table);
+
+    it('series_grouping_rules follows its FK parents', () => {
+      expect(idx('series_grouping_rules')).toBeGreaterThan(idx('systems_under_test'));
+      expect(idx('series_grouping_rules')).toBeGreaterThan(idx('application_dashboards'));
+    });
+
+    it('ds_metric_series_groups follows the rules it points at and the statistics it is written beside', () => {
+      expect(idx('ds_metric_series_groups')).toBeGreaterThan(idx('series_grouping_rules'));
+      expect(idx('ds_metric_series_groups')).toBeGreaterThan(idx('ds_metric_statistics'));
+      expect(idx('ds_metric_series_groups')).toBeGreaterThan(idx('application_dashboards'));
+    });
+
+    it('exports the rules by system, in the same group as ds_compare_config', () => {
+      expect(find('series_grouping_rules')).toMatchObject({ filter: 'bySut' });
+      expect(find('series_grouping_rules')!.group).toBe(find('ds_compare_config')!.group);
+    });
+
+    it('exports the membership rows by the varchar test_run_id, as core data', () => {
+      // No test_run FK and not a uuid key: the worker writes the canonical test_run_id string.
+      expect(find('ds_metric_series_groups')).toMatchObject({
+        filter: 'byTestRunVarchar',
+        group: 'core',
+      });
+    });
+
+    it('both tables survive a core-only export (includeOptional and includeRaw off)', () => {
+      const tables = selectResources({ includeOptional: false, includeRaw: false }).map((r) => r.table);
+      expect(tables).toContain('series_grouping_rules');
+      expect(tables).toContain('ds_metric_series_groups');
+    });
   });
 
   it('raw tables are excluded unless includeRaw', () => {

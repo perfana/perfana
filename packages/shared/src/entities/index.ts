@@ -44,6 +44,8 @@ export * from './generic-deep-link.entity';
 export * from './grafana-dashboard.entity';
 export * from './grafana-instance.entity';
 export * from './graph-preset.entity';
+export * from './series-grouping-rule.entity';
+export * from './ds-metric-series-group.entity';
 export * from './organization.entity';
 export * from './profile.entity';
 export * from './pyroscope-instance.entity';

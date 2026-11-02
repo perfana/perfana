@@ -457,12 +457,18 @@ describe('partitionAnalysisTimeRangeScope', () => {
     expect(skipped).toEqual([]);
   });
 
-  it('always includes the target, even when the offsets do not fit it', () => {
+  it('skips the TARGET as too-short, unlike the running case, because the write refuses it too', () => {
+    // The two target exemptions are NOT symmetric. A running target is written (the handler has no
+    // guard against it), so exempting it keeps the single-run and bulk paths agreeing. An
+    // ill-fitting target is REFUSED with a 400 — so exempting it only makes the read-only callers
+    // disagree with the write: `previewAnalysisTimeRangeScope` and the cap check share this
+    // partition and have no 400 of their own, so the dialog promised a scope the PUT rejected and
+    // the count read one high at the MAX_BULK_ANALYSIS_TIME_RANGE_RUNS boundary.
     const short = run({ id: 'uuid-1', testRunId: 'run-001', duration: 10 });
     const { applicable, skipped } = partitionAnalysisTimeRangeScope([short], short, 30, 60);
 
-    expect(applicable.map((r) => r.testRunId)).toEqual(['run-001']);
-    expect(skipped).toEqual([]);
+    expect(applicable).toEqual([]);
+    expect(skipped).toEqual([{ testRunId: 'run-001', completed: true, skipped: 'too-short' }]);
   });
 
   it('skips a sibling in another organization as not-writable', () => {

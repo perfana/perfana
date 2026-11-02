@@ -1,0 +1,94 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ReportDataFetcherService: SQL for a panel with no series grouping is pinned getAvailableMetricsPanels, org-scoped 1`] = `
+[
+  [
+    "
+        SELECT DISTINCT
+          dm.dashboard_label,
+          dm.panel_title,
+          dm.metric_name
+        FROM ds_metrics dm
+        WHERE dm.test_run_id = $1
+          AND EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id AND tr.organization_id IN ($2))
+        ORDER BY dm.dashboard_label ASC, dm.panel_title ASC, dm.metric_name ASC
+        LIMIT 20
+      ",
+    [
+      "run-1",
+      "org-1",
+    ],
+  ],
+]
+`;
+
+exports[`ReportDataFetcherService: SQL for a panel with no series grouping is pinned getAvailableMetricsPanels, system call 1`] = `
+[
+  [
+    "
+        SELECT DISTINCT
+          dm.dashboard_label,
+          dm.panel_title,
+          dm.metric_name
+        FROM ds_metrics dm
+        WHERE dm.test_run_id = $1
+          
+        ORDER BY dm.dashboard_label ASC, dm.panel_title ASC, dm.metric_name ASC
+        LIMIT 20
+      ",
+    [
+      "run-1",
+    ],
+  ],
+]
+`;
+
+exports[`ReportDataFetcherService: SQL for a panel with no series grouping is pinned getMetricsTimeSeries by label and title with no metric name, system call 1`] = `
+[
+  [
+    "
+          SELECT
+            dm.time,
+            dm.value,
+            dm.metric_name,
+            dm.panel_title,
+            dm.dashboard_label,
+            dm.unit
+          FROM ds_metrics dm
+          WHERE dm.test_run_id = $1 AND dm.dashboard_label = $2 AND dm.panel_title = $3
+          ORDER BY dm.time ASC
+        ",
+    [
+      "run-1",
+      "Perf",
+      "RT",
+    ],
+  ],
+]
+`;
+
+exports[`ReportDataFetcherService: SQL for a panel with no series grouping is pinned getMetricsTimeSeries by label, panel id and metric name, ramp-up excluded, org-scoped 1`] = `
+[
+  [
+    "
+          SELECT
+            dm.time,
+            dm.value,
+            dm.metric_name,
+            dm.panel_title,
+            dm.dashboard_label,
+            dm.unit
+          FROM ds_metrics dm
+          WHERE dm.test_run_id = $1 AND dm.dashboard_label = $2 AND dm.panel_id = $3 AND dm.metric_name = $4 AND (dm.ramp_up IS NULL OR dm.ramp_up = false) AND EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id AND tr.organization_id IN ($5))
+          ORDER BY dm.time ASC
+        ",
+    [
+      "run-1",
+      "Perf",
+      201,
+      "T01.login",
+      "org-1",
+    ],
+  ],
+]
+`;

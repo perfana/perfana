@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MetricsController } from './metrics.controller';
 import { MetricsService } from './metrics.service';
+import { SeriesGroupResolver } from './series-group-resolver';
 import { CommonModule } from '../../common/common.module';
 import {
   DsMetrics,
@@ -29,7 +30,7 @@ import {
     CommonModule,
   ],
   controllers: [MetricsController],
-  providers: [MetricsService],
+  providers: [MetricsService, SeriesGroupResolver],
   exports: [MetricsService],
 })
 export class MetricsModule {}

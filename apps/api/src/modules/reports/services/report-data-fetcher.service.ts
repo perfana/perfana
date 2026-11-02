@@ -1,10 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, SelectQueryBuilder } from 'typeorm';
 import { TestRun } from '@perfana/shared';
 import { SeriesConfig } from '@perfana/shared/entities';
 import { ControllerRef } from '../renderers/controller-sections';
 import { withRequestEm } from '../../../common/db/request-em';
+import {
+  SeriesGroupResolver,
+  buildSeriesRelation,
+  expandSeriesNames,
+  mapNamesToGroups,
+  seriesPanelKey,
+  type SeriesGroup,
+} from '../../metrics/series-group-resolver';
 import {
   AnalysisBounds,
   analysisBoundsFromEntity,
@@ -127,6 +135,12 @@ export class ReportDataFetcherService {
     private readonly testRunRepo: Repository<TestRun>,
     private readonly authzService: AuthorizationService,
     private readonly dataSource: DataSource,
+    /**
+     * Expands a series GROUP name back into the raw series `ds_metrics` holds. Optional so a
+     * fetcher built without one (most specs construct it by hand) simply reads ungrouped;
+     * the module always provides it.
+     */
+    @Optional() private readonly seriesGroups?: SeriesGroupResolver,
   ) {}
 
   /**
@@ -2493,6 +2507,8 @@ export class ReportDataFetcherService {
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
       const results: MetricsTimeSeriesPanel[] = [];
+      // One grouping lookup per panel, however many of its series the section names.
+      const groupCache = new Map<string, Promise<SeriesGroup[]>>();
 
       for (const panel of panels) {
         const conditions: string[] = ['dm.test_run_id = $1'];
@@ -2515,7 +2531,11 @@ export class ReportDataFetcherService {
           params.push(panel.panelTitle);
           paramIdx++;
         }
-        if (panel.metricName) {
+        // A series GROUP name (what the pickers offer, what a saved preset holds) is not a
+        // series in ds_metrics: it is answered from its members, below. Only a named series
+        // on a labelled panel is looked up; any other selector keeps the plain read.
+        const groups = await this.expandSeriesGroups(testRunId, panel, groupCache);
+        if (panel.metricName && groups.length === 0) {
           conditions.push(`dm.metric_name = $${paramIdx}`);
           params.push(panel.metricName);
           paramIdx++;
@@ -2546,7 +2566,26 @@ export class ReportDataFetcherService {
           ORDER BY dm.time ASC
         `;
 
-        const rows: MetricsTimeSeriesRow[] = await withRequestEm(this.testRunRepo).query(query, params);
+        // The grouped read keeps every filter above (label, panel, ramp-up, organization) and
+        // swaps only the series: the members, combined per timestamp.
+        const grouped =
+          groups.length > 0
+            ? buildSeriesRelation({
+                alias: 'dm',
+                conditions,
+                params,
+                groups,
+                attributes: ['panel_title', 'dashboard_label', 'unit'],
+              })
+            : null;
+        const rows: MetricsTimeSeriesRow[] = await withRequestEm(this.testRunRepo).query(
+          grouped
+            ? `SELECT "time", value, metric_name, panel_title, dashboard_label, unit
+                 FROM (${grouped.sql}) s
+                ORDER BY "time" ASC`
+            : query,
+          grouped ? grouped.params : params,
+        );
 
         if (rows.length > 0) {
           const firstRow = rows[0]!;
@@ -3508,6 +3547,33 @@ export class ReportDataFetcherService {
     }
   }
 
+  /**
+   * The groups a named series of a labelled panel stands for, or none. The lookup is cached
+   * per panel for the duration of one `getMetricsTimeSeries` call.
+   *
+   * Mirrors the read's own addressing: the id wins over the title (a display title can be a
+   * rename), so a selector with an id is looked up by id alone.
+   */
+  private async expandSeriesGroups(
+    testRunId: string,
+    panel: MetricsPanelSelector,
+    cache: Map<string, Promise<SeriesGroup[]>>,
+  ): Promise<SeriesGroup[]> {
+    if (!this.seriesGroups || !panel.metricName || !panel.dashboardLabel) return [];
+    const ref = {
+      testRunId,
+      dashboardLabel: panel.dashboardLabel,
+      ...(panel.panelId != null ? { panelId: panel.panelId } : { panelTitle: panel.panelTitle }),
+    };
+    const key = `${panel.dashboardLabel}\u0000${panel.panelId ?? ''}\u0000${panel.panelId != null ? '' : (panel.panelTitle ?? '')}`;
+    let available = cache.get(key);
+    if (!available) {
+      available = this.seriesGroups.groupsForPanel(withRequestEm(this.testRunRepo), ref);
+      cache.set(key, available);
+    }
+    return expandSeriesNames(await available, [panel.metricName]).groups;
+  }
+
   async getAvailableMetricsPanels(
     testRunId: string,
     userId: string = '',
@@ -3525,6 +3591,65 @@ export class ReportDataFetcherService {
           orgClause = `AND EXISTS (SELECT 1 FROM test_runs tr WHERE tr.test_run_id = dm.test_run_id ${orgFilter.clause})`;
           params.push(...orgFilter.params);
         }
+      }
+
+      // A run with series groups offers the GROUP in place of the pods behind it. Probed first
+      // and by itself: a run without grouping goes on to the statement below, unchanged.
+      const grouping = this.seriesGroups
+        ? await this.seriesGroups.loadRun(withRequestEm(this.testRunRepo), testRunId)
+        : undefined;
+      if (this.seriesGroups && grouping && !grouping.isEmpty) {
+        const seriesGroups = this.seriesGroups;
+        // Needs every raw series of the run to fold them, so no LIMIT here; the cap of 20 is
+        // applied to what is offered, below.
+        const rawRows: Array<{ dashboard_label: string; panel_title: string; panel_id: number; metric_name: string }> =
+          await withRequestEm(this.testRunRepo).query(
+            `
+        SELECT DISTINCT
+          dm.dashboard_label,
+          dm.panel_title,
+          dm.panel_id,
+          dm.metric_name
+        FROM ds_metrics dm
+        WHERE dm.test_run_id = $1
+          ${orgClause}
+        ORDER BY dm.dashboard_label ASC, dm.panel_title ASC, dm.metric_name ASC
+      `,
+            params,
+          );
+
+        const namesByPanel = new Map<string, string[]>();
+        for (const row of rawRows) {
+          const key = seriesPanelKey(row.dashboard_label, row.panel_title, Number(row.panel_id));
+          namesByPanel.set(key, [...(namesByPanel.get(key) ?? []), row.metric_name]);
+        }
+        const offered = new Map<string, MetricsPanelSelector>();
+        for (const row of rawRows) {
+          const key = seriesPanelKey(row.dashboard_label, row.panel_title, Number(row.panel_id));
+          const groups = seriesGroups.groupsInRun(
+            grouping,
+            { dashboardLabel: row.dashboard_label, panelTitle: row.panel_title, panelId: Number(row.panel_id) },
+            namesByPanel.get(key) ?? [],
+          );
+          const names = groups.length > 0 ? mapNamesToGroups([row.metric_name], groups).names : [row.metric_name];
+          for (const name of names) {
+            const selector = {
+              dashboardLabel: row.dashboard_label || '',
+              panelTitle: row.panel_title || '',
+              metricName: name || '',
+            };
+            offered.set(`${selector.dashboardLabel}\u0000${selector.panelTitle}\u0000${selector.metricName}`, selector);
+          }
+        }
+        const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+        return [...offered.values()]
+          .sort(
+            (a, b) =>
+              byCodeUnit(a.dashboardLabel ?? '', b.dashboardLabel ?? '') ||
+              byCodeUnit(a.panelTitle ?? '', b.panelTitle ?? '') ||
+              byCodeUnit(a.metricName ?? '', b.metricName ?? ''),
+          )
+          .slice(0, 20);
       }
 
       const query = `
