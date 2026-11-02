@@ -33,7 +33,6 @@ import {
   compileSeriesGroupingRule,
   evaluateGroupingPresets,
   SERIES_GROUPING_PRESET_ORDER,
-  SERIES_GROUPING_PRESETS,
   type SeriesGroupingAggregation,
   type SeriesGroupingPreset,
   type SeriesGroupingRuleSpec,
@@ -48,6 +47,7 @@ import {
   type SeriesGroupingRuleResponse,
 } from '@/lib/api/series-grouping';
 import { useSeriesGroupingPreview } from './useSeriesGroupingPreview';
+import { AGGREGATION_LABELS, presetLabel } from './labels';
 
 export interface SeriesGroupingDialogContext {
   systemId: string;
@@ -85,12 +85,6 @@ export interface SeriesGroupingDialogProps {
   /** The test-run page passes one; the config page shows the summary in an inline Alert instead. */
   showToast?: (message: string) => void;
 }
-
-const AGGREGATION_LABELS: Record<SeriesGroupingAggregation, string> = {
-  avg: 'Average per pod',
-  sum: 'Total',
-  max: 'Highest pod',
-};
 
 const COPY_SKIP_LABELS: Record<SeriesGroupingCopySkipReason, string> = {
   exists: 'already has a rule',
@@ -360,8 +354,8 @@ export default function SeriesGroupingDialog({
     onSaved({ rule, enqueued, summary });
   };
 
-  const presetLabel = (p: SeriesGroupingPreset): React.ReactNode => {
-    const label = p === 'custom' ? 'Custom regex' : SERIES_GROUPING_PRESETS[p].label;
+  const presetOption = (p: SeriesGroupingPreset): React.ReactNode => {
+    const label = presetLabel(p);
     const marker = p === detected ? ' (detected)' : !editing && p === initialPreset ? ' (suggested)' : '';
     return (
       <span>
@@ -395,9 +389,9 @@ export default function SeriesGroupingDialog({
             name="series-grouping-preset"
           >
             {SERIES_GROUPING_PRESET_ORDER.map((p) => (
-              <FormControlLabel key={p} value={p} control={<Radio size="small" />} label={presetLabel(p)} />
+              <FormControlLabel key={p} value={p} control={<Radio size="small" />} label={presetOption(p)} />
             ))}
-            <FormControlLabel value="custom" control={<Radio size="small" />} label={presetLabel('custom')} />
+            <FormControlLabel value="custom" control={<Radio size="small" />} label={presetOption('custom')} />
           </RadioGroup>
           {preset === 'custom' && (
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', pl: 4, mt: 1 }}>

@@ -114,6 +114,8 @@ export default function ConfigDialogs({
         loading={dashboard.editFormLoading}
         systemName={systemName}
         selectedEnvironment={selectedEnvironment}
+        systemId={systemId}
+        selectedWorkload={selectedWorkload}
       />
 
       <DeleteConfirmationDialog
