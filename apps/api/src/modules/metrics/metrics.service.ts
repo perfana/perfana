@@ -81,6 +81,29 @@ interface GroupedRead {
   excludeNames?: string[];
 }
 
+/** What a group name in a picker's answer stands for: snake_case, like the rest of those rows. */
+export interface SeriesGroupSummary {
+  group: string;
+  members: string[];
+  aggregation: string;
+  member_count_name?: string;
+}
+
+/** `/ds-metrics/distinct-series`: the names `/distinct-names` answers, plus the groups among them. */
+export interface DistinctMetricSeries {
+  metric_names: string[];
+  series_groups?: SeriesGroupSummary[];
+}
+
+function toSeriesGroupSummaries(groups: readonly SeriesGroup[]): SeriesGroupSummary[] {
+  return groups.map((g) => ({
+    group: g.group,
+    members: g.members,
+    aggregation: g.aggregation,
+    ...(g.memberCountName ? { member_count_name: g.memberCountName } : {}),
+  }));
+}
+
 @Injectable()
 export class MetricsService {
   private readonly logger = new Logger(MetricsService.name);
@@ -1341,17 +1364,21 @@ export class MetricsService {
     applicationDashboardId: string | undefined,
     panelId: number,
     metricsSourceId: string | undefined,
-  ): Promise<string[]> {
-    if (names.length === 0) return names;
+  ): Promise<DistinctMetricSeries> {
+    if (names.length === 0) return { metric_names: names };
     const dashboardId =
       applicationDashboardId || (metricsSourceId ? await this.resolveApplicationDashboardId(metricsSourceId) : undefined);
-    if (!dashboardId) return names;
+    if (!dashboardId) return { metric_names: names };
     const groups = await this.seriesGroups.groupsForPanel(
       this.groupingExecutor(),
       { testRunId, applicationDashboardId: dashboardId, panelId },
       names,
     );
-    return groups.length === 0 ? names : mapNamesToGroups(names, groups).names;
+    if (groups.length === 0) return { metric_names: names };
+    const mapped = mapNamesToGroups(names, groups);
+    return mapped.seriesGroups.length === 0
+      ? { metric_names: mapped.names }
+      : { metric_names: mapped.names, series_groups: toSeriesGroupSummaries(mapped.seriesGroups) };
   }
 
   /**
@@ -1366,6 +1393,33 @@ export class MetricsService {
     testRunId?: string,
     members: boolean = false,
   ): Promise<string[]> {
+    const series = await this.getDistinctMetricSeries(
+      applicationDashboardId,
+      panelId,
+      userId,
+      roles,
+      metricsSourceId,
+      testRunId,
+      members,
+    );
+    return series.metric_names;
+  }
+
+  /**
+   * `getDistinctMetricNames`, plus what each group name in the answer stands for. Same reads,
+   * same access check: the groups are the ones the names were just mapped with, so the series
+   * picker can badge a group and list its pods without asking again. A panel nothing groups
+   * carries no `series_groups` key, exactly like `getAvailableDashboards`' rows.
+   */
+  async getDistinctMetricSeries(
+    applicationDashboardId: string,
+    panelId: number,
+    userId: string,
+    roles: string[],
+    metricsSourceId?: string,
+    testRunId?: string,
+    members: boolean = false,
+  ): Promise<DistinctMetricSeries> {
     try {
       // Neither ds_metrics nor ds_metric_statistics has an RLS policy, so nothing below
       // this line constrains which organization's rows come back — the ids are raw query
@@ -1389,7 +1443,7 @@ export class MetricsService {
             ? await this.validateSourceAccess(metricsSourceId, userId, roles)
             : false;
       if (!permitted) {
-        return [];
+        return { metric_names: [] };
       }
 
       // Without a run this answers "every series this panel has EVER recorded" — including
@@ -1425,7 +1479,7 @@ export class MetricsService {
         // Group names are per run, so only a run-scoped answer can be grouped; the unscoped
         // fallback below spans runs and has no membership to ask. `members` is the per-pod view.
         return members || !scopedRunId
-          ? scopedNames
+          ? { metric_names: scopedNames }
           : this.groupMetricNames(scopedNames, scopedRunId, applicationDashboardId, panelId, metricsSourceId);
       }
 
@@ -1439,9 +1493,11 @@ export class MetricsService {
         `Distinct metric names: run ${scopedRunId ?? '(none resolved)'} had no rows for panel ${panelId}` +
           ` on dashboard ${applicationDashboardId}; falling back to the unscoped scan`,
       );
-      return this.withStatementTimeout((em) =>
-        this.queryDistinctMetricNames(panelId, applicationDashboardId, metricsSourceId, undefined, em),
-      );
+      return {
+        metric_names: await this.withStatementTimeout((em) =>
+          this.queryDistinctMetricNames(panelId, applicationDashboardId, metricsSourceId, undefined, em),
+        ),
+      };
     } catch (error) {
       this.logger.error(
         `Failed to get distinct metric names for dashboard ${applicationDashboardId} panel ${panelId}: ${(error as Error).message}`,
@@ -1541,12 +1597,7 @@ export class MetricsService {
         ...row,
         metric_names: names,
         metric_count: String(names.length),
-        series_groups: seriesGroups.map((g) => ({
-          group: g.group,
-          members: g.members,
-          aggregation: g.aggregation,
-          ...(g.memberCountName ? { member_count_name: g.memberCountName } : {}),
-        })),
+        series_groups: toSeriesGroupSummaries(seriesGroups),
       };
     });
   }

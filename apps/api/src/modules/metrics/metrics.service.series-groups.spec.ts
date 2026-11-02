@@ -358,6 +358,51 @@ describe('getDistinctMetricNames with a series group', () => {
   });
 });
 
+describe('getDistinctMetricSeries', () => {
+  const names = [POD_A, POD_B, 'heap-used'];
+
+  it('says what each group name stands for, beside the same names getDistinctMetricNames lists', async () => {
+    const lookup = [membershipRow(POD_A, { member_count_name: 'api (pod count)' }), membershipRow(POD_B, { member_count_name: 'api (pod count)' })];
+    const { service, metricsRepo } = build({ lookup });
+    metricsRepo.manager.query.mockImplementation(wrapNames(metricsRepo, names, lookup));
+
+    const result = await service.getDistinctMetricSeries(DASH, 201, 'user-1', ['user'], undefined, RUN);
+
+    expect(result.metric_names).toEqual(['api', 'api (pod count)', 'heap-used']);
+    expect(result.series_groups).toEqual([
+      { group: 'api', members: [POD_A, POD_B].sort(), aggregation: 'avg', member_count_name: 'api (pod count)' },
+    ]);
+  });
+
+  it('carries no series_groups key when nothing is grouped', async () => {
+    const { service, metricsRepo } = build({ lookup: [] });
+    metricsRepo.manager.query.mockImplementation(wrapNames(metricsRepo, names, []));
+
+    const result = await service.getDistinctMetricSeries(DASH, 201, 'user-1', ['user'], undefined, RUN);
+
+    expect(result).toEqual({ metric_names: names });
+  });
+
+  it('with members=true answers the raw names and no groups', async () => {
+    const { service, metricsRepo } = build({ lookup: GROUPED });
+    metricsRepo.manager.query.mockImplementation(wrapNames(metricsRepo, names, GROUPED));
+
+    expect(await service.getDistinctMetricSeries(DASH, 201, 'user-1', ['user'], undefined, RUN, true)).toEqual({
+      metric_names: names,
+    });
+  });
+
+  it('groups a live run by the current rule and names its members', async () => {
+    const { service, metricsRepo } = build({ lookup: [ruleRow()] });
+    metricsRepo.manager.query.mockImplementation(wrapNames(metricsRepo, names, [ruleRow()]));
+
+    const result = await service.getDistinctMetricSeries(DASH, 201, 'user-1', ['user'], undefined, RUN);
+
+    expect(result.metric_names).toEqual(['api', 'heap-used']);
+    expect(result.series_groups?.map((g) => [g.group, g.members])).toEqual([['api', [POD_A, POD_B].sort()]]);
+  });
+});
+
 /** Routes the names query to `names` and everything else to the grouping lookup. */
 function wrapNames(metricsRepo: { manager: { query: jest.Mock } }, names: string[], lookup: Row[]) {
   return async (sql: string) => {

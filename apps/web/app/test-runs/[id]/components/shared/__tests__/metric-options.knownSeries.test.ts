@@ -89,7 +89,7 @@ it('still asks for a panel the rows do not mention', async () => {
   mockFetch.mockClear();
   expect((await fetchSeriesForPanel(gc, testRun)).map((s) => s.metricName)).toEqual(['from-the-network']);
   expect(mockFetch).toHaveBeenCalledTimes(1);
-  expect(mockFetch.mock.calls[0]![0]).toContain('/ds-metrics/distinct-names');
+  expect(mockFetch.mock.calls[0]![0]).toContain('/ds-metrics/distinct-series');
 });
 
 it('falls back to a request per panel when the run-wide fetch fails', async () => {
@@ -256,7 +256,7 @@ it('declines the map for a label two selected dashboards share, rather than merg
   mockFetch.mockClear();
   expect((await fetchSeriesForPanel(jvm!.find((p) => p.id === 40)!, testRun)).map((s) => s.metricName))
     .toEqual(['from-the-network']);
-  expect(mockFetch.mock.calls[0]![0]).toContain('/ds-metrics/distinct-names');
+  expect(mockFetch.mock.calls[0]![0]).toContain('/ds-metrics/distinct-series');
 });
 
 it('declines it for a twin that is NOT selected, judged over the whole dashboard list', async () => {

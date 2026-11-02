@@ -28,7 +28,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Typography, Button, useTheme } from '@mui/material';
+import { Typography, Button, Tooltip, Box, useTheme } from '@mui/material';
 import { TestRun } from '@/types/test-runs';
 import { getSourceDisplayInfo } from '@/lib/metrics-source-utils';
 import { chartTheme, unitText, type ChartMode } from '@/lib/charts';
@@ -42,6 +42,7 @@ import {
   cascadeCountLabel,
   cascadeGroupBy,
   cascadeMatchesQuery,
+  type CascadeTheme,
 } from '@/components/charts/CascadeColumns';
 import { ALL_AGGREGATED_OPTION, buildAggregatedMetricName, isAllAggregatedDashboard, rtKeeperPanelId } from '@/lib/aggregated-perf-series';
 import HostLabelChips from '@/components/HostLabelChips';
@@ -140,6 +141,9 @@ export function MetricSeriesCascade({
   const [seriesOptions, setSeriesOptions] = useState<SeriesOption[]>([]);
   const [seriesLoading, setSeriesLoading] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState<SeriesOption[]>([]);
+  // Panels switched to the per-pod view ("show pods"), by `panelKey`. A grouped panel lists its
+  // group names by default; this asks for the raw series the groups combine.
+  const [memberPanels, setMemberPanels] = useState<string[]>([]);
 
   // One query per column. Deliberately NOT reset when the selection changes: narrowing
   // dashboards to "docker" and then stepping through their panels is the flow this is for.
@@ -152,6 +156,7 @@ export function MetricSeriesCascade({
   // refresh (a tag edit, a job completing) and would otherwise reload every picker.
   const dashboardsKey = selectedDashboards.map((d) => d.id).join('|');
   const panelsKey = selectedPanels.map(panelKey).join('|');
+  const memberPanelsKey = [...memberPanels].sort().join('|');
   const runKey = testRun ? `${testRun.test_run_id}|${testRun.system_under_test_id}|${testRun.test_environment}|${testRun.workload}` : '';
   // Which selection the current option lists belong to: an empty list for a selection that
   // has not loaded yet is not an empty result.
@@ -187,13 +192,25 @@ export function MetricSeriesCascade({
     }
     let cancelled = false;
     setSeriesLoading(true);
-    fetchSeriesForPanels(picked, testRun)
+    // Two arguments when nothing is in the per-pod view, so the common call is unchanged.
+    (memberPanels.length > 0
+      ? fetchSeriesForPanels(picked, testRun, new Set(memberPanels))
+      : fetchSeriesForPanels(picked, testRun))
       .then((lists) => { if (!cancelled) { seriesFor.current = panelsKey; setSeriesOptions(lists.flat()); } })
       .finally(() => { if (!cancelled) setSeriesLoading(false); });
     return () => { cancelled = true; };
-    // selectedPanels is read through panelsKey, testRun through runKey.
+    // selectedPanels is read through panelsKey, testRun through runKey, memberPanels through
+    // memberPanelsKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelsKey, runKey]);
+  }, [panelsKey, runKey, memberPanelsKey]);
+
+  // Switching a panel between its groups and its pods replaces that panel's series list, so a
+  // draft pick on it would point at a name the column no longer shows.
+  const togglePanelMembers = (panel: PanelOption) => {
+    const key = panelKey(panel);
+    setMemberPanels((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+    setSelectedSeries((prev) => prev.filter((s) => panelKey(s.panel) !== key));
+  };
 
   // Dropping a dashboard drops the panels and series that hung off it, or a series would be
   // added for a dashboard the form no longer shows.
@@ -209,6 +226,7 @@ export function MetricSeriesCascade({
   const pickPanels = (panels: PanelOption[]) => {
     const kept = new Set(panels.map(panelKey));
     setSelectedPanels(panels);
+    setMemberPanels((prev) => (prev.every((k) => kept.has(k)) ? prev : prev.filter((k) => kept.has(k))));
     setSelectedSeries(selectedSeries.filter((s) => kept.has(panelKey(s.panel))));
     onPrimaryChange?.(selectedDashboards[0] ?? null, panels[0] ?? null);
   };
@@ -580,29 +598,112 @@ export function MetricSeriesCascade({
           onQueryChange={setSeriesQuery}
           queryPlaceholder="filter series"
         >
-          {seriesGroups.map(([group, options]) => (
-            <CascadeGroup key={group} label={group} color={theme.faint}>
-              {options.map((option) => {
-                // Greying an added series out is right only where the checkbox is a draft.
-                // In instant mode the checkbox IS the membership, so it has to stay live or
-                // there is no way to take a series back off.
-                const already = !instant && isAdded(option);
-                return (
-                  <CascadeRow
-                    key={seriesKey(option)}
-                    theme={theme}
-                    checked={seriesChecked(option)}
-                    onToggle={() => toggleSeries(option)}
-                    disabled={already}
-                    label={option.metricName}
-                    trailing={already ? <CascadeHint theme={theme}>added</CascadeHint> : null}
-                  />
-                );
-              })}
-            </CascadeGroup>
-          ))}
+          {seriesGroups.map(([group, options]) => {
+            const groupPanel = options[0]?.panel;
+            const showingPods = groupPanel ? memberPanels.includes(panelKey(groupPanel)) : false;
+            const grouped = options.some((o) => o.members?.length);
+            return (
+              <CascadeGroup
+                key={group}
+                label={group}
+                color={theme.faint}
+                action={
+                  groupPanel && (grouped || showingPods) ? (
+                    <PodsToggle
+                      theme={theme}
+                      showingPods={showingPods}
+                      onToggle={() => togglePanelMembers(groupPanel)}
+                    />
+                  ) : undefined
+                }
+              >
+                {options.map((option) => {
+                  // Greying an added series out is right only where the checkbox is a draft.
+                  // In instant mode the checkbox IS the membership, so it has to stay live or
+                  // there is no way to take a series back off.
+                  const already = !instant && isAdded(option);
+                  const badge = option.members?.length ? (
+                    <MembersBadge theme={theme} members={option.members} />
+                  ) : null;
+                  return (
+                    <CascadeRow
+                      key={seriesKey(option)}
+                      theme={theme}
+                      checked={seriesChecked(option)}
+                      onToggle={() => toggleSeries(option)}
+                      disabled={already}
+                      label={option.metricName}
+                      trailing={
+                        badge || already ? (
+                          <>
+                            {badge}
+                            {already ? <CascadeHint theme={theme}>added</CascadeHint> : null}
+                          </>
+                        ) : null
+                      }
+                    />
+                  );
+                })}
+              </CascadeGroup>
+            );
+          })}
         </CascadeColumn>
     </CascadeFrame>
+  );
+}
+
+/** Members listed in a badge's tooltip before "and N more". */
+const MAX_MEMBERS_IN_TOOLTIP = 20;
+
+/**
+ * "3 pods" beside a series group, with the pods it combines in this run in the tooltip. The
+ * membership is the run's own, so the list can differ between the runs a chart compares.
+ */
+function MembersBadge({ theme, members }: { theme: CascadeTheme; members: string[] }) {
+  const shown = members.slice(0, MAX_MEMBERS_IN_TOOLTIP);
+  const rest = members.length - shown.length;
+  return (
+    <Tooltip
+      title={
+        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+          {shown.map((m) => (
+            <span key={m}>{m}</span>
+          ))}
+          {rest > 0 && <span>and {rest} more</span>}
+        </Box>
+      }
+    >
+      <span data-testid="series-members-badge">
+        <CascadeHint theme={theme}>
+          {members.length} {plural(members.length, 'pod')}
+        </CascadeHint>
+      </span>
+    </Tooltip>
+  );
+}
+
+/** The per-panel switch between a grouped panel's groups and the raw series behind them. */
+function PodsToggle({
+  theme,
+  showingPods,
+  onToggle,
+}: {
+  theme: CascadeTheme;
+  showingPods: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button
+      size="small"
+      variant="text"
+      onClick={onToggle}
+      aria-pressed={showingPods}
+      aria-label={showingPods ? 'Show groups' : 'Show individual pods'}
+      title={showingPods ? 'Show the series groups again' : 'Show the individual pods behind each group'}
+      sx={{ minWidth: 0, px: 0.5, py: 0, fontSize: 11, lineHeight: 1.6, textTransform: 'none', color: theme.muted, flexShrink: 0 }}
+    >
+      {showingPods ? 'show groups' : 'show pods'}
+    </Button>
   );
 }
 

@@ -2,7 +2,7 @@ import { Controller, Get, Param, NotFoundException, BadRequestException, Query, 
 import { ApiTags, ApiOperation, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MetricsService, MetricTimeRange } from './metrics.service';
+import { MetricsService, MetricTimeRange, type DistinctMetricSeries } from './metrics.service';
 import { Benchmark } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { UserCtx, UserContext } from '../../common/decorators/user-context.decorator';
@@ -320,6 +320,44 @@ export class MetricsController {
       applicationDashboardId,
       ctx.userId,
       ctx.roles,
+    );
+  }
+
+  @Get('ds-metrics/distinct-series')
+  @ApiOperation({
+    summary: 'Distinct metric names for a dashboard/panel, with what each series group among them stands for',
+    description:
+      'The same answer as `ds-metrics/distinct-names`, as `{ metric_names }`, plus `series_groups` (group, members, ' +
+      'aggregation, member_count_name) when a series grouping rule groups the panel in this run. A panel nothing ' +
+      'groups carries no `series_groups` key. Used by the series picker to badge a group and list its pods.',
+  })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
+  @ApiQuery({ name: 'testRunId', required: false, description: 'Limit to the series this run recorded; groups are per run.' })
+  @ApiQuery({ name: 'members', required: false, description: SERIES_MEMBERS_DESCRIPTION })
+  async getDistinctMetricSeries(
+    @UserCtx() ctx: UserContext,
+    @Query('applicationDashboardId', new ParseUUIDPipe({ optional: true })) applicationDashboardId: string,
+    @Query('panelId') panelId: string,
+    @Query('metricsSourceId', new ParseUUIDPipe({ optional: true })) metricsSourceId?: string,
+    @Query('testRunId') testRunId?: string,
+    @Query('members') members?: string,
+  ): Promise<DistinctMetricSeries> {
+    const panelIdNumber = parseInt(panelId, 10);
+    if (isNaN(panelIdNumber)) {
+      throw new BadRequestException('Invalid panel ID');
+    }
+    if (!applicationDashboardId && !metricsSourceId) {
+      throw new BadRequestException('applicationDashboardId or metricsSourceId is required');
+    }
+
+    return this.metricsService.getDistinctMetricSeries(
+      applicationDashboardId,
+      panelIdNumber,
+      ctx.userId,
+      ctx.roles,
+      metricsSourceId,
+      testRunId,
+      members === 'true',
     );
   }
 

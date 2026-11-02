@@ -241,27 +241,41 @@ export function CascadeColumn({
 export function CascadeGroup({
   label,
   color,
+  action,
   children,
 }: {
   label: string;
   color: string;
+  /** A control for the whole group, drawn at the end of its label row (e.g. "show pods"). */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const heading = (
+    <Typography
+      sx={{
+        px: 0.75,
+        py: 0.25,
+        fontSize: 11,
+        fontWeight: 600,
+        color,
+        ...(action ? { flex: 1, minWidth: 0 } : {}),
+      }}
+      noWrap
+      title={label}
+    >
+      {label}
+    </Typography>
+  );
   return (
     <Box sx={{ mb: 0.5 }}>
-      <Typography
-        sx={{
-          px: 0.75,
-          py: 0.25,
-          fontSize: 11,
-          fontWeight: 600,
-          color,
-        }}
-        noWrap
-        title={label}
-      >
-        {label}
-      </Typography>
+      {action ? (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, pr: 0.5 }}>
+          {heading}
+          {action}
+        </Box>
+      ) : (
+        heading
+      )}
       {children}
     </Box>
   );
