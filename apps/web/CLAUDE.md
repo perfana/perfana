@@ -775,3 +775,49 @@ part of the contract: `handleConfigSave` above always overwrites `source` with `
 `'panel'` on any UI save, which is what makes a user edit distinguishable from the Dynatrace
 boilerplate in the first place — a future save path that skips this field would make every row it
 touches look machine-seeded again.
+
+### Series grouping in the web: where a group's badge comes from, and what the dialog fetches
+
+Series grouping (v0.2.97.41–43; design in `docs/design/2026-11-01-series-grouping-design.md`) has
+three web surfaces: suggestions and a stale notice on the anomaly card
+(`anomaly-detection/components/SeriesGroupingNotices.tsx`), a **Series grouping** section in a
+dashboard's settings (`systems/[id]/config/components/SeriesGroupingRulesSection.tsx`), and the
+`N pods` badge plus **show pods** switch in the series picker. All of them open one dialog,
+`components/series-grouping/SeriesGroupingDialog.tsx`. Six things are easy to undo:
+
+1. **The picker learns a panel's groups from `/ds-metrics/distinct-series`, not from
+   `/ds-metrics/available`.** The plan said `available`, and that would have shipped a badge that
+   never appears: `fetchPanelsForDashboards` asks `available` only when a perf-test dashboard is in
+   the batch, and a perf-test dashboard never gets a rule. A Kubernetes Grafana panel gets its
+   series from the per-panel call, so that call is the one that has to carry `series_groups`.
+   `distinct-series` is `distinct-names` plus the groups, from the same reads; a **404 falls back
+   to `distinct-names`**, so a web build ahead of its API loses the badge and nothing else. The
+   `available` rows' `series_groups` are still mapped onto `PanelOption.seriesMembers` for the
+   panels that path does cover.
+2. **The per-pod view bypasses `panel.metricNames`.** Those names are grouped, and the raw members
+   are the point of the switch. `fetchSeriesForPanels` is called with **two** arguments while no
+   panel is switched — the third (`memberPanels`) only appears when one is — so the common call is
+   unchanged. Switching a panel drops the draft picks on it, because they name series the column
+   no longer lists.
+3. **The dialog fetches names once per scope and regroups on every keystroke client-side.** Only
+   the SLO check depends on the rule (it needs stored SLO patterns), so `useSeriesGroupingPreview`
+   re-asks the preview for it 600 ms after the rule stops changing, never for a rule that does not
+   compile, and shows "Checking SLOs…" instead of a warning list computed for a different rule.
+   Changing "This panel" ↔ "All panels" is a different name list and refetches.
+4. **The dialog's state is initialised from its props on the first render**, not only by the
+   reset-on-open effect. The preview fetches on the first commit, and a first render with a
+   placeholder scope (`panelId: null`) fetched the whole dashboard and then the panel — two
+   requests per open, caught by the "fetched once" test.
+5. **The anomaly notices refetch when the card's `anomalyData` array is replaced**, which is what
+   happens after a re-evaluate lands. A requested recalculation keeps the stale notice reading
+   "Recalculation requested" until then: the status endpoint still describes the old statistics,
+   and repeating the warning right after the user acted would read as a failure. Dismissals are
+   per browser (`lib/safe-storage.ts`, `perfana.seriesGrouping.dismissed.<sut>.<env>.<workload>.<dashboard>.<panel>`),
+   a convenience only.
+6. **The settings section is gated on a selected workload** (rules are per workload, the dashboard
+   list is per environment) and is not rendered at all for a `performance-test-metrics-` dashboard,
+   which the API refuses.
+
+Not in v1, by design: the Compare card's inline hint, the "avg of 3 pods · baseline 5" table
+affordance, and a badge in the report section cascade (`MetricSelectionCascade`), which reads its
+names from `getAvailableMetricsPanels` and shows group names unbadged.

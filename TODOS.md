@@ -14,7 +14,7 @@ with the version it landed in.
 ## Series grouping
 
 Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.41
-shipped PR A (the engine), v0.2.97.42 PR B (the rules API); PR C (the web) is next.
+shipped PR A (the engine), v0.2.97.42 PR B (the rules API), v0.2.97.43 PR C (the web).
 
 **Verified on 2026-11-01** against `timescaledb-ha:pg15` with every migration through 1819 applied
 (see the v0.2.97.42 CHANGELOG entry for numbers): the full preflight including the RLS suite (the
@@ -22,6 +22,18 @@ hand-edited coverage snapshot matches); the RLS policy matrix for `series_groupi
 Postgres-backed SUT export/import round trip; the grouped statistics on 1.87 M compressed rows
 with real Toolkit functions (which found the merge-join plan, fixed in v0.2.97.42); `lttb()` over
 a grouped series; and every rules route through a running API. What is still owed:
+
+### Walk the series grouping UI end to end in a browser (P2)
+
+**Origin:** v0.2.97.43, plan Task 12 for PR C. The web surfaces are covered by component tests and
+the new `/ds-metrics/distinct-series` route was exercised against a running API, but nobody has
+clicked through the real stack: analyse three runs with renamed pods (a Grafana Kubernetes dashboard
+with a `{{pod}}` legend, or seeded `ds_metrics`) → the anomaly card shows the suggestion → **Group
+series…** shows 0 % → 100 % → **Save and recalculate** → after the re-evaluate ADAPT compares the
+groups and the per-pod rows are gone → Compare shows baseline values → the Graphs picker badges the
+group and **show pods** works → a preset holding the group name draws after reload → a report
+section from it renders → SUT export/import keeps the rule → SUT delete removes both tables' rows →
+a copy to another workload reports its `origin` and skip reasons. Paste what you saw into the PR.
 
 ### Re-measure the grouped statistics at production scale (P2)
 

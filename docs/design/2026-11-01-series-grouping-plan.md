@@ -4,6 +4,8 @@
 
 **Design:** [`2026-11-01-series-grouping-design.md`](2026-11-01-series-grouping-design.md). Read it first; this plan does not repeat its reasoning.
 
+**Status:** done — PR A in v0.2.97.41, PR B in v0.2.97.42, PR C in v0.2.97.43. Two deviations in PR C, both recorded in the design's status line: Task 11 reads the groups from a new `/ds-metrics/distinct-series` route rather than from `AvailablePanelRow`, and the dialog re-asks the preview (debounced) for its SLO check instead of never refetching.
+
 **Goal:** Let a user declare that series whose names differ only by a Kubernetes pod segment are one series, so ADAPT, the Compare card, SLOs and charts compare the workload across deployments instead of reporting every pod as `incomparable`.
 
 **Architecture:**

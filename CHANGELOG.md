@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.43] - 2026-11-02
+
+### Added
+- **Series grouping in the UI: Kubernetes pod series can be grouped from the anomaly card, a dashboard's settings and the series picker.** The anomaly-detection card shows a banner per panel whose series read `incomparable` because their names changed between runs and that a built-in preset would line up with the baseline (*"6 series on "CPU usage per pod" have no baseline, because their names changed between runs"*), with **Group series…**, **Show rows** and **Dismiss** (remembered per panel, in this browser). A second notice appears when the run was analysed under other rules than the ones now in force, with a button that recalculates the run and its baseline, and a warning per group whose members never report at the same timestamps. A dashboard's *Edit* dialog in the system configuration gains a **Series grouping** section listing its rules for the selected workload, with add, edit, enable/disable and a confirmed delete.
+
+  **The dialog shows the run's real series before anything is saved**: each group with its members in this run and in the baseline, and *"Before: 0 of 6 series match the baseline · After: 2 of 2 groups match"*. The names are fetched once and regrouped in the browser with the same function the worker uses, on every keystroke. The preset that lines up the most names is preselected as *(detected)*; an unsafe custom regex shows the guard's reason and disables Save; it warns about SLOs that would match nothing after grouping, group names that equal a raw baseline series, and unaligned members. It can create the same rule for other workloads of the system and reports which it skipped and why, and **Save and recalculate** re-evaluates the run and its baseline runs so the rule takes effect at once.
+
+  **The series picker badges a group.** In Graphs, Trends and Compare a grouped series carries an `N pods` badge whose tooltip lists the pods it combines in this run, and **show pods** switches its panel to the raw per-pod series and back.
+
+- **`GET /metrics/ds-metrics/distinct-series`** — `distinct-names` plus what each group among the names stands for (`{ metric_names, series_groups }`), with the same reads and access check. The picker needs it: it asks `/ds-metrics/available` only when a performance-test dashboard is selected, and those never get a rule, so a Kubernetes panel's groups had no other way to the client. A web build ahead of its API falls back to `distinct-names` and loses only the badge.
+
+### Known limits
+- **Not in v1, by design:** the Compare card's inline hint and the *"avg of 3 pods · baseline 5"* affordance in the anomaly, Compare and SLO tables (design v1.1), and a badge in the report section picker, which lists group names unbadged.
+- **The dashboard settings list names a panel rule `Panel <id>`**, not by its title: the list has no run to read titles from.
+- **Verified with unit and component tests and the new route against a running API, not through a browser.** The plan's end-to-end walk through the local stack (analyse, group, recalculate, compare, export, delete) still needs a Grafana Kubernetes dashboard or seeded `ds_metrics` and a logged-in browser; filed in TODOS.md.
+
 ## [0.2.97.42] - 2026-11-01
 
 ### Added

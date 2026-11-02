@@ -3,12 +3,17 @@
 **Date:** 2026-11-01
 **Status:** Design agreed. All five open questions were decided on 2026-11-01 (see Decisions at the
 end). Implementation plan: [`2026-11-01-series-grouping-plan.md`](2026-11-01-series-grouping-plan.md).
-Corrections found while planning are applied below. **PR A (the engine) shipped in
-v0.2.97.41 and PR B (the rules API) in v0.2.97.42**; PR C (web) is next. Open items are in
+Corrections found while planning are applied below. **Implemented: PR A (the engine) in
+v0.2.97.41, PR B (the rules API) in v0.2.97.42, PR C (the web) in v0.2.97.43.** The Compare card
+hint and the table affordance (UI items 2 and 5 below) are deliberately v1.1. Open items are in
 `TODOS.md` under "Series grouping". Two decisions made while building PR B: writing a rule needs
 `benchmark:manage` and apply needs `test-run:update` (see apps/api/CLAUDE.md, "Series grouping
 rules: who may write them"), and the grouped statistics statement runs with merge joins off (see
-apps/worker/CLAUDE.md).
+apps/worker/CLAUDE.md). Two made while building PR C: the picker's badge reads a new
+`/ds-metrics/distinct-series` route, because `/ds-metrics/available` is only asked when a
+perf-test dashboard is selected; and the dialog re-asks the server for its SLO check, debounced,
+when the rule changes, since that check needs stored SLO patterns (see apps/web/CLAUDE.md,
+"Series grouping in the web").
 **Scope:** worker (`StatisticsPipeline`), API (rules, preview, group-aware `ds_metrics` reads), web
 (anomaly-detection card, Compare card, system config, series picker), `packages/shared` (one
 grouping function).

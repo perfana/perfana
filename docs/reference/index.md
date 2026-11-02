@@ -41,6 +41,7 @@ Perfana collects metrics from performance tests and compares them against histor
 
 ### Features
 - [[ADAPT Algorithm]] — Automated regression detection
+- [[Series Grouping]] — Comparing Kubernetes pod series across deployments
 - [[Real-time Monitoring]] — Live test run monitoring via WebSocket
 - [[RBAC]] — Role-based access control (Keycloak)
 - [[Multi-tenancy]] — Organizations and teams

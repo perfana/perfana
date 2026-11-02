@@ -1008,7 +1008,8 @@ group name back to its members. Five things about it:
    an ungrouped panel costs one extra indexed lookup against two small tables and nothing in
    `ds_metrics`. Update those snapshots only on purpose.
 5. **A new raw reader has to call it.** The covered set is `getAvailableDashboards`,
-   `getDistinctMetricNames`, `getMetricTimeSeries`, `findDSMetricsForPanel` (and through it
+   `getDistinctMetricNames` (and `getDistinctMetricSeries`, its `/ds-metrics/distinct-series` twin
+   that also returns `series_groups` for the picker's badge, v0.2.97.43), `getMetricTimeSeries`, `findDSMetricsForPanel` (and through it
    `ds-metrics-comparison`), and the report fetcher's `getMetricsTimeSeries` /
    `getAvailableMetricsPanels`. MCP reads those routes over HTTP and needs nothing. Readers of
    `ds_metric_statistics` (`getMetricTrends`, `getBaselineRunComparisonFromStatistics`, the Compare
