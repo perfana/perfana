@@ -981,7 +981,7 @@ before the first byte arrives, and `abort()` discards the swap file, not the ent
 
 ### A series group is not a `ds_metrics` series, so every raw reader expands it
 
-Series grouping (v0.2.97.41, migration 1819; design in
+Series grouping (v0.2.97.43, migration 1819; design in
 `docs/design/2026-11-01-series-grouping-design.md`) stores a group's statistics under the group
 name — `api` for the pods `api-7d9f8c6b5-x2k4p` and `api-7d9f8c6b5-z9w2t` — in
 `ds_metric_statistics`. `ds_metrics` is never rewritten and holds only the raw names. A reader that
@@ -1018,7 +1018,7 @@ group name back to its members. Five things about it:
 
 ### Series grouping rules: who may write them, and what apply does
 
-`modules/series-grouping/` (v0.2.97.42) holds the rules API: CRUD with copy-to-other-workloads
+`modules/series-grouping/` (v0.2.97.43) holds the rules API: CRUD with copy-to-other-workloads
 (`series-grouping.service.ts`), and preview, suggestions, apply and status
 (`series-grouping-insights.service.ts`). Five decisions in it are easy to undo:
 
@@ -1051,7 +1051,7 @@ group name back to its members. Five things about it:
    start before migration 1819 runs — nothing orders them, no service declares
    `depends_on: perfana-migration` — and a statement on a missing table inside the request's RLS
    transaction aborts it (25P02) and takes every later query of the request with it. `preview` went
-   straight to `series_grouping_rules` and `ds_metric_series_groups` until v0.2.97.44, so an
+   straight to `series_grouping_rules` and `ds_metric_series_groups` until v0.2.97.43, so an
    un-migrated deploy 500'd the grouping dialog's first request instead of previewing against a run
    that simply has no grouping yet. Only a positive probe is cached.
 7. **`sg:alignment` has no threshold in SQL, so `loadAlignment` must filter like `loadMisaligned`.**
@@ -1060,7 +1060,7 @@ group name back to its members. Five things about it:
    round-trips as `1.2000000476837158`, so a SQL `< 1.2` would call the threshold itself misaligned.
    The dialog renders each `alignment` entry as a warning that the members report at different
    timestamps — so an unfiltered list accuses every healthy group, printing "3.0 per timestamp"
-   inside a sentence claiming the values are mostly single pods. Fixed in v0.2.97.44; the preview
+   inside a sentence claiming the values are mostly single pods. Fixed in v0.2.97.43; the preview
    spec's cases fed only 1.1 and 1, which is why it shipped.
 
 Suggestions log one line per served suggestion (`series-grouping suggestion <run> <dash>/<panel>

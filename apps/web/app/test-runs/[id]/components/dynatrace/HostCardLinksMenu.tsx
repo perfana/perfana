@@ -27,6 +27,9 @@ export default function HostCardLinksMenu({ hostDisplayName }: { hostDisplayName
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={close}
+        // The menu renders in a portal, but React bubbles its clicks (items and backdrop) through
+        // the component tree to that same row, which would drill the card into this host.
+        onClick={(e) => e.stopPropagation()}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >

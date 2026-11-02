@@ -276,8 +276,8 @@ export default function AnalystChartCard({
       )}
 
       {/* ponytail: mounted while closed, hidden rather than unmounted. The cascade is what
-          walks an "Open in Graphs / Trends" link's ?dashboard/panel/metric params, and a
-          card whose picker starts closed would never run that walk.
+          walks an "Open in Graphs / Trends" link, whether a new tab's ?card= params or an
+          in-page CardLinkRequest, and a card whose picker starts closed would never run that walk.
           What that costs, stated honestly: a closed picker renders every dashboard row on
           every render of THIS card, so the caller must hand `panel` a stable element (see
           the memo in GraphsChart/TrendsChart) or a hover-driven re-render repeats that work

@@ -66,7 +66,7 @@ Perfana is a **multi-service monorepo** for performance analysis and observabili
 ### Real-time
 - **WebSocket**: Socket.IO for live test run updates
 - **Redis Pub/Sub**: Job progress streaming to frontend
-- **Polling**: Grafana Sync interval-based synchronization
+- **Polling**: Grafana Sync interval-based synchronization; in the browser, the Performance Analysis card refetches a live run's figures on a user-selectable timer
 
 ## Design Principles
 

@@ -4,7 +4,7 @@
 **Status:** Design agreed. All five open questions were decided on 2026-11-01 (see Decisions at the
 end). Implementation plan: [`2026-11-01-series-grouping-plan.md`](2026-11-01-series-grouping-plan.md).
 Corrections found while planning are applied below. **Implemented: PR A (the engine) in
-v0.2.97.41, PR B (the rules API) in v0.2.97.42, PR C (the web) in v0.2.97.43.** The Compare card
+v0.2.97.43, PR B (the rules API) and PR C (the web) in the same release.** The Compare card
 hint and the table affordance (UI items 2 and 5 below) are deliberately v1.1. Open items are in
 `TODOS.md` under "Series grouping". Two decisions made while building PR B: writing a rule needs
 `benchmark:manage` and apply needs `test-run:update` (see apps/api/CLAUDE.md, "Series grouping

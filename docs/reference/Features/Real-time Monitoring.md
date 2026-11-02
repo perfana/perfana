@@ -134,6 +134,9 @@ During test execution, metrics are collected in real-time:
 - Test runs list updates in real-time with new/changed runs
 - Sidebar shows live job progress with stage indicators
 - Test run detail page shows pipeline progress bar
+- The Performance Analysis card is the exception: while a run is live it refetches on its own
+  client timer (the card's Refresh dropdown, default 30 s, Off available) rather than on
+  `test-run:updated` events. Test-run status and job progress stay WebSocket-driven.
 
 ## Server-Side Implementation
 

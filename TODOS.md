@@ -13,14 +13,15 @@ with the version it landed in.
 
 ## Series grouping
 
-Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.41
-shipped PR A (the engine), v0.2.97.42 PR B (the rules API), v0.2.97.43 PR C (the web).
+Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.43
+shipped all three stages in one release: PR A (the engine), PR B (the rules API) and PR C (the
+web), which were developed as separate versions on one branch and squash-merged together.
 
 **Verified on 2026-11-01** against `timescaledb-ha:pg15` with every migration through 1819 applied
-(see the v0.2.97.42 CHANGELOG entry for numbers): the full preflight including the RLS suite (the
+(see the v0.2.97.43 CHANGELOG entry for numbers): the full preflight including the RLS suite (the
 hand-edited coverage snapshot matches); the RLS policy matrix for `series_grouping_rules`; the
 Postgres-backed SUT export/import round trip; the grouped statistics on 1.87 M compressed rows
-with real Toolkit functions (which found the merge-join plan, fixed in v0.2.97.42); `lttb()` over
+with real Toolkit functions (which found the merge-join plan, fixed in v0.2.97.43); `lttb()` over
 a grouped series; and every rules route through a running API. What is still owed:
 
 ### Walk the series grouping UI end to end in a browser (P2)
@@ -37,7 +38,7 @@ a copy to another workload reports its `origin` and skip reasons. Paste what you
 
 ### Re-measure the grouped statistics at production scale (P2)
 
-**Origin:** v0.2.97.41, plan Task 12. Measured at 1.87 M rows, not at the ~20 M of a large
+**Origin:** v0.2.97.43, plan Task 12. Measured at 1.87 M rows, not at the ~20 M of a large
 production run: main INSERT 5.8 s with no rule, 5.4 s + 3.0 s (grouped statement, merge joins off)
 with a dashboard-wide rule over 23 % of the rows, series read 85 ms. Repeat on a production-sized
 run before rules are used widely: `EXPLAIN (ANALYZE, BUFFERS)` the grouped statement and confirm a
@@ -48,7 +49,7 @@ with the grouped panels.
 
 ### The worker integration suite cannot run against a migrated database (P3)
 
-**Origin:** v0.2.97.41. `apps/worker/src/test/integration/*.integration.test.ts` create their own
+**Origin:** v0.2.97.43. `apps/worker/src/test/integration/*.integration.test.ts` create their own
 simplified tables with `CREATE TABLE IF NOT EXISTS` and never run migrations, so against a migrated
 database the statements are no-ops and the fixtures no longer match the real schema; CI never runs
 the suite (`pr-quality-gate.yml` runs `test:coverage` only). The series-grouping path was verified
@@ -338,6 +339,23 @@ as the two badges that report a fault, so colour no longer encodes severity. Eit
 `Avg` to a neutral tint or differentiate the fault badges by weight or icon.
 
 ## RBAC
+
+### A non-admin can read another organization's test runs by naming it in `organizationId` (P0)
+
+**Priority:** P0
+**Origin:** security specialist, review cycle 2 of /ship on `feat/test-run-tabs-keep-state`
+(2026-11-01, v0.2.97.41). Pre-existing, not touched by that branch; proposed as its own session.
+**Why:** `TestRunsCrudQueryService` (`apps/api/src/modules/test-runs/services/test-runs-crud-query.service.ts`)
+takes an optional explicit `organizationId` and, when it is set, filters on
+`sut.organization_id = :organizationId` **instead of** the caller's resolved `organizationIds` —
+it never checks that the caller belongs to it. `findAllPaginated`, the list/count method beside
+it and `findByTestRunIdAndParams` all have the shape (`if (organizationId) { … }` ahead of the
+`organizationIds` arm). Only the admin bypass is meant to skip the membership set. On a
+single-organization deploy this is inert; it becomes a cross-tenant read with the second org.
+**What:** intersect an explicit `organizationId` with the resolved set for non-admins (outside it:
+an empty result or a 404, never a 403, see item 48 in the root CLAUDE.md), and grep the rest of
+`apps/api` for the same "explicit id wins" arm. RLS is no backstop on a default deploy.
+**Where:** the three methods above, and their controllers' `organizationId` query params.
 
 ### Schema changes reach new databases only, and the code assumes otherwise
 
@@ -2123,6 +2141,54 @@ are unaffected. Either scope `unmountOnExit` to the Apdex branch or give the cha
 
 ---
 
+## Test run detail tabs
+
+Follow-ups from /ship on `feat/test-run-tabs-keep-state` (2026-11-01, v0.2.97.41), which kept
+visited tabs mounted and made "Open in Graphs / Compare / Trends" hand its series to the card
+in-page. All were judged edge cases or judgment calls and deferred on purpose.
+
+### Two quick "Open in…" clicks into the same card can drop the first
+
+**Priority:** P3
+**Why:** the page holds one `CardLinkRequest` slot (`page.tsx`), and `MetricSeriesCascade` remounts
+`CascadeBody` keyed on the request id. A second link into the same card before the first walk has
+finished fetching replaces the request, the first walk's body is unmounted mid-fetch, and its
+series is never added. No toast, nothing logged.
+**What:** a per-card FIFO of pending requests, popped when a walk adds or disarms. Not a debounce:
+both clicks are real instructions.
+
+### A new link remounts the picker, discarding its draft
+
+**Priority:** P3
+**Why:** the per-link `key` on `CascadeBody` is what re-arms the walk, and a remount drops any
+staged-but-not-added selection in an open picker. Compare's primary selection, fed by
+`onPrimaryChange`, keeps the old dashboard until the walk selects again.
+**What:** re-arm the walk without a remount (reset `preselect` on a new `linkKey` inside one
+body), so the draft survives and `onPrimaryChange` fires once for the new link.
+
+### A re-click that collapses cards can land right after a link switched the tab
+
+**Priority:** P3 (judgment call)
+**Why:** clicking the active tab collapses that tab's cards (single pointer click only,
+`e.detail === 1`). An "Open in…" link or a drill-down switches tabs programmatically, so the user's
+next click on that tab, often just to orient, collapses the card the link opened.
+**What:** if it shows up in use, ignore a collapse within ~1 s of a programmatic tab switch, or only
+collapse when the click started on the already-active tab before any switch. Do nothing until a
+real report.
+
+### The tracing and Pyroscope iframes keep running while the RCA tab is hidden
+
+**Priority:** P3
+**Why:** hidden tabs stay mounted and `TabBody` stops React re-renders, but an embedded iframe is
+its own document: `distributed-tracing/components/VisualiseTab.tsx` and
+`pyroscope/components/PyroscopeFlameGraph.tsx` keep their pages, scripts and any polling alive.
+`TabActiveContext` gates only our own timers (AWR reports, the rollup poll).
+**What:** read `TabActiveContext` in those two and unmount the iframe (or swap `src` to
+`about:blank`) while hidden, if their cost shows up. Losing the iframe's own scroll/zoom is the
+trade.
+
+---
+
 ## Web charts
 
 ### Three residues of the Graphs card's zoom refetch
@@ -2178,37 +2244,6 @@ for free. Not worth it until someone complains.
 
 **Where:** `apps/web/lib/charts/layout.ts` (`yAxis`, `buildTimeSeriesLayout`).
 
-### A landed card-link cannot be recovered after a tab switch
-
-**Priority:** P2
-**Origin:** adversarial review of v0.2.97.1 (`fix/card-deeplinks-series-picker`). Pre-existing —
-the fix only made it reachable, because before it the link did not land in Graphs/Trends at all.
-**Why:** `consumedLinks` in `apps/web/app/test-runs/[id]/components/shared/MetricSeriesCascade.tsx`
-is module state keyed on `card + query string`, so a link applies once per page load. The Reporting
-tab is rendered as `{activeTab === 2 && (…)}` (`page.tsx`), so leaving the tab unmounts
-`useGraphsData`/`useTrendsData` **and** the cascade together. Coming back: `addedSeries` is gone with
-the hook state, the key is still in `consumedLinks`, so `preselect` initialises to `null` and the
-chart is permanently empty with no recovery but a full page reload.
-**Also wrong in the same place:** the comment defending `consumedLinks` says the card unmounts "on
-every tab switch and collapse". The collapse half is false — `GraphsCard`/`TrendsCard` use
-`<Collapse in={…}>` with no `unmountOnExit`, so collapsing unmounts nothing. And the tab half no
-longer argues for the guard, since the picks it claims to protect die with the hook state anyway.
-**What to do:** either key the Set on something whose lifetime matches the card's own state, or drop
-it for a per-card ref and let the link re-apply on remount. Decide what a second application should
-mean first — the original worry was a cleared selection coming back on re-expand, which the Collapse
-finding says cannot happen.
-
-### The `consumedLinks` key omits the test run id
-
-**Priority:** P4
-**Origin:** same review. Low realism, silent failure, one-token fix.
-**Why:** `const linkKey = \`${card}?${searchParams.toString()}\`` — the run id lives in the path, not
-the query. Two different runs reached by soft navigation with identical query strings share a key,
-and the second link silently no-ops. Not reachable today because `buildCardLink` always opens
-`target="_blank"`, which is a fresh document with fresh module state.
-**What to do:** fold `useParams().id` into the key. Not a memory leak — growth is bounded by distinct
-query strings per document, at most three per page load.
-
 ### A card-link that resolves nothing fails silently, with the picker closed
 
 **Priority:** P3
@@ -2221,6 +2256,10 @@ gone by design now. The cascade has a `showToast` prop as of v0.2.97.1 (added fo
 so the channel already exists.
 **What to do:** toast on each `disarm()`-without-match path, naming which level failed ("that
 dashboard is not on this run", "that panel no longer exists", "that series was not recorded").
+**Also since v0.2.97.41:** a plain click now hands the link to the card in the same tab, and a
+card's dashboard list is fetched once per page. On a live run a dashboard can appear after that (a
+Dynatrace host mapped mid-run), so a link naming it misses at the dashboard step for a reason a
+refetch would fix. Refetch once on a dashboard- or panel-level miss before toasting.
 
 ### The report's transactions table is a legend that cannot repeat its header in print
 
@@ -2305,6 +2344,21 @@ resizing its content, so the observed box holds its final size for the whole ani
 observer fires only on `observe()`. The one-shot window kick is the only thing covering that case,
 and `ResponsivePlot` does not replace it. Same for `kickPlotlyResize` in
 `shared/ExpandableCardHeader.tsx`, which the Compare, Trends and Graphs cards use.
+
+### Card-level window resize kicks relayout charts on hidden tabs
+
+**Priority:** P3
+**Origin:** review cycle 2 of /ship on `feat/test-run-tabs-keep-state` (2026-11-01, v0.2.97.41),
+decision D12.
+**Why:** visited test-run tabs now stay mounted while hidden. The page resizes only the shown
+panel's charts on a tab switch, but `kickPlotlyResize`, DynatraceCard's `onEntered`,
+`HostPerformanceGraphs` and the SLO charts dispatch a **window** resize, which every Plotly
+listener on the page answers, hidden tabs included. Wasted relayouts, and `Plots.resize` rejects
+on a hidden graph div.
+**What:** fold into the `ResponsivePlot` sweep above: a chart that observes its own container
+skips a zero-width box (hidden panel) and needs no window kick, except the `Collapse` case that
+section says to keep.
+
 
 ---
 
@@ -3705,7 +3759,103 @@ It is not a simple `knip` deletion: `AuthenticatedSocket` is exported from that 
 
 **Effort:** S
 
+## Performance Analysis live refresh
+
+Follow-ups from the v0.2.97.42 refresh-rate dropdown.
+
+### Live refresh load and ordering gaps left by v0.2.97.42
+
+**Priority:** P2
+**Origin:** /ship review cycles 1-3 and adversarial review, 2026-11-01 (user decisions D7, D10, D11).
+**Why:** each gap is bounded or pre-existing, but the user-picked cadence (as fast as 10 s) makes them
+more frequent than under the old ~30 s WebSocket trigger.
+**What:**
+- Only `/transactions` has the latest-request guard. `/virtual-users`, `/throughput` and the threshold
+  still write whichever answer arrives last — after a ramp-up toggle, or at run completion when a slow
+  last-tick answer lands after the completion refetch (then nothing corrects it until reload). Give
+  each refresh pass one generation token that all four fetches check.
+- The ≥5 s pause times `/transactions` only; `/virtual-users` and `/throughput` (the multi-second reads
+  in root CLAUDE.md #34) are not timed and not deduped, so they can overlap at 10 s. The 5 s threshold
+  is also absolute, ~50% duty cycle per viewer at 10 s.
+- The timer runs while the browser tab is hidden and while the card is collapsed (it does stop while
+  the Results tab is hidden behind another details-page tab). Skip ticks while
+  `document.visibilityState !== 'visible'` and refresh once on return.
+- A `/transactions` request that never settles keeps the background gate closed until it does
+  (bounded by the API's 300 s `query_timeout`); add `AbortSignal.timeout(~60 s)` and abort superseded
+  requests (they are dropped, not cancelled).
+- A failed background refresh blanks the table (`setTransactions([])`) and nulls the stats; keep the
+  last good figures like `fetchSamplesFor` does.
+- Editing the analysis window on a live run no longer refetches immediately; refetch when
+  `analysis_start_offset` / `analysis_end_offset` change on the `testRun` prop.
+- `sortedTransactions` / `scenarioGroups` are rebuilt every render; memoize them.
+**Where:** `.../hooks/usePerformanceAnalysisData.ts`.
+
+### Completion and resume can still show stale figures
+
+**Priority:** P2
+**Origin:** /ship red-team cycles 2-3 and adversarial review, 2026-11-01.
+**Why:** v0.2.97.42 refetches once on completion and resumes the timer on a pick, but:
+- The completion refetch fires the instant `completed` flips, before late `requests_raw` rows
+  (up to ~36 s) and the analyze rollup land; nothing fetches after. Schedule one more refetch
+  (~60 s later, or when the analysis result arrives).
+- Resuming from a pause (or picking a rate) does not fetch at once; the first refresh comes a full
+  period later (5 min at 5m).
+- An expanded row whose sampler fetch is still out at completion keeps pre-completion figures:
+  `inFlightSamplesRef` skips the completion refetch, and it is keyed on name only, ignoring the
+  samples epoch, so a re-expand during a window change can show an empty request table.
+- If the browser misses the completion WebSocket event (sleep, API restart), the card polls on, and a
+  "Last N minutes" window drains to empty after the run. Refetch the run on socket reconnect
+  (`useTestRunRealtime` re-subscribes but never refetches).
+**Where:** `.../hooks/usePerformanceAnalysisData.ts`, `apps/web/app/test-runs/[id]/hooks/useTestRunRealtime.ts`.
+
+### Live refresh polish and accessibility
+
+**Priority:** P3
+**Origin:** /ship review cycle 3, 2026-11-01 (user decision D11).
+**What:**
+- The caption gains `role="status"` in the same render as its "· auto-refresh paused" text, so the
+  entry into paused is likely not announced. Keep one always-mounted live region whose text changes
+  only with the refresh state.
+- The paused copy (tooltip, button label, caption) says why but not how to resume.
+- The manual refresh button sits at the start of the live-controls row, away from the Refresh
+  select that summons it; the select is labelled "Refresh" while the tooltips say "auto-refresh",
+  beside a button named "Refresh metrics" ("Auto-refresh" would read unambiguously).
+- The LIVE dot keeps pulsing when refresh is Off or paused, and ignores `prefers-reduced-motion`.
+- The manual refresh button drops keyboard focus because it disables itself while loading
+  (`aria-disabled` instead).
+- The comment above the manual button's `aria-label` gives the wrong reason (with `describeChild` the
+  tooltip is a description, so the icon button needs its own name).
+- `autoRefreshDisabled` now means "paused"; rename it `autoRefreshPaused`, or return `refreshState` from
+  the hook so the card and the timer guard cannot drift.
+- One comment still says expanded rows update "in realtime"; the 5 s threshold is spelled out in two
+  user-facing strings; `REFRESH_OPTIONS` is a mutable exported array (`as const`); `lastUpdatedAt` is
+  not reset when the run changes; a superseded response body is never cancelled.
+**Where:** `.../components/LiveWindowSelector.tsx`, `.../PerformanceAnalysisCard.tsx`, `.../hooks/usePerformanceAnalysisData.ts`.
+
+### Tests the live refresh review proposed but did not add
+
+**Priority:** P3
+**Origin:** /ship coverage reassessment and testing review, cycle 3, 2026-11-01 (both generation passes
+were used). Each is correct code without a test; mutations noted survive today.
+**What:**
+- Only the newest request re-opens the background gate: moving `latestTransactionsSettledRef.current = true`
+  above the stale check passes all tests. A ready stub: mount request 3 s, window change at 1 s
+  answering at 15 s, 10 s period; expect 2 requests and `['call-2']`.
+- Off outranks paused (pick Off, slow manual refresh): swapping the `refreshState` ternary passes all tests.
+- The gate re-opens after the latest request *fails* (a fast 502 on a tick, then a 200 on the next).
+- The post-json stale check: delay `json()` (not `fetch`) on the older request, then change the window.
+- The caption carries no `role`/`aria-live` while refresh is on.
+**Where:** `.../hooks/__tests__/usePerformanceAnalysisData.test.ts`,
+`apps/web/__tests__/app/test-runs/performance-analysis/PerformanceAnalysisCard.test.tsx`.
+
 ## Completed
+
+### A landed card-link could not be recovered after a tab switch, and its key omitted the run
+
+**Shipped in v0.2.97.41** (`feat/test-run-tabs-keep-state`). Visited tabs stay mounted, so a
+card's added series survive a switch, and the module-level `consumedLinks` became a page-scoped
+set on `CardLinkRequestContext` whose URL-link key carries the run id. Closes both the P2 entry
+and the P4 "`consumedLinks` key omits the test run id" entry from the v0.2.97.1 review.
 
 ### RELEASE GATE: multi-org tenancy
 

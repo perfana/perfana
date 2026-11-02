@@ -563,7 +563,7 @@ above — that is a deliberate change in what the number means, and it is docume
 
 Kubernetes dashboards name series after pods, and pod names change every deployment, so two runs
 of one build share no `metric_name` and ADAPT reads every pod as `incomparable` — a regression on
-those panels is never reported. A `series_grouping_rules` row (per workload; migration 1819, v0.2.97.41)
+those panels is never reported. A `series_grouping_rules` row (per workload; migration 1819, v0.2.97.43)
 rewrites raw names to a group name with `applySeriesGrouping` (`@perfana/shared/utils`), and
 `StatisticsPipeline` writes the group's statistics instead of the pods'. Design:
 `docs/design/2026-11-01-series-grouping-design.md`. Six things hold it together:
