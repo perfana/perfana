@@ -12,6 +12,7 @@ import { ApplicationDashboard, SeriesGroupingRule } from '@perfana/shared/entiti
 import { OwnedResource } from '@perfana/shared';
 import {
   compileSeriesGroupingRule,
+  normalizeExtraAggregations,
   type SeriesGroupingAggregation,
   type SeriesGroupingPreset,
 } from '@perfana/shared/utils';
@@ -44,6 +45,7 @@ interface RuleFields {
   pattern: string | null;
   replacement: string;
   aggregation: SeriesGroupingAggregation;
+  extraAggregations: SeriesGroupingAggregation[];
   trackMemberCount: boolean;
 }
 
@@ -118,7 +120,14 @@ export class SeriesGroupingService {
     roles: string[],
     accessibleOrgIds: string[] | null,
   ): Promise<SeriesGroupingCreateResultDto> {
-    const fields = this.ruleFields(dto.preset, dto.pattern ?? null, dto.replacement ?? null, dto.aggregation, dto.trackMemberCount);
+    const fields = this.ruleFields(
+      dto.preset,
+      dto.pattern ?? null,
+      dto.replacement ?? null,
+      dto.aggregation,
+      dto.extraAggregations ?? [],
+      dto.trackMemberCount,
+    );
 
     // Authorize the caller-supplied parent BEFORE inheriting its organization.
     const dashboard = await this.loadAuthorizedDashboard(dto.applicationDashboardId, dto.systemUnderTestId, dto.testEnvironment, accessibleOrgIds);
@@ -174,6 +183,7 @@ export class SeriesGroupingService {
       switchingToCustom ? (dto.pattern ?? rule.pattern) : null,
       switchingToCustom ? (dto.replacement ?? rule.replacement) : null,
       dto.aggregation ?? rule.aggregation,
+      dto.extraAggregations ?? rule.extraAggregations ?? [],
       dto.trackMemberCount ?? rule.trackMemberCount,
     );
     Object.assign(rule, fields, { enabled: dto.enabled ?? rule.enabled, updatedBy: userId });
@@ -206,12 +216,19 @@ export class SeriesGroupingService {
     pattern: string | null,
     replacement: string | null,
     aggregation: SeriesGroupingAggregation,
+    extraAggregations: SeriesGroupingAggregation[],
     trackMemberCount: boolean,
   ): RuleFields {
+    // Normalised rather than refused: the DTO already rejects an unknown value and a duplicate,
+    // and what is left — the primary aggregation sent as an extra, which
+    // ck_series_grouping_rules_extra_aggregations would answer with a 500 — is exactly the
+    // request "also emit avg", which the bare group name already satisfies. Canonical order so
+    // the rule hash does not change with the order of the checkboxes.
+    const extras = normalizeExtraAggregations({ aggregation, extraAggregations });
     const fields: RuleFields =
       preset === 'custom'
-        ? { preset, pattern: pattern || null, replacement: replacement ?? '', aggregation, trackMemberCount }
-        : { preset, pattern: null, replacement: '', aggregation, trackMemberCount };
+        ? { preset, pattern: pattern || null, replacement: replacement ?? '', aggregation, extraAggregations: extras, trackMemberCount }
+        : { preset, pattern: null, replacement: '', aggregation, extraAggregations: extras, trackMemberCount };
     const compiled = compileSeriesGroupingRule(fields);
     if (!compiled.ok) throw new BadRequestException(compiled.error ?? 'Invalid series grouping rule');
     return fields;
@@ -330,6 +347,7 @@ export class SeriesGroupingService {
         pattern: source.pattern,
         replacement: source.replacement,
         aggregation: source.aggregation,
+        extraAggregations: source.extraAggregations ?? [],
         trackMemberCount: source.trackMemberCount,
         enabled: source.enabled,
         origin: 'copy',
@@ -430,6 +448,7 @@ export class SeriesGroupingService {
       pattern: rule.pattern ?? null,
       replacement: rule.replacement ?? '',
       aggregation: rule.aggregation,
+      extraAggregations: rule.extraAggregations ?? [],
       trackMemberCount: rule.trackMemberCount,
       enabled: rule.enabled,
       origin: rule.origin,

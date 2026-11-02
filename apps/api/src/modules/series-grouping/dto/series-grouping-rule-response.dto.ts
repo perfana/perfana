@@ -1,3 +1,4 @@
+import { SERIES_GROUPING_AGGREGATION_VALUES } from './create-series-grouping-rule.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { SeriesGroupingAggregation, SeriesGroupingPreset } from '@perfana/shared/utils';
 import type { SeriesGroupingRuleOrigin } from '@perfana/shared/entities';
@@ -13,7 +14,9 @@ export class SeriesGroupingRuleResponseDto {
   @ApiProperty() preset!: SeriesGroupingPreset;
   @ApiProperty({ nullable: true, type: String }) pattern!: string | null;
   @ApiProperty() replacement!: string;
-  @ApiProperty() aggregation!: SeriesGroupingAggregation;
+  @ApiProperty({ enum: SERIES_GROUPING_AGGREGATION_VALUES }) aggregation!: SeriesGroupingAggregation;
+  @ApiProperty({ enum: SERIES_GROUPING_AGGREGATION_VALUES, isArray: true })
+  extraAggregations!: SeriesGroupingAggregation[];
   @ApiProperty() trackMemberCount!: boolean;
   @ApiProperty() enabled!: boolean;
   @ApiProperty({ enum: ['manual', 'suggestion', 'copy'] }) origin!: SeriesGroupingRuleOrigin;

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   applySeriesGrouping,
   compileSeriesGroupingRule,
+  extraAggregationSeriesName,
   type SeriesGroupingAggregation,
   type SeriesGroupingPreset,
   type SeriesGroupingRuleSpec,
@@ -75,6 +76,11 @@ export interface SeriesGroup {
   aggregation: SeriesValueAggregation;
   /** This group's member-count series name, when the rule tracks one. Never set on a count entry. */
   memberCountName: string | null;
+  /**
+   * The group's extra aggregations, each of which is a second series named `<group> (sum)`.
+   * Never set on a derived entry (a count or an extra), which is already one of them.
+   */
+  extraAggregations: SeriesGroupingAggregation[];
 }
 
 interface MembershipRow {
@@ -85,6 +91,7 @@ interface MembershipRow {
   metric_name: string;
   group_name: string;
   aggregation: SeriesGroupingAggregation;
+  extra_aggregations: SeriesGroupingAggregation[];
   member_count_name: string | null;
 }
 
@@ -136,6 +143,7 @@ function groupsFromMembership(rows: readonly MembershipRow[]): SeriesGroup[] {
         members: [row.metric_name],
         aggregation: row.aggregation,
         memberCountName: row.member_count_name,
+        extraAggregations: row.extra_aggregations,
       });
     }
   }
@@ -157,6 +165,7 @@ function groupsFromRule(spec: SeriesGroupingRuleSpec, rawNames: readonly string[
       members: [...members],
       aggregation: spec.aggregation,
       memberCountName: result.memberCountNames.get(group) ?? null,
+      extraAggregations: result.extraAggregations.get(group) ?? [],
     });
   }
   return groups;
@@ -181,6 +190,29 @@ export class SeriesGroupResolver {
    * fail, and only a POSITIVE answer is remembered: the tables never go away again.
    */
   private tablesPresent = false;
+
+  /**
+   * Whether `extra_aggregations` exists on BOTH tables (migration 1820). Asked for in the same
+   * probe and for the same reason as the tables: selecting a column that does not exist is 42703
+   * INSIDE the request's RLS transaction, which aborts it (25P02) and takes every later query of
+   * the request with it.
+   *
+   * Its OWN latch, re-probed while false. An earlier version read it from whichever probe first
+   * found the tables, on the argument that 1819 and 1820 arrive in one batch so tables-without-
+   * column means a failed deploy. That is true only for a greenfield install: 1819 shipped in
+   * v0.2.97.43, so on an upgrade 1820 applies ALONE, and nothing orders the API behind the
+   * migration runner (no service declares `depends_on: perfana-migration`). One chart lookup
+   * served before the migration landed would then latch `false` for the whole process lifetime —
+   * extras invisible until someone restarts the API, nothing logged, and `groupsFromRule`
+   * hashing every rule as having no extras so the insights page reports every grouped run as
+   * stale. The cost avoided was one `pg_attribute` lookup (3 shared buffers, ~1 ms planning).
+   *
+   * BOTH tables are probed because one flag gates reads of both: `load()` selects
+   * `g.extra_aggregations` from `ds_metric_series_groups` and `r.extra_aggregations` from
+   * `series_grouping_rules`. Migration 1820 adds them in one DO block, so they move together
+   * today; asking about only one would let the other vouch for it.
+   */
+  private extrasPresent = false;
 
   /**
    * Groups for a panel of a run, real groups only (a series nothing renamed is not one).
@@ -262,12 +294,27 @@ export class SeriesGroupResolver {
   // ---------------------------------------------------------------------------------------
 
   private async ensureTables(q: SeriesQueryable): Promise<boolean> {
-    if (this.tablesPresent) return true;
+    // Re-probe while EITHER answer is still negative; both latch positive independently.
+    if (this.tablesPresent && this.extrasPresent) return true;
     const rows = await q.query(
+      // pg_attribute, not information_schema.columns: measured 3 shared buffers and ~1.0 ms of
+      // planning against 47 buffers and ~3.0 ms for the view, which is a 10-way catalog join
+      // with a per-row has_column_privilege() whose planning cost grows with the catalog (one
+      // relation per chunk per day here). to_regclass returns NULL rather than raising for a
+      // missing table, so a pre-1819 database answers false instead of erroring.
       `SELECT to_regclass('public.ds_metric_series_groups') IS NOT NULL
-          AND to_regclass('public.series_grouping_rules') IS NOT NULL AS present`,
+          AND to_regclass('public.series_grouping_rules') IS NOT NULL AS present,
+              (EXISTS (SELECT 1 FROM pg_attribute
+                        WHERE attrelid = to_regclass('public.series_grouping_rules')
+                          AND attname = 'extra_aggregations' AND NOT attisdropped)
+               AND EXISTS (SELECT 1 FROM pg_attribute
+                            WHERE attrelid = to_regclass('public.ds_metric_series_groups')
+                              AND attname = 'extra_aggregations' AND NOT attisdropped)) AS has_extras`,
     );
-    this.tablesPresent = Array.isArray(rows) && rows[0]?.present === true;
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    // Only positive answers are remembered: neither the tables nor the column go away again.
+    if (row?.present === true) this.tablesPresent = true;
+    if (row?.has_extras === true) this.extrasPresent = true;
     return this.tablesPresent;
   }
 
@@ -283,11 +330,13 @@ export class SeriesGroupResolver {
     if (scoped === null) return EMPTY_GROUPING;
 
     const membershipWhere = scoped.membership('g');
+    const extras = this.extrasPresent;
     const rows = await q.query(
       `SELECT 'm'::text AS kind, g.application_dashboard_id, g.panel_id,
               g.dashboard_label::text AS dashboard_label, g.panel_title::text AS panel_title,
               g.metric_name::text AS metric_name, g.group_name::text AS group_name,
               g.aggregation::text AS aggregation, g.member_count_name::text AS member_count_name,
+              ${extras ? 'g.extra_aggregations::text[]' : 'NULL::text[]'} AS extra_aggregations,
               NULL::text AS preset, NULL::text AS pattern, NULL::text AS replacement,
               NULL::boolean AS track_member_count
          FROM ds_metric_series_groups g
@@ -297,6 +346,7 @@ export class SeriesGroupResolver {
               ad.dashboard_label::text, NULL::text,
               NULL::text, NULL::text,
               r.aggregation::text, NULL::text,
+              ${extras ? 'r.extra_aggregations::text[]' : 'NULL::text[]'},
               r.preset::text, r.pattern, r.replacement, r.track_member_count
          FROM series_grouping_rules r
          JOIN test_runs tr
@@ -327,6 +377,7 @@ export class SeriesGroupResolver {
           metric_name: row.metric_name,
           group_name: row.group_name,
           aggregation: row.aggregation,
+          extra_aggregations: Array.isArray(row.extra_aggregations) ? row.extra_aggregations : [],
           member_count_name: row.member_count_name ?? null,
         });
       } else {
@@ -339,6 +390,7 @@ export class SeriesGroupResolver {
             pattern: row.pattern,
             replacement: row.replacement,
             aggregation: row.aggregation,
+            extraAggregations: Array.isArray(row.extra_aggregations) ? row.extra_aggregations : [],
             trackMemberCount: row.track_member_count === true,
           },
         });
@@ -482,6 +534,21 @@ export function expandSeriesNames(
         members: g.members,
         aggregation: 'count',
         memberCountName: null,
+        extraAggregations: [],
+      });
+    }
+    // Same shape as the member count, and the `has` guard matters for the same reason: a raw
+    // series literally named `api (sum)` wins, and the derived one is dropped rather than
+    // shadowing real data.
+    for (const extra of g.extraAggregations ?? []) {
+      const name = extraAggregationSeriesName(g.group, extra);
+      if (byName.has(name)) continue;
+      byName.set(name, {
+        group: name,
+        members: g.members,
+        aggregation: extra,
+        memberCountName: null,
+        extraAggregations: [],
       });
     }
   }
@@ -523,6 +590,7 @@ export function mapNamesToGroups(
     }
     names.add(g.group);
     if (g.memberCountName) names.add(g.memberCountName);
+    for (const extra of g.extraAggregations ?? []) names.add(extraAggregationSeriesName(g.group, extra));
     const members = used.get(g.group) ?? new Set<string>();
     members.add(raw);
     used.set(g.group, members);

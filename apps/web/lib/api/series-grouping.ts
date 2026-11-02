@@ -32,6 +32,8 @@ export interface SeriesGroupingRuleResponse {
   pattern: string | null;
   replacement: string;
   aggregation: SeriesGroupingAggregation;
+  /** Aggregations emitted beside the primary one, each as a `<group> (sum)` series. */
+  extraAggregations: SeriesGroupingAggregation[];
   trackMemberCount: boolean;
   enabled: boolean;
   origin: SeriesGroupingRuleOrigin;

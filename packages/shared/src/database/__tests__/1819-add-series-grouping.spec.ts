@@ -80,6 +80,24 @@ describe('migration 1819 — series grouping tables', () => {
     expect(sql).toMatch(/attempt >= 10/);
   });
 
+  // Added in v0.2.97.44; this migration shipped in v0.2.97.43 without it. The runner uses
+  // transaction: "all" — ONE transaction for the whole batch — so a 3s lock_timeout left in place
+  // leaks into every migration numbered above this one, where it surfaces as 55P03 instead of a
+  // wait. 1820 has the same block and captures whatever it finds on ENTRY, so while this one
+  // leaked, a combined 1819+1820 install had 1820 capture this block's 3s and faithfully restore
+  // it: the leak outlived the fix meant to remove it. Restoring the captured entry value is the
+  // only correct form — `'0'` means UNLIMITED, which would strip a deployment's configured
+  // lock_timeout from the rest of the batch, and `DEFAULT` resolves to the conf value, clobbering
+  // a SET LOCAL an earlier migration set for itself.
+  it.each(['up', 'down'] as const)('restores the lock_timeout it captured on %s entry', async (dir) => {
+    const sql = await run(dir);
+    expect(sql).toMatch(/prev_lock_timeout text := current_setting\('lock_timeout'\)/);
+    const restores = [...sql.matchAll(/set_config\('lock_timeout',\s*prev_lock_timeout,\s*true\)/g)];
+    expect(restores).toHaveLength(2); // the success path and before the RAISE
+    expect(sql).not.toMatch(/set_config\('lock_timeout',\s*'0'/);
+    expect(sql).not.toMatch(/lock_timeout\s*=\s*DEFAULT/);
+  });
+
   it('drops the derived table before the rules table it references', async () => {
     const sql = await run('down');
     const groups = sql.indexOf('DROP TABLE IF EXISTS public.ds_metric_series_groups');

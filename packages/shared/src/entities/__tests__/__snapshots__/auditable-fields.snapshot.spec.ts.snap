@@ -285,6 +285,7 @@ exports[`auditableFields snapshot — every OwnedResource entity has a stable de
     "pattern",
     "replacement",
     "aggregation",
+    "extraAggregations",
     "trackMemberCount",
     "enabled",
     "origin",

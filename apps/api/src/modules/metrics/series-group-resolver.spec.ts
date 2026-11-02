@@ -1,4 +1,10 @@
-import { SeriesGroupResolver, buildSeriesRelation, mapNamesToGroups, type SeriesGroup } from './series-group-resolver';
+import {
+  SeriesGroupResolver,
+  buildSeriesRelation,
+  expandSeriesNames,
+  mapNamesToGroups,
+  type SeriesGroup,
+} from './series-group-resolver';
 
 const RUN = 'run-1';
 const DASH = '6f1c1c52-0000-4000-8000-000000000001';
@@ -17,6 +23,7 @@ const membership = (over: Row = {}): Row => ({
   metric_name: POD_A,
   group_name: 'api',
   aggregation: 'avg',
+  extra_aggregations: [],
   member_count_name: null,
   preset: null,
   pattern: null,
@@ -35,6 +42,7 @@ const rule = (over: Row = {}): Row => ({
   metric_name: null,
   group_name: null,
   aggregation: 'avg',
+  extra_aggregations: [],
   member_count_name: null,
   preset: 'k8s-pod',
   pattern: null,
@@ -47,14 +55,22 @@ const rule = (over: Row = {}): Row => ({
  * A queryable that answers by statement: the presence probe, the lookup, and (for the
  * live-run fallback only) the read of the panel's raw names.
  */
-function queryable(opts: { present?: boolean; lookup?: Row[]; names?: Row[]; failLookup?: boolean } = {}) {
+function queryable(
+  opts: { present?: boolean; hasExtras?: boolean; lookup?: Row[]; names?: Row[]; failLookup?: boolean } = {},
+) {
   const calls: Array<{ sql: string; params: unknown[] }> = [];
   const query = jest.fn(async (sql: string, params: unknown[] = []) => {
     calls.push({ sql, params });
-    if (sql.includes('to_regclass')) return [{ present: opts.present ?? true }];
+    if (sql.includes('to_regclass')) {
+      return [{ present: opts.present ?? true, has_extras: opts.hasExtras ?? true }];
+    }
     if (/\bFROM ds_metrics\b/.test(sql)) return opts.names ?? [];
     if (opts.failLookup) throw new Error('boom');
-    return opts.lookup ?? [];
+    // Honour the projection, as Postgres does: a statement that selected NULL::text[] cannot
+    // hand the column back. Returning the fixture regardless made the pre-1820 arm's
+    // behavioural assertion a fixture echo — it passed with the conditional deleted.
+    const projectsNull = /NULL::text\[\] AS extra_aggregations/.test(sql);
+    return (opts.lookup ?? []).map((r) => (projectsNull ? { ...r, extra_aggregations: null } : r));
   });
   return { query, calls };
 }
@@ -140,7 +156,7 @@ describe('SeriesGroupResolver', () => {
       );
 
       expect(groups).toEqual<SeriesGroup[]>([
-        { group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null },
+        { group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null, extraAggregations: [] },
       ]);
       // No raw-name read: membership already says it all.
       expect(touchedDsMetrics(q.calls)).toBe(false);
@@ -177,7 +193,7 @@ describe('SeriesGroupResolver', () => {
         applicationDashboardId: DASH,
         panelId: 201,
       });
-      expect(groups).toEqual([{ group: 'api', members: [POD_A], aggregation: 'avg', memberCountName: null }]);
+      expect(groups).toEqual([{ group: 'api', members: [POD_A], aggregation: 'avg', memberCountName: null, extraAggregations: [] }]);
     });
   });
 
@@ -189,7 +205,7 @@ describe('SeriesGroupResolver', () => {
 
       const groups = await new SeriesGroupResolver().groupsForPanel(q, ref, [POD_A, POD_B, 'heap-used']);
 
-      expect(groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null }]);
+      expect(groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null, extraAggregations: [] }]);
       expect(touchedDsMetrics(q.calls)).toBe(false);
     });
 
@@ -275,10 +291,92 @@ describe('SeriesGroupResolver', () => {
         panelTitle: 'CPU per pod',
       });
 
-      expect(groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null }]);
+      expect(groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null, extraAggregations: [] }]);
       const read = q.calls.find((c) => /\bFROM ds_metrics\b/.test(c.sql))!;
       expect(read.sql).toContain('dashboard_label = $2');
       expect(read.sql).toContain('panel_title = $3');
+    });
+  });
+
+  /**
+   * Value:
+   *   protects — the `extra_aggregations` column is NAMED in the lookup only after the probe has
+   *     seen it (migration 1820), and a rule's extras reach a live run's groups.
+   *   fails_when — the `extras ? … : 'NULL::text[]'` conditional in `load()` becomes an
+   *     unconditional `g.extra_aggregations` / `r.extra_aggregations`. On a pre-1820 database that
+   *     is 42703 INSIDE the request's RLS transaction, which aborts it (25P02) and takes every
+   *     later query of the request with it — or `groupsFromRule` stops carrying
+   *     `result.extraAggregations`, and `api (sum)` draws an empty chart on a live run.
+   *   why_new — v0.2.97.44 gave this spec's `queryable` a `hasExtras` option and no test passes
+   *     it, so only the post-migration half of the branch was exercised; and no test drove the
+   *     rule (live-run) path with a rule that has extras.
+   *   seam — the captured SQL of the single lookup statement, and the returned `SeriesGroup[]`.
+   */
+  describe('migration 1820: the extra_aggregations column', () => {
+    const ref = { testRunId: RUN, applicationDashboardId: DASH, panelId: 201 };
+    const rows = [membership({ metric_name: POD_A }), membership({ metric_name: POD_B })];
+
+    it('names the column only once the probe has seen it, and still groups without it', async () => {
+      // The fixture carries extras on purpose: the fake nulls them when the statement projects
+      // NULL, so `extraAggregations: []` below is the resolver's Array.isArray coercion at work
+      // rather than a copy of the fixture.
+      const withExtras = rows.map((r) => ({ ...r, extra_aggregations: ['sum'] }));
+      const before = queryable({ hasExtras: false, lookup: withExtras });
+      const groups = await new SeriesGroupResolver().groupsForPanel(before, ref);
+
+      const preMigration = before.calls[1]!.sql;
+      expect(preMigration).not.toMatch(/\.extra_aggregations/);
+      expect(preMigration).toContain('NULL::text[]');
+      // The run is still grouped; it just reads as having no extras, which is what it has.
+      expect(groups).toEqual<SeriesGroup[]>([
+        {
+          group: 'api',
+          members: [POD_A, POD_B].sort(),
+          aggregation: 'avg',
+          memberCountName: null,
+          extraAggregations: [],
+        },
+      ]);
+
+      const after = queryable({ hasExtras: true, lookup: withExtras });
+      await new SeriesGroupResolver().groupsForPanel(after, ref);
+      expect(after.calls[1]!.sql).toContain('g.extra_aggregations::text[]');
+      expect(after.calls[1]!.sql).toContain('r.extra_aggregations::text[]');
+    });
+
+    it('keeps probing for the column while it is absent, and latches once it appears', async () => {
+      const resolver = new SeriesGroupResolver();
+      const ref2 = { testRunId: RUN, applicationDashboardId: DASH, panelId: 201 };
+
+      const pre = queryable({ hasExtras: false, lookup: rows });
+      await resolver.groupsForPanel(pre, ref2);
+      await resolver.groupsForPanel(pre, ref2);
+      // Still asking: migration 1820 can land at any time, and latching false here would leave
+      // extras invisible for the whole process lifetime (1819 shipped a release earlier, so on
+      // an upgrade 1820 applies alone and nothing orders the API behind the migration runner).
+      expect(pre.calls.filter((c) => c.sql.includes('to_regclass'))).toHaveLength(2);
+
+      const post = queryable({ hasExtras: true, lookup: rows });
+      await resolver.groupsForPanel(post, ref2);
+      await resolver.groupsForPanel(post, ref2);
+      // Found it once; now it stops asking.
+      expect(post.calls.filter((c) => c.sql.includes('to_regclass'))).toHaveLength(1);
+    });
+
+    it('carries a rule\'s extras into a live run\'s groups, before any membership exists', async () => {
+      const q = queryable({ lookup: [rule({ extra_aggregations: ['sum', 'max'] })] });
+
+      const groups = await new SeriesGroupResolver().groupsForPanel(q, ref, [POD_A, POD_B]);
+
+      expect(groups).toEqual<SeriesGroup[]>([
+        {
+          group: 'api',
+          members: [POD_A, POD_B].sort(),
+          aggregation: 'avg',
+          memberCountName: null,
+          extraAggregations: ['sum', 'max'],
+        },
+      ]);
     });
   });
 
@@ -294,7 +392,7 @@ describe('SeriesGroupResolver', () => {
       const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['api']);
       expect(raw).toEqual([]);
       expect(groups).toEqual([
-        { group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: 'api (pod count)' },
+        { group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: 'api (pod count)', extraAggregations: [] },
       ]);
     });
 
@@ -304,8 +402,52 @@ describe('SeriesGroupResolver', () => {
       const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['api (pod count)']);
       expect(raw).toEqual([]);
       expect(groups).toEqual([
-        { group: 'api (pod count)', members: [POD_B, POD_A].sort(), aggregation: 'count', memberCountName: null },
+        { group: 'api (pod count)', members: [POD_B, POD_A].sort(), aggregation: 'count', memberCountName: null, extraAggregations: [] },
       ]);
+    });
+
+    it('turns an extra aggregation name into its members with that aggregation', async () => {
+      const withExtras = [
+        membership({ metric_name: POD_A, extra_aggregations: ['sum'] }),
+        membership({ metric_name: POD_B, extra_aggregations: ['sum'] }),
+      ];
+      const q = queryable({ lookup: withExtras });
+      const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['api (sum)']);
+      expect(raw).toEqual([]);
+      expect(groups).toEqual([
+        {
+          group: 'api (sum)',
+          members: [POD_B, POD_A].sort(),
+          aggregation: 'sum',
+          memberCountName: null,
+          extraAggregations: [],
+        },
+      ]);
+    });
+
+    // The write side already refuses to emit an extra whose name is taken (see the shared
+    // applySeriesGrouping spec); this is the read-side belt and braces for membership written
+    // before such a series appeared.
+    it('lets a group of that exact name win over the synthesised extra', () => {
+      const real: SeriesGroup = {
+        group: 'api (sum)',
+        members: ['pod-1', 'pod-2'],
+        aggregation: 'max',
+        memberCountName: null,
+        extraAggregations: [],
+      };
+      const withExtra: SeriesGroup = {
+        group: 'api',
+        members: [POD_A, POD_B],
+        aggregation: 'avg',
+        memberCountName: null,
+        extraAggregations: ['sum'],
+      };
+      // Whichever order they arrive in, the real group keeps the name.
+      for (const available of [[withExtra, real], [real, withExtra]]) {
+        const { groups } = expandSeriesNames(available, ['api (sum)']);
+        expect(groups).toEqual([real]);
+      }
     });
 
     it('passes a non-group name straight through, a raw pod name included', async () => {
@@ -374,9 +516,24 @@ describe('SeriesGroupResolver', () => {
   });
 });
 
+describe('mapNamesToGroups — extra aggregations', () => {
+  it('lists an extra series beside the group name, so a picker can offer it', () => {
+    const { names } = mapNamesToGroups([POD_A, POD_B], [
+      {
+        group: 'api',
+        members: [POD_A, POD_B],
+        aggregation: 'avg',
+        memberCountName: 'api (pod count)',
+        extraAggregations: ['sum'],
+      },
+    ]);
+    expect(names).toEqual(['api', 'api (pod count)', 'api (sum)']);
+  });
+});
+
 describe('mapNamesToGroups', () => {
   const groups: SeriesGroup[] = [
-    { group: 'api', members: [POD_A, POD_B], aggregation: 'avg', memberCountName: 'api (pod count)' },
+    { group: 'api', members: [POD_A, POD_B], aggregation: 'avg', memberCountName: 'api (pod count)', extraAggregations: [] },
   ];
 
   it('replaces covered names with the group and its count series, sorted, and keeps the rest', () => {

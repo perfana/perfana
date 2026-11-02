@@ -32,6 +32,9 @@ import {
   applySeriesGrouping,
   compileSeriesGroupingRule,
   evaluateGroupingPresets,
+  extraAggregationSeriesName,
+  normalizeExtraAggregations,
+  SERIES_GROUPING_AGGREGATIONS,
   SERIES_GROUPING_PRESET_ORDER,
   type SeriesGroupingAggregation,
   type SeriesGroupingPreset,
@@ -47,7 +50,7 @@ import {
   type SeriesGroupingRuleResponse,
 } from '@/lib/api/series-grouping';
 import { useSeriesGroupingPreview } from './useSeriesGroupingPreview';
-import { AGGREGATION_LABELS, presetLabel } from './labels';
+import { AGGREGATION_LABELS, extraAggregationLabel, presetLabel } from './labels';
 
 export interface SeriesGroupingDialogContext {
   systemId: string;
@@ -95,6 +98,9 @@ const COPY_SKIP_LABELS: Record<SeriesGroupingCopySkipReason, string> = {
   'same-slot': 'same workload',
 };
 
+/** Ties the extras FormGroup to its visible label for assistive tech. */
+const EXTRAS_LABEL_ID = 'series-grouping-extras-label';
+
 /** Rows the preview table renders before it summarises the rest. */
 const MAX_PREVIEW_ROWS = 50;
 /** Member names listed in a cell before "+N more". */
@@ -109,6 +115,8 @@ interface PreviewRow {
   members: string[];
   baselineMembers: string[];
   inBaseline: boolean;
+  /** The group's extra series names, previewed under the group name. */
+  extraNames: string[];
 }
 
 function MemberList({ names }: { names: string[] }) {
@@ -161,6 +169,9 @@ export default function SeriesGroupingDialog({
     existingRule?.preset === 'custom' ? existingRule.replacement : '',
   );
   const [aggregation, setAggregation] = useState<SeriesGroupingAggregation>(() => existingRule?.aggregation ?? 'avg');
+  const [extraAggregations, setExtraAggregations] = useState<SeriesGroupingAggregation[]>(
+    () => existingRule?.extraAggregations ?? [],
+  );
   const [trackMemberCount, setTrackMemberCount] = useState(() => existingRule?.trackMemberCount ?? true);
   const [appliesTo, setAppliesTo] = useState<number | null>(() =>
     existingRule ? existingRule.panelId : context.panelId,
@@ -180,6 +191,7 @@ export default function SeriesGroupingDialog({
     setPattern(existingRule?.pattern ?? '');
     setReplacement(existingRule?.preset === 'custom' ? existingRule.replacement : '');
     setAggregation(existingRule?.aggregation ?? 'avg');
+    setExtraAggregations(existingRule?.extraAggregations ?? []);
     setTrackMemberCount(existingRule?.trackMemberCount ?? true);
     setAppliesTo(existingRule ? existingRule.panelId : context.panelId);
     setCopyEnabled(false);
@@ -192,12 +204,35 @@ export default function SeriesGroupingDialog({
     detectionDone.current = Boolean(existingRule || initialPreset);
   }, [open, existingRule, initialPreset, context.panelId, context.testRunId]);
 
+  // The one implementation of "which extras does this rule actually emit" — canonical order,
+  // de-duplicated, primary removed. The server applies the same function on write, so a second
+  // copy of the rule here could disagree with what gets saved.
+  const extras = useMemo(
+    () => normalizeExtraAggregations({ aggregation, extraAggregations }),
+    [aggregation, extraAggregations],
+  );
+  /** Extras the saved rule has that this draft no longer does — each one deletes a series. */
+  const removedExtras = useMemo(
+    () => (existingRule?.extraAggregations ?? []).filter((a) => !extras.includes(a)),
+    [existingRule, extras],
+  );
+
+  /**
+   * Changing the primary FORGETS an extra it has taken over, rather than keeping it hidden in
+   * state. Retaining it meant switching avg -> sum -> avg silently re-checked "total" and
+   * re-added a series the user had not asked for on this pass — and on a saved rule that is a
+   * PATCH that adds a series with no warning, from a radio click made for another reason.
+   */
+  const changePrimary = (next: SeriesGroupingAggregation) => {
+    setAggregation(next);
+    setExtraAggregations((prev) => prev.filter((a) => a !== next));
+  };
   const spec: SeriesGroupingRuleSpec = useMemo(
     () =>
       preset === 'custom'
-        ? { preset, pattern, replacement, aggregation, trackMemberCount }
-        : { preset, aggregation, trackMemberCount },
-    [preset, pattern, replacement, aggregation, trackMemberCount],
+        ? { preset, pattern, replacement, aggregation, extraAggregations: extras, trackMemberCount }
+        : { preset, aggregation, extraAggregations: extras, trackMemberCount },
+    [preset, pattern, replacement, aggregation, extras, trackMemberCount],
   );
   const compiled = useMemo(() => compileSeriesGroupingRule(spec), [spec]);
 
@@ -247,7 +282,9 @@ export default function SeriesGroupingDialog({
     let groupsAfter = 0;
     let matchedAfter = 0;
     const collisions = new Set<string>();
-    if (!compiled.ok) return { rows, seriesBefore, matchedBefore, groupsAfter, matchedAfter, collisions: [] };
+    if (!compiled.ok) {
+      return { rows, seriesBefore, matchedBefore, groupsAfter, matchedAfter, extraSeries: 0, collisions: [] };
+    }
     for (const panel of scopedPanels) {
       const baselineRaw = new Set(panel.baselineNames);
       seriesBefore += panel.currentNames.length;
@@ -259,7 +296,15 @@ export default function SeriesGroupingDialog({
         const inBaseline = baseline.groups.has(group);
         groupsAfter += 1;
         if (inBaseline) matchedAfter += 1;
-        rows.push({ panelId: panel.panelId, group, members, baselineMembers, inBaseline });
+        rows.push({
+          panelId: panel.panelId,
+          group,
+          members,
+          baselineMembers,
+          inBaseline,
+          // Counted as series, never as groups: `groupsAfter` is about baseline matching.
+          extraNames: (current.extraAggregations.get(group) ?? []).map((a) => extraAggregationSeriesName(group, a)),
+        });
         // An old baseline run with an ungrouped series of exactly this name pools it into the group.
         if (members.some((m) => m !== group) && baselineRaw.has(group)) collisions.add(group);
       }
@@ -270,6 +315,9 @@ export default function SeriesGroupingDialog({
       matchedBefore,
       groupsAfter,
       matchedAfter,
+      // Series, not groups: a dashboard-wide rule with two extras multiplies the picker's list,
+      // and the count is what tells the user before they save.
+      extraSeries: rows.reduce((n, r) => n + r.extraNames.length, 0),
       collisions: Array.from(collisions).sort(),
     };
   }, [compiled.ok, scopedPanels, spec]);
@@ -295,8 +343,8 @@ export default function SeriesGroupingDialog({
     setSaveError(null);
     const ruleFields =
       preset === 'custom'
-        ? { preset, pattern, replacement, aggregation, trackMemberCount }
-        : { preset, aggregation, trackMemberCount };
+        ? { preset, pattern, replacement, aggregation, extraAggregations: extras, trackMemberCount }
+        : { preset, aggregation, extraAggregations: extras, trackMemberCount };
     let rule: SeriesGroupingRuleResponse;
     const parts: string[] = [];
     try {
@@ -423,13 +471,43 @@ export default function SeriesGroupingDialog({
           <RadioGroup
             row
             value={aggregation}
-            onChange={(e) => setAggregation(e.target.value as SeriesGroupingAggregation)}
+            onChange={(e) => changePrimary(e.target.value as SeriesGroupingAggregation)}
             name="series-grouping-aggregation"
           >
-            {(Object.keys(AGGREGATION_LABELS) as SeriesGroupingAggregation[]).map((a) => (
+            {SERIES_GROUPING_AGGREGATIONS.map((a) => (
               <FormControlLabel key={a} value={a} control={<Radio size="small" />} label={AGGREGATION_LABELS[a]} />
             ))}
           </RadioGroup>
+          <FormLabel id={EXTRAS_LABEL_ID} sx={{ display: 'block', mt: 1 }}>
+            Also add
+          </FormLabel>
+          {/* A real FormLabel + role="group", not aria-label on a FormGroup: MUI renders
+              FormGroup as a plain <div> with no role, where aria-label is ignored by assistive
+              tech — and a checkbox reading `total as "… (sum)"` means nothing without its group. */}
+          <FormGroup row role="group" aria-labelledby={EXTRAS_LABEL_ID}>
+            {SERIES_GROUPING_AGGREGATIONS.filter((a) => a !== aggregation).map((a) => (
+              <FormControlLabel
+                key={a}
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={extras.includes(a)}
+                    onChange={(e) =>
+                      setExtraAggregations((prev) =>
+                        e.target.checked ? [...prev, a] : prev.filter((x) => x !== a),
+                      )
+                    }
+                  />
+                }
+                label={`${extraAggregationLabel(a)} as "… (${a})"`}
+              />
+            ))}
+          </FormGroup>
+          <Typography variant="caption" color="text.secondary" display="block">
+            Each one adds its own series per group, named &quot;api (sum)&quot;. The aggregation
+            selected under Combine keeps the plain group name, so existing baselines, SLOs and
+            comparison settings keep matching it.
+          </Typography>
           <FormControlLabel
             control={
               <Checkbox
@@ -440,6 +518,24 @@ export default function SeriesGroupingDialog({
             }
             label="Also track the number of pods"
           />
+          {editing && aggregation !== existingRule.aggregation && (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              Each group keeps its plain name, but the numbers under it change from{' '}
+              <strong>{AGGREGATION_LABELS[existingRule.aggregation]}</strong> to{' '}
+              <strong>{AGGREGATION_LABELS[aggregation]}</strong>. Baselines, SLOs and comparison
+              settings on that name go on matching — they will just be judging a different
+              measurement from the history they were built on.
+            </Alert>
+          )}
+          {editing && removedExtras.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              Removing {removedExtras.map((a) => `"… (${a})"`).join(' and ')} deletes{' '}
+              {removedExtras.length === 1 ? 'that series' : 'those series'} on the next
+              recalculation. Anomaly detection drops its results by itself, but an SLO, a saved
+              graph preset or a report section pointing at the name will stop matching — an SLO
+              then records no verdict rather than failing.
+            </Alert>
+          )}
         </FormControl>
 
         <FormControl component="fieldset" sx={{ mb: 2, display: 'block' }}>
@@ -547,6 +643,18 @@ export default function SeriesGroupingDialog({
                         <Typography variant="body2" sx={{ fontWeight: 600, wordBreak: 'break-all' }}>
                           {row.group}
                         </Typography>
+                        {row.extraNames.map((name) => (
+                          <Typography
+                            key={name}
+                            variant="caption"
+                            color="text.secondary"
+                            display="block"
+                            sx={{ wordBreak: 'break-all' }}
+                            data-testid="series-grouping-extra-series"
+                          >
+                            + {name}
+                          </Typography>
+                        ))}
                         {multiPanel && (
                           <Typography variant="caption" color="text.secondary" display="block">
                             {panelTitle(row.panelId)}
@@ -571,6 +679,8 @@ export default function SeriesGroupingDialog({
               <Typography variant="body2" sx={{ mt: 1 }} data-testid="series-grouping-before-after">
                 Before: {analysis.matchedBefore} of {analysis.seriesBefore} series match the baseline · After:{' '}
                 {analysis.matchedAfter} of {analysis.groupsAfter} group{analysis.groupsAfter === 1 ? '' : 's'} match
+                {analysis.extraSeries > 0 &&
+                  ` · ${analysis.extraSeries} extra series added`}
               </Typography>
               {baselineCount === 0 && (
                 <Typography variant="caption" color="text.secondary" display="block">

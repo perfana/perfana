@@ -250,6 +250,64 @@ describe('SeriesGroupingInsightsService.status', () => {
     });
   });
 
+  /**
+   * Value:
+   *   protects — `extra_aggregations` reaches the rule spec the staleness verdict is hashed from,
+   *     and is NAMED in the statement only once the probe has seen the column (migration 1820).
+   *   fails_when — the `extraAggregationsKnownPresent ? 'r.extra_aggregations' : 'NULL::text[]'`
+   *     conditional becomes unconditional, which on a pre-1820 database is 42703 inside the
+   *     request's RLS transaction and aborts it (25P02); or `loadEnabledRules` stops mapping the
+   *     column into the spec, so a rule that gained an extra aggregation hashes as if it had not
+   *     and every run grouped before the change reads as up to date — the stale notice, the
+   *     "Save and recalculate" prompt and the apply button all go quiet.
+   *   why_new — the helper's default `sg:tables-present` route returns `{ present: true }` with no
+   *     `has_extras`, so every existing insights spec exercises the pre-1820 arm only and nothing
+   *     drives the column into `seriesGroupingRuleHash` at all.
+   *   seam — the emitted `sg:rules` SQL, and the `stale` verdict against a known rule hash.
+   */
+  describe('when migration 1820 has run', () => {
+    const withExtras = [[/sg:tables-present/, () => [{ present: true, has_extras: true }]]] as Route[];
+    const hashWithSum = seriesGroupingRuleHash({ ...SPEC, extraAggregations: ['sum'] });
+
+    it('hashes a rule\'s extra aggregations, and names the column only when it exists', async () => {
+      // The fake honours the projection, so the pre-1820 arm reads what Postgres would hand it
+      // for `NULL::text[] AS extra_aggregations` — not the stored value the statement never asked
+      // for. Without that, both arms see the extras and the conditional is untested.
+      const scenario = (extra: Route[], ruleHash: string) =>
+        makeService([
+          [
+            /sg:rules/,
+            (_params, sql) => [
+              rule('r1', 1, { extra_aggregations: /NULL::text\[\] AS extra_aggregations/.test(sql) ? null : ['sum'] }),
+            ],
+          ],
+          [/sg:membership/, () => [membership(1, 'r1', ruleHash)]],
+          [/sg:stat-panels/, () => [statPanel(1)]],
+          [/sg:misaligned/, () => []],
+          ...extra,
+        ]);
+
+      // Post-1820: the extras are read, so membership stamped with the pre-extras hash is stale.
+      const post = scenario(withExtras, HASH);
+      expect((await post.service.status('run-001', [ORG_A])).stale).toEqual([
+        { applicationDashboardId: DASHBOARD.id, panelId: 1, reason: 'rule-changed' },
+      ]);
+      expect(post.db.calls.find((c) => /sg:rules/.test(c.sql))!.sql).toMatch(/r\.extra_aggregations/);
+
+      // ...and membership computed WITH them is up to date.
+      const recalculated = scenario(withExtras, hashWithSum);
+      expect(await recalculated.service.status('run-001', [ORG_A])).toEqual({ stale: [], misaligned: [] });
+
+      // Pre-1820: the column is never named, and every rule reads as having no extras — which
+      // is what it has, so the pre-extras hash is the fresh one.
+      const pre = scenario([], HASH);
+      expect(await pre.service.status('run-001', [ORG_A])).toEqual({ stale: [], misaligned: [] });
+      const preSql = pre.db.calls.find((c) => /sg:rules/.test(c.sql))!.sql;
+      expect(preSql).not.toMatch(/r\.extra_aggregations/);
+      expect(preSql).toMatch(/NULL::text\[\] AS extra_aggregations/);
+    });
+  });
+
   describe('tenancy', () => {
     it('answers 404 for a run outside the caller\'s organizations', async () => {
       const { service, db } = makeService(routes({ rules: [rule('r1', 1)] }));

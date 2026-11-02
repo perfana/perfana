@@ -74,6 +74,7 @@ const rule = (overrides: Partial<SeriesGroupingRuleResponse> = {}): SeriesGroupi
   pattern: null,
   replacement: '',
   aggregation: 'avg',
+  extraAggregations: [],
   trackMemberCount: true,
   enabled: true,
   origin: 'manual',
@@ -231,6 +232,7 @@ describe('SeriesGroupingDialog', () => {
       panelId: 4,
       preset: 'k8s-pod',
       aggregation: 'avg',
+      extraAggregations: [],
       trackMemberCount: true,
       origin: 'suggestion',
       copyTo: [
@@ -243,6 +245,110 @@ describe('SeriesGroupingDialog', () => {
     expect(showToast).toHaveBeenCalledWith(summary);
     // No run in hand: nothing to recalculate.
     expect(callsTo('/series-grouping-rules/apply', 'POST')).toHaveLength(0);
+  });
+
+  describe('more than one aggregation', () => {
+    it('offers only the aggregations that are not primary, and follows a change of primary', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      const user = userEvent.setup();
+      renderDialog();
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      const alsoAdd = screen.getByLabelText('Also add');
+      expect(within(alsoAdd).getAllByRole('checkbox')).toHaveLength(2);
+      expect(within(alsoAdd).getByLabelText(/total as "… \(sum\)"/)).toBeInTheDocument();
+      expect(within(alsoAdd).queryByLabelText(/average per pod as/)).not.toBeInTheDocument();
+
+      // Making `sum` primary moves it out of the list and puts `avg` into it.
+      await user.click(screen.getByLabelText('Total'));
+      expect(within(screen.getByLabelText('Also add')).getByLabelText(/average per pod as/)).toBeInTheDocument();
+      expect(within(screen.getByLabelText('Also add')).queryByLabelText(/total as/)).not.toBeInTheDocument();
+    });
+
+    it('previews the extra series per group and counts them as series, not groups', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      const user = userEvent.setup();
+      renderDialog();
+      await waitFor(() => expect(screen.getAllByTestId('series-grouping-preview-row')).toHaveLength(2));
+
+      await user.click(within(screen.getByLabelText('Also add')).getByLabelText(/total as/));
+
+      const extras = screen.getAllByTestId('series-grouping-extra-series').map((n) => n.textContent);
+      expect(extras).toEqual(['+ api (sum)', '+ worker (sum)']);
+      // Still 2 GROUPS: the count is about baseline matching, not about series.
+      expect(screen.getByTestId('series-grouping-before-after')).toHaveTextContent(
+        'After: 2 of 2 groups match · 2 extra series added',
+      );
+    });
+
+    it('sends the extras, in canonical order, without the primary', async () => {
+      routeFetch({
+        [`POST ${PREVIEW_URL}`]: preview(),
+        'POST /series-grouping-rules': { rule: rule(), copies: { created: [], skipped: [] } },
+      });
+      const user = userEvent.setup();
+      const { onSaved } = renderDialog();
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      const alsoAdd = () => screen.getByLabelText('Also add');
+      await user.click(within(alsoAdd()).getByLabelText(/highest pod as/));
+      await user.click(within(alsoAdd()).getByLabelText(/total as/));
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      expect(findBodyFor('/series-grouping-rules', 'POST')?.extraAggregations).toEqual(['sum', 'max']);
+    });
+
+    // Changing the primary keeps the NAME and changes the measurement under it — the opposite of
+    // a rename, and the thing the warning has to say. Ticking an extra changes nothing stored.
+    it('warns when an existing rule changes its primary aggregation, and not when an extra changes', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      const user = userEvent.setup();
+      renderDialog({ existingRule: rule() });
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      await user.click(within(screen.getByLabelText('Also add')).getByLabelText(/total as/));
+      expect(screen.queryByText(/judging a different measurement/)).not.toBeInTheDocument();
+
+      await user.click(screen.getByLabelText('Highest pod'));
+      const warning = screen.getByText(/judging a different measurement/);
+      expect(warning).toBeInTheDocument();
+      // It must NOT claim a rename: the name is exactly what stays, which is the hazard.
+      expect(warning.textContent).toMatch(/keeps its plain name/);
+      expect(warning.textContent).not.toMatch(/rename/i);
+    });
+
+    // deleteOrphanedResults covers ds_adapt_results and nothing else, so the dialog may not call
+    // removal safe: an SLO, a graph preset or a report section on the derived name stops matching.
+    it('warns when a draft drops an extra the saved rule has', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      const user = userEvent.setup();
+      renderDialog({ existingRule: rule({ extraAggregations: ['sum'] }) });
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      expect(screen.queryByText(/deletes that series/)).not.toBeInTheDocument();
+      await user.click(within(screen.getByLabelText('Also add')).getByLabelText(/total as/));
+      expect(screen.getByText(/deletes that series/)).toBeInTheDocument();
+    });
+
+    // Retaining a hidden pick meant a radio click made for another reason silently re-added a
+    // series — and on a saved rule that is a PATCH with no warning.
+    it('forgets an extra the primary has taken over, there and back', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      const user = userEvent.setup();
+      renderDialog();
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      await user.click(within(screen.getByLabelText('Also add')).getByLabelText(/total as/));
+      expect(screen.getByTestId('series-grouping-before-after')).toHaveTextContent('2 extra series added');
+
+      await user.click(screen.getByLabelText('Total'));            // sum becomes primary
+      await user.click(screen.getByLabelText('Average per pod'));  // and back again
+      // The checkbox comes back UNCHECKED and the count does not jump.
+      const box = within(screen.getByLabelText('Also add')).getByLabelText(/total as/) as HTMLInputElement;
+      expect(box.checked).toBe(false);
+      expect(screen.getByTestId('series-grouping-before-after')).not.toHaveTextContent('extra series added');
+    });
   });
 
   it('applies to the whole dashboard when "All panels" is chosen', async () => {
@@ -340,6 +446,7 @@ describe('SeriesGroupingDialog', () => {
     expect(findBodyFor('/series-grouping-rules/rule-1', 'PATCH')).toEqual({
       preset: 'k8s-pod',
       aggregation: 'sum',
+      extraAggregations: [],
       trackMemberCount: true,
     });
   });

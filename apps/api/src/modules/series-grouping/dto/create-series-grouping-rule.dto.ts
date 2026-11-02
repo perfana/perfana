@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
@@ -13,6 +14,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SERIES_GROUPING_AGGREGATIONS } from '@perfana/shared/utils';
 import type { SeriesGroupingAggregation, SeriesGroupingPreset } from '@perfana/shared/utils';
 
 export const SERIES_GROUPING_PRESET_VALUES: readonly SeriesGroupingPreset[] = [
@@ -22,7 +24,13 @@ export const SERIES_GROUPING_PRESET_VALUES: readonly SeriesGroupingPreset[] = [
   'trailing-id',
   'custom',
 ];
-export const SERIES_GROUPING_AGGREGATION_VALUES: readonly SeriesGroupingAggregation[] = ['avg', 'sum', 'max'];
+/**
+ * Re-exported, never re-declared. A second literal list is how the DTO's `@IsIn`, the dialog's
+ * controls and migration 1820's CHECK drift apart: both lists are typed as a SUBSET of the
+ * union, so adding a fourth aggregation type-checks everywhere while one layer silently rejects
+ * it (the DTO with a 400, or the CHECK with a 23514 the service does not translate).
+ */
+export const SERIES_GROUPING_AGGREGATION_VALUES = SERIES_GROUPING_AGGREGATIONS;
 
 /** Another workload of the SAME system to create the rule for as well (design Decision 2). */
 export class SeriesGroupingCopyTargetDto {
@@ -88,6 +96,20 @@ export class CreateSeriesGroupingRuleDto {
   @ApiProperty({ enum: SERIES_GROUPING_AGGREGATION_VALUES, description: 'How members combine per timestamp' })
   @IsIn(SERIES_GROUPING_AGGREGATION_VALUES as string[])
   aggregation!: SeriesGroupingAggregation;
+
+  @ApiPropertyOptional({
+    enum: SERIES_GROUPING_AGGREGATION_VALUES,
+    isArray: true,
+    description:
+      'Aggregations to emit BESIDE `aggregation`, each as its own "<group> (sum)" series. ' +
+      'The primary aggregation keeps the bare group name, so adding one renames nothing. ' +
+      'Must not contain `aggregation` (ck_series_grouping_rules_extra_aggregations).',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(SERIES_GROUPING_AGGREGATION_VALUES as string[], { each: true })
+  extraAggregations?: SeriesGroupingAggregation[];
 
   @ApiProperty({ description: 'Also write a "<group> (pod count)" series per group' })
   @IsBoolean()

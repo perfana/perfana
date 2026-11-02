@@ -24,6 +24,14 @@ export interface SeriesGroupingRuleSpec {
   replacement?: string | null;
   aggregation: SeriesGroupingAggregation;
   trackMemberCount: boolean;
+  /**
+   * Aggregations emitted BESIDE `aggregation`, each as its own series named
+   * `<group> (sum)`. The primary one keeps the bare group name: `ds_metric_statistics`,
+   * `ds_adapt_results`, `benchmarks` and `ds_compare_config` all key on `metric_name` and
+   * nothing migrates a stored name, so suffixing every series would make every baseline, SLO
+   * and compare config on the panel stop matching. Absent or empty means today's behaviour.
+   */
+  extraAggregations?: readonly SeriesGroupingAggregation[];
 }
 
 /** Kubernetes' generated-name alphabet (`k8s.io/apimachinery/pkg/util/rand`): no vowels, no 0/1/3. */
@@ -71,6 +79,30 @@ export const SERIES_GROUPING_PRESET_ORDER: readonly SeriesGroupingBuiltinPreset[
 export const MEMBER_COUNT_SUFFIX = ' (pod count)';
 /** `ds_metric_statistics.metric_name` and `ds_metric_series_groups.group_name` are varchar(255). */
 export const SERIES_NAME_MAX_LENGTH = 255;
+
+/** Canonical order, for the CHECK constraint, the DTO and the hash. */
+export const SERIES_GROUPING_AGGREGATIONS: readonly SeriesGroupingAggregation[] = ['avg', 'sum', 'max'];
+
+/**
+ * The series name an extra aggregation emits. The same shape `memberCountSeriesName` already
+ * uses, so the convention is not new — and the worker's grouped statement rebuilds it as
+ * `group_name || ' (' || agg || ')'`, so this concatenation and that one must stay identical.
+ */
+export function extraAggregationSeriesName(group: string, aggregation: SeriesGroupingAggregation): string {
+  return `${group} (${aggregation})`;
+}
+
+/**
+ * The extras actually worth emitting: known values only, de-duplicated, in canonical order,
+ * with the primary aggregation removed (it is already emitted under the bare group name).
+ */
+export function normalizeExtraAggregations(rule: {
+  aggregation: SeriesGroupingAggregation;
+  extraAggregations?: readonly SeriesGroupingAggregation[] | null;
+}): SeriesGroupingAggregation[] {
+  const requested = new Set(rule.extraAggregations ?? []);
+  return SERIES_GROUPING_AGGREGATIONS.filter((a) => a !== rule.aggregation && requested.has(a));
+}
 
 /** Suggestion thresholds (design Decision 5): shipped as defaults, tuned from the suggestion logs. */
 export const SUGGEST_MAX_MATCHED_BEFORE = 0.5;
@@ -122,6 +154,12 @@ export interface SeriesGroupingResult {
   renamedCount: number;
   /** Group -> member-count series name; only when tracked and the group has a renamed member. */
   memberCountNames: Map<string, string>;
+  /**
+   * Group -> the extra aggregations whose derived series name is free, in canonical order.
+   * Empty for a group nothing renamed: `SUM` of one member equals its `AVG`, so an extra there
+   * would be a second copy of the same series. Same rule the member count follows.
+   */
+  extraAggregations: Map<string, SeriesGroupingAggregation[]>;
 }
 
 /** Code-unit order: locale-independent, so the worker, the API and every browser agree. */
@@ -182,9 +220,12 @@ export function applySeriesGrouping(rule: SeriesGroupingRuleSpec, names: readonl
       .map((g) => [g, members.get(g)!]),
   );
 
+  // Every name already spoken for. A derived series must never collide with one of them: the
+  // statistics insert would then carry two rows for one metric_name.
+  const taken = new Set<string>([...unique, ...groups.keys()]);
+
   const memberCountNames = new Map<string, string>();
   if (rule.trackMemberCount) {
-    const taken = new Set<string>([...unique, ...groups.keys()]);
     for (const group of groups.keys()) {
       if (!renamedGroups.has(group)) continue;
       const name = memberCountSeriesName(group);
@@ -195,7 +236,26 @@ export function applySeriesGrouping(rule: SeriesGroupingRuleSpec, names: readonl
     }
   }
 
-  return { mapping, groups, renamedCount, memberCountNames };
+  const extraAggregations = new Map<string, SeriesGroupingAggregation[]>();
+  const extras = normalizeExtraAggregations(rule);
+  if (extras.length > 0) {
+    for (const group of groups.keys()) {
+      if (!renamedGroups.has(group)) continue;
+      const kept: SeriesGroupingAggregation[] = [];
+      for (const aggregation of extras) {
+        const name = extraAggregationSeriesName(group, aggregation);
+        // Dropped rather than truncated: the worker rebuilds this name by concatenation in SQL,
+        // where a truncated one would not match. A group within 6 characters of the column
+        // limit is pathological; losing its extras beats emitting a name that disagrees.
+        if (name.length > SERIES_NAME_MAX_LENGTH || taken.has(name)) continue;
+        taken.add(name);
+        kept.push(aggregation);
+      }
+      if (kept.length > 0) extraAggregations.set(group, kept);
+    }
+  }
+
+  return { mapping, groups, renamedCount, memberCountNames, extraAggregations };
 }
 
 /** FNV-1a 32-bit, as 8 hex characters. No crypto dependency, so the web bundle can import it. */
@@ -210,11 +270,19 @@ function fnv1a32(input: string): string {
 
 /** Identifies the grouping a run was computed with; a different hash means the run is stale. */
 export function seriesGroupingRuleHash(rule: SeriesGroupingRuleSpec): string {
-  return fnv1a32(
-    [rule.preset, rule.pattern ?? '', rule.replacement ?? '', rule.aggregation, rule.trackMemberCount ? '1' : '0'].join(
-      '\u0000',
-    ),
-  );
+  const parts = [
+    rule.preset,
+    rule.pattern ?? '',
+    rule.replacement ?? '',
+    rule.aggregation,
+    rule.trackMemberCount ? '1' : '0',
+  ];
+  // Appended ONLY when there are extras, so every rule that predates them keeps the hash it
+  // has: the insights page reads a changed hash as "this run is stale" and would otherwise
+  // light up every grouped run in the deployment on deploy.
+  const extras = normalizeExtraAggregations(rule);
+  if (extras.length > 0) parts.push(extras.join(','));
+  return fnv1a32(parts.join('\u0000'));
 }
 
 export interface PresetEvaluation {

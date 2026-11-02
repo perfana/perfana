@@ -29,6 +29,7 @@ export class SeriesGroupingRule {
     'pattern',
     'replacement',
     'aggregation',
+    'extraAggregations',
     'trackMemberCount',
     'enabled',
     'origin',
@@ -65,6 +66,19 @@ export class SeriesGroupingRule {
 
   @Column({ name: 'aggregation', type: 'varchar', length: 8, default: 'avg' })
   aggregation!: SeriesGroupingAggregation;
+
+  /**
+   * Aggregations emitted beside `aggregation`, each as its own `<group> (sum)` series. The
+   * primary one keeps the bare group name, so ticking one of these is purely additive: nothing
+   * a baseline, SLO or compare config already stores is renamed. Added by migration 1820.
+   *
+   * NULLABLE on purpose, and every reader must keep coalescing: this table is a `core` resource
+   * in `SUT_RESOURCES`, and the SUT importer's `json_populate_recordset` yields NULL rather than
+   * the DEFAULT for a key an older bundle lacks — with NOT NULL that is a 23502 that kills the
+   * whole import (migration 1820's docblock, and the 1808 precedent).
+   */
+  @Column({ name: 'extra_aggregations', type: 'varchar', length: 8, array: true, nullable: true, default: () => "'{}'" })
+  extraAggregations!: SeriesGroupingAggregation[] | null;
 
   @Column({ name: 'track_member_count', type: 'boolean', default: false })
   trackMemberCount!: boolean;

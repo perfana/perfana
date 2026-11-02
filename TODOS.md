@@ -24,6 +24,114 @@ Postgres-backed SUT export/import round trip; the grouped statistics on 1.87 M c
 with real Toolkit functions (which found the merge-join plan, fixed in v0.2.97.43); `lttb()` over
 a grouped series; and every rules route through a running API. What is still owed:
 
+### Measure the extras arm of the grouped statistics (P2)
+
+**Origin:** v0.2.97.44 (`extra_aggregations`, migration 1820). Spec:
+`docs/design/2026-11-02-series-grouping-multi-aggregation.md`.
+
+A rule can now emit `<group> (sum)` / `<group> (max)` beside its primary aggregation. The arm is
+**opt-in in the SQL** — `buildGroupedStatisticsSQL(runCount, hasExtras)` adds the third `points`
+arm, the three `AVG`/`SUM`/`MAX` aggregate states and the ninth bound array only when some rule
+asked for one — so a rule without extras sends the v0.2.97.43 statement byte for byte and nothing
+below applies to it. What is unmeasured is the case with extras: up to 3x the rows entering
+`buildStatisticsCtes`, each carrying a `percentile_agg` sketch, which is what
+`AGGREGATION_WORK_MEM` (128MB) is sized for. The case to measure is a dashboard-wide rule with
+both extras on a 20 M-row run — fold it into "Re-measure the grouped statistics at production
+scale" below. What IS proven: both variants and the membership insert `PREPARE` against the real
+schema, and the arm computes a hand-checked avg/sum/max from one `GROUP BY` pass.
+
+**The quality tail from the v0.2.97.44 pre-landing review, filed by decision.** The review's
+correctness findings were fixed on the branch; these are real but are improvements rather than
+defects, and each reads better as its own change:
+
+- **`buildGroupedStatisticsSQL(runCount, hasExtras)` still takes the answer as a boolean while
+  `groupedStatementParams` re-derives it from the rows.** The `= false` default is gone, so a
+  caller must now state it, but passing the rows to both (or returning `{ sql, params }` from one
+  function) would make a bind mismatch unrepresentable.
+- **The extras parse runs once per `grouped_points` row.** `CROSS JOIN LATERAL
+  unnest(string_to_array(...))` re-parses an identical string for every point of a group — the
+  plan shows one `Function Scan` loop per row — and `MAX(s.extra_aggregations)` rides the
+  per-member Sort for every grouped panel whenever any rule has extras (+8 bytes/row, GroupAggregate
+  width +17%, ~+3.5 MB on the 432k-row case). Hoisting both into a `group_extras` CTE keyed on the
+  group (rows = groups x extras, i.e. tens) fixes them together.
+- **The derived series' name is composed twice, in JS and in SQL, and nothing couples the copies.**
+  `extraAggregationSeriesName` and `group_name || ' (' || x.agg || ')'`; the two guards are
+  independent assertions against the same hardcoded literal in different packages, so changing the
+  JS suffix and its own spec leaves the worker suite green and the series silently absent. A
+  cross-package test that builds the expected SQL fragment from the helper would close it.
+- **The schema-presence probe is implemented twice** (`SeriesGroupResolver.ensureTables` and
+  `SeriesGroupingInsightsService.groupingTablesPresent`), each with its own latch pair and the same
+  ~10-line comment. One shared probe returning `{ tablesPresent, hasExtras }` would do.
+- **No `N pods` badge on a derived series.** `toSeriesGroupSummaries` drops `extraAggregations` and
+  `mapNamesToGroups().seriesGroups` carries only bare groups, so `api (sum)` arrives in
+  `metric_names` with nothing describing it. Mirror `member_count_name` with a derived-names field
+  on `SeriesGroupSummary`. The Swagger description for `/ds-metrics/distinct-series` still
+  enumerates the old `series_groups` fields and should name the derived series at the same time.
+- **The dialog's structure still carries the primary/extra asymmetry in prose rather than in
+  layout.** Splitting the one "Combine" fieldset into "Combine as" (the radios, with a persistent
+  note about the plain group name) and "Also emit" (the extras plus the pod-count checkbox as a
+  third peer) would make it structural; the count line conflates units ("2 of 2 groups match · 2
+  extra series added"), the preview Group cell stacks up to five lines in three semantic roles with
+  one style, and `<code>` is used on prose labels against the file's own convention.
+- **`compileSeriesGroupingRule` does not validate `extraAggregations`** although it is the worker's
+  documented guard for a rule row the API did not write. Harmless today because
+  `normalizeExtraAggregations` whitelists, but the stated invariant ("skipped rather than applied")
+  is not what happens for that field.
+- **SUT import maps only 23505.** A hand-crafted bundle whose rule carries its own primary in
+  `extra_aggregations` now raises 23514 and surfaces as an unexplained whole-bundle failure.
+  `ds_metric_series_groups` also has no CHECK of its own, though the resolver prefers it.
+- **`down()` is not a data no-op.** Dropping the column erases the record that `(sum)` rows are
+  derived, so after a rollback they are statistics rows with no membership to resolve. A
+  statistics recalculation is the recovery; the migration header should say so.
+- **`SeriesGroupingRulesSection.tsx` has no spec file at all.**
+
+Residues from the same version:
+
+- **A stale derived comparison setting can outlive the series it describes, and shadow a real one
+  of the same name.** `derivedSeriesConfigRows` writes a metric-level `ds_compare_config` row per
+  derived name with `ON CONFLICT DO NOTHING`, and nothing deletes it when an extra is unticked, a
+  rule is edited or a rule is deleted — so the row accumulates one per (edit x group x extra) and
+  survives the feature being switched off. Inert in itself (a setting for a series that does not
+  exist matches nothing, and the anomaly UI joins configs to results). The reachable failure needs
+  a later name collision: if a **real** series named `api (sum)` appears on that panel in a later
+  run, `applySeriesGrouping`'s `taken` guard drops the derived one but the stored metric-level row
+  remains, and metric beats panel in config resolution — so that real series is permanently
+  unclassified and ADAPT can never flag it. Same class as the `All aggregated` collisions in root
+  `CLAUDE.md` #20, and narrower: it needs the real series to appear *after* the derived one.
+  Recovery is to delete the row. The fix is an orphan sweep keyed on the membership table, in the
+  `deleteOrphanedResults` mould — the `source` marker the golden-path fix added is what would make
+  it safe, since a user's own edit rewrites `source` and would be preserved.
+- **The derived row shadows the panel's whole `thresholds` object, not just its classification.**
+  Config resolution picks a whole object rather than merging keys, which is why the row has to be
+  metric-level — but `DERIVED_SERIES_CONFIG_DATA` therefore also replaces the panel's `aggregation`,
+  `percentageThreshold`, `iqrThreshold` and `defaultValueIfControlGroupMissing` with the shared
+  defaults — **and `minSampleCount`, which it does not even set**, so a panel-level
+  `thresholds.minSampleCount` is discarded for every derived series and the floor falls back to
+  `ADAPT_MIN_SAMPLE_COUNT`. (Not reachable today: the panels that set it to 1 are the perf-test
+  scenario panels, and `seriesGroupingRulesSql` excludes those dashboards outright.)
+  So on a panel configured for `median` at 50%, `api (sum)` is judged on `mean` at 15%.
+  It cannot change a verdict (`higherIsBetter: null` keeps every derived series out of
+  `regression_count`), but `thresholds.aggregation` decides which statistic is *displayed* as the
+  compared value, so the derived row can show a different number from its siblings with nothing
+  saying why. Fixing it means reading the resolved panel config at write time and copying it, which
+  then goes stale if the panel's config changes later — hence not done in v0.2.97.44.
+- **The next migration needing a bounded lock wait should copy 1819/1820's block, not 1813's.**
+  Both now capture `current_setting('lock_timeout')` on entry and restore *that* on both exit
+  paths. `'0'` is wrong (it means unlimited, so it strips a deployment's configured value from the
+  rest of the batch) and so is `DEFAULT` (the conf value, which clobbers a `SET LOCAL` an earlier
+  migration set for itself). 1819 was given its restore in v0.2.97.44 — it shipped in v0.2.97.43
+  without one, and because 1820 captures whatever it finds on entry, a combined install had 1820
+  capture 1819's leaked `'3s'` and faithfully put it back, so the leak survived the fix meant to
+  remove it.
+- **`extraAggregations` is typed non-nullable in two places the database can return NULL for.**
+  `apps/web/lib/api/series-grouping.ts` and `series-grouping-rule-response.dto.ts` both declare
+  `SeriesGroupingAggregation[]`, while the column is nullable (deliberately — see the SUT-import
+  reason in migration 1820). Every actual reader coalesces, so this is not a live bug; it is how
+  the next reader learns it can skip the `?? []`.
+- **No nudge pairing `sum` with the pod count.** The v1 design recommends the pairing in prose and
+  nothing enforces it; decided against auto-ticking in v0.2.97.44 (a checkbox that moves by itself).
+  One line if the rule rows show people ticking `sum` without it.
+
 ### Walk the series grouping UI end to end in a browser (P2)
 
 **Origin:** v0.2.97.43, plan Task 12 for PR C. The web surfaces are covered by component tests and

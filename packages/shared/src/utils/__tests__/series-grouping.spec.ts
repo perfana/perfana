@@ -2,7 +2,9 @@ import {
   applySeriesGrouping,
   compileSeriesGroupingRule,
   evaluateGroupingPresets,
+  extraAggregationSeriesName,
   MEMBER_COUNT_SUFFIX,
+  normalizeExtraAggregations,
   SERIES_GROUPING_PRESETS,
   SERIES_NAME_MAX_LENGTH,
   seriesGroupingRuleHash,
@@ -177,6 +179,40 @@ describe('applySeriesGrouping', () => {
     expect(result.memberCountNames.has('api')).toBe(false);
   });
 
+  it('emits an extra aggregation per renamed group, in canonical order', () => {
+    const result = applySeriesGrouping(rule({ aggregation: 'avg', extraAggregations: ['max', 'sum'] }), [
+      'api-7d9f8c6b5-x2k4p',
+      'api-7d9f8c6b5-z9w2t',
+      'heap-used',
+    ]);
+    expect(result.extraAggregations.get('api')).toEqual(['sum', 'max']);
+    // A group nothing renamed is a group of one, where SUM equals AVG: a second copy, not a series.
+    expect(result.extraAggregations.has('heap-used')).toBe(false);
+  });
+
+  it('never emits the primary aggregation as an extra', () => {
+    const result = applySeriesGrouping(rule({ aggregation: 'sum', extraAggregations: ['sum', 'avg'] }), [
+      'api-7d9f8c6b5-x2k4p',
+    ]);
+    expect(result.extraAggregations.get('api')).toEqual(['avg']);
+  });
+
+  it('drops an extra whose name collides with a real series, or would overflow the column', () => {
+    const collided = applySeriesGrouping(rule({ extraAggregations: ['sum'] }), [
+      'api-7d9f8c6b5-x2k4p',
+      'api (sum)',
+    ]);
+    expect(collided.extraAggregations.has('api')).toBe(false);
+
+    // Dropped rather than truncated: the worker rebuilds this name by concatenation in SQL.
+    const long = `${'y'.repeat(SERIES_NAME_MAX_LENGTH)}-7d9f8c6b5-x2k4p`;
+    expect(applySeriesGrouping(rule({ extraAggregations: ['sum'] }), [long]).extraAggregations.size).toBe(0);
+  });
+
+  it('emits nothing extra for a rule that asks for none', () => {
+    expect(applySeriesGrouping(rule(), ['api-7d9f8c6b5-x2k4p']).extraAggregations.size).toBe(0);
+  });
+
   it('is deterministic and does not depend on input order', () => {
     const names = ['b-7d9f8c6b5-x2k4p', 'a-7d9f8c6b5-x2k4p', 'a-7d9f8c6b5-z9w2t'];
     const one = applySeriesGrouping(rule(), names);
@@ -210,6 +246,38 @@ describe('seriesGroupingRuleHash', () => {
     expect(seriesGroupingRuleHash(rule({ preset: 'k8s-daemonset' }))).not.toBe(base);
     const custom = rule({ preset: 'custom', pattern: 'a', replacement: '' });
     expect(seriesGroupingRuleHash({ ...custom, replacement: 'b' })).not.toBe(seriesGroupingRuleHash(custom));
+    expect(seriesGroupingRuleHash(rule({ extraAggregations: ['sum'] }))).not.toBe(base);
+  });
+
+  // The insights page reads a changed hash as "this run is stale". Appending an empty extras
+  // field would light up every grouped run in the deployment on deploy.
+  it('is byte-identical for a rule with no extras, however they are spelled', () => {
+    const base = seriesGroupingRuleHash(rule());
+    expect(seriesGroupingRuleHash(rule({ extraAggregations: [] }))).toBe(base);
+    expect(seriesGroupingRuleHash(rule({ extraAggregations: undefined }))).toBe(base);
+    // The primary aggregation is dropped before hashing, so asking for it changes nothing.
+    expect(seriesGroupingRuleHash(rule({ extraAggregations: ['avg'] }))).toBe(base);
+  });
+
+  it('does not depend on the order the extras were picked in', () => {
+    expect(seriesGroupingRuleHash(rule({ extraAggregations: ['max', 'sum'] }))).toBe(
+      seriesGroupingRuleHash(rule({ extraAggregations: ['sum', 'max'] })),
+    );
+  });
+});
+
+describe('extra aggregation helpers', () => {
+  // The worker's grouped statement rebuilds this as `group_name || ' (' || agg || ')'`.
+  it('names an extra series the way the grouped SQL concatenates it', () => {
+    expect(extraAggregationSeriesName('api', 'sum')).toBe('api (sum)');
+  });
+
+  it('normalizes to canonical order, de-duplicated, without the primary', () => {
+    expect(
+      normalizeExtraAggregations({ aggregation: 'avg', extraAggregations: ['max', 'sum', 'max', 'avg'] }),
+    ).toEqual(['sum', 'max']);
+    expect(normalizeExtraAggregations({ aggregation: 'avg', extraAggregations: null })).toEqual([]);
+    expect(normalizeExtraAggregations({ aggregation: 'avg' })).toEqual([]);
   });
 });
 

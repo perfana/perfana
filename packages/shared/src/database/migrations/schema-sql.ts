@@ -1907,6 +1907,7 @@ CREATE TABLE public.ds_metric_series_groups (
     dashboard_label character varying(255),
     panel_title character varying(255),
     aggregation character varying(8) NOT NULL,
+    extra_aggregations character varying(8)[] DEFAULT '{}'::character varying[],
     avg_members real,
     rule_id uuid,
     rule_hash character varying(16) NOT NULL,
@@ -1931,6 +1932,7 @@ CREATE TABLE public.series_grouping_rules (
     pattern text,
     replacement text DEFAULT ''::text NOT NULL,
     aggregation character varying(8) DEFAULT 'avg'::character varying NOT NULL,
+    extra_aggregations character varying(8)[] DEFAULT '{}'::character varying[],
     track_member_count boolean DEFAULT false NOT NULL,
     enabled boolean DEFAULT true NOT NULL,
     origin character varying(16) DEFAULT 'manual'::character varying NOT NULL,
@@ -1942,6 +1944,7 @@ CREATE TABLE public.series_grouping_rules (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_series_grouping_rules_aggregation CHECK (((aggregation)::text = ANY ((ARRAY['avg'::character varying, 'sum'::character varying, 'max'::character varying])::text[]))),
     CONSTRAINT ck_series_grouping_rules_custom_pattern CHECK ((((preset)::text = 'custom'::text) = (pattern IS NOT NULL))),
+    CONSTRAINT ck_series_grouping_rules_extra_aggregations CHECK (((extra_aggregations <@ (ARRAY['avg'::character varying, 'sum'::character varying, 'max'::character varying])::character varying(8)[]) AND (NOT ((aggregation)::text = ANY ((extra_aggregations)::text[]))))),
     CONSTRAINT ck_series_grouping_rules_origin CHECK (((origin)::text = ANY ((ARRAY['manual'::character varying, 'suggestion'::character varying, 'copy'::character varying])::text[]))),
     CONSTRAINT ck_series_grouping_rules_preset CHECK (((preset)::text = ANY ((ARRAY['k8s-pod'::character varying, 'k8s-daemonset'::character varying, 'ip-port'::character varying, 'trailing-id'::character varying, 'custom'::character varying])::text[])))
 );

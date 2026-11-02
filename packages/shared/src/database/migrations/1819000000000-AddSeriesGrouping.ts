@@ -112,15 +112,27 @@ const withBoundedLockWait = (label: string, ddl: string): string => `
   DO $series_grouping$
   DECLARE
     attempt int := 0;
+    -- Captured on entry and restored on both exit paths. set_config(..., true) is
+    -- transaction-local and the runner uses TypeORM's default transaction: "all" — ONE
+    -- transaction for the whole batch — so the 3s left in place leaked forward into every
+    -- migration numbered above this one in the same deploy, where it surfaces as 55P03 instead of
+    -- a wait. Added in v0.2.97.44 (this migration shipped in v0.2.97.43 without it): a database
+    -- that has already run it is unaffected, since the leak only ever lasted for that batch's
+    -- transaction, while a combined 1819+1820 install is fixed. 1820 captures the value it finds
+    -- on entry, so without this restore it captured THIS block's 3s and dutifully put it back —
+    -- the leak survived a fix whose comment claimed otherwise.
+    prev_lock_timeout text := current_setting('lock_timeout');
   BEGIN
     PERFORM set_config('lock_timeout', '3s', true);
     LOOP
       attempt := attempt + 1;
       BEGIN
         ${ddl}
+        PERFORM set_config('lock_timeout', prev_lock_timeout, true);
         RETURN;
       EXCEPTION WHEN lock_not_available THEN
         IF attempt >= 10 THEN
+          PERFORM set_config('lock_timeout', prev_lock_timeout, true);
           RAISE EXCEPTION
             'could not ${label}: application_dashboards or systems_under_test stayed locked across % attempts. Find the long-running transaction (pg_stat_activity, often a SUT deletion) and retry the deploy.', attempt;
         END IF;

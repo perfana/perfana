@@ -15,7 +15,7 @@ import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import { CreateSeriesGroupingRuleDto } from './create-series-grouping-rule.dto';
 
 /**
- * The rule being previewed: the five fields that define what a rule DOES, with the very same
+ * The rule being previewed: the six fields that define what a rule DOES, with the very same
  * validators the create body uses (`PickType` carries the class-validator metadata along), so a
  * body the preview accepts is one the create route accepts too.
  */
@@ -24,6 +24,7 @@ export class SeriesGroupingRuleSpecDto extends PickType(CreateSeriesGroupingRule
   'pattern',
   'replacement',
   'aggregation',
+  'extraAggregations',
   'trackMemberCount',
 ] as const) {}
 

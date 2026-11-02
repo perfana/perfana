@@ -336,6 +336,37 @@ describe('SeriesGroupingService', () => {
       expect(saved[0]).toMatchObject({ aggregation: 'avg', enabled: true });
     });
 
+    // The CHECK constraint refuses (aggregation, extras) pairs that overlap, and a 23514 is a
+    // 500. "Also emit avg" when avg is primary is already satisfied by the bare group name.
+    it('normalizes the extras: canonical order, de-duplicated, primary removed', async () => {
+      ruleRepo.findOne.mockResolvedValue(existing());
+      await service.update(
+        'r1',
+        { aggregation: 'avg', extraAggregations: ['max', 'avg', 'sum', 'max'] as never },
+        'user-2',
+        ['user'],
+        [ORG],
+      );
+      expect(saved[0]!.extraAggregations).toEqual(['sum', 'max']);
+    });
+
+    it('keeps the stored extras when the key is absent', async () => {
+      const rule = existing();
+      rule.extraAggregations = ['sum'];
+      ruleRepo.findOne.mockResolvedValue(rule);
+      await service.update('r1', { trackMemberCount: true }, 'user-2', ['user'], [ORG]);
+      expect(saved[0]!.extraAggregations).toEqual(['sum']);
+    });
+
+    // Changing the primary drops an extra that has become the primary, rather than 23514ing.
+    it('drops an extra that the new primary aggregation has taken over', async () => {
+      const rule = existing();
+      rule.extraAggregations = ['sum', 'max'];
+      ruleRepo.findOne.mockResolvedValue(rule);
+      await service.update('r1', { aggregation: 'sum' }, 'user-2', ['user'], [ORG]);
+      expect(saved[0]!.extraAggregations).toEqual(['max']);
+    });
+
     it('ignores slot fields even if a client sends them', async () => {
       ruleRepo.findOne.mockResolvedValue(existing());
       await service.update('r1', { panelId: 99, workload: 'other' } as never, 'user-2', ['user'], [ORG]);

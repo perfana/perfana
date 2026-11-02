@@ -9,7 +9,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ApplySeriesGroupingDto } from './apply-series-grouping.dto';
 import { CreateSeriesGroupingRuleDto } from './create-series-grouping-rule.dto';
-import { PreviewSeriesGroupingDto } from './preview-series-grouping.dto';
+import { SeriesGroupingRuleSpecDto, PreviewSeriesGroupingDto } from './preview-series-grouping.dto';
 
 const DASHBOARD = '5f1c0f9e-0000-4000-8000-000000000001';
 const rule = { preset: 'k8s-pod', aggregation: 'avg', trackMemberCount: false };
@@ -65,12 +65,48 @@ describe('PreviewSeriesGroupingDto', () => {
   it('uses the very same rule validators as the create body', () => {
     // A field added to the create body's rule must reach the preview, or a body one route accepts
     // the other would refuse.
-    const fields = ['preset', 'pattern', 'replacement', 'aggregation', 'trackMemberCount'];
+    //
+    // This assertion used to read metadata off CreateSeriesGroupingRuleDto ONLY, and carried a
+    // hand-copied field list. Both halves were broken: the list went stale when
+    // `extraAggregations` was added (while this file's own doc comment was updated from "five"
+    // to "six"), and because it never touched the PICKED class it could not detect the drift it
+    // was written for at any field count — deleting 'extraAggregations' from the PickType list
+    // left all 177 series-grouping tests green.
+    const fields = ['preset', 'pattern', 'replacement', 'aggregation', 'extraAggregations', 'trackMemberCount'];
     const meta = (cls: object, field: string) =>
       Reflect.getMetadata('swagger/apiModelProperties', (cls as { prototype: object }).prototype, field);
     for (const field of fields) {
       expect(meta(CreateSeriesGroupingRuleDto, field)).toBeDefined();
+      // The half that was missing: the picked class must carry it too.
+      expect(meta(SeriesGroupingRuleSpecDto, field)).toBeDefined();
     }
+  });
+
+  it('carries the picked rule fields through transformation, not just their metadata', () => {
+    const dto = plainToInstance(SeriesGroupingRuleSpecDto, {
+      preset: 'k8s-pod',
+      aggregation: 'avg',
+      extraAggregations: ['sum'],
+      trackMemberCount: true,
+    });
+    expect(dto.extraAggregations).toEqual(['sum']);
+  });
+
+  // The rules service leans on these explicitly — "Normalised rather than refused: the DTO
+  // already rejects an unknown value and a duplicate" — so the guard needs a denied case.
+  it('refuses an unknown, duplicated or non-array extraAggregations', async () => {
+    const body = (extraAggregations: unknown) => ({
+      testRunId: 'r',
+      applicationDashboardId: DASHBOARD,
+      rule: { ...rule, extraAggregations },
+    });
+    expect(await errorsOf(PreviewSeriesGroupingDto, body(['min']))).toEqual(['rule.extraAggregations']);
+    expect(await errorsOf(PreviewSeriesGroupingDto, body(['sum', 'sum']))).toEqual(['rule.extraAggregations']);
+    expect(await errorsOf(PreviewSeriesGroupingDto, body('sum'))).toEqual(['rule.extraAggregations']);
+    // @IsOptional: an absent key is fine and means "no extras".
+    expect(
+      await errorsOf(PreviewSeriesGroupingDto, { testRunId: 'r', applicationDashboardId: DASHBOARD, rule }),
+    ).toEqual([]);
   });
 });
 

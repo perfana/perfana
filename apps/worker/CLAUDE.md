@@ -594,23 +594,123 @@ rewrites raw names to a group name with `applySeriesGrouping` (`@perfana/shared/
    grouped panels excluded, and the series read 85 ms for two runs. An ungrouped panel in a grouped
    batch matches a no-rule run exactly except `std_dev` and the two trend columns, which differ by
    at most 1e-13 — floating-point summation order under a different plan, not a different answer.
-3. **Rules load before the transaction and never throw.** `loadSeriesGroupingContext` runs on the
+3. **A second aggregation is an EXTRA series, never a rename (v0.2.97.44, migration 1820).**
+   `series_grouping_rules.extra_aggregations` is a **nullable** `varchar(8)[]` of the aggregations
+   to emit beside the primary one (nullable because both tables are `core` in `SUT_RESOURCES` and
+   the importer's `json_populate_recordset` yields NULL, not the DEFAULT, for a key an older
+   bundle lacks — `NOT NULL` there is a 23502 that kills the whole bundle; migration 1808 is the
+   precedent, so every reader coalesces); each produces `<group> (sum)` while the primary keeps the bare group
+   name. That asymmetry is the whole safety argument, not a presentation choice:
+   `ds_metric_statistics`, `ds_adapt_results`, `benchmarks` and `ds_compare_config` all key on
+   `metric_name` and nothing migrates a stored name, so suffixing *every* series — which reads
+   better — would make every baseline, SLO and compare config on the panel stop matching and the
+   panel go `incomparable`, the exact failure series grouping exists to fix. Five things:
+
+   - **The extras arm is opt-in at the SQL level.** `buildGroupedStatisticsSQL(runCount,
+     hasExtras)` adds the third `points` arm, the three `AVG`/`SUM`/`MAX` aggregate states and
+     the ninth bound array only when some rule asked for one, so a rule with no extras sends the
+     v0.2.97.43 statement byte for byte and pays nothing. `groupedStatementParams` is conditional
+     on the same `hasExtraAggregations(rows)` or the bind count does not match.
+   - **The extras travel as a comma-joined STRING per row, split with `string_to_array`.**
+     `unnest($1::text[], …)` cannot take a per-row array: a Postgres multidimensional array is not
+     an array of arrays, so every row would have to carry the same number of extras. The empty
+     case needs no `WHERE` — `unnest(NULL)` yields no rows, so a group with no extras drops out of
+     the `CROSS JOIN LATERAL` by itself.
+   - **The series name is composed in TWO places and they must stay identical**:
+     `extraAggregationSeriesName` in `@perfana/shared/utils` (which decides, in JS, which extras a
+     group may emit) and `group_name || ' (' || x.agg || ')'` in the arm. The JS side is where the
+     collision guard lives — a raw series literally named `api (sum)` makes the extra get dropped,
+     because two rows under one `metric_name` fail the statistics insert outright — and it **drops
+     rather than truncates** a name that would exceed `varchar(255)`, since SQL concatenation
+     cannot reproduce a truncation.
+   - **An unrenamed group gets no extras**, the same rule the member count follows: it is a group
+     of one, where `SUM` equals `AVG`, so an extra would be a second copy of one series.
+   - **Every DERIVED series gets an unclassified `ds_compare_config` row, and that is what keeps
+     a scale-out from reading as a regression.** A derived series is pod-count dependent by
+     construction: scale a Deployment from 2 replicas to 4 and `api (sum)` doubles against a
+     baseline recorded at the old count, and so does `api (pod count)`. Everything in
+     `ds_metric_statistics` reaches `ds_adapt_results`, and `buildConclusionSQL` flips the run to
+     REGRESSION on `regression_count > 0` — so the feature would report a regression for the exact
+     case its own design table says is NOT one ("`sum` up / `avg` flat = scale-out"). Measured on
+     the dev database: 346 of 419 inheritable compare configs carry a real `higherIsBetter`, so
+     inheriting the panel's config is the common outcome, not an edge case.
+
+     `derivedSeriesConfigRows` therefore writes one **metric-level** row per derived name with
+     `higherIsBetter: null`, which is the panel-304 mechanism — `buildConclusionLogic` emits
+     `'regression'` only under `= true` or `= false`, so an unclassified metric's change lands in
+     `difference_count` and cannot flip the verdict. Four things about it: it must be METRIC level,
+     because resolution picks a whole object (metric -> panel -> dashboard -> global) and only a
+     metric row overrides the panel's; `ignore` is NOT an alternative, since nothing reads it back
+     off a stored row; it is `ON CONFLICT DO NOTHING`, so a classification the user sets on
+     `api (sum)` survives every later analysis and the write is idempotent across runs of the
+     workload (which share the `(system, environment, workload)` scope the table is keyed on); and
+     it covers the member-count series, which has had the same exposure since v0.2.97.43.
+
+   - **`seriesGroupingRuleHash` appends the extras ONLY when there are any.** Appending an empty
+     field would change every existing rule's hash, and the insights page reads a changed hash as
+     "this run is stale" — every grouped run in the deployment would light up on deploy. The
+     extras are sorted canonically first, so the order of the checkboxes does not change the hash.
+
+   **A worker rolled out before migration 1820 probes for the column rather than relying on the
+   catch, and that distinction is load-bearing.** `loadSeriesGroupingContext` asks `pg_attribute`
+   for `extra_aggregations` on both tables and the rules SELECT projects `NULL::varchar(8)[]` when
+   it is absent, so `SeriesGroupingContext.extrasPresent` is false while `tablesPresent` stays
+   true. Letting the 42703 fall into the catch instead is WORSE than a failure: the catch returns
+   `NO_SERIES_GROUPING`, whose `tablesPresent: false` also gates the membership DELETE, while
+   `ds_metric_statistics` is deleted and rewritten ungrouped regardless — so the previous
+   analysis's `ds_metric_series_groups` rows survive describing series that no longer exist.
+   `SeriesGroupResolver` prefers membership over the live rule, so every picker, chart and report
+   then offers a group with no statistics row behind it; an SLO on it records `meets_requirement`
+   NULL, which the run verdict's `bool_and(COALESCE(meets_requirement, true))` reports as passed;
+   and the insights page reports the run as in step, because it compares `rule_hash` and the hash
+   has not changed. Under 1819 the same catch was harmless — the tables genuinely did not exist.
+
+   **`extrasPresent` has to reach every statement that names the column, not just the rules
+   SELECT — and that is the bug this feature shipped to review with.** `INSERT_MEMBERSHIP_SQL` was
+   a module constant naming `extra_aggregations` unconditionally, so on a 1819-only database the
+   probe let the SELECT through, membership was built, `DELETE_MEMBERSHIP_SQL` ran, and the INSERT
+   raised 42703 *inside* `withAnalyticsTransaction`. `statistics-calculation` is not `softFail`, so
+   that aborts the transaction (25P02) and fails the whole re-evaluate batch, and the DELETE rolls
+   back with it — leaving exactly the stale membership the probe was added to prevent. Strictly
+   worse than the catch it replaced, which at least analysed the run ungrouped. It is
+   `insertMembershipSql(extrasPresent)` now, with extras as the LAST bind position so the parameter
+   drops without renumbering, and the grouped statement's extras arm is already off by itself
+   (NULL extras coalesce to `[]`, so `hasExtraAggregations` is false).
+
+   So the pre-1820 window needs **no recovery**: the run is grouped normally with no extras, which
+   is a v0.2.97.43 analysis, and the next recalculation after 1820 lands picks the extras up like
+   any other rule change. The regression test asserts no in-transaction statement mentions the
+   column when it is absent — the harness raises 42703 on one that does, because before that every
+   in-transaction statement resolved to `[undefined, 0]` whatever its column list said, which is
+   why `columnPresent` existed and was never set to false.
+
+   Two smaller rules in the same statement. `MAX(s.extra_aggregations)`, not `MIN`: `extrasParam`
+   emits `''` for a row with no extras and `''` sorts before `'avg'`/`'max'`/`'sum'`, so `MIN`
+   would collapse a group whose member rows disagree to `''` -> `NULLIF` -> `unnest(NULL)` -> every
+   extra silently dropped, while the JS-side `extraSeries=` counter still reported them; the two
+   sibling aggregates beside it are both "any member wins". And the extras arm writes
+   `NULL::uuid` for `first_benchmark_id`, matching the member-count arm: that column reaches
+   `ds_metric_statistics.benchmark_id` and from there `ds_adapt_results.benchmark_ids`, so
+   inheriting it would attribute a threshold written for one pod's value to the sum across the
+   fleet.
+
+4. **Rules load before the transaction and never throw.** `loadSeriesGroupingContext` runs on the
    pooled connection after a `to_regclass` probe: an error inside `withAnalyticsTransaction` aborts it
    (25P02), and `statistics-calculation` is not `softFail`, so it would fail the whole re-evaluate
    batch. A worker rolled out before migration 1819 finds no tables and aggregates exactly as before.
    An invalid stored custom rule is skipped with a warning. Perf-test dashboards are never grouped.
-4. **Membership is written with the statistics it describes.** `ds_metric_series_groups` (one row per
+5. **Membership is written with the statistics it describes.** `ds_metric_series_groups` (one row per
    raw series of a grouped panel, with the group name, the rule's hash and `member_count_name`) is
    deleted and rewritten in the same transaction. It is deleted only when a rule exists or a removed
    rule left rows behind, so a deploy that never uses grouping issues nothing extra in the transaction.
    The grouped statement binds the membership as arrays rather than joining the table it just wrote:
    rows inserted earlier in a transaction are invisible to the planner (the `deleteOrphanedResults`
    lesson below).
-5. **The alignment check is the v1 answer to unaligned sources.** Members are combined on exact
+6. **The alignment check is the v1 answer to unaligned sources.** Members are combined on exact
    `time`, which Prometheus range queries align. The grouped statement writes the average members per
    timestamp onto the membership rows (`avg_members`) in the same round trip, and the pipeline warns
    `series-grouping: … timestamps are not aligned` when a group of ≥ 2 averages under 1.2.
-6. **The legacy control-group path loses groups, loudly.** It re-reads raw `ds_metrics` by raw name,
+7. **The legacy control-group path loses groups, loudly.** It re-reads raw `ds_metrics` by raw name,
    where a group name has no counterpart. Grouped rows always carry `pct_agg` and
    `backfillMissingSketches` regroups the runs first, so this happens only when that backfill failed;
    the result is `incomparable`, not a wrong verdict, and `ControlGroupStatisticsPipeline` logs it.

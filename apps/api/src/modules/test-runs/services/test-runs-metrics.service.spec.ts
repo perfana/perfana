@@ -13,6 +13,7 @@ import { createMockRepository, MockRepository } from '../../../../test/helpers/m
 import { createAuthorizationServiceMock } from '../../../../test/mocks/authorization-service.mock';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { AuditService } from '../../audit/audit.service';
+import { SERIES_GROUPING_DERIVED_SOURCE } from '@perfana/shared/constants';
 
 describe('TestRunsMetricsService', () => {
   let service: TestRunsMetricsService;
@@ -434,14 +435,61 @@ describe('TestRunsMetricsService', () => {
       it('a wildcard does not recreate a config that already exists on that panel', async () => {
         templateRepo.find.mockResolvedValue([tmpl({ id: 'wild' })]);
         compareConfigRepo.find.mockResolvedValue([
-          { application_dashboard_id: 'dash-a', panel_id: 201, metric_name: 'some-metric' },
+          // PANEL-level: this is what "a config already exists on that panel" means. The fixture
+          // used to be metric-level, which made the case pass for the wrong reason — see the pair
+          // below, which is the behaviour that changed.
+          { application_dashboard_id: 'dash-a', panel_id: 201, metric_name: null },
         ] as any);
 
         const result = await service.applyGoldenPathClassifications(testRunInput);
 
-        // dash-a already has a config on panel 201 (metric-level counts for a panel-level template, as before)
         expect(result).toEqual({ compareConfigsCreated: 2 });
         expect(created().map((c) => c.application_dashboard_id).sort()).toEqual(['dash-b', 'dash-jvm']);
+      });
+
+      /**
+       * Value:
+       *   protects — a panel-level golden-path template must still apply to a panel whose only
+       *     config is a per-SERIES override. `StatisticsPipeline` writes one metric-level row per
+       *     derived series (`api (sum)`, `api (pod count)`) on every grouped analysis, so without
+       *     this the first grouped analysis of a workload disables that panel's template forever.
+       *     A user's own per-series tweak had the same effect; it was simply rare (one metric-level
+       *     row in 420 on the dev database) until series grouping made them routine.
+       *   fails_when — `existingPanels` counts rows at any level again. The consequence is silent
+       *     and inverted: the template never lands, so the panel's series — including the PRIMARY
+       *     grouped series — fall back to DEFAULT_COMPARE_CONFIG with `higherIsBetter` null, and a
+       *     real regression on that panel can never flip the run to REGRESSION. The only output is
+       *     `0 compare configs created`.
+       *   why_new — the gate is keyed on the row's LEVEL, not on who wrote it. An earlier version
+       *     excluded only rows carrying `SERIES_GROUPING_DERIVED_SOURCE`, which is not durable:
+       *     the anomaly card's save rebuilds `config_data` from scratch and the API replaces the
+       *     column wholesale, so one edit of a derived row erased the marker and silently restored
+       *     the defect. Both cases below are therefore driven through the same assertion — the
+       *     machine-written row and the user-edited one must behave identically.
+       *   seam — `metric_name IS NOT NULL`, a property of the row that no save can rewrite.
+       */
+      it.each([
+        ['machine-written, marker intact', { source: SERIES_GROUPING_DERIVED_SOURCE }, 'worker-pipeline'],
+        // Exactly what the UI writes over a derived row on any edit: marker gone, author replaced.
+        ['user-edited, marker erased', { source: 'metric' }, 'user-sub'],
+      ])('a metric-level row does not block a panel-level template (%s)', async (_label, configData, updatedBy) => {
+        templateRepo.find.mockResolvedValue([tmpl({ id: 'wild' })]);
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            application_dashboard_id: 'dash-a',
+            panel_id: 201,
+            metric_name: 'api (sum)',
+            config_data: configData,
+            updated_by: updatedBy,
+          },
+        ] as any);
+
+        const result = await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(result).toEqual({ compareConfigsCreated: 3 });
+        expect(created().map((c) => c.application_dashboard_id).sort()).toEqual(['dash-a', 'dash-b', 'dash-jvm']);
+        // Every row it creates is its own panel-level one; the metric-level row is untouched.
+        expect(created().every((c) => c.metric_name == null)).toBe(true);
       });
     });
 

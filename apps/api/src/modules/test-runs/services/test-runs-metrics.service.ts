@@ -636,7 +636,29 @@ export class TestRunsMetricsService {
     // The merge stamps GOLDEN_PATH_ACTOR, so a Dynatrace row stops matching after the first pass.
     const workerSeeded = new Map<string, (typeof existingConfigs)[number]>();
     for (const c of existingConfigs) {
-      existingPanels.add(`${c.application_dashboard_id}|${c.panel_id}`);
+      // ONLY a panel-level row makes a panel read as configured. `existingPanels` gates
+      // panel-level templates (`exists` below), and a metric-level row is a per-SERIES override,
+      // not a panel default: applying the panel template alongside it changes nothing for that
+      // series, because config resolution picks metric before panel. So a single per-series tweak
+      // must not permanently block provisioning for the whole panel.
+      //
+      // This used to count every row at any level. Harmless while nothing wrote metric-level rows
+      // — one row in 420 on the dev database — and series grouping made them routine:
+      // `StatisticsPipeline` writes one per derived series (`api (sum)`, `api (pod count)`) on
+      // every grouped analysis, so the first grouped analysis of a workload made every
+      // panel-level golden-path template on that panel read as already-configured, permanently,
+      // logging only `0 compare configs created`. The result was the inverse of what those rows
+      // exist for: the template never landed, so the panel's own series — including the PRIMARY
+      // grouped series `api` — fell back to DEFAULT_COMPARE_CONFIG, whose `higherIsBetter` is
+      // null, and a real regression there could never flip the run to REGRESSION.
+      //
+      // **Keyed on the row's LEVEL, not on who wrote it, and that is the point.** Excluding only
+      // rows carrying `SERIES_GROUPING_DERIVED_SOURCE` was tried and is not durable: the anomaly
+      // card's save rebuilds `config_data` from scratch (`source: scope === 'metric' ? 'metric' :
+      // 'panel'`, `useAnomalyDetection.ts`) and `updateDsCompareConfig` replaces the column
+      // wholesale, so one ordinary edit of a derived row erases the marker and silently restores
+      // the defect. `metric_name IS NOT NULL` is a property of the row that no save can rewrite.
+      if (!c.metric_name) existingPanels.add(`${c.application_dashboard_id}|${c.panel_id}`);
       if (c.metric_name) existingMetrics.add(`${c.application_dashboard_id}|${c.panel_id}|${c.metric_name}`);
       const machineSeeded =
         c.updated_by === WORKER_ACTOR ||

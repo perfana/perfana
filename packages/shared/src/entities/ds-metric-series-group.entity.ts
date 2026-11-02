@@ -49,6 +49,15 @@ export class DsMetricSeriesGroup {
   @Column({ type: 'varchar', length: 8 })
   aggregation!: SeriesGroupingAggregation;
 
+  /**
+   * The rule's extra aggregations, copied here for the same reason `aggregation` is: this row is
+   * the record of what the run's statistics were actually computed with, and the resolver
+   * prefers it over the live rule so a chart agrees with the numbers beside it. One row per RAW
+   * series, so the array repeats across a group's members. Added by migration 1820.
+   */
+  @Column({ type: 'varchar', length: 8, array: true, nullable: true, default: () => "'{}'" })
+  extra_aggregations!: SeriesGroupingAggregation[] | null;
+
   /** Average members reporting per timestamp; ~1 on a multi-member group means unaligned timestamps. */
   @Column({ type: 'real', nullable: true })
   avg_members!: number | null;
