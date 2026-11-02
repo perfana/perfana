@@ -334,6 +334,32 @@ describe('SeriesGroupingInsightsService.preview', () => {
       expect(q.params[0]).toBe('run-001');
     });
 
+    it('does not report a WELL-aligned group: the SQL has no threshold, the dialog only warns', async () => {
+      // 3 pods all reporting at every timestamp. Unfiltered, the dialog accused this group of
+      // having members that report at different timestamps while printing "3.0 per timestamp".
+      const { service } = makeService(
+        baselineRoutes(podNames, [
+          [/sg:alignment/, () => [{ panel_id: 1, group_name: 'api', members: 3, avg_members: 3 }]],
+        ]),
+      );
+
+      expect((await service.preview(body(), [ORG_A])).alignment).toEqual([]);
+    });
+
+    it('previews with no alignment when the grouping tables are not migrated yet', async () => {
+      // A statement on a missing table aborts the request's RLS transaction (25P02), so the probe
+      // has to come before either grouping table is read — as in `status` and `suggestions`.
+      const { service, db } = makeService(
+        baselineRoutes(podNames, [[/sg:tables-present/, () => [{ present: false }]]]),
+      );
+
+      const { alignment, panels } = await service.preview(body({ panelId: undefined }), [ORG_A]);
+
+      expect(alignment).toEqual([]);
+      expect(panels.length).toBeGreaterThan(0);
+      expect(db.calls.some((c) => /sg:alignment|sg:rules/.test(c.sql))).toBe(false);
+    });
+
     it('drops alignment rows of panels the preview does not cover', async () => {
       const { service } = makeService(
         baselineRoutes(podNames, [

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -56,7 +57,13 @@ export class SeriesGroupingController {
   @ApiQuery({ name: 'applicationDashboardId', required: false })
   @ApiResponse({ status: 200, type: [SeriesGroupingRuleResponseDto] })
   async findAll(
-    @Query('systemId', ParseUUIDPipe) systemId: string,
+    // Named in the message, because ParseUUIDPipe's own text for an ABSENT value is "The value
+    // passed as UUID is not a string" — which says nothing about which parameter, and reads like
+    // an internal fault rather than a missing one. `systemUnderTestId` is the spelling most of the
+    // rest of the API uses, so guessing wrong here is the likely mistake, and the generic message
+    // sent one reader looking for a tenancy bug in the org-scoping path instead.
+    @Query('systemId', new ParseUUIDPipe({ exceptionFactory: () => new BadRequestException('systemId is required and must be a uuid') }))
+    systemId: string,
     @UserCtx() ctx: UserContext,
     @Query('environment') environment?: string,
     @Query('workload') workload?: string,

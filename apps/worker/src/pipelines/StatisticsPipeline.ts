@@ -445,10 +445,15 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     // panels and names was tried and is far worse (53.6 s: the lower estimate tips it into nested
     // loops). Same discipline as AdaptPipeline's `jit = off`: scoped to the statement that needs
     // it, and the previous value is put back so nothing later in the transaction inherits it.
+    // Read and write in SEPARATE statements. PostgreSQL does not specify target-list evaluation
+    // order, so reading `current_setting` beside the `set_config` that overwrites it can return
+    // 'off' — and the restore below then puts 'off' back, leaving merge joins disabled for the
+    // rest of the analytics transaction.
     const [setting] =
-      ((await manager.query(
-        "SELECT current_setting('enable_mergejoin') AS previous, set_config('enable_mergejoin', 'off', true)"
-      )) as Array<{ previous?: string }> | undefined) ?? [];
+      ((await manager.query("SELECT current_setting('enable_mergejoin') AS previous")) as
+        | Array<{ previous?: string }>
+        | undefined) ?? [];
+    await manager.query("SELECT set_config('enable_mergejoin', 'off', true)");
     const alignment: Array<Record<string, unknown>> =
       (await manager.query(
         buildGroupedStatisticsSQL(runIds.length),

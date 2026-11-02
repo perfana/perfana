@@ -156,6 +156,11 @@ export class SeriesGroupingInsightsService {
 
     const q = this.sql();
     const wantedPanel = dto.panelId ?? null;
+    // Probed before either grouping table is touched, like `status` and `suggestions`: the API can
+    // start before migration 1819 runs, and a statement on a missing table inside the request's
+    // RLS transaction aborts it (25P02) — so an un-migrated deploy would 500 the dialog's first
+    // request instead of previewing against a run that simply has no grouping yet.
+    const grouped = await this.groupingTablesPresent(q);
     const baselineRunIds = await resolveBaselineRunIds(q, run.testRunId);
 
     const nameRows = await loadRunSeriesNames(q, [run.testRunId, ...baselineRunIds], {
@@ -167,7 +172,7 @@ export class SeriesGroupingInsightsService {
     // A panel with its own enabled rule is governed by that rule, not by a dashboard-wide one: a
     // dashboard-wide preview must not claim to change it.
     const overridden = new Set<number>();
-    if (wantedPanel === null) {
+    if (grouped && wantedPanel === null) {
       for (const rule of await this.loadEnabledRules(q, run)) {
         if (rule.applicationDashboardId === dashboard.id && rule.panelId !== null) overridden.add(rule.panelId);
       }
@@ -182,7 +187,9 @@ export class SeriesGroupingInsightsService {
       panels,
       sloWarnings: await this.findSloWarnings(q, run, dashboard.id, panels, groupings),
       rawNameCollisions: findRawNameCollisions(panels, groupings),
-      alignment: await this.loadAlignment(q, run, dashboard.id, wantedPanel, new Set(panels.map((p) => p.panelId))),
+      alignment: grouped
+        ? await this.loadAlignment(q, run, dashboard.id, wantedPanel, new Set(panels.map((p) => p.panelId)))
+        : [],
     };
   }
 
@@ -288,7 +295,15 @@ export class SeriesGroupingInsightsService {
     return warnings;
   }
 
-  /** Alignment only exists for groups an earlier rule already formed: a first preview cannot know it. */
+  /**
+   * Alignment only exists for groups an earlier rule already formed: a first preview cannot know it.
+   *
+   * Filtered to the MISALIGNED groups, like `loadMisaligned`, and for the same reason: the SQL has
+   * no threshold, so every group of two or more comes back. The dialog renders each entry as a
+   * warning that the members report at different timestamps, so an unfiltered list accuses every
+   * healthy group — printing "3.0 per timestamp" inside a sentence claiming the values are mostly
+   * single pods. Compared in JavaScript on the rounded value for the reason `loadMisaligned` gives.
+   */
   private async loadAlignment(
     q: SqlRunner,
     run: RunRow,
@@ -316,7 +331,8 @@ export class SeriesGroupingInsightsService {
         group: r.group_name,
         members: r.members,
         avgMembers: round3(Number(r.avg_members)),
-      }));
+      }))
+      .filter((r) => r.avgMembers < MISALIGNED_AVG_MEMBERS);
   }
 
   // ─────────────────────────── suggestions ───────────────────────────

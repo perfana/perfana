@@ -1047,6 +1047,21 @@ group name back to its members. Five things about it:
    `details.controlRuns` (written only for a failed baseline aggregation). A run with no conclusion
    falls back to the workload's five previous completed runs; a conclusion with an EMPTY control
    group answers `[]` rather than inventing a baseline ADAPT never used.
+6. **All three of preview, suggestions and status probe `groupingTablesPresent` first.** The API can
+   start before migration 1819 runs — nothing orders them, no service declares
+   `depends_on: perfana-migration` — and a statement on a missing table inside the request's RLS
+   transaction aborts it (25P02) and takes every later query of the request with it. `preview` went
+   straight to `series_grouping_rules` and `ds_metric_series_groups` until v0.2.97.44, so an
+   un-migrated deploy 500'd the grouping dialog's first request instead of previewing against a run
+   that simply has no grouping yet. Only a positive probe is cached.
+7. **`sg:alignment` has no threshold in SQL, so `loadAlignment` must filter like `loadMisaligned`.**
+   Both return every group of two or more members with a non-null `avg_members`; the threshold is
+   applied in JavaScript on the rounded value, because `avg_members` is a `REAL` and `1.2`
+   round-trips as `1.2000000476837158`, so a SQL `< 1.2` would call the threshold itself misaligned.
+   The dialog renders each `alignment` entry as a warning that the members report at different
+   timestamps — so an unfiltered list accuses every healthy group, printing "3.0 per timestamp"
+   inside a sentence claiming the values are mostly single pods. Fixed in v0.2.97.44; the preview
+   spec's cases fed only 1.1 and 1, which is why it shipped.
 
 Suggestions log one line per served suggestion (`series-grouping suggestion <run> <dash>/<panel>
 preset=… matched <b>% -> <a>% incomparable=<n>`) and rules carry `origin`; together they are how

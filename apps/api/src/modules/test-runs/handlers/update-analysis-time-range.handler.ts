@@ -188,7 +188,12 @@ export function partitionAnalysisTimeRangeScope(
   for (const run of candidates) {
     if (!writableSet.has(run)) {
       skipped.push(held[heldIndex++]!);
-    } else if (run.id !== target.id && !offsetsFitRun(run, analysisStartOffset, analysisEndOffset)) {
+      // The TARGET is checked too, not exempted. The write path throws its own 400 before it ever
+      // reaches here, so this changes nothing there — but `previewAnalysisTimeRangeScope` and the
+      // MAX_BULK_ANALYSIS_TIME_RANGE_RUNS cap check share this partition and have no such throw.
+      // Exempt it and the dialog counts an impossible target as applicable, omits its `too-short`
+      // entry, promises a scope the PUT answers 400 to, and reads one high at the cap boundary.
+    } else if (!offsetsFitRun(run, analysisStartOffset, analysisEndOffset)) {
       skipped.push({ testRunId: run.testRunId, completed: run.completed === true, skipped: 'too-short' });
     } else {
       applicable.push(run);

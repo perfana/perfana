@@ -13,6 +13,8 @@
  */
 
 import { describe, test, expect, beforeEach, vi, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { StatisticsPipeline, StatisticsInput } from '../../../pipelines/StatisticsPipeline.js';
 import { getLogger } from '../../../lib/utils/logger.js';
 import * as databaseAccessor from '../../../common/database-accessor.js';
@@ -1138,6 +1140,22 @@ describe('StatisticsPipeline', () => {
       // equal deadlines node-postgres destroys the connection instead of letting
       // Postgres cancel, so the clean rollback and the useful error are both lost.
       expect(Number(settings.get('statement_timeout'))).toBeLessThan(600000);
+    });
+  });
+
+  describe('the enable_mergejoin save/restore', () => {
+    test('reads the previous value in its own statement, not beside the set_config', () => {
+      // PostgreSQL does not specify target-list evaluation order, so
+      //   SELECT current_setting('enable_mergejoin'), set_config('enable_mergejoin','off',true)
+      // may evaluate the write first and read back 'off' — and the restore then puts 'off' back,
+      // leaving merge joins disabled for the rest of the analytics transaction (the verification
+      // count, and anything a later caller adds). Asserted on the source because reproducing the
+      // ordering needs a real planner, so no behavioural test can see it.
+      const src = readFileSync(join(__dirname, '../../../pipelines/StatisticsPipeline.ts'), 'utf8');
+      const statements = stripSqlComments(src).match(/current_setting\([^)]*\)[^;]*/g) ?? [];
+
+      expect(statements).toHaveLength(1);
+      expect(statements[0]).not.toMatch(/set_config/);
     });
   });
 
