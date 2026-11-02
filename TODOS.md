@@ -24,6 +24,32 @@ Postgres-backed SUT export/import round trip; the grouped statistics on 1.87 M c
 with real Toolkit functions (which found the merge-join plan, fixed in v0.2.97.43); `lttb()` over
 a grouped series; and every rules route through a running API. What is still owed:
 
+### More than one aggregation per grouping rule (P2)
+
+**Origin:** proposed 2026-11-02 after v0.2.97.43 shipped. Spec:
+`docs/design/2026-11-02-series-grouping-multi-aggregation.md`.
+
+A rule picks one of `avg` / `sum` / `max`, so a panel shows one row of the table that distinguishes
+a scale-out from a regression (`avg` flat + `sum` up = more pods at the same cost each; `avg` up +
+`sum` up = a real regression). The v1 design already recommends pairing `sum` with the member count
+series, which works, but `sum` cannot be paired with `avg`. Different aggregations on different
+*panels* are already possible today through per-panel rules beating the dashboard-wide one
+(`uq_series_grouping_rules_slot` is `NULLS NOT DISTINCT` on `panel_id`), so the gap is only two
+aggregations on **one** panel.
+
+Proposed shape: the primary aggregation keeps emitting `afterburner-fe` unchanged and extras are
+suffixed `afterburner-fe (sum)`, reusing the `(pod count)` convention `track_member_count` already
+established. Suffixing every series instead is the trap — `ds_metric_statistics`, `ds_adapt_results`,
+`benchmarks` and `ds_compare_config` all key on `metric_name` and nothing migrates a stored name, so
+ticking a box would make every baseline, SLO and compare config on the panel stop matching and the
+panel go `incomparable`, which is the failure series grouping exists to fix. The resolver change is
+four lines (`expandSeriesNames` already synthesises the member-count series this exact way); the
+work is migration 1820, a third `UNION ALL` arm on the `points` CTE, and the dialog.
+
+Measure the grouped statement before committing to it: worst case is 3x the rows entering
+`buildStatisticsCtes`, each carrying a `percentile_agg` sketch. Fold this into the production-scale
+measurement already owed below.
+
 ### Walk the series grouping UI end to end in a browser (P2)
 
 **Origin:** v0.2.97.43, plan Task 12 for PR C. The web surfaces are covered by component tests and
