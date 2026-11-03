@@ -380,9 +380,21 @@ entire batch, so the escape hatch 1791 and 1813 both use means every migration n
 in the same batch runs outside any shared transaction — the batch quietly stops being
 all-or-nothing from that point. TypeORM does not notice, because its `isTransactionActive` flag is
 only moved by the driver's own commit/rollback and never by inspecting raw SQL, so its later bare
-`COMMIT`/`ROLLBACK` are `WARNING: there is no transaction in progress` rather than errors. Nothing
-breaks; but a migration that is relying on the batch to roll back for it cannot do so if an earlier
-one in the same deploy used this pattern.
+`COMMIT`/`ROLLBACK` are `WARNING: there is no transaction in progress` rather than errors.
+
+**This is not a theoretical caveat — it took down greenfield installs, and the symptom was a migration
+several numbers later.** Migration 1799 isolated each refresh policy behind a `SAVEPOINT`, which is a
+hard error with no transaction (`25P01 SAVEPOINT can only be used in transaction blocks`), so a fresh
+database stopped at 1799 with every later migration unapplied — fixed in v0.2.97.45 by moving that
+isolation into a plpgsql `DO` block, whose `EXCEPTION` handler is an implicit subtransaction and is
+legal either way. An **existing** deploy never reproduces it, because the migration that needs the
+transaction ran in an earlier batch than the `COMMIT` that destroys it; only a batch spanning both
+fails, which is a fresh install. So the rule for anything numbered **above 1791**: it may not use
+`SAVEPOINT`, and it may not rely on the batch to roll back for it. Use a plpgsql block for
+per-statement isolation. `ConsolidatedSchema` may keep its savepoints — it is the first migration and
+runs before any `COMMIT`. `packages/shared/src/database/__tests__/cagg-refresh-windows.spec.ts` pins
+the shape for 1799; nothing yet pins it for the next migration that gets this wrong, which is filed
+in TODOS.md.
 
 One honest caveat on cost: net index **count** on the ingest path is unchanged, but net **width**
 is not. The new index's third column averages ~19 bytes, so its leaf entries run 35-40% larger than
