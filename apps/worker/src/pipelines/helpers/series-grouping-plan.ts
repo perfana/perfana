@@ -1,4 +1,10 @@
 /**
+ * ANY statement exported from here must be added to `SPEC` in `scripts/check-grouped-sql.mjs`,
+ * which PREPAREs each one against a real schema in `npm run preflight`. Nothing else in the repo
+ * can catch a column these statements name that does not exist — this file is where v0.2.97.44
+ * shipped exactly that, and the `members` CTE below is a VALUES list built in JavaScript, so its
+ * columns are not checked by anything a compiler or a snapshot can see.
+ *
  * Series grouping for StatisticsPipeline (docs/design/2026-11-01-series-grouping-design.md).
  *
  * A grouping rule rewrites raw series names (Kubernetes pod names) on a panel to group names.
@@ -549,17 +555,18 @@ export function derivedCompareConfigParams(rows: DerivedSeriesConfigRow[]): unkn
  * average members per timestamp back onto the membership rows — the timestamp-alignment signal.
  * Returns that alignment, one row per group.
  *
- * Parameters: the run ids at `$1..$runCount`, then the eight member arrays from
- * `groupedStatementParams` — nine when `hasExtras`.
+ * Parameters: the run ids at `$1..$runCount`, then the SEVEN member arrays from
+ * `groupedStatementParams` — `test_run_id`, `application_dashboard_id`, `panel_id`,
+ * `metric_name`, `group_name`, `aggregations`, `renamed`. The `members` CTE's `AS s(...)` alias
+ * list is the authority on that count, and a test asserts the two agree: an `unnest` arity that
+ * drifts from the alias list does not fail, it silently pads with NULL columns.
  *
- * `hasExtras` is what makes a rule with no extra aggregations send the statement it sent in
- * v0.2.97.43, byte for byte: the three `v_avg`/`v_sum`/`v_max` aggregate states and the third
- * `points` arm appear only when some rule actually asked for one. `groupedStatementParams` is
- * conditional on the same thing, or the bind count would not match — it derives the answer from
- * the rows with `hasExtraAggregations`, so pass `hasExtraAggregations(rows)` here and nothing
- * else. It is deliberately NOT defaulted: a caller that omitted it while holding extras-bearing
- * membership would compile cleanly and then send 10 parameters to a 9-bind statement, and
- * `statistics-calculation` is not softFail, so that fails the whole re-evaluate batch.
+ * The statement is UNCONDITIONAL. There is no `hasExtras` parameter and no second shape: all
+ * four aggregate states are computed every time and which of them become series is decided per
+ * group, in SQL, from each row's `aggregations`. That is deliberate — a statement whose shape
+ * depended on what the rules happened to ask for is how the predecessor design shipped a 42703
+ * inside the analytics transaction, and `statistics-calculation` is not softFail, so it failed
+ * the whole re-evaluate batch. Do not reintroduce a branch here.
  */
 export function buildGroupedStatisticsSQL(runCount: number): string {
   const placeholders = Array.from({ length: runCount }, (_, i) => `$${i + 1}`).join(', ');
@@ -598,9 +605,16 @@ export function buildGroupedStatisticsSQL(runCount: number): string {
               -- real value and would otherwise win for a group whose rows ever disagreed.
               MAX(s.aggregations) AS aggregations,
               bool_or(s.renamed) AS renamed,
+              -- The count series reads this; it is COUNT(*), not a column of the members CTE. Two
+              -- projections used to sit here, bool_or(s.track_member_count) and
+              -- MIN(s.member_count_name), and they outlived the columns they named when the member
+              -- count became an ordinary aggregation. Nothing downstream read either one, so they
+              -- were dead code that still had to RESOLVE — and the members CTE is a VALUES list
+              -- built in JavaScript, so the statement failed at run time with
+              -- "column s.track_member_count does not exist", aborting the whole aggregation
+              -- transaction. The DELETE rolled back with it, so every run kept its previous
+              -- statistics and the only symptom was a number that silently never moved.
               COUNT(*) AS member_count,
-              bool_or(s.track_member_count) AS track_member_count,
-              MIN(s.member_count_name) AS member_count_name,
               MIN(m.dashboard_uid) AS dashboard_uid,
               MIN(m.panel_title) AS panel_title,
               MIN(m.dashboard_label) AS dashboard_label,
