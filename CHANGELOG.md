@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.45] - 2026-11-03
+
+### Fixed
+- **Series grouping stopped every run's statistics from being written, silently.** On any database with one enabled series-grouping rule, the `statistics-calculation` stage failed for every run in the batch with `column s.track_member_count does not exist`. The grouped statement still projected `bool_or(s.track_member_count)` and `MIN(s.member_count_name)` — two columns that went away in v0.2.97.44 when the member count became an ordinary aggregation. Both were dead code, read by nothing, and both still had to resolve, so Postgres rejected the whole statement.
+
+  **The symptom was a number that never moved.** The `DELETE` that precedes the `INSERT` rolls back with the failed transaction, so each run kept the statistics it already had; the stage logged `query failed:` with the cause on a separate line and nothing at error level named the column. Found by deploying v0.2.97.44 and being handed the other end of it: Kubernetes Pod Metrics dashboards collected and populated, but absent from anomaly detection and the compare card, with `ds_metric_statistics` frozen at 889 rows across six aggregation attempts in 40 seconds.
+
+  **Fixed, and the class is now checked rather than reasoned about.** `npm run check:grouped-sql` (in `preflight`) asks Postgres to `PREPARE` all 11 statements the two statistics modules export, including the ungrouped statement every analysis sends. No unit test in this repo could catch this: a text guard checks a statement's shape, only Postgres resolves its names — and the snapshot test passed throughout, because the snapshot had been regenerated over the broken SQL and recorded it as golden.
+
+- **The series-group entity named a column the table does not have.** `DsMetricSeriesGroup.member_count_name` was a real `@Column` while migration 1820 drops it and 1819 never creates it. TypeORM names every declared column in its `SELECT`, so the first read of that table would have failed the same way, and `SCHEMA_DRIFT_CHECK` logs it at ERROR (`strict` refuses to boot). Dormant only because nothing imports the entity yet — the same way the two dead projections were dormant until a grouping rule existed. The `/ds-metrics/available` response field and its Swagger description had drifted with it, and now say `aggregations`.
+
+### Known limits
+- **The grouped statement had never executed before this release**, so its cost is new information rather than a regression. Measured with `EXPLAIN`: it is planned at `rows=1` whatever the membership size (28 and 2000 bound members give byte-identical plans), which buys a `Sort` over every matched raw row that goes external past roughly 215k rows at `AGGREGATION_WORK_MEM=128MB`. The 272MB spill already recorded in a comment at `StatisticsPipeline.ts:446` and blamed on a merge join is in fact this node. **Before enabling a dashboard-wide rule on a large system, run `EXPLAIN (ANALYZE, BUFFERS)` on a real grouped run and read `Sort Method:`.** Filed as two P0 items in TODOS.md with the measurements and the named fixes.
+
 ## [0.2.97.44] - 2026-11-03
 
 ### Added

@@ -17,6 +17,98 @@ Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.m
 shipped all three stages in one release: PR A (the engine), PR B (the rules API) and PR C (the
 web), which were developed as separate versions on one branch and squash-merged together.
 
+### The grouped statement sorts on a rows=1 estimate and spills
+
+**Priority:** P0
+**Origin:** the v0.2.97.45 performance review, measured with `EXPLAIN` on the dev database.
+**Why:** `grouped_points` is planned at `rows=1` no matter how large the membership is, so every
+node above it is planned against one row. Measured: at 28 bound members and at 2000 bound members
+the plan is byte-for-byte identical — `GroupAggregate (rows=1 width=351)` over `Sort (rows=1
+width=621)` over `Nested Loop (rows=1)` — and only the `members` Function Scan count moves. The
+cause is that `members` is a MATERIALIZED `unnest` CTE, so `s.test_run_id = m.test_run_id` on a
+function-scan column takes the default 0.005 selectivity.
+
+The plan that estimate buys is a `Sort` over every raw `ds_metrics` row the grouped panels
+matched. At `AGGREGATION_WORK_MEM=128MB` it goes external past roughly 215k matched rows
+(128MB / ~621B). **The existing comment at `StatisticsPipeline.ts:446` already records a 272MB
+external-merge spill at 432k matched rows and blames the merge join — but 432k x 621B is exactly
+272MB, and the `Sort` is still in the plan with `enable_mergejoin=off`.** So that spill was this
+node all along. A production Kubernetes-pod dashboard (50 pods x 20 panels x a 3-hour run at 10s
+≈ 1M matched rows) projects to ~600MB of temp files for one node, inside the transaction whose
+540s `AGGREGATION_STATEMENT_TIMEOUT_MS` it shares with the main aggregation. This is issue #13's
+`Sort Method: external merge Disk:` shape.
+
+**Never observed before v0.2.97.45 because the statement never once executed** — it was rejected
+outright on a dead column reference every time (that is what v0.2.97.45 fixed).
+
+**Shape:** the output group count (panels x groups x timestamps) is ~1/30 of the input, so a
+HashAggregate is the right plan and would not spill. Make the estimate honest — write the
+membership to a TEMP table and `ANALYZE` it inside the transaction, which IS visible to the
+planner (the `unnest` arrays were chosen to avoid exactly that visibility) — or, as a stopgap,
+scope a larger `work_mem` to this one statement the way `enable_mergejoin` is already scoped at
+`StatisticsPipeline.ts:459`. **Before enabling a dashboard-wide rule on a large SUT, run
+`EXPLAIN (ANALYZE, BUFFERS)` on a real grouped run and read `Sort Method:`.**
+
+### `grouped_points` carries ~226 bytes of per-panel constants through a tuplestore and a 4x fan-out
+
+**Priority:** P0
+**Origin:** same review.
+**Why:** `grouped_points` is referenced three times — `points`' not-renamed arm, `points`' renamed
+arm, and `alignment` — so Postgres will not inline it and materialises it into a tuplestore bound
+by the SAME 128MB `work_mem` the `Sort` beneath it wants. Confirmed in the plan: one `CTE
+grouped_points` and three `CTE Scan` nodes. Output width is 351 bytes, so ~380k rows before the
+tuplestore spills, and a spilled tuplestore is re-read from that file by each of the three read
+pointers. One statement can therefore want 2x `work_mem` at the same instant, which
+`AGGREGATION_WORK_MEM`'s documented deploy-wide peak arithmetic does not account for.
+
+About 226 of those 351 bytes are text carriers that are constant per (dashboard, panel) or per
+group — `MIN(m.dashboard_uid)`, `MIN(m.panel_title)`, `MIN(m.dashboard_label)`, `MIN(m.unit)`,
+plus `test_run_id`, `group_name` and `aggregations` — yet they ride every per-timestamp row
+through the tuplestore AND through the 4x LATERAL fan-out above it.
+
+**Shape:** narrow `grouped_points` to the keys plus the four aggregate states and the member
+count, then re-attach the per-panel constants in a small join keyed on `(test_run_id,
+application_dashboard_id, panel_id)` after the per-timestamp aggregation. Roughly a two-thirds cut
+to both the tuplestore and the fan-out input, for no behaviour change. Also worth asking whether
+`alignment` can be derived without the third reference.
+
+### Lower-priority findings from the same review
+
+**Priority:** P2
+1. **The grouped statement is a SECOND full pass over the run's `ds_metrics` in the same budgeted
+   transaction, and its good plan only exists on UNCOMPRESSED chunks.** Locally the planner picks
+   `Nested Loop` + `Index Scan using uniq_ds_metrics_upsert` — one probe per member series, and it
+   holds at 2000 members. But only `test_run_id` is `compress_segmentby`; the other three join
+   keys sit inside the compressed payload, so past the 2-day compression policy — every
+   re-evaluate, and every `force`/`missing-data` path — it degrades to a decompressing scan of the
+   run's whole segment, a second time after the main statement already did one. Each statement
+   gets the full 540s, so a grouped run's transaction can roughly double in wall time against the
+   stage's 30-min `JOB_WAIT_TIMEOUT_MS` while holding the `sut:env:workload` scope lock. Not
+   verifiable locally (the dev database has 1 chunk, 0 compressed): **measure on a re-evaluate of
+   a >2-day-old run before trusting local timings, and re-check whether `REEVALUATE_CHUNK_SIZE=5`
+   still fits once one grouped panel adds a second pass per chunk.**
+2. **The `aligned` UPDATE plans as a Seq Scan per alignment row** — `idx_ds_metric_series_groups_group`
+   is exactly the four key columns, but the membership rows were INSERTed earlier in the same
+   transaction so the table reads as empty, and on a deploy that first turns grouping on it has
+   never been ANALYZEd. Self-corrects as `relpages` grows, so it is a cold-start shape, not a
+   standing cliff. If a large deployment shows it, `ANALYZE ds_metric_series_groups` after
+   `INSERT_MEMBERSHIP_SQL`. Note the join key omits `metric_name`, so the UPDATE rewrites every
+   member row of every group on every analysis.
+3. **A dashboard-wide rule sends EVERY panel down the grouped path**, including panels whose every
+   series is a group of one. `buildGroupedExclusion` stops the work being duplicated, but the
+   grouped path costs strictly more per point than `metrics_filtered` (an extra per-timestamp
+   GROUP BY, a materialised tuplestore, a 3x rescan) for panels that gain nothing. A rule could
+   skip panels on which `applySeriesGrouping` renamed nothing.
+4. **`ds_metrics` remains an unbounded raw-hypertable read** (`test_run_id` with no `time`
+   predicate) and is outside the 41+12-site conversion that bounded `requests_raw`,
+   `transactions`, `requests_error` and `virtual_users` — root issue #56. Measured as NOT amplified
+   by the grouped statement: 38 relation locks after planning the main statement, 44 after planning
+   both, and the 6 additions are `ds_metric_series_groups` and its indexes, with zero additional
+   `ds_metrics` chunk locks (the main statement already holds them). If `ds_metrics` is ever
+   converted, `metrics_filtered` and the grouped CTE must take the window as bind parameters
+   together — never via a subquery on `test_runs` in the same statement, which measured worse than
+   no predicate at all.
+
 **Verified on 2026-11-01** against `timescaledb-ha:pg15` with every migration through 1819 applied
 (see the v0.2.97.43 CHANGELOG entry for numbers): the full preflight including the RLS suite (the
 hand-edited coverage snapshot matches); the RLS policy matrix for `series_grouping_rules`; the
