@@ -253,8 +253,8 @@ describe('SutImportService (integration)', () => {
     const insertMembership = (runKey: string, metric: string): Promise<unknown> =>
       dataSource.query(
         `INSERT INTO ds_metric_series_groups
-           (test_run_id, application_dashboard_id, panel_id, metric_name, group_name, aggregation, rule_id, rule_hash, organization_id)
-         VALUES ($1,$2,101,$3,'pod-a','avg',$4,'abc123',$5)`,
+           (test_run_id, application_dashboard_id, panel_id, metric_name, group_name, aggregations, rule_id, rule_hash, organization_id)
+         VALUES ($1,$2,101,$3,'pod-a','{avg,count}',$4,'abc123',$5)`,
         [runKey, sg.ad, metric, sg.rule, srcOrg],
       );
 
