@@ -2940,6 +2940,35 @@ index exists.
 
 ## Quality gates
 
+### Nothing runs the migrations against an empty database, and nothing forbids a `SAVEPOINT` above 1791
+
+**Priority:** P2
+**Origin:** v0.2.97.45 (2026-11-03), after a `clean.sh` + `init-demo.sh` on the dev stack died at
+migration 1799 with `25P01 SAVEPOINT can only be used in transaction blocks` and left 20 later
+migrations unapplied.
+**Why:** two gaps, one of which is the reason the other went unnoticed for months.
+
+1. **No greenfield migration run exists in any gate.** `npm run preflight` runs lint, type-check, two
+   check scripts, the RLS suite and the chart-tokens spec, none of which executes a migration; the RLS
+   suite targets an already-migrated dev database. `.github/workflows/pr-quality-gate.yml` is
+   `workflow_dispatch` only. So the only path that applies migration 1 to migration N in one batch is
+   a real fresh install, and the failure was invisible to every existing deployment — an incremental
+   deploy applies each migration in a batch whose earlier members have already run, which is exactly
+   the condition that hides this class.
+2. **No rule stops the next one.** The constraint is now written down in `apps/api/CLAUDE.md` and
+   symptom #63, and `cagg-refresh-windows.spec.ts` pins it for 1799 specifically, but nothing checks
+   the invariant: *no migration numbered above the lowest bare-`COMMIT` migration (1791) may issue a
+   `SAVEPOINT` or depend on the batch transaction.* That is a cheap static check — scan
+   `packages/shared/src/database/migrations/*.ts`, find the files issuing a bare `COMMIT`, find the
+   files matching `SAVEPOINT`, and fail when a savepoint user sorts after a commit user.
+   `ConsolidatedSchema` is the legitimate exception (it runs first).
+
+**Shape:** add the static check to `npm run preflight` beside `check:entity-migrations` — it needs no
+database, so it costs nothing. A docker-compose smoke test that migrates an empty Postgres is the
+stronger fix and the one that would also catch a broken `down()`, a missing grant and a column that
+only reaches `ConsolidatedSchema.ts` (the `SCHEMA_DRIFT_CHECK` class); it belongs in CI rather than
+preflight because it needs a container.
+
 ### `apps/api` spec files are type-checked by nothing
 
 **Priority:** P3

@@ -81,35 +81,39 @@ export class WidenCaggRefreshWindows1799000000000 implements MigrationInterface 
   private async setStartOffset(queryRunner: QueryRunner, start: string | null): Promise<void> {
     for (const p of WidenCaggRefreshWindows1799000000000.POLICIES) {
       const startOffset = start ?? p.was;
-      // SAVEPOINT, not a bare try/catch. Migrations run under
-      // runMigrations({ transaction: 'each' }), so a failing statement aborts the
-      // whole transaction (25P02) and every later statement — including TypeORM's
-      // own INSERT into the migrations table — dies with "current transaction is
-      // aborted". Catching the error is not enough to keep going; the savepoint is
-      // what actually makes the next policy runnable.
-      await queryRunner.query('SAVEPOINT cagg_refresh_policy');
-      try {
-        // No ALTER for a refresh policy — drop and re-add is the documented way.
-        await queryRunner.query(
-          `SELECT remove_continuous_aggregate_policy('${p.view}', if_not_exists => TRUE)`,
-        );
-        await queryRunner.query(`
-          SELECT add_continuous_aggregate_policy('${p.view}',
+      // A plpgsql block, and deliberately neither a bare try/catch nor a SAVEPOINT.
+      //
+      // A failing statement aborts the surrounding transaction (25P02), after which every
+      // later statement — including TypeORM's own INSERT into the migrations table — dies
+      // with "current transaction is aborted", so catching the error in JS does not make
+      // the next policy runnable. SAVEPOINT fixes that but is illegal OUTSIDE a
+      // transaction block (25P01, "SAVEPOINT can only be used in transaction blocks"),
+      // and on a GREENFIELD deploy there is no transaction here: the runner uses
+      // transaction: "all", and 1791's bare COMMIT — it needs CREATE INDEX CONCURRENTLY,
+      // which forbids a transaction — ends the whole batch's transaction several
+      // migrations before this one. An incremental deploy never reaches that state,
+      // because 1799 landed in a batch of its own, which is why this only ever failed on
+      // a fresh install.
+      //
+      // A plpgsql EXCEPTION handler is an implicit subtransaction and is legal either
+      // way, so it is the only shape that survives both. Do not "simplify" it back to a
+      // SAVEPOINT: the failure is invisible until someone installs from empty.
+      await queryRunner.query(`
+        DO $$
+        BEGIN
+          -- No ALTER for a refresh policy — drop and re-add is the documented way.
+          PERFORM remove_continuous_aggregate_policy('${p.view}', if_not_exists => TRUE);
+          PERFORM add_continuous_aggregate_policy('${p.view}',
             start_offset      => INTERVAL '${startOffset}',
             end_offset        => INTERVAL '${p.end}',
             schedule_interval => INTERVAL '${p.schedule}',
             if_not_exists     => TRUE
-          )
-        `);
-        await queryRunner.query('RELEASE SAVEPOINT cagg_refresh_policy');
-      } catch (error: unknown) {
-        // A deploy without TimescaleDB, or without these CAGGs, keeps booting.
-        await queryRunner.query('ROLLBACK TO SAVEPOINT cagg_refresh_policy');
-        console.warn(
-          `  Warning: could not set refresh window for ${p.view}:`,
-          (error as Error).message,
-        );
-      }
+          );
+        EXCEPTION WHEN OTHERS THEN
+          -- A deploy without TimescaleDB, or without these CAGGs, keeps booting.
+          RAISE WARNING 'could not set refresh window for ${p.view}: %', SQLERRM;
+        END $$;
+      `);
     }
   }
 

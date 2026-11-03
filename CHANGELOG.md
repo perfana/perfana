@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.45] - 2026-11-03
+
+### Fixed
+- **A fresh install stopped dead partway through its first migration batch.** Migration 1799 (`WidenCaggRefreshWindows`) isolated each of the 15 continuous-aggregate refresh policies behind a `SAVEPOINT`, so that a deploy without TimescaleDB, or without those aggregates, warns and keeps booting instead of aborting the batch. `SAVEPOINT` is a hard error outside a transaction block (`25P01 SAVEPOINT can only be used in transaction blocks`), and on a greenfield database there is no transaction at that point: the runner uses `transaction: "all"`, and migration 1791 issues a bare `COMMIT` — it needs `CREATE INDEX CONCURRENTLY`, which forbids a transaction — which ends the whole **batch's** transaction several migrations earlier. The install failed at 1799 with 20 later migrations unapplied, including every index and constraint added since, and the services then ran against a half-created schema.
+
+  Each policy is now one self-contained `DO` block whose plpgsql `EXCEPTION` handler is an implicit subtransaction, which is legal both inside and outside a transaction block, so the same statement works on a fresh install and on an incremental deploy. The per-policy isolation it was written for is unchanged — a missing aggregate still raises a warning and the remaining policies still apply.
+
+  **Only a fresh install was affected.** An existing deployment applied 1799 in a batch of its own, long before 1791 existed, so it never saw the combination; nothing needs re-running. The guard is a spec that refuses any `SAVEPOINT` in this migration and asserts one well-formed block per policy — the previous spec asserted the savepoint contract against a JS mock, which a real database would have rejected, and after the fix one of its cases passed vacuously (zero savepoints opened, zero closed). 1799 was the only migration pairing a `SAVEPOINT` with a later-numbered `COMMIT` escape; `ConsolidatedSchema` also uses savepoints but runs first, before any `COMMIT`.
+
 ## [0.2.97.43] - 2026-11-02
 
 ### Added
