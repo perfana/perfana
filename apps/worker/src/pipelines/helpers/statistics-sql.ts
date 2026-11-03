@@ -1,4 +1,9 @@
 /**
+ * ANY statement exported from here must be added to `SPEC` in `scripts/check-grouped-sql.mjs`,
+ * which PREPAREs each one against a real schema in `npm run preflight`. Nothing else in the repo
+ * can catch a column this file names that does not exist — see the v0.2.97.44 entry in the root
+ * CLAUDE.md Health Stack.
+ *
  * The SQL of StatisticsPipeline's aggregation, split into the pieces series grouping reuses.
  *
  * Moved here verbatim from StatisticsPipeline.aggregateMetricStatistics. With no grouped panels,

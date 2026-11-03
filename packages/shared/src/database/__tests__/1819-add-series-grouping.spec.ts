@@ -1,6 +1,8 @@
 // These specs live OUTSIDE src/database/migrations on purpose: that directory is globbed
 // as migrations by Dockerfile.migrations, ormconfig.ts and apps/api/src/data-source.ts —
 // a compiled *.spec.js there gets require()d as a migration and dies on describe().
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { AddSeriesGrouping1819000000000 as M } from '../migrations/1819000000000-AddSeriesGrouping';
 import { SERIES_GROUPING_AGGREGATIONS } from '../../utils/series-grouping';
 
@@ -64,6 +66,41 @@ describe('migration 1819 — series grouping tables', () => {
     expect(ddl).not.toMatch(/\baggregation\b(?!s)/);
     expect(ddl).not.toMatch(/track_member_count/);
     expect(ddl).not.toMatch(/member_count_name/);
+  });
+
+  /**
+   * Value: protects=the ENTITY declares no column the migrations do not create;
+   * fails_when=a @Column is added to DsMetricSeriesGroup for a retired column, or a column is
+   * dropped from the migration while the entity keeps it; why_new=the case above asserts the DDL
+   * only, and the two drifted apart in exactly that gap; seam=none; no_claim=column TYPES and
+   * nullability are not compared, only presence
+   *
+   * REGRESSION GUARD. v0.2.97.44 shipped `@Column(...) member_count_name!: string | null` on this
+   * entity while 1819 never creates that column and 1820 drops it. TypeORM names every declared
+   * column in its SELECT, so the first read of the table fails with "column does not exist", and
+   * `SCHEMA_DRIFT_CHECK` logs it at ERROR (`strict` refuses to boot). It was dormant only because
+   * nothing imports the entity yet. Asserting the DDL alone could never catch it: the drift is
+   * between the DDL and the entity, so the test has to read both.
+   */
+  it('declares no entity column the migration does not create', async () => {
+    const entity = await readFile(
+      join(__dirname, '../../entities/ds-metric-series-group.entity.ts'),
+      'utf8',
+    );
+    // Column names as TypeORM sees them: this entity spells its properties in snake_case, so the
+    // property name IS the column name. Comments are stripped — both files discuss the old names.
+    const code = entity.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    const declared = [...code.matchAll(/@Column\([^)]*\)\s*([a-z_][a-z0-9_]*)!?\s*[?:]/gi)].map(
+      (m) => m[1]!,
+    );
+    expect(declared.length).toBeGreaterThan(0);
+
+    const ddl = (await run('up')).replace(/--[^\n]*/g, '');
+    const groupsTable = /CREATE TABLE IF NOT EXISTS public\.ds_metric_series_groups \(([\s\S]*?)\n {2}\);/.exec(ddl);
+    expect(groupsTable).not.toBeNull();
+
+    const missing = declared.filter((c) => !new RegExp(`\\b${c}\\b`).test(groupsTable![1]!)).sort();
+    expect(missing).toEqual([]);
   });
 
   // Root CLAUDE.md #57: an unindexed FK child turns every parent delete into a scan per child.

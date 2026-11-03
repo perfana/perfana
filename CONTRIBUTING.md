@@ -193,11 +193,25 @@ npm run preflight
 `npm run preflight` runs, in order: lint + type-check across the monorepo,
 `check:entity-migrations` (an `@Column` added with no migration to carry it to
 existing installs), `check:workspace-exports` (an import naming an undeclared
-`@perfana/shared/...` subpath), then the API RLS test suite and the
+`@perfana/shared/...` subpath), a cached worker build plus
+`check:grouped-sql` (Postgres is asked to `PREPARE` every SQL statement the two
+statistics modules under `apps/worker/src/pipelines/helpers/` export, so a
+column name that does not resolve fails at push time instead of aborting an
+analysis transaction), then the API RLS test suite and the
 chart-tokens drift spec (`test:chart-tokens` — the report's hand copy of
 `apps/web/lib/charts/tokens.ts`, which `apps/api` cannot import). It is wired
 to `git push` via `.githooks/pre-push`, which is installed automatically when
 you run `npm install` (via the `prepare` script).
+
+Two of those steps need the local database (`perfana` on `localhost:5432` by
+default; override with the `DB_*` variables), and the RLS suite needs the Phase 5b
+migrations applied. `check:grouped-sql` skips with a message when no database
+answers, but refuses to run rather than pass quietly when the database is behind
+migration head, when the credentials or database name are wrong, or when `DB_HOST`
+is not loopback — the gate runs on every push, and a shell with staging `DB_*`
+exported would otherwise connect to it. Set `GROUPED_SQL_ALLOW_REMOTE=1` if you
+mean a remote database. A statement added to those two modules has to be added to
+`SPEC` in `scripts/check-grouped-sql.mjs` or it is not covered.
 
 If you must bypass the gate, use `git push --no-verify` — but do so sparingly,
 and only when you understand why it would otherwise fail.
