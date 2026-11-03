@@ -188,29 +188,6 @@ export class SeriesGroupResolver {
   private tablesPresent = false;
 
   /**
-   * Whether `extra_aggregations` exists on BOTH tables (migration 1820). Asked for in the same
-   * probe and for the same reason as the tables: selecting a column that does not exist is 42703
-   * INSIDE the request's RLS transaction, which aborts it (25P02) and takes every later query of
-   * the request with it.
-   *
-   * Its OWN latch, re-probed while false. An earlier version read it from whichever probe first
-   * found the tables, on the argument that 1819 and 1820 arrive in one batch so tables-without-
-   * column means a failed deploy. That is true only for a greenfield install: 1819 shipped in
-   * v0.2.97.43, so on an upgrade 1820 applies ALONE, and nothing orders the API behind the
-   * migration runner (no service declares `depends_on: perfana-migration`). One chart lookup
-   * served before the migration landed would then latch `false` for the whole process lifetime —
-   * extras invisible until someone restarts the API, nothing logged, and `groupsFromRule`
-   * hashing every rule as having no extras so the insights page reports every grouped run as
-   * stale. The cost avoided was one `pg_attribute` lookup (3 shared buffers, ~1 ms planning).
-   *
-   * BOTH tables are probed because one flag gates reads of both: `load()` selects
-   * `g.extra_aggregations` from `ds_metric_series_groups` and `r.extra_aggregations` from
-   * `series_grouping_rules`. Migration 1820 adds them in one DO block, so they move together
-   * today; asking about only one would let the other vouch for it.
-   */
-  private extrasPresent = false;
-
-  /**
    * Groups for a panel of a run, real groups only (a series nothing renamed is not one).
    *
    * @param rawNames the panel's raw series names when the caller already holds them. Only
@@ -290,27 +267,24 @@ export class SeriesGroupResolver {
   // ---------------------------------------------------------------------------------------
 
   private async ensureTables(q: SeriesQueryable): Promise<boolean> {
-    // Re-probe while EITHER answer is still negative; both latch positive independently.
-    if (this.tablesPresent && this.extrasPresent) return true;
+    if (this.tablesPresent) return true;
     const rows = await q.query(
-      // pg_attribute, not information_schema.columns: measured 3 shared buffers and ~1.0 ms of
-      // planning against 47 buffers and ~3.0 ms for the view, which is a 10-way catalog join
-      // with a per-row has_column_privilege() whose planning cost grows with the catalog (one
-      // relation per chunk per day here). to_regclass returns NULL rather than raising for a
-      // missing table, so a pre-1819 database answers false instead of erroring.
+      // to_regclass returns NULL rather than raising for a missing table, so a pre-1819
+      // database answers false instead of erroring.
+      //
+      // Table presence is the WHOLE probe, and must stay that way. A second latch for a
+      // column lived here until v0.2.97.44 and became unlatchable when that column was
+      // collapsed away — which does not break the answer (this returns `tablesPresent`) but
+      // silently turned a once-per-process catalog lookup into one per resolver call, on the
+      // path every chart and every picker open takes. A column probe is only coherent if it
+      // can latch; if one is ever needed again, probe it on BOTH tables and make every
+      // statement that NAMES it conditional, not just the SELECT.
       `SELECT to_regclass('public.ds_metric_series_groups') IS NOT NULL
-          AND to_regclass('public.series_grouping_rules') IS NOT NULL AS present,
-              (EXISTS (SELECT 1 FROM pg_attribute
-                        WHERE attrelid = to_regclass('public.series_grouping_rules')
-                          AND attname = 'extra_aggregations' AND NOT attisdropped)
-               AND EXISTS (SELECT 1 FROM pg_attribute
-                            WHERE attrelid = to_regclass('public.ds_metric_series_groups')
-                              AND attname = 'extra_aggregations' AND NOT attisdropped)) AS has_extras`,
+          AND to_regclass('public.series_grouping_rules') IS NOT NULL AS present`,
     );
     const row = Array.isArray(rows) ? rows[0] : undefined;
-    // Only positive answers are remembered: neither the tables nor the column go away again.
+    // Only a positive answer is remembered: the tables never go away again.
     if (row?.present === true) this.tablesPresent = true;
-    if (row?.has_extras === true) this.extrasPresent = true;
     return this.tablesPresent;
   }
 

@@ -14,10 +14,14 @@
  *   - Rules load BEFORE the analytics transaction, on the pooled connection, and never throw: an
  *     error inside the transaction aborts it (25P02), and statistics-calculation is not softFail,
  *     so it would fail the whole re-evaluate batch. A worker rolled out before migration 1819 finds
- *     no tables and aggregates exactly as before; one rolled out before 1820 finds the tables but
- *     not the column, and the probe reports that separately so the membership DELETE still runs
- *     (see `SeriesGroupingContext.extrasPresent` — conflating the two leaves the previous
- *     analysis's membership describing statistics that have been rewritten ungrouped).
+ *     no tables and aggregates exactly as before. The probe is table presence ONLY: 1819 creates
+ *     `aggregations` WITH the tables, so a database that has one has the other, and 1820 converts
+ *     a v0.2.97.43 database in a single guarded block. A column-level probe lived here and was
+ *     the source of a silent incoherence — the membership DELETE was gated on it while
+ *     `ds_metric_statistics` was rewritten regardless, which leaves the previous analysis's
+ *     membership describing statistics that have since been rewritten ungrouped. If a future
+ *     migration adds a column to these tables, probe it on BOTH tables and make every statement
+ *     that NAMES it conditional, not just the SELECT.
  *   - The regex runs only in JavaScript (applySeriesGrouping), never in Postgres, so the dialog's
  *     preview and the stored membership cannot disagree.
  *   - The grouped statement reads ds_metrics itself; it never references the main statement's

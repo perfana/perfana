@@ -51,19 +51,16 @@ const rule = (over: Row = {}): Row => ({
  * live-run fallback only) the read of the panel's raw names.
  */
 function queryable(
-  opts: { present?: boolean; hasExtras?: boolean; lookup?: Row[]; names?: Row[]; failLookup?: boolean } = {},
+  opts: { present?: boolean; lookup?: Row[]; names?: Row[]; failLookup?: boolean } = {},
 ) {
   const calls: Array<{ sql: string; params: unknown[] }> = [];
   const query = jest.fn(async (sql: string, params: unknown[] = []) => {
     calls.push({ sql, params });
     if (sql.includes('to_regclass')) {
-      return [{ present: opts.present ?? true, has_extras: opts.hasExtras ?? true }];
+      return [{ present: opts.present ?? true }];
     }
     if (/\bFROM ds_metrics\b/.test(sql)) return opts.names ?? [];
     if (opts.failLookup) throw new Error('boom');
-    // Honour the projection, as Postgres does: a statement that selected NULL::text[] cannot
-    // hand the column back. Returning the fixture regardless made the pre-1820 arm's
-    // behavioural assertion a fixture echo — it passed with the conditional deleted.
     return opts.lookup ?? [];
   });
   return { query, calls };

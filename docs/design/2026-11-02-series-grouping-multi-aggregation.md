@@ -9,8 +9,17 @@ statement and its measurements are still the record of why the feature exists.
 
 Every series a renamed group emits is suffixed: `api (avg)`, `api (sum)`, `api (max)`,
 `api (count)`. There is no primary and no bare `api`. A rule carries ONE column,
-`series_grouping_rules.aggregations varchar(8)[]`, created by migration **1819** — the follow-up
-migration 1820 this spec called for does not exist.
+`series_grouping_rules.aggregations varchar(8)[]`, created by migration **1819**.
+
+Migration **1820** exists but does something other than what §"Schema (migration 1820)" below
+describes: rather than adding an extras column beside `aggregation`, it **collapses** the
+v0.2.97.43 columns (`aggregation`, `track_member_count`, `extra_aggregations`,
+`member_count_name`) into `aggregations`. It is needed because v0.2.97.43 is merged and shipped the
+old shape, and editing 1819 never reaches a database that already ran it. It is idempotent and a
+no-op on a fresh install, where 1819 creates the collapsed shape directly in the same batch. One
+asymmetry worth knowing: a membership row for a group the rule did **not** rename converts to an
+EMPTY array, not to its old `aggregation`, because such a group passes through under its own name
+and emits no derived series.
 
 **The asymmetry this spec is built on only buys something where stored names already exist.** Its
 whole argument for keeping one series unsuffixed is that `ds_metric_statistics`,
@@ -156,7 +165,11 @@ sends the reader looking for a new series name.
 a saved graph preset or report-section selection (a blank chart, nothing logged), and
 `ds_adapt_tracked_results`. The dialog warns on removal for that reason.
 
-## Schema (migration 1820)
+## Schema (migration 1820) — SUPERSEDED
+
+> Not what shipped. 1819 creates `aggregations` directly and 1820 collapses the old columns into
+> it; see the header. The section is kept because the reasoning below is what the header argues
+> against.
 
 Add one column to each of the two tables. Keep the existing `aggregation` column exactly as it is —
 every current reader keeps working untouched.
