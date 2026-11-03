@@ -74,7 +74,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^15.5.2",
     "pg-mem": "^2.6.13",
-    "prettier": "^3.0.3",
+    "prettier": "^3.9.10",
     "rimraf": "^5.0.5",
     "supertest": "^6.3.3",
     "testcontainers": "^10.2.1",
