@@ -98,56 +98,67 @@ describe('WidenCaggRefreshWindows', () => {
   });
 
   it('keeps going when one view is missing or TimescaleDB is absent', async () => {
-    // A deploy without these CAGGs must still boot: one failing view cannot
-    // abort the loop and leave the remaining 14 policies un-widened.
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { runner, sql } = recordingRunner('requests_raw_5s');
-
-    await expect(new WidenCaggRefreshWindows1799000000000().up(runner)).resolves.toBeUndefined();
-
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('requests_raw_5s'), 'boom');
-    // 14 survivors still got their add; the failing view got its remove only.
-    expect(startOffsetsIn(sql)).toHaveLength(14);
-    warn.mockRestore();
-  });
-
-  it('rolls the failing view back to a savepoint so the transaction stays usable', async () => {
-    // Migrations run under transaction: 'each'. A failed statement aborts the
-    // whole transaction (25P02) and everything after it — including TypeORM's
-    // INSERT into the migrations table — dies with "current transaction is
-    // aborted". A bare try/catch does NOT survive that; only the savepoint does.
-    // Verified against Postgres directly, not just this mock.
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { runner, sql } = recordingRunner('requests_raw_5s');
-
-    await new WidenCaggRefreshWindows1799000000000().up(runner);
-
-    expect(sql.filter((q) => q === 'SAVEPOINT cagg_refresh_policy')).toHaveLength(15);
-    // The one failure rolls back; the 14 successes release.
-    expect(sql.filter((q) => q === 'ROLLBACK TO SAVEPOINT cagg_refresh_policy')).toHaveLength(1);
-    expect(sql.filter((q) => q === 'RELEASE SAVEPOINT cagg_refresh_policy')).toHaveLength(14);
-
-    // The rollback must land before the next policy's savepoint, or the next
-    // statement runs inside the still-aborted transaction.
-    const rollbackAt = sql.indexOf('ROLLBACK TO SAVEPOINT cagg_refresh_policy');
-    const nextAdd = sql.findIndex((q, i) => i > rollbackAt && q.includes('add_continuous_aggregate_policy'));
-    expect(rollbackAt).toBeGreaterThan(-1);
-    expect(nextAdd).toBeGreaterThan(rollbackAt);
-    warn.mockRestore();
-  });
-
-  it('always pairs every savepoint with a release or a rollback', async () => {
-    // A leaked savepoint holds locks for the rest of the migration.
+    // A deploy without these CAGGs must still boot: one failing view cannot abort the
+    // loop and leave the remaining 14 policies un-widened. Containment is now a property
+    // of the SQL rather than of this loop — each policy is ONE self-contained statement
+    // whose plpgsql EXCEPTION handler swallows its own failure — so the assertion is
+    // structural. Verified against a real Postgres: a DO block naming a non-existent view
+    // emits `WARNING: could not set refresh window for ...` and the NEXT statement still
+    // runs, both inside and outside a transaction block.
     const { runner, sql } = recordingRunner();
     await new WidenCaggRefreshWindows1799000000000().up(runner);
 
-    const opened = sql.filter((q) => q === 'SAVEPOINT cagg_refresh_policy').length;
-    const closed = sql.filter(
-      (q) =>
-        q === 'RELEASE SAVEPOINT cagg_refresh_policy' ||
-        q === 'ROLLBACK TO SAVEPOINT cagg_refresh_policy',
-    ).length;
-    expect(closed).toBe(opened);
+    expect(sql).toHaveLength(15);
+    for (const [i, q] of sql.entries()) {
+      // Each statement must carry its own handler naming its own view. A shared handler,
+      // or one policy emitted without one, is a view that can still abort the batch.
+      expect(q).toMatch(/EXCEPTION WHEN OTHERS THEN/);
+      expect(q).toContain(`could not set refresh window for ${POLICIES[i]!.view}`);
+      expect(q).toContain(`'${POLICIES[i]!.view}'`);
+    }
+  });
+
+  it('contains each failure in a plpgsql block and never issues a SAVEPOINT', async () => {
+    // REGRESSION GUARD, and the reason this migration does not use the obvious tool.
+    //
+    // A failed statement aborts the surrounding transaction (25P02) and everything after
+    // it — including TypeORM's INSERT into the migrations table — dies with "current
+    // transaction is aborted", so a bare try/catch cannot keep the loop going. SAVEPOINT
+    // fixes that INSIDE a transaction and is a hard error outside one:
+    //
+    //   25P01  SAVEPOINT can only be used in transaction blocks
+    //
+    // On a GREENFIELD install there is no transaction here. The runner uses
+    // transaction: "all", and 1791 issues a bare COMMIT (it needs CREATE INDEX
+    // CONCURRENTLY, which forbids a transaction), which ends the whole BATCH's
+    // transaction — not just its own — several migrations before this one. An incremental
+    // deploy never reaches that state, because 1799 landed in a batch of its own; so this
+    // failed on fresh installs only, and every existing deploy was fine. Observed
+    // 2026-11-03: a wiped dev stack stopped dead at 1799 with 20 migrations unapplied.
+    //
+    // A plpgsql EXCEPTION handler is an implicit subtransaction and is legal either way,
+    // which is the only shape that survives both.
+    const { runner, sql } = recordingRunner();
+    await new WidenCaggRefreshWindows1799000000000().up(runner);
+
+    expect(sql.join('\n')).not.toMatch(/SAVEPOINT/i);
+    expect(sql.filter((q) => /DO \$\$/.test(q))).toHaveLength(15);
+  });
+
+  it('emits a well-formed, self-closing plpgsql block per policy', async () => {
+    // An unbalanced block takes the rest of the migration's SQL into its own body, and
+    // the failure is a syntax error hundreds of lines away from the cause.
+    const { runner, sql } = recordingRunner();
+    await new WidenCaggRefreshWindows1799000000000().up(runner);
+
+    for (const q of sql) {
+      expect((q.match(/\$\$/g) ?? []).length).toBe(2);
+      expect(q).toMatch(/DO \$\$\s*BEGIN[\s\S]*EXCEPTION WHEN OTHERS THEN[\s\S]*END \$\$/);
+      // PERFORM, not SELECT: a bare SELECT of a set-returning policy call is a syntax
+      // error inside plpgsql, and that is only reachable at migrate time.
+      expect(q).toMatch(/PERFORM remove_continuous_aggregate_policy/);
+      expect(q).toMatch(/PERFORM add_continuous_aggregate_policy/);
+    }
   });
 
   it('never lets a refresh window fall back below a full day', () => {

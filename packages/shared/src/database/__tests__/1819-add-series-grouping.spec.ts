@@ -2,6 +2,7 @@
 // as migrations by Dockerfile.migrations, ormconfig.ts and apps/api/src/data-source.ts —
 // a compiled *.spec.js there gets require()d as a migration and dies on describe().
 import { AddSeriesGrouping1819000000000 as M } from '../migrations/1819000000000-AddSeriesGrouping';
+import { SERIES_GROUPING_AGGREGATIONS } from '../../utils/series-grouping';
 
 const run = async (direction: 'up' | 'down'): Promise<string> => {
   const queries: string[] = [];
@@ -31,11 +32,38 @@ describe('migration 1819 — series grouping tables', () => {
     expect(sql).toMatch(/CHECK \(\(preset = 'custom'\) = \(pattern IS NOT NULL\)\)/);
   });
 
-  it('constrains preset, aggregation and origin to the known values', async () => {
+  it('constrains preset and origin to the known values', async () => {
     const sql = await run('up');
     expect(sql).toMatch(/preset IN \('k8s-pod', ?'k8s-daemonset', ?'ip-port', ?'trailing-id', ?'custom'\)/);
-    expect(sql).toMatch(/aggregation IN \('avg', ?'sum', ?'max'\)/);
     expect(sql).toMatch(/origin IN \('manual', ?'suggestion', ?'copy'\)/);
+  });
+
+  /**
+   * Value:
+   *   protects — `aggregations` is a LIST, and both halves of its CHECK matter: the `<@` bounds
+   *     it to the values the code knows, and `array_length >= 1` refuses a rule that would emit
+   *     no series at all while still excluding its panels from the main statistics statement.
+   *   fails_when — the list is spelled by hand and drifts from `SERIES_GROUPING_AGGREGATIONS`,
+   *     so the DTO accepts a value the CHECK then rejects with a 23514 nobody translates (a 500).
+   *     Built from the shared constant for that reason, never typed out.
+   *   seam — the CHECK text against the one list the DTO and the dialog also read.
+   */
+  it('constrains the aggregations list to the values the code knows, and refuses an empty one', async () => {
+    const sql = await run('up');
+    const expected = SERIES_GROUPING_AGGREGATIONS.map((a) => `'${a}'`).join(', ');
+    expect(sql).toContain(`aggregations <@ ARRAY[${expected}]::character varying(8)[]`);
+    expect(sql).toMatch(/array_length\(aggregations, 1\) >= 1/);
+  });
+
+  // The old singular `aggregation` and `track_member_count` are folded into that one list; a
+  // leftover column would be written by nothing and read as authoritative by the next reader.
+  // Asserted against the DDL with its comments stripped — the docblock mentions the old names on
+  // purpose, and a test that reads prose fails on an edit that changes nothing it is about.
+  it('carries no singular aggregation or member-count column', async () => {
+    const ddl = (await run('up')).replace(/--[^\n]*/g, '');
+    expect(ddl).not.toMatch(/\baggregation\b(?!s)/);
+    expect(ddl).not.toMatch(/track_member_count/);
+    expect(ddl).not.toMatch(/member_count_name/);
   });
 
   // Root CLAUDE.md #57: an unindexed FK child turns every parent delete into a scan per child.
@@ -78,6 +106,21 @@ describe('migration 1819 — series grouping tables', () => {
     expect(sql).toMatch(/EXCEPTION WHEN lock_not_available/);
     expect(sql).toMatch(/pg_sleep\(3\)/);
     expect(sql).toMatch(/attempt >= 10/);
+  });
+
+  // The runner uses transaction: "all" — ONE transaction for the whole batch — so a 3s
+  // lock_timeout left in place leaks into every migration numbered above this one, where it
+  // surfaces as 55P03 instead of a wait. Restoring the CAPTURED ENTRY VALUE is the only correct
+  // form: `'0'` means UNLIMITED, which would strip a deployment's configured lock_timeout from
+  // the rest of the batch, and `DEFAULT` resolves to the conf value, clobbering a SET LOCAL an
+  // earlier migration set for itself.
+  it.each(['up', 'down'] as const)('restores the lock_timeout it captured on %s entry', async (dir) => {
+    const sql = await run(dir);
+    expect(sql).toMatch(/prev_lock_timeout text := current_setting\('lock_timeout'\)/);
+    const restores = [...sql.matchAll(/set_config\('lock_timeout',\s*prev_lock_timeout,\s*true\)/g)];
+    expect(restores).toHaveLength(2); // the success path and before the RAISE
+    expect(sql).not.toMatch(/set_config\('lock_timeout',\s*'0'/);
+    expect(sql).not.toMatch(/lock_timeout\s*=\s*DEFAULT/);
   });
 
   it('drops the derived table before the rules table it references', async () => {

@@ -820,7 +820,7 @@ three web surfaces: suggestions and a stale notice on the anomaly card
 (`anomaly-detection/components/SeriesGroupingNotices.tsx`), a **Series grouping** section in a
 dashboard's settings (`systems/[id]/config/components/SeriesGroupingRulesSection.tsx`), and the
 `N pods` badge plus **show pods** switch in the series picker. All of them open one dialog,
-`components/series-grouping/SeriesGroupingDialog.tsx`. Six things are easy to undo:
+`components/series-grouping/SeriesGroupingDialog.tsx`. Seven things are easy to undo:
 
 1. **The picker learns a panel's groups from `/ds-metrics/distinct-series`, not from
    `/ds-metrics/available`.** The plan said `available`, and that would have shipped a badge that
@@ -836,22 +836,46 @@ dashboard's settings (`systems/[id]/config/components/SeriesGroupingRulesSection
    panel is switched — the third (`memberPanels`) only appears when one is — so the common call is
    unchanged. Switching a panel drops the draft picks on it, because they name series the column
    no longer lists.
-3. **The dialog fetches names once per scope and regroups on every keystroke client-side.** Only
+3. **One control picks every series a group emits (v0.2.97.44).** **Series per group** is a single
+   `FormGroup` of four checkboxes — Average per pod, Total, Highest pod, Number of pods — and each
+   ticked box is one series named `<group> (avg)` / `(sum)` / `(max)` / `(count)`. There is no
+   primary, no radio, and no bare `api`. It replaced three controls (Combine / Also add / Also
+   track) that were one question split three ways; the split existed only to keep one series
+   unsuffixed for stored baselines, which a greenfield feature does not have. Five rules:
+
+   - **Save is disabled with nothing ticked**, and an Alert says why. A rule that emits nothing
+     still excludes its panels from the main statistics statement, so the panel would lose every
+     series rather than keeping its pods — and the DTO and the CHECK both refuse it anyway, which
+     without this guard is a 400 on a form that looked valid.
+   - **The series are previewed as sub-lines under the group name**, never as extra rows, so the
+     *After: N of M groups match* figure keeps counting **groups**: ticking a box must not inflate
+     a number that is about baseline matching. The series count is printed separately.
+   - **Unticking a box on a SAVED rule warns**, because `deleteOrphanedResults` covers
+     `ds_adapt_results` only — an SLO, a graph preset or a report section on that name just stops
+     matching, with nothing logged.
+   - **The order of the ticks never reaches the server.** `normalizeAggregations` canonicalises
+     before the spec is built, because the rule hash is taken over that list and the insights page
+     reads a changed hash as "this run is stale".
+   - **A `FormLabel` + `role="group"`, not `aria-label` on the `FormGroup`.** MUI renders
+     `FormGroup` as a plain `<div>` with no role, where `aria-label` is ignored by assistive tech,
+     and a checkbox reading `Total as "… (sum)"` means nothing without its group.
+
+4. **The dialog fetches names once per scope and regroups on every keystroke client-side.** Only
    the SLO check depends on the rule (it needs stored SLO patterns), so `useSeriesGroupingPreview`
    re-asks the preview for it 600 ms after the rule stops changing, never for a rule that does not
    compile, and shows "Checking SLOs…" instead of a warning list computed for a different rule.
    Changing "This panel" ↔ "All panels" is a different name list and refetches.
-4. **The dialog's state is initialised from its props on the first render**, not only by the
+5. **The dialog's state is initialised from its props on the first render**, not only by the
    reset-on-open effect. The preview fetches on the first commit, and a first render with a
    placeholder scope (`panelId: null`) fetched the whole dashboard and then the panel — two
    requests per open, caught by the "fetched once" test.
-5. **The anomaly notices refetch when the card's `anomalyData` array is replaced**, which is what
+6. **The anomaly notices refetch when the card's `anomalyData` array is replaced**, which is what
    happens after a re-evaluate lands. A requested recalculation keeps the stale notice reading
    "Recalculation requested" until then: the status endpoint still describes the old statistics,
    and repeating the warning right after the user acted would read as a failure. Dismissals are
    per browser (`lib/safe-storage.ts`, `perfana.seriesGrouping.dismissed.<sut>.<env>.<workload>.<dashboard>.<panel>`),
    a convenience only.
-6. **The settings section is gated on a selected workload** (rules are per workload, the dashboard
+7. **The settings section is gated on a selected workload** (rules are per workload, the dashboard
    list is per environment) and is not rendered at all for a `performance-test-metrics-` dashboard,
    which the API refuses.
 

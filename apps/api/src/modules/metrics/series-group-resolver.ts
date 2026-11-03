@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   applySeriesGrouping,
   compileSeriesGroupingRule,
+  groupSeriesName,
   type SeriesGroupingAggregation,
   type SeriesGroupingPreset,
   type SeriesGroupingRuleSpec,
@@ -68,13 +69,17 @@ export interface PanelRef {
 }
 
 export interface SeriesGroup {
-  /** The name a client sees: a group name, or a member-count name when `aggregation` is `count`. */
+  /** The group name. Its series are `<group> (avg)` and friends, one per entry in `aggregations`. */
   group: string;
   /** Raw series names in `ds_metrics`, sorted. */
   members: string[];
-  aggregation: SeriesValueAggregation;
-  /** This group's member-count series name, when the rule tracks one. Never set on a count entry. */
-  memberCountName: string | null;
+  /**
+   * Which series this group emits. Empty for a group the rule did not rename: it passes through
+   * under its own name and has no derived series at all.
+   */
+  aggregations: SeriesGroupingAggregation[];
+  /** False means the rule left this series alone, so it keeps its raw name. */
+  renamed: boolean;
 }
 
 interface MembershipRow {
@@ -84,8 +89,7 @@ interface MembershipRow {
   panel_title: string | null;
   metric_name: string;
   group_name: string;
-  aggregation: SeriesGroupingAggregation;
-  member_count_name: string | null;
+  aggregations: SeriesGroupingAggregation[];
 }
 
 interface RuleRow {
@@ -129,13 +133,14 @@ function groupsFromMembership(rows: readonly MembershipRow[]): SeriesGroup[] {
     const existing = byGroup.get(row.group_name);
     if (existing) {
       existing.members.push(row.metric_name);
-      existing.memberCountName ??= row.member_count_name;
     } else {
       byGroup.set(row.group_name, {
         group: row.group_name,
         members: [row.metric_name],
-        aggregation: row.aggregation,
-        memberCountName: row.member_count_name,
+        aggregations: row.aggregations,
+        // A stored membership row only exists for a panel a rule covered, and only a RENAMED
+        // group has aggregations: the statistics' own record of which series it wrote.
+        renamed: row.aggregations.length > 0,
       });
     }
   }
@@ -155,8 +160,8 @@ function groupsFromRule(spec: SeriesGroupingRuleSpec, rawNames: readonly string[
     groups.push({
       group,
       members: [...members],
-      aggregation: spec.aggregation,
-      memberCountName: result.memberCountNames.get(group) ?? null,
+      aggregations: result.seriesAggregations.get(group) ?? [],
+      renamed: result.isRenamed.get(group) === true,
     });
   }
   return groups;
@@ -219,7 +224,7 @@ export class SeriesGroupResolver {
     q: SeriesQueryable,
     ref: PanelRef,
     names: readonly string[],
-  ): Promise<{ raw: string[]; groups: SeriesGroup[] }> {
+  ): Promise<{ raw: string[]; groups: ResolvedSeries[] }> {
     if (names.length === 0) return { raw: [], groups: [] };
     return expandSeriesNames(await this.groupsForPanel(q, ref), names);
   }
@@ -264,10 +269,22 @@ export class SeriesGroupResolver {
   private async ensureTables(q: SeriesQueryable): Promise<boolean> {
     if (this.tablesPresent) return true;
     const rows = await q.query(
+      // to_regclass returns NULL rather than raising for a missing table, so a pre-1819
+      // database answers false instead of erroring.
+      //
+      // Table presence is the WHOLE probe, and must stay that way. A second latch for a
+      // column lived here until v0.2.97.44 and became unlatchable when that column was
+      // collapsed away — which does not break the answer (this returns `tablesPresent`) but
+      // silently turned a once-per-process catalog lookup into one per resolver call, on the
+      // path every chart and every picker open takes. A column probe is only coherent if it
+      // can latch; if one is ever needed again, probe it on BOTH tables and make every
+      // statement that NAMES it conditional, not just the SELECT.
       `SELECT to_regclass('public.ds_metric_series_groups') IS NOT NULL
           AND to_regclass('public.series_grouping_rules') IS NOT NULL AS present`,
     );
-    this.tablesPresent = Array.isArray(rows) && rows[0]?.present === true;
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    // Only a positive answer is remembered: the tables never go away again.
+    if (row?.present === true) this.tablesPresent = true;
     return this.tablesPresent;
   }
 
@@ -287,17 +304,17 @@ export class SeriesGroupResolver {
       `SELECT 'm'::text AS kind, g.application_dashboard_id, g.panel_id,
               g.dashboard_label::text AS dashboard_label, g.panel_title::text AS panel_title,
               g.metric_name::text AS metric_name, g.group_name::text AS group_name,
-              g.aggregation::text AS aggregation, g.member_count_name::text AS member_count_name,
+              g.aggregations::text[] AS aggregations,
               NULL::text AS preset, NULL::text AS pattern, NULL::text AS replacement,
-              NULL::boolean AS track_member_count
+
          FROM ds_metric_series_groups g
         WHERE g.test_run_id = $1 AND ${membershipWhere}
        UNION ALL
        SELECT 'r'::text, r.application_dashboard_id, r.panel_id,
               ad.dashboard_label::text, NULL::text,
               NULL::text, NULL::text,
-              r.aggregation::text, NULL::text,
-              r.preset::text, r.pattern, r.replacement, r.track_member_count
+              r.aggregations::text[],
+              r.preset::text, r.pattern, r.replacement
          FROM series_grouping_rules r
          JOIN test_runs tr
            ON tr.test_run_id = $1
@@ -326,8 +343,7 @@ export class SeriesGroupResolver {
           panel_title: row.panel_title,
           metric_name: row.metric_name,
           group_name: row.group_name,
-          aggregation: row.aggregation,
-          member_count_name: row.member_count_name ?? null,
+          aggregations: Array.isArray(row.aggregations) ? row.aggregations : [],
         });
       } else {
         rules.push({
@@ -338,8 +354,7 @@ export class SeriesGroupResolver {
             preset: row.preset as SeriesGroupingPreset,
             pattern: row.pattern,
             replacement: row.replacement,
-            aggregation: row.aggregation,
-            trackMemberCount: row.track_member_count === true,
+            aggregations: Array.isArray(row.aggregations) ? row.aggregations : [],
           },
         });
       }
@@ -460,45 +475,86 @@ export class SeriesGroupResolver {
 }
 
 /**
- * Split requested names against a panel's groups. A group name becomes its members; a
- * member-count name becomes its group's members with the `count` aggregation; anything else
- * is a raw name and passes through. Pure, so a caller that reads many series of one panel
- * can look the groups up once.
+ * One requested series, resolved to the raw members it reads and how to combine them.
+ *
+ * Distinct from `SeriesGroup` on purpose: a group is a set of members, while this is ONE of the
+ * series that group emits. Conflating them is what made the old shape carry an `aggregation`
+ * beside a `memberCountName` and a list of extras, so a reader could not tell whether an instance
+ * described a group or a series.
+ */
+export interface ResolvedSeries {
+  /** The series name the caller asked for, e.g. `api (sum)`. */
+  name: string;
+  /** Raw series names in `ds_metrics`, sorted. */
+  members: string[];
+  aggregation: SeriesValueAggregation;
+}
+
+/**
+ * Split requested names against a panel's groups. A derived name (`api (sum)`) becomes its
+ * group's members combined with that aggregation; anything else is a raw name and passes
+ * through. Pure, so a caller that reads many series of one panel can look the groups up once.
  */
 export function expandSeriesNames(
   available: readonly SeriesGroup[],
   names: readonly string[],
-): { raw: string[]; groups: SeriesGroup[] } {
+): { raw: string[]; groups: ResolvedSeries[] } {
   if (available.length === 0) return { raw: [...names], groups: [] };
 
-  const byName = new Map<string, SeriesGroup>();
+  // Every raw member name, so a derived name can never shadow real data (below).
+  const rawMembers = new Set<string>();
+  for (const g of available) for (const m of g.members) rawMembers.add(m);
+
+  const byName = new Map<string, ResolvedSeries>();
   for (const g of available) {
-    byName.set(g.group, g);
-    // The worker drops a member-count name that collides with a real series, in which case
-    // memberCountName is null here and there is nothing to add.
-    if (g.memberCountName && !byName.has(g.memberCountName)) {
-      byName.set(g.memberCountName, {
-        group: g.memberCountName,
-        members: g.members,
-        aggregation: 'count',
-        memberCountName: null,
-      });
+    for (const aggregation of g.aggregations) {
+      const name = groupSeriesName(g.group, aggregation);
+      // A raw series literally named `api (sum)` wins and the derived one is dropped rather than
+      // shadowing real data — the same guard the worker applies when it decides what to write,
+      // so the two agree about which name belongs to which series.
+      if (rawMembers.has(name) || byName.has(name)) continue;
+      byName.set(name, { name, members: g.members, aggregation });
     }
   }
 
   const raw: string[] = [];
-  const groups: SeriesGroup[] = [];
+  const groups: ResolvedSeries[] = [];
   const seen = new Set<string>();
   for (const name of names) {
     const hit = byName.get(name);
     if (!hit) {
       raw.push(name);
-    } else if (!seen.has(hit.group)) {
-      seen.add(hit.group);
+    } else if (!seen.has(hit.name)) {
+      seen.add(hit.name);
       groups.push(hit);
     }
   }
   return { raw, groups };
+}
+
+/**
+ * Every series a set of groups emits, resolved. The counterpart of `expandSeriesNames` for a
+ * caller that asked for a whole panel rather than for named series.
+ *
+ * A group the rule did not rename contributes its own single series under its own name: its
+ * `aggregations` is empty, so the loop below yields nothing for it and the caller reads it as a
+ * raw name instead — which is what `excludeNames` at the call sites is for.
+ */
+export function allSeriesOf(groups: readonly SeriesGroup[]): ResolvedSeries[] {
+  const out: ResolvedSeries[] = [];
+  const rawMembers = new Set<string>();
+  for (const g of groups) for (const m of g.members) rawMembers.add(m);
+  const seen = new Set<string>();
+  for (const g of groups) {
+    for (const aggregation of g.aggregations) {
+      const name = groupSeriesName(g.group, aggregation);
+      // Same guard as expandSeriesNames: a raw series of that literal name wins.
+      if (rawMembers.has(name) || seen.has(name)) continue;
+      seen.add(name);
+      out.push({ name, members: g.members, aggregation });
+    }
+  }
+  return out;
 }
 
 /**
@@ -521,8 +577,10 @@ export function mapNamesToGroups(
       names.add(raw);
       continue;
     }
-    names.add(g.group);
-    if (g.memberCountName) names.add(g.memberCountName);
+    // A renamed group is listed as its derived series; one the rule left alone keeps its own
+    // name, which is also `g.group` for a group of one.
+    if (g.renamed) for (const a of g.aggregations) names.add(groupSeriesName(g.group, a));
+    else names.add(g.group);
     const members = used.get(g.group) ?? new Set<string>();
     members.add(raw);
     used.set(g.group, members);
@@ -541,8 +599,8 @@ export interface SeriesRelationOptions {
   conditions: readonly string[];
   /** The values `conditions` bind, as `$1..$n`. Not mutated. */
   params: readonly unknown[];
-  /** Series answered by combining their members per timestamp. */
-  groups?: readonly SeriesGroup[];
+  /** Series answered by combining their members per timestamp (from `expandSeriesNames`). */
+  groups?: readonly ResolvedSeries[];
   /** Plain series, by exact name. */
   rawNames?: readonly string[];
   /** Plain series: every series EXCEPT these. */
@@ -603,7 +661,7 @@ export function buildSeriesRelation(opts: SeriesRelationOptions): { sql: string;
     for (const g of groups) {
       for (const m of g.members) {
         members.push(m);
-        names.push(g.group);
+        names.push(g.name);
         aggregations.push(g.aggregation);
       }
     }

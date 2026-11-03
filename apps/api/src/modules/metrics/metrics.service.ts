@@ -20,6 +20,8 @@ import {
   mapNamesToGroups,
   seriesPanelKey,
   type PanelRef,
+  allSeriesOf,
+  type ResolvedSeries,
   type SeriesGroup,
 } from './series-group-resolver';
 
@@ -76,7 +78,7 @@ export interface ControlGroupTrendResult {
 
 /** What a group-aware read hands `buildSeriesRelation`. */
 interface GroupedRead {
-  groups: SeriesGroup[];
+  groups: ResolvedSeries[];
   rawNames?: string[];
   excludeNames?: string[];
 }
@@ -85,8 +87,8 @@ interface GroupedRead {
 export interface SeriesGroupSummary {
   group: string;
   members: string[];
-  aggregation: string;
-  member_count_name?: string;
+  /** The aggregations this group emits, each as a `<group> (agg)` series. */
+  aggregations: string[];
 }
 
 /** `/ds-metrics/distinct-series`: the names `/distinct-names` answers, plus the groups among them. */
@@ -99,8 +101,9 @@ function toSeriesGroupSummaries(groups: readonly SeriesGroup[]): SeriesGroupSumm
   return groups.map((g) => ({
     group: g.group,
     members: g.members,
-    aggregation: g.aggregation,
-    ...(g.memberCountName ? { member_count_name: g.memberCountName } : {}),
+    // The series this group emits, so the picker can badge it and name them without re-deriving
+    // the suffix rule. Empty for a group the rule did not rename: it is its own single series.
+    aggregations: g.aggregations,
   }));
 }
 
@@ -520,7 +523,10 @@ export class MetricsService {
     if (!metricName) {
       if (members) return undefined;
       const groups = await this.seriesGroups.groupsForPanel(this.groupingExecutor(), ref);
-      return groups.length === 0 ? undefined : { groups, excludeNames: groups.flatMap((g) => g.members) };
+      if (groups.length === 0) return undefined;
+      // Every series every group emits; the members are excluded so a grouped panel reports its
+      // derived series rather than the raw pods behind them.
+      return { groups: allSeriesOf(groups), excludeNames: groups.flatMap((g) => g.members) };
     }
     const { groups } = await this.seriesGroups.expand(this.groupingExecutor(), ref, [metricName]);
     if (groups.length === 0) return undefined;

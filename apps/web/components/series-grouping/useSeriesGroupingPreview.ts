@@ -18,7 +18,7 @@ import {
 export const SLO_RECHECK_DEBOUNCE_MS = 600;
 
 /** A spec the server accepts even when the user's draft is mid-edit; the names do not depend on it. */
-const NAMES_ONLY_SPEC: SeriesGroupingRuleSpec = { preset: 'k8s-pod', aggregation: 'avg', trackMemberCount: false };
+const NAMES_ONLY_SPEC: SeriesGroupingRuleSpec = { preset: 'k8s-pod', aggregations: ['avg'] };
 
 export interface SeriesGroupingPreviewScope {
   testRunId?: string;

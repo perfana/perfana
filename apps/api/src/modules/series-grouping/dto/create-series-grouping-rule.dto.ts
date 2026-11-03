@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayNotEmpty,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
@@ -13,6 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { SERIES_GROUPING_AGGREGATIONS } from '@perfana/shared/utils';
 import type { SeriesGroupingAggregation, SeriesGroupingPreset } from '@perfana/shared/utils';
 
 export const SERIES_GROUPING_PRESET_VALUES: readonly SeriesGroupingPreset[] = [
@@ -22,7 +25,13 @@ export const SERIES_GROUPING_PRESET_VALUES: readonly SeriesGroupingPreset[] = [
   'trailing-id',
   'custom',
 ];
-export const SERIES_GROUPING_AGGREGATION_VALUES: readonly SeriesGroupingAggregation[] = ['avg', 'sum', 'max'];
+/**
+ * Re-exported, never re-declared. A second literal list is how the DTO's `@IsIn`, the dialog's
+ * controls and migration 1819's CHECK drift apart: a list typed as a SUBSET of the union lets a
+ * new aggregation type-check everywhere while one layer silently rejects it (the DTO with a 400,
+ * or the CHECK with a 23514 the service does not translate).
+ */
+export const SERIES_GROUPING_AGGREGATION_VALUES = SERIES_GROUPING_AGGREGATIONS;
 
 /** Another workload of the SAME system to create the rule for as well (design Decision 2). */
 export class SeriesGroupingCopyTargetDto {
@@ -85,13 +94,20 @@ export class CreateSeriesGroupingRuleDto {
   @MaxLength(255)
   replacement?: string;
 
-  @ApiProperty({ enum: SERIES_GROUPING_AGGREGATION_VALUES, description: 'How members combine per timestamp' })
-  @IsIn(SERIES_GROUPING_AGGREGATION_VALUES as string[])
-  aggregation!: SeriesGroupingAggregation;
-
-  @ApiProperty({ description: 'Also write a "<group> (pod count)" series per group' })
-  @IsBoolean()
-  trackMemberCount!: boolean;
+  @ApiProperty({
+    enum: SERIES_GROUPING_AGGREGATION_VALUES,
+    isArray: true,
+    description:
+      'Which series a renamed group emits, one each, named "<group> (avg)" / "(sum)" / "(max)" / ' +
+      '"(count)". At least one. Every one is suffixed and none keeps the bare group name, so ' +
+      'adding or removing one never changes what an existing series measures. "count" is the ' +
+      'number of members reporting at a timestamp.',
+  })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsIn(SERIES_GROUPING_AGGREGATION_VALUES as string[], { each: true })
+  aggregations!: SeriesGroupingAggregation[];
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()

@@ -55,8 +55,7 @@ const rule = (id: string, panelId: number | null, extra: Record<string, unknown>
   preset: 'k8s-pod',
   pattern: null,
   replacement: '',
-  aggregation: 'avg',
-  trackMemberCount: true,
+  aggregations: ['avg', 'count'],
   enabled: true,
   origin: 'manual',
   createdAt: '',
@@ -104,7 +103,7 @@ describe('EditDashboardDialog — series grouping section', () => {
     mockFetch.mockResolvedValue(
       jsonResponse([
         rule('r-1', null),
-        rule('r-2', 4, { preset: 'custom', pattern: '-[a-z0-9]{5}$', aggregation: 'max', trackMemberCount: false, enabled: false }),
+        rule('r-2', 4, { preset: 'custom', pattern: '-[a-z0-9]{5}$', aggregations: ['max'], enabled: false }),
       ]),
     );
     renderDialog('peak');

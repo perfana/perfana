@@ -31,8 +31,8 @@ export interface SeriesGroupingRuleResponse {
   preset: SeriesGroupingPreset;
   pattern: string | null;
   replacement: string;
-  aggregation: SeriesGroupingAggregation;
-  trackMemberCount: boolean;
+  /** Which series this rule emits, each named `<group> (avg)` and so on. At least one. */
+  aggregations: SeriesGroupingAggregation[];
   enabled: boolean;
   origin: SeriesGroupingRuleOrigin;
   createdBy?: string;

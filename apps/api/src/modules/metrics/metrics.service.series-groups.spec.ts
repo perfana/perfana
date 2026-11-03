@@ -29,12 +29,10 @@ const membershipRow = (metric_name: string, over: Row = {}): Row => ({
   panel_title: 'CPU per pod',
   metric_name,
   group_name: 'api',
-  aggregation: 'avg',
-  member_count_name: null,
+  aggregations: ['avg'],
   preset: null,
   pattern: null,
   replacement: null,
-  track_member_count: null,
   ...over,
 });
 
@@ -46,12 +44,10 @@ const ruleRow = (over: Row = {}): Row => ({
   panel_title: null,
   metric_name: null,
   group_name: null,
-  aggregation: 'avg',
-  member_count_name: null,
+  aggregations: ['avg'],
   preset: 'k8s-pod',
   pattern: null,
   replacement: '',
-  track_member_count: false,
   ...over,
 });
 
@@ -103,15 +99,15 @@ const reads = (metricsRepo: { query: jest.Mock }) =>
 
 describe('findDSMetricsForPanel with a series group', () => {
   it('answers a group name from its members, combined per timestamp with the stored aggregation', async () => {
-    const { service, metricsRepo } = build({ lookup: [membershipRow(POD_A, { aggregation: 'sum' }), membershipRow(POD_B, { aggregation: 'sum' })] });
+    const { service, metricsRepo } = build({ lookup: [membershipRow(POD_A, { aggregations: ['sum'] }), membershipRow(POD_B, { aggregations: ['sum'] })] });
     const rows = [
-      { time: new Date('2024-01-01T10:00:00Z'), metric_name: 'api', value: 30, timestep: 1, ramp_up: false },
+      { time: new Date('2024-01-01T10:00:00Z'), metric_name: 'api (sum)', value: 30, timestep: 1, ramp_up: false },
     ];
     metricsRepo.query.mockImplementation(async (sql: string) =>
       sql.includes('needs_downsampling') ? [{ needs_downsampling: false }] : rows,
     );
 
-    const result = await service.findDSMetricsForPanel(RUN, 201, DASH, 'api');
+    const result = await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (sum)');
 
     expect(result).toEqual(rows);
     // The group is not a column in ds_metrics, so the TypeORM `find` (metric_name = 'api') must not run.
@@ -122,7 +118,7 @@ describe('findDSMetricsForPanel with a series group', () => {
       expect(statement.sql).toContain('GROUP BY m."time", g.group_name');
       expect(statement.sql).toContain('m.test_run_id = $1 AND m.panel_id = $2 AND m.application_dashboard_id = $3');
       expect(statement.sql).not.toContain('m.metric_name = $');
-      expect(statement.params).toEqual([RUN, 201, DASH, [POD_B, POD_A].sort(), ['api', 'api'], ['sum', 'sum'], [POD_B, POD_A].sort()]);
+      expect(statement.params).toEqual([RUN, 201, DASH, [POD_B, POD_A].sort(), ['api (sum)', 'api (sum)'], ['sum', 'sum'], [POD_B, POD_A].sort()]);
     }
     expect(read!.sql).toMatch(/ORDER BY timestep ASC/);
   });
@@ -132,12 +128,12 @@ describe('findDSMetricsForPanel with a series group', () => {
     metricsRepo.query.mockImplementation(async (sql: string) => {
       if (sql.includes('needs_downsampling')) return [{ needs_downsampling: true }];
       if (sql.includes('COUNT(DISTINCT')) return [{ count: 1 }];
-      return [{ metric_name: 'api', time: new Date('2024-01-01T10:00:00Z'), value: 12 }];
+      return [{ metric_name: 'api (avg)', time: new Date('2024-01-01T10:00:00Z'), value: 12 }];
     });
 
-    const result = await service.findDSMetricsForPanel(RUN, 201, DASH, 'api');
+    const result = await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (avg)');
 
-    expect(result).toEqual([{ time: new Date('2024-01-01T10:00:00Z'), metric_name: 'api', value: 12 }]);
+    expect(result).toEqual([{ time: new Date('2024-01-01T10:00:00Z'), metric_name: 'api (avg)', value: 12 }]);
     const [probe, count, lttb] = reads(metricsRepo);
     expect(probe!.sql).toContain('LIMIT 4001 OFFSET 4000');
     expect(count!.sql).toContain('COUNT(DISTINCT metric_name)');
@@ -154,7 +150,7 @@ describe('findDSMetricsForPanel with a series group', () => {
     metricsRepo.query.mockResolvedValue([{ needs_downsampling: false }]);
     const range = { from: '2024-01-01T00:00:00.000Z', to: '2024-01-01T01:00:00.000Z' };
 
-    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api', '', [], undefined, range);
+    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (avg)', '', [], undefined, range);
 
     const [probe] = reads(metricsRepo);
     expect(probe!.sql).toContain('m."time" >= $4::timestamptz AND m."time" <= $5::timestamptz');
@@ -165,7 +161,7 @@ describe('findDSMetricsForPanel with a series group', () => {
     const { service, metricsRepo } = build({ lookup: GROUPED });
     metricsRepo.query.mockResolvedValue([{ needs_downsampling: false }]);
 
-    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api', '', [], 'ms-1');
+    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (avg)', '', [], 'ms-1');
 
     const [probe] = reads(metricsRepo);
     expect(probe!.sql).toContain('m.metrics_source_id = $3');
@@ -175,15 +171,15 @@ describe('findDSMetricsForPanel with a series group', () => {
 
   it('draws a member-count name as COUNT of the members', async () => {
     const { service, metricsRepo } = build({
-      lookup: [membershipRow(POD_A, { member_count_name: 'api (pod count)' }), membershipRow(POD_B, { member_count_name: 'api (pod count)' })],
+      lookup: [membershipRow(POD_A, { aggregations: ['count'] }), membershipRow(POD_B, { aggregations: ['count'] })],
     });
     metricsRepo.query.mockResolvedValue([{ needs_downsampling: false }]);
 
-    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (pod count)');
+    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (count)');
 
     const [probe] = reads(metricsRepo);
     // The bound aggregation is `count`, under the member-count name, over the group's members.
-    expect(probe!.params.slice(3)).toEqual([[POD_B, POD_A].sort(), ['api (pod count)', 'api (pod count)'], ['count', 'count'], [POD_B, POD_A].sort()]);
+    expect(probe!.params.slice(3)).toEqual([[POD_B, POD_A].sort(), ['api (count)', 'api (count)'], ['count', 'count'], [POD_B, POD_A].sort()]);
     expect(probe!.sql).toContain("WHEN 'count' THEN COUNT(*)::double precision");
   });
 
@@ -199,14 +195,14 @@ describe('findDSMetricsForPanel with a series group', () => {
     // Excluded: the pods the group replaces. `heap-used` is a group of one: it stays a plain series.
     expect(probe!.params[3]).toEqual([POD_B, POD_A].sort());
     expect(probe!.params[4]).toEqual([POD_B, POD_A].sort());
-    expect(probe!.params[5]).toEqual(['api', 'api']);
+    expect(probe!.params[5]).toEqual(['api (avg)', 'api (avg)']);
   });
 
   it('returns the per-pod series when members=true, with a group name', async () => {
     const { service, metricsRepo } = build({ lookup: GROUPED });
     metricsRepo.query.mockResolvedValue([{ needs_downsampling: false }]);
 
-    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api', '', [], undefined, undefined, true);
+    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (avg)', '', [], undefined, undefined, true);
 
     const [probe] = reads(metricsRepo);
     expect(probe!.sql).not.toContain('GROUP BY');
@@ -239,7 +235,7 @@ describe('findDSMetricsForPanel with a series group', () => {
 
   it('applies the CURRENT rule for a live run that has no membership yet', async () => {
     const { service, metricsRepo } = build({
-      lookup: [ruleRow({ aggregation: 'max' })],
+      lookup: [ruleRow({ aggregations: ['max'] })],
       names: [
         { panel_id: 201, metric_name: POD_A },
         { panel_id: 201, metric_name: POD_B },
@@ -247,10 +243,10 @@ describe('findDSMetricsForPanel with a series group', () => {
     });
     metricsRepo.query.mockResolvedValue([{ needs_downsampling: false }]);
 
-    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api');
+    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (max)');
 
     const [probe] = reads(metricsRepo);
-    expect(probe!.params.slice(3)).toEqual([[POD_B, POD_A].sort(), ['api', 'api'], ['max', 'max'], [POD_B, POD_A].sort()]);
+    expect(probe!.params.slice(3)).toEqual([[POD_B, POD_A].sort(), ['api (max)', 'api (max)'], ['max', 'max'], [POD_B, POD_A].sort()]);
   });
 
   it('is not misled by a group-looking name when the panel has no grouping at all', async () => {
@@ -258,7 +254,7 @@ describe('findDSMetricsForPanel with a series group', () => {
     metricsRepo.query.mockResolvedValue([{ needs_downsampling: false }]);
     metricsRepo.find.mockResolvedValue([]);
 
-    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api');
+    await service.findDSMetricsForPanel(RUN, 201, DASH, 'api (avg)');
 
     expect(metricsRepo.find).toHaveBeenCalled();
     expect(reads(metricsRepo).every((r) => !r.sql.includes('unnest('))).toBe(true);
@@ -283,7 +279,7 @@ describe('ds-metrics-comparison expands each run with its own members', () => {
       'run-baseline',
       DASH,
       '201',
-      'api',
+      'api (avg)',
     );
 
     const probes = reads(metricsRepo).filter((r) => r.sql.includes('needs_downsampling'));
@@ -302,17 +298,16 @@ describe('getDistinctMetricNames with a series group', () => {
 
     const result = await service.getDistinctMetricNames(DASH, 201, 'user-1', ['user'], undefined, RUN);
 
-    expect(result).toEqual(['api', 'heap-used']);
+    expect(result).toEqual(['api (avg)', 'heap-used']);
   });
 
   it('lists the member-count name beside its group', async () => {
-    const lookup = [membershipRow(POD_A, { member_count_name: 'api (pod count)' }), membershipRow(POD_B, { member_count_name: 'api (pod count)' })];
+    const lookup = [membershipRow(POD_A, { aggregations: ['count'] }), membershipRow(POD_B, { aggregations: ['count'] })];
     const { service, metricsRepo } = build({ lookup });
     metricsRepo.manager.query.mockImplementation(wrapNames(metricsRepo, [POD_A, POD_B], lookup));
 
     expect(await service.getDistinctMetricNames(DASH, 201, 'user-1', ['user'], undefined, RUN)).toEqual([
-      'api',
-      'api (pod count)',
+      'api (count)',
     ]);
   });
 
@@ -338,7 +333,7 @@ describe('getDistinctMetricNames with a series group', () => {
 
     const result = await service.getDistinctMetricNames(DASH, 201, 'user-1', ['user'], undefined, RUN);
 
-    expect(result).toEqual(['api', 'heap-used']);
+    expect(result).toEqual(['api (avg)', 'heap-used']);
     // The names query ran once: the rule was applied to its output, not to a second read.
     const namesReads = metricsRepo.manager.query.mock.calls.filter(([sql]) => /\bFROM ds_metrics\b/.test(String(sql)));
     expect(namesReads).toHaveLength(1);
@@ -362,15 +357,16 @@ describe('getDistinctMetricSeries', () => {
   const names = [POD_A, POD_B, 'heap-used'];
 
   it('says what each group name stands for, beside the same names getDistinctMetricNames lists', async () => {
-    const lookup = [membershipRow(POD_A, { member_count_name: 'api (pod count)' }), membershipRow(POD_B, { member_count_name: 'api (pod count)' })];
+    const lookup = [membershipRow(POD_A, { aggregations: ['count'] }), membershipRow(POD_B, { aggregations: ['count'] })];
     const { service, metricsRepo } = build({ lookup });
     metricsRepo.manager.query.mockImplementation(wrapNames(metricsRepo, names, lookup));
 
     const result = await service.getDistinctMetricSeries(DASH, 201, 'user-1', ['user'], undefined, RUN);
 
-    expect(result.metric_names).toEqual(['api', 'api (pod count)', 'heap-used']);
+    expect(result.metric_names).toEqual(['api (count)', 'heap-used']);
+    // The summary names the GROUP and the series it emits; the picker composes the rest.
     expect(result.series_groups).toEqual([
-      { group: 'api', members: [POD_A, POD_B].sort(), aggregation: 'avg', member_count_name: 'api (pod count)' },
+      { group: 'api', members: [POD_A, POD_B].sort(), aggregations: ['count'] },
     ]);
   });
 
@@ -398,7 +394,7 @@ describe('getDistinctMetricSeries', () => {
 
     const result = await service.getDistinctMetricSeries(DASH, 201, 'user-1', ['user'], undefined, RUN);
 
-    expect(result.metric_names).toEqual(['api', 'heap-used']);
+    expect(result.metric_names).toEqual(['api (avg)', 'heap-used']);
     expect(result.series_groups?.map((g) => [g.group, g.members])).toEqual([['api', [POD_A, POD_B].sort()]]);
   });
 });
@@ -434,8 +430,8 @@ describe('getAvailableDashboards with a series group', () => {
     expect(rows[0]).toEqual({
       ...ROW,
       metric_count: '2',
-      metric_names: ['api', 'heap-used'],
-      series_groups: [{ group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg' }],
+      metric_names: ['api (avg)', 'heap-used'],
+      series_groups: [{ group: 'api', members: [POD_B, POD_A].sort(), aggregations: ['avg'] }],
     });
     // A panel with no grouping is returned exactly as the query produced it.
     expect(rows[1]).toEqual(OTHER);
@@ -453,14 +449,14 @@ describe('getAvailableDashboards with a series group', () => {
   });
 
   it('lists the member-count series beside its group', async () => {
-    const lookup = [membershipRow(POD_A, { member_count_name: 'api (pod count)' }), membershipRow(POD_B, { member_count_name: 'api (pod count)' })];
+    const lookup = [membershipRow(POD_A, { aggregations: ['count'] }), membershipRow(POD_B, { aggregations: ['count'] })];
     const { service, metricsRepo } = build({ lookup });
     metricsRepo.query.mockResolvedValue([{ ...ROW, metric_names: [POD_A, POD_B] }]);
 
     const [row] = await service.getAvailableDashboards(RUN, 'user-1', ['user']);
 
-    expect(row!.metric_names).toEqual(['api', 'api (pod count)']);
-    expect(row!.series_groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', member_count_name: 'api (pod count)' }]);
+    expect(row!.metric_names).toEqual(['api (count)']);
+    expect(row!.series_groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregations: ['count'] }]);
   });
 
   it('returns raw names, and consults nothing, with members=true', async () => {
@@ -479,7 +475,7 @@ describe('getAvailableDashboards with a series group', () => {
 
     const [row] = await service.getAvailableDashboards(RUN, 'user-1', ['user']);
 
-    expect(row!.metric_names).toEqual(['api', 'heap-used']);
+    expect(row!.metric_names).toEqual(['api (avg)', 'heap-used']);
   });
 
   it('does not group a dashboard whose label no rule is for', async () => {
@@ -508,12 +504,12 @@ describe('getMetricTimeSeries with a series group', () => {
   }
 
   it('answers a group name from its members, aggregated, addressed by label and title', async () => {
-    const { service, metricsRepo } = build({ lookup: [membershipRow(POD_A, { aggregation: 'max' }), membershipRow(POD_B, { aggregation: 'max' })] });
+    const { service, metricsRepo } = build({ lookup: [membershipRow(POD_A, { aggregations: ['max'] }), membershipRow(POD_B, { aggregations: ['max'] })] });
     const qb = withQueryBuilder(metricsRepo);
-    const rows = [{ time: new Date('2024-01-01T10:00:00Z'), metric_name: 'api', value: 9, timestep: 1, ramp_up: false, unit: 'percent' }];
+    const rows = [{ time: new Date('2024-01-01T10:00:00Z'), metric_name: 'api (max)', value: 9, timestep: 1, ramp_up: false, unit: 'percent' }];
     metricsRepo.query.mockResolvedValue(rows);
 
-    const result = await service.getMetricTimeSeries(RUN, 'Perf', 'CPU per pod', 'api', false, 'user-1', ['user']);
+    const result = await service.getMetricTimeSeries(RUN, 'Perf', 'CPU per pod', 'api (max)', false, 'user-1', ['user']);
 
     expect(result).toEqual(rows);
     expect(qb.getMany).not.toHaveBeenCalled();
@@ -522,7 +518,7 @@ describe('getMetricTimeSeries with a series group', () => {
     expect(read!.sql).toContain("WHEN 'max' THEN MAX(m.value)");
     expect(read!.sql).toContain('MIN(m.unit) AS unit');
     expect(read!.sql).toMatch(/ORDER BY metric_name, "time"/);
-    expect(read!.params).toEqual([RUN, 'Perf', 'CPU per pod', [POD_B, POD_A].sort(), ['api', 'api'], ['max', 'max'], [POD_B, POD_A].sort()]);
+    expect(read!.params).toEqual([RUN, 'Perf', 'CPU per pod', [POD_B, POD_A].sort(), ['api (max)', 'api (max)'], ['max', 'max'], [POD_B, POD_A].sort()]);
   });
 
   it('keeps the ramp-up exclusion the caller asked for', async () => {
@@ -530,7 +526,7 @@ describe('getMetricTimeSeries with a series group', () => {
     withQueryBuilder(metricsRepo);
     metricsRepo.query.mockResolvedValue([]);
 
-    await service.getMetricTimeSeries(RUN, 'Perf', 'CPU per pod', 'api', true, 'user-1', ['user']);
+    await service.getMetricTimeSeries(RUN, 'Perf', 'CPU per pod', 'api (avg)', true, 'user-1', ['user']);
 
     expect(reads(metricsRepo)[0]!.sql).toContain('m.ramp_up = false');
   });
@@ -540,7 +536,7 @@ describe('getMetricTimeSeries with a series group', () => {
     withQueryBuilder(metricsRepo);
     metricsRepo.query.mockResolvedValue([]);
 
-    await service.getMetricTimeSeries(RUN, 'Perf', 'CPU per pod', 'api', false, 'user-1', ['user'], true);
+    await service.getMetricTimeSeries(RUN, 'Perf', 'CPU per pod', 'api (avg)', false, 'user-1', ['user'], true);
 
     const [read] = reads(metricsRepo);
     expect(read!.sql).not.toContain('GROUP BY');
@@ -593,8 +589,8 @@ describe('MetricsController: members=true reaches the readers', () => {
 
   it('ds-metrics/time-series passes members last', async () => {
     const { service, controller } = controllerWithSpy();
-    await controller.getMetricTimeSeries(RUN, ctx, 'Perf', 'CPU', 'api', 'true', 'true');
-    expect(service.getMetricTimeSeries).toHaveBeenCalledWith(RUN, 'Perf', 'CPU', 'api', true, 'user-1', ['user'], true);
+    await controller.getMetricTimeSeries(RUN, ctx, 'Perf', 'CPU', 'api (avg)', 'true', 'true');
+    expect(service.getMetricTimeSeries).toHaveBeenCalledWith(RUN, 'Perf', 'CPU', 'api (avg)', true, 'user-1', ['user'], true);
   });
 
   it('ds-metrics/:testRunId/:panelId passes members after the zoom window', async () => {

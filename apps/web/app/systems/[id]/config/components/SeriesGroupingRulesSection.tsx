@@ -192,12 +192,11 @@ export default function SeriesGroupingRulesSection({
                       )}
                     </TableCell>
                     <TableCell>
-                      {AGGREGATION_LABELS[rule.aggregation] ?? rule.aggregation}
-                      {rule.trackMemberCount && (
-                        <Typography variant="caption" color="text.secondary" display="block">
-                          + pod count
+                      {(rule.aggregations ?? []).map((a) => (
+                        <Typography key={a} variant="body2" display="block">
+                          {AGGREGATION_LABELS[a] ?? a}
                         </Typography>
-                      )}
+                      ))}
                     </TableCell>
                     <TableCell>
                       <Switch

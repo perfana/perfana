@@ -356,6 +356,10 @@ Symptom index. Each entry names the cause and points at the file that explains i
 
 62. **A grouped series (e.g. `api` for a set of Kubernetes pods) has statistics and an ADAPT verdict, but its chart is empty** → a reader of raw `ds_metrics` was handed the group name and looked it up as-is; `ds_metrics` holds only the pod names. Since v0.2.97.43 every raw reader expands a group through `SeriesGroupResolver`, so an empty grouped chart means a reader that does not. If instead the pods still read `incomparable` after a rule was added, the run's statistics were not recalculated: a plain re-evaluate does not run `StatisticsPipeline`. See "A series group is not a `ds_metrics` series" in [apps/api/CLAUDE.md](apps/api/CLAUDE.md) and "Series grouping happens at the statistics layer" in [apps/worker/CLAUDE.md](apps/worker/CLAUDE.md).
 
+63. **A panel's golden-path provisioning template silently never applies, and that panel can no longer turn a run red** → the run log says only `0 compare configs created`. `applyGoldenPathClassifications` counted a `ds_compare_config` row at **any** level as "this panel is already configured", and a metric-level row is a per-series override, not a panel default. Dormant while metric-level rows were rare (one of 420 on the dev database); series grouping made them routine, because `StatisticsPipeline` writes one per derived series (`api (sum)`, `api (count)`) on every grouped analysis — so the first grouped analysis of a workload disabled that panel's template permanently, and it outlived the rule, since deleting the rule does not delete those rows. The consequence is the inverse of what those rows exist for: with no template the panel's series — the **primary** grouped series `api` included — resolve to `DEFAULT_COMPARE_CONFIG`, whose `higherIsBetter` is NULL, so `buildConclusionLogic` can only ever label them `increase`/`decrease` and `regression_count` stays 0. Fixed in v0.2.97.44 (only a row with `metric_name IS NULL` counts). Do **not** re-fix it by excluding rows that carry `config_data.source = 'series-grouping-derived'`: the anomaly card's save rebuilds `config_data` from scratch and the API replaces the column wholesale, so one ordinary edit of a derived row erases the marker and restores the defect silently. On an older deploy, delete the derived rows for that panel and re-complete a run. Related: on a database that ran the **v0.2.97.43** shape of 1819, every read of either grouping table fails with `column "aggregations" does not exist` until migration **1820** converts it — the entities name the collapsed column and TypeORM selects every declared column. 1820 is idempotent and a no-op on a fresh install, so this is self-healing once the migration runner has gone past it; nothing orders the API behind it. See "A golden-path template loses to any row already on the panel" in [apps/api/CLAUDE.md](apps/api/CLAUDE.md).
+
+64. **A FRESH install dies mid-migration with `SAVEPOINT can only be used in transaction blocks` (25P01), and the services then run against a half-created schema** → not the migration named in the error. The runner uses `transaction: "all"`, so one transaction spans the whole batch, and migration **1791** issues a bare `COMMIT` (it needs `CREATE INDEX CONCURRENTLY`, which forbids a transaction) — which ends that batch transaction for every migration numbered above it. 1799 then asked for a `SAVEPOINT` with no transaction to put it in and the batch stopped, leaving ~20 later migrations unapplied; `init-demo.sh` reports it as `ERROR: Database migration failed`, and the only other tell is the last row in `typeorm_migrations`. An **existing** deploy cannot reproduce it, because 1799 applied in a batch of its own before 1791 existed — so this was broken only for new installs, and only on the greenfield path nobody exercises per-PR. Fixed in v0.2.97.45 (plpgsql `DO` block with an `EXCEPTION` handler, an implicit subtransaction that is legal with or without a transaction). On an older image, run the migration container again after applying 1799's 15 policy changes by hand. **Any migration numbered above 1791 must not use `SAVEPOINT` and must not rely on the batch to roll back for it.** See "A `COMMIT` inside a migration ends the whole batch's transaction" in [apps/api/CLAUDE.md](apps/api/CLAUDE.md).
+
 ## Health Stack
 
 - typecheck: turbo run type-check
@@ -372,24 +376,25 @@ Symptom index. Each entry names the cause and points at the file that explains i
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **perfana** (38187 symbols, 66540 relationships, 228 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **perfana** (23961 symbols, 66747 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
 
 ## Resources
 

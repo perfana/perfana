@@ -73,8 +73,7 @@ const rule = (overrides: Partial<SeriesGroupingRuleResponse> = {}): SeriesGroupi
   preset: 'k8s-pod',
   pattern: null,
   replacement: '',
-  aggregation: 'avg',
-  trackMemberCount: true,
+  aggregations: ['avg', 'count'],
   enabled: true,
   origin: 'manual',
   createdAt: '2026-11-01T00:00:00Z',
@@ -230,8 +229,7 @@ describe('SeriesGroupingDialog', () => {
       applicationDashboardId: 'dash-1',
       panelId: 4,
       preset: 'k8s-pod',
-      aggregation: 'avg',
-      trackMemberCount: true,
+      aggregations: ['avg', 'count'],
       origin: 'suggestion',
       copyTo: [
         { testEnvironment: 'acc', workload: 'peak' },
@@ -243,6 +241,98 @@ describe('SeriesGroupingDialog', () => {
     expect(showToast).toHaveBeenCalledWith(summary);
     // No run in hand: nothing to recalculate.
     expect(callsTo('/series-grouping-rules/apply', 'POST')).toHaveLength(0);
+  });
+
+  describe('one control for every series a group emits', () => {
+    const seriesBox = (label: RegExp) => within(screen.getByLabelText('Series per group')).getByLabelText(label);
+
+    /**
+     * Value:
+     *   protects — the four aggregations are peers in ONE multi-select. The split into Combine /
+     *     Also add / Also track existed only to keep one series unsuffixed for stored baselines,
+     *     which a greenfield feature does not have.
+     *   fails_when — a "primary" is reintroduced in any form. One checked box would then behave
+     *     differently from its neighbours with nothing on screen saying which, which is worse
+     *     than the three visible sections it replaced.
+     *   seam — the rendered controls.
+     */
+    it('offers all four aggregations as peers, with no primary', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      renderDialog();
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      const group = screen.getByLabelText('Series per group');
+      expect(within(group).getAllByRole('checkbox')).toHaveLength(4);
+      for (const label of [/Average per pod/, /Total/, /Highest pod/, /Number of pods/]) {
+        expect(within(group).getByLabelText(label)).toBeInTheDocument();
+      }
+      // No radio group survives: there is nothing left for one to pick.
+      expect(screen.queryByRole('radio', { name: 'Total' })).not.toBeInTheDocument();
+    });
+
+    it('previews each series per group and counts them as series, not groups', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      const user = userEvent.setup();
+      renderDialog();
+      await waitFor(() => expect(screen.getAllByTestId('series-grouping-preview-row')).toHaveLength(2));
+
+      await user.click(seriesBox(/Total/));
+
+      const names = screen.getAllByTestId('series-grouping-series-name').map((n) => n.textContent);
+      expect(names).toEqual([
+        '+ api (avg)', '+ api (sum)', '+ api (count)',
+        '+ worker (avg)', '+ worker (sum)', '+ worker (count)',
+      ]);
+      // Still 2 GROUPS: the match count is about baseline matching, not about series.
+      expect(screen.getByTestId('series-grouping-before-after')).toHaveTextContent(
+        'After: 2 of 2 groups match · 6 series',
+      );
+    });
+
+    it('sends the aggregations in canonical order, whatever order they were ticked', async () => {
+      routeFetch({
+        [`POST ${PREVIEW_URL}`]: preview(),
+        'POST /series-grouping-rules': { rule: rule(), copies: { created: [], skipped: [] } },
+      });
+      const user = userEvent.setup();
+      const { onSaved } = renderDialog();
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      await user.click(seriesBox(/Highest pod/));
+      await user.click(seriesBox(/Total/));
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalled());
+      // Canonical, not click order — the rule hash is taken over this list.
+      expect(findBodyFor('/series-grouping-rules', 'POST')?.aggregations).toEqual(['avg', 'sum', 'max', 'count']);
+    });
+
+    // deleteOrphanedResults covers ds_adapt_results and nothing else, so removal is not safe:
+    // an SLO, a graph preset or a report section on the derived name stops matching.
+    it('warns when a draft drops a series the saved rule emits', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      const user = userEvent.setup();
+      renderDialog({ existingRule: rule({ aggregations: ['avg', 'sum', 'count'] }) });
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      expect(screen.queryByText(/deletes that series/)).not.toBeInTheDocument();
+      await user.click(seriesBox(/Total/));
+      expect(screen.getByText(/deletes that series/)).toBeInTheDocument();
+    });
+
+    // A rule that emits nothing would still exclude its panels from the main statistics
+    // statement, so the panel would lose every series rather than keeping the pods.
+    it('refuses to save with nothing ticked', async () => {
+      routeFetch({ [`POST ${PREVIEW_URL}`]: preview() });
+      const user = userEvent.setup();
+      renderDialog();
+      await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
+
+      await user.click(seriesBox(/Average per pod/));
+      await user.click(seriesBox(/Number of pods/));
+      expect(screen.getByText(/Pick at least one/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
   });
 
   it('applies to the whole dashboard when "All panels" is chosen', async () => {
@@ -322,7 +412,7 @@ describe('SeriesGroupingDialog', () => {
   it('edits by PATCH and never sends the slot', async () => {
     routeFetch({
       [`POST ${PREVIEW_URL}`]: preview(),
-      'PATCH /series-grouping-rules/rule-1': rule({ aggregation: 'sum' }),
+      'PATCH /series-grouping-rules/rule-1': rule({ aggregations: ['sum', 'count'] }),
     });
     const user = userEvent.setup();
     const { onSaved } = renderDialog({ existingRule: rule(), copyTargets: [{ testEnvironment: 'acc', workload: 'peak' }] });
@@ -332,15 +422,14 @@ describe('SeriesGroupingDialog', () => {
     expect(screen.queryByLabelText('All panels on this dashboard')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Also create for other workloads of this system')).not.toBeInTheDocument();
 
-    await user.click(screen.getByLabelText('Total'));
+    await user.click(screen.getByLabelText(/^Total as/));
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(callsTo('/series-grouping-rules', 'POST')).toHaveLength(0);
     expect(findBodyFor('/series-grouping-rules/rule-1', 'PATCH')).toEqual({
       preset: 'k8s-pod',
-      aggregation: 'sum',
-      trackMemberCount: true,
+      aggregations: ['avg', 'sum', 'count'],
     });
   });
 
@@ -367,8 +456,8 @@ describe('SeriesGroupingDialog', () => {
     const user = userEvent.setup();
     const { rerender, onSaved, onClose, showToast } = renderDialog();
     await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST')).toHaveLength(1));
-    await user.click(screen.getByLabelText('Highest pod'));
-    expect(screen.getByLabelText('Highest pod')).toBeChecked();
+    await user.click(screen.getByLabelText(/^Highest pod as/));
+    expect(screen.getByLabelText(/^Highest pod as/)).toBeChecked();
 
     const props = {
       onClose,
@@ -388,7 +477,7 @@ describe('SeriesGroupingDialog', () => {
     rerender(<SeriesGroupingDialog open={false} {...props} />);
     rerender(<SeriesGroupingDialog open {...props} />);
 
-    await waitFor(() => expect(screen.getByLabelText('Average per pod')).toBeChecked());
+    await waitFor(() => expect(screen.getByLabelText(/^Average per pod as/)).toBeChecked());
     // The names are fetched afresh rather than reused from the last open.
     await waitFor(() => expect(callsTo(PREVIEW_URL, 'POST').length).toBeGreaterThanOrEqual(2));
   });

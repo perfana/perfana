@@ -17,7 +17,7 @@ import {
   type Route,
 } from '../../test/series-grouping-insights-helpers';
 
-const SPEC = { preset: 'k8s-pod', pattern: null, replacement: '', aggregation: 'avg', trackMemberCount: false } as const;
+const SPEC = { preset: 'k8s-pod', pattern: null, replacement: '', aggregations: ['avg'] } as const;
 const HASH = seriesGroupingRuleHash(SPEC);
 
 const rule = (id: string, panelId: number | null, overrides: Record<string, unknown> = {}) => ({
@@ -27,8 +27,7 @@ const rule = (id: string, panelId: number | null, overrides: Record<string, unkn
   preset: SPEC.preset,
   pattern: SPEC.pattern,
   replacement: SPEC.replacement,
-  aggregation: SPEC.aggregation,
-  track_member_count: SPEC.trackMemberCount,
+  aggregations: SPEC.aggregations,
   ...overrides,
 });
 
@@ -80,7 +79,7 @@ describe('SeriesGroupingInsightsService.status', () => {
       const { service } = makeService(
         routes({
           rules: [rule('r1', 1)],
-          membership: [membership(1, 'r1', seriesGroupingRuleHash({ ...SPEC, aggregation: 'sum' }))],
+          membership: [membership(1, 'r1', seriesGroupingRuleHash({ ...SPEC, aggregations: ['sum'] }))],
           panels: [statPanel(1)],
         }),
       );
@@ -91,10 +90,10 @@ describe('SeriesGroupingInsightsService.status', () => {
     });
 
     it('hashes the stored row exactly as the worker does: a custom rule\'s pattern and replacement count', async () => {
-      const custom = { preset: 'custom', pattern: '-[a-z0-9]{4}$', replacement: '', aggregation: 'max', trackMemberCount: true } as const;
+      const custom = { preset: 'custom', pattern: '-[a-z0-9]{4}$', replacement: '', aggregations: ['max', 'count'] } as const;
       const { service } = makeService(
         routes({
-          rules: [rule('r1', 1, { preset: 'custom', pattern: custom.pattern, aggregation: 'max', track_member_count: true })],
+          rules: [rule('r1', 1, { preset: 'custom', pattern: custom.pattern, aggregations: ['max', 'count'] })],
           membership: [membership(1, 'r1', seriesGroupingRuleHash(custom))],
           panels: [statPanel(1)],
         }),
@@ -248,6 +247,37 @@ describe('SeriesGroupingInsightsService.status', () => {
       expect(await service.status('run-001', [ORG_A])).toEqual({ stale: [], misaligned: [] });
       expect(db.calls.map((c) => c.sql.match(/sg:[a-z-]+/)?.[0])).toEqual(['sg:run', 'sg:tables-present']);
     });
+  });
+
+  /**
+   * Value:
+   *   protects — every aggregation a rule emits reaches the spec the staleness verdict is hashed
+   *     from, so adding or removing one marks the runs grouped before the change as stale.
+   *   fails_when — `loadEnabledRules` stops mapping the column into the spec. A rule that gained
+   *     `sum` would then hash as if it had not, every run grouped before the change would read as
+   *     up to date, and the stale notice, the "Save and recalculate" prompt and the apply button
+   *     would all go quiet — with nothing logged.
+   *   seam — the `stale` verdict against a known rule hash.
+   */
+  it('hashes every aggregation a rule emits, so a change marks older runs stale', async () => {
+    const scenario = (aggregations: string[], ruleHash: string) =>
+      makeService([
+        [/sg:rules/, () => [rule('r1', 1, { aggregations })]],
+        [/sg:membership/, () => [membership(1, 'r1', ruleHash)]],
+        [/sg:stat-panels/, () => [statPanel(1)]],
+        [/sg:misaligned/, () => []],
+      ]);
+
+    // The rule now emits avg+sum; membership stamped with the avg-only hash is stale.
+    const changed = scenario(['avg', 'sum'], HASH);
+    expect((await changed.service.status('run-001', [ORG_A])).stale).toEqual([
+      { applicationDashboardId: DASHBOARD.id, panelId: 1, reason: 'rule-changed' },
+    ]);
+
+    // ...and membership computed WITH them is up to date.
+    const hashWithSum = seriesGroupingRuleHash({ ...SPEC, aggregations: ['avg', 'sum'] });
+    const recalculated = scenario(['avg', 'sum'], hashWithSum);
+    expect(await recalculated.service.status('run-001', [ORG_A])).toEqual({ stale: [], misaligned: [] });
   });
 
   describe('tenancy', () => {

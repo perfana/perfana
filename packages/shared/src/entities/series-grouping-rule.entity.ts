@@ -28,8 +28,7 @@ export class SeriesGroupingRule {
     'preset',
     'pattern',
     'replacement',
-    'aggregation',
-    'trackMemberCount',
+    'aggregations',
     'enabled',
     'origin',
   ] as const;
@@ -63,11 +62,21 @@ export class SeriesGroupingRule {
   @Column({ name: 'replacement', type: 'text', default: '' })
   replacement!: string;
 
-  @Column({ name: 'aggregation', type: 'varchar', length: 8, default: 'avg' })
-  aggregation!: SeriesGroupingAggregation;
-
-  @Column({ name: 'track_member_count', type: 'boolean', default: false })
-  trackMemberCount!: boolean;
+  /**
+   * Which series a renamed group emits, one each, named `<group> (avg)` / `(sum)` / `(max)` /
+   * `(count)`. Every one is suffixed and none keeps the bare group name, so ticking or unticking
+   * a box only ever adds or removes a series — it never changes what an existing one measures.
+   * `count` is the member count, which was a separate `track_member_count` boolean before
+   * v0.2.97.44.
+   *
+   * NOT NULL with a `{avg}` default, and that is safe here only because the feature ships
+   * greenfield: a `core` SUT-transfer resource whose column is NOT NULL rejects every bundle
+   * exported before the column existed, because `json_populate_recordset` yields NULL rather than
+   * the DEFAULT for an absent key (migration 1808's trap). No such bundle can exist for a column
+   * that has been there since the table was created.
+   */
+  @Column({ name: 'aggregations', type: 'varchar', length: 8, array: true, default: () => "'{avg}'" })
+  aggregations!: SeriesGroupingAggregation[];
 
   @Column({ name: 'enabled', type: 'boolean', default: true })
   enabled!: boolean;

@@ -24,6 +24,87 @@ Postgres-backed SUT export/import round trip; the grouped statistics on 1.87 M c
 with real Toolkit functions (which found the merge-join plan, fixed in v0.2.97.43); `lttb()` over
 a grouped series; and every rules route through a running API. What is still owed:
 
+### Measure the grouped statistics with several aggregations (P2)
+
+**Origin:** v0.2.97.44 (`series_grouping_rules.aggregations`). Spec:
+`docs/design/2026-11-02-series-grouping-multi-aggregation.md`.
+
+A renamed group emits one series per ticked aggregation, so a rule with all four puts **4x** the
+rows into `buildStatisticsCtes`, each carrying a `percentile_agg` sketch — which is what
+`AGGREGATION_WORK_MEM` (128MB) is sized for. Measured on the dev database the multiplier matches
+the group count exactly (8 groups -> 24 rows at three aggregations); what is unmeasured is the
+spill behaviour at production scale. The case to measure is a dashboard-wide rule with all four
+aggregations on a 20 M-row run — fold it into "Re-measure the grouped statistics at production
+scale" below. What IS proven: the statement `PREPARE`s against the real schema, its placeholder
+count matches its bind list at every batch size, and the arm computes a hand-checked
+avg/sum/max/count from one `GROUP BY` pass.
+
+**The quality tail, filed by decision.** Each is real but reads better as its own change:
+
+- **The aggregation parse runs once per `grouped_points` row.** `CROSS JOIN LATERAL
+  unnest(string_to_array(...))` re-parses an identical string for every point of a group — the plan
+  shows one `Function Scan` loop per row — and `MAX(s.aggregations)` rides the per-member Sort for
+  every grouped panel. Hoisting both into a `group_aggregations` CTE keyed on the group (rows =
+  groups, i.e. tens) fixes them together.
+- **The series name is composed twice, in JS and in SQL, and nothing couples the copies.**
+  `groupSeriesName` and `group_name || ' (' || x.agg || ')'`; the two guards are independent
+  assertions against the same literal in different packages, so changing the JS suffix and its own
+  spec leaves the worker suite green and the series silently absent. A cross-package test that
+  builds the expected SQL fragment from the helper would close it.
+- **The table-presence probe is implemented twice** (`SeriesGroupResolver.ensureTables` and
+  `SeriesGroupingInsightsService.groupingTablesPresent`), each with its own latch and a similar
+  comment. One shared probe would do.
+- **No `N pods` badge on a derived series.** `SeriesGroupSummary` now carries `aggregations`, so
+  the client has what it needs to badge `api (sum)`; the picker does not use it yet. The Swagger
+  description for `/ds-metrics/distinct-series` should name the derived series at the same time.
+- **`compileSeriesGroupingRule` does not validate `aggregations`** although it is the worker's
+  documented guard for a rule row the API did not write. The loader checks the list separately and
+  skips an empty one with a warning, so the behaviour is right; the stated invariant lives in two
+  places.
+- **SUT import maps only 23505.** A hand-crafted bundle whose rule carries an unknown aggregation,
+  or an empty list, raises 23514 and surfaces as an unexplained whole-bundle failure.
+  `ds_metric_series_groups` has no CHECK of its own, though the resolver prefers it.
+- **`SeriesGroupingRulesSection.tsx` has no spec file at all.**
+
+Residues from the same version:
+
+- **A stale derived comparison setting can outlive the series it describes, and shadow a real one
+  of the same name.** `derivedSeriesConfigRows` writes a metric-level `ds_compare_config` row per
+  derived name with `ON CONFLICT DO NOTHING`, and nothing deletes it when an extra is unticked, a
+  rule is edited or a rule is deleted — so the row accumulates one per (edit x group x extra) and
+  survives the feature being switched off. Inert in itself (a setting for a series that does not
+  exist matches nothing, and the anomaly UI joins configs to results). The reachable failure needs
+  a later name collision: if a **real** series named `api (sum)` appears on that panel in a later
+  run, `applySeriesGrouping`'s `taken` guard drops the derived one but the stored metric-level row
+  remains, and metric beats panel in config resolution — so that real series is permanently
+  unclassified and ADAPT can never flag it. Same class as the `All aggregated` collisions in root
+  `CLAUDE.md` #20, and narrower: it needs the real series to appear *after* the derived one.
+  Recovery is to delete the row. The fix is an orphan sweep keyed on the membership table, in the
+  `deleteOrphanedResults` mould — the `source` marker the golden-path fix added is what would make
+  it safe, since a user's own edit rewrites `source` and would be preserved.
+- **The derived row shadows the panel's whole `thresholds` object, not just its classification.**
+  Config resolution picks a whole object rather than merging keys, which is why the row has to be
+  metric-level — but `DERIVED_SERIES_CONFIG_DATA` therefore also replaces the panel's `aggregation`,
+  `percentageThreshold`, `iqrThreshold` and `defaultValueIfControlGroupMissing` with the shared
+  defaults — **and `minSampleCount`, which it does not even set**, so a panel-level
+  `thresholds.minSampleCount` is discarded for every derived series and the floor falls back to
+  `ADAPT_MIN_SAMPLE_COUNT`. (Not reachable today: the panels that set it to 1 are the perf-test
+  scenario panels, and `seriesGroupingRulesSql` excludes those dashboards outright.)
+  So on a panel configured for `median` at 50%, `api (sum)` is judged on `mean` at 15%.
+  It cannot change a verdict (`higherIsBetter: null` keeps every derived series out of
+  `regression_count`), but `thresholds.aggregation` decides which statistic is *displayed* as the
+  compared value, so the derived row can show a different number from its siblings with nothing
+  saying why. Fixing it means reading the resolved panel config at write time and copying it, which
+  then goes stale if the panel's config changes later — hence not done in v0.2.97.44.
+- **The next migration needing a bounded lock wait should copy 1819's block, not 1813's.** It
+  captures `current_setting('lock_timeout')` on entry and restores *that* on both exit paths.
+  `'0'` is wrong (it means unlimited, so it strips a deployment's configured value from the rest
+  of the batch) and so is `DEFAULT` (the conf value, which clobbers a `SET LOCAL` an earlier
+  migration set for itself).
+- **No nudge pairing `sum` with the pod count.** The v1 design recommends the pairing in prose and
+  nothing enforces it; decided against auto-ticking in v0.2.97.44 (a checkbox that moves by
+  itself). The default of average + pod count makes the common case right without one.
+
 ### Walk the series grouping UI end to end in a browser (P2)
 
 **Origin:** v0.2.97.43, plan Task 12 for PR C. The web surfaces are covered by component tests and
@@ -2939,6 +3020,35 @@ index exists.
 ---
 
 ## Quality gates
+
+### Nothing runs the migrations against an empty database, and nothing forbids a `SAVEPOINT` above 1791
+
+**Priority:** P2
+**Origin:** v0.2.97.45 (2026-11-03), after a `clean.sh` + `init-demo.sh` on the dev stack died at
+migration 1799 with `25P01 SAVEPOINT can only be used in transaction blocks` and left 20 later
+migrations unapplied.
+**Why:** two gaps, one of which is the reason the other went unnoticed for months.
+
+1. **No greenfield migration run exists in any gate.** `npm run preflight` runs lint, type-check, two
+   check scripts, the RLS suite and the chart-tokens spec, none of which executes a migration; the RLS
+   suite targets an already-migrated dev database. `.github/workflows/pr-quality-gate.yml` is
+   `workflow_dispatch` only. So the only path that applies migration 1 to migration N in one batch is
+   a real fresh install, and the failure was invisible to every existing deployment — an incremental
+   deploy applies each migration in a batch whose earlier members have already run, which is exactly
+   the condition that hides this class.
+2. **No rule stops the next one.** The constraint is now written down in `apps/api/CLAUDE.md` and
+   symptom #64, and `cagg-refresh-windows.spec.ts` pins it for 1799 specifically, but nothing checks
+   the invariant: *no migration numbered above the lowest bare-`COMMIT` migration (1791) may issue a
+   `SAVEPOINT` or depend on the batch transaction.* That is a cheap static check — scan
+   `packages/shared/src/database/migrations/*.ts`, find the files issuing a bare `COMMIT`, find the
+   files matching `SAVEPOINT`, and fail when a savepoint user sorts after a commit user.
+   `ConsolidatedSchema` is the legitimate exception (it runs first).
+
+**Shape:** add the static check to `npm run preflight` beside `check:entity-migrations` — it needs no
+database, so it costs nothing. A docker-compose smoke test that migrates an empty Postgres is the
+stronger fix and the one that would also catch a broken `down()`, a missing grant and a column that
+only reaches `ConsolidatedSchema.ts` (the `SCHEMA_DRIFT_CHECK` class); it belongs in CI rather than
+preflight because it needs a container.
 
 ### `apps/api` spec files are type-checked by nothing
 

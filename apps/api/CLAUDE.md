@@ -380,9 +380,21 @@ entire batch, so the escape hatch 1791 and 1813 both use means every migration n
 in the same batch runs outside any shared transaction — the batch quietly stops being
 all-or-nothing from that point. TypeORM does not notice, because its `isTransactionActive` flag is
 only moved by the driver's own commit/rollback and never by inspecting raw SQL, so its later bare
-`COMMIT`/`ROLLBACK` are `WARNING: there is no transaction in progress` rather than errors. Nothing
-breaks; but a migration that is relying on the batch to roll back for it cannot do so if an earlier
-one in the same deploy used this pattern.
+`COMMIT`/`ROLLBACK` are `WARNING: there is no transaction in progress` rather than errors.
+
+**This is not a theoretical caveat — it took down greenfield installs, and the symptom was a migration
+several numbers later.** Migration 1799 isolated each refresh policy behind a `SAVEPOINT`, which is a
+hard error with no transaction (`25P01 SAVEPOINT can only be used in transaction blocks`), so a fresh
+database stopped at 1799 with every later migration unapplied — fixed in v0.2.97.45 by moving that
+isolation into a plpgsql `DO` block, whose `EXCEPTION` handler is an implicit subtransaction and is
+legal either way. An **existing** deploy never reproduces it, because the migration that needs the
+transaction ran in an earlier batch than the `COMMIT` that destroys it; only a batch spanning both
+fails, which is a fresh install. So the rule for anything numbered **above 1791**: it may not use
+`SAVEPOINT`, and it may not rely on the batch to roll back for it. Use a plpgsql block for
+per-statement isolation. `ConsolidatedSchema` may keep its savepoints — it is the first migration and
+runs before any `COMMIT`. `packages/shared/src/database/__tests__/cagg-refresh-windows.spec.ts` pins
+the shape for 1799; nothing yet pins it for the next migration that gets this wrong, which is filed
+in TODOS.md.
 
 One honest caveat on cost: net index **count** on the ingest path is unchanged, but net **width**
 is not. The new index's third column averages ~19 bytes, so its leaf entries run 35-40% larger than
@@ -777,6 +789,31 @@ run completion and refuses to overwrite a `ds_compare_config` row that already s
 user edits must survive. Its one exception used to be `updated_by = 'worker-pipeline'`, the default
 row `PerformanceTestMetricsPipeline` seeds during the run.
 
+**"Already sits on the panel" means a PANEL-LEVEL row, as of v0.2.97.44.** `existingPanels` counted
+every row at any level, so one metric-level row — a per-series override — blocked the panel's
+template for good. That is wrong on its own terms: resolution picks metric before panel, so
+applying the panel default alongside an override changes nothing for the overridden series. It was
+invisible while metric-level rows were vanishingly rare (one of 420 on the dev database), and
+series grouping made them routine — `StatisticsPipeline` writes one per derived series
+(`api (sum)`, `api (count)`) on every grouped analysis, so the first grouped analysis of a
+workload disabled that panel's template permanently, logging only `0 compare configs created`.
+The consequence was the inverse of what those rows exist for: with the template never applied, the
+panel's series — the PRIMARY grouped series `api` included — fell back to `DEFAULT_COMPARE_CONFIG`,
+whose `higherIsBetter` is null, so a real regression there could never flip the run.
+
+**Key it on the row's level, never on who wrote it.** Excluding rows that carry
+`SERIES_GROUPING_DERIVED_SOURCE` was tried first and is not durable: the anomaly card's save
+rebuilds `config_data` from scratch (`source: scope === 'metric' ? 'metric' : 'panel'`) and
+`updateDsCompareConfig` replaces the column wholesale, so one ordinary edit of a derived row erases
+the marker and silently restores the defect. `metric_name IS NOT NULL` is a property of the row
+that no save path can rewrite. The marker still exists, for provenance and for the orphan sweep
+filed in TODOS.md — it is just not load-bearing. One behaviour change rides along: a panel whose
+only row is metric-level now receives its panel-level template on the next completed run.
+
+`workerSeeded` is unaffected and still keys on `dashboard|panel|metric`, so a metric-level template
+naming a derived series merges into the worker's row rather than being skipped — which is what the
+`created_by`/`updated_by = 'worker-pipeline'` stamp on that INSERT buys.
+
 **`createDsCompareConfigForMetric` (`modules/dynatrace/dynatrace.repository.ts`) writes a panel-level
 row the moment a HOST is mapped, and its INSERT names no `created_by`/`updated_by` at all.** So the
 row read as a user edit while being pure boilerplate — classification hardcoded `USE_utilization`,
@@ -997,8 +1034,39 @@ group name back to its members. Five things about it:
    changed. Only a run with no membership for the panel (live, or not yet recalculated) falls back
    to the current enabled rule, applied in JavaScript with `applySeriesGrouping`. No regex ever
    reaches SQL, and no name is interpolated: groups, members and aggregations are bound arrays.
-2. **A member-count name is a group too.** `api (pod count)` exists only in `ds_metric_statistics`;
-   the resolver answers it as `COUNT(*)` of the members per timestamp.
+2. **A group's series are its DERIVED names, and the bare group name is not one of them.** A
+   renamed group emits `api (avg)` / `(sum)` / `(max)` / `(count)` — one per entry in the
+   membership row's `aggregations` — and `expandSeriesNames` answers each by combining the group's
+   members with that aggregation. `api (count)` is `COUNT(*)` per timestamp; it exists only in
+   `ds_metric_statistics`, never in `ds_metrics`. `mapNamesToGroups` lists exactly those names,
+   which is what gets them into the pickers.
+
+   Three things hold it together:
+
+   - **A raw series of that literal name wins.** `expandSeriesNames` and `allSeriesOf` both skip a
+     derived name that collides with a member name, so a panel that really does hold a series
+     called `api (sum)` keeps it and the derived one is dropped rather than shadowing real data.
+     That is the same guard the worker applies on write, which is why the two agree about which
+     name belongs to which series.
+   - **`SeriesGroup` and `ResolvedSeries` are different types, deliberately.** A group is a set of
+     members; a resolved series is ONE of the series that group emits, with the aggregation to
+     apply. The single type that carried both (an `aggregation` beside a `memberCountName` and a
+     list of extras) could not tell a reader which it was describing. `groupsForPanel` and
+     `groupsInRun` return groups; `expand` and `allSeriesOf` return resolved series.
+   - **A group the rule did not rename has an EMPTY `aggregations`.** It passes through under its
+     own name, so it contributes no derived series at all — which is why the whole-panel readers
+     pair `allSeriesOf(groups)` with `excludeNames: groups.flatMap(g => g.members)`.
+
+   The membership table carries `aggregations` for the same reason it carried the aggregation
+   before: it records what the run's statistics were actually computed with, and the resolver
+   prefers it over the live rule so a chart agrees with the numbers beside it.
+
+   **There is no column probe, and that is deliberate.** `aggregations` is created WITH the tables
+   by migration 1819, so a database that has one has the other. A column-level probe briefly
+   existed here for a follow-up migration that no longer exists, and it was the source of a silent
+   incoherence — the worker's membership DELETE was gated on it while `ds_metric_statistics` was
+   rewritten regardless. If a future migration adds a column to these tables, probe it on BOTH
+   tables and make every statement that NAMES it conditional, not just the SELECT.
 3. **It probes for its tables with `to_regclass` and never throws.** The API can start before
    migration 1819 runs, and a statement on a missing table inside the request's RLS transaction
    aborts it (25P02) and takes every later query of the request with it. Only a positive probe is
@@ -1047,14 +1115,24 @@ group name back to its members. Five things about it:
    `details.controlRuns` (written only for a failed baseline aggregation). A run with no conclusion
    falls back to the workload's five previous completed runs; a conclusion with an EMPTY control
    group answers `[]` rather than inventing a baseline ADAPT never used.
-6. **All three of preview, suggestions and status probe `groupingTablesPresent` first.** The API can
+6. **`aggregations` is REQUIRED and non-empty, and the service canonicalises rather than
+   re-validating.** The DTO carries `@ArrayNotEmpty`, `@ArrayUnique` and a per-element `@IsIn`
+   against `SERIES_GROUPING_AGGREGATIONS`; `ck_series_grouping_rules_aggregations` repeats both
+   halves in SQL. `ruleFields` then runs `normalizeAggregations` — known values only,
+   de-duplicated, canonical order — and throws a 400 if nothing survives, because the rule hash is
+   taken over this list and decides whether a run reads as stale, so the order the checkboxes
+   happened to be ticked in must not change it. The same function runs on the web side, so the
+   dialog and the API cannot disagree about what a rule will emit. An empty list is refused rather
+   than defaulted: a rule that emits nothing would still exclude its panels from the main
+   statistics statement, so the panel would lose every series instead of keeping its pods.
+7. **All three of preview, suggestions and status probe `groupingTablesPresent` first.** The API can
    start before migration 1819 runs — nothing orders them, no service declares
    `depends_on: perfana-migration` — and a statement on a missing table inside the request's RLS
    transaction aborts it (25P02) and takes every later query of the request with it. `preview` went
    straight to `series_grouping_rules` and `ds_metric_series_groups` until v0.2.97.43, so an
    un-migrated deploy 500'd the grouping dialog's first request instead of previewing against a run
    that simply has no grouping yet. Only a positive probe is cached.
-7. **`sg:alignment` has no threshold in SQL, so `loadAlignment` must filter like `loadMisaligned`.**
+8. **`sg:alignment` has no threshold in SQL, so `loadAlignment` must filter like `loadMisaligned`.**
    Both return every group of two or more members with a non-null `avg_members`; the threshold is
    applied in JavaScript on the rounded value, because `avg_members` is a `REAL` and `1.2`
    round-trips as `1.2000000476837158`, so a SQL `< 1.2` would call the threshold itself misaligned.

@@ -27,8 +27,41 @@ dashboard-wide one.
 | Field | Meaning |
 |---|---|
 | Pattern | A built-in preset, or a custom JavaScript regex with a replacement (`$1` allowed). Every match is replaced; a rewrite that leaves nothing keeps the raw name. |
-| Combine | How the members of a group combine per timestamp: **Average per pod** (default), **Total** or **Highest pod**. |
-| Track the number of pods | Also writes a `<group> (pod count)` series, so a changed replica count is visible next to an average. |
+| Series per group | Which series the group emits, one per ticked box: **Average per pod**, **Total**, **Highest pod**, **Number of pods**. At least one. A new rule starts with the average and the pod count. |
+
+### Reading the average and the total together
+
+**Average per pod** and **Total** answer different questions, and reading them side by side is what
+tells a scale-out apart from a regression:
+
+| | **Average per pod** flat | **Average per pod** up |
+|---|---|---|
+| **Total** up | scale-out — more pods, same cost each. Not a regression. | a real regression, amplified by the replica count |
+| **Total** flat | scale-in with hotter pods | a real regression on a fixed fleet |
+
+Each ticked box is its own series, named for what it measures: `api (avg)`, `api (sum)`,
+`api (max)`, `api (count)`. There is no plain `api` — every series carries its suffix.
+
+**That is what makes a rule safe to edit.** Ticking a box adds a series and unticking removes one;
+no edit ever changes what an existing series measures. A series the rule does not rename is left
+alone entirely and keeps its own name, because a group of one has nothing to combine.
+
+**Unticking a box is not free.** The series disappears on the next recalculation. Anomaly detection
+drops its own results, but an SLO, a saved graph preset or a report section pointing at `api (sum)`
+will stop matching it — and an SLO that matches nothing records no verdict rather than failing. The
+dialog warns when a saved rule loses a series this way.
+
+Each box multiplies the number of series on the panel, so a dashboard-wide rule with all four is
+four series per group. The dialog prints the total before you save.
+
+**The total and the pod count are reported, not judged — the average and the highest are judged.**
+A total and a pod count are both replica-count dependent: scale a Deployment from two replicas to
+four and each doubles, which is a scale-out and not a regression. So Perfana gives those two an
+*unclassified* comparison setting, which means anomaly detection reports a change in them as a
+difference and never as a
+regression — it cannot turn a run red on its own. The plain group series keeps whatever
+classification the panel has. If you do want a derived series judged, set a comparison
+classification on it explicitly and Perfana will leave your setting alone.
 
 Built-in presets:
 
@@ -62,13 +95,17 @@ is checked by the same ReDoS guard the worker uses, and the dialog refuses an un
 ## The dialog
 
 The dialog shows the run's real series before anything is saved: each group, its members in this
-run and in the baseline, whether the group is in the baseline, and a *Before / After* line (*"0 of
-6 series match the baseline · 2 of 2 groups match"*). The preview is computed in the browser with the
+run and in the baseline, whether the group is in the baseline, each extra series the group will add,
+and a *Before / After* line (*"0 of 6 series match the baseline · 2 of 2 groups match · 2 extra
+series added"*). The *After* figure counts **groups**, because that is what baseline matching is
+about; the extras are counted separately as series. The preview is computed in the browser with the
 same function the worker uses, so it cannot disagree with what the analysis will do. The preset
 that matches the most names is preselected and marked *(detected)*.
 
-It warns about three things:
+It warns about four things:
 
+- **unticking a box on a saved rule**, which deletes that series on the next recalculation, so
+  anything referencing it by name stops matching;
 - an **SLO** whose match pattern selects pods by name and would match nothing after grouping;
 - a **group name that is also a raw series name** in a baseline run that has not been recalculated —
   that run's series of that name is pooled into the group until it is;

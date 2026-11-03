@@ -1,5 +1,13 @@
 # Series grouping: implementation plan
 
+> **Superseded in part (v0.2.97.44).** The schema below shows `aggregation` (one value) plus
+> `track_member_count`. Both were replaced by a single `aggregations varchar(8)[]` before this
+> feature reached any database, and every series a renamed group emits is now suffixed:
+> `api (avg)`, `api (sum)`, `api (max)`, `api (count)`. There is no bare `api`. Everything else
+> here — the presets, the membership table, where grouping happens, the SLO and baseline
+> interactions — still holds. See `2026-11-02-series-grouping-multi-aggregation.md`.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Design:** [`2026-11-01-series-grouping-design.md`](2026-11-01-series-grouping-design.md). Read it first; this plan does not repeat its reasoning.

@@ -8,8 +8,11 @@ import {
   buildGroupedStatisticsSQL,
   buildMembership,
   DELETE_MEMBERSHIP_SQL,
+  derivedCompareConfigParams,
+  derivedSeriesConfigRows,
   groupedPanelTriples,
   groupedStatementParams,
+  INSERT_DERIVED_COMPARE_CONFIG_SQL,
   INSERT_MEMBERSHIP_SQL,
   loadSeriesGroupingContext,
   membersPerGroup,
@@ -479,14 +482,16 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     }
 
     const groups = new Set(membership.map((m) => alignmentKey(m)));
-    const memberCountSeries = new Set(
-      membership.filter((m) => m.track_member_count && m.member_count_name).map((m) => alignmentKey(m))
+    const renamedGroups = new Set(membership.filter((m) => m.renamed).map((m) => alignmentKey(m)));
+    // One per (group, aggregation): what the grouped statement's suffixed arm will write.
+    const derivedSeries = new Set(
+      membership.flatMap((m) => m.aggregations.map((a) => `${alignmentKey(m)}\u0000${a}`))
     );
     const [panelRuns] = groupedPanelTriples(membership);
     this.logger.info(
       `series-grouping: runs=${new Set(membership.map((m) => m.test_run_id)).size} rules=${grouping.rules.length} ` +
         `panels=${panelRuns.length} rawSeries=${membership.length} groups=${groups.size} ` +
-        `memberCountSeries=${memberCountSeries.size} in ${Date.now() - startedAt}ms`
+        `renamedGroups=${renamedGroups.size} derivedSeries=${derivedSeries.size} in ${Date.now() - startedAt}ms`
     );
   }
 
@@ -557,6 +562,24 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
 
     if (membership.length > 0) {
       await this.aggregateGroupedPanels(manager, targetRunIds, membership, grouping, groupingStart);
+
+      // One unclassified compare config per DERIVED series, so a scale-out shows up as a difference
+      // instead of flipping the run to REGRESSION. See derivedSeriesConfigRows.
+      //
+      // LAST in the transaction, deliberately. Nothing later reads these rows, and the INSERT takes
+      // a RowExclusiveLock on ds_compare_config plus FK key-share locks on the systems_under_test
+      // and application_dashboards rows it touches — held until COMMIT, i.e. for the whole
+      // aggregation window, up to AGGREGATION_STATEMENT_TIMEOUT_MS (540 s). Placed before the
+      // aggregation it blocked the API's `DELETE FROM ds_compare_config WHERE
+      // application_dashboard_id = $1` (the Dynatrace host-mapping and entity-copy paths) for that
+      // window, which then hits the API pool's 300 s query_timeout. Here the window is the commit.
+      // Keep it AFTER the statistics DELETE/INSERT: the SUT-delete cascade takes ds_metric_statistics
+      // and ds_metric_series_groups in phase 1 and ds_compare_config in phase 2, so this ordering
+      // matches it and a concurrent SUT delete blocks rather than deadlocks.
+      const derivedConfigs = derivedSeriesConfigRows(membership);
+      if (derivedConfigs.length > 0) {
+        await manager.query(INSERT_DERIVED_COMPARE_CONFIG_SQL, derivedCompareConfigParams(derivedConfigs));
+      }
     }
 
     // For CTE-based INSERT...SELECT, TypeORM doesn't return rowCount reliably

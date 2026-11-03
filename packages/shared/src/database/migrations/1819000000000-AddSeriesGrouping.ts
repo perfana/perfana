@@ -44,9 +44,15 @@ const UP_DDL = `
       CONSTRAINT ck_series_grouping_rules_preset CHECK (preset IN ('k8s-pod', 'k8s-daemonset', 'ip-port', 'trailing-id', 'custom')),
     pattern text,
     replacement text NOT NULL DEFAULT '',
-    aggregation character varying(8) NOT NULL DEFAULT 'avg'
-      CONSTRAINT ck_series_grouping_rules_aggregation CHECK (aggregation IN ('avg', 'sum', 'max')),
-    track_member_count boolean NOT NULL DEFAULT false,
+    -- Which series a renamed group emits, one each, named "<group> (avg)" / "(sum)" / "(max)" /
+    -- "(count)". Every one is suffixed and none keeps the bare group name, so a rule edit only
+    -- ever adds or removes a series and never changes what an existing one measures. "count" is
+    -- the member count, which was a separate track_member_count boolean before v0.2.97.44.
+    -- (No backticks in here: this string is a template literal.)
+    aggregations character varying(8)[] NOT NULL DEFAULT '{avg}'
+      CONSTRAINT ck_series_grouping_rules_aggregations
+      CHECK (aggregations <@ ARRAY['avg', 'sum', 'max', 'count']::character varying(8)[]
+             AND array_length(aggregations, 1) >= 1),
     enabled boolean NOT NULL DEFAULT true,
     origin character varying(16) NOT NULL DEFAULT 'manual'
       CONSTRAINT ck_series_grouping_rules_origin CHECK (origin IN ('manual', 'suggestion', 'copy')),
@@ -83,10 +89,9 @@ const UP_DDL = `
     panel_id integer NOT NULL,
     metric_name character varying(255) NOT NULL,
     group_name character varying(255) NOT NULL,
-    member_count_name character varying(255),
     dashboard_label character varying(255),
     panel_title character varying(255),
-    aggregation character varying(8) NOT NULL,
+    aggregations character varying(8)[] NOT NULL,
     avg_members real,
     rule_id uuid REFERENCES public.series_grouping_rules(id) ON DELETE SET NULL,
     rule_hash character varying(16) NOT NULL,
@@ -112,15 +117,27 @@ const withBoundedLockWait = (label: string, ddl: string): string => `
   DO $series_grouping$
   DECLARE
     attempt int := 0;
+    -- Captured on entry and restored on both exit paths. set_config(..., true) is
+    -- transaction-local and the runner uses TypeORM's default transaction: "all" — ONE
+    -- transaction for the whole batch — so the 3s left in place leaked forward into every
+    -- migration numbered above this one in the same deploy, where it surfaces as 55P03 instead of
+    -- a wait. Added in v0.2.97.44 (this migration shipped in v0.2.97.43 without it): a database
+    -- that has already run it is unaffected, since the leak only ever lasted for that batch's
+    -- transaction, while a combined 1819+1820 install is fixed. 1820 captures the value it finds
+    -- on entry, so without this restore it captured THIS block's 3s and dutifully put it back —
+    -- the leak survived a fix whose comment claimed otherwise.
+    prev_lock_timeout text := current_setting('lock_timeout');
   BEGIN
     PERFORM set_config('lock_timeout', '3s', true);
     LOOP
       attempt := attempt + 1;
       BEGIN
         ${ddl}
+        PERFORM set_config('lock_timeout', prev_lock_timeout, true);
         RETURN;
       EXCEPTION WHEN lock_not_available THEN
         IF attempt >= 10 THEN
+          PERFORM set_config('lock_timeout', prev_lock_timeout, true);
           RAISE EXCEPTION
             'could not ${label}: application_dashboards or systems_under_test stayed locked across % attempts. Find the long-running transaction (pg_stat_activity, often a SUT deletion) and retry the deploy.', attempt;
         END IF;

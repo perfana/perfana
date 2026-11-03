@@ -1,4 +1,11 @@
-import { SeriesGroupResolver, buildSeriesRelation, mapNamesToGroups, type SeriesGroup } from './series-group-resolver';
+import {
+  SeriesGroupResolver,
+  buildSeriesRelation,
+  expandSeriesNames,
+  mapNamesToGroups,
+  type ResolvedSeries,
+  type SeriesGroup,
+} from './series-group-resolver';
 
 const RUN = 'run-1';
 const DASH = '6f1c1c52-0000-4000-8000-000000000001';
@@ -16,12 +23,10 @@ const membership = (over: Row = {}): Row => ({
   panel_title: 'CPU per pod',
   metric_name: POD_A,
   group_name: 'api',
-  aggregation: 'avg',
-  member_count_name: null,
+  aggregations: ['avg'],
   preset: null,
   pattern: null,
   replacement: null,
-  track_member_count: null,
   ...over,
 });
 
@@ -34,12 +39,10 @@ const rule = (over: Row = {}): Row => ({
   panel_title: null,
   metric_name: null,
   group_name: null,
-  aggregation: 'avg',
-  member_count_name: null,
+  aggregations: ['avg'],
   preset: 'k8s-pod',
   pattern: null,
   replacement: '',
-  track_member_count: false,
   ...over,
 });
 
@@ -47,11 +50,15 @@ const rule = (over: Row = {}): Row => ({
  * A queryable that answers by statement: the presence probe, the lookup, and (for the
  * live-run fallback only) the read of the panel's raw names.
  */
-function queryable(opts: { present?: boolean; lookup?: Row[]; names?: Row[]; failLookup?: boolean } = {}) {
+function queryable(
+  opts: { present?: boolean; lookup?: Row[]; names?: Row[]; failLookup?: boolean } = {},
+) {
   const calls: Array<{ sql: string; params: unknown[] }> = [];
   const query = jest.fn(async (sql: string, params: unknown[] = []) => {
     calls.push({ sql, params });
-    if (sql.includes('to_regclass')) return [{ present: opts.present ?? true }];
+    if (sql.includes('to_regclass')) {
+      return [{ present: opts.present ?? true }];
+    }
     if (/\bFROM ds_metrics\b/.test(sql)) return opts.names ?? [];
     if (opts.failLookup) throw new Error('boom');
     return opts.lookup ?? [];
@@ -140,7 +147,7 @@ describe('SeriesGroupResolver', () => {
       );
 
       expect(groups).toEqual<SeriesGroup[]>([
-        { group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null },
+        { group: 'api', members: [POD_B, POD_A].sort(), aggregations: ['avg'], renamed: true },
       ]);
       // No raw-name read: membership already says it all.
       expect(touchedDsMetrics(q.calls)).toBe(false);
@@ -156,8 +163,8 @@ describe('SeriesGroupResolver', () => {
     it('carries the stored aggregation and the member-count name', async () => {
       const q = queryable({
         lookup: [
-          membership({ metric_name: POD_A, aggregation: 'sum', member_count_name: 'api (pod count)' }),
-          membership({ metric_name: POD_B, aggregation: 'sum', member_count_name: 'api (pod count)' }),
+          membership({ metric_name: POD_A, aggregations: ['sum', 'count'] }),
+          membership({ metric_name: POD_B, aggregations: ['sum', 'count'] }),
         ],
       });
 
@@ -167,7 +174,7 @@ describe('SeriesGroupResolver', () => {
         panelId: 201,
       });
 
-      expect(group).toMatchObject({ group: 'api', aggregation: 'sum', memberCountName: 'api (pod count)' });
+      expect(group).toMatchObject({ group: 'api', aggregations: ['sum', 'count'] });
     });
 
     it('treats a single renamed pod as a group, because its group name exists nowhere in ds_metrics', async () => {
@@ -177,7 +184,7 @@ describe('SeriesGroupResolver', () => {
         applicationDashboardId: DASH,
         panelId: 201,
       });
-      expect(groups).toEqual([{ group: 'api', members: [POD_A], aggregation: 'avg', memberCountName: null }]);
+      expect(groups).toEqual([{ group: 'api', members: [POD_A], aggregations: ['avg'], renamed: true }]);
     });
   });
 
@@ -189,27 +196,27 @@ describe('SeriesGroupResolver', () => {
 
       const groups = await new SeriesGroupResolver().groupsForPanel(q, ref, [POD_A, POD_B, 'heap-used']);
 
-      expect(groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null }]);
+      expect(groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregations: ['avg'], renamed: true }]);
       expect(touchedDsMetrics(q.calls)).toBe(false);
     });
 
     it('names the member-count series the rule tracks', async () => {
-      const q = queryable({ lookup: [rule({ track_member_count: true, aggregation: 'max' })] });
+      const q = queryable({ lookup: [rule({ aggregations: ['max', 'count'] })] });
 
       const [group] = await new SeriesGroupResolver().groupsForPanel(q, ref, [POD_A, POD_B]);
 
-      expect(group).toMatchObject({ group: 'api', aggregation: 'max', memberCountName: 'api (pod count)' });
+      expect(group).toMatchObject({ group: 'api', aggregations: ['max', 'count'] });
     });
 
     it('prefers a panel rule over a dashboard-wide rule', async () => {
       const q = queryable({
-        lookup: [rule({ panel_id: null, preset: 'trailing-id' }), rule({ panel_id: 201, preset: 'k8s-pod', aggregation: 'sum' })],
+        lookup: [rule({ panel_id: null, preset: 'trailing-id' }), rule({ panel_id: 201, preset: 'k8s-pod', aggregations: ['sum'] })],
       });
 
       const [group] = await new SeriesGroupResolver().groupsForPanel(q, ref, [POD_A, POD_B]);
 
       // `trailing-id` would have produced "api-7d9f8c6b5" / "api" differently; the panel rule is k8s-pod.
-      expect(group).toMatchObject({ group: 'api', aggregation: 'sum' });
+      expect(group).toMatchObject({ group: 'api', aggregations: ['sum'] });
     });
 
     it('reads the panel\'s series from ds_metrics only when a rule candidate exists and none were given', async () => {
@@ -275,37 +282,69 @@ describe('SeriesGroupResolver', () => {
         panelTitle: 'CPU per pod',
       });
 
-      expect(groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: null }]);
+      expect(groups).toEqual([{ group: 'api', members: [POD_B, POD_A].sort(), aggregations: ['avg'], renamed: true }]);
       const read = q.calls.find((c) => /\bFROM ds_metrics\b/.test(c.sql))!;
       expect(read.sql).toContain('dashboard_label = $2');
       expect(read.sql).toContain('panel_title = $3');
     });
   });
 
+
   describe('expand', () => {
     const lookup = [
-      membership({ metric_name: POD_A, member_count_name: 'api (pod count)' }),
-      membership({ metric_name: POD_B, member_count_name: 'api (pod count)' }),
+      membership({ metric_name: POD_A, aggregations: ['avg', 'count'] }),
+      membership({ metric_name: POD_B, aggregations: ['avg', 'count'] }),
     ];
     const ref = { testRunId: RUN, applicationDashboardId: DASH, panelId: 201 };
 
-    it('turns a group name into its members', async () => {
+    // Every series a group emits is suffixed; the bare group name is not one of them.
+    it('turns a derived name into its members with that aggregation', async () => {
       const q = queryable({ lookup });
-      const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['api']);
+      const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['api (avg)']);
       expect(raw).toEqual([]);
-      expect(groups).toEqual([
-        { group: 'api', members: [POD_B, POD_A].sort(), aggregation: 'avg', memberCountName: 'api (pod count)' },
-      ]);
+      expect(groups).toEqual([{ name: 'api (avg)', members: [POD_B, POD_A].sort(), aggregation: 'avg' }]);
     });
 
-    it('turns a member-count name into COUNT over the same members', async () => {
+    it('turns a count name into COUNT over the same members', async () => {
       // The count series exists only in ds_metric_statistics, never in ds_metrics.
       const q = queryable({ lookup });
-      const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['api (pod count)']);
+      const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['api (count)']);
       expect(raw).toEqual([]);
-      expect(groups).toEqual([
-        { group: 'api (pod count)', members: [POD_B, POD_A].sort(), aggregation: 'count', memberCountName: null },
-      ]);
+      expect(groups).toEqual([{ name: 'api (count)', members: [POD_B, POD_A].sort(), aggregation: 'count' }]);
+    });
+
+    // The bare group name is no longer a series: nothing writes it, so nothing may resolve it.
+    it('passes the bare group name through as a raw name', async () => {
+      const q = queryable({ lookup });
+      const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['api']);
+      expect(raw).toEqual(['api']);
+      expect(groups).toEqual([]);
+    });
+
+    // The write side already refuses to emit an extra whose name is taken (see the shared
+    // applySeriesGrouping spec); this is the read-side belt and braces for membership written
+    // before such a series appeared.
+    it('lets a group of that exact name win over the synthesised extra', () => {
+      // A RAW series literally named `api (sum)` — a member of some other group on the panel.
+      const real: SeriesGroup = {
+        group: 'other',
+        members: ['api (sum)', 'pod-2'],
+        aggregations: ['avg'],
+        renamed: true,
+      };
+      const derived: SeriesGroup = {
+        group: 'api',
+        members: [POD_A, POD_B],
+        aggregations: ['avg', 'sum'],
+        renamed: true,
+      };
+      // Whichever order they arrive in, the raw series keeps the name and the derived one is
+      // dropped rather than shadowing real data — the same guard the worker applies on write.
+      for (const available of [[derived, real], [real, derived]]) {
+        const { raw, groups } = expandSeriesNames(available, ['api (sum)']);
+        expect(raw).toEqual(['api (sum)']);
+        expect(groups).toEqual([]);
+      }
     });
 
     it('passes a non-group name straight through, a raw pod name included', async () => {
@@ -317,9 +356,9 @@ describe('SeriesGroupResolver', () => {
 
     it('splits a mixed request', async () => {
       const q = queryable({ lookup });
-      const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['heap-used', 'api', 'api']);
+      const { raw, groups } = await new SeriesGroupResolver().expand(q, ref, ['heap-used', 'api (avg)', 'api (avg)']);
       expect(raw).toEqual(['heap-used']);
-      expect(groups.map((g) => g.group)).toEqual(['api']);
+      expect(groups.map((g) => g.name)).toEqual(['api (avg)']);
     });
 
     it('passes everything through when nothing is grouped, after one lookup and no ds_metrics read', async () => {
@@ -374,14 +413,24 @@ describe('SeriesGroupResolver', () => {
   });
 });
 
+describe('mapNamesToGroups — extra aggregations', () => {
+  it('lists every series the group emits, so a picker can offer them', () => {
+    const { names } = mapNamesToGroups([POD_A, POD_B], [
+      { group: 'api', members: [POD_A, POD_B], aggregations: ['avg', 'sum', 'count'], renamed: true },
+    ]);
+    // The bare group name is NOT among them: nothing writes it.
+    expect(names).toEqual(['api (avg)', 'api (count)', 'api (sum)']);
+  });
+});
+
 describe('mapNamesToGroups', () => {
   const groups: SeriesGroup[] = [
-    { group: 'api', members: [POD_A, POD_B], aggregation: 'avg', memberCountName: 'api (pod count)' },
+    { group: 'api', members: [POD_A, POD_B], aggregations: ['avg'], renamed: true },
   ];
 
-  it('replaces covered names with the group and its count series, sorted, and keeps the rest', () => {
+  it('replaces covered names with the series the group emits, sorted, and keeps the rest', () => {
     const { names, seriesGroups } = mapNamesToGroups([POD_A, 'heap-used', POD_B], groups);
-    expect(names).toEqual(['api', 'api (pod count)', 'heap-used']);
+    expect(names).toEqual(['api (avg)', 'heap-used']);
     expect(seriesGroups).toEqual([{ ...groups[0], members: [POD_A, POD_B] }]);
   });
 
@@ -396,11 +445,10 @@ describe('mapNamesToGroups', () => {
 });
 
 describe('buildSeriesRelation', () => {
-  const group: SeriesGroup = {
-    group: "api'; DROP TABLE ds_metrics; --",
+  const group: ResolvedSeries = {
+    name: "api'; DROP TABLE ds_metrics; --",
     members: [POD_A, POD_B],
     aggregation: 'sum',
-    memberCountName: null,
   };
   const base = { alias: 'm', conditions: ['m.test_run_id = $1', 'm.panel_id = $2'], params: [RUN, 201] };
 
@@ -418,7 +466,7 @@ describe('buildSeriesRelation', () => {
       RUN,
       201,
       [POD_A, POD_B],
-      [group.group, group.group],
+      [group.name, group.name],
       ['sum', 'sum'],
       [POD_A, POD_B],
     ]);
@@ -431,12 +479,12 @@ describe('buildSeriesRelation', () => {
   });
 
   it('carries every group of the request through one scan', () => {
-    const second: SeriesGroup = { group: 'db', members: ['db-aaaaa-bbbbb'], aggregation: 'max', memberCountName: null };
+    const second: ResolvedSeries = { name: 'db', members: ['db-aaaaa-bbbbb'], aggregation: 'max' };
     const { sql, params } = buildSeriesRelation({ ...base, groups: [group, second] });
 
     expect(sql.match(/FROM ds_metrics m/g)).toHaveLength(1);
     expect(params[2]).toEqual([POD_A, POD_B, 'db-aaaaa-bbbbb']);
-    expect(params[3]).toEqual([group.group, group.group, 'db']);
+    expect(params[3]).toEqual([group.name, group.name, 'db']);
     expect(params[4]).toEqual(['sum', 'sum', 'max']);
   });
 

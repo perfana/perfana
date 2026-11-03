@@ -9,6 +9,9 @@ export const AGGREGATION_LABELS: Record<SeriesGroupingAggregation, string> = {
   avg: 'Average per pod',
   sum: 'Total',
   max: 'Highest pod',
+  // The series is named `<group> (count)`; "pods" is the word a reader of a Kubernetes dashboard
+  // expects, and the label is free to be friendlier than the name.
+  count: 'Number of pods',
 };
 
 export function presetLabel(preset: SeriesGroupingPreset): string {

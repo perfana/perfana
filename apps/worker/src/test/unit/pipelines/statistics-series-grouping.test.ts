@@ -9,14 +9,26 @@ import { StatisticsPipeline } from '../../../pipelines/StatisticsPipeline.js';
 import {
   buildMembership,
   buildGroupedExclusion,
+  buildGroupedStatisticsSQL,
+  derivedCompareConfigParams,
+  derivedSeriesConfigRows,
+  groupedStatementParams,
+  INSERT_DERIVED_COMPARE_CONFIG_SQL,
+  INSERT_MEMBERSHIP_SQL,
+  membershipInsertParams,
   SERIES_GROUPING_RULES_SQL,
   type LoadedRule,
+  type MembershipRow,
   type SeriesRow,
 } from '../../../pipelines/helpers/series-grouping-plan.js';
 import { buildStatisticsInsertSQL } from '../../../pipelines/helpers/statistics-sql.js';
 import { getLogger } from '../../../lib/utils/logger.js';
 import * as databaseAccessor from '../../../common/database-accessor.js';
-import { seriesGroupingRuleHash, type SeriesGroupingRuleSpec } from '@perfana/shared/utils';
+import {
+  SERIES_GROUPING_AGGREGATIONS,
+  seriesGroupingRuleHash,
+  type SeriesGroupingRuleSpec,
+} from '@perfana/shared/utils';
 
 vi.mock('../../../lib/utils/logger.js');
 vi.mock('../../../common/database-accessor.js');
@@ -28,8 +40,7 @@ const spec = (overrides: Partial<SeriesGroupingRuleSpec> = {}): SeriesGroupingRu
   preset: 'k8s-pod',
   pattern: null,
   replacement: '',
-  aggregation: 'avg',
-  trackMemberCount: false,
+  aggregations: ['avg'],
   ...overrides,
 });
 
@@ -38,11 +49,13 @@ const ruleRow = (overrides: Record<string, unknown> = {}) => ({
   id: 'rule-1',
   application_dashboard_id: DASH,
   panel_id: 7,
+  system_under_test_id: '33333333-3333-3333-3333-333333333333',
+  test_environment: 'acc',
+  workload: 'peak',
   preset: 'k8s-pod',
   pattern: null,
   replacement: '',
-  aggregation: 'avg',
-  track_member_count: false,
+  aggregations: ['avg'],
   ...overrides,
 });
 
@@ -183,7 +196,7 @@ describe('StatisticsPipeline — series grouping', () => {
 
   describe('a batch with one grouped panel', () => {
     beforeEach(() => {
-      rulesRows = [ruleRow({ track_member_count: true })];
+      rulesRows = [ruleRow({ aggregations: ['avg', 'count'] })];
       seriesRows = [
         series('api-7d9f8c6b5-x2k4p'),
         series('api-7d9f8c6b5-z9w2t'),
@@ -219,17 +232,18 @@ describe('StatisticsPipeline — series grouping', () => {
       await pipeline.execute({ testRunIds: ['run-a'] });
 
       const insert = txWith('INSERT INTO ds_metric_series_groups')[0]!;
-      const [runs, dashes, panels, metrics, groups, memberCounts, , , aggregations, ruleIds, hashes] =
+      const [runs, dashes, panels, metrics, groups, , , aggregations, ruleIds, hashes] =
         insert.params as unknown[][];
       expect(metrics).toEqual(['api-7d9f8c6b5-x2k4p', 'api-7d9f8c6b5-z9w2t', 'worker-6b8f7d9c4-h5k2l']);
       expect(groups).toEqual(['api', 'api', 'worker']);
-      expect(memberCounts).toEqual(['api (pod count)', 'api (pod count)', 'worker (pod count)']);
       expect(runs).toEqual(['run-a', 'run-a', 'run-a']);
       expect(dashes).toEqual([DASH, DASH, DASH]);
       expect(panels).toEqual([7, 7, 7]);
-      expect(aggregations).toEqual(['avg', 'avg', 'avg']);
+      // One comma-joined string per row, which the statement string_to_arrays back to an array.
+      // Every member of a group carries the SAME list: it is a property of the group.
+      expect(aggregations).toEqual(['avg,count', 'avg,count', 'avg,count']);
       expect(ruleIds).toEqual(['rule-1', 'rule-1', 'rule-1']);
-      expect(hashes).toEqual(Array(3).fill(seriesGroupingRuleHash(spec({ trackMemberCount: true }))));
+      expect(hashes).toEqual(Array(3).fill(seriesGroupingRuleHash(spec({ aggregations: ['avg', 'count'] }))));
     });
 
     test('deletes the old membership before writing the new one', async () => {
@@ -259,14 +273,15 @@ describe('StatisticsPipeline — series grouping', () => {
       // (Comments in the shared statistics chain may still mention it by name.)
       expect(sql.replace(/--[^\n]*/g, '')).not.toContain('metrics_filtered');
       expect(sql).toContain('UPDATE ds_metric_series_groups');
-      const [runId, runs, , , metrics, groups, aggregations, tracked, memberCounts] = grouped[0]!.params as unknown[];
+      const [runId, runs, , , metrics, groups, aggregations, renamed] = grouped[0]!.params as unknown[];
       expect(runId).toBe('run-a');
       expect(runs).toHaveLength(3);
       expect(metrics).toEqual(['api-7d9f8c6b5-x2k4p', 'api-7d9f8c6b5-z9w2t', 'worker-6b8f7d9c4-h5k2l']);
       expect(groups).toEqual(['api', 'api', 'worker']);
-      expect(aggregations).toEqual(['avg', 'avg', 'avg']);
-      expect(tracked).toEqual([true, true, true]);
-      expect(memberCounts).toEqual(['api (pod count)', 'api (pod count)', 'worker (pod count)']);
+      expect(aggregations).toEqual(['avg,count', 'avg,count', 'avg,count']);
+      // Every one of these was renamed by the rule, so each emits suffixed series rather than
+      // passing through under its own name.
+      expect(renamed).toEqual([true, true, true]);
     });
 
     // Measured on TimescaleDB 2026-11-01 (1.87 M ds_metrics rows, compressed): the planner
@@ -311,7 +326,51 @@ describe('StatisticsPipeline — series grouping', () => {
       const infos = logger.info.mock.calls.map((c: unknown[]) => String(c.at(-1)));
       const summary = infos.filter((l: string) => l.startsWith('series-grouping:'));
       expect(summary).toHaveLength(1);
-      expect(summary[0]).toMatch(/runs=1 rules=1 panels=1 rawSeries=3 groups=2 memberCountSeries=2 in \d+ms/);
+      expect(summary[0]).toMatch(
+        /runs=1 rules=1 panels=1 rawSeries=3 groups=2 renamedGroups=2 derivedSeries=4 in \d+ms/,
+      );
+    });
+
+    test('a multi-aggregation rule writes the same list on every member row', async () => {
+      rulesRows = [ruleRow({ aggregations: ['avg', 'sum'] })];
+      await pipeline.execute({ testRunIds: ['run-a'] });
+
+      const insert = txWith('INSERT INTO ds_metric_series_groups')[0]!;
+      expect((insert.params as unknown[][])[7]).toEqual(['avg,sum', 'avg,sum', 'avg,sum']);
+
+      const infos = logger.info.mock.calls.map((c: unknown[]) => String(c.at(-1)));
+      // 2 renamed groups x 2 aggregations.
+      expect(infos.find((l: string) => l.startsWith('series-grouping:'))).toContain('derivedSeries=4');
+    });
+
+    /**
+     * Value:
+     *   protects — a series the rule does not rename is a group of ONE, which passes through
+     *     under its own name. It must carry no aggregations, so the grouped statement's bare arm
+     *     picks it up and the suffixed arm does not.
+     *   fails_when — `buildMembership` reads the list off `rule.spec.aggregations` instead of
+     *     `grouping.seriesAggregations.get(group)`. The statement would then emit
+     *     `heap-used (avg)` INSTEAD of `heap-used`, silently renaming a series the rule was never
+     *     meant to touch and breaking its baseline.
+     *   seam — the INSERT's bound arrays, which are positional.
+     */
+    test('a series the rule does not rename carries no aggregations and is not renamed', async () => {
+      rulesRows = [ruleRow({ aggregations: ['avg', 'sum'] })];
+      // Same panel as the pods, and the k8s-pod preset leaves it alone: a group of one.
+      seriesRows.push(series('heap-used'));
+
+      await pipeline.execute({ testRunIds: ['run-a'] });
+
+      const insert = txWith('INSERT INTO ds_metric_series_groups')[0]!;
+      const params = insert.params as unknown[][];
+      expect(params[3]).toEqual([
+        'api-7d9f8c6b5-x2k4p',
+        'api-7d9f8c6b5-z9w2t',
+        'heap-used',
+        'worker-6b8f7d9c4-h5k2l',
+      ]);
+      expect(params[4]).toEqual(['api', 'api', 'heap-used', 'worker']);
+      expect(params[7]).toEqual(['avg,sum', 'avg,sum', '', 'avg,sum']);
     });
 
     test('an invalid stored custom rule is skipped with a warning, not applied', async () => {
@@ -334,6 +393,9 @@ describe('buildMembership', () => {
       ruleId: 'rule-1',
       applicationDashboardId: DASH,
       panelId: 7,
+      systemUnderTestId: '33333333-3333-3333-3333-333333333333',
+      testEnvironment: 'acc',
+      workload: 'peak',
       spec: s,
       hash: seriesGroupingRuleHash(s),
       ...overrides,
@@ -371,12 +433,161 @@ describe('buildMembership', () => {
 
   test('applies each run its own rule', () => {
     const rows = buildMembership(
-      [loaded({ testRunId: 'run-a' }), loaded({ testRunId: 'run-b', ruleId: 'rule-b', spec: spec({ aggregation: 'max' }) })],
+      [loaded({ testRunId: 'run-a' }), loaded({ testRunId: 'run-b', ruleId: 'rule-b', spec: spec({ aggregations: ['max'] }) })],
       [series('api-7d9f8c6b5-x2k4p'), series('api-7d9f8c6b5-x2k4p', { test_run_id: 'run-b' })],
     );
-    expect(rows.map((r) => [r.test_run_id, r.rule_id, r.aggregation])).toEqual([
+    expect(rows.map((r) => [r.test_run_id, r.rule_id, r.aggregations.join(',')])).toEqual([
       ['run-a', 'rule-1', 'avg'],
       ['run-b', 'rule-b', 'max'],
     ]);
+  });
+});
+
+describe('buildGroupedStatisticsSQL', () => {
+  const row = (
+    aggregations: Array<'avg' | 'sum' | 'max' | 'count'>,
+    renamed = true,
+  ): MembershipRow => ({
+    test_run_id: 'run-a',
+    application_dashboard_id: DASH,
+    panel_id: 7,
+    metric_name: 'api-7d9f8c6b5-x2k4p',
+    dashboard_label: 'K8s resources',
+    panel_title: 'CPU per pod',
+    group_name: 'api',
+    aggregations,
+    renamed,
+    rule_id: 'rule-1',
+    rule_hash: 'deadbeef',
+    system_under_test_id: '33333333-3333-3333-3333-333333333333',
+    test_environment: 'acc',
+    workload: 'peak',
+  });
+
+  /**
+   * Value:
+   *   protects — the statement is now unconditional: one shape, whatever the rules ask for. The
+   *     golden is what makes a change to it deliberate.
+   *   fails_when — anyone reintroduces a branch on what the rules happen to contain. A
+   *     half-conditional statement is how the previous design shipped a 42703 inside the
+   *     analytics transaction, which is not softFail and failed the whole re-evaluate batch.
+   *   seam — the emitted SQL.
+   */
+  test('is one unconditional statement, whatever the rules ask for', () => {
+    expect(buildGroupedStatisticsSQL(1)).toMatchSnapshot('grouped-sql');
+    // All four states are computed every time; which become series is decided per group, in SQL.
+    const sql = buildGroupedStatisticsSQL(1);
+    for (const [state, fn] of [['v_avg', 'AVG'], ['v_sum', 'SUM'], ['v_max', 'MAX']] as const) {
+      expect(sql).toContain(`${fn}(m.value) AS ${state}`);
+    }
+    expect(sql).toContain('COUNT(*) AS member_count');
+    expect(sql).toContain("CROSS JOIN LATERAL unnest(string_to_array(NULLIF(gp.aggregations, ''), ','))");
+  });
+
+  test('every aggregation has its own arm, so none falls through to the average', () => {
+    const sql = buildGroupedStatisticsSQL(1);
+    // The ELSE arm is the average, so avg needs no WHEN of its own; everything else does.
+    expect(sql).toContain("WHEN 'sum' THEN gp.v_sum");
+    expect(sql).toContain("WHEN 'max' THEN gp.v_max");
+    expect(sql).toContain("WHEN 'count' THEN gp.member_count::double precision");
+  });
+
+  /**
+   * Value:
+   *   protects — a series the rule did NOT rename passes through under its own name. Suffixing
+   *     it would rename a series the rule was never meant to touch.
+   *   fails_when — the `WHERE NOT renamed` / `WHERE gp.renamed` split is collapsed into one arm.
+   *     Every ungrouped series on a grouped panel would then be renamed to `heap-used (avg)`,
+   *     breaking its baseline silently — or, with the bare arm dropped, vanish entirely.
+   *   seam — the two arms of the `points` CTE.
+   */
+  test('an unrenamed group passes through under its own name, a renamed one is suffixed', () => {
+    const sql = buildGroupedStatisticsSQL(1);
+    expect(sql).toContain('WHERE NOT renamed');
+    expect(sql).toContain('WHERE gp.renamed');
+    expect(sql).toContain("gp.group_name || ' (' || x.agg || ')' AS metric_name");
+  });
+
+  // A member-count-dependent series doubles when a Deployment is scaled out, against a baseline
+  // recorded at the old replica count. Left classified, ADAPT counts that as a regression and
+  // buildConclusionSQL flips the whole run — the exact case the feature exists to rule out.
+  test('only the member-count-dependent series get an unclassified compare config', () => {
+    const rows = [
+      row(['avg', 'sum', 'max', 'count']),
+      { ...row(['avg', 'sum', 'max', 'count']), metric_name: 'api-7d9f8c6b5-z9w2t' },
+      // Same group on another run of the same workload: the config scope is identical, so the
+      // rows must collapse rather than duplicating.
+      { ...row(['avg', 'sum', 'max', 'count']), test_run_id: 'run-b' },
+    ];
+    const configs = derivedSeriesConfigRows(rows);
+    // `avg` and `max` do not move with the replica count, so they inherit the panel's
+    // classification and a genuine regression in either still flags the run.
+    expect(configs.map((c) => c.metric_name).sort()).toEqual(['api (count)', 'api (sum)']);
+    expect(configs.every((c) => c.workload === 'peak' && c.panel_id === 7)).toBe(true);
+  });
+
+  test('a group emitting neither sum nor count produces no compare config at all', () => {
+    expect(derivedSeriesConfigRows([row(['avg', 'max'])])).toEqual([]);
+  });
+
+  test('an unrenamed group produces no compare config, because it emits no derived series', () => {
+    expect(derivedSeriesConfigRows([row([], false)])).toEqual([]);
+  });
+
+  test('the aggregations travel as one delimited string per row, not as a per-row array', () => {
+    const params = groupedStatementParams(['run-a'], [row(['sum', 'max'])]);
+    // Second to last; `renamed` is last.
+    expect(params[params.length - 2]).toEqual(['sum,max']);
+  });
+
+  /**
+   * Value:
+   *   protects — the `$n` arithmetic in the statement and the order of `groupedStatementParams`
+   *     stay one contract, for every batch size.
+   *   fails_when — an array is added to the params without being bound in the `members` CTE, or
+   *     `p()`'s `runCount + 1 + offset` base drifts. Postgres answers `bind message supplies N
+   *     parameters, but prepared statement requires M`, or silently reads the wrong array into a
+   *     column — and `statistics-calculation` is not softFail, so the whole batch fails.
+   *   why_new — a single run id makes an off-by-one in the base and one in the offset cancel
+   *     out. A batch is up to `REEVALUATE_CHUNK_SIZE` (5) runs.
+   *   seam — the highest placeholder in the emitted SQL against the bound parameter count.
+   */
+  test.each([1, 2, 5])('runCount=%i binds exactly as many parameters as the statement reads', (runCount) => {
+    const sql = buildGroupedStatisticsSQL(runCount);
+    const placeholders = [...sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1] ?? 0));
+    const runIds = Array.from({ length: runCount }, (_, i) => `run-${i}`);
+    const params = groupedStatementParams(runIds, [row(['sum'])]);
+
+    expect(Math.max(...placeholders)).toBe(params.length);
+    // Contiguous: no placeholder is skipped, which a bare max cannot see.
+    expect(new Set(placeholders).size).toBe(params.length);
+  });
+
+  /**
+   * Value:
+   *   protects — the same contract for the other two statements this module emits.
+   *   fails_when — a column is added to one list and not the other, or the actor is added to
+   *     `INSERT_DERIVED_COMPARE_CONFIG_SQL` as `$8` without reaching `derivedCompareConfigParams`.
+   *     Postgres answers a bind-count error inside `withAnalyticsTransaction`.
+   *   seam — the emitted placeholders against the built parameter array.
+   */
+  test('the membership INSERT binds what it reads', () => {
+    const placeholders = [...INSERT_MEMBERSHIP_SQL.matchAll(/\$(\d+)/g)].map((m) => Number(m[1] ?? 0));
+    const params = membershipInsertParams([row(['sum'])]);
+    expect(Math.max(...placeholders)).toBe(params.length);
+    expect(new Set(placeholders).size).toBe(params.length);
+    expect(params.length).toBe(10);
+  });
+
+  test('the derived compare-config INSERT binds what it reads, actor included', () => {
+    const configs = derivedSeriesConfigRows([row(['sum'])]);
+    const placeholders = [...INSERT_DERIVED_COMPARE_CONFIG_SQL.matchAll(/\$(\d+)/g)].map((m) => Number(m[1] ?? 0));
+    const params = derivedCompareConfigParams(configs);
+
+    expect(Math.max(...placeholders)).toBe(params.length);
+    expect(new Set(placeholders).size).toBe(params.length);
+    // Bound, not interpolated — the house style both cited precedents use.
+    expect(INSERT_DERIVED_COMPARE_CONFIG_SQL).not.toContain("'worker-pipeline'");
+    expect(params[params.length - 1]).toBe('worker-pipeline');
   });
 });

@@ -594,23 +594,70 @@ rewrites raw names to a group name with `applySeriesGrouping` (`@perfana/shared/
    grouped panels excluded, and the series read 85 ms for two runs. An ungrouped panel in a grouped
    batch matches a no-rule run exactly except `std_dev` and the two trend columns, which differ by
    at most 1e-13 — floating-point summation order under a different plan, not a different answer.
-3. **Rules load before the transaction and never throw.** `loadSeriesGroupingContext` runs on the
+3. **A rule emits a SET of series, every one suffixed (v0.2.97.44).** `series_grouping_rules.aggregations`
+   is a `varchar(8)[]` holding any of `avg` / `sum` / `max` / `count`; a renamed group emits one
+   series per entry, named `<group> (avg)` and so on. There is no primary and no bare `api`.
+   `count` is the member count, which was a separate `track_member_count` boolean before this
+   version. Six things:
+
+   - **A series the rule does NOT rename keeps its own name.** It is a group of one, so all four
+     aggregations are the same number (bar `count`, a constant 1), and suffixing it would rename a
+     series the rule was never meant to touch. The `points` CTE has two arms for exactly this:
+     `WHERE NOT renamed` emits the bare name with `v_avg` (the identity for one member), and
+     `WHERE gp.renamed` emits one suffixed row per aggregation through a `CROSS JOIN LATERAL`.
+   - **The statement is UNCONDITIONAL.** All four aggregate states are computed on every run and
+     which become series is decided per group, in SQL, from the bound `aggregations` string. The
+     previous design made the SQL itself conditional on what the rules asked for, and that is how
+     it shipped a 42703 inside `withAnalyticsTransaction`: the column probe made the rules SELECT
+     conditional and left the membership INSERT naming the column regardless. A stage that is not
+     `softFail` then failed the whole batch, and the membership DELETE rolled back with it. If a
+     future migration adds a column here, probe it on BOTH tables and make every statement that
+     NAMES it conditional — not just the SELECT.
+   - **The series name is composed in TWO places and they must stay identical**: `groupSeriesName`
+     in `@perfana/shared/utils`, which decides in JS which names a group may emit, and
+     `group_name || ' (' || x.agg || ')'` in the arm. The JS side owns the guards — a raw series
+     literally named `api (sum)` makes that one get dropped, because two rows under one
+     `metric_name` fail the statistics insert outright, and a name over `varchar(255)` is **dropped
+     rather than truncated**, since SQL concatenation cannot reproduce a JS truncation.
+   - **Only `sum` and `count` get an unclassified `ds_compare_config` row**
+     (`MEMBER_COUNT_DEPENDENT_AGGREGATIONS`). Those two move on their own when a Deployment is
+     scaled out, so an unclassified row is what stops a scale-out reading as a regression:
+     `buildConclusionLogic` emits `'regression'` only under `higherIsBetter = true|false`, so an
+     unclassified metric's change lands in `difference_count`. `avg` and `max` do NOT move with the
+     replica count and deliberately get no row, so they inherit the panel's classification and a
+     genuine regression in either still flags the run — which is the point of grouping.
+   - **Those rows are stamped `created_by`/`updated_by = 'worker-pipeline'` and carry
+     `config_data.source = SERIES_GROUPING_DERIVED_SOURCE`.** The stamp is provenance, not a gate:
+     the anomaly card's save rebuilds `config_data` from scratch, so one edit erases the marker.
+     The golden path keys on the row's LEVEL instead — see "A golden-path template loses to any row
+     already on the panel" in [apps/api/CLAUDE.md](../api/CLAUDE.md).
+   - **The aggregations travel as a comma-joined STRING per row**, split with `string_to_array`:
+     `unnest($1::text[], …)` cannot take a per-row array, because a Postgres multidimensional array
+     is not an array of arrays and every row would need the same number of elements. `extrasParam`'s
+     successor `aggregationsParam` filters each element against `SERIES_GROUPING_AGGREGATIONS`
+     before joining, because the separator is the only thing holding that string together.
+
+   `seriesGroupingRuleHash` is taken over the CANONICALISED list, so ticking the same boxes in a
+   different order is the same rule and the insights page does not report every grouped run as
+   stale for a change that is not one.
+
+4. **Rules load before the transaction and never throw.** `loadSeriesGroupingContext` runs on the
    pooled connection after a `to_regclass` probe: an error inside `withAnalyticsTransaction` aborts it
    (25P02), and `statistics-calculation` is not `softFail`, so it would fail the whole re-evaluate
    batch. A worker rolled out before migration 1819 finds no tables and aggregates exactly as before.
    An invalid stored custom rule is skipped with a warning. Perf-test dashboards are never grouped.
-4. **Membership is written with the statistics it describes.** `ds_metric_series_groups` (one row per
+5. **Membership is written with the statistics it describes.** `ds_metric_series_groups` (one row per
    raw series of a grouped panel, with the group name, the rule's hash and `member_count_name`) is
    deleted and rewritten in the same transaction. It is deleted only when a rule exists or a removed
    rule left rows behind, so a deploy that never uses grouping issues nothing extra in the transaction.
    The grouped statement binds the membership as arrays rather than joining the table it just wrote:
    rows inserted earlier in a transaction are invisible to the planner (the `deleteOrphanedResults`
    lesson below).
-5. **The alignment check is the v1 answer to unaligned sources.** Members are combined on exact
+6. **The alignment check is the v1 answer to unaligned sources.** Members are combined on exact
    `time`, which Prometheus range queries align. The grouped statement writes the average members per
    timestamp onto the membership rows (`avg_members`) in the same round trip, and the pipeline warns
    `series-grouping: … timestamps are not aligned` when a group of ≥ 2 averages under 1.2.
-6. **The legacy control-group path loses groups, loudly.** It re-reads raw `ds_metrics` by raw name,
+7. **The legacy control-group path loses groups, loudly.** It re-reads raw `ds_metrics` by raw name,
    where a group name has no counterpart. Grouped rows always carry `pct_agg` and
    `backfillMissingSketches` regroups the runs first, so this happens only when that backfill failed;
    the result is `incomparable`, not a wrong verdict, and `ControlGroupStatisticsPipeline` logs it.
