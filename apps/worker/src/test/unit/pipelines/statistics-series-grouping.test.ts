@@ -473,6 +473,47 @@ describe('buildGroupedStatisticsSQL', () => {
    *     analytics transaction, which is not softFail and failed the whole re-evaluate batch.
    *   seam — the emitted SQL.
    */
+  /**
+   * REGRESSION GUARD, and the one the snapshot above could not be.
+   *
+   * `members` is a VALUES list built in JavaScript, so a projection naming a column it does not
+   * declare resolves nowhere until Postgres parses the statement — at which point the whole
+   * aggregation transaction aborts, the DELETE that preceded it rolls back, and the run keeps its
+   * PREVIOUS statistics. The only symptom is a number that silently never moves; the stage logs
+   * `query failed` with no column named at error level.
+   *
+   * That shipped: `bool_or(s.track_member_count)` and `MIN(s.member_count_name)` outlived their
+   * columns when the member count became an ordinary aggregation. Both were dead — nothing
+   * downstream read them — and both still had to resolve. Every `statistics-calculation` on a
+   * database with one enabled grouping rule failed, for every run, with no statistics written
+   * anywhere. The snapshot test passed throughout, because the snapshot had been regenerated and
+   * recorded the broken SQL as golden.
+   *
+   * So this asserts the two halves against each other rather than against a stored copy.
+   */
+  test('never projects a members column the CTE does not declare', () => {
+    const sql = buildGroupedStatisticsSQL(1);
+
+    const alias = /AS s\(([^)]*)\)/.exec(sql);
+    expect(alias).not.toBeNull();
+    const declared = alias![1]!.split(',').map((c) => c.trim()).filter(Boolean);
+    expect(declared.length).toBeGreaterThan(0);
+
+    // The unnest arity has to match the alias list, or Postgres silently pads with NULL columns.
+    const unnest = /FROM unnest\(([\s\S]*?)\)\s*\n?\s*AS s\(/.exec(sql);
+    expect(unnest).not.toBeNull();
+    expect(unnest![1]!.split('::').length - 1).toBe(declared.length);
+
+    // Comments are stripped first: this file explains the bug in prose that names the column.
+    const code = sql.replace(/--[^\n]*/g, '');
+    const referenced = [...code.matchAll(/\bs\.([a-z_][a-z0-9_]*)/g)].map((m) => m[1]!);
+    expect(referenced.length).toBeGreaterThan(0);
+    // Every projected column must be declared. Reported as a set difference so a failure names
+    // the offending column instead of just the first one.
+    const undeclared = [...new Set(referenced)].filter((c) => !declared.includes(c)).sort();
+    expect(undeclared).toEqual([]);
+  });
+
   test('is one unconditional statement, whatever the rules ask for', () => {
     expect(buildGroupedStatisticsSQL(1)).toMatchSnapshot('grouped-sql');
     // All four states are computed every time; which become series is decided per group, in SQL.

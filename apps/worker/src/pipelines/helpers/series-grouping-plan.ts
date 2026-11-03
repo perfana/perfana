@@ -598,9 +598,16 @@ export function buildGroupedStatisticsSQL(runCount: number): string {
               -- real value and would otherwise win for a group whose rows ever disagreed.
               MAX(s.aggregations) AS aggregations,
               bool_or(s.renamed) AS renamed,
+              -- The count series reads this; it is COUNT(*), not a column of the members CTE. Two
+              -- projections used to sit here, bool_or(s.track_member_count) and
+              -- MIN(s.member_count_name), and they outlived the columns they named when the member
+              -- count became an ordinary aggregation. Nothing downstream read either one, so they
+              -- were dead code that still had to RESOLVE — and the members CTE is a VALUES list
+              -- built in JavaScript, so the statement failed at run time with
+              -- "column s.track_member_count does not exist", aborting the whole aggregation
+              -- transaction. The DELETE rolled back with it, so every run kept its previous
+              -- statistics and the only symptom was a number that silently never moved.
               COUNT(*) AS member_count,
-              bool_or(s.track_member_count) AS track_member_count,
-              MIN(s.member_count_name) AS member_count_name,
               MIN(m.dashboard_uid) AS dashboard_uid,
               MIN(m.panel_title) AS panel_title,
               MIN(m.dashboard_label) AS dashboard_label,
