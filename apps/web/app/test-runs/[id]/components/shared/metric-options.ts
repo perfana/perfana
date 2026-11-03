@@ -86,8 +86,16 @@ export interface SeriesOption {
 export interface SeriesGroupSummary {
   group: string;
   members: string[];
-  aggregation: string;
-  member_count_name?: string;
+  /**
+   * The series this group emits, one per entry: `<group> (avg)`, `(sum)`, `(max)`, `(count)`.
+   * EMPTY for a group the rule did not rename — it passes through as its own single series.
+   *
+   * Must match `toSeriesGroupSummaries` in apps/api/src/modules/metrics/metrics.service.ts. It
+   * previously declared a singular `aggregation` and a `member_count_name`, which the API stopped
+   * emitting when the member count became an ordinary aggregation; nothing read either, so the
+   * drift was invisible.
+   */
+  aggregations: string[];
 }
 
 /** Group name -> members, for the groups a response carries; undefined when it carries none. */

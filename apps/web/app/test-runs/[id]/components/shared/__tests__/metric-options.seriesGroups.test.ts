@@ -45,7 +45,7 @@ it('marks a group name with its members from /distinct-series', async () => {
   mockFetch.mockResolvedValue(
     json({
       metric_names: ['api', 'api (pod count)', 'heap'],
-      series_groups: [{ group: 'api', members: [POD_A, POD_B], aggregation: 'avg', member_count_name: 'api (pod count)' }],
+      series_groups: [{ group: 'api', members: [POD_A, POD_B], aggregations: ['avg', 'count'] }],
     }),
   );
 

@@ -328,8 +328,10 @@ export class MetricsController {
     summary: 'Distinct metric names for a dashboard/panel, with what each series group among them stands for',
     description:
       'The same answer as `ds-metrics/distinct-names`, as `{ metric_names }`, plus `series_groups` (group, members, ' +
-      'aggregation, member_count_name) when a series grouping rule groups the panel in this run. A panel nothing ' +
-      'groups carries no `series_groups` key. Used by the series picker to badge a group and list its pods.',
+      'aggregations) when a series grouping rule groups the panel in this run. `aggregations` lists the series the ' +
+      'group emits — `<group> (avg)`, `(sum)`, `(max)`, `(count)` — and is empty for a group the rule did not ' +
+      'rename. A panel nothing groups carries no `series_groups` key. Used by the series picker to badge a group ' +
+      'and list its pods.',
   })
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   @ApiQuery({ name: 'testRunId', required: false, description: 'Limit to the series this run recorded; groups are per run.' })
