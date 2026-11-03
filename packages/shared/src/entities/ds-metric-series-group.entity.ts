@@ -30,13 +30,15 @@ export class DsMetricSeriesGroup {
   @Column({ type: 'varchar', length: 255 })
   group_name!: string;
 
-  /**
-   * The group's member-count series name (e.g. `api (pod count)`), when the rule tracks it.
-   * That series exists only in ds_metric_statistics, never in ds_metrics, so a chart reader
-   * draws it as COUNT(*) of the members per timestamp. NULL when not tracked.
-   */
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  member_count_name!: string | null;
+  // There is deliberately NO member_count_name column. The member count is an ordinary entry in
+  // `aggregations` ('count'), and its series name is composed as `<group> (count)` by
+  // groupSeriesName — it exists only in ds_metric_statistics, never in ds_metrics. The column was
+  // dropped by migration 1820 and 1819 never creates it, so declaring it here made the entity
+  // name a column the table does not have: TypeORM puts every declared column in its SELECT, so
+  // the first read of this table would fail with "column does not exist", and SCHEMA_DRIFT_CHECK
+  // logs it at ERROR (`strict` refuses to boot). It was dormant only because nothing imports this
+  // entity yet — the same way the two dead projections in series-grouping-plan.ts were dormant
+  // until a grouping rule existed.
 
   /** Copied from ds_metrics: some readers address a panel by label and title, not by id. */
   @Column({ type: 'varchar', length: 255, nullable: true })
