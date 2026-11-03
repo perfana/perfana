@@ -91,5 +91,6 @@ Perfana collects metrics from performance tests and compares them against histor
 | `npm run test` | Run all tests |
 | `npm run lint` | Run linting |
 | `npm run type-check` | TypeScript checks |
-| `npm run preflight` | The pre-push gate: lint + type-check, `check:entity-migrations`, `check:workspace-exports`, API RLS suite |
+| `npm run preflight` | The pre-push gate: lint + type-check, `check:entity-migrations`, `check:workspace-exports`, `check:grouped-sql`, API RLS suite, chart-tokens drift spec |
 | `npm run check:workspace-exports` | Refuse an import naming an undeclared `@perfana/shared/...` subpath ([[Shared Package]]) |
+| `npm run check:grouped-sql` | Ask Postgres to `PREPARE` every statement the worker's two statistics SQL modules emit, so a column that does not resolve fails here instead of inside an analysis transaction |

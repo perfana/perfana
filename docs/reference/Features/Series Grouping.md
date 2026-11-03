@@ -15,8 +15,9 @@ regression on those panels is never reported. A **series grouping rule** tells P
 whose names differ only by a generated part are one series, so the workload is compared across
 deployments.
 
-Shipped in three releases: the engine (v0.2.97.41), the rules API (v0.2.97.42) and the web UI
-(v0.2.97.43). Design: `docs/design/2026-11-01-series-grouping-design.md`.
+Shipped in v0.2.97.43 — engine, rules API and web UI in one release — and gained one control per
+emitted series in v0.2.97.44. Design: `docs/design/2026-11-01-series-grouping-design.md` and
+`docs/design/2026-11-02-series-grouping-multi-aggregation.md`.
 
 ## What a rule is
 

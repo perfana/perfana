@@ -647,9 +647,10 @@ rewrites raw names to a group name with `applySeriesGrouping` (`@perfana/shared/
    batch. A worker rolled out before migration 1819 finds no tables and aggregates exactly as before.
    An invalid stored custom rule is skipped with a warning. Perf-test dashboards are never grouped.
 5. **Membership is written with the statistics it describes.** `ds_metric_series_groups` (one row per
-   raw series of a grouped panel, with the group name, the rule's hash and `member_count_name`) is
-   deleted and rewritten in the same transaction. It is deleted only when a rule exists or a removed
-   rule left rows behind, so a deploy that never uses grouping issues nothing extra in the transaction.
+   raw series of a grouped panel, with the group name, the rule's hash and the `aggregations` the
+   run's statistics were computed with) is deleted and rewritten in the same transaction. It is
+   deleted only when a rule exists or a removed rule left rows behind, so a deploy that never uses
+   grouping issues nothing extra in the transaction.
    The grouped statement binds the membership as arrays rather than joining the table it just wrote:
    rows inserted earlier in a transaction are invisible to the planner (the `deleteOrphanedResults`
    lesson below).
