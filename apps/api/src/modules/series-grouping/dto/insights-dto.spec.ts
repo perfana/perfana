@@ -12,7 +12,7 @@ import { CreateSeriesGroupingRuleDto } from './create-series-grouping-rule.dto';
 import { SeriesGroupingRuleSpecDto, PreviewSeriesGroupingDto } from './preview-series-grouping.dto';
 
 const DASHBOARD = '5f1c0f9e-0000-4000-8000-000000000001';
-const rule = { preset: 'k8s-pod', aggregation: 'avg', trackMemberCount: false };
+const rule = { preset: 'k8s-pod', aggregations: ['avg'] };
 
 async function errorsOf<T extends object>(cls: new () => T, plain: Record<string, unknown>): Promise<string[]> {
   const errors = await validate(plainToInstance(cls, plain));
@@ -44,8 +44,8 @@ describe('PreviewSeriesGroupingDto', () => {
       errorsOf(PreviewSeriesGroupingDto, { testRunId: 'r', applicationDashboardId: DASHBOARD, rule: { ...rule, ...patch } });
 
     expect(await bad({ preset: 'nonsense' })).toEqual(['rule.preset']);
-    expect(await bad({ aggregation: 'median' })).toEqual(['rule.aggregation']);
-    expect(await bad({ trackMemberCount: 'yes' })).toEqual(['rule.trackMemberCount']);
+    expect(await bad({ aggregations: ['median'] })).toEqual(['rule.aggregations']);
+    expect(await bad({ aggregations: [] })).toEqual(['rule.aggregations']);
     expect(await bad({ pattern: 'x'.repeat(501) })).toEqual(['rule.pattern']);
     expect(await bad({ replacement: 'x'.repeat(256) })).toEqual(['rule.replacement']);
   });
@@ -72,7 +72,7 @@ describe('PreviewSeriesGroupingDto', () => {
     // to "six"), and because it never touched the PICKED class it could not detect the drift it
     // was written for at any field count — deleting 'extraAggregations' from the PickType list
     // left all 177 series-grouping tests green.
-    const fields = ['preset', 'pattern', 'replacement', 'aggregation', 'extraAggregations', 'trackMemberCount'];
+    const fields = ['preset', 'pattern', 'replacement', 'aggregations'];
     const meta = (cls: object, field: string) =>
       Reflect.getMetadata('swagger/apiModelProperties', (cls as { prototype: object }).prototype, field);
     for (const field of fields) {
@@ -85,28 +85,32 @@ describe('PreviewSeriesGroupingDto', () => {
   it('carries the picked rule fields through transformation, not just their metadata', () => {
     const dto = plainToInstance(SeriesGroupingRuleSpecDto, {
       preset: 'k8s-pod',
-      aggregation: 'avg',
-      extraAggregations: ['sum'],
-      trackMemberCount: true,
+      aggregations: ['avg', 'sum'],
     });
-    expect(dto.extraAggregations).toEqual(['sum']);
+    expect(dto.aggregations).toEqual(['avg', 'sum']);
   });
 
-  // The rules service leans on these explicitly — "Normalised rather than refused: the DTO
-  // already rejects an unknown value and a duplicate" — so the guard needs a denied case.
-  it('refuses an unknown, duplicated or non-array extraAggregations', async () => {
-    const body = (extraAggregations: unknown) => ({
+  // The rules service leans on these explicitly — it canonicalises rather than re-validating —
+  // so the guard needs a denied case for each shape the DTO is the only thing refusing.
+  it('refuses an unknown, duplicated, empty or non-array aggregations', async () => {
+    const body = (aggregations: unknown) => ({
       testRunId: 'r',
       applicationDashboardId: DASHBOARD,
-      rule: { ...rule, extraAggregations },
+      rule: { ...rule, aggregations },
     });
-    expect(await errorsOf(PreviewSeriesGroupingDto, body(['min']))).toEqual(['rule.extraAggregations']);
-    expect(await errorsOf(PreviewSeriesGroupingDto, body(['sum', 'sum']))).toEqual(['rule.extraAggregations']);
-    expect(await errorsOf(PreviewSeriesGroupingDto, body('sum'))).toEqual(['rule.extraAggregations']);
-    // @IsOptional: an absent key is fine and means "no extras".
+    expect(await errorsOf(PreviewSeriesGroupingDto, body(['min']))).toEqual(['rule.aggregations']);
+    expect(await errorsOf(PreviewSeriesGroupingDto, body(['sum', 'sum']))).toEqual(['rule.aggregations']);
+    expect(await errorsOf(PreviewSeriesGroupingDto, body('sum'))).toEqual(['rule.aggregations']);
+    // @ArrayNotEmpty: a rule that emits nothing is refused rather than silently defaulted.
+    expect(await errorsOf(PreviewSeriesGroupingDto, body([]))).toEqual(['rule.aggregations']);
+    // Required, so an absent key is an error too — unlike the optional field it replaced.
     expect(
-      await errorsOf(PreviewSeriesGroupingDto, { testRunId: 'r', applicationDashboardId: DASHBOARD, rule }),
-    ).toEqual([]);
+      await errorsOf(PreviewSeriesGroupingDto, {
+        testRunId: 'r',
+        applicationDashboardId: DASHBOARD,
+        rule: { preset: 'k8s-pod' },
+      }),
+    ).toEqual(['rule.aggregations']);
   });
 });
 

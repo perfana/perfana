@@ -32,12 +32,10 @@ const membershipRow = (metric_name: string, over: Row = {}): Row => ({
   panel_title: 'CPU per pod',
   metric_name,
   group_name: 'api',
-  aggregation: 'avg',
-  member_count_name: null,
+  aggregations: ['avg'],
   preset: null,
   pattern: null,
   replacement: null,
-  track_member_count: null,
   ...over,
 });
 
@@ -49,12 +47,10 @@ const ruleRow = (over: Row = {}): Row => ({
   panel_title: null,
   metric_name: null,
   group_name: null,
-  aggregation: 'avg',
-  member_count_name: null,
+  aggregations: ['avg'],
   preset: 'k8s-pod',
   pattern: null,
   replacement: '',
-  track_member_count: false,
   ...over,
 });
 
@@ -86,27 +82,27 @@ function build(opts: { lookup?: Row[]; names?: Row[]; data?: Row[]; isAdmin?: bo
   return { service, calls, query, dataReads };
 }
 
-const POINT = { time: '2026-10-02T10:00:00Z', value: '42.5', metric_name: 'api', panel_title: 'CPU per pod', dashboard_label: 'Perf', unit: 'percent' };
+const POINT = { time: '2026-10-02T10:00:00Z', value: '42.5', metric_name: 'api (avg)', panel_title: 'CPU per pod', dashboard_label: 'Perf', unit: 'percent' };
 const GROUPED = [membershipRow(POD_A), membershipRow(POD_B)];
 
 describe('ReportDataFetcherService.getMetricsTimeSeries with a series group', () => {
   it('answers a group name from its members, combined per timestamp with the stored aggregation', async () => {
     const { service, dataReads } = build({
-      lookup: [membershipRow(POD_A, { aggregation: 'sum' }), membershipRow(POD_B, { aggregation: 'sum' })],
+      lookup: [membershipRow(POD_A, { aggregations: ['sum'] }), membershipRow(POD_B, { aggregations: ['sum'] })],
       data: [POINT],
       isAdmin: true,
     });
 
     const result = await service.getMetricsTimeSeries(
       RUN,
-      [{ dashboardLabel: 'Perf', panelId: 201, panelTitle: 'CPU per pod', metricName: 'api', key: 'k1' }],
+      [{ dashboardLabel: 'Perf', panelId: 201, panelTitle: 'CPU per pod', metricName: 'api (sum)', key: 'k1' }],
       true,
       'user-1',
       ['admin'],
     );
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ metricName: 'api', dashboardLabel: 'Perf', unit: 'percent', key: 'k1' });
+    expect(result[0]).toMatchObject({ metricName: 'api (sum)', dashboardLabel: 'Perf', unit: 'percent', key: 'k1' });
     expect(result[0]!.dataPoints).toEqual([{ time: new Date(POINT.time), value: 42.5 }]);
 
     const [read] = dataReads();
@@ -118,7 +114,7 @@ describe('ReportDataFetcherService.getMetricsTimeSeries with a series group', ()
     expect(read!.sql).not.toContain('dm.metric_name = $');
     expect(read!.sql).toContain('(dm.ramp_up IS NULL OR dm.ramp_up = false)');
     expect(read!.sql).toMatch(/ORDER BY "time" ASC|ORDER BY s\."time" ASC/);
-    expect(read!.params).toEqual([RUN, 'Perf', 201, [POD_B, POD_A].sort(), ['api', 'api'], ['sum', 'sum'], [POD_B, POD_A].sort()]);
+    expect(read!.params).toEqual([RUN, 'Perf', 201, [POD_B, POD_A].sort(), ['api (sum)', 'api (sum)'], ['sum', 'sum'], [POD_B, POD_A].sort()]);
   });
 
   it('keeps the organization filter on the grouped read', async () => {
@@ -126,7 +122,7 @@ describe('ReportDataFetcherService.getMetricsTimeSeries with a series group', ()
 
     await service.getMetricsTimeSeries(
       RUN,
-      [{ dashboardLabel: 'Perf', panelId: 201, metricName: 'api' }],
+      [{ dashboardLabel: 'Perf', panelId: 201, metricName: 'api (avg)' }],
       false,
       'user-1',
       ['user'],
@@ -142,7 +138,7 @@ describe('ReportDataFetcherService.getMetricsTimeSeries with a series group', ()
 
     await service.getMetricsTimeSeries(
       RUN,
-      [{ dashboardLabel: 'Perf', panelTitle: 'CPU per pod', metricName: 'api' }],
+      [{ dashboardLabel: 'Perf', panelTitle: 'CPU per pod', metricName: 'api (avg)' }],
       false,
       'user-1',
       ['admin'],
@@ -154,24 +150,24 @@ describe('ReportDataFetcherService.getMetricsTimeSeries with a series group', ()
   });
 
   it('draws a member-count name as COUNT of the members', async () => {
-    const lookup = [membershipRow(POD_A, { member_count_name: 'api (pod count)' }), membershipRow(POD_B, { member_count_name: 'api (pod count)' })];
-    const { service, dataReads } = build({ lookup, data: [{ ...POINT, metric_name: 'api (pod count)', value: '2' }], isAdmin: true });
+    const lookup = [membershipRow(POD_A, { aggregations: ['count'] }), membershipRow(POD_B, { aggregations: ['count'] })];
+    const { service, dataReads } = build({ lookup, data: [{ ...POINT, metric_name: 'api (count)', value: '2' }], isAdmin: true });
 
     const [panel] = await service.getMetricsTimeSeries(
       RUN,
-      [{ dashboardLabel: 'Perf', panelId: 201, metricName: 'api (pod count)' }],
+      [{ dashboardLabel: 'Perf', panelId: 201, metricName: 'api (count)' }],
       false,
       '',
       [],
     );
 
-    expect(panel!.metricName).toBe('api (pod count)');
-    expect(dataReads()[0]!.params.slice(3, 6)).toEqual([[POD_B, POD_A].sort(), ['api (pod count)', 'api (pod count)'], ['count', 'count']]);
+    expect(panel!.metricName).toBe('api (count)');
+    expect(dataReads()[0]!.params.slice(3, 6)).toEqual([[POD_B, POD_A].sort(), ['api (count)', 'api (count)'], ['count', 'count']]);
   });
 
   it('groups a live run by the current rule, reading the panel\'s series only because a rule applies', async () => {
     const { service, dataReads, calls } = build({
-      lookup: [ruleRow({ aggregation: 'max' })],
+      lookup: [ruleRow({ aggregations: ['max'] })],
       names: [
         { panel_id: 201, metric_name: POD_A },
         { panel_id: 201, metric_name: POD_B },
@@ -180,11 +176,11 @@ describe('ReportDataFetcherService.getMetricsTimeSeries with a series group', ()
       isAdmin: true,
     });
 
-    await service.getMetricsTimeSeries(RUN, [{ dashboardLabel: 'Perf', panelId: 201, metricName: 'api' }], false, '', []);
+    await service.getMetricsTimeSeries(RUN, [{ dashboardLabel: 'Perf', panelId: 201, metricName: 'api (max)' }], false, '', []);
 
     expect(calls.some((c) => c.sql.includes('SELECT DISTINCT panel_id, metric_name'))).toBe(true);
     const [read] = dataReads().filter((c) => c.sql.includes('GROUP BY dm."time", g.group_name'));
-    expect(read!.params).toEqual([RUN, 'Perf', 201, [POD_B, POD_A].sort(), ['api', 'api'], ['max', 'max'], [POD_B, POD_A].sort()]);
+    expect(read!.params).toEqual([RUN, 'Perf', 201, [POD_B, POD_A].sort(), ['api (max)', 'api (max)'], ['max', 'max'], [POD_B, POD_A].sort()]);
   });
 
   it('looks a panel up once, however many of its series the section names', async () => {
@@ -193,7 +189,7 @@ describe('ReportDataFetcherService.getMetricsTimeSeries with a series group', ()
     await service.getMetricsTimeSeries(
       RUN,
       [
-        { dashboardLabel: 'Perf', panelId: 201, metricName: 'api' },
+        { dashboardLabel: 'Perf', panelId: 201, metricName: 'api (avg)' },
         { dashboardLabel: 'Perf', panelId: 201, metricName: 'heap-used' },
         { dashboardLabel: 'Perf', panelId: 201, metricName: POD_A },
       ],
@@ -242,7 +238,7 @@ describe('ReportDataFetcherService.getMetricsTimeSeries: a panel with no groupin
   it('does not consult the grouping tables for a selector with no dashboard label', async () => {
     const { service, calls } = build({ lookup: GROUPED, data: [POINT], isAdmin: true });
 
-    await service.getMetricsTimeSeries(RUN, [{ panelId: 201, metricName: 'api' }], false, '', []);
+    await service.getMetricsTimeSeries(RUN, [{ panelId: 201, metricName: 'api (avg)' }], false, '', []);
 
     expect(calls.some((c) => c.sql.includes('ds_metric_series_groups'))).toBe(false);
   });
@@ -261,7 +257,7 @@ describe('ReportDataFetcherService.getAvailableMetricsPanels with a series group
     const panels = await service.getAvailableMetricsPanels(RUN);
 
     expect(panels).toEqual([
-      { dashboardLabel: 'Perf', panelTitle: 'CPU per pod', metricName: 'api' },
+      { dashboardLabel: 'Perf', panelTitle: 'CPU per pod', metricName: 'api (avg)' },
       { dashboardLabel: 'Perf', panelTitle: 'CPU per pod', metricName: 'heap-used' },
     ]);
     // The group read has to see every raw series, so it cannot carry the cap of 20 that the
@@ -271,13 +267,17 @@ describe('ReportDataFetcherService.getAvailableMetricsPanels with a series group
     expect(read!.sql).not.toContain('LIMIT 20');
   });
 
-  it('offers the member-count series beside the group', async () => {
-    const lookup = [membershipRow(POD_A, { member_count_name: 'api (pod count)' }), membershipRow(POD_B, { member_count_name: 'api (pod count)' })];
+  it('offers each series the group emits, once', async () => {
+    const lookup = [
+      membershipRow(POD_A, { aggregations: ['avg', 'count'] }),
+      membershipRow(POD_B, { aggregations: ['avg', 'count'] }),
+    ];
     const { service } = build({ lookup, data: PANEL_ROWS.slice(0, 2) });
 
     const panels = await service.getAvailableMetricsPanels(RUN);
 
-    expect(panels.map((p) => p.metricName)).toEqual(['api', 'api (pod count)']);
+    // Two pods collapse to one group, which offers one entry per aggregation — not one per pod.
+    expect(panels.map((p) => p.metricName)).toEqual(['api (avg)', 'api (count)']);
   });
 
   it('still caps what it returns at 20', async () => {
@@ -317,17 +317,17 @@ describe('statistics readers carry group names unchanged', () => {
   it('getMetricTrends returns a series under its group name, with its per-run values', async () => {
     const dataSource = {
       query: jest.fn().mockResolvedValue([
-        { test_run_id: 'r1', dashboard_label: 'Perf', panel_title: 'CPU per pod', panel_id: 201, metric_name: 'api', unit: 'percent', source_type: 'grafana', mean: 11 },
-        { test_run_id: 'r2', dashboard_label: 'Perf', panel_title: 'CPU per pod', panel_id: 201, metric_name: 'api', unit: 'percent', source_type: 'grafana', mean: 13 },
+        { test_run_id: 'r1', dashboard_label: 'Perf', panel_title: 'CPU per pod', panel_id: 201, metric_name: 'api (avg)', unit: 'percent', source_type: 'grafana', mean: 11 },
+        { test_run_id: 'r2', dashboard_label: 'Perf', panel_title: 'CPU per pod', panel_id: 201, metric_name: 'api (avg)', unit: 'percent', source_type: 'grafana', mean: 13 },
       ]),
     };
     const repo = { query: jest.fn() };
     const svc = new ReportDataFetcherService(repo as never, {} as never, dataSource as never, new SeriesGroupResolver());
 
-    const series = await svc.getMetricTrends(['r1', 'r2'], [{ dashboardLabel: 'Perf', panelId: 201, metricNames: ['api'] }]);
+    const series = await svc.getMetricTrends(['r1', 'r2'], [{ dashboardLabel: 'Perf', panelId: 201, metricNames: ['api (avg)'] }]);
 
     expect(series).toHaveLength(1);
-    expect(series[0]).toMatchObject({ metricName: 'api', valuesByRun: { r1: 11, r2: 13 } });
+    expect(series[0]).toMatchObject({ metricName: 'api (avg)', valuesByRun: { r1: 11, r2: 13 } });
     // Not a word to the grouping tables or to ds_metrics.
     expect(repo.query).not.toHaveBeenCalled();
     expect(dataSource.query.mock.calls.every(([sql]) => !String(sql).includes('ds_metric_series_groups'))).toBe(true);
@@ -339,8 +339,8 @@ describe('statistics readers carry group names unchanged', () => {
     });
     const dataSource = {
       query: jest.fn().mockResolvedValue([
-        stat('cur', 'api', 110), stat('base', 'api', 100),
-        stat('cur', 'api (pod count)', 3), stat('base', 'api (pod count)', 2),
+        stat('cur', 'api (avg)', 110), stat('base', 'api (avg)', 100),
+        stat('cur', 'api (count)', 3), stat('base', 'api (count)', 2),
       ]),
     };
     const repo = { query: jest.fn() };
@@ -348,7 +348,7 @@ describe('statistics readers carry group names unchanged', () => {
 
     const data = await svc.getBaselineRunComparison('cur', 'base', 'grafana', { metrics: ['avg'], userId: 'u', roles: [] });
 
-    expect(data!.rows.map((r) => r.label)).toEqual(['api', 'api (pod count)']);
+    expect(data!.rows.map((r) => r.label)).toEqual(['api (avg)', 'api (count)']);
     expect(data!.rows[0]!.metrics[0]!.diffPercent).toBeCloseTo(10);
     expect(data!.rows[1]!.metrics[0]!.diffPercent).toBeCloseTo(50);
     expect(repo.query).not.toHaveBeenCalled();

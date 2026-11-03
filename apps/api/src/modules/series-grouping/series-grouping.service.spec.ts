@@ -42,8 +42,7 @@ const dto = (overrides: Partial<CreateSeriesGroupingRuleDto> = {}): CreateSeries
   applicationDashboardId: DASH,
   panelId: 7,
   preset: 'k8s-pod',
-  aggregation: 'avg',
-  trackMemberCount: false,
+  aggregations: ['avg'],
   ...overrides,
 });
 
@@ -295,7 +294,7 @@ describe('SeriesGroupingService', () => {
 
     it('update answers 404 for a rule in another organization', async () => {
       ruleRepo.findOne.mockResolvedValue(Object.assign(new SeriesGroupingRule(), { id: 'r1', organizationId: OTHER_ORG }));
-      await expect(service.update('r1', { aggregation: 'sum' }, 'user-1', ['user'], [ORG])).rejects.toThrow(NotFoundException);
+      await expect(service.update('r1', { aggregations: ['sum'] }, 'user-1', ['user'], [ORG])).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -312,59 +311,61 @@ describe('SeriesGroupingService', () => {
         preset: 'k8s-pod',
         pattern: null,
         replacement: '',
-        aggregation: 'avg',
-        trackMemberCount: false,
+        aggregations: ['avg'],
         enabled: true,
         origin: 'manual',
       });
 
     it('changes rule fields, keeps the slot, audits before and after as entity instances', async () => {
       ruleRepo.findOne.mockResolvedValue(existing());
-      const result = await service.update('r1', { aggregation: 'sum', trackMemberCount: true, enabled: false }, 'user-2', ['user'], [ORG]);
+      const result = await service.update('r1', { aggregations: ['sum', 'count'], enabled: false }, 'user-2', ['user'], [ORG]);
 
-      expect(result).toMatchObject({ aggregation: 'sum', trackMemberCount: true, enabled: false, panelId: 7, workload: 'peak' });
+      expect(result).toMatchObject({ aggregations: ['sum', 'count'], enabled: false, panelId: 7, workload: 'peak' });
       expect(saved[0]!.updatedBy).toBe('user-2');
       const [before, after] = audit.logUpdate.mock.calls[0];
       expect(before).toBeInstanceOf(SeriesGroupingRule);
-      expect(before.aggregation).toBe('avg');
-      expect(after.aggregation).toBe('sum');
+      expect(before.aggregations).toEqual(['avg']);
+      expect(after.aggregations).toEqual(['sum', 'count']);
     });
 
     it('treats an explicit null like an absent key', async () => {
       ruleRepo.findOne.mockResolvedValue(existing());
-      await service.update('r1', { aggregation: null as never, enabled: null as never }, 'user-2', ['user'], [ORG]);
-      expect(saved[0]).toMatchObject({ aggregation: 'avg', enabled: true });
+      await service.update('r1', { aggregations: null as never, enabled: null as never }, 'user-2', ['user'], [ORG]);
+      expect(saved[0]).toMatchObject({ aggregations: ['avg'], enabled: true });
     });
 
-    // The CHECK constraint refuses (aggregation, extras) pairs that overlap, and a 23514 is a
+    // The CHECK refuses an unknown value or an empty list, and a 23514 is a
     // 500. "Also emit avg" when avg is primary is already satisfied by the bare group name.
-    it('normalizes the extras: canonical order, de-duplicated, primary removed', async () => {
+    // The hash is taken over this list and decides whether a run reads as stale, so the order
+    // the checkboxes happened to be ticked in must not change it.
+    it('canonicalises the aggregations: fixed order, de-duplicated', async () => {
       ruleRepo.findOne.mockResolvedValue(existing());
       await service.update(
         'r1',
-        { aggregation: 'avg', extraAggregations: ['max', 'avg', 'sum', 'max'] as never },
+        { aggregations: ['count', 'max', 'avg', 'max'] as never },
         'user-2',
         ['user'],
         [ORG],
       );
-      expect(saved[0]!.extraAggregations).toEqual(['sum', 'max']);
+      expect(saved[0]!.aggregations).toEqual(['avg', 'max', 'count']);
     });
 
-    it('keeps the stored extras when the key is absent', async () => {
+    it('keeps the stored aggregations when the key is absent', async () => {
       const rule = existing();
-      rule.extraAggregations = ['sum'];
+      rule.aggregations = ['avg', 'sum'];
       ruleRepo.findOne.mockResolvedValue(rule);
-      await service.update('r1', { trackMemberCount: true }, 'user-2', ['user'], [ORG]);
-      expect(saved[0]!.extraAggregations).toEqual(['sum']);
+      await service.update('r1', { enabled: false }, 'user-2', ['user'], [ORG]);
+      expect(saved[0]!.aggregations).toEqual(['avg', 'sum']);
     });
 
     // Changing the primary drops an extra that has become the primary, rather than 23514ing.
-    it('drops an extra that the new primary aggregation has taken over', async () => {
-      const rule = existing();
-      rule.extraAggregations = ['sum', 'max'];
-      ruleRepo.findOne.mockResolvedValue(rule);
-      await service.update('r1', { aggregation: 'sum' }, 'user-2', ['user'], [ORG]);
-      expect(saved[0]!.extraAggregations).toEqual(['max']);
+    // An empty list would emit no series at all while still excluding the panel from the main
+    // statistics statement, so it is refused rather than stored.
+    it('refuses an aggregations list that normalises to nothing', async () => {
+      ruleRepo.findOne.mockResolvedValue(existing());
+      await expect(
+        service.update('r1', { aggregations: ['nope'] as never }, 'user-2', ['user'], [ORG]),
+      ).rejects.toThrow(/at least one aggregation/);
     });
 
     it('ignores slot fields even if a client sends them', async () => {
@@ -399,7 +400,7 @@ describe('SeriesGroupingService', () => {
     const existingRule = () =>
       Object.assign(new SeriesGroupingRule(), {
         id: 'r1', organizationId: ORG, teamId: 'team-1', preset: 'k8s-pod', pattern: null, replacement: '',
-        aggregation: 'avg', trackMemberCount: false, enabled: true,
+        aggregations: ['avg'], enabled: true,
       });
 
     it.each([

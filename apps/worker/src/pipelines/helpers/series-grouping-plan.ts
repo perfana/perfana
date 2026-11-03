@@ -27,7 +27,9 @@ import type { Logger } from 'pino';
 import {
   applySeriesGrouping,
   compileSeriesGroupingRule,
-  extraAggregationSeriesName,
+  groupSeriesName,
+  MEMBER_COUNT_DEPENDENT_AGGREGATIONS,
+  normalizeAggregations,
   SERIES_GROUPING_AGGREGATIONS,
   seriesGroupingRuleHash,
   type SeriesGroupingAggregation,
@@ -38,7 +40,7 @@ import { SERIES_GROUPING_DERIVED_SOURCE } from '@perfana/shared/constants';
 import { buildRunScopeCtes, buildStatisticsCtes, STATISTICS_INSERT } from './statistics-sql.js';
 
 type Queryable = { query: (sql: string, params?: unknown[]) => Promise<unknown> };
-type PresentRow = { present?: unknown; has_extras?: unknown };
+type PresentRow = { present?: unknown };
 
 export interface LoadedRule {
   testRunId: string;
@@ -57,18 +59,6 @@ export interface LoadedRule {
 export interface SeriesGroupingContext {
   /** Both tables exist (migration 1819 has run). */
   tablesPresent: boolean;
-  /**
-   * `extra_aggregations` exists on both tables (migration 1820). Tracked SEPARATELY from
-   * `tablesPresent` because the consequence of conflating them is not a missing feature but an
-   * INCOHERENT run: the membership DELETE in `StatisticsPipeline` is gated on `tablesPresent`,
-   * while `ds_metric_statistics` is deleted and rewritten regardless. Report the tables as
-   * absent when only the column is missing and the previous analysis's membership rows survive
-   * describing statistics that no longer exist — and because `SeriesGroupResolver` prefers
-   * membership over the live rule, every picker, chart and report then offers a group name with
-   * no statistics row behind it, while the insights page reports the run as in step (it
-   * compares `rule_hash`, which has not changed).
-   */
-  extrasPresent: boolean;
   rules: LoadedRule[];
   /** Only meaningful when there are no rules: old membership a removed rule left behind. */
   hasExistingMembership: boolean;
@@ -76,39 +66,28 @@ export interface SeriesGroupingContext {
 
 export const NO_SERIES_GROUPING: SeriesGroupingContext = {
   tablesPresent: false,
-  extrasPresent: false,
   rules: [],
   hasExistingMembership: false,
 };
 
 /**
- * Both tables (migration 1819) and the `extra_aggregations` column (1820), in one statement.
+ * Both tables (migration 1819), in one statement.
  *
- * The column is asked about SEPARATELY and on BOTH tables, because the two migrations do not
- * necessarily arrive together: 1819 shipped in v0.2.97.43, so on an upgrade 1820 applies alone
- * and nothing orders the worker behind the migration runner. Answered from `pg_attribute`
- * rather than `information_schema.columns`: measured 3 shared buffers and ~1.0 ms of planning
- * against 47 buffers and ~3.0 ms for the view, which is a 10-way catalog join with a per-row
- * `has_column_privilege()`, and whose planning cost grows with the catalog (one relation per
- * chunk per day on this deployment). `to_regclass` returns NULL rather than raising for a
- * missing table, so a pre-1819 database answers false instead of erroring.
+ * `to_regclass` returns NULL rather than raising for a missing relation, so a database that has
+ * not run 1819 answers false instead of erroring — which matters because the worker can start
+ * before the migration runner and an error inside `withAnalyticsTransaction` aborts it (25P02).
  *
- * The one thing dropped with the view is that `has_column_privilege()`: `pg_attribute` reports a
- * column this role may not be able to write. Not reachable on this schema — the consolidated
- * migration grants at TABLE level and column privileges inherit from it, so a grant that admits
- * the INSERT admits every column of it — but on a deployment that ever added column-level grants
- * the probe would answer true and the membership INSERT would raise 42501 inside the analytics
- * transaction, which is the shape this probe exists to prevent.
+ * There is deliberately no column probe. `aggregations` is created WITH the tables, so a database
+ * that has one has the other; the column-level probe that briefly existed here (for a follow-up
+ * migration that no longer exists) was the source of a silent incoherence — the membership DELETE
+ * was gated on it while `ds_metric_statistics` was rewritten regardless. If a future migration
+ * ever adds a column to these tables, probe it on BOTH tables and make every statement that NAMES
+ * it conditional, not just the SELECT: naming it in the membership INSERT regardless raises 42703
+ * inside the transaction, and `statistics-calculation` is not softFail.
  */
 export const SERIES_GROUPING_TABLES_PROBE_SQL = `
       SELECT (to_regclass('public.series_grouping_rules') IS NOT NULL
-              AND to_regclass('public.ds_metric_series_groups') IS NOT NULL) AS present,
-             (EXISTS (SELECT 1 FROM pg_attribute
-                       WHERE attrelid = to_regclass('public.series_grouping_rules')
-                         AND attname = 'extra_aggregations' AND NOT attisdropped)
-              AND EXISTS (SELECT 1 FROM pg_attribute
-                           WHERE attrelid = to_regclass('public.ds_metric_series_groups')
-                             AND attname = 'extra_aggregations' AND NOT attisdropped)) AS has_extras
+              AND to_regclass('public.ds_metric_series_groups') IS NOT NULL) AS present
     `;
 
 /**
@@ -116,12 +95,10 @@ export const SERIES_GROUPING_TABLES_PROBE_SQL = `
  * excluded here as well as in the API: their series names are stable and a grouping there would
  * collide with PerformanceTestMetricsPipeline's live statistics writer.
  */
-export const seriesGroupingRulesSql = (extrasPresent: boolean): string => `
+export const SERIES_GROUPING_RULES_SQL = `
       SELECT tr.test_run_id, r.id, r.application_dashboard_id, r.panel_id,
              r.system_under_test_id, r.test_environment, r.workload, r.preset, r.pattern,
-             r.replacement, r.aggregation,
-             ${extrasPresent ? 'r.extra_aggregations' : 'NULL::varchar(8)[]'} AS extra_aggregations,
-             r.track_member_count
+             r.replacement, r.aggregations
       FROM test_runs tr
       JOIN series_grouping_rules r
         ON r.system_under_test_id = tr.system_under_test_id
@@ -146,9 +123,8 @@ export async function loadSeriesGroupingContext(
   try {
     const probe = (await db.query(SERIES_GROUPING_TABLES_PROBE_SQL)) as PresentRow[] | undefined;
     if (probe?.[0]?.present !== true) {return NO_SERIES_GROUPING;}
-    const extrasPresent = probe?.[0]?.has_extras === true;
 
-    const result = await db.query(seriesGroupingRulesSql(extrasPresent), [testRunIds]);
+    const result = await db.query(SERIES_GROUPING_RULES_SQL, [testRunIds]);
     const rows: Array<Record<string, unknown>> = Array.isArray(result)
       ? result.filter((r): r is Record<string, unknown> => r !== null && typeof r === 'object')
       : [];
@@ -158,20 +134,24 @@ export async function loadSeriesGroupingContext(
         preset: row.preset as SeriesGroupingPreset,
         pattern: (row.pattern as string | null) ?? null,
         replacement: (row.replacement as string | null) ?? '',
-        aggregation: row.aggregation as SeriesGroupingAggregation,
-        // NULL on a pre-1820 database (the SELECT projects NULL rather than naming the column)
-        // and on a row the SUT importer inserted from an older bundle, where
-        // json_populate_recordset yields NULL instead of the DEFAULT.
-        extraAggregations: Array.isArray(row.extra_aggregations)
-          ? (row.extra_aggregations as SeriesGroupingAggregation[])
+        // Coalesced because the column is only as trustworthy as whatever wrote the row; the
+        // compile check below then skips a rule that would emit nothing.
+        aggregations: Array.isArray(row.aggregations)
+          ? normalizeAggregations(row.aggregations as SeriesGroupingAggregation[])
           : [],
-        trackMemberCount: row.track_member_count === true,
       };
       // The API validates on write; a row written by hand, or a guard tightened since, is
       // skipped rather than applied unguarded.
       const compiled = compileSeriesGroupingRule(spec);
       if (!compiled.ok) {
         logger.warn(`series-grouping: rule ${String(row.id)} skipped: ${compiled.error}`);
+        continue;
+      }
+      // The DTO and ck_series_grouping_rules_aggregations both refuse an empty list, so this is a
+      // row written by hand or holding only values this build does not know. Grouping it would
+      // emit no series at all for its panels while still excluding them from the main statement.
+      if (spec.aggregations.length === 0) {
+        logger.warn(`series-grouping: rule ${String(row.id)} skipped: no known aggregations`);
         continue;
       }
       rules.push({
@@ -192,7 +172,7 @@ export async function loadSeriesGroupingContext(
       const exists = (await db.query(SERIES_GROUPING_MEMBERSHIP_EXISTS_SQL, [testRunIds])) as PresentRow[] | undefined;
       hasExistingMembership = exists?.[0]?.present === true;
     }
-    return { tablesPresent: true, extrasPresent, rules, hasExistingMembership };
+    return { tablesPresent: true, rules, hasExistingMembership };
   } catch (err) {
     logger.warn({ err }, 'series-grouping: rules unavailable, aggregating without grouping');
     return NO_SERIES_GROUPING;
@@ -210,15 +190,14 @@ export interface SeriesRow {
 
 export interface MembershipRow extends SeriesRow {
   group_name: string;
-  member_count_name: string | null;
-  aggregation: SeriesGroupingAggregation;
   /**
-   * The group's extra aggregations, repeated on every member row (see the entity). `null` is
-   * possible only for a row read back from the database (a pre-1820 projection, or a SUT-imported
-   * row whose bundle lacked the key); `buildMembership` always produces an array.
+   * Which series this group emits, repeated on every member row (see the entity). EMPTY for a
+   * group the rule did not rename: it passes through under its own name, and `renamed` is how
+   * the grouped statement tells the two apart.
    */
-  extra_aggregations: SeriesGroupingAggregation[] | null;
-  track_member_count: boolean;
+  aggregations: SeriesGroupingAggregation[];
+  /** False means the rule left this series alone, so it keeps its raw name and is not suffixed. */
+  renamed: boolean;
   rule_id: string;
   rule_hash: string;
   /** The governing rule's scope, which is how `ds_compare_config` is keyed. */
@@ -278,13 +257,15 @@ export function buildMembership(rules: LoadedRule[], series: SeriesRow[]): Membe
       out.push({
         ...row,
         group_name: group,
-        member_count_name: grouping.memberCountNames.get(group) ?? null,
-        aggregation: rule.spec.aggregation,
-        extra_aggregations: grouping.extraAggregations.get(group) ?? [],
+        // Per GROUP, not per rule: `applySeriesGrouping` drops an aggregation whose composed name
+        // collides with a real series or overflows varchar(255), and emits none at all for a group
+        // the rule did not rename. Reading `rule.spec.aggregations` here instead would promise
+        // series the grouped statement must not write.
+        aggregations: grouping.seriesAggregations.get(group) ?? [],
+        renamed: grouping.isRenamed.get(group) === true,
         system_under_test_id: rule.systemUnderTestId,
         test_environment: rule.testEnvironment,
         workload: rule.workload,
-        track_member_count: rule.spec.trackMemberCount,
         rule_id: rule.ruleId,
         rule_hash: rule.hash,
       });
@@ -337,90 +318,65 @@ export const DELETE_MEMBERSHIP_SQL = (placeholders: string) => `
     `;
 
 /**
- * How a row's extra aggregations travel to Postgres: one delimited string per row, split back
- * with `string_to_array`. NOT an array column in the bound arrays: `unnest($1::text[], ...)`
- * cannot take a per-row array, because a Postgres multidimensional array is not an array of
- * arrays and every row would have to carry the same number of extras.
+ * How a row's aggregations travel to Postgres: one delimited string per row, split back with
+ * `string_to_array`. NOT an array column in the bound arrays: `unnest($1::text[], ...)` cannot
+ * take a per-row array, because a Postgres multidimensional array is not an array of arrays and
+ * every row would have to carry the same number of elements.
  */
-const EXTRA_AGGREGATIONS_SEPARATOR = ',';
-const EXTRAS_SQL = (param: string) =>
-  `string_to_array(NULLIF(${param}, ''), '${EXTRA_AGGREGATIONS_SEPARATOR}')`;
+const AGGREGATIONS_SEPARATOR = ',';
+const AGGS_SQL = (param: string) => `string_to_array(NULLIF(${param}, ''), '${AGGREGATIONS_SEPARATOR}')`;
 /**
- * The separator is safe only because every element comes from the closed `['avg','sum','max']`
- * set. Enforced HERE rather than relying on `normalizeExtraAggregations` two call frames away:
- * a value containing the separator would split into phantom extras AFTER the bind, where
- * neither Postgres nor the rules table's CHECK can see it.
+ * The separator is safe only because every element comes from the closed
+ * `['avg','sum','max','count']` set. Enforced HERE rather than relying on `normalizeAggregations`
+ * two call frames away: a value containing the separator would split into phantom aggregations
+ * AFTER the bind, where neither Postgres nor the rules table's CHECK can see it.
  */
-const extrasParam = (rows: MembershipRow[]): string[] =>
+const aggregationsParam = (rows: MembershipRow[]): string[] =>
   rows.map((r) =>
-    (r.extra_aggregations ?? [])
-      .filter((a) => SERIES_GROUPING_AGGREGATIONS.includes(a))
-      .join(EXTRA_AGGREGATIONS_SEPARATOR),
+    (r.aggregations ?? []).filter((a) => SERIES_GROUPING_AGGREGATIONS.includes(a)).join(AGGREGATIONS_SEPARATOR),
   );
-
-/** True when any row asks for an extra aggregation; what makes the grouped statement grow an arm. */
-export function hasExtraAggregations(rows: readonly MembershipRow[]): boolean {
-  return rows.some((r) => (r.extra_aggregations ?? []).length > 0);
-}
 
 /**
  * Organization and team come from the run, like every ds_metric_statistics row.
  *
- * **The `extra_aggregations` column is named only when it exists, and that is the whole point of
- * `SeriesGroupingContext.extrasPresent` reaching this statement.** It used to be a module constant
- * that named the column unconditionally, which made the pre-1820 window WORSE than the 42703 the
- * probe was added to avoid: the probe let the rules SELECT succeed (it projects `NULL::varchar(8)[]`),
- * membership was built, `DELETE_MEMBERSHIP_SQL` ran, and then THIS statement raised 42703 — inside
- * `withAnalyticsTransaction`. That aborts the transaction (25P02), and `statistics-calculation` is
- * not `softFail`, so it fails the whole re-evaluate batch; the DELETE rolls back with it, so the
- * stale membership the probe exists to prevent survives anyway. Before the probe, the SELECT threw
- * on the pooled connection OUTSIDE the transaction, the catch returned `NO_SERIES_GROUPING`, and the
- * run was analysed ungrouped with a warning.
+ * `aggregations` travels as one comma-joined STRING per row, split back with `string_to_array`,
+ * for the same reason the grouped statement does it: `unnest($1::text[], ...)` cannot take a
+ * per-row array, because a Postgres multidimensional array is not an array of arrays and every
+ * row would have to carry the same number of elements.
  *
- * Grouping itself needs nothing from 1820 — migration 1819 carries every column it reads — so the
- * right behaviour in that window is to group normally and emit no extras, not to abandon grouping.
- * `hasExtraAggregations(membership)` is false there by construction (a rule's NULL extras coalesce
- * to `[]`), so the grouped statement's extras arm stays off on its own and only this column list
- * had to learn the flag.
- *
- * Extras are the LAST bind position so the parameter can be dropped without renumbering the other
- * eleven — the same shape `groupedStatementParams` uses.
+ * A constant, not a builder. It was briefly a function of a column probe, for a follow-up
+ * migration that no longer exists — see the probe's docblock for why a half-conditional statement
+ * is worse than no probe at all.
  */
-export const insertMembershipSql = (extrasPresent: boolean): string => `
+export const INSERT_MEMBERSHIP_SQL = `
       INSERT INTO ds_metric_series_groups (
-          test_run_id, application_dashboard_id, panel_id, metric_name, group_name, member_count_name,
-          dashboard_label, panel_title, aggregation, rule_id, rule_hash,
-          organization_id, team_id${extrasPresent ? ', extra_aggregations' : ''}
+          test_run_id, application_dashboard_id, panel_id, metric_name, group_name,
+          dashboard_label, panel_title, aggregations, rule_id, rule_hash,
+          organization_id, team_id
       )
       SELECT s.test_run_id, s.application_dashboard_id, s.panel_id, s.metric_name, s.group_name,
-             s.member_count_name, s.dashboard_label, s.panel_title, s.aggregation,
-             s.rule_id, s.rule_hash, tr.organization_id, tr.team_id${
-               extrasPresent
-                 ? `,
-             COALESCE(${EXTRAS_SQL('s.extra_aggregations')}, '{}')::character varying(8)[]`
-                 : ''
-             }
-      FROM unnest($1::text[], $2::uuid[], $3::int[], $4::text[], $5::text[], $6::text[], $7::text[],
-                  $8::text[], $9::text[], $10::uuid[], $11::text[]${extrasPresent ? ', $12::text[]' : ''})
-        AS s(test_run_id, application_dashboard_id, panel_id, metric_name, group_name, member_count_name,
-             dashboard_label, panel_title, aggregation, rule_id, rule_hash${extrasPresent ? ', extra_aggregations' : ''})
+             s.dashboard_label, s.panel_title,
+             COALESCE(${AGGS_SQL('s.aggregations')}, '{}')::character varying(8)[],
+             s.rule_id, s.rule_hash, tr.organization_id, tr.team_id
+      FROM unnest($1::text[], $2::uuid[], $3::int[], $4::text[], $5::text[], $6::text[],
+                  $7::text[], $8::text[], $9::uuid[], $10::text[])
+        AS s(test_run_id, application_dashboard_id, panel_id, metric_name, group_name,
+             dashboard_label, panel_title, aggregations, rule_id, rule_hash)
       LEFT JOIN test_runs tr ON tr.test_run_id = s.test_run_id
     `;
 
-export function membershipInsertParams(rows: MembershipRow[], extrasPresent: boolean): unknown[] {
+export function membershipInsertParams(rows: MembershipRow[]): unknown[] {
   return [
     rows.map((r) => r.test_run_id),
     rows.map((r) => r.application_dashboard_id),
     rows.map((r) => r.panel_id),
     rows.map((r) => r.metric_name),
     rows.map((r) => r.group_name),
-    rows.map((r) => r.member_count_name),
     rows.map((r) => r.dashboard_label),
     rows.map((r) => r.panel_title),
-    rows.map((r) => r.aggregation),
+    aggregationsParam(rows),
     rows.map((r) => r.rule_id),
     rows.map((r) => r.rule_hash),
-    ...(extrasPresent ? [extrasParam(rows)] : []),
   ];
 }
 
@@ -465,14 +421,21 @@ export interface DerivedSeriesConfigRow {
   metric_name: string;
 }
 
-/** Every derived series name a run's membership implies, de-duplicated per config scope. */
+/**
+ * The MEMBER-COUNT-DEPENDENT series a run's membership implies, de-duplicated per config scope.
+ *
+ * Only `sum` and `count` (`MEMBER_COUNT_DEPENDENT_AGGREGATIONS`) are here, and that narrowing is
+ * the point: those two move on their own when a Deployment is scaled, so an unclassified config
+ * is what stops a scale-out reading as a regression. `avg` and `max` do NOT move with the replica
+ * count, so they deliberately get no row and inherit the panel's classification — a genuine
+ * regression in either SHOULD flag the run, which is what grouping exists to make possible.
+ */
 export function derivedSeriesConfigRows(rows: readonly MembershipRow[]): DerivedSeriesConfigRow[] {
   const out = new Map<string, DerivedSeriesConfigRow>();
   for (const row of rows) {
-    const names = [
-      ...(row.member_count_name ? [row.member_count_name] : []),
-      ...(row.extra_aggregations ?? []).map((a) => extraAggregationSeriesName(row.group_name, a)),
-    ];
+    const names = row.aggregations
+      .filter((a) => MEMBER_COUNT_DEPENDENT_AGGREGATIONS.includes(a))
+      .map((a) => groupSeriesName(row.group_name, a));
     for (const metric_name of names) {
       // Keyed on the CONFIG scope, not the run: several runs of one workload produce the same row.
       const k = key(row.system_under_test_id, row.test_environment, row.workload,
@@ -594,7 +557,7 @@ export function derivedCompareConfigParams(rows: DerivedSeriesConfigRow[]): unkn
  * membership would compile cleanly and then send 10 parameters to a 9-bind statement, and
  * `statistics-calculation` is not softFail, so that fails the whole re-evaluate batch.
  */
-export function buildGroupedStatisticsSQL(runCount: number, hasExtras: boolean): string {
+export function buildGroupedStatisticsSQL(runCount: number): string {
   const placeholders = Array.from({ length: runCount }, (_, i) => `$${i + 1}`).join(', ');
   const p = (offset: number) => `$${runCount + 1 + offset}`;
   return (
@@ -605,9 +568,9 @@ export function buildGroupedStatisticsSQL(runCount: number, hasExtras: boolean):
       members AS MATERIALIZED (
           SELECT *
           FROM unnest(${p(0)}::text[], ${p(1)}::uuid[], ${p(2)}::int[], ${p(3)}::text[], ${p(4)}::text[],
-                      ${p(5)}::text[], ${p(6)}::boolean[], ${p(7)}::text[]${hasExtras ? `, ${p(8)}::text[]` : ''})
-            AS s(test_run_id, application_dashboard_id, panel_id, metric_name, group_name, aggregation,
-                 track_member_count, member_count_name${hasExtras ? ', extra_aggregations' : ''})
+                      ${p(5)}::text[], ${p(6)}::boolean[])
+            AS s(test_run_id, application_dashboard_id, panel_id, metric_name, group_name,
+                 aggregations, renamed)
       ),
 
       -- One point per group per timestamp. COUNT(*) is the members reporting at that instant:
@@ -619,35 +582,18 @@ export function buildGroupedStatisticsSQL(runCount: number, hasExtras: boolean):
               m.panel_id,
               s.group_name,
               m.time,
-              CASE MIN(s.aggregation)
-                  WHEN 'sum' THEN SUM(m.value)
-                  WHEN 'max' THEN MAX(m.value)
-                  ELSE AVG(m.value)
-              END AS value,${
-                hasExtras
-                  ? `
-              -- Computed in the same GROUP BY pass as the primary CASE, so the extra cost is
-              -- three aggregate states per group rather than a second scan of the panel.
+              -- All four states in the one GROUP BY pass, unconditionally. Which of them become
+              -- series is decided below, per group, from aggregations; computing a state nobody
+              -- reads costs a scalar accumulator, where making the SQL itself conditional on what
+              -- the rules happen to ask for is how a statement and its bind list drift apart.
               AVG(m.value) AS v_avg,
               SUM(m.value) AS v_sum,
               MAX(m.value) AS v_max,
-              -- MAX, not MIN: extrasParam emits '' for a row with no extras and '' sorts
-              -- BEFORE 'avg'/'max'/'sum', so MIN would collapse a group whose member rows
-              -- disagree to '' -> NULLIF -> unnest(NULL) -> every extra silently dropped,
-              -- while the JS-side extraSeries= counter still reported them as emitted. The two
-              -- siblings below are both "any member wins" (bool_or, and MIN over a column whose
-              -- no-value case is NULL rather than ''), so MAX matches their semantics.
-              --
-              -- What this does NOT do is reconcile a disagreement: these are comma-joined
-              -- STRINGS, not arrays, so given {'avg,sum','max'} MAX returns 'max' and still
-              -- drops avg and sum. It fixes the '' case and nothing more. That is adequate
-              -- because disagreement is unreachable: one rule governs a panel,
-              -- applySeriesGrouping keys the extras map on the GROUP rather than the member, and
-              -- test_run_id, dashboard and panel are all in the GROUP BY. A union would need the
-              -- column bound as an array, which unnest() cannot do per row (see EXTRAS_SQL).
-              MAX(s.extra_aggregations) AS extra_aggregations,`
-                  : ''
-              }
+              -- Every member row of a group carries the same string (applySeriesGrouping keys it
+              -- on the GROUP), so MIN and MAX agree; MAX is kept because '' sorts before every
+              -- real value and would otherwise win for a group whose rows ever disagreed.
+              MAX(s.aggregations) AS aggregations,
+              bool_or(s.renamed) AS renamed,
               COUNT(*) AS member_count,
               bool_or(s.track_member_count) AS track_member_count,
               MIN(s.member_count_name) AS member_count_name,
@@ -673,39 +619,42 @@ export function buildGroupedStatisticsSQL(runCount: number, hasExtras: boolean):
           GROUP BY m.test_run_id, m.application_dashboard_id, m.panel_id, s.group_name, m.time
       ),
 
-      -- The statistics chain's input: the combined series, plus each tracked group's member count.
+      -- The statistics chain's input.
       points AS (
-          SELECT test_run_id, application_dashboard_id, panel_id, group_name AS metric_name, value, time,
+          -- A series the rule did not rename is a group of one: it passes through under its own
+          -- name with its own value, exactly as if no rule existed. Suffixing it would rename a
+          -- series the rule was never meant to touch, and AVG of one member IS that value.
+          SELECT test_run_id, application_dashboard_id, panel_id, group_name AS metric_name,
+                 v_avg AS value, time,
                  dashboard_uid, panel_title, dashboard_label, first_benchmark_id, unit,
                  organization_id, team_id, metrics_source_id
           FROM grouped_points
+          WHERE NOT renamed
           UNION ALL
-          SELECT test_run_id, application_dashboard_id, panel_id, member_count_name AS metric_name,
-                 member_count::double precision AS value, time,
-                 dashboard_uid, panel_title, dashboard_label, NULL::uuid AS first_benchmark_id,
-                 NULL::character varying AS unit, organization_id, team_id, metrics_source_id
-          FROM grouped_points
-          WHERE track_member_count AND member_count_name IS NOT NULL${
-            hasExtras
-              ? `
-          UNION ALL
-          -- One more series per extra aggregation. The name is composed here and in
-          -- extraAggregationSeriesName (@perfana/shared/utils); the two must stay identical.
-          -- unnest(NULL) yields no rows, so a group with no extras drops out of this arm.
+          -- One series per aggregation for a renamed group. The name is composed here and in
+          -- groupSeriesName (@perfana/shared/utils); the two must stay identical. unnest(NULL)
+          -- yields no rows, so a group whose aggregations were all dropped drops out by itself.
           SELECT gp.test_run_id, gp.application_dashboard_id, gp.panel_id,
                  gp.group_name || ' (' || x.agg || ')' AS metric_name,
-                 CASE x.agg WHEN 'sum' THEN gp.v_sum WHEN 'max' THEN gp.v_max ELSE gp.v_avg END AS value,
+                 CASE x.agg
+                     WHEN 'sum' THEN gp.v_sum
+                     WHEN 'max' THEN gp.v_max
+                     WHEN 'count' THEN gp.member_count::double precision
+                     ELSE gp.v_avg
+                 END AS value,
                  gp.time, gp.dashboard_uid, gp.panel_title, gp.dashboard_label,
-                 -- NULL, matching the member-count arm above: first_benchmark_id reaches
+                 -- NULL for every derived series: first_benchmark_id reaches
                  -- ds_metric_statistics.benchmark_id and from there ds_adapt_results.benchmark_ids,
                  -- so inheriting it would attribute a threshold written for ONE pod's value to the
-                 -- sum across the fleet. The unit IS kept: a SUM has the same unit as its members.
+                 -- whole group.
                  NULL::uuid AS first_benchmark_id,
-                 gp.unit, gp.organization_id, gp.team_id, gp.metrics_source_id
+                 -- A count is in members, not in the metric's unit; the others keep it, because
+                 -- an AVG, a SUM and a MAX all have the same unit as their inputs.
+                 CASE WHEN x.agg = 'count' THEN NULL::character varying ELSE gp.unit END AS unit,
+                 gp.organization_id, gp.team_id, gp.metrics_source_id
           FROM grouped_points gp
-          CROSS JOIN LATERAL unnest(${EXTRAS_SQL('gp.extra_aggregations')}) AS x(agg)`
-              : ''
-          }
+          CROSS JOIN LATERAL unnest(${AGGS_SQL('gp.aggregations')}) AS x(agg)
+          WHERE gp.renamed
       ),
 
 ` +
@@ -749,11 +698,8 @@ export function groupedStatementParams(runIds: string[], rows: MembershipRow[]):
     rows.map((r) => r.panel_id),
     rows.map((r) => r.metric_name),
     rows.map((r) => r.group_name),
-    rows.map((r) => r.aggregation),
-    rows.map((r) => r.track_member_count),
-    rows.map((r) => r.member_count_name),
-    // Ninth only when the statement binds it; see buildGroupedStatisticsSQL's `hasExtras`.
-    ...(hasExtraAggregations(rows) ? [extrasParam(rows)] : []),
+    aggregationsParam(rows),
+    rows.map((r) => r.renamed),
   ];
 }
 

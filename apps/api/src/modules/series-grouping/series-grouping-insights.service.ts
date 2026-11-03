@@ -117,17 +117,6 @@ export class SeriesGroupingInsightsService {
 
   /** Only a positive probe is cached: a deploy that migrates later must start answering. */
   private groupingTablesKnownPresent = false;
-  /**
-   * Whether `extra_aggregations` exists (migration 1820). Answered by the same probe and for the
-   * same reason: asking for a column that does not exist is 42703 inside the request's RLS
-   * transaction, which aborts it. Its OWN latch, re-probed while false — see the matching note in
-   * `SeriesGroupResolver` for why reading it off the tables latch is wrong on the upgrade path
-   * (1819 shipped in v0.2.97.43, so 1820 applies alone and nothing orders the API behind the
-   * migration runner). Here the stakes are the staleness verdict: a rule read as having no
-   * extras hashes differently from what the migrated worker wrote, so every grouped run reports
-   * as stale.
-   */
-  private extraAggregationsKnownPresent = false;
 
   constructor(
     @InjectRepository(TestRunEntity)
@@ -754,15 +743,11 @@ export class SeriesGroupingInsightsService {
       preset: SeriesGroupingPreset;
       pattern: string | null;
       replacement: string | null;
-      aggregation: SeriesGroupingAggregation;
-      extra_aggregations: SeriesGroupingAggregation[] | null;
-      track_member_count: boolean;
+      aggregations: SeriesGroupingAggregation[] | null;
     }> = await q.query(
       `/* sg:rules */
        SELECT r.id, r.application_dashboard_id, r.panel_id, r.preset, r.pattern, r.replacement,
-              r.aggregation, ${
-                this.extraAggregationsKnownPresent ? 'r.extra_aggregations' : 'NULL::text[]'
-              } AS extra_aggregations, r.track_member_count
+              r.aggregations
        FROM series_grouping_rules r
        JOIN application_dashboards ad ON ad.id = r.application_dashboard_id
        WHERE r.system_under_test_id = $1
@@ -780,9 +765,7 @@ export class SeriesGroupingInsightsService {
         preset: row.preset,
         pattern: row.pattern ?? null,
         replacement: row.replacement ?? '',
-        aggregation: row.aggregation,
-        extraAggregations: Array.isArray(row.extra_aggregations) ? row.extra_aggregations : [],
-        trackMemberCount: row.track_member_count === true,
+        aggregations: Array.isArray(row.aggregations) ? row.aggregations : [],
       },
     }));
   }
@@ -793,19 +776,16 @@ export class SeriesGroupingInsightsService {
    * page view, so a rollout-order mistake must read as "nothing to say", not as a stream of 500s.
    */
   private async groupingTablesPresent(q: SqlRunner): Promise<boolean> {
-    if (this.groupingTablesKnownPresent && this.extraAggregationsKnownPresent) return true;
+    if (this.groupingTablesKnownPresent) return true;
     try {
-      const rows: Array<{ present: unknown; has_extras: unknown }> = await q.query(
-        // pg_attribute rather than information_schema.columns: 3 shared buffers and ~1 ms of
-        // planning against 47 and ~3 ms. This service reads only the rules table.
+      const rows: Array<{ present: unknown }> = await q.query(
+        // to_regclass returns NULL rather than raising for a missing relation, so a database that
+        // has not run migration 1819 answers false instead of aborting the request's RLS
+        // transaction (25P02), which would take every later query of the request with it.
         `/* sg:tables-present */
          SELECT (to_regclass('public.series_grouping_rules') IS NOT NULL
-                 AND to_regclass('public.ds_metric_series_groups') IS NOT NULL) AS present,
-                EXISTS (SELECT 1 FROM pg_attribute
-                         WHERE attrelid = to_regclass('public.series_grouping_rules')
-                           AND attname = 'extra_aggregations' AND NOT attisdropped) AS has_extras`,
+                 AND to_regclass('public.ds_metric_series_groups') IS NOT NULL) AS present`,
       );
-      if (rows[0]?.has_extras === true) this.extraAggregationsKnownPresent = true;
       if (rows[0]?.present === true) {
         this.groupingTablesKnownPresent = true;
         return true;
@@ -822,9 +802,7 @@ function toSpec(rule: PreviewSeriesGroupingDto['rule']): SeriesGroupingRuleSpec 
     preset: rule.preset,
     pattern: rule.pattern ?? null,
     replacement: rule.replacement ?? '',
-    aggregation: rule.aggregation,
-    extraAggregations: rule.extraAggregations ?? [],
-    trackMemberCount: rule.trackMemberCount,
+    aggregations: rule.aggregations ?? [],
   };
 }
 

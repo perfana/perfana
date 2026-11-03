@@ -594,105 +594,52 @@ rewrites raw names to a group name with `applySeriesGrouping` (`@perfana/shared/
    grouped panels excluded, and the series read 85 ms for two runs. An ungrouped panel in a grouped
    batch matches a no-rule run exactly except `std_dev` and the two trend columns, which differ by
    at most 1e-13 — floating-point summation order under a different plan, not a different answer.
-3. **A second aggregation is an EXTRA series, never a rename (v0.2.97.44, migration 1820).**
-   `series_grouping_rules.extra_aggregations` is a **nullable** `varchar(8)[]` of the aggregations
-   to emit beside the primary one (nullable because both tables are `core` in `SUT_RESOURCES` and
-   the importer's `json_populate_recordset` yields NULL, not the DEFAULT, for a key an older
-   bundle lacks — `NOT NULL` there is a 23502 that kills the whole bundle; migration 1808 is the
-   precedent, so every reader coalesces); each produces `<group> (sum)` while the primary keeps the bare group
-   name. That asymmetry is the whole safety argument, not a presentation choice:
-   `ds_metric_statistics`, `ds_adapt_results`, `benchmarks` and `ds_compare_config` all key on
-   `metric_name` and nothing migrates a stored name, so suffixing *every* series — which reads
-   better — would make every baseline, SLO and compare config on the panel stop matching and the
-   panel go `incomparable`, the exact failure series grouping exists to fix. Five things:
+3. **A rule emits a SET of series, every one suffixed (v0.2.97.44).** `series_grouping_rules.aggregations`
+   is a `varchar(8)[]` holding any of `avg` / `sum` / `max` / `count`; a renamed group emits one
+   series per entry, named `<group> (avg)` and so on. There is no primary and no bare `api`.
+   `count` is the member count, which was a separate `track_member_count` boolean before this
+   version. Six things:
 
-   - **The extras arm is opt-in at the SQL level.** `buildGroupedStatisticsSQL(runCount,
-     hasExtras)` adds the third `points` arm, the three `AVG`/`SUM`/`MAX` aggregate states and
-     the ninth bound array only when some rule asked for one, so a rule with no extras sends the
-     v0.2.97.43 statement byte for byte and pays nothing. `groupedStatementParams` is conditional
-     on the same `hasExtraAggregations(rows)` or the bind count does not match.
-   - **The extras travel as a comma-joined STRING per row, split with `string_to_array`.**
-     `unnest($1::text[], …)` cannot take a per-row array: a Postgres multidimensional array is not
-     an array of arrays, so every row would have to carry the same number of extras. The empty
-     case needs no `WHERE` — `unnest(NULL)` yields no rows, so a group with no extras drops out of
-     the `CROSS JOIN LATERAL` by itself.
-   - **The series name is composed in TWO places and they must stay identical**:
-     `extraAggregationSeriesName` in `@perfana/shared/utils` (which decides, in JS, which extras a
-     group may emit) and `group_name || ' (' || x.agg || ')'` in the arm. The JS side is where the
-     collision guard lives — a raw series literally named `api (sum)` makes the extra get dropped,
-     because two rows under one `metric_name` fail the statistics insert outright — and it **drops
-     rather than truncates** a name that would exceed `varchar(255)`, since SQL concatenation
-     cannot reproduce a truncation.
-   - **An unrenamed group gets no extras**, the same rule the member count follows: it is a group
-     of one, where `SUM` equals `AVG`, so an extra would be a second copy of one series.
-   - **Every DERIVED series gets an unclassified `ds_compare_config` row, and that is what keeps
-     a scale-out from reading as a regression.** A derived series is pod-count dependent by
-     construction: scale a Deployment from 2 replicas to 4 and `api (sum)` doubles against a
-     baseline recorded at the old count, and so does `api (pod count)`. Everything in
-     `ds_metric_statistics` reaches `ds_adapt_results`, and `buildConclusionSQL` flips the run to
-     REGRESSION on `regression_count > 0` — so the feature would report a regression for the exact
-     case its own design table says is NOT one ("`sum` up / `avg` flat = scale-out"). Measured on
-     the dev database: 346 of 419 inheritable compare configs carry a real `higherIsBetter`, so
-     inheriting the panel's config is the common outcome, not an edge case.
+   - **A series the rule does NOT rename keeps its own name.** It is a group of one, so all four
+     aggregations are the same number (bar `count`, a constant 1), and suffixing it would rename a
+     series the rule was never meant to touch. The `points` CTE has two arms for exactly this:
+     `WHERE NOT renamed` emits the bare name with `v_avg` (the identity for one member), and
+     `WHERE gp.renamed` emits one suffixed row per aggregation through a `CROSS JOIN LATERAL`.
+   - **The statement is UNCONDITIONAL.** All four aggregate states are computed on every run and
+     which become series is decided per group, in SQL, from the bound `aggregations` string. The
+     previous design made the SQL itself conditional on what the rules asked for, and that is how
+     it shipped a 42703 inside `withAnalyticsTransaction`: the column probe made the rules SELECT
+     conditional and left the membership INSERT naming the column regardless. A stage that is not
+     `softFail` then failed the whole batch, and the membership DELETE rolled back with it. If a
+     future migration adds a column here, probe it on BOTH tables and make every statement that
+     NAMES it conditional — not just the SELECT.
+   - **The series name is composed in TWO places and they must stay identical**: `groupSeriesName`
+     in `@perfana/shared/utils`, which decides in JS which names a group may emit, and
+     `group_name || ' (' || x.agg || ')'` in the arm. The JS side owns the guards — a raw series
+     literally named `api (sum)` makes that one get dropped, because two rows under one
+     `metric_name` fail the statistics insert outright, and a name over `varchar(255)` is **dropped
+     rather than truncated**, since SQL concatenation cannot reproduce a JS truncation.
+   - **Only `sum` and `count` get an unclassified `ds_compare_config` row**
+     (`MEMBER_COUNT_DEPENDENT_AGGREGATIONS`). Those two move on their own when a Deployment is
+     scaled out, so an unclassified row is what stops a scale-out reading as a regression:
+     `buildConclusionLogic` emits `'regression'` only under `higherIsBetter = true|false`, so an
+     unclassified metric's change lands in `difference_count`. `avg` and `max` do NOT move with the
+     replica count and deliberately get no row, so they inherit the panel's classification and a
+     genuine regression in either still flags the run — which is the point of grouping.
+   - **Those rows are stamped `created_by`/`updated_by = 'worker-pipeline'` and carry
+     `config_data.source = SERIES_GROUPING_DERIVED_SOURCE`.** The stamp is provenance, not a gate:
+     the anomaly card's save rebuilds `config_data` from scratch, so one edit erases the marker.
+     The golden path keys on the row's LEVEL instead — see "A golden-path template loses to any row
+     already on the panel" in [apps/api/CLAUDE.md](../api/CLAUDE.md).
+   - **The aggregations travel as a comma-joined STRING per row**, split with `string_to_array`:
+     `unnest($1::text[], …)` cannot take a per-row array, because a Postgres multidimensional array
+     is not an array of arrays and every row would need the same number of elements. `extrasParam`'s
+     successor `aggregationsParam` filters each element against `SERIES_GROUPING_AGGREGATIONS`
+     before joining, because the separator is the only thing holding that string together.
 
-     `derivedSeriesConfigRows` therefore writes one **metric-level** row per derived name with
-     `higherIsBetter: null`, which is the panel-304 mechanism — `buildConclusionLogic` emits
-     `'regression'` only under `= true` or `= false`, so an unclassified metric's change lands in
-     `difference_count` and cannot flip the verdict. Four things about it: it must be METRIC level,
-     because resolution picks a whole object (metric -> panel -> dashboard -> global) and only a
-     metric row overrides the panel's; `ignore` is NOT an alternative, since nothing reads it back
-     off a stored row; it is `ON CONFLICT DO NOTHING`, so a classification the user sets on
-     `api (sum)` survives every later analysis and the write is idempotent across runs of the
-     workload (which share the `(system, environment, workload)` scope the table is keyed on); and
-     it covers the member-count series, which has had the same exposure since v0.2.97.43.
-
-   - **`seriesGroupingRuleHash` appends the extras ONLY when there are any.** Appending an empty
-     field would change every existing rule's hash, and the insights page reads a changed hash as
-     "this run is stale" — every grouped run in the deployment would light up on deploy. The
-     extras are sorted canonically first, so the order of the checkboxes does not change the hash.
-
-   **A worker rolled out before migration 1820 probes for the column rather than relying on the
-   catch, and that distinction is load-bearing.** `loadSeriesGroupingContext` asks `pg_attribute`
-   for `extra_aggregations` on both tables and the rules SELECT projects `NULL::varchar(8)[]` when
-   it is absent, so `SeriesGroupingContext.extrasPresent` is false while `tablesPresent` stays
-   true. Letting the 42703 fall into the catch instead is WORSE than a failure: the catch returns
-   `NO_SERIES_GROUPING`, whose `tablesPresent: false` also gates the membership DELETE, while
-   `ds_metric_statistics` is deleted and rewritten ungrouped regardless — so the previous
-   analysis's `ds_metric_series_groups` rows survive describing series that no longer exist.
-   `SeriesGroupResolver` prefers membership over the live rule, so every picker, chart and report
-   then offers a group with no statistics row behind it; an SLO on it records `meets_requirement`
-   NULL, which the run verdict's `bool_and(COALESCE(meets_requirement, true))` reports as passed;
-   and the insights page reports the run as in step, because it compares `rule_hash` and the hash
-   has not changed. Under 1819 the same catch was harmless — the tables genuinely did not exist.
-
-   **`extrasPresent` has to reach every statement that names the column, not just the rules
-   SELECT — and that is the bug this feature shipped to review with.** `INSERT_MEMBERSHIP_SQL` was
-   a module constant naming `extra_aggregations` unconditionally, so on a 1819-only database the
-   probe let the SELECT through, membership was built, `DELETE_MEMBERSHIP_SQL` ran, and the INSERT
-   raised 42703 *inside* `withAnalyticsTransaction`. `statistics-calculation` is not `softFail`, so
-   that aborts the transaction (25P02) and fails the whole re-evaluate batch, and the DELETE rolls
-   back with it — leaving exactly the stale membership the probe was added to prevent. Strictly
-   worse than the catch it replaced, which at least analysed the run ungrouped. It is
-   `insertMembershipSql(extrasPresent)` now, with extras as the LAST bind position so the parameter
-   drops without renumbering, and the grouped statement's extras arm is already off by itself
-   (NULL extras coalesce to `[]`, so `hasExtraAggregations` is false).
-
-   So the pre-1820 window needs **no recovery**: the run is grouped normally with no extras, which
-   is a v0.2.97.43 analysis, and the next recalculation after 1820 lands picks the extras up like
-   any other rule change. The regression test asserts no in-transaction statement mentions the
-   column when it is absent — the harness raises 42703 on one that does, because before that every
-   in-transaction statement resolved to `[undefined, 0]` whatever its column list said, which is
-   why `columnPresent` existed and was never set to false.
-
-   Two smaller rules in the same statement. `MAX(s.extra_aggregations)`, not `MIN`: `extrasParam`
-   emits `''` for a row with no extras and `''` sorts before `'avg'`/`'max'`/`'sum'`, so `MIN`
-   would collapse a group whose member rows disagree to `''` -> `NULLIF` -> `unnest(NULL)` -> every
-   extra silently dropped, while the JS-side `extraSeries=` counter still reported them; the two
-   sibling aggregates beside it are both "any member wins". And the extras arm writes
-   `NULL::uuid` for `first_benchmark_id`, matching the member-count arm: that column reaches
-   `ds_metric_statistics.benchmark_id` and from there `ds_adapt_results.benchmark_ids`, so
-   inheriting it would attribute a threshold written for one pod's value to the sum across the
-   fleet.
+   `seriesGroupingRuleHash` is taken over the CANONICALISED list, so ticking the same boxes in a
+   different order is the same rule and the insights page does not report every grouped run as
+   stale for a change that is not one.
 
 4. **Rules load before the transaction and never throw.** `loadSeriesGroupingContext` runs on the
    pooled connection after a `to_regclass` probe: an error inside `withAnalyticsTransaction` aborts it

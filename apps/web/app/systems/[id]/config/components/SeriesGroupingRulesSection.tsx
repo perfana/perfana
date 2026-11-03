@@ -33,7 +33,6 @@ import SeriesGroupingDialog from '@/components/series-grouping/SeriesGroupingDia
 import { useCopyTargets } from '@/components/series-grouping/useCopyTargets';
 import {
   AGGREGATION_LABELS,
-  extraAggregationLabel,
   PERF_TEST_DASHBOARD_UID_PREFIX,
   presetLabel,
 } from '@/components/series-grouping/labels';
@@ -193,17 +192,11 @@ export default function SeriesGroupingRulesSection({
                       )}
                     </TableCell>
                     <TableCell>
-                      {AGGREGATION_LABELS[rule.aggregation] ?? rule.aggregation}
-                      {(rule.extraAggregations ?? []).map((a) => (
-                        <Typography key={a} variant="caption" color="text.secondary" display="block">
-                          + {extraAggregationLabel(a)}
+                      {(rule.aggregations ?? []).map((a) => (
+                        <Typography key={a} variant="body2" display="block">
+                          {AGGREGATION_LABELS[a] ?? a}
                         </Typography>
                       ))}
-                      {rule.trackMemberCount && (
-                        <Typography variant="caption" color="text.secondary" display="block">
-                          + pod count
-                        </Typography>
-                      )}
                     </TableCell>
                     <TableCell>
                       <Switch

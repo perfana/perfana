@@ -836,22 +836,29 @@ dashboard's settings (`systems/[id]/config/components/SeriesGroupingRulesSection
    panel is switched — the third (`memberPanels`) only appears when one is — so the common call is
    unchanged. Switching a panel drops the draft picks on it, because they name series the column
    no longer lists.
-3. **"Also add" is additive; "Combine" is not, and only one of them warns (v0.2.97.44).** The
-   `RadioGroup` picks the **primary** aggregation, which keeps the plain group name; the checkbox
-   group beneath it picks extras, each of which adds a `<group> (sum)` series. Four rules: the
-   checkboxes offer only the two aggregations that are not primary and follow a change of primary
-   (the CHECK constraint refuses an overlapping pair, and a 23514 is a 500); the extras are
-   previewed as sub-lines under the group name rather than as new rows, so the *After: N of M
-   groups match* figure keeps counting **groups** — ticking a box must not inflate a number that
-   is about baseline matching; the extra **series** count is printed separately, because a
-   dashboard-wide rule with two extras and a pod count is four series per group; and changing the
-   primary on an **existing** rule gets a warning that says the group KEEPS its name while the
-   numbers under it change (saying "renames" is wrong and sends the reader hunting for a new
-   name), and unticking an extra gets its own warning, because `deleteOrphanedResults` covers
-   `ds_adapt_results` only — an SLO, a graph preset or a report section on the derived name just
-   stops matching. Changing the primary also FORGETS an extra it has taken over: retaining the
-   hidden pick meant avg -> sum -> avg silently re-added a series, and on a saved rule that is a
-   PATCH with no warning.
+3. **One control picks every series a group emits (v0.2.97.44).** **Series per group** is a single
+   `FormGroup` of four checkboxes — Average per pod, Total, Highest pod, Number of pods — and each
+   ticked box is one series named `<group> (avg)` / `(sum)` / `(max)` / `(count)`. There is no
+   primary, no radio, and no bare `api`. It replaced three controls (Combine / Also add / Also
+   track) that were one question split three ways; the split existed only to keep one series
+   unsuffixed for stored baselines, which a greenfield feature does not have. Five rules:
+
+   - **Save is disabled with nothing ticked**, and an Alert says why. A rule that emits nothing
+     still excludes its panels from the main statistics statement, so the panel would lose every
+     series rather than keeping its pods — and the DTO and the CHECK both refuse it anyway, which
+     without this guard is a 400 on a form that looked valid.
+   - **The series are previewed as sub-lines under the group name**, never as extra rows, so the
+     *After: N of M groups match* figure keeps counting **groups**: ticking a box must not inflate
+     a number that is about baseline matching. The series count is printed separately.
+   - **Unticking a box on a SAVED rule warns**, because `deleteOrphanedResults` covers
+     `ds_adapt_results` only — an SLO, a graph preset or a report section on that name just stops
+     matching, with nothing logged.
+   - **The order of the ticks never reaches the server.** `normalizeAggregations` canonicalises
+     before the spec is built, because the rule hash is taken over that list and the insights page
+     reads a changed hash as "this run is stale".
+   - **A `FormLabel` + `role="group"`, not `aria-label` on the `FormGroup`.** MUI renders
+     `FormGroup` as a plain `<div>` with no role, where `aria-label` is ignored by assistive tech,
+     and a checkbox reading `Total as "… (sum)"` means nothing without its group.
 
 4. **The dialog fetches names once per scope and regroups on every keystroke client-side.** Only
    the SLO check depends on the rule (it needs stored SLO patterns), so `useSeriesGroupingPreview`

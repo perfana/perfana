@@ -27,9 +27,7 @@ dashboard-wide one.
 | Field | Meaning |
 |---|---|
 | Pattern | A built-in preset, or a custom JavaScript regex with a replacement (`$1` allowed). Every match is replaced; a rewrite that leaves nothing keeps the raw name. |
-| Combine | How the members of a group combine per timestamp: **Average per pod** (default), **Total** or **Highest pod**. |
-| Also add | The other two aggregations, each as a second series named `<group> (sum)` / `<group> (max)`. |
-| Track the number of pods | Also writes a `<group> (pod count)` series, so a changed replica count is visible next to an average. |
+| Series per group | Which series the group emits, one per ticked box: **Average per pod**, **Total**, **Highest pod**, **Number of pods**. At least one. A new rule starts with the average and the pod count. |
 
 ### Reading the average and the total together
 
@@ -41,29 +39,26 @@ tells a scale-out apart from a regression:
 | **Total** up | scale-out — more pods, same cost each. Not a regression. | a real regression, amplified by the replica count |
 | **Total** flat | scale-in with hotter pods | a real regression on a fixed fleet |
 
-The one you pick under **Combine** keeps the plain group name (`api`), and each box you tick under
-**Also add** adds a series beside it (`api (sum)`). That order matters: the plain name is what every
-baseline, SLO and comparison setting on the panel already refers to, so ticking a box only ever
-**adds** series and leaves everything matching.
+Each ticked box is its own series, named for what it measures: `api (avg)`, `api (sum)`,
+`api (max)`, `api (count)`. There is no plain `api` — every series carries its suffix.
 
-**Changing which one is under Combine is the one move that is not additive.** The group keeps its
-name and the numbers under it change, so a baseline, an SLO or a comparison setting on that name
-goes on matching while judging a different measurement than the history it was built on. Nothing
-is renamed — that is exactly why it is easy to miss. The dialog warns when you do it to a saved
-rule.
+**That is what makes a rule safe to edit.** Ticking a box adds a series and unticking removes one;
+no edit ever changes what an existing series measures. A series the rule does not rename is left
+alone entirely and keeps its own name, because a group of one has nothing to combine.
 
-**Unticking a box is not free either.** The series disappears on the next recalculation. Anomaly
-detection drops its own results, but an SLO, a saved graph preset or a report section pointing at
-`api (sum)` will stop matching it — and an SLO that matches nothing records no verdict rather than
-failing. The dialog warns about that too.
+**Unticking a box is not free.** The series disappears on the next recalculation. Anomaly detection
+drops its own results, but an SLO, a saved graph preset or a report section pointing at `api (sum)`
+will stop matching it — and an SLO that matches nothing records no verdict rather than failing. The
+dialog warns when a saved rule loses a series this way.
 
-Each box multiplies the number of series on the panel, so a dashboard-wide rule with both extras
-and a pod count is four series per group. The dialog prints how many extra series it adds before you save.
+Each box multiplies the number of series on the panel, so a dashboard-wide rule with all four is
+four series per group. The dialog prints the total before you save.
 
-**The extra series and the pod count are reported, not judged.** Both are pod-count dependent by
-construction: scale a Deployment from two replicas to four and the total doubles, which is a
-scale-out and not a regression. So Perfana gives each derived series an *unclassified* comparison
-setting, which means anomaly detection reports a change in it as a difference and never as a
+**The total and the pod count are reported, not judged — the average and the highest are judged.**
+A total and a pod count are both replica-count dependent: scale a Deployment from two replicas to
+four and each doubles, which is a scale-out and not a regression. So Perfana gives those two an
+*unclassified* comparison setting, which means anomaly detection reports a change in them as a
+difference and never as a
 regression — it cannot turn a run red on its own. The plain group series keeps whatever
 classification the panel has. If you do want a derived series judged, set a comparison
 classification on it explicitly and Perfana will leave your setting alone.
@@ -107,13 +102,10 @@ about; the extras are counted separately as series. The preview is computed in t
 same function the worker uses, so it cannot disagree with what the analysis will do. The preset
 that matches the most names is preselected and marked *(detected)*.
 
-It warns about five things:
+It warns about four things:
 
-- **changing Combine on a saved rule**, which keeps the group's name and changes what it measures,
-  so its baselines, SLOs and comparison settings go on matching while describing a different
-  measurement;
-- **unticking an Also add box on a saved rule**, which deletes that series on the next
-  recalculation, so anything referencing it by name stops matching;
+- **unticking a box on a saved rule**, which deletes that series on the next recalculation, so
+  anything referencing it by name stops matching;
 - an **SLO** whose match pattern selects pods by name and would match nothing after grouping;
 - a **group name that is also a raw series name** in a baseline run that has not been recalculated —
   that run's series of that name is pooled into the group until it is;

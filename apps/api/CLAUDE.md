@@ -783,7 +783,7 @@ template for good. That is wrong on its own terms: resolution picks metric befor
 applying the panel default alongside an override changes nothing for the overridden series. It was
 invisible while metric-level rows were vanishingly rare (one of 420 on the dev database), and
 series grouping made them routine — `StatisticsPipeline` writes one per derived series
-(`api (sum)`, `api (pod count)`) on every grouped analysis, so the first grouped analysis of a
+(`api (sum)`, `api (count)`) on every grouped analysis, so the first grouped analysis of a
 workload disabled that panel's template permanently, logging only `0 compare configs created`.
 The consequence was the inverse of what those rows exist for: with the template never applied, the
 panel's series — the PRIMARY grouped series `api` included — fell back to `DEFAULT_COMPARE_CONFIG`,
@@ -1022,45 +1022,39 @@ group name back to its members. Five things about it:
    changed. Only a run with no membership for the panel (live, or not yet recalculated) falls back
    to the current enabled rule, applied in JavaScript with `applySeriesGrouping`. No regex ever
    reaches SQL, and no name is interpolated: groups, members and aggregations are bound arrays.
-2. **A member-count name is a group too.** `api (pod count)` exists only in `ds_metric_statistics`;
-   the resolver answers it as `COUNT(*)` of the members per timestamp. So is an **extra
-   aggregation** (v0.2.97.44): `api (sum)` is the same group's members combined with `sum`, and
-   `expandSeriesNames` synthesises it exactly as it does the count — including the `!byName.has()`
-   guard, so a raw series of that literal name wins and the derived one is dropped rather than
-   shadowing real data. `mapNamesToGroups` lists the extra names beside the group name, which is
-   what gets them into the pickers. The membership table carries `extra_aggregations` for the same
-   reason it carries `aggregation`: it records what the run's statistics were actually computed
-   with, and the resolver prefers it over the live rule.
+2. **A group's series are its DERIVED names, and the bare group name is not one of them.** A
+   renamed group emits `api (avg)` / `(sum)` / `(max)` / `(count)` — one per entry in the
+   membership row's `aggregations` — and `expandSeriesNames` answers each by combining the group's
+   members with that aggregation. `api (count)` is `COUNT(*)` per timestamp; it exists only in
+   `ds_metric_statistics`, never in `ds_metrics`. `mapNamesToGroups` lists exactly those names,
+   which is what gets them into the pickers.
 
-   **The column is probed, not assumed, and it needs its OWN latch.** `ensureTables` asks
-   `pg_attribute` for `extra_aggregations` on BOTH tables in the same statement as the two
-   `to_regclass` checks, and selects `NULL::text[]` when it is absent — the API can start before
-   migration 1820 runs, and a 42703 inside the request's RLS transaction aborts it (25P02) and
-   takes every later query of the request with it.
+   Three things hold it together:
 
-   Three things about it, each of which was wrong in the first version:
+   - **A raw series of that literal name wins.** `expandSeriesNames` and `allSeriesOf` both skip a
+     derived name that collides with a member name, so a panel that really does hold a series
+     called `api (sum)` keeps it and the derived one is dropped rather than shadowing real data.
+     That is the same guard the worker applies on write, which is why the two agree about which
+     name belongs to which series.
+   - **`SeriesGroup` and `ResolvedSeries` are different types, deliberately.** A group is a set of
+     members; a resolved series is ONE of the series that group emits, with the aggregation to
+     apply. The single type that carried both (an `aggregation` beside a `memberCountName` and a
+     list of extras) could not tell a reader which it was describing. `groupsForPanel` and
+     `groupsInRun` return groups; `expand` and `allSeriesOf` return resolved series.
+   - **A group the rule did not rename has an EMPTY `aggregations`.** It passes through under its
+     own name, so it contributes no derived series at all — which is why the whole-panel readers
+     pair `allSeriesOf(groups)` with `excludeNames: groups.flatMap(g => g.members)`.
 
-   - **Its own latch, re-probed while false.** Reading it off the tables latch looks safe on the
-     argument that 1819 and 1820 arrive in one batch, so tables-without-column means a failed
-     deploy. That holds for a greenfield install only: 1819 shipped in v0.2.97.43, so on an
-     upgrade **1820 applies alone**, and nothing orders the API behind the migration runner (no
-     service declares `depends_on: perfana-migration`). One chart lookup served before the
-     migration lands would then latch `false` for the whole process lifetime — extras invisible
-     until someone restarts the API, nothing logged, and `groupsFromRule` hashing every rule as
-     having none, so the insights page reports every grouped run as stale.
-   - **Both tables, because one flag gates both.** `load()` selects `g.extra_aggregations` from
-     `ds_metric_series_groups` and `r.extra_aggregations` from `series_grouping_rules`. 1820 adds
-     them in one DO block so they move together today; asking about one lets it vouch for the
-     other.
-   - **`pg_attribute`, not `information_schema.columns`.** Measured on the dev database: 3 shared
-     buffers and ~1.0 ms of planning against 47 buffers and ~3.0 ms. The view is a 10-way catalog
-     join with a per-row `has_column_privilege()`, and its planning cost grows with the catalog —
-     one relation per chunk per day here.
+   The membership table carries `aggregations` for the same reason it carried the aggregation
+   before: it records what the run's statistics were actually computed with, and the resolver
+   prefers it over the live rule so a chart agrees with the numbers beside it.
 
-   `SeriesGroupingInsightsService.groupingTablesPresent` does the same for the rules it reads with
-   raw SQL. Note the rules CRUD service does **not** probe: it reads through the TypeORM entity,
-   which names the column unconditionally, so `/series-grouping-rules` 500s on a pre-1820 database
-   until the migration lands (self-healing, no latch involved).
+   **There is no column probe, and that is deliberate.** `aggregations` is created WITH the tables
+   by migration 1819, so a database that has one has the other. A column-level probe briefly
+   existed here for a follow-up migration that no longer exists, and it was the source of a silent
+   incoherence — the worker's membership DELETE was gated on it while `ds_metric_statistics` was
+   rewritten regardless. If a future migration adds a column to these tables, probe it on BOTH
+   tables and make every statement that NAMES it conditional, not just the SELECT.
 3. **It probes for its tables with `to_regclass` and never throws.** The API can start before
    migration 1819 runs, and a statement on a missing table inside the request's RLS transaction
    aborts it (25P02) and takes every later query of the request with it. Only a positive probe is
@@ -1109,15 +1103,16 @@ group name back to its members. Five things about it:
    `details.controlRuns` (written only for a failed baseline aggregation). A run with no conclusion
    falls back to the workload's five previous completed runs; a conclusion with an EMPTY control
    group answers `[]` rather than inventing a baseline ADAPT never used.
-6. **`extraAggregations` is optional, and an overlapping value is normalised away rather than
-   refused (v0.2.97.44).** Absent and `[]` both mean "primary only". The DTO validates membership of
-   `SERIES_GROUPING_AGGREGATIONS` per element, but it deliberately does NOT reject an array
-   containing the rule's own primary aggregation: `normalizeExtraAggregations` drops it, because
-   `ck_series_grouping_rules_extra_aggregations` refuses the overlapping pair and a 23514 has no
-   translator here — it would surface as a 500. Normalising also makes the stored array canonical
-   (known values, de-duplicated, fixed order), which is what keeps `seriesGroupingRuleHash` stable
-   against checkbox order. The same function runs on the web side, so the dialog and the API cannot
-   disagree about what a rule will emit.
+6. **`aggregations` is REQUIRED and non-empty, and the service canonicalises rather than
+   re-validating.** The DTO carries `@ArrayNotEmpty`, `@ArrayUnique` and a per-element `@IsIn`
+   against `SERIES_GROUPING_AGGREGATIONS`; `ck_series_grouping_rules_aggregations` repeats both
+   halves in SQL. `ruleFields` then runs `normalizeAggregations` — known values only,
+   de-duplicated, canonical order — and throws a 400 if nothing survives, because the rule hash is
+   taken over this list and decides whether a run reads as stale, so the order the checkboxes
+   happened to be ticked in must not change it. The same function runs on the web side, so the
+   dialog and the API cannot disagree about what a rule will emit. An empty list is refused rather
+   than defaulted: a rule that emits nothing would still exclude its panels from the main
+   statistics statement, so the panel would lose every series instead of keeping its pods.
 7. **All three of preview, suggestions and status probe `groupingTablesPresent` first.** The API can
    start before migration 1819 runs — nothing orders them, no service declares
    `depends_on: perfana-migration` — and a statement on a missing table inside the request's RLS

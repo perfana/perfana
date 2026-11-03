@@ -1,35 +1,86 @@
 # Series grouping: more than one aggregation per group
 
-**Status:** shipped in v0.2.97.44 (migration 1820). Follow-up to the series grouping feature
-shipped in v0.2.97.43 (`2026-11-01-series-grouping-design.md`, `-plan.md`).
+**Status:** shipped in v0.2.97.44, but **NOT as specified below**. This spec's central decision —
+keep one "primary" aggregation unsuffixed and suffix the rest — was reversed before release. Read
+the section immediately below for what shipped; the rest of this file is kept because its problem
+statement and its measurements are still the record of why the feature exists.
 
-Implemented with three decisions on the open questions below and **four** deviations from the
-letter of this spec:
+## What shipped, and why it is not what this spec says
 
-1. The grouped statement's extras arm is **conditional** on some rule actually having extras, so a
-   rule without them sends the v0.2.97.43 statement byte for byte and pays none of the three extra
-   aggregate states.
-2. The extras are previewed as **sub-lines under the group name** rather than as extra rows in the
-   preview table, which keeps the group counts honest without a second row per group.
-3. `applySeriesGrouping` is **not** untouched (this spec's "What must not change" asked for an
-   assertion that it was). It gained the collision/length guard for the derived names, because the
-   worker rebuilds those names by SQL concatenation and cannot reproduce a JS truncation — so the
-   guard has to live on the write side, once, where the names are decided.
-4. The column is **nullable**, not `NOT NULL DEFAULT '{}'` as specified below. `NOT NULL` breaks
-   SUT transfer: both tables are `core` in `SUT_RESOURCES` and the importer's
-   `json_populate_recordset` yields NULL rather than the DEFAULT for a key an older bundle lacks,
-   so every bundle exported on v0.2.97.43 would fail to import with 23502, taking the whole
-   transaction with it. Reproduced before the fix and verified after. Migration 1808 documents the
-   same trap.
+Every series a renamed group emits is suffixed: `api (avg)`, `api (sum)`, `api (max)`,
+`api (count)`. There is no primary and no bare `api`. A rule carries ONE column,
+`series_grouping_rules.aggregations varchar(8)[]`, created by migration **1819** — the follow-up
+migration 1820 this spec called for does not exist.
 
-The per-row array travels as a comma-joined string (`string_to_array`) because `unnest` cannot
-take a per-row array.
+**The asymmetry this spec is built on only buys something where stored names already exist.** Its
+whole argument for keeping one series unsuffixed is that `ds_metric_statistics`,
+`ds_adapt_results`, `benchmarks` and `ds_compare_config` all key on `metric_name` and nothing
+migrates a stored name — true, and decisive for a feature landing on live data. This one lands
+greenfield (confirmed before the change: migration 1819 had not run anywhere), so there is nothing
+to keep matching, and the asymmetry was pure cost:
 
-**One requirement of this spec was also wrong and was corrected rather than implemented.** The
-CHECK's third clause, `array_length(extra_aggregations, 1) IS DISTINCT FROM 0`, cannot fail:
-`array_length` of an empty array is NULL, and `NULL IS DISTINCT FROM 0` is true. It was dropped.
-The `<@` clause turns out to be the only NULL-element guard, since
-`NOT ('avg' = ANY (ARRAY['sum',NULL]))` is NULL and a CHECK passes on NULL.
+- a three-control dialog (Combine radios / Also add checkboxes / Also track) for one question,
+- two name builders (`extraAggregationSeriesName`, `memberCountSeriesName`) that both had to agree
+  with one SQL concatenation,
+- a warning that changing the primary keeps the name and changes the measurement,
+- a prune so `avg -> sum -> avg` did not silently re-add a series,
+- and a grouped statement whose shape depended on what the rules happened to ask for — which is
+  what made the pre-1820 42703 possible (see below).
+
+Suffixing everything removes all of it. A rule edit is now purely additive or subtractive: ticking
+a box adds a series, unticking removes one, and no edit ever changes what an existing series
+measures. `track_member_count` folded in as the fourth aggregation, `count`.
+
+**The member count is `api (count)`, not `api (pod count)`.** One suffix rule with no lookup table
+to keep identical in JS and SQL — and "pod" was wrong anyway for the IP-and-port and trailing-id
+presets. The dialog still labels it "Number of pods".
+
+**A series the rule does not rename still passes through under its own name.** It is a group of
+one, where all four aggregations are the same number (bar `count`, a constant 1), and suffixing it
+would rename a series the rule was never meant to touch.
+
+**Only `sum` and `count` get an unclassified `ds_compare_config` row** — the two that move when a
+Deployment is scaled. Under this spec's design every non-primary series was exempted from flagging
+a regression, which was over-broad: `avg` and `max` do not move with the replica count, so they
+inherit the panel's classification and a genuine regression in either still turns the run red.
+That is the point of grouping.
+
+### What this spec got right and the implementation kept
+
+- The per-row array travels as a comma-joined string (`string_to_array`): `unnest` cannot take a
+  per-row array, because a Postgres multidimensional array is not an array of arrays.
+- The collision and length guard lives on the write side, in `applySeriesGrouping`, once, where
+  the names are decided — the worker rebuilds them by SQL concatenation and cannot reproduce a JS
+  truncation, so a name that would overflow `varchar(255)` is DROPPED rather than cut.
+- The series are previewed as sub-lines under the group name, so the *N of M groups match* figure
+  keeps counting groups while the series count is printed separately.
+
+### One requirement of this spec was wrong on its own terms
+
+The CHECK's third clause, `array_length(extra_aggregations, 1) IS DISTINCT FROM 0`, cannot fail:
+`array_length` of an empty array is NULL, and `NULL IS DISTINCT FROM 0` is true. The shipped CHECK
+uses `array_length(aggregations, 1) >= 1`, which does refuse an empty list — and that matters now
+that a rule with no aggregations would emit nothing while still excluding its panels from the main
+statistics statement.
+
+### The dead end worth recording
+
+The conditional design was shipped to review and failed there, twice, in ways worth keeping:
+
+1. **A conditional projection is only coherent if EVERY statement in the path is conditional.** The
+   column probe made the rules SELECT conditional and left the membership INSERT naming the column
+   unconditionally, so on a database with 1819 but not 1820 the probe let the SELECT through, the
+   membership DELETE ran, and the INSERT raised 42703 *inside* `withAnalyticsTransaction` —
+   failing a stage that is not `softFail`, and rolling the DELETE back so the stale membership the
+   probe existed to remove survived anyway. Strictly worse than the swallowed error it replaced.
+2. **A marker in `config_data` cannot carry a gating decision.** The unclassified rows were first
+   told apart by `config_data.source`; the anomaly card rebuilds that object from scratch on every
+   save, so one ordinary edit erased the marker. The gate is keyed on the row's LEVEL instead.
+
+Both disappear with the single column: there is no second migration to probe for, and no
+conditional statement to get half right.
+
+---
 
 **One line:** a grouping rule picks one of `avg` / `sum` / `max` today; let it emit several, with
 the primary one keeping the name it has now.

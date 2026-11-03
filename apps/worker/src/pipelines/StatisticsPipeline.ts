@@ -12,9 +12,8 @@ import {
   derivedSeriesConfigRows,
   groupedPanelTriples,
   groupedStatementParams,
-  hasExtraAggregations,
   INSERT_DERIVED_COMPARE_CONFIG_SQL,
-  insertMembershipSql,
+  INSERT_MEMBERSHIP_SQL,
   loadSeriesGroupingContext,
   membersPerGroup,
   membershipInsertParams,
@@ -460,7 +459,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     await manager.query("SELECT set_config('enable_mergejoin', 'off', true)");
     const alignment: Array<Record<string, unknown>> =
       (await manager.query(
-        buildGroupedStatisticsSQL(runIds.length, hasExtraAggregations(membership)),
+        buildGroupedStatisticsSQL(runIds.length),
         groupedStatementParams(runIds, membership)
       )) ?? [];
     // Restored on success only, deliberately not in a `finally`: a failed statement has already
@@ -483,17 +482,16 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
     }
 
     const groups = new Set(membership.map((m) => alignmentKey(m)));
-    const memberCountSeries = new Set(
-      membership.filter((m) => m.track_member_count && m.member_count_name).map((m) => alignmentKey(m))
-    );
-    const extraSeries = new Set(
-      membership.flatMap((m) => (m.extra_aggregations ?? []).map((a) => `${alignmentKey(m)}\u0000${a}`))
+    const renamedGroups = new Set(membership.filter((m) => m.renamed).map((m) => alignmentKey(m)));
+    // One per (group, aggregation): what the grouped statement's suffixed arm will write.
+    const derivedSeries = new Set(
+      membership.flatMap((m) => m.aggregations.map((a) => `${alignmentKey(m)}\u0000${a}`))
     );
     const [panelRuns] = groupedPanelTriples(membership);
     this.logger.info(
       `series-grouping: runs=${new Set(membership.map((m) => m.test_run_id)).size} rules=${grouping.rules.length} ` +
         `panels=${panelRuns.length} rawSeries=${membership.length} groups=${groups.size} ` +
-        `memberCountSeries=${memberCountSeries.size} extraSeries=${extraSeries.size} in ${Date.now() - startedAt}ms`
+        `renamedGroups=${renamedGroups.size} derivedSeries=${derivedSeries.size} in ${Date.now() - startedAt}ms`
     );
   }
 
@@ -554,10 +552,7 @@ export class StatisticsPipeline extends BasePipelineTypeORM {
       await manager.query(DELETE_MEMBERSHIP_SQL(placeholders), targetRunIds);
     }
     if (membership.length > 0) {
-      await manager.query(
-        insertMembershipSql(grouping.extrasPresent),
-        membershipInsertParams(membership, grouping.extrasPresent),
-      );
+      await manager.query(INSERT_MEMBERSHIP_SQL, membershipInsertParams(membership));
     }
 
     // Step 2: INSERT new statistics (no ON CONFLICT needed since we deleted existing records)

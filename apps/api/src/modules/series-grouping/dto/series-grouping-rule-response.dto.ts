@@ -14,10 +14,8 @@ export class SeriesGroupingRuleResponseDto {
   @ApiProperty() preset!: SeriesGroupingPreset;
   @ApiProperty({ nullable: true, type: String }) pattern!: string | null;
   @ApiProperty() replacement!: string;
-  @ApiProperty({ enum: SERIES_GROUPING_AGGREGATION_VALUES }) aggregation!: SeriesGroupingAggregation;
   @ApiProperty({ enum: SERIES_GROUPING_AGGREGATION_VALUES, isArray: true })
-  extraAggregations!: SeriesGroupingAggregation[];
-  @ApiProperty() trackMemberCount!: boolean;
+  aggregations!: SeriesGroupingAggregation[];
   @ApiProperty() enabled!: boolean;
   @ApiProperty({ enum: ['manual', 'suggestion', 'copy'] }) origin!: SeriesGroupingRuleOrigin;
   @ApiPropertyOptional() createdBy?: string;

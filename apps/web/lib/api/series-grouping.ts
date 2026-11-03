@@ -31,10 +31,8 @@ export interface SeriesGroupingRuleResponse {
   preset: SeriesGroupingPreset;
   pattern: string | null;
   replacement: string;
-  aggregation: SeriesGroupingAggregation;
-  /** Aggregations emitted beside the primary one, each as a `<group> (sum)` series. */
-  extraAggregations: SeriesGroupingAggregation[];
-  trackMemberCount: boolean;
+  /** Which series this rule emits, each named `<group> (avg)` and so on. At least one. */
+  aggregations: SeriesGroupingAggregation[];
   enabled: boolean;
   origin: SeriesGroupingRuleOrigin;
   createdBy?: string;

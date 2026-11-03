@@ -17,7 +17,7 @@ import {
   type Route,
 } from '../../test/series-grouping-insights-helpers';
 
-const SPEC = { preset: 'k8s-pod', pattern: null, replacement: '', aggregation: 'avg', trackMemberCount: false } as const;
+const SPEC = { preset: 'k8s-pod', pattern: null, replacement: '', aggregations: ['avg'] } as const;
 const HASH = seriesGroupingRuleHash(SPEC);
 
 const rule = (id: string, panelId: number | null, overrides: Record<string, unknown> = {}) => ({
@@ -27,8 +27,7 @@ const rule = (id: string, panelId: number | null, overrides: Record<string, unkn
   preset: SPEC.preset,
   pattern: SPEC.pattern,
   replacement: SPEC.replacement,
-  aggregation: SPEC.aggregation,
-  track_member_count: SPEC.trackMemberCount,
+  aggregations: SPEC.aggregations,
   ...overrides,
 });
 
@@ -80,7 +79,7 @@ describe('SeriesGroupingInsightsService.status', () => {
       const { service } = makeService(
         routes({
           rules: [rule('r1', 1)],
-          membership: [membership(1, 'r1', seriesGroupingRuleHash({ ...SPEC, aggregation: 'sum' }))],
+          membership: [membership(1, 'r1', seriesGroupingRuleHash({ ...SPEC, aggregations: ['sum'] }))],
           panels: [statPanel(1)],
         }),
       );
@@ -91,10 +90,10 @@ describe('SeriesGroupingInsightsService.status', () => {
     });
 
     it('hashes the stored row exactly as the worker does: a custom rule\'s pattern and replacement count', async () => {
-      const custom = { preset: 'custom', pattern: '-[a-z0-9]{4}$', replacement: '', aggregation: 'max', trackMemberCount: true } as const;
+      const custom = { preset: 'custom', pattern: '-[a-z0-9]{4}$', replacement: '', aggregations: ['max', 'count'] } as const;
       const { service } = makeService(
         routes({
-          rules: [rule('r1', 1, { preset: 'custom', pattern: custom.pattern, aggregation: 'max', track_member_count: true })],
+          rules: [rule('r1', 1, { preset: 'custom', pattern: custom.pattern, aggregations: ['max', 'count'] })],
           membership: [membership(1, 'r1', seriesGroupingRuleHash(custom))],
           panels: [statPanel(1)],
         }),
@@ -252,60 +251,33 @@ describe('SeriesGroupingInsightsService.status', () => {
 
   /**
    * Value:
-   *   protects — `extra_aggregations` reaches the rule spec the staleness verdict is hashed from,
-   *     and is NAMED in the statement only once the probe has seen the column (migration 1820).
-   *   fails_when — the `extraAggregationsKnownPresent ? 'r.extra_aggregations' : 'NULL::text[]'`
-   *     conditional becomes unconditional, which on a pre-1820 database is 42703 inside the
-   *     request's RLS transaction and aborts it (25P02); or `loadEnabledRules` stops mapping the
-   *     column into the spec, so a rule that gained an extra aggregation hashes as if it had not
-   *     and every run grouped before the change reads as up to date — the stale notice, the
-   *     "Save and recalculate" prompt and the apply button all go quiet.
-   *   why_new — the helper's default `sg:tables-present` route returns `{ present: true }` with no
-   *     `has_extras`, so every existing insights spec exercises the pre-1820 arm only and nothing
-   *     drives the column into `seriesGroupingRuleHash` at all.
-   *   seam — the emitted `sg:rules` SQL, and the `stale` verdict against a known rule hash.
+   *   protects — every aggregation a rule emits reaches the spec the staleness verdict is hashed
+   *     from, so adding or removing one marks the runs grouped before the change as stale.
+   *   fails_when — `loadEnabledRules` stops mapping the column into the spec. A rule that gained
+   *     `sum` would then hash as if it had not, every run grouped before the change would read as
+   *     up to date, and the stale notice, the "Save and recalculate" prompt and the apply button
+   *     would all go quiet — with nothing logged.
+   *   seam — the `stale` verdict against a known rule hash.
    */
-  describe('when migration 1820 has run', () => {
-    const withExtras = [[/sg:tables-present/, () => [{ present: true, has_extras: true }]]] as Route[];
-    const hashWithSum = seriesGroupingRuleHash({ ...SPEC, extraAggregations: ['sum'] });
-
-    it('hashes a rule\'s extra aggregations, and names the column only when it exists', async () => {
-      // The fake honours the projection, so the pre-1820 arm reads what Postgres would hand it
-      // for `NULL::text[] AS extra_aggregations` — not the stored value the statement never asked
-      // for. Without that, both arms see the extras and the conditional is untested.
-      const scenario = (extra: Route[], ruleHash: string) =>
-        makeService([
-          [
-            /sg:rules/,
-            (_params, sql) => [
-              rule('r1', 1, { extra_aggregations: /NULL::text\[\] AS extra_aggregations/.test(sql) ? null : ['sum'] }),
-            ],
-          ],
-          [/sg:membership/, () => [membership(1, 'r1', ruleHash)]],
-          [/sg:stat-panels/, () => [statPanel(1)]],
-          [/sg:misaligned/, () => []],
-          ...extra,
-        ]);
-
-      // Post-1820: the extras are read, so membership stamped with the pre-extras hash is stale.
-      const post = scenario(withExtras, HASH);
-      expect((await post.service.status('run-001', [ORG_A])).stale).toEqual([
-        { applicationDashboardId: DASHBOARD.id, panelId: 1, reason: 'rule-changed' },
+  it('hashes every aggregation a rule emits, so a change marks older runs stale', async () => {
+    const scenario = (aggregations: string[], ruleHash: string) =>
+      makeService([
+        [/sg:rules/, () => [rule('r1', 1, { aggregations })]],
+        [/sg:membership/, () => [membership(1, 'r1', ruleHash)]],
+        [/sg:stat-panels/, () => [statPanel(1)]],
+        [/sg:misaligned/, () => []],
       ]);
-      expect(post.db.calls.find((c) => /sg:rules/.test(c.sql))!.sql).toMatch(/r\.extra_aggregations/);
 
-      // ...and membership computed WITH them is up to date.
-      const recalculated = scenario(withExtras, hashWithSum);
-      expect(await recalculated.service.status('run-001', [ORG_A])).toEqual({ stale: [], misaligned: [] });
+    // The rule now emits avg+sum; membership stamped with the avg-only hash is stale.
+    const changed = scenario(['avg', 'sum'], HASH);
+    expect((await changed.service.status('run-001', [ORG_A])).stale).toEqual([
+      { applicationDashboardId: DASHBOARD.id, panelId: 1, reason: 'rule-changed' },
+    ]);
 
-      // Pre-1820: the column is never named, and every rule reads as having no extras — which
-      // is what it has, so the pre-extras hash is the fresh one.
-      const pre = scenario([], HASH);
-      expect(await pre.service.status('run-001', [ORG_A])).toEqual({ stale: [], misaligned: [] });
-      const preSql = pre.db.calls.find((c) => /sg:rules/.test(c.sql))!.sql;
-      expect(preSql).not.toMatch(/r\.extra_aggregations/);
-      expect(preSql).toMatch(/NULL::text\[\] AS extra_aggregations/);
-    });
+    // ...and membership computed WITH them is up to date.
+    const hashWithSum = seriesGroupingRuleHash({ ...SPEC, aggregations: ['avg', 'sum'] });
+    const recalculated = scenario(['avg', 'sum'], hashWithSum);
+    expect(await recalculated.service.status('run-001', [ORG_A])).toEqual({ stale: [], misaligned: [] });
   });
 
   describe('tenancy', () => {

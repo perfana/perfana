@@ -12,7 +12,7 @@ import { ApplicationDashboard, SeriesGroupingRule } from '@perfana/shared/entiti
 import { OwnedResource } from '@perfana/shared';
 import {
   compileSeriesGroupingRule,
-  normalizeExtraAggregations,
+  normalizeAggregations,
   type SeriesGroupingAggregation,
   type SeriesGroupingPreset,
 } from '@perfana/shared/utils';
@@ -44,9 +44,7 @@ interface RuleFields {
   preset: SeriesGroupingPreset;
   pattern: string | null;
   replacement: string;
-  aggregation: SeriesGroupingAggregation;
-  extraAggregations: SeriesGroupingAggregation[];
-  trackMemberCount: boolean;
+  aggregations: SeriesGroupingAggregation[];
 }
 
 /**
@@ -124,9 +122,7 @@ export class SeriesGroupingService {
       dto.preset,
       dto.pattern ?? null,
       dto.replacement ?? null,
-      dto.aggregation,
-      dto.extraAggregations ?? [],
-      dto.trackMemberCount,
+      dto.aggregations,
     );
 
     // Authorize the caller-supplied parent BEFORE inheriting its organization.
@@ -182,9 +178,7 @@ export class SeriesGroupingService {
       preset,
       switchingToCustom ? (dto.pattern ?? rule.pattern) : null,
       switchingToCustom ? (dto.replacement ?? rule.replacement) : null,
-      dto.aggregation ?? rule.aggregation,
-      dto.extraAggregations ?? rule.extraAggregations ?? [],
-      dto.trackMemberCount ?? rule.trackMemberCount,
+      dto.aggregations ?? rule.aggregations,
     );
     Object.assign(rule, fields, { enabled: dto.enabled ?? rule.enabled, updatedBy: userId });
 
@@ -215,20 +209,17 @@ export class SeriesGroupingService {
     preset: SeriesGroupingPreset,
     pattern: string | null,
     replacement: string | null,
-    aggregation: SeriesGroupingAggregation,
-    extraAggregations: SeriesGroupingAggregation[],
-    trackMemberCount: boolean,
+    aggregations: SeriesGroupingAggregation[],
   ): RuleFields {
-    // Normalised rather than refused: the DTO already rejects an unknown value and a duplicate,
-    // and what is left — the primary aggregation sent as an extra, which
-    // ck_series_grouping_rules_extra_aggregations would answer with a 500 — is exactly the
-    // request "also emit avg", which the bare group name already satisfies. Canonical order so
-    // the rule hash does not change with the order of the checkboxes.
-    const extras = normalizeExtraAggregations({ aggregation, extraAggregations });
+    // Canonicalised rather than stored as sent: the rule hash is taken over this list and decides
+    // whether a run reads as stale, so the order the checkboxes happened to be ticked in must not
+    // change it. The DTO already rejects an unknown value, a duplicate and an empty list.
+    const canonical = normalizeAggregations(aggregations);
+    if (canonical.length === 0) throw new BadRequestException('A series grouping rule needs at least one aggregation');
     const fields: RuleFields =
       preset === 'custom'
-        ? { preset, pattern: pattern || null, replacement: replacement ?? '', aggregation, extraAggregations: extras, trackMemberCount }
-        : { preset, pattern: null, replacement: '', aggregation, extraAggregations: extras, trackMemberCount };
+        ? { preset, pattern: pattern || null, replacement: replacement ?? '', aggregations: canonical }
+        : { preset, pattern: null, replacement: '', aggregations: canonical };
     const compiled = compileSeriesGroupingRule(fields);
     if (!compiled.ok) throw new BadRequestException(compiled.error ?? 'Invalid series grouping rule');
     return fields;
@@ -346,9 +337,7 @@ export class SeriesGroupingService {
         preset: source.preset,
         pattern: source.pattern,
         replacement: source.replacement,
-        aggregation: source.aggregation,
-        extraAggregations: source.extraAggregations ?? [],
-        trackMemberCount: source.trackMemberCount,
+        aggregations: source.aggregations,
         enabled: source.enabled,
         origin: 'copy',
         organizationId: resolved.organizationId,
@@ -447,9 +436,7 @@ export class SeriesGroupingService {
       preset: rule.preset,
       pattern: rule.pattern ?? null,
       replacement: rule.replacement ?? '',
-      aggregation: rule.aggregation,
-      extraAggregations: rule.extraAggregations ?? [],
-      trackMemberCount: rule.trackMemberCount,
+      aggregations: rule.aggregations,
       enabled: rule.enabled,
       origin: rule.origin,
       createdBy: rule.createdBy,

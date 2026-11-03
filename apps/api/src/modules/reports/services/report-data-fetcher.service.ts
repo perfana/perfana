@@ -11,6 +11,7 @@ import {
   expandSeriesNames,
   mapNamesToGroups,
   seriesPanelKey,
+  type ResolvedSeries,
   type SeriesGroup,
 } from '../../metrics/series-group-resolver';
 import {
@@ -3558,7 +3559,7 @@ export class ReportDataFetcherService {
     testRunId: string,
     panel: MetricsPanelSelector,
     cache: Map<string, Promise<SeriesGroup[]>>,
-  ): Promise<SeriesGroup[]> {
+  ): Promise<ResolvedSeries[]> {
     if (!this.seriesGroups || !panel.metricName || !panel.dashboardLabel) return [];
     const ref = {
       testRunId,

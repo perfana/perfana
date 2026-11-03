@@ -2,9 +2,8 @@ import {
   applySeriesGrouping,
   compileSeriesGroupingRule,
   evaluateGroupingPresets,
-  extraAggregationSeriesName,
-  MEMBER_COUNT_SUFFIX,
-  normalizeExtraAggregations,
+  groupSeriesName,
+  normalizeAggregations,
   SERIES_GROUPING_PRESETS,
   SERIES_NAME_MAX_LENGTH,
   seriesGroupingRuleHash,
@@ -14,8 +13,7 @@ import { validateRegexPattern } from '../safe-regex';
 
 const rule = (overrides: Partial<SeriesGroupingRuleSpec> = {}): SeriesGroupingRuleSpec => ({
   preset: 'k8s-pod',
-  aggregation: 'avg',
-  trackMemberCount: false,
+  aggregations: ['avg'],
   ...overrides,
 });
 
@@ -152,65 +150,47 @@ describe('applySeriesGrouping', () => {
     expect(group).toBe('x'.repeat(SERIES_NAME_MAX_LENGTH - 1));
   });
 
-  it('emits a member-count name only when tracked and the group was renamed', () => {
-    const tracked = applySeriesGrouping(rule({ trackMemberCount: true }), [
-      'api-7d9f8c6b5-x2k4p',
-      'heap-used',
-    ]);
-    expect(tracked.memberCountNames.get('api')).toBe(`api${MEMBER_COUNT_SUFFIX}`);
-    expect(tracked.memberCountNames.has('heap-used')).toBe(false);
-
-    const untracked = applySeriesGrouping(rule(), ['api-7d9f8c6b5-x2k4p']);
-    expect(untracked.memberCountNames.size).toBe(0);
-  });
-
-  it('truncates a member-count name so the suffix survives', () => {
-    const long = `${'y'.repeat(300)}-7d9f8c6b5-x2k4p`;
-    const name = applySeriesGrouping(rule({ trackMemberCount: true }), [long]).memberCountNames.values().next().value!;
-    expect(name).toHaveLength(SERIES_NAME_MAX_LENGTH);
-    expect(name.endsWith(MEMBER_COUNT_SUFFIX)).toBe(true);
-  });
-
-  it('drops a member-count name that collides with an existing series', () => {
-    const result = applySeriesGrouping(rule({ trackMemberCount: true }), [
-      'api-7d9f8c6b5-x2k4p',
-      `api${MEMBER_COUNT_SUFFIX}`,
-    ]);
-    expect(result.memberCountNames.has('api')).toBe(false);
-  });
-
-  it('emits an extra aggregation per renamed group, in canonical order', () => {
-    const result = applySeriesGrouping(rule({ aggregation: 'avg', extraAggregations: ['max', 'sum'] }), [
+  it('emits one series per selected aggregation, in canonical order, for renamed groups only', () => {
+    const result = applySeriesGrouping(rule({ aggregations: ['max', 'avg', 'count'] }), [
       'api-7d9f8c6b5-x2k4p',
       'api-7d9f8c6b5-z9w2t',
       'heap-used',
     ]);
-    expect(result.extraAggregations.get('api')).toEqual(['sum', 'max']);
-    // A group nothing renamed is a group of one, where SUM equals AVG: a second copy, not a series.
-    expect(result.extraAggregations.has('heap-used')).toBe(false);
+    expect(result.seriesAggregations.get('api')).toEqual(['avg', 'max', 'count']);
+    // A series the rule left alone is a group of one: it passes through under its own name, and
+    // suffixing it would rename a series the rule was never meant to touch. All four aggregations
+    // of one member are the same number anyway, bar `count`, which would be a constant 1.
+    expect(result.seriesAggregations.has('heap-used')).toBe(false);
+    expect(result.isRenamed.get('api')).toBe(true);
+    expect(result.isRenamed.get('heap-used')).toBe(false);
   });
 
-  it('never emits the primary aggregation as an extra', () => {
-    const result = applySeriesGrouping(rule({ aggregation: 'sum', extraAggregations: ['sum', 'avg'] }), [
-      'api-7d9f8c6b5-x2k4p',
-    ]);
-    expect(result.extraAggregations.get('api')).toEqual(['avg']);
+  /**
+   * Value:
+   *   protects — the member count is an ordinary aggregation now (it was a separate
+   *     `track_member_count` boolean), so it has to follow every rule the others do.
+   *   fails_when — `count` is special-cased back out of the canonical list, or given its own
+   *     name shape. The series would then be missing from the picker, or named something the
+   *     grouped SQL's `group_name || ' (' || agg || ')'` cannot reproduce — a silent miss.
+   *   seam — the one name rule.
+   */
+  it('treats the member count as an ordinary aggregation, named like the rest', () => {
+    const result = applySeriesGrouping(rule({ aggregations: ['count'] }), ['api-7d9f8c6b5-x2k4p']);
+    expect(result.seriesAggregations.get('api')).toEqual(['count']);
+    expect(groupSeriesName('api', 'count')).toBe('api (count)');
   });
 
-  it('drops an extra whose name collides with a real series, or would overflow the column', () => {
-    const collided = applySeriesGrouping(rule({ extraAggregations: ['sum'] }), [
+  it('drops a series whose name collides with a real one, or would overflow the column', () => {
+    const collided = applySeriesGrouping(rule({ aggregations: ['avg', 'sum'] }), [
       'api-7d9f8c6b5-x2k4p',
       'api (sum)',
     ]);
-    expect(collided.extraAggregations.has('api')).toBe(false);
+    // Only the colliding one is dropped; its siblings still emit.
+    expect(collided.seriesAggregations.get('api')).toEqual(['avg']);
 
     // Dropped rather than truncated: the worker rebuilds this name by concatenation in SQL.
     const long = `${'y'.repeat(SERIES_NAME_MAX_LENGTH)}-7d9f8c6b5-x2k4p`;
-    expect(applySeriesGrouping(rule({ extraAggregations: ['sum'] }), [long]).extraAggregations.size).toBe(0);
-  });
-
-  it('emits nothing extra for a rule that asks for none', () => {
-    expect(applySeriesGrouping(rule(), ['api-7d9f8c6b5-x2k4p']).extraAggregations.size).toBe(0);
+    expect(applySeriesGrouping(rule({ aggregations: ['sum'] }), [long]).seriesAggregations.size).toBe(0);
   });
 
   it('is deterministic and does not depend on input order', () => {
@@ -241,43 +221,38 @@ describe('seriesGroupingRuleHash', () => {
 
   it('changes with every field that changes grouping', () => {
     const base = seriesGroupingRuleHash(rule());
-    expect(seriesGroupingRuleHash(rule({ aggregation: 'sum' }))).not.toBe(base);
-    expect(seriesGroupingRuleHash(rule({ trackMemberCount: true }))).not.toBe(base);
+    expect(seriesGroupingRuleHash(rule({ aggregations: ['sum'] }))).not.toBe(base);
+    expect(seriesGroupingRuleHash(rule({ aggregations: ['avg', 'count'] }))).not.toBe(base);
     expect(seriesGroupingRuleHash(rule({ preset: 'k8s-daemonset' }))).not.toBe(base);
     const custom = rule({ preset: 'custom', pattern: 'a', replacement: '' });
     expect(seriesGroupingRuleHash({ ...custom, replacement: 'b' })).not.toBe(seriesGroupingRuleHash(custom));
-    expect(seriesGroupingRuleHash(rule({ extraAggregations: ['sum'] }))).not.toBe(base);
   });
 
-  // The insights page reads a changed hash as "this run is stale". Appending an empty extras
-  // field would light up every grouped run in the deployment on deploy.
-  it('is byte-identical for a rule with no extras, however they are spelled', () => {
-    const base = seriesGroupingRuleHash(rule());
-    expect(seriesGroupingRuleHash(rule({ extraAggregations: [] }))).toBe(base);
-    expect(seriesGroupingRuleHash(rule({ extraAggregations: undefined }))).toBe(base);
-    // The primary aggregation is dropped before hashing, so asking for it changes nothing.
-    expect(seriesGroupingRuleHash(rule({ extraAggregations: ['avg'] }))).toBe(base);
-  });
-
-  it('does not depend on the order the extras were picked in', () => {
-    expect(seriesGroupingRuleHash(rule({ extraAggregations: ['max', 'sum'] }))).toBe(
-      seriesGroupingRuleHash(rule({ extraAggregations: ['sum', 'max'] })),
+  // The insights page reads a changed hash as "this run is stale", so ticking the same boxes in a
+  // different order must not light up every grouped run in the deployment.
+  it('does not depend on the order the boxes were ticked in, or on junk values', () => {
+    expect(seriesGroupingRuleHash(rule({ aggregations: ['count', 'avg', 'sum'] }))).toBe(
+      seriesGroupingRuleHash(rule({ aggregations: ['avg', 'sum', 'count'] })),
     );
+    expect(seriesGroupingRuleHash(rule({ aggregations: ['avg', 'avg'] }))).toBe(seriesGroupingRuleHash(rule()));
   });
 });
 
-describe('extra aggregation helpers', () => {
+describe('aggregation helpers', () => {
   // The worker's grouped statement rebuilds this as `group_name || ' (' || agg || ')'`.
-  it('names an extra series the way the grouped SQL concatenates it', () => {
-    expect(extraAggregationSeriesName('api', 'sum')).toBe('api (sum)');
+  it('names a series the way the grouped SQL concatenates it', () => {
+    expect(groupSeriesName('api', 'sum')).toBe('api (sum)');
+    expect(groupSeriesName('api', 'count')).toBe('api (count)');
   });
 
-  it('normalizes to canonical order, de-duplicated, without the primary', () => {
-    expect(
-      normalizeExtraAggregations({ aggregation: 'avg', extraAggregations: ['max', 'sum', 'max', 'avg'] }),
-    ).toEqual(['sum', 'max']);
-    expect(normalizeExtraAggregations({ aggregation: 'avg', extraAggregations: null })).toEqual([]);
-    expect(normalizeExtraAggregations({ aggregation: 'avg' })).toEqual([]);
+  it('normalizes to canonical order, de-duplicated, dropping unknown values', () => {
+    expect(normalizeAggregations(['count', 'max', 'sum', 'max', 'avg'])).toEqual(['avg', 'sum', 'max', 'count']);
+    // Empty is NOT defaulted to ['avg']: the DTO and the CHECK refuse it, and a rule that somehow
+    // emits nothing must be skipped loudly rather than quietly behaving like a different rule.
+    expect(normalizeAggregations([])).toEqual([]);
+    expect(normalizeAggregations(null)).toEqual([]);
+    expect(normalizeAggregations(undefined)).toEqual([]);
+    expect(normalizeAggregations(['nope' as never])).toEqual([]);
   });
 });
 

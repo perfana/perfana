@@ -23,9 +23,7 @@ export class SeriesGroupingRuleSpecDto extends PickType(CreateSeriesGroupingRule
   'preset',
   'pattern',
   'replacement',
-  'aggregation',
-  'extraAggregations',
-  'trackMemberCount',
+  'aggregations',
 ] as const) {}
 
 export class PreviewSeriesGroupingDto {

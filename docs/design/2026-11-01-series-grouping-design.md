@@ -1,5 +1,13 @@
 # Series grouping: compare Kubernetes metrics whose names change every deployment
 
+> **Superseded in part (v0.2.97.44).** The schema below shows `aggregation` (one value) plus
+> `track_member_count`. Both were replaced by a single `aggregations varchar(8)[]` before this
+> feature reached any database, and every series a renamed group emits is now suffixed:
+> `api (avg)`, `api (sum)`, `api (max)`, `api (count)`. There is no bare `api`. Everything else
+> here — the presets, the membership table, where grouping happens, the SLO and baseline
+> interactions — still holds. See `2026-11-02-series-grouping-multi-aggregation.md`.
+
+
 **Date:** 2026-11-01
 **Status:** Design agreed. All five open questions were decided on 2026-11-01 (see Decisions at the
 end). Implementation plan: [`2026-11-01-series-grouping-plan.md`](2026-11-01-series-grouping-plan.md).
