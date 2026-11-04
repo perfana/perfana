@@ -6,7 +6,7 @@
  * Modern UI for building custom reports with template support
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -28,19 +28,31 @@ import {
 } from '@mui/material';
 import {
   DndContext,
+  DragOverlay,
   closestCenter,
+  pointerWithin,
   KeyboardSensor,
   PointerSensor,
+  useDndContext,
+  useDroppable,
   useSensor,
   useSensors,
+  type Active,
+  type Announcements,
+  type CollisionDetection,
   type DragEndEvent,
+  type DragMoveEvent,
+  type DragStartEvent,
+  type UniqueIdentifier,
 } from '@dnd-kit/core';
 import {
   arrayMove,
   SortableContext,
+  defaultAnimateLayoutChanges,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
+  type AnimateLayoutChanges,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
@@ -65,8 +77,8 @@ import {
   getSectionText,
 } from '@/lib/api/reports';
 import { MAX_REPORT_SECTIONS, SECTION_RENDER_TITLES } from '@perfana/shared/types';
-import { SECTION_CONFIG } from './section-config';
-import { SectionPalette } from './SectionPalette';
+import { SECTION_CONFIG, sortByOrder } from './section-config';
+import { SectionChip, SectionDragPreview, SectionPalette, type PaletteDragData } from './SectionPalette';
 import { ReportVariablesProvider } from './ReportVariablesProvider';
 import { SectionTitleProvider } from './SectionTitleContext';
 import {
@@ -138,6 +150,80 @@ const STARTER_LAYOUTS: ReadonlyArray<{ name: string; description: string; sectio
   },
 ];
 
+/** A starting-point card. A real button: these are the only way past that screen, and a div has no keyboard path. */
+const STARTING_POINT_SX = {
+  display: 'block',
+  flexShrink: 0,
+  width: '100%',
+  p: 3,
+  borderRadius: 2,
+  bgcolor: 'transparent',
+  color: 'inherit',
+  font: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+  transition: 'border-color 0.2s, background-color 0.2s',
+  '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' },
+  '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 },
+} as const;
+
+// ==================== Drag and drop ====================
+
+/** The canvas's scroll area. Every palette drag lands only while the pointer is inside it, and on an empty report it is the target itself. */
+const CANVAS_DROP_ID = 'report-canvas';
+
+const paletteTypeOf = (active: Active | null) =>
+  (active?.data.current as PaletteDragData | undefined)?.paletteType;
+
+/**
+ * A reorder snaps to the nearest card, as before. A palette drag lands only while the pointer is
+ * over the canvas, so letting go over the palette (or anywhere else) cancels it; inside the
+ * canvas it snaps to the nearest card, or to the canvas itself when there is none.
+ */
+const collisionDetection: CollisionDetection = (args) => {
+  const cards = args.droppableContainers.filter((c) => c.id !== CANVAS_DROP_ID);
+  if (!paletteTypeOf(args.active)) return closestCenter({ ...args, droppableContainers: cards });
+  const canvas = pointerWithin({
+    ...args,
+    droppableContainers: args.droppableContainers.filter((c) => c.id === CANVAS_DROP_ID),
+  });
+  if (canvas.length === 0 || cards.length === 0) return canvas;
+  return closestCenter({ ...args, droppableContainers: cards });
+};
+
+function CanvasDropArea({ children, enabled }: { children: ReactNode; enabled: boolean }) {
+  // Off unless a palette row is in hand. dnd-kit's keyboard reorder ranks every enabled droppable
+  // itself (sortableKeyboardCoordinates ignores collisionDetection), and with a card expanded the
+  // canvas could win ArrowUp: the card jumped several places, or the canvas scrolled instead.
+  const { setNodeRef } = useDroppable({ id: CANVAS_DROP_ID, disabled: !enabled });
+  return (
+    <Box
+      ref={setNodeRef}
+      data-drop-canvas
+      // No scroll anchoring: the browser would answer a drop slot opening above the first visible
+      // card by scrolling, which moves that card under the pointer and flips the slot back.
+      sx={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none', display: 'flex', flexDirection: 'column', gap: 1.5 }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+/**
+ * Ends the dialog's drag state when dnd-kit has no drag. The move past the activation distance and
+ * the release can land before React commits (a jittery click, a trackpad tap-and-nudge), and dnd-kit
+ * then calls neither onDragEnd nor onDragCancel: both read `active` from a layout effect that has
+ * not run. Nothing else clears this state, and while it is set the dialog ignores the mouse and
+ * Escape, so the report in progress could not be reached again.
+ */
+function ClearDragWhenIdle({ dragging, onIdle }: { dragging: boolean; onIdle: () => void }) {
+  const { active } = useDndContext();
+  useEffect(() => {
+    if (dragging && !active) onIdle();
+  }, [active, dragging, onIdle]);
+  return null;
+}
+
 // ==================== Main Component ====================
 
 export function GenerateReportDialog({
@@ -159,9 +245,39 @@ export function GenerateReportDialog({
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateDetail | null>(null);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [showTemplateSelector, setShowTemplateSelector] = useState(!isTemplateBuilder);
+  // Reset while rendering, not in an effect: this dialog stays mounted while closed on the test-run
+  // page, and one commit with the old value mounts the last report's whole builder, with every
+  // card's form firing its fetches, only for the starting point to replace it.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open && !isTemplateBuilder) setShowTemplateSelector(true);
+  }
 
   // Report builder state
-  const [sections, setSections] = useState<ReportSectionConfig[]>(initialSections);
+  // Sorted by `order`, which is what the report renders by: a stored template's array order can
+  // disagree with it, and the first add or move renumbers `order` from the array position.
+  const [sections, setSections] = useState<ReportSectionConfig[]>(() => sortByOrder(initialSections));
+  // One stable key per card, kept in step with `sections` by every edit that inserts, removes or
+  // moves one. Index keys handed a card's expanded state and form state to whichever section
+  // landed at its position, which a drop into the middle of the list does on every add.
+  const keyCounter = useRef(0);
+  const freshKeys = (n: number) => Array.from({ length: n }, () => `section-${keyCounter.current++}`);
+  const [sectionKeys, setSectionKeys] = useState<string[]>(() => freshKeys(initialSections.length));
+  /** The palette type being dragged, and where on the canvas it would land right now. */
+  const [paletteDrag, setPaletteDrag] = useState<{ type: ReportSectionType; insertAt: number | null } | null>(null);
+  // Any drag, palette or reorder. While one is in hand Escape must reach dnd-kit's cancel: the
+  // Dialog would otherwise swallow it and close, taking the unsaved report with it.
+  const [dragging, setDragging] = useState(false);
+  // A keyboard drag leaves the mouse locked out with nothing on screen saying why, so the canvas
+  // spells out the keys, and there is no grabbing cursor: the mouse is not holding anything.
+  const [keyboardDrag, setKeyboardDrag] = useState(false);
+  // A palette drop shifts the cards below it, but dnd-kit animates them from where it measured them
+  // when the drag began, before the drop slot pushed them down: they jumped up over the new card and
+  // slid back. Only a reorder, where the card itself moved, keeps the layout animation.
+  const lastDragFromPalette = useRef(false);
+  const animateCardLayout: AnimateLayoutChanges = (args) =>
+    !lastDragFromPalette.current && defaultAnimateLayoutChanges(args);
   // Collapsing the catalogue hands its width to the canvas, for narrow windows and long reports.
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
 
@@ -192,12 +308,16 @@ export function GenerateReportDialog({
       .map((s) => (s.config as Record<string, unknown> | undefined)?.baselineTestRunId)
       .filter((v): v is string => typeof v === 'string' && v.length > 0),
   );
-  // One shared value when all baseline sections agree; undefined otherwise
+  // The one baseline in use, if there is exactly one; a new section starts on it.
   const sharedBaselineId = baselineIds.size === 1 ? [...baselineIds][0] : undefined;
-  // Unset baselines are filtered out of the set above, so "no shared value" covers two very
-  // different states: nobody has picked one yet (size 0), and they disagree (size > 1). Only
-  // the second is an override.
-  const baselinesDiffer = baselineIds.size > 1;
+  // Unset baselines are filtered out of the set above, so "one in use" does not mean every section
+  // is on it. The shared picker shows a value only when they all are: offered one pinned and one
+  // unset section it read "Applied to all" with Generate blocked, and re-picking that value fires
+  // no change, so it could not repair what it was showing.
+  const allOnSharedBaseline = sharedBaselineId !== undefined && baselineSections.every((s) =>
+    (s.config as Record<string, unknown> | undefined)?.baselineTestRunId === sharedBaselineId);
+  // Nobody has picked one yet (size 0) is not an override; anything else short of all-on-one is.
+  const baselinesDiffer = baselineIds.size > 0 && !allOnSharedBaseline;
   const baselineCandidates = useBaselineCandidates(
     scope.systemId,
     testRunId,
@@ -232,9 +352,18 @@ export function GenerateReportDialog({
     ));
   };
 
+  // Which template load may still write. See handleLoadTemplate.
+  const templateLoad = useRef(0);
+
   // Load templates on open (skip in template-builder mode)
   useEffect(() => {
+    // A template still loading when the dialog closes or its scope changes is no longer wanted.
+    templateLoad.current++;
     if (!open || isTemplateBuilder) return;
+
+    // A different scope's report starts over, without waiting for its templates.
+    setShowTemplateSelector(true);
+    let cancelled = false;
 
     const fetchTemplates = async () => {
       setTemplatesLoading(true);
@@ -247,60 +376,114 @@ export function GenerateReportDialog({
           scope.workload
         );
 
-        setTemplates(summaries);
-
-        // Don't auto-load template - let user choose
-        setShowTemplateSelector(true);
+        if (!cancelled) setTemplates(summaries);
       } catch (err) {
         console.error('[GenerateReportDialog] Failed to fetch templates:', err);
-        setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to load templates');
+        if (!cancelled) setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to load templates');
       } finally {
-        setTemplatesLoading(false);
+        if (!cancelled) setTemplatesLoading(false);
       }
     };
 
     fetchTemplates();
-  }, [open, scope, isTemplateBuilder]);
+    return () => {
+      cancelled = true;
+    };
+    // The scope's strings, not the object: the test-run page passes a fresh literal on every
+    // render, so a websocket update or a toast re-ran this and threw the user out of the builder.
+  }, [open, scope.systemId, scope.testEnvironment, scope.workload, isTemplateBuilder]);
 
   // Note: Report generation polling is now handled by parent component (page.tsx)
   // This dialog just initiates the generation and returns the report ID immediately
 
   // Handle section reorder
   const handleReorder = (fromIndex: number, toIndex: number) => {
-    const newSections = [...sections];
-    const [removed] = newSections.splice(fromIndex, 1);
-    newSections.splice(toIndex, 0, removed);
-
-    // Update order values
-    const reordered = newSections.map((section, index) => ({
-      ...section,
-      order: index,
-    }));
-    setSections(reordered);
+    setSections(arrayMove(sections, fromIndex, toIndex).map((section, order) => ({ ...section, order })));
+    setSectionKeys(arrayMove(sectionKeys, fromIndex, toIndex));
   };
 
   // Handle drag and drop
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    // A few pixels of travel before a drag starts, so a click on a palette row still adds it.
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
 
+  /** Where a palette drag would insert: above or below the card it is over, by which half. */
+  const insertIndexFor = ({ active, over }: Pick<DragEndEvent, 'active' | 'over'>): number | null => {
+    if (!over) return null;
+    const overIndex = sectionKeys.indexOf(String(over.id));
+    if (overIndex < 0) return sections.length; // the canvas itself: an empty report
+    const dragged = active.rect.current.translated;
+    const below = !!dragged && dragged.top + dragged.height / 2 > over.rect.top + over.rect.height / 2;
+    return overIndex + (below ? 1 : 0);
+  };
+
+  const handleDragStart = ({ active, activatorEvent }: DragStartEvent) => {
+    setDragging(true);
+    setKeyboardDrag(activatorEvent instanceof KeyboardEvent);
+    const type = paletteTypeOf(active);
+    lastDragFromPalette.current = !!type;
+    if (type) setPaletteDrag({ type, insertAt: null });
+  };
+
+  const clearDrag = () => {
+    setDragging(false);
+    setKeyboardDrag(false);
+    setPaletteDrag(null);
+  };
+
+  const handleDragMove = (event: DragMoveEvent) => {
+    if (!paletteDrag) return;
+    const insertAt = insertIndexFor(event);
+    if (insertAt !== paletteDrag.insertAt) setPaletteDrag({ ...paletteDrag, insertAt });
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
+    clearDrag();
+
+    const paletteType = paletteTypeOf(active);
+    if (paletteType) {
+      const insertAt = insertIndexFor(event);
+      if (insertAt !== null) handleAddSection(paletteType, insertAt);
+      return;
+    }
 
     if (over && active.id !== over.id) {
-      const oldIndex = sections.findIndex((_, i) => i.toString() === active.id);
-      const newIndex = sections.findIndex((_, i) => i.toString() === over.id);
-
-      const newSections = arrayMove(sections, oldIndex, newIndex);
-      const reordered = newSections.map((section, index) => ({
-        ...section,
-        order: index,
-      }));
-      setSections(reordered);
+      const from = sectionKeys.indexOf(String(active.id));
+      const to = sectionKeys.indexOf(String(over.id));
+      // A card that left the list mid-drag has no index, and splice(-1) would move the last one.
+      if (from >= 0 && to >= 0) handleReorder(from, to);
     }
+  };
+
+  // dnd-kit's default announcements read the raw ids aloud ("section-14", "palette:slo"), which
+  // name nothing a screen-reader user can place. Say the section and where it sits instead.
+  const describeTarget = (id: UniqueIdentifier) => {
+    const index = sectionKeys.indexOf(String(id));
+    if (index < 0) return 'the end of the report';
+    const section = sections[index];
+    const label = section.title || SECTION_CONFIG[section.type]?.label || section.type;
+    return `${label}, position ${index + 1} of ${sections.length}`;
+  };
+  const describeDragged = (active: Active) => {
+    const type = paletteTypeOf(active);
+    return type ? `${SECTION_CONFIG[type].label} from the section list` : describeTarget(active.id);
+  };
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => `Picked up ${describeDragged(active)}.`,
+    onDragOver: ({ active, over }) =>
+      over
+        ? `${describeDragged(active)} is over ${describeTarget(over.id)}.`
+        : `${describeDragged(active)} is not over the report.`,
+    onDragEnd: ({ active, over }) =>
+      over
+        ? `Dropped ${describeDragged(active)} on ${describeTarget(over.id)}.`
+        : `Dropped ${describeDragged(active)} outside the report; nothing changed.`,
+    onDragCancel: ({ active }) => `Cancelled dragging ${describeDragged(active)}; nothing changed.`,
   };
 
   // Handle section delete
@@ -311,6 +494,7 @@ export function GenerateReportDialog({
       order: i,
     }));
     setSections(reordered);
+    setSectionKeys(sectionKeys.filter((_, i) => i !== index));
   };
 
   // Handle section config change
@@ -341,8 +525,8 @@ export function GenerateReportDialog({
     setSections(newSections);
   };
 
-  // Handle add section
-  const handleAddSection = (type: ReportSectionType) => {
+  // Handle add section: a click appends, a drop from the palette inserts at `at`
+  const handleAddSection = (type: ReportSectionType, at: number = sections.length) => {
     if (sections.length >= MAX_SECTIONS) {
       return;
     }
@@ -354,36 +538,46 @@ export function GenerateReportDialog({
     // "Index"), and it made every section of the same type start life
     // indistinguishable, which is exactly the setup for the duplicate-title/anchor
     // problem the title field below exists to let authors fix.
-    const newSection: ReportSectionConfig = {
-      type,
-      order: sections.length,
-    };
-    setSections([...sections, newSection]);
+    const newSections = [...sections];
+    // A comparisons section added after the shared baseline is set starts on it. Without it the
+    // new section alone blocks Generate while the shared picker still reads "Applied to all".
+    // Not in a template, which has neither and may legitimately be saved unpinned.
+    const config = !isTemplateBuilder && type === 'comparisons' && sharedBaselineId
+      ? { baselineTestRunId: sharedBaselineId }
+      : undefined;
+    newSections.splice(at, 0, { type, order: at, ...(config && { config }) });
+    setSections(newSections.map((section, order) => ({ ...section, order })));
+    const newKeys = [...sectionKeys];
+    newKeys.splice(at, 0, ...freshKeys(1));
+    setSectionKeys(newKeys);
   };
 
   /** Fills an empty canvas with a starting shape the reader can then edit. */
   const handleApplyStarterLayout = (types: readonly ReportSectionType[]) => {
-    setSections(
-      types.slice(0, MAX_SECTIONS).map((type, order) => ({
-        type,
-        order,
-      })),
-    );
+    const starter = types.slice(0, MAX_SECTIONS);
+    setSections(starter.map((type, order) => ({ type, order })));
+    setSectionKeys(freshKeys(starter.length));
   };
 
   // Handle template selection and loading
   const handleLoadTemplate = async (templateId: string) => {
+    // A slow answer must not land after the user closed the dialog: it would replace whatever they
+    // built since the reopen.
+    const load = ++templateLoad.current;
     try {
       setTemplatesLoading(true);
       setError(null);
       const detail = await getTemplate(templateId);
+      if (load !== templateLoad.current) return;
       setSelectedTemplate(detail);
-      setSections(detail.sections || []);
+      const loaded = sortByOrder(detail.sections ?? []);
+      setSections(loaded);
+      setSectionKeys(freshKeys(loaded.length));
       setShowTemplateSelector(false);
     } catch (err) {
-      setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to load template');
+      if (load === templateLoad.current) setError(err && typeof err === 'object' && 'message' in err ? (err as Error).message : 'Failed to load template');
     } finally {
-      setTemplatesLoading(false);
+      if (load === templateLoad.current) setTemplatesLoading(false);
     }
   };
 
@@ -391,6 +585,7 @@ export function GenerateReportDialog({
   const handleStartFromScratch = () => {
     setSelectedTemplate(null);
     setSections([]);
+    setSectionKeys([]);
     setShowTemplateSelector(false);
   };
 
@@ -456,6 +651,19 @@ export function GenerateReportDialog({
     <Dialog
       open={open}
       onClose={onClose}
+      disableEscapeKeyDown={dragging}
+      // During a drag the whole dialog drops out of hit-testing except the canvas scroller, which
+      // keeps the wheel, and shows one grabbing cursor wherever the drag goes. The palette preview
+      // ignores the pointer so the wheel reaches the canvas, which otherwise let everything under
+      // it react: rows lit up as drop targets, tooltips opened over the preview. A keyboard drag
+      // leaves the mouse free, and Delete, Back or Cancel would pull the list out from under it.
+      // dnd-kit tracks the pointer on the document, unaffected. `&&` doubles the class so the rule
+      // outranks the children's own cursor and hover styles.
+      sx={dragging ? {
+        cursor: keyboardDrag ? undefined : 'grabbing',
+        '&& *': { cursor: 'inherit', pointerEvents: 'none' },
+        '&& [data-drop-canvas]': { pointerEvents: 'auto' },
+      } : undefined}
       // `lg` (1200px) left ~380px of gutter either side of a 1900px screen while the
       // section configuration below — a palette column plus a three-column metric picker —
       // was squeezed into about 900px. Width is taken from the VIEWPORT instead, with a
@@ -593,10 +801,10 @@ export function GenerateReportDialog({
               </Typography>
               <BaselineRunSelect
                 candidates={baselineCandidates}
-                value={sharedBaselineId}
+                value={allOnSharedBaseline ? sharedBaselineId : undefined}
                 onChange={handleSharedBaselineChange}
                 helperText={
-                  sharedBaselineId
+                  allOnSharedBaseline
                     ? `Applied to all ${baselineSectionCount} comparison section${baselineSectionCount !== 1 ? 's' : ''}`
                     : baselinesDiffer
                       ? 'Sections currently use different baselines — selecting one here overrides them all'
@@ -625,19 +833,10 @@ export function GenerateReportDialog({
               <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {/* Start from Scratch Option */}
                 <Box
+                  component="button"
+                  type="button"
                   onClick={handleStartFromScratch}
-                  sx={{
-                    p: 3,
-                    border: '2px solid',
-                    borderColor: 'divider',
-                    borderRadius: 2,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    '&:hover': {
-                      borderColor: 'primary.main',
-                      bgcolor: 'action.hover',
-                    },
-                  }}
+                  sx={{ ...STARTING_POINT_SX, border: '2px solid', borderColor: 'divider' }}
                 >
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Box
@@ -674,19 +873,10 @@ export function GenerateReportDialog({
                     {templates.map((template) => (
                       <Box
                         key={template.id}
+                        component="button"
+                        type="button"
                         onClick={() => handleLoadTemplate(template.id)}
-                        sx={{
-                          p: 3,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 2,
-                          cursor: 'pointer',
-                          transition: 'all 0.2s',
-                          '&:hover': {
-                            borderColor: 'primary.main',
-                            bgcolor: 'action.hover',
-                          },
-                        }}
+                        sx={{ ...STARTING_POINT_SX, border: '1px solid', borderColor: 'divider' }}
                       >
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                           <Box
@@ -734,6 +924,20 @@ export function GenerateReportDialog({
 
         {/* Main Content - Report Builder */}
         {!showTemplateSelector && (
+          // One DndContext spans both columns, so a palette row can be dropped onto the canvas.
+          <DndContext
+            sensors={sensors}
+            collisionDetection={collisionDetection}
+            onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
+            // dnd-kit hands onDragMove the previous target on the move that changes it, so the
+            // slot would trail one card behind a fast drag; onDragOver carries the new one.
+            onDragOver={handleDragMove}
+            onDragEnd={handleDragEnd}
+            onDragCancel={clearDrag}
+            accessibility={{ announcements }}
+          >
+          <ClearDragWhenIdle dragging={dragging} onIdle={clearDrag} />
           <Box sx={{ display: 'flex', gap: 3, px: 3, py: 2, flex: 1, minHeight: 0 }}>
             {/* Left Column: the section catalogue, which yields space to the canvas */}
             <SectionPalette
@@ -755,7 +959,7 @@ export function GenerateReportDialog({
                   Report Layout
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Drag to reorder sections
+                  {keyboardDrag ? 'Arrow keys to move, Space to drop, Esc to cancel' : 'Drag to reorder sections'}
                 </Typography>
               </Box>
               {sections.length >= SECTION_COUNT_VISIBLE_FROM && (
@@ -768,20 +972,16 @@ export function GenerateReportDialog({
               )}
             </Box>
 
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
               <SortableContext
-                items={sections.map((_, index) => index.toString())}
+                items={sectionKeys}
                 strategy={verticalListSortingStrategy}
               >
-                <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <CanvasDropArea enabled={paletteDrag !== null}>
                   {sections.map((section, index) => (
+                    <Fragment key={sectionKeys[index]}>
+                    {paletteDrag?.insertAt === index && <DropSlot type={paletteDrag.type} />}
                     <LayoutSectionCard
-                      key={index.toString()}
-                      id={index.toString()}
+                      id={sectionKeys[index]}
                       section={section}
                       index={index}
                       onDelete={() => handleDelete(index)}
@@ -795,10 +995,13 @@ export function GenerateReportDialog({
                       testEnvironment={scope.testEnvironment}
                       workload={scope.workload}
                       allSections={sections}
+                      animateLayoutChanges={animateCardLayout}
                     />
+                    </Fragment>
                   ))}
+                  {paletteDrag && paletteDrag.insertAt === sections.length && <DropSlot type={paletteDrag.type} />}
 
-                  {sections.length === 0 && (
+                  {sections.length === 0 && paletteDrag?.insertAt == null && (
                     <Box
                       sx={{
                         flex: 1,
@@ -806,7 +1009,8 @@ export function GenerateReportDialog({
                         alignItems: 'center',
                         justifyContent: 'center',
                         border: '2px dashed',
-                        borderColor: 'divider',
+                        // Lights up while a palette row is in hand: this is where it goes.
+                        borderColor: paletteDrag ? 'primary.main' : 'divider',
                         borderRadius: 2,
                         p: 4,
                       }}
@@ -815,7 +1019,7 @@ export function GenerateReportDialog({
                         <Typography variant="body2" color="text.secondary" gutterBottom>
                           {paletteCollapsed
                             ? 'No sections yet. Use + to add one, or start from a layout:'
-                            : 'No sections yet. Pick one from the left, or start from a layout:'}
+                            : 'No sections yet. Click or drag one from the left, or start from a layout:'}
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center', flexWrap: 'wrap', mt: 2 }}>
                           {STARTER_LAYOUTS.map((layout) => (
@@ -839,11 +1043,21 @@ export function GenerateReportDialog({
                       </Box>
                     </Box>
                   )}
-                </Box>
+                </CanvasDropArea>
               </SortableContext>
-            </DndContext>
           </Box>
           </Box>
+          {/* Mounted only for a palette drag: a reorder moves the card itself, and a mounted
+              overlay would take over its collision rect. No drop animation — it would fly the
+              preview back to the palette even when the drop landed. No pointer events: it sits
+              under the pointer, so it took every wheel event and the canvas could not scroll
+              mid-drag (dnd-kit tracks the pointer on the document, so the drag is unaffected). */}
+          {paletteDrag && (
+            <DragOverlay dropAnimation={null} style={{ pointerEvents: 'none' }}>
+              <SectionDragPreview type={paletteDrag.type} />
+            </DragOverlay>
+          )}
+          </DndContext>
         )}
 
         {/* Bottom Section: Error Display */}
@@ -902,6 +1116,31 @@ export function GenerateReportDialog({
   );
 }
 
+/** Where a dragged palette section will land, drawn in the gap it is about to fill. */
+function DropSlot({ type }: { type: ReportSectionType }) {
+  return (
+    <Box
+      aria-hidden
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.25,
+        px: 2,
+        // A collapsed card's height (1px border, 16px padding and a 40px icon, top and bottom; see
+        // the card header in LayoutSectionCard), so the slot turns into the card in place.
+        // Shorter, the cards below dropped 20px on release.
+        boxSizing: 'border-box',
+        minHeight: 74,
+        border: '2px dashed',
+        borderColor: 'primary.main',
+        borderRadius: 2,
+      }}
+    >
+      <SectionChip type={type} />
+    </Box>
+  );
+}
+
 // ==================== Layout Section Card ====================
 
 interface LayoutSectionCardProps {
@@ -920,9 +1159,11 @@ interface LayoutSectionCardProps {
   workload?: string;
   /** The builder's full, ordered section list — feeds the link-target picker in each MarkdownField. */
   allSections?: ReportSectionConfig[];
+  /** Whether a card animates to its new place; the dialog turns it off after a palette drop. */
+  animateLayoutChanges?: AnimateLayoutChanges;
 }
 
-function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTextChange, onTitleChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload, allSections }: LayoutSectionCardProps) {
+function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTextChange, onTitleChange, onMoveUp: _onMoveUp, onMoveDown: _onMoveDown, testRunId, systemUnderTestId, testEnvironment, workload, allSections, animateLayoutChanges }: LayoutSectionCardProps) {
   // DB-stored templates can carry section types this build doesn't know about
   const config = SECTION_CONFIG[section.type] ?? { icon: null, label: section.type, description: '', color: '#9e9e9e' };
   const [expanded, setExpanded] = useState(false);
@@ -943,7 +1184,7 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, animateLayoutChanges });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -959,9 +1200,9 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
     const text = getSectionText(section);
 
     // Each *ConfigForm declares its own concrete config type, while this dispatcher
-    // is deliberately type-erased and hands the same callback to all eleven. Under
+    // is deliberately type-erased and hands the same callback to every one of them. Under
     // strictFunctionTypes those narrower parameter types are contravariant, so the
-    // erasure is stated once here instead of cast at eleven call sites.
+    // erasure is stated once here instead of cast at every call site.
     const handleChange = <T extends object>(config: T) =>
       onConfigChange(config as Record<string, unknown>);
 
@@ -1014,7 +1255,8 @@ function LayoutSectionCard({ id, section, index, onDelete, onConfigChange, onTex
         }),
       }}
     >
-      {/* Header */}
+      {/* Header. DropSlot's minHeight is this collapsed height: change the 1px border, the
+          padding or the 40px icon below and change it there too. */}
       <Box
         onClick={() => setExpanded(!expanded)}
         sx={{

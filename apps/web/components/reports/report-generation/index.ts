@@ -5,3 +5,4 @@
  */
 
 export { GenerateReportDialog } from './GenerateReportDialog';
+export { sortByOrder } from './section-config';

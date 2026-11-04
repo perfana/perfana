@@ -938,3 +938,41 @@ Keep new live controls in that row.
 
 Known gaps (the sibling endpoints' ordering, polling while hidden, polish) are in TODOS.md under
 "Performance Analysis live refresh".
+
+### dnd-kit can end a drag without telling the report builder
+
+`GenerateReportDialog` (`components/reports/report-generation/`, v0.2.97.46) runs one `DndContext`
+across the palette and the canvas and keeps its own `dragging` state. While that is set the dialog
+ignores the mouse and Escape: `pointerEvents: 'none'` on everything but the canvas scroller, which
+keeps the wheel, and `disableEscapeKeyDown`, so Escape reaches dnd-kit's cancel instead of closing
+the dialog over an unsaved report. A keyboard drag gets the same lockout, because Delete, Back or
+Cancel would pull the list out from under it, so the canvas heading swaps "Drag to reorder
+sections" for its keys: nothing else on screen says why the mouse stopped answering.
+
+Four things fail silently when undone:
+
+1. **Neither `onDragEnd` nor `onDragCancel` fires when a drag starts and ends before React
+   commits.** Their caller (`createHandler` in `@dnd-kit/core` 6.3.1) reads `active` from
+   `sensorContext.current`, which a layout effect fills in, and builds the event only if it is set.
+   A move past the 5 px activation distance and a release in one batch (a jittery click, a trackpad
+   tap-and-nudge) runs `onDragStart` and then neither of them, so `dragging` stays set and the
+   report in progress cannot be reached. Nothing clears that except `ClearDragWhenIdle`, which ends
+   the state when `useDndContext().active` reads null and has to render inside the `DndContext`.
+2. **The suite's hand-held drags fake dnd-kit's `active`, so they cannot catch a break in item 1.**
+   They call the recorded handlers directly, which dnd-kit knows nothing about, and
+   `ClearDragWhenIdle` would end such a drag on its first commit. So in
+   `GenerateReportDialog.test.tsx` the wrapped `onDragStart` records `mockDnd.handDrag` and the
+   mocked `useDndContext` reports it as `active`. Only the `with the real pointer sensor` block
+   goes through the real `PointerSensor` and `DndContext`, so a test of the drag's lifecycle
+   belongs there.
+3. **The reset to the starting point happens while rendering, not in an effect.** The dialog stays
+   mounted while closed on the test-run page, and MUI's `Portal` mounts its children from a layout
+   effect, so on a reopen they commit before an effect in the dialog can change what they render.
+   The last report's whole builder mounts, every card's form fires its fetches, and only then does
+   the starting point replace it. The settled screen is right either way, so the test
+   `fetches nothing for the last report on a reopen` counts requests, and it waits for the dialog
+   to close all the way: a reopen during the exit animation never unmounted the old content.
+4. **`sections` and `sectionKeys` move together.** Cards are keyed by `sectionKeys`, so every edit
+   that inserts, removes or moves a section has to edit both. Index keys handed a card's expanded
+   state and form state to whichever section landed at its position, which a drop into the middle
+   of the list does on every add.

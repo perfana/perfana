@@ -15,7 +15,10 @@ import {
   TrendingUp as TrendingIcon,
   Warning as WarningIcon,
 } from '@mui/icons-material';
-import { ReportSectionType } from '@/lib/api/reports';
+import { ReportSectionConfig, ReportSectionType } from '@/lib/api/reports';
+
+/** A stored template's sections in `order`, which is what the report renders by; the stored array can disagree. */
+export const sortByOrder = (sections: readonly ReportSectionConfig[]) => [...sections].sort((a, b) => a.order - b.order);
 
 /**
  * How each section type presents itself: icon, label, one-line description and accent colour.
