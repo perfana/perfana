@@ -2604,6 +2604,76 @@ scroll container, which may make the shared hook unnecessary; check before reach
 
 ## Reports
 
+### A late template load in the settings dialog can overwrite a different template
+
+**Priority:** P2
+**Origin:** the adversarial pass on `feat/report-sections-drag-drop` (2026-11-04). Found by reading the source, not
+reproduced. Predates that feature.
+**Why:** `TemplateManagementDialog`'s load effect has no cleanup. Edit template A, close, edit template B, and if A answers
+last the form holds A's name, description and sections while its save calls `updateTemplate(editingTemplate.id, ...)`
+(`useReportingTemplateManagement.ts`) with B's id: A's content is written over B. The only tell is A's name in the field. It
+needs a slow answer and a quick close and reopen. A's `finally` also clears the spinner while B is still loading.
+**Fix:** a `cancelled` flag in that effect guarding the state writes and the `finally`, as `templateLoad` does in the
+builder.
+
+### Report builder drag and drop: follow-ups from v0.2.97.46
+
+**Priority:** P3
+**Origin:** the /ship reviews of `feat/report-sections-drag-drop` (2026-11-03 and 04). None blocks shipping or loses
+data. The user stopped the review loop and chose to file these rather than run another cycle.
+**Where:** `apps/web/components/reports/report-generation/`.
+
+**Design calls, approved as follow-ups:**
+- **The drop slot can sit out of view beside an expanded card taller than the canvas.** `insertIndexFor` puts it at
+  that card's far edge and nothing scrolls it in. The drop still lands correctly. Do not just `scrollIntoView` the slot:
+  the jump can flip which half of the card the pointer is over, which moves the slot, which scrolls again.
+- **The first Test Comparisons section shifts the layout.** It mounts the baseline picker above the builder, in a
+  `flexShrink: 0` block, so the cards jump down about 150 px (estimated) on release. A click does the same. Moving the
+  picker below the canvas is the likely fix.
+- **Section accents and order badges are fixed hexes, some below readable contrast.** Icon on its tint on dark paper:
+  `text_block` 1.76, `index` 1.81, `dynatrace_hosts` 1.84, `awr` 2.01. White order digits: `trends` 2.37,
+  `top_10_lists` 2.50, `graphs` 2.74. Same class as trap 2 in `apps/web/CLAUDE.md`, across all fourteen types.
+- **Keyboard reorder next to an expanded card is unreliable.** The reorder collision is `closestCenter` on tall rects, so
+  an expanded card does not move and a collapsed one jumps two places. Same as before this feature.
+
+**Polish left by the second review pass:**
+- **Shared baseline picker copy.** "Sections currently use different baselines" is wrong for one pinned section plus
+  one unset, where only one baseline is in use. "Select from 0 available test runs" reads as a dead end, though the list
+  still offers the resolved-per-report options. "Applied to all N" stands beside an empty field when the pinned id does
+  not resolve to an option (a deleted run, or a failed candidate fetch).
+- **The focus ring is clipped** on the starting-point buttons and palette rows: both are full width in an `overflowY: auto`
+  scroller and the ring paints outside it. `outlineOffset: -2` showed all four edges in a scratch render.
+- **`baselineBlockReason` shows on the starting-point screen**, where there is no Generate button and no picker to act
+  on it, after Cancel or Back with an unpinned comparisons section. Gate it on `!showTemplateSelector`, as the button is.
+- **`overflowAnchor: 'none'` is permanent** on the canvas, though its reason applies only during a palette drag. Scope it
+  with the `enabled` prop.
+- **Stale comments.** The baseline seed in `handleAddSection` still says the picker reads "Applied to all", and the
+  `SECTION_CONFIG` docblock says thirteen and eleven types where there are fourteen.
+- **Tests owed**, each with a mutant that survives today: the `cancelled` guards on `setError` and `setTemplatesLoading`;
+  the `to >= 0` half of the reorder guard; the helper text when nobody has pinned a baseline; the seed with one section
+  pinned and one unset, which also needs a decision on what should happen there.
+- **Optional simplifications.** `allOnSharedBaseline` could merge into `sharedBaselineId` by tightening its meaning; three
+  declarations in `STARTING_POINT_SX` are no-ops in Chrome (not measured in Firefox or Safari); the two starting-point
+  cards could share a `StartingPointCard` (about 22 lines).
+
+**Found by the final adversarial pass, by reading the source, none reproduced:**
+- **The builder stays live during an in-flight Generate.** `sections` is captured at the click, so a drop made while the
+  request is out is silently missing from the report. The response can also close the dialog mid-drag: dnd-kit does not
+  detach its sensor when `DndContext` unmounts, and `ClearDragWhenIdle` unmounts with it, so after a keyboard drag the arrow
+  keys are swallowed page-wide and `dragging` stays true until a Space, Enter, Tab or Esc. Lock the builder while
+  `isSubmitting`, and call `clearDrag` where the render phase handles `open`.
+- **Holding Escape cancels the drag, then closes the dialog.** MUI's modal does not filter `event.repeat`, so the first
+  auto-repeat lands after `dragging` cleared, and the report in progress is out of reach on reopen. Ignore a repeated
+  `escapeKeyDown` in `onClose`.
+- **Space or Enter during a pointer drag of a palette row adds a section**, because a keyboard click has `detail === 0`.
+  Return early from the row's `onClick` while `isDragging`.
+- **A failed template fetch after a scope change leaves the old scope's templates clickable.** `setTemplates([])` at the top
+  of the effect.
+
+**Coverage:** the three fixes that landed last (late template load, reopen, keyboard drag hint) had no specialist pass and no
+browser run; the adversarial pass read them and found no defect in them. The second Red Team pass was stopped before
+reporting. See the PR.
+
 ### Comparisons group filters: review follow-ups deferred from v0.2.97.40
 
 **Priority:** P3
