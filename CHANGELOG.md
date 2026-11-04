@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.46] - 2026-11-04
+
+### Added
+- **Drag a section into the report at the place you want it.** In the report builder and the template designer, sections in the Available Sections list can now be dragged onto the layout. A dashed slot shows where the section will land, above or below the card under it, and it lands there. Letting go anywhere outside the layout adds nothing, and so does a drag let go on the row it started from. A click still adds to the end, and on the keyboard Enter or Space does the same. On a touch screen, tap a row to add it.
+
+  **Escape cancels a drag** and leaves the dialog and the report you are building alone. While a drag is in hand nothing else in the dialog reacts to the mouse, and only the layout still scrolls. A keyboard reorder now shows its keys on screen (arrows to move, Space to drop, Esc to cancel). Screen readers hear sections named by title and position rather than internal ids.
+
+### Fixed
+- **A card keeps its own expanded form when another card moves.** Cards were keyed by position, so a card's open form and its unsaved state stayed at that position and landed on whichever section moved there. Each card now has a stable key.
+- **The report builder no longer throws you back to the template list** when the test-run page re-renders. A websocket update or a toast re-ran the template fetch, because the page passes a fresh scope object each time, and that discarded the report in progress.
+- **Reopening the dialog starts at the template list straight away.** It used to show the previous report's builder, live, until the template list arrived, where a drop would be thrown away. It also no longer mounts that builder and fires its requests. A template picked just before closing can no longer land later and replace the report built since.
+- **A stored template opens in the order it renders in.** A template's stored array can disagree with its `order` values, and the first edit renumbered from the array, silently reordering it. The report builder and the template settings dialog now both sort on load.
+- **A new Test Comparisons section starts on the shared baseline** when one is in use, instead of blocking Generate while the picker reads "Applied to all". This applies to reports only: a template may still be saved unpinned.
+- **One pinned and one unset Test Comparisons section can be repaired from the shared picker.** It read "Applied to all" over a blocked Generate button, and re-picking the value it showed did nothing. It now shows no value, so picking one applies to every section.
+- **The template list can be reached by keyboard.** Its options were plain clickable boxes, so a keyboard user could not get past that screen. They are real buttons now.
+
 ## [0.2.97.45] - 2026-11-03
 
 ### Fixed

@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEventHandler } from 'react';
+import { useDraggable } from '@dnd-kit/core';
 import {
   Box,
   IconButton,
@@ -17,6 +18,7 @@ import {
   Add as AddIcon,
   ChevronLeft as CollapseIcon,
   ChevronRight as ExpandIcon,
+  DragIndicator as DragIcon,
   Search as SearchIcon,
 } from '@mui/icons-material';
 import { REPORT_SECTION_TYPES, type ReportSectionType } from '@/lib/api/reports';
@@ -30,19 +32,138 @@ export interface SectionPaletteProps {
   disabled?: boolean;
 }
 
+/** What a palette row hands to the dialog's DndContext; its presence is what marks a palette drag. */
+export interface PaletteDragData {
+  paletteType: ReportSectionType;
+}
+
+/** The icon + label a palette row shows; reused by the drag preview and the canvas drop slot. */
+export function SectionChip({ type }: { type: ReportSectionType }) {
+  const config = SECTION_CONFIG[type];
+  return (
+    <>
+      <Box
+        sx={{
+          width: 26,
+          height: 26,
+          flexShrink: 0,
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: `${config.color}15`,
+          color: config.color,
+          '& svg': { fontSize: 16 },
+        }}
+      >
+        {config.icon}
+      </Box>
+      <Typography variant="body2" fontWeight={500} noWrap sx={{ minWidth: 0 }}>
+        {config.label}
+      </Typography>
+    </>
+  );
+}
+
+const ROW_SX = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 1.25,
+  width: '100%',
+  px: 1.25,
+  py: 1,
+  border: '1px solid',
+  borderColor: 'divider',
+  borderRadius: 1.5,
+  bgcolor: 'background.paper',
+  font: 'inherit',
+  textAlign: 'left',
+} as const;
+
+/** The row as it follows the pointer, rendered in the dialog's DragOverlay. */
+export function SectionDragPreview({ type }: { type: ReportSectionType }) {
+  return (
+    <Box sx={{ ...ROW_SX, borderColor: 'primary.main', boxShadow: 6 }}>
+      <SectionChip type={type} />
+    </Box>
+  );
+}
+
+function PaletteRow({ type, onAdd, disabled }: { type: ReportSectionType; onAdd: (type: ReportSectionType) => void; disabled?: boolean }) {
+  const config = SECTION_CONFIG[type];
+  const data: PaletteDragData = { paletteType: type };
+  const { setNodeRef, listeners, isDragging } = useDraggable({ id: `palette:${type}`, data, disabled });
+  const startDrag = listeners?.onPointerDown as PointerEventHandler | undefined;
+  // Letting go over this row clicks it. dnd-kit swallows that click for only 50ms after a drag ends,
+  // so a drag cancelled earlier (Escape with the button still held) would add the section it just
+  // said it cancelled. A keyboard click has no pointerdown to clear this, hence detail below.
+  const dragged = useRef(false);
+  useEffect(() => {
+    if (isDragging) dragged.current = true;
+  }, [isDragging]);
+
+  return (
+    <Tooltip
+      // An empty title renders no tooltip, so it doesn't ride along on the row being dragged.
+      title={isDragging ? '' : disabled ? 'Section limit reached' : config.description}
+      placement="right"
+      enterDelay={400}
+    >
+      {/* span: a disabled button fires no events, so the tooltip needs a live wrapper — same
+          guard as the collapsed variant. Without it the rows dim at the cap and nothing explains why. */}
+      <span style={{ display: 'block' }}>
+        <Box
+          ref={setNodeRef}
+          component="button"
+          type="button"
+          disabled={disabled}
+          onClick={(event) => {
+            if (!dragged.current || event.detail === 0) onAdd(type);
+          }}
+          // Pointer only. The keyboard sensor would claim Enter and Space, which is how a keyboard
+          // user adds a section (to the end); they reorder it on the canvas from there.
+          onPointerDown={(event) => {
+            dragged.current = false;
+            startDrag?.(event);
+          }}
+          aria-label={`Add ${config.label} section`}
+          sx={{
+            ...ROW_SX,
+            cursor: disabled ? 'not-allowed' : 'grab',
+            opacity: disabled ? 0.5 : isDragging ? 0.4 : 1,
+            transition: 'border-color 0.2s, background-color 0.2s',
+            '&:hover:not(:disabled)': { borderColor: 'primary.main', bgcolor: 'action.hover' },
+            '&:hover:not(:disabled) .palette-grip': { color: 'primary.main' },
+          }}
+        >
+          <SectionChip type={type} />
+          {/* Same token as the canvas card's grip. */}
+          {!disabled && (
+            <DragIcon
+              className="palette-grip"
+              fontSize="small"
+              sx={{ ml: 'auto', color: 'text.secondary', transition: 'color 0.2s' }}
+            />
+          )}
+        </Box>
+      </span>
+    </Tooltip>
+  );
+}
+
 /**
  * The catalogue of section types you can add to a report.
  *
  * Deliberately small. This is a list you consult for seconds, next to a canvas you edit for
  * minutes, so it gives way rather than holding a fixed share of the dialog: one line per type,
  * the description on hover, and a collapse control that hands the whole width to the canvas.
- * The list is now thirteen types long and the container scrolls (overflowY: 'auto') rather than
+ * The list is now fourteen types long and the container scrolls (overflowY: 'auto') rather than
  * guaranteeing every row fits on screen at once — unlike the original eleven, this hasn't been
  * re-measured against a real viewport, so don't take "fits without scrolling" as still true.
  *
- * There are no drag handles here. Adding is a click — the previous grip icons and "drag sections
- * to the canvas" copy described an interaction that was never wired up, so anyone who tried it
- * concluded the dialog was broken. Dragging still reorders sections once they are on the canvas.
+ * A row is added two ways: a click appends it, a drag drops it at a position on the canvas. The
+ * drag lives in the dialog's DndContext, which owns the drop logic; a row only declares itself
+ * draggable and carries its type as `PaletteDragData`. The collapsed menu stays click-only.
  */
 export function SectionPalette({ onAdd, collapsed, onToggleCollapsed, disabled }: SectionPaletteProps) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -139,7 +260,7 @@ export function SectionPalette({ onAdd, collapsed, onToggleCollapsed, disabled }
             Available Sections
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Click to add to your report
+            Click to add, or drag into place
           </Typography>
         </Box>
         <Tooltip title="Hide section list">
@@ -150,68 +271,9 @@ export function SectionPalette({ onAdd, collapsed, onToggleCollapsed, disabled }
       </Box>
 
       <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-        {REPORT_SECTION_TYPES.map((type) => {
-          const config = SECTION_CONFIG[type];
-          return (
-            <Tooltip
-              key={type}
-              title={disabled ? 'Section limit reached' : config.description}
-              placement="right"
-              enterDelay={400}
-            >
-              {/* span: a disabled button fires no events, so the tooltip needs a live wrapper —
-                  same guard as the collapsed variant above. Without it the rows dim at the cap
-                  and nothing explains why. */}
-              <span style={{ display: 'block' }}>
-              <Box
-                component="button"
-                type="button"
-                disabled={disabled}
-                onClick={() => onAdd(type)}
-                aria-label={`Add ${config.label} section`}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1.25,
-                  width: '100%',
-                  px: 1.25,
-                  py: 1,
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  borderRadius: 1.5,
-                  bgcolor: 'background.paper',
-                  font: 'inherit',
-                  textAlign: 'left',
-                  cursor: disabled ? 'not-allowed' : 'pointer',
-                  opacity: disabled ? 0.5 : 1,
-                  transition: 'border-color 0.2s, background-color 0.2s',
-                  '&:hover:not(:disabled)': { borderColor: 'primary.main', bgcolor: 'action.hover' },
-                }}
-              >
-                <Box
-                  sx={{
-                    width: 26,
-                    height: 26,
-                    flexShrink: 0,
-                    borderRadius: '50%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    bgcolor: `${config.color}15`,
-                    color: config.color,
-                    '& svg': { fontSize: 16 },
-                  }}
-                >
-                  {config.icon}
-                </Box>
-                <Typography variant="body2" fontWeight={500} noWrap sx={{ minWidth: 0 }}>
-                  {config.label}
-                </Typography>
-              </Box>
-              </span>
-            </Tooltip>
-          );
-        })}
+        {REPORT_SECTION_TYPES.map((type) => (
+          <PaletteRow key={type} type={type} onAdd={onAdd} disabled={disabled} />
+        ))}
       </Box>
     </Box>
   );

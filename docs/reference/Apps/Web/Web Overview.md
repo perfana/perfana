@@ -108,6 +108,7 @@ RootLayout
 - `TestRunStatusChip` — Status badge component
 
 ### Reports
+- `GenerateReportDialog` + `SectionPalette` — Report and template builder: click or drag sections onto the layout (see [[Templates]])
 - `MarkdownField` — Text block editor: formatting toolbar over a live preview (see [[Templates]])
 
 ### Layout

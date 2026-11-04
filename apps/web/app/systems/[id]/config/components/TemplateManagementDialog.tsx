@@ -25,7 +25,7 @@ import {
   type ReportSectionConfig,
   type ReportStyling,
 } from '@/lib/api/reports';
-import { GenerateReportDialog } from '@/components/reports/report-generation';
+import { GenerateReportDialog, sortByOrder } from '@/components/reports/report-generation';
 
 export interface TemplateManagementDialogProps {
   open: boolean;
@@ -77,7 +77,8 @@ export function TemplateManagementDialog({
           setName(detail.name);
           setDescription(detail.description || '');
           setIsDefault(detail.is_default);
-          setSections(detail.sections || []);
+          // In `order`, as the builder and the rendered report show them.
+          setSections(sortByOrder(detail.sections ?? []));
           setStyling(detail.styling);
         } catch (err) {
           setError(
