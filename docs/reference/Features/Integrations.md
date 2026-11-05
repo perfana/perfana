@@ -56,6 +56,10 @@ reads it from there. The symptom on a Grafana 8 dashboard is that it never appea
 Perfana's dashboard list, with one `Skipped dashboard "<title>" (UID: …)` WARN in the
 grafana-sync log; re-save the dashboard in Grafana 9+ to get the embedded type.
 
+**Minimum Grafana version: 9.0.** Variable values are resolved through
+`POST /api/ds/query` with `datasource: { uid, type }` and no `datasourceId`, which is
+uid-only resolution. Verified against Grafana 12.4.13; not verified below 9.
+
 ## Dynatrace
 
 APM integration for service and host monitoring.

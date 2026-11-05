@@ -28,6 +28,13 @@ export interface TemplatingVariable {
   multi?: boolean;
 }
 
+/**
+ * The refId every `/api/ds/query` request below sends, and the key its response is read
+ * back under. One constant because the request and response halves must not drift apart:
+ * `results` is keyed by refId, so a send/read mismatch yields [] with nothing logged.
+ */
+const DS_QUERY_REF_ID = 'A';
+
 @Injectable()
 export class VariableDetectorService {
   private readonly logger = new Logger(VariableDetectorService.name);
@@ -138,15 +145,42 @@ export class VariableDetectorService {
   /**
    * Collect variable values out of a `/api/ds/query` dataframe response.
    *
-   * Takes the FIRST column of each frame, which is what the Postgres path has always done
-   * (a `__text`/`__value` pair resolves to its text, as before). An InfluxQL metadata query
-   * comes back as a single "Value" field, so first and last are the same column there.
+   * The column is the CALLER's choice because the two datasource families disagree, and
+   * sharing one rule silently broke Influx:
+   *
+   * - Postgres wants the FIRST column. Grafana's variable convention is a `__text`/`__value`
+   *   pair and the text is what a user picks from, which is what this path has always done.
+   * - InfluxQL wants the LAST. `SHOW TAG VALUES` comes back as a single `Value` field, so
+   *   either rule works there — but anything `SELECT`-shaped comes back as `Time` then
+   *   `Value`, and taking column 0 stores epoch milliseconds as the variable's values.
+   *   Verified against InfluxDB 1.8 + Grafana 12.4.13: `SELECT DISTINCT("usage_percent")`
+   *   answers `fields: ['Time','Value']`. The proxy parser this replaced got it right
+   *   (`value.length === 1 ? value[0] : value[1]`), and apps/api's `parseVariableFrames`
+   *   still does, so first-column-for-everything was a regression, not a simplification.
    */
-  private collectFrameValues(response: any, variable: TemplatingVariable): string[] {
+  private collectFrameValues(
+    response: any,
+    variable: TemplatingVariable,
+    column: 'first' | 'last',
+  ): string[] {
     const variableValues: string[] = [];
 
-    for (const frame of response?.results?.A?.frames ?? []) {
-      const values = frame?.data?.values?.[0];
+    // /api/ds/query answers 200 (or 207) with a PER-QUERY error inside `results`, so an auth
+    // or syntax failure reads as "no values" unless it is looked at. The proxy route this
+    // replaced surfaced the same failures as a non-2xx the caller's catch logged.
+    const result = response?.results?.[DS_QUERY_REF_ID];
+    if (result?.error || (typeof result?.status === 'number' && result.status >= 400)) {
+      this.logger.error(
+        `Grafana query for variable "${variable.name}" failed ` +
+          `(status ${result.status ?? 'n/a'}): ${result.error ?? 'no message'}`,
+      );
+      return variableValues;
+    }
+
+    for (const frame of result?.frames ?? []) {
+      const columns = frame?.data?.values;
+      if (!Array.isArray(columns) || columns.length === 0) continue;
+      const values = column === 'last' ? columns[columns.length - 1] : columns[0];
       if (!Array.isArray(values)) continue;
 
       for (const value of values) {
@@ -284,10 +318,13 @@ export class VariableDetectorService {
     const queryPayload = {
       queries: [
         {
-          refId: 'A',
-          datasource: { uid: datasource.uid, type: 'influxdb' },
+          refId: DS_QUERY_REF_ID,
+          datasource: { uid: datasource.uid, type: datasource.type },
           query,
           rawQuery: true,
+          // Grafana derives $__interval from this; without it a GROUP BY time($__interval)
+          // variable query buckets off its own default instead of the window below.
+          maxDataPoints: 1000,
         },
       ],
       // Only consulted for a query that interpolates the dashboard range; the 7 days match
@@ -305,7 +342,7 @@ export class VariableDetectorService {
         queryPayload,
       );
 
-      return this.collectFrameValues(response, variable);
+      return this.collectFrameValues(response, variable, 'last');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.stack : String(err);
       this.logger.error(
@@ -343,7 +380,8 @@ export class VariableDetectorService {
         `match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
     } else {
       // variable.name is dashboard-controlled; a `/`, `?` or `#` in it rewrites the proxied
-      // path. apps/api's twin of this request encodes its segment the same way.
+      // path. apps/api's twin encodes its uid and metric the same way (since v0.2.97.47 —
+      // it did not when this comment was written).
       queryUrl = `/api/datasources/proxy/uid/${encodeURIComponent(datasource.uid)}/api/v1/label/${encodeURIComponent(variable.name)}/values`;
     }
 
@@ -397,7 +435,7 @@ export class VariableDetectorService {
     const queryPayload = {
       queries: [
         {
-          refId: 'A',
+          refId: DS_QUERY_REF_ID,
           datasource: {
             uid: datasource.uid,
             type: 'postgres',
@@ -421,7 +459,7 @@ export class VariableDetectorService {
         `PostgreSQL query response for variable "${variable.name}": ${JSON.stringify(response, null, 2)}`,
       );
 
-      return this.collectFrameValues(response, variable);
+      return this.collectFrameValues(response, variable, 'first');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.stack : String(err);
       this.logger.error(

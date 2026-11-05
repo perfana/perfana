@@ -126,7 +126,7 @@ HTTP client for the live Grafana API. Uses native `fetch` (Node 18+).
 - `createAnnotation(instance, params)` — POST an annotation
 - `deleteAnnotation(instance, id)` — DELETE an annotation
 - `getDatasource(instance, uid)` — GET datasource metadata
-- `getInfluxVariableValues(...)` — resolve template variable values via InfluxDB proxy
+- `getInfluxVariableValues(...)` — resolve template variable values via POST /api/ds/query (InfluxQL and Flux)
 - `getPrometheusVariableValues(...)` — resolve template variable values via Prometheus proxy
 
 ### `GrafanaInstancesService`

@@ -234,12 +234,29 @@ not a type). Three rules keep it that way:
    Postgres only the uid, Influx only the uid. A new query path that wants more than
    `{ uid, type }` is reintroducing the Admin requirement — say so out loud if it does.
 
-The frames shape differs from the proxy's and is the one real behaviour change: the proxy
-answers `series[].values: [["system_under_test","PerfanaWebshop"]]` (key column first, which
-is why the old parser indexed past it) and `/api/ds/query` answers
-`frames[].data.values: [["PerfanaWebshop"]]`. Verified against InfluxDB 1.8. `apps/api`'s
-`parseVariableFrames` takes the last column; grafana-sync's `collectFrameValues` takes the
-first, because its Postgres path has always resolved a `__text`/`__value` pair to the text.
+The frames shape differs from the proxy's and is the one real behaviour change, and **the
+column is not the same for both datasource families** — sharing one rule shipped a silent
+regression that two reviewers caught independently:
+
+| query | fields | value is |
+|---|---|---|
+| `SHOW TAG VALUES …` | `['Value']` | column 0 (either rule works) |
+| `SELECT DISTINCT("x") …` | `['Time','Value']` | the **last** column |
+| Postgres `__text`/`__value` | two columns | the **first** column |
+
+So InfluxQL reads the last column (matching the proxy parser's
+`value.length === 1 ? value[0] : value[1]` and apps/api's `parseVariableFrames`) and
+Postgres reads the first. `collectFrameValues` takes that as a parameter rather than
+deciding for its callers; first-column-for-everything stored epoch milliseconds as a
+variable's values, and because `getValuesFromDatasourceQuery` accepts any user-authored
+`type: 'query'` variable, "an InfluxQL metadata query answers a single field" is true only
+of the metadata subset. Verified against InfluxDB 1.8 + Grafana 12.4.13.
+
+A fourth rule, from the same review: the uid that travels beside that type is
+**dashboard-author-controlled** now, where it used to be a value Grafana had handed back
+through `GET /api/datasources/uid/:uid`. Every path segment it reaches must be
+`encodeURIComponent`'d — apps/api's two Prometheus proxy sinks were raw until v0.2.97.47
+while encoding the metric and label beside them.
 
 ### Client URL vs server URL: Grafana and Dynatrace have opposite polarity
 

@@ -9,7 +9,7 @@
  * - createAnnotation: POST body construction, optional field inclusion, HTTP errors
  * - deleteAnnotation: DELETE with 404 tolerance, error propagation
  * - getDatasource: delegates to grafanaCall, re-throws errors
- * - getInfluxVariableValues: URL encoding, result parsing, regex extraction, deduplication
+ * - getInfluxVariableValues: /api/ds/query payload, frame parsing, regex extraction, deduplication
  * - getPrometheusVariableValues: label_values query path, simple label path, regex filtering,
  *   deduplication, empty/missing metric guard
  */
@@ -43,21 +43,13 @@ const INSTANCE_NO_SERVER_URL = {
 };
 
 const INFLUX_DATASOURCE = {
-  id: 7,
-  name: 'InfluxDB',
   type: 'influxdb',
   uid: 'influx-uid',
-  database: 'mydb',
-  url: 'http://influxdb.example.com',
 };
 
 const PROM_DATASOURCE = {
-  id: 12,
-  name: 'Prometheus',
   type: 'prometheus',
   uid: 'prom-uid',
-  database: undefined,
-  url: 'http://prometheus.example.com',
 };
 
 // ---------------------------------------------------------------------------
@@ -536,7 +528,6 @@ describe('GrafanaClientService', () => {
       const [calledUrl, options] = fetchMock.mock.calls[0];
       expect(calledUrl).toContain('/api/ds/query');
       expect(calledUrl).not.toContain('/api/datasources/proxy/uid/');
-      expect(calledUrl).not.toContain('db=');
       expect((options as RequestInit).method).toBe('POST');
       const body = JSON.parse((options as RequestInit).body as string);
       expect(body.queries[0]).toMatchObject({
@@ -545,6 +536,29 @@ describe('GrafanaClientService', () => {
         query,
         datasource: { type: 'influxdb', uid: INFLUX_DATASOURCE.uid },
       });
+      // The `database` plumbing is what forced org Admin. Asserted on the BODY, not the
+      // URL: grafanaPost builds `${baseUrl}/api/ds/query` with no query string, so a
+      // `not.toContain('db=')` on the URL could never fail in any implementation.
+      expect(body.queries[0]).not.toHaveProperty('database');
+      expect(JSON.stringify(body)).not.toContain('mydb');
+    });
+
+    it('sends a bounded time window, which Grafana needs to interpolate $timeFilter', async () => {
+      // Scoping the payload assertion to queries[0] left from/to unpinned, so dropping
+      // them would keep every test green while Grafana rejected the request.
+      const before = Date.now();
+      fetchMock.mockResolvedValue(makeOkResponse(framesResponse([])));
+
+      await service.getInfluxVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        INFLUX_DATASOURCE,
+        'SHOW TAG VALUES',
+      );
+
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+      expect(body.queries[0].maxDataPoints).toBe(1000);
+      expect(Number(body.to)).toBeGreaterThanOrEqual(before);
+      expect(Number(body.to) - Number(body.from)).toBe(24 * 60 * 60 * 1000);
     });
 
     it('should return an empty array when there are no frames', async () => {
@@ -696,6 +710,23 @@ describe('GrafanaClientService', () => {
   // -------------------------------------------------------------------------
 
   describe('getPrometheusVariableValues', () => {
+    it('encodes a dashboard-supplied datasource uid into the proxy path', async () => {
+      // Since v0.2.97.47 getVariableValues builds {uid,type} out of templating_variables
+      // when the type is embedded, so this uid is dashboard-author-controlled and no longer
+      // round-tripped through GET /api/datasources/uid/:uid.
+      fetchMock.mockResolvedValue(makeOkResponse({ data: [] }));
+
+      await service.getPrometheusVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        { uid: 'a/../../api/admin/settings' },
+        'up',
+      );
+
+      const [calledUrl] = fetchMock.mock.calls[0];
+      expect(calledUrl).not.toContain('/api/admin/settings');
+      expect(calledUrl).toContain('a%2F..%2F..%2Fapi%2Fadmin%2Fsettings');
+    });
+
     describe('label_values query path', () => {
       it('should call the series API with the metric and time range', async () => {
         const seriesResponse = {

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://github.com/garrytan/gstack/docs/pregate.md#pregate-v1",
+  "runner": "./scripts/pregate-runner.sh {files}",
+  "dependencies": {
+    "**/*.md": [],
+    "**/*.sql": [],
+    "**/*.yaml": [],
+    "**/*.yml": [],
+    "**/package.json": [],
+    ".gitignore": [],
+    ".gstack/pregate.json": [],
+    "Dockerfile*": [],
+    "LICENSE": [],
+    "VERSION": [],
+    "apps/mcp/**": [],
+    "docs/**": [],
+    "package-lock.json": [],
+    "scripts/pregate-runner.sh": [],
+    "tsconfig*.json": []
+  },
+  "strays": {
+    "allow": [
+      ".gstack/pregate.json",
+      "scripts/pregate-runner.sh"
+    ]
+  }
+}

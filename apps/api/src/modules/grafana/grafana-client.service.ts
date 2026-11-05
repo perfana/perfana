@@ -5,6 +5,7 @@ import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { validateGrafanaUrl } from '../../common/security';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
+import { validateRegexPattern } from '@perfana/shared/utils';
 
 interface GrafanaInstance {
   id: string;
@@ -19,12 +20,10 @@ interface GrafanaInstance {
   useProxy: boolean;
 }
 
+/** What apps/api actually consumes off a Grafana datasource, not Grafana's whole row. */
 interface GrafanaDatasource {
-  id: number;
-  name: string;
   type: string;
   uid: string;
-  url?: string;
 }
 
 @Injectable()
@@ -306,7 +305,17 @@ export class GrafanaClientService {
     const results = response?.results as Record<string, unknown> | undefined;
     if (!results) return variableValues;
 
-    for (const result of Object.values(results)) {
+    for (const [refId, result] of Object.entries(results)) {
+      // /api/ds/query answers 200 (or 207) with a PER-QUERY error inside `results`, so an
+      // auth or syntax failure reads as "no values" unless it is looked at. The proxy route
+      // this replaced surfaced the same failures as a non-2xx that grafanaCall threw on.
+      const status = (result as { status?: number })?.status;
+      const error = (result as { error?: string })?.error;
+      if (error || (typeof status === 'number' && status >= 400)) {
+        this.logger.error(`Grafana query "${refId}" failed (status ${status ?? 'n/a'}): ${error ?? 'no message'}`);
+        continue;
+      }
+
       const frames = (result as Record<string, unknown>)?.frames;
       if (!Array.isArray(frames)) continue;
 
@@ -334,10 +343,23 @@ export class GrafanaClientService {
     return variableValues;
   }
 
-  /** Apply an optional variable regex, returning the concatenated capture groups. */
+  /**
+   * Apply an optional variable regex, returning the concatenated capture groups.
+   *
+   * The pattern comes from `grafana_dashboards.templating_variables`, i.e. from a
+   * tenant-configured Grafana, and this runs inside a synchronous authenticated request — so
+   * it goes through the same ReDoS guard the grafana-sync twin uses
+   * (`applyRegexFilterAndCollect`). An unsafe pattern is logged and the raw value kept,
+   * never thrown.
+   */
   private applyVariableRegex(variableValue: string, regex?: string): string {
     if (!regex || regex === '') return variableValue;
-    const valueRegex = new RegExp(regex.replace(/^\/|\/$/g, ''));
+    const validation = validateRegexPattern(regex.replace(/^\/|\/$/g, ''));
+    if (!validation.safe || !validation.regex) {
+      this.logger.warn(`Unsafe variable regex rejected: ${validation.error}`);
+      return variableValue;
+    }
+    const valueRegex = validation.regex;
     const matches = variableValue.match(valueRegex);
     if (!matches) return variableValue;
     let valueAfterRegex = '';
@@ -382,6 +404,14 @@ export class GrafanaClientService {
     return response.json();
   }
 
+  /**
+   * The uid is encoded into the proxy path because it is dashboard-author-controlled: since
+   * v0.2.97.47 `getVariableValues` builds `{ uid, type }` straight out of
+   * `templating_variables` when the type is embedded, instead of taking a uid that had been
+   * round-tripped through `GET /api/datasources/uid/:uid`. A `/` or `?` in it would otherwise
+   * retarget the request at another Grafana endpoint. Same rule as the grafana-sync twin
+   * (`variable-detector.service.ts`).
+   */
   async getPrometheusVariableValues(
     grafanaInstance: GrafanaInstance,
     datasource: Pick<GrafanaDatasource, 'uid'>,
@@ -409,7 +439,7 @@ export class GrafanaClientService {
           const startTime = Math.round(new Date(Date.now() - 24 * 60 * 60 * 1000).getTime() / 1000);
           const endTime = Math.round(new Date().getTime() / 1000);
           
-          queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/api/v1/series?match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
+          queryUrl = `/api/datasources/proxy/uid/${encodeURIComponent(datasource.uid)}/api/v1/series?match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
           
           const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
 
@@ -423,7 +453,7 @@ export class GrafanaClientService {
         }
       } else {
         // Simple label values query
-        queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/api/v1/label/${encodeURIComponent(query)}/values`;
+        queryUrl = `/api/datasources/proxy/uid/${encodeURIComponent(datasource.uid)}/api/v1/label/${encodeURIComponent(query)}/values`;
         const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
 
         if (response && response.data) {
@@ -433,30 +463,9 @@ export class GrafanaClientService {
         }
       }
 
-      // Apply regex if provided
-      let processedValues = variableValues;
-      if (regex && regex !== '') {
-        const valueRegex = new RegExp(regex.replace(/^\/|\/$/g, ''));
-        processedValues = [];
-        
-        variableValues.forEach((variableValue) => {
-          let valueAfterRegex = '';
-          const matches = variableValue.match(valueRegex);
-          
-          if (matches) {
-            matches.forEach((match, i) => {
-              if (i > 0) valueAfterRegex += match;
-            });
-          }
-
-          const pushValue = valueAfterRegex !== '' ? valueAfterRegex : variableValue;
-          if (processedValues.indexOf(pushValue) === -1) {
-            processedValues.push(pushValue);
-          }
-        });
-      }
-
-      return [...new Set(processedValues)]; // Remove duplicates
+      // Same regex rule as the InfluxQL path, through the one guarded helper rather than a
+      // second hand-rolled copy: an unvalidated pattern here was the other ReDoS sink.
+      return [...new Set(variableValues.map((value) => this.applyVariableRegex(value, regex)))];
     } catch (error) {
       this.logger.error(`Error getting Prometheus variable values:`, error);
       throw error;

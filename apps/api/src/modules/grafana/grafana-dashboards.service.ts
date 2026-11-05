@@ -610,7 +610,8 @@ export class GrafanaDashboardsService {
           }
 
           // Grafana embeds the concrete type beside the uid on every query variable it
-          // writes, and uid + type is all the three query paths below need. Preferring it
+          // writes, and uid + type is all both query paths below need (apps/api supports
+          // influxdb and prometheus; grafana-sync also does postgres). Preferring it
           // keeps this off `/api/datasources/uid/:uid`, which needs org Admin
           // (`datasources:read` arrives with Admin's `fixed:datasources:writer`; a Viewer
           // holds only `fixed:datasources.id:reader`). Only a legacy dashboard with no type
