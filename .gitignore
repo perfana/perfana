@@ -34,7 +34,11 @@ pids
 # ============================================
 # gstack (security reports, session data)
 # ============================================
-.gstack/
+# Everything except the committed pre-gate policy: gstack-pregate reads that from
+# the BASE BRANCH copy, so an ignored file could never declare a lane and every
+# ship touching a doc failed PREGATE_NO_LANE with no reachable remedy.
+.gstack/*
+!.gstack/pregate.json
 
 # ============================================
 # Environment variables & secrets

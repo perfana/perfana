@@ -31,9 +31,34 @@ Primary metrics source. Full bidirectional sync via [[Grafana Sync Overview]].
 Settings → Integrations → Grafana
   ├── URL (client_url, required): address the browser loads panels from
   ├── Server URL (server_url, optional): address api/worker call, when it differs
-  ├── API Key: Grafana API token
+  ├── API Key: Grafana API token (service account token)
   └── Test Connection: Verify connectivity
 ```
+
+### Minimum service-account role
+
+**Viewer** collects metrics. **Editor** is needed for the write features; nothing Perfana
+does requires org **Admin**.
+
+| Perfana feature | Grafana calls | Role |
+|---|---|---|
+| Metrics collection, variable values | `POST /api/ds/query`, `/api/datasources/proxy/uid/:uid/*` | Viewer |
+| Discovering `perfana`-tagged dashboards | `GET /api/search`, `GET /api/dashboards/uid/:uid` | Viewer |
+| Dashboard push / restore, folder creation | `POST /api/dashboards/db`, `POST /api/folders`, `DELETE /api/dashboards/uid/:uid` | Editor |
+| Test-run annotations | `POST` / `DELETE /api/annotations` | Editor |
+
+One residue needs Admin, on **Grafana 8 schema dashboards only**: a panel or query variable
+that names its datasource with no `type` beside it falls back to
+`GET /api/datasources/uid/:uid` (or `/name/:name`), and `datasources:read` arrives only with
+Admin's `fixed:datasources:writer` — a Viewer holds `fixed:datasources.id:reader`, which
+reads an id and not a type. Grafana 9+ embeds the type in the dashboard JSON and Perfana
+reads it from there. The symptom on a Grafana 8 dashboard is that it never appears in
+Perfana's dashboard list, with one `Skipped dashboard "<title>" (UID: …)` WARN in the
+grafana-sync log; re-save the dashboard in Grafana 9+ to get the embedded type.
+
+**Minimum Grafana version: 9.0.** Variable values are resolved through
+`POST /api/ds/query` with `datasource: { uid, type }` and no `datasourceId`, which is
+uid-only resolution. Verified against Grafana 12.4.13; not verified below 9.
 
 ## Dynatrace
 

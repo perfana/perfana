@@ -11,6 +11,64 @@ with the version it landed in.
 
 ---
 
+## Grafana integration
+
+### The two apps disagree on the variable-query time window (P2)
+
+`getInfluxVariableValues` sends `from = now - 24h` (apps/api,
+`grafana-client.service.ts`) while `getInfluxVariableValues` in grafana-sync
+(`variable-detector.service.ts`) sends `now - 7d`. Each matches its own app's Prometheus
+path, so each file is internally consistent and the pair is not. The window was inert
+before v0.2.97.47 (the proxy route carried none and passed `$timeFilter` through
+literally, which InfluxDB rejected); now that Grafana interpolates it, a `$timeFilter`
+variable query resolves to a different value set depending on which service asked —
+grafana-sync stores one set at auto-config time, the API's picker shows another.
+
+Pick one number and share it from `@perfana/shared`, or state the divergence where
+`CLAUDE.md` already states the column one. Raised independently by the performance,
+api-contract, maintainability and testing reviewers on PR #706.
+
+### apps/api does not resolve a templated datasource ref (P2)
+
+grafana-sync routes a query variable's `datasource.uid` through
+`resolveTemplatedDatasourceUid`, which resolves `${datasource}` against the dashboard's
+datasource variables — that is issue #657. `GrafanaDashboardsService.getVariableValues`
+has no equivalent and, since v0.2.97.47's embedded-type shortcut, POSTs the literal
+`${datasource}` as the uid instead of 404ing on the datasource lookup.
+
+Net observable result is unchanged (`[]` either way), which is why it is not in the fix
+set, but the failure moved from a shape with a named helper, a CODING_RULES row and two
+specs to a silent one with none. Either port the resolution (`templatingListFromGrafanaJson`
++ `datasourceVariableUid` read out of `grafana_json`), move the pair to
+`packages/shared`, or at minimum warn-skip a `$`-prefixed uid so both services fail the
+same recognisable way.
+
+### Three structural collapses in the role-fix code (P3)
+
+All behaviour-preserving, all deferred from PR #706 rather than refactoring code that had
+just passed review:
+
+- `resolveVariableDatasource`'s object arm and string-ref arm share an identical tail
+  (~18 lines). A bare string can never carry an embedded type, so the embedded-type
+  shortcut is a no-op on the string arm and the two collapse. The string arm also parses
+  the ref twice (`parseTemplateVariableRef`, then `resolveTemplatedDatasourceUid` parses
+  it again).
+- `resolvePanelDatasource` states `if (panelDatasourceType) return { type: … }` three
+  times. Handling the two template-ref arms first would state it once.
+- The `embeddedType` closure has one call site and is the third hand-written copy of the
+  same predicate (`store-dashboard.service.ts` has its own, `grafana-dashboards.service.ts`
+  writes it inline). `apps/grafana-sync/src/modules/auto-config/datasource-variable.util.ts`
+  already exists and both grafana-sync copies could come from it; apps/api cannot import
+  across apps, so its inline copy stays.
+
+### `parseVariableFrames` dedupes in O(n²) and recompiles its regex per value (P3)
+
+`grafana-client.service.ts`: `variableValues.indexOf(pushValue)` inside the per-value loop,
+and `applyVariableRegex` building a fresh `RegExp` for each value. Pre-existing — this is
+the renamed `parseFluxVariableFrames`, not new code — and nothing bounds the value count,
+since `maxDataPoints` is a time-series downsampling hint and does not cap a metadata
+query's rows. A `Set` plus hoisting the compile out of the loop is the whole fix.
+
 ## Series grouping
 
 Design and plan: `docs/design/2026-11-01-series-grouping-design.md` and `-plan.md`. v0.2.97.43

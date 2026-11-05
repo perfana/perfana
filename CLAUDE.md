@@ -210,6 +210,54 @@ Anything that reads this table has to decide whether it means "real dashboards" 
 
 v0.2.89.0 fixed three symptoms of this: the grafana-sync restore sweep re-pushing artificial rows every 30s forever, one rejected dashboard aborting the whole sweep, and the API delete returning an opaque 500. See `docs/reference/Apps/Grafana Sync/Grafana Sync Overview.md` and `apps/api/src/modules/grafana/README.md`.
 
+### The Grafana service account needs Viewer, and Editor only for the write features
+
+Perfana's Grafana token runs on **Viewer** for collection and dashboard discovery, **Editor**
+for dashboard push, folder creation and annotations. Nothing needs org **Admin** any more
+(v0.2.97.47) — and the one call that used to is the trap worth knowing about:
+`GET /api/datasources/uid/:uid` is gated on `datasources:read`, which arrives only with
+Admin's `fixed:datasources:writer` (a Viewer holds `fixed:datasources.id:reader`, an id and
+not a type). Three rules keep it that way:
+
+1. **Never ask Grafana for a datasource's type.** Grafana 9+ embeds it in the dashboard JSON
+   beside the (possibly templated) uid, on the panel and on its first target, which is what
+   `resolvePanelDatasource` (`apps/grafana-sync/.../store-dashboard.service.ts`),
+   `resolveVariableDatasource` (`apps/grafana-sync/.../variable-detector.service.ts`),
+   `getVariableValues` (`apps/api/.../grafana-dashboards.service.ts`) and the worker's
+   `apps/worker/src/pipelines/panels/helpers.ts` all read. Only a Grafana 8 dashboard with no
+   embedded type falls back to the API, and on a Viewer token it is skipped with a WARN.
+2. **Never reach for the datasource proxy to run an InfluxQL query.** `/query?db=` needs the
+   datasource's `database`, and that field only exists in the datasource config — reading it
+   is the Admin call. `POST /api/ds/query` has Grafana resolve the database itself and works
+   for a Viewer, which is also where Flux already went.
+3. **`uid` + `type` is the whole datasource for a query.** Prometheus needs only the uid,
+   Postgres only the uid, Influx only the uid. A new query path that wants more than
+   `{ uid, type }` is reintroducing the Admin requirement — say so out loud if it does.
+
+The frames shape differs from the proxy's and is the one real behaviour change, and **the
+column is not the same for both datasource families** — sharing one rule shipped a silent
+regression that two reviewers caught independently:
+
+| query | fields | value is |
+|---|---|---|
+| `SHOW TAG VALUES …` | `['Value']` | column 0 (either rule works) |
+| `SELECT DISTINCT("x") …` | `['Time','Value']` | the **last** column |
+| Postgres `__text`/`__value` | two columns | the **first** column |
+
+So InfluxQL reads the last column (matching the proxy parser's
+`value.length === 1 ? value[0] : value[1]` and apps/api's `parseVariableFrames`) and
+Postgres reads the first. `collectFrameValues` takes that as a parameter rather than
+deciding for its callers; first-column-for-everything stored epoch milliseconds as a
+variable's values, and because `getValuesFromDatasourceQuery` accepts any user-authored
+`type: 'query'` variable, "an InfluxQL metadata query answers a single field" is true only
+of the metadata subset. Verified against InfluxDB 1.8 + Grafana 12.4.13.
+
+A fourth rule, from the same review: the uid that travels beside that type is
+**dashboard-author-controlled** now, where it used to be a value Grafana had handed back
+through `GET /api/datasources/uid/:uid`. Every path segment it reaches must be
+`encodeURIComponent`'d — apps/api's two Prometheus proxy sinks were raw until v0.2.97.47
+while encoding the metric and label beside them.
+
 ### Client URL vs server URL: Grafana and Dynatrace have opposite polarity
 
 Both integrations can point the browser at a different address than the API calls, for deploys behind a reverse proxy or split DNS. **Which column is the required one is inverted between them, and that is deliberate — do not "align" them.**

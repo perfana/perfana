@@ -153,10 +153,6 @@ describe('StoreDashboardService', () => {
     it('should store new dashboard with panels and variables', async () => {
       jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
       jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(dashboardDetails);
-      jest.spyOn(grafanaApiService, 'getDatasourceByUid').mockResolvedValue({
-        type: 'prometheus',
-        name: 'Prometheus',
-      } as any);
       jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
 
       const result = await service.storeDashboard(
@@ -193,10 +189,6 @@ describe('StoreDashboardService', () => {
     it('should update existing dashboard when update=true', async () => {
       jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
       jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(dashboardDetails);
-      jest.spyOn(grafanaApiService, 'getDatasourceByUid').mockResolvedValue({
-        type: 'prometheus',
-        name: 'Prometheus',
-      } as any);
       jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
 
       const result = await service.storeDashboard(
@@ -265,6 +257,48 @@ describe('StoreDashboardService', () => {
       );
     });
 
+    // Value: protects=a panel naming its datasource by NAME takes the type off its first
+    // target, with no by-name Grafana call;
+    // fails_when=the embedded-type preference is kept only on the concrete-uid arm;
+    // why_new=the by-name fallback test above spreads a panel with no targets, so only the
+    // API arm of this branch is pinned;
+    // seam=none;
+    // no_claim=that Grafana writes this shape (mocked GrafanaApiService; unit only)
+    it("should take a named datasource's type from the first target without calling Grafana", async () => {
+      // /api/datasources/name/:name needs the same org-Admin scope as the uid route, and
+      // Grafana 9+ writes the concrete type onto the target even when the panel names its
+      // datasource by name. Only a name with no type anywhere may reach the API.
+      const namedWithTypedTarget = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            {
+              id: 1,
+              title: 'CPU Usage',
+              type: 'graph',
+              datasource: 'Prometheus',
+              targets: [{ datasource: { uid: 'prometheus-uid', type: 'prometheus' } }],
+            },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(namedWithTypedTarget);
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
+      );
+
+      expect(result.datasourceType).toBe('prometheus');
+      expect(grafanaApiService.getDatasourceByName).not.toHaveBeenCalled();
+      expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalled();
+    });
+
     it('should handle dashboards with no templating variables', async () => {
       const dashboardWithoutVariables = {
         ...dashboardDetails,
@@ -278,10 +312,6 @@ describe('StoreDashboardService', () => {
       jest
         .spyOn(grafanaApiService, 'getDashboardByUid')
         .mockResolvedValue(dashboardWithoutVariables);
-      jest.spyOn(grafanaApiService, 'getDatasourceByUid').mockResolvedValue({
-        type: 'prometheus',
-        name: 'Prometheus',
-      } as any);
       jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
 
       const result = await service.storeDashboard(
@@ -313,6 +343,8 @@ describe('StoreDashboardService', () => {
 
       jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
       jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(dashboardWithOldFormat);
+      // This fixture's panel carries a uid with NO embedded type, so it really does take
+      // the API fallback — unlike the three siblings whose stubs were unreachable.
       jest.spyOn(grafanaApiService, 'getDatasourceByUid').mockResolvedValue({
         type: 'prometheus',
         name: 'Prometheus',
@@ -328,25 +360,84 @@ describe('StoreDashboardService', () => {
       expect((result.panels as any[])[0].y_axes_format).toBe('ms');
     });
 
-    it('should keep calling Grafana for a concrete datasource UID', async () => {
+    it("should read a concrete UID's type from the panel without calling Grafana", async () => {
+      // /api/datasources/uid/:uid needs org Admin and answers with the type the panel
+      // already carries, which made Admin the minimum role for the whole sync.
       jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
       jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(dashboardDetails);
-      jest.spyOn(grafanaApiService, 'getDatasourceByUid').mockResolvedValue({
-        type: 'prometheus',
-        name: 'Prometheus',
-      } as any);
       jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
 
-      await service.storeDashboard(mockGrafanaInstance as GrafanaInstance, dashboardSummary, false);
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
+      );
 
+      expect(result.datasourceType).toBe('prometheus');
+      expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalled();
+      expect(grafanaApiService.getDatasourceByName).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to Grafana for a concrete UID with no type anywhere', async () => {
+      // Grafana 8 schema: a uid with no type beside it and no target carrying one. The
+      // lookup needs Admin, so this is the one shape a Viewer token cannot store.
+      const untyped = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [{ id: 1, title: 'CPU', type: 'graph', datasource: { uid: 'prometheus-uid' } }],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(untyped);
+      jest
+        .spyOn(grafanaApiService, 'getDatasourceByUid')
+        .mockResolvedValue({ type: 'prometheus', name: 'Prometheus' } as any);
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
+      );
+
+      expect(result.datasourceType).toBe('prometheus');
       expect(grafanaApiService.getDatasourceByUid).toHaveBeenCalledWith(
         'test-instance-id',
         'prometheus-uid',
       );
-      expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalledWith(
-        expect.anything(),
-        expect.stringMatching(/^\$/),
+    });
+
+    it("should take a concrete UID's type from the first target when the panel has none", async () => {
+      const targetTyped = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [
+            {
+              id: 1,
+              title: 'CPU',
+              type: 'graph',
+              datasource: { uid: 'prometheus-uid' },
+              targets: [{ datasource: { uid: 'prometheus-uid', type: 'prometheus' } }],
+            },
+          ],
+        },
+      };
+
+      jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(targetTyped);
+      jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
+
+      const result = await service.storeDashboard(
+        mockGrafanaInstance as GrafanaInstance,
+        dashboardSummary,
+        false,
       );
+
+      expect(result.datasourceType).toBe('prometheus');
+      expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalled();
     });
 
     it('should resolve "${datasource}" from panel.datasource.type without calling Grafana', async () => {
@@ -524,8 +615,17 @@ describe('StoreDashboardService', () => {
     });
 
     it('should still surface unrelated Grafana API errors', async () => {
+      // Only an untyped uid reaches the API now, so that is the fixture the error needs.
+      const untyped = {
+        ...dashboardDetails,
+        dashboard: {
+          ...dashboardDetails.dashboard,
+          panels: [{ id: 1, title: 'CPU', type: 'graph', datasource: { uid: 'prometheus-uid' } }],
+        },
+      };
+
       jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
-      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(dashboardDetails);
+      jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(untyped);
       jest
         .spyOn(grafanaApiService, 'getDatasourceByUid')
         .mockRejectedValue(
@@ -650,9 +750,6 @@ describe('StoreDashboardService', () => {
 
       jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
       jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(emptyDatasource);
-      jest
-        .spyOn(grafanaApiService, 'getDatasourceByUid')
-        .mockResolvedValue({ type: 'prometheus', name: 'Prometheus' } as any);
       jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
 
       const result = await service.storeDashboard(
@@ -662,10 +759,7 @@ describe('StoreDashboardService', () => {
       );
 
       expect(result.datasourceType).toBe('prometheus');
-      expect(grafanaApiService.getDatasourceByUid).toHaveBeenCalledWith(
-        'test-instance-id',
-        'prometheus-uid',
-      );
+      expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalled();
     });
 
     it('should use the first graph panel that names a datasource when several disagree', async () => {
@@ -690,13 +784,6 @@ describe('StoreDashboardService', () => {
 
       jest.spyOn(dashboardRepo, 'findOne').mockResolvedValue(null);
       jest.spyOn(grafanaApiService, 'getDashboardByUid').mockResolvedValue(mixed);
-      jest
-        .spyOn(grafanaApiService, 'getDatasourceByUid')
-        .mockImplementation(async (_instanceId: string, uid: string) =>
-          uid === 'loki-uid'
-            ? ({ type: 'loki', name: 'Loki' } as any)
-            : ({ type: 'prometheus', name: 'Prometheus' } as any),
-        );
       jest.spyOn(dashboardRepo, 'save').mockImplementation(async (entity) => entity as any);
 
       const result = await service.storeDashboard(
@@ -707,10 +794,7 @@ describe('StoreDashboardService', () => {
 
       // The `text` panel is not a graph type and must not win it.
       expect(result.datasourceType).toBe('loki');
-      expect(grafanaApiService.getDatasourceByUid).toHaveBeenCalledWith(
-        'test-instance-id',
-        'loki-uid',
-      );
+      expect(grafanaApiService.getDatasourceByUid).not.toHaveBeenCalled();
     });
 
     it('does not let a bare `datasource: {}` shadow a sibling that names one', async () => {

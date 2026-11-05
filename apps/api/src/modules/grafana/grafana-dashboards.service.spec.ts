@@ -1220,7 +1220,47 @@ describe('GrafanaDashboardsService', () => {
           mockRoles
         );
 
-        // Assert
+        // Assert: the variable carries its own type, so no org-Admin
+        // /api/datasources/uid/:uid call is needed to learn it.
+        expect(grafanaClientService.getDatasource).not.toHaveBeenCalled();
+        expect(grafanaClientService.getInfluxVariableValues).toHaveBeenCalledWith(
+          mockGrafanaInstance,
+          { uid: 'datasource-uid-123', type: 'influxdb' },
+          'SHOW TAG VALUES',
+          undefined
+        );
+      });
+
+      it('falls back to the datasource lookup when the variable carries no type', async () => {
+        // Grafana 8 schema: uid with no type beside it. The lookup needs org Admin, so
+        // this is the one shape a Viewer token cannot resolve.
+        const dashboardWithUntypedVar = {
+          ...mockDashboardEntity,
+          templating_variables: [
+            {
+              name: 'application',
+              type: 'query',
+              datasource: { uid: 'datasource-uid-123' },
+              query: 'SHOW TAG VALUES'
+            }
+          ]
+        };
+
+        jest.spyOn(service, 'findOne').mockResolvedValue(dashboardWithUntypedVar as any);
+        grafanaClientService.getGrafanaInstance.mockResolvedValue(mockGrafanaInstance as any);
+        grafanaClientService.getDatasource.mockResolvedValue(mockDatasource);
+        grafanaClientService.getInfluxVariableValues.mockResolvedValue(['app1']);
+
+        await service.getVariableValues(
+          mockDashboardEntity.id,
+          'application',
+          'system1',
+          'acc',
+          {},
+          mockUserId,
+          mockRoles
+        );
+
         expect(grafanaClientService.getDatasource).toHaveBeenCalledWith(
           mockGrafanaInstance,
           'datasource-uid-123'

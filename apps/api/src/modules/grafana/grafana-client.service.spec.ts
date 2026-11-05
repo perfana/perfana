@@ -9,7 +9,7 @@
  * - createAnnotation: POST body construction, optional field inclusion, HTTP errors
  * - deleteAnnotation: DELETE with 404 tolerance, error propagation
  * - getDatasource: delegates to grafanaCall, re-throws errors
- * - getInfluxVariableValues: URL encoding, result parsing, regex extraction, deduplication
+ * - getInfluxVariableValues: /api/ds/query payload, frame parsing, regex extraction, deduplication
  * - getPrometheusVariableValues: label_values query path, simple label path, regex filtering,
  *   deduplication, empty/missing metric guard
  */
@@ -43,21 +43,13 @@ const INSTANCE_NO_SERVER_URL = {
 };
 
 const INFLUX_DATASOURCE = {
-  id: 7,
-  name: 'InfluxDB',
   type: 'influxdb',
   uid: 'influx-uid',
-  database: 'mydb',
-  url: 'http://influxdb.example.com',
 };
 
 const PROM_DATASOURCE = {
-  id: 12,
-  name: 'Prometheus',
   type: 'prometheus',
   uid: 'prom-uid',
-  database: undefined,
-  url: 'http://prometheus.example.com',
 };
 
 // ---------------------------------------------------------------------------
@@ -511,20 +503,66 @@ describe('GrafanaClientService', () => {
   // -------------------------------------------------------------------------
 
   describe('getInfluxVariableValues', () => {
-    it('should build the proxy URL with the correct database and encoded query', async () => {
+    // Both InfluxQL and Flux go through POST /api/ds/query. The proxy route needs the
+    // datasource's `database`, readable only via an org-Admin /api/datasources/uid/:uid
+    // call; Grafana resolves it itself here, so a Viewer token reaches the same values.
+    // Frame shape verified against InfluxDB 1.8 and Grafana's influxdb backend.
+    const framesResponse = (...columns: unknown[][]) => ({
+      results: {
+        metricFindQuery: {
+          status: 200,
+          frames: columns.map((values) => ({
+            schema: { refId: 'metricFindQuery', fields: [{ name: 'Value', type: 'string' }] },
+            data: { values: [values] },
+          })),
+        },
+      },
+    });
+
+    it('POSTs to /api/ds/query with the uid, and never the db= proxy', async () => {
       const query = 'SHOW TAG VALUES FROM "cpu" WITH KEY="host"';
-      fetchMock.mockResolvedValue(makeOkResponse({ results: [] }));
+      fetchMock.mockResolvedValue(makeOkResponse(framesResponse([])));
 
       await service.getInfluxVariableValues(VALID_GRAFANA_INSTANCE, INFLUX_DATASOURCE, query);
 
-      const [calledUrl] = fetchMock.mock.calls[0];
-      expect(calledUrl).toContain(`/api/datasources/proxy/uid/${INFLUX_DATASOURCE.uid}/query`);
-      expect(calledUrl).toContain(`db=${INFLUX_DATASOURCE.database}`);
-      expect(calledUrl).toContain(encodeURIComponent(query));
+      const [calledUrl, options] = fetchMock.mock.calls[0];
+      expect(calledUrl).toContain('/api/ds/query');
+      expect(calledUrl).not.toContain('/api/datasources/proxy/uid/');
+      expect((options as RequestInit).method).toBe('POST');
+      const body = JSON.parse((options as RequestInit).body as string);
+      expect(body.queries[0]).toMatchObject({
+        refId: 'metricFindQuery',
+        rawQuery: true,
+        query,
+        datasource: { type: 'influxdb', uid: INFLUX_DATASOURCE.uid },
+      });
+      // The `database` plumbing is what forced org Admin. Asserted on the BODY, not the
+      // URL: grafanaPost builds `${baseUrl}/api/ds/query` with no query string, so a
+      // `not.toContain('db=')` on the URL could never fail in any implementation.
+      expect(body.queries[0]).not.toHaveProperty('database');
+      expect(JSON.stringify(body)).not.toContain('mydb');
     });
 
-    it('should return an empty array when results is empty', async () => {
-      fetchMock.mockResolvedValue(makeOkResponse({ results: [] }));
+    it('sends a bounded time window, which Grafana needs to interpolate $timeFilter', async () => {
+      // Scoping the payload assertion to queries[0] left from/to unpinned, so dropping
+      // them would keep every test green while Grafana rejected the request.
+      const before = Date.now();
+      fetchMock.mockResolvedValue(makeOkResponse(framesResponse([])));
+
+      await service.getInfluxVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        INFLUX_DATASOURCE,
+        'SHOW TAG VALUES',
+      );
+
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+      expect(body.queries[0].maxDataPoints).toBe(1000);
+      expect(Number(body.to)).toBeGreaterThanOrEqual(before);
+      expect(Number(body.to) - Number(body.from)).toBe(24 * 60 * 60 * 1000);
+    });
+
+    it('should return an empty array when there are no frames', async () => {
+      fetchMock.mockResolvedValue(makeOkResponse(framesResponse()));
 
       const result = await service.getInfluxVariableValues(
         VALID_GRAFANA_INSTANCE,
@@ -547,19 +585,10 @@ describe('GrafanaClientService', () => {
       expect(result).toEqual([]);
     });
 
-    it('should extract values from the first column of single-column rows', async () => {
-      const influxResponse = {
-        results: [
-          {
-            series: [
-              {
-                values: [['host-a'], ['host-b'], ['host-c']],
-              },
-            ],
-          },
-        ],
-      };
-      fetchMock.mockResolvedValue(makeOkResponse(influxResponse));
+    it('should extract the values of a single-column frame', async () => {
+      fetchMock.mockResolvedValue(
+        makeOkResponse(framesResponse(['host-a', 'host-b', 'host-c'])),
+      );
 
       const result = await service.getInfluxVariableValues(
         VALID_GRAFANA_INSTANCE,
@@ -570,22 +599,18 @@ describe('GrafanaClientService', () => {
       expect(result).toEqual(['host-a', 'host-b', 'host-c']);
     });
 
-    it('should extract values from the second column of two-column rows', async () => {
-      const influxResponse = {
-        results: [
-          {
-            series: [
-              {
-                values: [
-                  ['time1', 'host-x'],
-                  ['time2', 'host-y'],
-                ],
-              },
-            ],
+    it('should take the last column of a two-column frame', async () => {
+      // Grafana drops the tag-key column for SHOW TAG VALUES, but a text/value pair
+      // still arrives that way — the value is the last column, as on the proxy route.
+      fetchMock.mockResolvedValue(
+        makeOkResponse({
+          results: {
+            metricFindQuery: {
+              frames: [{ data: { values: [['time1', 'time2'], ['host-x', 'host-y']] } }],
+            },
           },
-        ],
-      };
-      fetchMock.mockResolvedValue(makeOkResponse(influxResponse));
+        }),
+      );
 
       const result = await service.getInfluxVariableValues(
         VALID_GRAFANA_INSTANCE,
@@ -596,18 +621,10 @@ describe('GrafanaClientService', () => {
       expect(result).toEqual(['host-x', 'host-y']);
     });
 
-    it('should deduplicate values across series', async () => {
-      const influxResponse = {
-        results: [
-          {
-            series: [
-              { values: [['host-a'], ['host-b']] },
-              { values: [['host-a'], ['host-c']] },
-            ],
-          },
-        ],
-      };
-      fetchMock.mockResolvedValue(makeOkResponse(influxResponse));
+    it('should deduplicate values across frames', async () => {
+      fetchMock.mockResolvedValue(
+        makeOkResponse(framesResponse(['host-a', 'host-b'], ['host-a', 'host-c'])),
+      );
 
       const result = await service.getInfluxVariableValues(
         VALID_GRAFANA_INSTANCE,
@@ -619,22 +636,10 @@ describe('GrafanaClientService', () => {
     });
 
     it('should extract capture-group text from matching values and use raw value for non-matching', async () => {
-      const influxResponse = {
-        results: [
-          {
-            series: [
-              {
-                // app-prod-1 and app-staging-2 match the capture group; svc-prod-3 does NOT match
-                // so it falls back to its raw value
-                values: [['app-prod-1'], ['app-staging-2'], ['svc-prod-3']],
-              },
-            ],
-          },
-        ],
-      };
-      fetchMock.mockResolvedValue(makeOkResponse(influxResponse));
+      fetchMock.mockResolvedValue(
+        makeOkResponse(framesResponse(['app-prod-1', 'app-staging-2', 'svc-prod-3'])),
+      );
 
-      // Regex captures the environment between "app-" and the trailing "-\d"
       const result = await service.getInfluxVariableValues(
         VALID_GRAFANA_INSTANCE,
         INFLUX_DATASOURCE,
@@ -642,23 +647,11 @@ describe('GrafanaClientService', () => {
         '/app-(.+)-\\d/',
       );
 
-      // Matching values yield the capture group; non-matching value falls back to raw
       expect(result).toEqual(['prod', 'staging', 'svc-prod-3']);
     });
 
     it('should return the raw value when regex does not match', async () => {
-      const influxResponse = {
-        results: [
-          {
-            series: [
-              {
-                values: [['no-match-here']],
-              },
-            ],
-          },
-        ],
-      };
-      fetchMock.mockResolvedValue(makeOkResponse(influxResponse));
+      fetchMock.mockResolvedValue(makeOkResponse(framesResponse(['no-match-here'])));
 
       const result = await service.getInfluxVariableValues(
         VALID_GRAFANA_INSTANCE,
@@ -670,126 +663,45 @@ describe('GrafanaClientService', () => {
       expect(result).toEqual(['no-match-here']);
     });
 
-    it('should propagate errors from grafanaCall', async () => {
+    it('should skip null values in a frame', async () => {
+      fetchMock.mockResolvedValue(makeOkResponse(framesResponse(['a', 'a', null, 'b'])));
+
+      const result = await service.getInfluxVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        INFLUX_DATASOURCE,
+        'SHOW TAG VALUES',
+      );
+
+      expect(result).toEqual(['a', 'b']);
+    });
+
+    it('should propagate errors from Grafana', async () => {
       fetchMock.mockResolvedValue(makeErrorResponse(500, 'InfluxDB error'));
 
       await expect(
         service.getInfluxVariableValues(VALID_GRAFANA_INSTANCE, INFLUX_DATASOURCE, 'SELECT 1'),
       ).rejects.toThrow('HTTP error! status: 500');
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // getInfluxVariableValues — Flux (InfluxDB v2) path
-  // -------------------------------------------------------------------------
+    it('takes a Flux (InfluxDB v2) query down the same route', async () => {
+      // Flux always needed this transport; it is no longer a separate path, so no
+      // jsonData.version probe and no datasource lookup to read it from.
+      const FLUX_DATASOURCE = { id: 1, name: 'InfluxDB v2', type: 'influxdb', uid: 'rn8_KJEnk' };
+      const tagValuesQuery =
+        'import "influxdata/influxdb/v1"\nv1.tagValues(bucket: "monitoring", tag: "host", predicate: (r) => true, start: -1d)';
+      fetchMock.mockResolvedValue(makeOkResponse(framesResponse(['UWVA3VWPAPP0106'])));
 
-  describe('getInfluxVariableValues (Flux)', () => {
-    const FLUX_DATASOURCE = {
-      id: 1,
-      name: 'InfluxDB v2',
-      type: 'influxdb',
-      uid: 'rn8_KJEnk',
-      database: undefined,
-      url: 'http://influxdb.example.com',
-      jsonData: { version: 'Flux' },
-    };
+      const result = await service.getInfluxVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        FLUX_DATASOURCE,
+        tagValuesQuery,
+      );
 
-    // Grafana dataframe response for a Flux tagValues query.
-    const fluxFramesResponse = (values: unknown[]) => ({
-      results: {
-        metricFindQuery: {
-          status: 200,
-          frames: [
-            {
-              schema: { refId: 'metricFindQuery', fields: [{ name: '_value', type: 'string' }] },
-              data: { values: [values] },
-            },
-          ],
-        },
-      },
-    });
-
-    const tagValuesQuery =
-      'import "influxdata/influxdb/v1"\nv1.tagValues(bucket: "monitoring", tag: "host", predicate: (r) => true, start: -1d)';
-
-    it('POSTs the Flux query to /api/ds/query instead of the InfluxQL endpoint', async () => {
-      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(['host-a'])));
-
-      await service.getInfluxVariableValues(VALID_GRAFANA_INSTANCE, FLUX_DATASOURCE, tagValuesQuery);
-
+      expect(result).toEqual(['UWVA3VWPAPP0106']);
       const [calledUrl, options] = fetchMock.mock.calls[0];
       expect(calledUrl).toContain('/api/ds/query');
-      expect(calledUrl).not.toContain('/query?db=');
-      expect((options as RequestInit).method).toBe('POST');
       const body = JSON.parse((options as RequestInit).body as string);
-      expect(body.queries[0]).toMatchObject({
-        refId: 'metricFindQuery',
-        rawQuery: true,
-        datasource: { type: 'influxdb', uid: 'rn8_KJEnk' },
-        datasourceId: 1,
-      });
-    });
-
-    it('extracts the tag values from the dataframe string column', async () => {
-      const hosts = ['UWVA3VWPAPP0106', 'UWVA3VWPAPP0107', 'UWVA3VWPAPP0108'];
-      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(hosts)));
-
-      const result = await service.getInfluxVariableValues(
-        VALID_GRAFANA_INSTANCE,
-        FLUX_DATASOURCE,
-        tagValuesQuery,
-      );
-
-      expect(result).toEqual(hosts);
-    });
-
-    it('routes to the Flux path when the query is Flux even without jsonData.version', async () => {
-      const bareDatasource = { ...FLUX_DATASOURCE, jsonData: undefined };
-      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(['h1'])));
-
-      await service.getInfluxVariableValues(VALID_GRAFANA_INSTANCE, bareDatasource, tagValuesQuery);
-
-      const [calledUrl] = fetchMock.mock.calls[0];
-      expect(calledUrl).toContain('/api/ds/query');
-    });
-
-    it('applies the variable regex to Flux values', async () => {
-      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(['prod-host-01', 'prod-host-02'])));
-
-      const result = await service.getInfluxVariableValues(
-        VALID_GRAFANA_INSTANCE,
-        FLUX_DATASOURCE,
-        tagValuesQuery,
-        '/prod-(host-\\d+)/',
-      );
-
-      expect(result).toEqual(['host-01', 'host-02']);
-    });
-
-    it('deduplicates and skips null values from the frame', async () => {
-      fetchMock.mockResolvedValue(makeOkResponse(fluxFramesResponse(['a', 'a', null, 'b'])));
-
-      const result = await service.getInfluxVariableValues(
-        VALID_GRAFANA_INSTANCE,
-        FLUX_DATASOURCE,
-        tagValuesQuery,
-      );
-
-      expect(result).toEqual(['a', 'b']);
-    });
-
-    it('still uses the InfluxQL endpoint for a non-Flux InfluxQL query', async () => {
-      fetchMock.mockResolvedValue(makeOkResponse({ results: [] }));
-
-      await service.getInfluxVariableValues(
-        VALID_GRAFANA_INSTANCE,
-        INFLUX_DATASOURCE,
-        'SHOW TAG VALUES FROM "cpu" WITH KEY = "host"',
-      );
-
-      const [calledUrl] = fetchMock.mock.calls[0];
-      expect(calledUrl).toContain('/api/datasources/proxy/uid/');
-      expect(calledUrl).not.toContain('/api/ds/query');
+      expect(body.queries[0].query).toBe(tagValuesQuery);
     });
   });
 
@@ -798,6 +710,23 @@ describe('GrafanaClientService', () => {
   // -------------------------------------------------------------------------
 
   describe('getPrometheusVariableValues', () => {
+    it('encodes a dashboard-supplied datasource uid into the proxy path', async () => {
+      // Since v0.2.97.47 getVariableValues builds {uid,type} out of templating_variables
+      // when the type is embedded, so this uid is dashboard-author-controlled and no longer
+      // round-tripped through GET /api/datasources/uid/:uid.
+      fetchMock.mockResolvedValue(makeOkResponse({ data: [] }));
+
+      await service.getPrometheusVariableValues(
+        VALID_GRAFANA_INSTANCE,
+        { uid: 'a/../../api/admin/settings' },
+        'up',
+      );
+
+      const [calledUrl] = fetchMock.mock.calls[0];
+      expect(calledUrl).not.toContain('/api/admin/settings');
+      expect(calledUrl).toContain('a%2F..%2F..%2Fapi%2Fadmin%2Fsettings');
+    });
+
     describe('label_values query path', () => {
       it('should call the series API with the metric and time range', async () => {
         const seriesResponse = {

@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.47] - 2026-11-05
+
+### Changed
+- **Perfana's Grafana service account no longer needs the org Admin role.** Viewer is enough to collect metrics and to pick up `perfana`-tagged dashboards; Editor covers dashboard push, folder creation and test-run annotations. One call was forcing Admin on everything: `GET /api/datasources/uid/:uid`, which Grafana gates on `datasources:read` and grants only to Admin, and which answers with a datasource type the dashboard JSON already carries. Both grafana-sync and the API now read the type Grafana embedded beside the uid — the same source the worker's collection path has always used.
+
+  **An InfluxQL variable query now goes through `POST /api/ds/query`** instead of the datasource proxy, because `/query?db=` needs the datasource's `database` field and reading that was the second Admin call. Grafana resolves the database itself on that route, which is where Flux variable queries already went, so the two paths are now one. Verified against InfluxDB 1.8: the values are identical, and a `$timeFilter` in a variable query is now interpolated instead of being sent through literally.
+
+  The minimum role per feature is in `docs/reference/Features/Integrations.md`, along with the minimum Grafana version (9.0) that uid-only query resolution implies.
+
+  **A Grafana 8 schema dashboard is the exception.** A panel or query variable that names its datasource with no `type` beside it still falls back to the Admin-scoped lookup. On a Viewer or Editor token that dashboard is skipped with a `Skipped dashboard "<title>" (UID: …)` warning in the grafana-sync log and does not appear in Perfana; re-saving it in Grafana 9+ adds the embedded type. Dashboards already stored are unaffected.
+
+- **The pre-push gate works on this repo for the first time.** `gstack-pregate` failed `PREGATE_NO_LANE` on every ship that touched a doc, the changelog or VERSION, and the remedy it names was unreachable: `.gitignore` hid `.gstack/`, and the gate reads its policy from the base-branch committed copy. That policy is now committed and declares the paths that cannot carry a test lane. Fixing it surfaced a second defect — runner detection was picking `bun test`, because the root `package.json` declares no test runner and bun is on PATH, so 422 of 518 jest specs "failed" on NestJS decorators alone. `scripts/pregate-runner.sh` routes each spec to the test script of the workspace that owns it (jest in most, vitest in `apps/worker`) and refuses by name a workspace whose script does not take paths.
+
+### Fixed
+- **A `SELECT`-shaped InfluxDB variable query no longer fills its variable with timestamps.** Moving InfluxQL variable queries onto `POST /api/ds/query` also changed the response shape, and the new reader took the first dataframe column for both InfluxQL and Postgres. First is right for Postgres, whose variable convention is a `__text`/`__value` pair, and right for `SHOW TAG VALUES`, which answers a single field — but anything `SELECT`-shaped answers `Time` then `Value`, so grafana-sync stored epoch milliseconds as the variable's values and the dashboard then collected nothing for every series those values select. The column is now the caller's choice: last for InfluxQL, matching both the proxy parser this replaced and the API's own reader, and first for Postgres.
+- **A dashboard-supplied datasource uid is encoded into the Prometheus proxy path.** Reading the type out of the dashboard JSON means the uid beside it is author-controlled where it used to be a value Grafana had handed back, and apps/api interpolated it into `/api/datasources/proxy/uid/…` raw while encoding the metric and label next to it. A `/` or `?` in that uid could retarget the request at another Grafana endpoint.
+- **A failed Grafana query is reported instead of reading as an empty variable.** `/api/ds/query` answers 200 with a per-query error inside `results`, so an auth or syntax failure was indistinguishable from a variable that legitimately has no values. Both readers now log it with the refId and the message.
+- **An unsafe variable regex can no longer stall an API request.** A dashboard-supplied pattern reached a bare `new RegExp` on two apps/api paths, while the grafana-sync twin has validated through `validateRegexPattern` all along. The second of those paths was also a hand-rolled copy of the first and is gone.
+
 ## [0.2.97.46] - 2026-11-04
 
 ### Added

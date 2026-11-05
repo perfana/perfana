@@ -5,6 +5,7 @@ import { GrafanaInstance as GrafanaInstanceEntity } from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { validateGrafanaUrl } from '../../common/security';
 import { ProxyResolverService } from '../proxy/proxy-resolver.service';
+import { validateRegexPattern } from '@perfana/shared/utils';
 
 interface GrafanaInstance {
   id: string;
@@ -19,16 +20,10 @@ interface GrafanaInstance {
   useProxy: boolean;
 }
 
+/** What apps/api actually consumes off a Grafana datasource, not Grafana's whole row. */
 interface GrafanaDatasource {
-  id: number;
-  name: string;
   type: string;
   uid: string;
-  database?: string;
-  url?: string;
-  // Grafana's InfluxDB datasource sets jsonData.version to "Flux" when the
-  // datasource speaks Flux (InfluxDB v2) instead of InfluxQL (InfluxDB v1).
-  jsonData?: { version?: string };
 }
 
 @Injectable()
@@ -260,83 +255,22 @@ export class GrafanaClientService {
     }
   }
 
+  /**
+   * InfluxDB variable values via POST /api/ds/query, for both InfluxQL and Flux.
+   *
+   * Not the datasource proxy: `/query?db=` needs the datasource's `database`, which lives
+   * only in the datasource config and costs an org-Admin `/api/datasources/uid/:uid` call to
+   * read. `/api/ds/query` has Grafana resolve the database itself, so a Viewer token reaches
+   * the same values, and Flux needed this transport anyway. Verified against InfluxDB 1.8 —
+   * the proxy answers `series[].values: [["system_under_test","PerfanaWebshop"]]` and this
+   * answers `frames[].data.values: [["PerfanaWebshop"]]`, so `parseVariableFrames` taking
+   * the last column lands on the same value the proxy parser indexed past the key column for.
+   */
   async getInfluxVariableValues(
-    grafanaInstance: GrafanaInstance, 
-    datasource: GrafanaDatasource, 
+    grafanaInstance: GrafanaInstance,
+    datasource: Pick<GrafanaDatasource, 'uid' | 'type'>,
     query: string,
     regex?: string
-  ): Promise<string[]> {
-    // Flux (InfluxDB v2) datasources can't answer the legacy InfluxQL
-    // /query?db=&q= endpoint. Grafana runs Flux variable queries through
-    // POST /api/ds/query, which returns dataframes. Detect Flux via the
-    // datasource version, with a query-shape fallback for older configs.
-    if (this.isFluxDatasource(datasource, query)) {
-      return this.getFluxVariableValues(grafanaInstance, datasource, query, regex);
-    }
-
-    try {
-      const encodedQuery = encodeURIComponent(query);
-      const queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/query?db=${datasource.database}&q=${encodedQuery}`;
-
-      const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
-      const variableValues: string[] = [];
-
-      if (response.results) {
-        (response.results as Record<string, unknown>[]).forEach((result: Record<string, unknown>) => {
-          if (result.series) {
-            (result.series as Record<string, unknown>[]).forEach((serie: Record<string, unknown>) => {
-              if (serie.values) {
-                (serie.values as string[][]).forEach((value: string[]) => {
-                  const variableValue: string = (value.length === 1 ? value[0] : value[1]) ?? '';
-                  let valueAfterRegex = '';
-
-                  if (regex && regex !== '') {
-                    const valueRegex = new RegExp(regex.replace(/^\/|\/$/g, ''));
-                    const matches = variableValue.match(valueRegex);
-                    if (matches) {
-                      matches.forEach((match: string, i: number) => {
-                        if (i > 0) valueAfterRegex += match;
-                      });
-                    }
-                  }
-
-                  const pushValue = valueAfterRegex !== '' ? valueAfterRegex : variableValue;
-                  if (variableValues.indexOf(pushValue) === -1) {
-                    variableValues.push(pushValue);
-                  }
-                });
-              }
-            });
-          }
-        });
-      }
-
-      return variableValues;
-    } catch (error) {
-      this.logger.error(`Error getting InfluxDB variable values:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * A Flux datasource is either explicitly marked (jsonData.version === 'Flux')
-   * or gives itself away with Flux syntax in the variable query.
-   */
-  private isFluxDatasource(datasource: GrafanaDatasource, query: string): boolean {
-    if (datasource.jsonData?.version === 'Flux') return true;
-    return /\bimport\s+"|\bfrom\s*\(\s*bucket\s*:|\|>/.test(query);
-  }
-
-  /**
-   * Resolve Flux (InfluxDB v2) variable values via POST /api/ds/query.
-   * The response is Grafana's dataframe format: results[refId].frames[].data.values
-   * with the tag values in a string-typed field (typically "_value").
-   */
-  private async getFluxVariableValues(
-    grafanaInstance: GrafanaInstance,
-    datasource: GrafanaDatasource,
-    query: string,
-    regex?: string,
   ): Promise<string[]> {
     const now = Date.now();
     const body = {
@@ -346,7 +280,6 @@ export class GrafanaClientService {
           query,
           rawQuery: true,
           datasource: { type: datasource.type, uid: datasource.uid },
-          datasourceId: datasource.id,
           maxDataPoints: 1000,
         },
       ],
@@ -354,20 +287,35 @@ export class GrafanaClientService {
       to: String(now),
     };
 
-    const response = (await this.grafanaPost(grafanaInstance, '/api/ds/query', body)) as Record<string, unknown>;
-    return this.parseFluxVariableFrames(response, regex);
+    try {
+      const response = (await this.grafanaPost(grafanaInstance, '/api/ds/query', body)) as Record<string, unknown>;
+      return this.parseVariableFrames(response, regex);
+    } catch (error) {
+      this.logger.error(`Error getting InfluxDB variable values:`, error);
+      throw error;
+    }
   }
 
   /**
    * Extract distinct string values from a Grafana dataframe response.
-   * Mirrors the InfluxQL parser's regex-capture behavior.
+   * Keeps the regex-capture behavior the proxy-based InfluxQL parser had.
    */
-  private parseFluxVariableFrames(response: Record<string, unknown>, regex?: string): string[] {
+  private parseVariableFrames(response: Record<string, unknown>, regex?: string): string[] {
     const variableValues: string[] = [];
     const results = response?.results as Record<string, unknown> | undefined;
     if (!results) return variableValues;
 
-    for (const result of Object.values(results)) {
+    for (const [refId, result] of Object.entries(results)) {
+      // /api/ds/query answers 200 (or 207) with a PER-QUERY error inside `results`, so an
+      // auth or syntax failure reads as "no values" unless it is looked at. The proxy route
+      // this replaced surfaced the same failures as a non-2xx that grafanaCall threw on.
+      const status = (result as { status?: number })?.status;
+      const error = (result as { error?: string })?.error;
+      if (error || (typeof status === 'number' && status >= 400)) {
+        this.logger.error(`Grafana query "${refId}" failed (status ${status ?? 'n/a'}): ${error ?? 'no message'}`);
+        continue;
+      }
+
       const frames = (result as Record<string, unknown>)?.frames;
       if (!Array.isArray(frames)) continue;
 
@@ -395,10 +343,23 @@ export class GrafanaClientService {
     return variableValues;
   }
 
-  /** Apply an optional variable regex, returning the concatenated capture groups. */
+  /**
+   * Apply an optional variable regex, returning the concatenated capture groups.
+   *
+   * The pattern comes from `grafana_dashboards.templating_variables`, i.e. from a
+   * tenant-configured Grafana, and this runs inside a synchronous authenticated request — so
+   * it goes through the same ReDoS guard the grafana-sync twin uses
+   * (`applyRegexFilterAndCollect`). An unsafe pattern is logged and the raw value kept,
+   * never thrown.
+   */
   private applyVariableRegex(variableValue: string, regex?: string): string {
     if (!regex || regex === '') return variableValue;
-    const valueRegex = new RegExp(regex.replace(/^\/|\/$/g, ''));
+    const validation = validateRegexPattern(regex.replace(/^\/|\/$/g, ''));
+    if (!validation.safe || !validation.regex) {
+      this.logger.warn(`Unsafe variable regex rejected: ${validation.error}`);
+      return variableValue;
+    }
+    const valueRegex = validation.regex;
     const matches = variableValue.match(valueRegex);
     if (!matches) return variableValue;
     let valueAfterRegex = '';
@@ -443,9 +404,17 @@ export class GrafanaClientService {
     return response.json();
   }
 
+  /**
+   * The uid is encoded into the proxy path because it is dashboard-author-controlled: since
+   * v0.2.97.47 `getVariableValues` builds `{ uid, type }` straight out of
+   * `templating_variables` when the type is embedded, instead of taking a uid that had been
+   * round-tripped through `GET /api/datasources/uid/:uid`. A `/` or `?` in it would otherwise
+   * retarget the request at another Grafana endpoint. Same rule as the grafana-sync twin
+   * (`variable-detector.service.ts`).
+   */
   async getPrometheusVariableValues(
-    grafanaInstance: GrafanaInstance, 
-    datasource: GrafanaDatasource, 
+    grafanaInstance: GrafanaInstance,
+    datasource: Pick<GrafanaDatasource, 'uid'>,
     query: string,
     regex?: string
   ): Promise<string[]> {
@@ -470,7 +439,7 @@ export class GrafanaClientService {
           const startTime = Math.round(new Date(Date.now() - 24 * 60 * 60 * 1000).getTime() / 1000);
           const endTime = Math.round(new Date().getTime() / 1000);
           
-          queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/api/v1/series?match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
+          queryUrl = `/api/datasources/proxy/uid/${encodeURIComponent(datasource.uid)}/api/v1/series?match[]=${encodeURIComponent(metric)}&start=${startTime}&end=${endTime}`;
           
           const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
 
@@ -484,7 +453,7 @@ export class GrafanaClientService {
         }
       } else {
         // Simple label values query
-        queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/api/v1/label/${encodeURIComponent(query)}/values`;
+        queryUrl = `/api/datasources/proxy/uid/${encodeURIComponent(datasource.uid)}/api/v1/label/${encodeURIComponent(query)}/values`;
         const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
 
         if (response && response.data) {
@@ -494,30 +463,9 @@ export class GrafanaClientService {
         }
       }
 
-      // Apply regex if provided
-      let processedValues = variableValues;
-      if (regex && regex !== '') {
-        const valueRegex = new RegExp(regex.replace(/^\/|\/$/g, ''));
-        processedValues = [];
-        
-        variableValues.forEach((variableValue) => {
-          let valueAfterRegex = '';
-          const matches = variableValue.match(valueRegex);
-          
-          if (matches) {
-            matches.forEach((match, i) => {
-              if (i > 0) valueAfterRegex += match;
-            });
-          }
-
-          const pushValue = valueAfterRegex !== '' ? valueAfterRegex : variableValue;
-          if (processedValues.indexOf(pushValue) === -1) {
-            processedValues.push(pushValue);
-          }
-        });
-      }
-
-      return [...new Set(processedValues)]; // Remove duplicates
+      // Same regex rule as the InfluxQL path, through the one guarded helper rather than a
+      // second hand-rolled copy: an unvalidated pattern here was the other ReDoS sink.
+      return [...new Set(variableValues.map((value) => this.applyVariableRegex(value, regex)))];
     } catch (error) {
       this.logger.error(`Error getting Prometheus variable values:`, error);
       throw error;
