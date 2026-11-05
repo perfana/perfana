@@ -24,11 +24,7 @@ interface GrafanaDatasource {
   name: string;
   type: string;
   uid: string;
-  database?: string;
   url?: string;
-  // Grafana's InfluxDB datasource sets jsonData.version to "Flux" when the
-  // datasource speaks Flux (InfluxDB v2) instead of InfluxQL (InfluxDB v1).
-  jsonData?: { version?: string };
 }
 
 @Injectable()
@@ -260,83 +256,22 @@ export class GrafanaClientService {
     }
   }
 
+  /**
+   * InfluxDB variable values via POST /api/ds/query, for both InfluxQL and Flux.
+   *
+   * Not the datasource proxy: `/query?db=` needs the datasource's `database`, which lives
+   * only in the datasource config and costs an org-Admin `/api/datasources/uid/:uid` call to
+   * read. `/api/ds/query` has Grafana resolve the database itself, so a Viewer token reaches
+   * the same values, and Flux needed this transport anyway. Verified against InfluxDB 1.8 —
+   * the proxy answers `series[].values: [["system_under_test","PerfanaWebshop"]]` and this
+   * answers `frames[].data.values: [["PerfanaWebshop"]]`, so `parseVariableFrames` taking
+   * the last column lands on the same value the proxy parser indexed past the key column for.
+   */
   async getInfluxVariableValues(
-    grafanaInstance: GrafanaInstance, 
-    datasource: GrafanaDatasource, 
+    grafanaInstance: GrafanaInstance,
+    datasource: Pick<GrafanaDatasource, 'uid' | 'type'>,
     query: string,
     regex?: string
-  ): Promise<string[]> {
-    // Flux (InfluxDB v2) datasources can't answer the legacy InfluxQL
-    // /query?db=&q= endpoint. Grafana runs Flux variable queries through
-    // POST /api/ds/query, which returns dataframes. Detect Flux via the
-    // datasource version, with a query-shape fallback for older configs.
-    if (this.isFluxDatasource(datasource, query)) {
-      return this.getFluxVariableValues(grafanaInstance, datasource, query, regex);
-    }
-
-    try {
-      const encodedQuery = encodeURIComponent(query);
-      const queryUrl = `/api/datasources/proxy/uid/${datasource.uid}/query?db=${datasource.database}&q=${encodedQuery}`;
-
-      const response = await this.grafanaCall(grafanaInstance, queryUrl) as Record<string, unknown>;
-      const variableValues: string[] = [];
-
-      if (response.results) {
-        (response.results as Record<string, unknown>[]).forEach((result: Record<string, unknown>) => {
-          if (result.series) {
-            (result.series as Record<string, unknown>[]).forEach((serie: Record<string, unknown>) => {
-              if (serie.values) {
-                (serie.values as string[][]).forEach((value: string[]) => {
-                  const variableValue: string = (value.length === 1 ? value[0] : value[1]) ?? '';
-                  let valueAfterRegex = '';
-
-                  if (regex && regex !== '') {
-                    const valueRegex = new RegExp(regex.replace(/^\/|\/$/g, ''));
-                    const matches = variableValue.match(valueRegex);
-                    if (matches) {
-                      matches.forEach((match: string, i: number) => {
-                        if (i > 0) valueAfterRegex += match;
-                      });
-                    }
-                  }
-
-                  const pushValue = valueAfterRegex !== '' ? valueAfterRegex : variableValue;
-                  if (variableValues.indexOf(pushValue) === -1) {
-                    variableValues.push(pushValue);
-                  }
-                });
-              }
-            });
-          }
-        });
-      }
-
-      return variableValues;
-    } catch (error) {
-      this.logger.error(`Error getting InfluxDB variable values:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * A Flux datasource is either explicitly marked (jsonData.version === 'Flux')
-   * or gives itself away with Flux syntax in the variable query.
-   */
-  private isFluxDatasource(datasource: GrafanaDatasource, query: string): boolean {
-    if (datasource.jsonData?.version === 'Flux') return true;
-    return /\bimport\s+"|\bfrom\s*\(\s*bucket\s*:|\|>/.test(query);
-  }
-
-  /**
-   * Resolve Flux (InfluxDB v2) variable values via POST /api/ds/query.
-   * The response is Grafana's dataframe format: results[refId].frames[].data.values
-   * with the tag values in a string-typed field (typically "_value").
-   */
-  private async getFluxVariableValues(
-    grafanaInstance: GrafanaInstance,
-    datasource: GrafanaDatasource,
-    query: string,
-    regex?: string,
   ): Promise<string[]> {
     const now = Date.now();
     const body = {
@@ -346,7 +281,6 @@ export class GrafanaClientService {
           query,
           rawQuery: true,
           datasource: { type: datasource.type, uid: datasource.uid },
-          datasourceId: datasource.id,
           maxDataPoints: 1000,
         },
       ],
@@ -354,15 +288,20 @@ export class GrafanaClientService {
       to: String(now),
     };
 
-    const response = (await this.grafanaPost(grafanaInstance, '/api/ds/query', body)) as Record<string, unknown>;
-    return this.parseFluxVariableFrames(response, regex);
+    try {
+      const response = (await this.grafanaPost(grafanaInstance, '/api/ds/query', body)) as Record<string, unknown>;
+      return this.parseVariableFrames(response, regex);
+    } catch (error) {
+      this.logger.error(`Error getting InfluxDB variable values:`, error);
+      throw error;
+    }
   }
 
   /**
    * Extract distinct string values from a Grafana dataframe response.
-   * Mirrors the InfluxQL parser's regex-capture behavior.
+   * Keeps the regex-capture behavior the proxy-based InfluxQL parser had.
    */
-  private parseFluxVariableFrames(response: Record<string, unknown>, regex?: string): string[] {
+  private parseVariableFrames(response: Record<string, unknown>, regex?: string): string[] {
     const variableValues: string[] = [];
     const results = response?.results as Record<string, unknown> | undefined;
     if (!results) return variableValues;
@@ -444,8 +383,8 @@ export class GrafanaClientService {
   }
 
   async getPrometheusVariableValues(
-    grafanaInstance: GrafanaInstance, 
-    datasource: GrafanaDatasource, 
+    grafanaInstance: GrafanaInstance,
+    datasource: Pick<GrafanaDatasource, 'uid'>,
     query: string,
     regex?: string
   ): Promise<string[]> {

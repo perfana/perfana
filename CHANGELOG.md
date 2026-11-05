@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.47] - 2026-11-05
+
+### Changed
+- **Perfana's Grafana service account no longer needs the org Admin role.** Viewer is enough to collect metrics and to pick up `perfana`-tagged dashboards; Editor covers dashboard push, folder creation and test-run annotations. One call was forcing Admin on everything: `GET /api/datasources/uid/:uid`, which Grafana gates on `datasources:read` and grants only to Admin, and which answers with a datasource type the dashboard JSON already carries. Both grafana-sync and the API now read the type Grafana embedded beside the uid — the same source the worker's collection path has always used.
+
+  **An InfluxQL variable query now goes through `POST /api/ds/query`** instead of the datasource proxy, because `/query?db=` needs the datasource's `database` field and reading that was the second Admin call. Grafana resolves the database itself on that route, which is where Flux variable queries already went, so the two paths are now one. Verified against InfluxDB 1.8: the values are identical, and a `$timeFilter` in a variable query is now interpolated instead of being sent through literally.
+
+  The minimum role per feature is documented under Grafana in `docs/reference/Features/Integrations.md`.
+
+  **A Grafana 8 schema dashboard is the exception.** A panel or query variable that names its datasource with no `type` beside it still falls back to the Admin-scoped lookup. On a Viewer or Editor token that dashboard is skipped with a `Skipped dashboard "<title>" (UID: …)` warning in the grafana-sync log and does not appear in Perfana; re-saving it in Grafana 9+ adds the embedded type. Dashboards already stored are unaffected.
+
 ## [0.2.97.46] - 2026-11-04
 
 ### Added

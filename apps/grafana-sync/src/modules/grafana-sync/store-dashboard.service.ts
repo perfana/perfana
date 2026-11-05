@@ -330,7 +330,16 @@ export class StoreDashboardService {
 
   /**
    * Resolve a panel's datasource to at least `{ type }` for persistence.
-   * Concrete UIDs/names still hit the Grafana API; template variable refs do not.
+   *
+   * The type Grafana embedded in the dashboard JSON is preferred over asking Grafana about
+   * the datasource, for every shape — concrete uid included. `/api/datasources/uid/:uid`
+   * needs org **Admin** (`datasources:read` arrives with Admin's `fixed:datasources:writer`;
+   * a Viewer holds only `fixed:datasources.id:reader`), and it answers with a type the panel
+   * already carries. Asking anyway made Admin the minimum role for the whole sync, and the
+   * failure was a tagged dashboard that silently never appeared in Perfana.
+   *
+   * Only a dashboard that names its datasource by name alone, with no embedded type
+   * (Grafana 8 schema), still falls through to the API.
    */
   private async resolvePanelDatasource(
     instanceId: string,
@@ -362,6 +371,9 @@ export class StoreDashboardService {
             ),
           };
         }
+        if (panelDatasourceType) {
+          return { type: panelDatasourceType };
+        }
         return this.grafanaApiService.getDatasourceByUid(instanceId, ds.uid);
       }
 
@@ -382,6 +394,9 @@ export class StoreDashboardService {
           panelDatasourceType,
         ),
       };
+    }
+    if (panelDatasourceType) {
+      return { type: panelDatasourceType };
     }
     return this.grafanaApiService.getDatasourceByName(instanceId, ds);
   }

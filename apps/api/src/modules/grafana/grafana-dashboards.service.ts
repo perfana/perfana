@@ -609,9 +609,23 @@ export class GrafanaDashboardsService {
             return [];
           }
 
+          // Grafana embeds the concrete type beside the uid on every query variable it
+          // writes, and uid + type is all the three query paths below need. Preferring it
+          // keeps this off `/api/datasources/uid/:uid`, which needs org Admin
+          // (`datasources:read` arrives with Admin's `fixed:datasources:writer`; a Viewer
+          // holds only `fixed:datasources.id:reader`). Only a legacy dashboard with no type
+          // beside the reference still asks Grafana.
+          const embeddedType = typeof variable.datasource === 'object'
+            && typeof variable.datasource.type === 'string'
+            && variable.datasource.type.length > 0
+              ? variable.datasource.type
+              : undefined;
+
           try {
-            const datasource = await this.grafanaClientService.getDatasource(grafanaInstance, datasourceUid);
-            
+            const datasource = embeddedType
+              ? { uid: datasourceUid, type: embeddedType }
+              : await this.grafanaClientService.getDatasource(grafanaInstance, datasourceUid);
+
             // Replace placeholders in the query
             const processedQuery = this.processVariableQuery(variable, system, environment, existingVariables);
             
