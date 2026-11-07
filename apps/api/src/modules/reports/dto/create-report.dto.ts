@@ -66,20 +66,24 @@ export class ReportSectionConfigDto {
   /**
    * Section-specific configuration.
    *
-   * Comparison sections additionally accept the reserved values `'previous'` and
-   * `'previous-successful'` for `baselineTestRunId` — see the Swagger description
-   * below, and PREVIOUS_RUN_BASELINE / PREVIOUS_SUCCESSFUL_RUN_BASELINE in
-   * @perfana/shared for the strings themselves.
+   * Comparison sections additionally accept the reserved values `'previous'`,
+   * `'previous-successful'` and `'control-group'` for `baselineTestRunId` — see the
+   * Swagger description below, and PREVIOUS_RUN_BASELINE / PREVIOUS_SUCCESSFUL_RUN_BASELINE /
+   * CONTROL_GROUP_BASELINE in @perfana/shared for the strings themselves.
    */
   @ApiPropertyOptional({
     description:
-      'Section-specific configuration options. Comparison sections additionally accept two ' +
+      'Section-specific configuration options. Comparison sections additionally accept three ' +
       "reserved values for baselineTestRunId. 'previous' resolves per report to the run " +
       'immediately before this one in the same system, environment and workload — so a template ' +
       'compares each report against its own predecessor rather than a pinned run. ' +
       "'previous-successful' is the same idea but skips back to the most recent earlier run " +
       'whose SLOs passed (consolidated_result.meetsRequirement), so a still-broken report is not ' +
-      'compared against a run that had already breached its objectives and made to look flat.',
+      'compared against a run that had already breached its objectives and made to look flat. ' +
+      "'control-group' compares against the run's own control group — the earlier runs anomaly " +
+      'detection (ADAPT) judges it against — using their pooled statistics ' +
+      '(ds_control_group_statistics), the same control values the anomaly-detection card shows. ' +
+      'dashboardMap is ignored with it, since a control group shares the run\'s environment.',
     example: { baselineTestRunId: 'previous-successful', source: 'performance-metrics' },
   })
   @IsOptional()

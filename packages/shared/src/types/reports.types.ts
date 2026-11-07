@@ -836,6 +836,21 @@ export const PREVIOUS_RUN_BASELINE = 'previous';
 export const PREVIOUS_SUCCESSFUL_RUN_BASELINE = 'previous-successful';
 
 /**
+ * Compare against the run's own control group instead of another single run.
+ *
+ * The control group is the set of earlier runs ADAPT (anomaly detection) judges the run
+ * against, and its pooled statistics live in `ds_control_group_statistics`. Choosing it as the
+ * baseline makes a comparison show the same "control" numbers the anomaly-detection card
+ * shows, rather than one run's, which is noisier.
+ *
+ * Unlike the two sentinels above it is not resolved to a run id: the API keeps it as a
+ * sentinel all the way down, so a reader must never look it up in `test_runs`. It is shared by
+ * the report's comparisons section (`baselineTestRunId`), the Compare card's baseline picker
+ * and the compare presets that store that picker's value (`baseline_test_run_id`).
+ */
+export const CONTROL_GROUP_BASELINE = 'control-group';
+
+/**
  * Most sections one report may contain.
  *
  * The builder enforces this while composing, and the ad-hoc generate DTO enforces it at the

@@ -13,7 +13,11 @@
 import { useState, useEffect } from 'react';
 import { Autocomplete, Box, TextField, Typography } from '@mui/material';
 import { authenticatedFetch } from '@/lib/api';
-import { PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE } from '@perfana/shared/types';
+import {
+  CONTROL_GROUP_BASELINE,
+  PREVIOUS_RUN_BASELINE,
+  PREVIOUS_SUCCESSFUL_RUN_BASELINE,
+} from '@perfana/shared/types';
 
 export interface BaselineCandidate {
   test_run_id: string;
@@ -41,7 +45,7 @@ const formatCandidateTime = (c: BaselineCandidate): string =>
  * cannot drift: a rename is now a compile error rather than a template that silently stops
  * resolving a previous run.
  */
-export { PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE };
+export { CONTROL_GROUP_BASELINE, PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE };
 
 /**
  * The synthetic options, in the order the list offers them.
@@ -72,6 +76,15 @@ const SYNTHETIC = new Map<string, { label: string; hint: string }>([
       // qualifier is exactly what the collapsed input truncates away.
       label: 'Previous SLO-passing run',
       hint: 'Each report compares against the most recent earlier run that passed its SLOs',
+    },
+  ],
+  [
+    CONTROL_GROUP_BASELINE,
+    {
+      // Not a run at all: the pooled statistics of the runs anomaly detection judged this one
+      // against, so the section shows the same control values as the Anomaly Detection card.
+      label: 'Control group',
+      hint: "Each report compares against its run's control group: the earlier runs anomaly detection judges it against, pooled",
     },
   ],
 ]);

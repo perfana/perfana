@@ -26,6 +26,8 @@ jest.mock('@/lib/compare-presets', () => ({
 
 const BASELINE = { test_run_id: 'run-00003' } as RelatedTestRun;
 const OTHER = { test_run_id: 'run-00002' } as RelatedTestRun;
+// The card hands the hook its baseline OPTIONS, so the control group is findable like a run.
+const CONTROL_GROUP = { test_run_id: 'control-group', control_group: { test_runs: ['run-00001'] } } as RelatedTestRun;
 
 const preset = (over: Partial<ComparePreset> = {}): ComparePreset =>
   ({
@@ -48,7 +50,7 @@ function setup(selectedTestRun: RelatedTestRun | null) {
       selectedSource: 'grafana' as never,
       addedSeries: [],
       dashboards: [],
-      relatedTestRuns: [BASELINE, OTHER],
+      relatedTestRuns: [CONTROL_GROUP, BASELINE, OTHER],
       selectedTestRun,
       setSelectedSource: jest.fn(),
       setSelectedDashboard: jest.fn(),
@@ -89,6 +91,12 @@ describe('useComparePresets — restoring the preset baseline', () => {
     const { result, setSelectedTestRun } = setup(null);
     await result.current.applyPreset(preset({ baseline_test_run_id: 'run-deleted' }));
     expect(setSelectedTestRun).not.toHaveBeenCalled();
+  });
+
+  it('restores a preset saved against the control group to this run\'s control group', async () => {
+    const { result, setSelectedTestRun } = setup(null);
+    await result.current.applyPreset(preset({ baseline_test_run_id: 'control-group' }));
+    expect(setSelectedTestRun).toHaveBeenCalledWith(CONTROL_GROUP);
   });
 
   it('does nothing when the preset carries no baseline at all', async () => {

@@ -29,6 +29,11 @@ import { percentDiff, percentDiffScaled } from '../renderers/comparison-bands';
 import { ALL_AGGREGATED_SERIES, aggregatedKindFor, getUrlPanel, isRequestPanel, isSyntheticAllAggregated, isUrlPanel, perfPanelTitle, presetAggregateSpec } from './url-perf-panels';
 import { CHANGE_POINT_WINDOW } from './trend-window';
 import { hostDashboardLabel } from '../../dynatrace/dynatrace.repository';
+import {
+  loadControlGroupForRun,
+  loadControlGroupStatistics,
+  type ControlGroupInfo,
+} from '../../metrics/control-group-baseline';
 
 // The shapes these queries return. Re-exported so the ten renderers that import them from
 // this module keep working unchanged.
@@ -75,6 +80,22 @@ export * from './report-data.types';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (id: string) => UUID_RE.test(id);
+
+/**
+ * Transaction RT Avg — the perf-test panel a control-group comparison reads when the section
+ * picked nothing (`METRIC_TYPE_PANEL_IDS.TXN_RT_AVG` in the worker). One row per transaction,
+ * which is what the run-vs-run default shows too.
+ */
+const PERF_TXN_RT_AVG_PANEL_ID = 101;
+
+/** The statistics either side of a statistics-based comparison row carries. */
+interface StatisticsComparisonSide {
+  unit: string | null;
+  mean: number | null;
+  q90: number | null;
+  q95: number | null;
+  q99: number | null;
+}
 
 /** Derive Top10Row metrics from raw stat rows (formulas match prepareTop10Data). */
 export function mapRawToTop10Rows(raw: RawTop10Row[], testDuration: number): Top10Row[] {
@@ -978,7 +999,9 @@ export class ReportDataFetcherService {
    */
   private async getAggregatedSeriesRows(
     currentRunId: string,
-    baselineRunId: string,
+    // null: no baseline run (a control-group comparison). The run-wide aggregate is not a
+    // series ADAPT pools, so there is no control-group value for it and the baseline stays empty.
+    baselineRunId: string | null,
     selections: BaselineComparisonSelection[],
     opts: { metrics: ('avg' | 'p90' | 'p95' | 'p99')[]; userId: string; roles: string[] },
   ): Promise<BaselineComparisonRow[]> {
@@ -987,11 +1010,14 @@ export class ReportDataFetcherService {
 
     const kinds = new Set(wanted.map((s) => aggregatedKindFor(s.panelId)!));
     const scalars = new Map<string, { avg: number | null; p90: number | null; p95: number | null; p99: number | null }>();
+    const none = { avg: null, p90: null, p95: null, p99: null };
     for (const kind of kinds) {
       const [cur, base] = await Promise.all(
-        [currentRunId, baselineRunId].map((run) => (kind === 'transaction'
-          ? this.getAggregatedScalars(run, opts.userId, opts.roles)
-          : this.getAggregatedRequestScalars(run, opts.userId, opts.roles))),
+        [currentRunId, baselineRunId].map((run) => (run == null
+          ? Promise.resolve(none)
+          : kind === 'transaction'
+            ? this.getAggregatedScalars(run, opts.userId, opts.roles)
+            : this.getAggregatedRequestScalars(run, opts.userId, opts.roles))),
       );
       scalars.set(`${kind}:current`, cur!);
       scalars.set(`${kind}:baseline`, base!);
@@ -2871,7 +2897,9 @@ export class ReportDataFetcherService {
    */
   private async getUrlComparison(
     currentRunId: string,
-    baselineRunId: string,
+    // null: no baseline run (a control-group comparison) — the URL panels have no pooled
+    // control-group rows, so the rows carry the current values only.
+    baselineRunId: string | null,
     selections: BaselineComparisonSelection[],
     opts: { metrics: ('avg' | 'p90' | 'p95' | 'p99')[]; userId: string; roles: string[] },
   ): Promise<BaselineComparisonRow[]> {
@@ -2924,12 +2952,12 @@ export class ReportDataFetcherService {
         AND up.system_under_test = a.system_under_test
         AND up.test_environment = a.test_environment
        ORDER BY a.total_count DESC`,
-      [[currentRunId, baselineRunId], ...orgFilter.params],
+      [baselineRunId ? [currentRunId, baselineRunId] : [currentRunId], ...orgFilter.params],
     );
     if (rows.length === 0) return [];
 
     const num = (v: unknown) => (v == null ? null : Number(v));
-    const byRun = (id: string) => new Map(rows.filter((r) => r.test_run_id === id).map((r) => [r.normalized_url, r]));
+    const byRun = (id: string | null) => new Map(rows.filter((r) => r.test_run_id === id).map((r) => [r.normalized_url, r]));
     const current = byRun(currentRunId);
     const baseline = byRun(baselineRunId);
 
@@ -3185,54 +3213,200 @@ export class ReportDataFetcherService {
       return `${mapped}||${r.panel_title}||${r.metric_name}`;
     };
 
-    const fieldByKey = { avg: 'mean', p90: 'q90', p95: 'q95', p99: 'q99' } as const;
-
     // Request rows are named `transaction_name.sampler_name`, which says nothing about what was
     // called — the compare card shows the URL underneath, so the report does too.
     const urlByMetricName = source === 'performance-metrics' && cur.some((r) => isRequestPanel(r.panel_id))
       ? await this.getSamplerUrlMap(currentRunId, opts.userId ?? '', opts.roles ?? [])
       : {};
 
-    const rowsOut: BaselineComparisonRow[] = cur.map((c) => {
-      const b = baseByIdentity.get(remapIdentity(c));
-      const host = source === 'dynatrace' ? this.extractHost(c.metric_name) : null;
-      const panelTitle = source === 'performance-metrics'
-        ? perfPanelTitle(c.panel_id, c.panel_title)
-        : (c.panel_title ?? '');
-      return {
-        group:
-          source === 'dynatrace'
-            ? (host ?? 'Hosts')
-            : `${c.dashboard_label ?? 'Other'} / ${panelTitle}`.trim(),
-        label: c.metric_name ?? '',
-        dashboardLabel: c.dashboard_label ?? 'Other',
-        panelId: c.panel_id ?? undefined,
-        panelTitle,
-        ...(c.metric_name && urlByMetricName[c.metric_name] ? { url: urlByMetricName[c.metric_name] } : {}),
-        unit: c.unit,
-        // The pairing identity is dashboard/panel/metric name — the unit is NOT part of it,
-        // so a dashboardMap can legitimately pair an `s` panel against an `ms` one. Carry the
-        // baseline's own code rather than scaling and labelling its number with the current
-        // row's; the renderer falls back to `unit` when this is null.
-        baselineUnit: b?.unit ?? null,
-        // percentDiffScaled, not percentDiff: this is the ONE builder whose two sides can
-        // carry different unit codes (see baselineUnit above), and the raw pair 42 (`percent`)
-        // against 0.4 (`percentunit`) reads as +10400% beside a cell printing `42 vs 40`.
-        // Everywhere else the pair is fixed to one unit, where percentDiff is scale-invariant.
-        metrics: opts.metrics.map((k) => {
-          const cv = c[fieldByKey[k]];
-          const bv = b ? b[fieldByKey[k]] : null;
-          return {
-            key: k,
-            current: cv,
-            baseline: bv,
-            diffPercent: percentDiffScaled(cv, bv, c.unit, b?.unit ?? null),
-          };
-        }),
-      };
-    });
+    const rowsOut: BaselineComparisonRow[] = cur.map((c) =>
+      this.statisticsComparisonRow(c, baseByIdentity.get(remapIdentity(c)), source, opts.metrics, urlByMetricName));
 
     return { source, rows: rowsOut };
+  }
+
+  /**
+   * One comparison row from a current-run `ds_metric_statistics` row and whatever baseline row
+   * paired with it — another run's statistics row, or the control group's pooled one. Both
+   * statistics paths build their rows here, so a run-vs-run section and a control-group section
+   * group, label and scale a series identically.
+   */
+  private statisticsComparisonRow(
+    c: StatisticsComparisonSide & {
+      dashboard_label: string | null;
+      panel_title: string | null;
+      panel_id: number | null;
+      metric_name: string | null;
+    },
+    b: StatisticsComparisonSide | undefined,
+    source: 'grafana' | 'dynatrace' | 'performance-metrics',
+    metrics: ('avg' | 'p90' | 'p95' | 'p99')[],
+    urlByMetricName: Record<string, string>,
+  ): BaselineComparisonRow {
+    const fieldByKey = { avg: 'mean', p90: 'q90', p95: 'q95', p99: 'q99' } as const;
+    const host = source === 'dynatrace' ? this.extractHost(c.metric_name) : null;
+    const panelTitle = source === 'performance-metrics'
+      ? perfPanelTitle(c.panel_id, c.panel_title)
+      : (c.panel_title ?? '');
+    return {
+      group:
+        source === 'dynatrace'
+          ? (host ?? 'Hosts')
+          : `${c.dashboard_label ?? 'Other'} / ${panelTitle}`.trim(),
+      label: c.metric_name ?? '',
+      dashboardLabel: c.dashboard_label ?? 'Other',
+      panelId: c.panel_id ?? undefined,
+      panelTitle,
+      ...(c.metric_name && urlByMetricName[c.metric_name] ? { url: urlByMetricName[c.metric_name] } : {}),
+      unit: c.unit,
+      // The pairing identity is dashboard/panel/metric name — the unit is NOT part of it,
+      // so a dashboardMap can legitimately pair an `s` panel against an `ms` one. Carry the
+      // baseline's own code rather than scaling and labelling its number with the current
+      // row's; the renderer falls back to `unit` when this is null.
+      baselineUnit: b?.unit ?? null,
+      // percentDiffScaled, not percentDiff: this is the ONE builder whose two sides can
+      // carry different unit codes (see baselineUnit above), and the raw pair 42 (`percent`)
+      // against 0.4 (`percentunit`) reads as +10400% beside a cell printing `42 vs 40`.
+      // Everywhere else the pair is fixed to one unit, where percentDiff is scale-invariant.
+      metrics: metrics.map((k) => {
+        const cv = c[fieldByKey[k]];
+        const bv = b ? b[fieldByKey[k]] : null;
+        return {
+          key: k,
+          current: cv,
+          baseline: bv,
+          diffPercent: percentDiffScaled(cv, bv, c.unit, b?.unit ?? null),
+        };
+      }),
+    };
+  }
+
+  /**
+   * The control group behind this run's anomaly detection, or null when it has none.
+   *
+   * The run itself was authorized before the section rendered; the group is keyed on it, so
+   * this needs no access check of its own — the same footing as `getRegressionsData`.
+   */
+  async getControlGroupForRun(testRunId: string): Promise<ControlGroupInfo | null> {
+    try {
+      return await loadControlGroupForRun(this.dataSource, testRunId);
+    } catch (error) {
+      this.logger.warn(`Failed to resolve the control group of ${testRunId}: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Compare this run against its control group: the pooled `ds_control_group_statistics` the
+   * anomaly-detection card shows as "control", instead of another single run's statistics.
+   *
+   * Pairs on `(application_dashboard_id, panel_id, metric_name)` — ADAPT's own identity, and
+   * unambiguous because a control group is built from the same system and environment, so the
+   * dashboard ids agree. That is also why a `dashboardMap` has no meaning here and is ignored.
+   *
+   * Three shapes differ from the run-vs-run comparison:
+   *  - A performance-metrics section with NO selection compares Transaction RT Avg (panel 101)
+   *    per transaction. The run-vs-run default reads raw `transactions` for two runs; pooling
+   *    raw percentiles over a whole control group is not what anomaly detection compares and
+   *    would scan every member run, so the control-group default reads the panel ADAPT reads.
+   *  - The synthetic "All aggregated" series and the URL panels have no pooled control rows.
+   *    They are listed with the current value only, never with an invented baseline.
+   *  - A series the control group has no row for (new since the group was built) keeps its
+   *    row with an empty baseline, exactly as a series missing from a baseline run does.
+   */
+  async getControlGroupComparison(
+    currentRunId: string,
+    controlGroupId: string,
+    source: 'performance-metrics' | 'grafana' | 'dynatrace',
+    opts: {
+      metrics: ('avg' | 'p90' | 'p95' | 'p99')[];
+      userId: string;
+      roles: string[];
+      selections?: BaselineComparisonSelection[];
+    },
+  ): Promise<BaselineComparisonData | null> {
+    let selections = opts.selections ?? [];
+    let unpooledRows: { aggregated: BaselineComparisonRow[]; url: BaselineComparisonRow[] } = { aggregated: [], url: [] };
+    let defaultPanels: number[] | undefined;
+    if (source === 'performance-metrics') {
+      if (selections.length === 0) {
+        defaultPanels = [PERF_TXN_RT_AVG_PANEL_ID];
+      } else {
+        unpooledRows = {
+          aggregated: await this.getAggregatedSeriesRows(currentRunId, null, selections, opts),
+          url: await this.getUrlComparison(currentRunId, null, selections, opts),
+        };
+        selections = selections
+          .filter((s) => !isUrlPanel(s.panelId))
+          .map((s) => (isSyntheticAllAggregated(s)
+            ? { ...s, metricNames: s.metricNames!.filter((m) => m !== ALL_AGGREGATED_SERIES) }
+            : s))
+          .filter((s) => !(s.metricNames && s.metricNames.length === 0));
+        if (selections.length === 0) {
+          const rows = [...unpooledRows.aggregated, ...unpooledRows.url];
+          return rows.length ? { source, rows } : null;
+        }
+      }
+    }
+
+    const sourceType =
+      source === 'grafana' ? 'grafana' : source === 'dynatrace' ? 'dynatrace' : 'performance_test';
+    const params: unknown[] = [currentRunId, sourceType];
+    let scopeFilter = '';
+    if (selections.length > 0) {
+      params.push([...new Set(selections.map((sel) => sel.dashboardLabel))]);
+      scopeFilter += ` AND s.dashboard_label = ANY($${params.length})`;
+    }
+    if (defaultPanels) {
+      params.push(defaultPanels);
+      scopeFilter += ` AND s.panel_id = ANY($${params.length}::int[])`;
+    }
+    const orgFilter = await this.resolveOrgFilter(opts.userId, opts.roles, params.length + 1, 'tr');
+    params.push(...orgFilter.params);
+    const current: Array<StatisticsComparisonSide & {
+      application_dashboard_id: string;
+      dashboard_label: string | null;
+      panel_title: string | null;
+      panel_id: number | null;
+      metric_name: string | null;
+    }> = await this.dataSource.query(
+      `/* report:control-group-comparison */
+       SELECT s.application_dashboard_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name,
+              s.unit, s.mean, s.q90, s.q95, s.q99
+       FROM ds_metric_statistics s
+       JOIN test_runs tr ON tr.test_run_id = s.test_run_id
+       LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
+       WHERE s.test_run_id = $1 AND (s.metrics_source_id IS NULL OR ms.source_type = $2)${scopeFilter}${orgFilter.clause}`,
+      params,
+    );
+
+    const selected = (r: typeof current[number]) =>
+      selections.length === 0 ||
+      selections.some(
+        (sel) =>
+          sel.dashboardLabel === r.dashboard_label &&
+          (sel.panelId == null || sel.panelId === r.panel_id) &&
+          (!sel.metricNames?.length || (r.metric_name != null && sel.metricNames.includes(r.metric_name))),
+      );
+    const cur = current.filter(selected);
+
+    // Read the group only once the run has answered: an org filter that hid the run's own
+    // statistics must not be followed by a read keyed on that run.
+    const control = cur.length
+      ? await loadControlGroupStatistics(this.dataSource, controlGroupId)
+      : [];
+    const key = (r: { application_dashboard_id: string; panel_id: number | null; metric_name: string | null }) =>
+      `${r.application_dashboard_id}||${r.panel_id}||${r.metric_name}`;
+    const controlByKey = new Map(control.map((r) => [key(r), r]));
+
+    const urlByMetricName = source === 'performance-metrics' && cur.some((r) => isRequestPanel(r.panel_id))
+      ? await this.getSamplerUrlMap(currentRunId, opts.userId, opts.roles)
+      : {};
+    const statRows = cur.map((c) =>
+      this.statisticsComparisonRow(c, controlByKey.get(key(c)), source, opts.metrics, urlByMetricName));
+
+    const rows = [...unpooledRows.aggregated, ...statRows, ...unpooledRows.url];
+    return rows.length ? { source, rows } : null;
   }
 
   /**

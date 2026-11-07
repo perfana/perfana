@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceDashboards, DynatraceDashboard } from '@/lib/dynatrace';
 import {
@@ -14,7 +14,20 @@ import {
   RelatedTestRun,
   ComparisonStatus,
 } from '../types';
-import { calculatePercentageDifference, buildAggregatedComparisons, DEFAULT_DISPLAY_CONFIG, DisplayConfig } from '../utils/compare-utils';
+import {
+  calculatePercentageDifference,
+  buildAggregatedComparisons,
+  controlGroupOption,
+  isControlGroupOption,
+  DEFAULT_DISPLAY_CONFIG,
+  DisplayConfig,
+} from '../utils/compare-utils';
+import {
+  CONTROL_GROUP_BASELINE,
+  fetchControlGroup,
+  fetchControlGroupStatistics,
+  type ControlGroup,
+} from '@/lib/control-group-baseline';
 import { TestRun } from '@/types/test-runs';
 import { isGrafana, isPerformanceTest} from '@/lib/metrics-source-utils';
 import { getAggregateSpec, fetchAggregatedStatistics } from '@/lib/aggregated-perf-series';
@@ -38,6 +51,9 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   const [loading, setLoading] = useState(false);
   const [comparisonStatus, setComparisonStatus] = useState<ComparisonStatus | null>(null);
   const [selectedTestRun, setSelectedTestRun] = useState<RelatedTestRun | null>(null);
+  // The run's control group, offered as a baseline. `undefined` until asked for, `null` when
+  // the run has none — kept apart so a run with no group is not re-asked on every render.
+  const [controlGroup, setControlGroup] = useState<ControlGroup | null | undefined>(undefined);
 
   // Source and selection state
   const [selectedSource, setSelectedSource] = useState<DataSource>('grafana');
@@ -172,6 +188,14 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   const fetchMetricsComparison = useCallback(async () => {
     if (!selectedTestRun || !testRun || addedSeries.length === 0) return;
 
+    // Against the control group the baseline is not a run: its values come from the group's
+    // pooled statistics, and the series ADAPT does not pool (URL panels, "All aggregated")
+    // are shown with the current value only, never with a stand-in.
+    const againstControlGroup = isControlGroupOption(selectedTestRun);
+    const runsToRead = againstControlGroup
+      ? [testRun.test_run_id]
+      : [testRun.test_run_id, selectedTestRun.test_run_id];
+
     try {
       setMetricsLoading(true);
 
@@ -207,13 +231,14 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
 
       for (const [, group] of seriesGroups) {
         let allData: MetricStatistic[];
+        let controlData: MetricStatistic[] = [];
 
         if (isUrlPanel(group.panelId)) {
           const metric = getUrlPanelMetric(group.panelId);
           if (!metric) continue;
           allData = await fetchUrlMetricStatistics(
             testRun.test_run_id,
-            [testRun.test_run_id, selectedTestRun.test_run_id],
+            runsToRead,
             metric,
           );
         } else {
@@ -225,18 +250,39 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
             workload: testRun.workload || '',
           });
           if (group.metricsSourceId) params.set('metricsSourceId', group.metricsSourceId);
-          const response = await authenticatedFetch(
-            `/metrics/ds-metric-statistics?${params.toString()}`,
-            { headers: { 'Content-Type': 'application/json' } },
-          );
+          const [response, control] = await Promise.all([
+            authenticatedFetch(
+              `/metrics/ds-metric-statistics?${params.toString()}`,
+              { headers: { 'Content-Type': 'application/json' } },
+            ),
+            againstControlGroup
+              ? fetchControlGroupStatistics(testRun.test_run_id, {
+                  applicationDashboardId: group.dashboardId,
+                  metricsSourceId: group.metricsSourceId,
+                  panelId: group.panelId,
+                })
+              : Promise.resolve([]),
+          ]);
           if (!response.ok) continue;
           allData = await response.json();
+          // Shaped like a run's statistics row so the pairing below reads both sides alike.
+          controlData = control.map((c) => ({
+            test_run_id: CONTROL_GROUP_BASELINE,
+            panel_title: c.panel_title,
+            metric_name: c.metric_name,
+            created_at: '',
+            version: null,
+            annotations: null,
+            statistics: c.statistics,
+          }));
         }
 
         const relevant = new Set(group.metricNames);
         const filtered = allData.filter(item => relevant.has(item.metric_name));
         const currentData = filtered.filter(item => item.test_run_id === testRun.test_run_id);
-        const selectedData = filtered.filter(item => item.test_run_id === selectedTestRun.test_run_id);
+        const selectedData = againstControlGroup
+          ? controlData.filter(item => relevant.has(item.metric_name))
+          : filtered.filter(item => item.test_run_id === selectedTestRun.test_run_id);
         allCurrentMetrics.push(...currentData);
         allSelectedMetrics.push(...selectedData);
 
@@ -292,7 +338,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         [...specByMetric.values()].map(async spec => {
           const values = await fetchAggregatedStatistics(
             testRun.test_run_id,
-            [testRun.test_run_id, selectedTestRun.test_run_id],
+            runsToRead,
             spec,
           );
           return [spec.metric, new Map(values.map(v => [v.testRunId, v]))] as const;
@@ -306,7 +352,7 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         const cells = buildAggregatedComparisons(
           series,
           byId.get(testRun.test_run_id),
-          byId.get(selectedTestRun.test_run_id),
+          againstControlGroup ? undefined : byId.get(selectedTestRun.test_run_id),
           spec.stat,
         );
         for (const cell of cells) {
@@ -394,6 +440,28 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     }
   }, [compareExpanded, testRun, relatedTestRuns.length, fetchRelatedTestRuns]);
 
+  // The control group is asked for once per run, on first expand.
+  const anchorRunId = testRun?.test_run_id;
+  useEffect(() => {
+    if (!compareExpanded || !anchorRunId || controlGroup !== undefined) return;
+    let cancelled = false;
+    fetchControlGroup(anchorRunId).then((group) => {
+      if (!cancelled) setControlGroup(group);
+    });
+    return () => { cancelled = true; };
+  }, [compareExpanded, anchorRunId, controlGroup]);
+
+  // A different run has a different control group.
+  useEffect(() => {
+    setControlGroup(undefined);
+  }, [anchorRunId]);
+
+  /** What the baseline picker offers: the control group first, when the run has one, then the runs. */
+  const baselineOptions = useMemo<RelatedTestRun[]>(
+    () => (controlGroup ? [controlGroupOption(controlGroup), ...relatedTestRuns] : relatedTestRuns),
+    [controlGroup, relatedTestRuns],
+  );
+
   // Load dashboards when component mounts
   useEffect(() => {
     if (dashboards.length === 0 && testRun) {
@@ -421,6 +489,8 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
   return {
     // State
     relatedTestRuns,
+    controlGroup: controlGroup ?? null,
+    baselineOptions,
     loading,
     comparisonStatus,
     selectedTestRun,

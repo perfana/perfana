@@ -26,6 +26,7 @@ import ComparePresetsTable from '../ComparePresetsTable';
 import { ComparePreset } from '../ComparePresetsTable';
 import { TestRun } from '@/types/test-runs';
 import PresetsAccordion from '../../shared/PresetsAccordion';
+import type { ControlGroup } from '@/lib/control-group-baseline';
 
 interface CompareExpandedContentProps {
   // Loading state
@@ -41,6 +42,8 @@ interface CompareExpandedContentProps {
 
   // Test runs
   relatedTestRuns: RelatedTestRun[];
+  /** The run's control group, offered as a baseline. Null when it has none. */
+  controlGroup?: ControlGroup | null;
   selectedTestRun: RelatedTestRun | null;
   onTestRunSelect: (testRun: RelatedTestRun | null) => void;
 
@@ -87,6 +90,7 @@ export function CompareExpandedContent({
   onDeletePreset,
   onSavePresetClick,
   relatedTestRuns,
+  controlGroup = null,
   selectedTestRun,
   onTestRunSelect,
   allDashboards,
@@ -122,11 +126,12 @@ export function CompareExpandedContent({
 
   return (
     <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {relatedTestRuns.length > 0 ? (
+      {relatedTestRuns.length > 0 || controlGroup ? (
         <>
           {/* Selection Panel */}
           <CompareSelectionPanel
             relatedTestRuns={relatedTestRuns}
+            controlGroup={controlGroup}
             selectedTestRun={selectedTestRun}
             onTestRunSelect={onTestRunSelect}
             allDashboards={allDashboards}

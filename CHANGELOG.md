@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.51] - 2026-11-07
+
+### Added
+- **Compare against the control group.** The Compare card's baseline picker and the report Comparisons section's baseline picker now offer **Control group** next to the single runs. It compares the run against the earlier runs anomaly detection judges it against, using their pooled statistics: the same control values the Anomaly Detection card shows, and less noisy than one other run. The option is offered only when the run has a control group. A first run, or one whose analysis has not finished, has none.
+
+  In the Compare card, the caption under the picker names the group's runs. A row's graph draws the group's mean as a flat dashed line, because a pooled group has no time series of its own. A compare preset saved against the control group restores it on any run. It is saved as a generic preset by default, because every run has its own control group.
+
+  In a report, the section names the group's runs under its heading, because a group is rebuilt on every re-evaluate. A section with no dashboard selection compares Transaction RT Avg per transaction, the panel anomaly detection reads, rather than raw response-time percentiles. A row graph draws the group's mean as a flat line, which needs the `avg` metric. The dashboard mapping does not apply, because a control group shares the run's environment. Templates and the ad-hoc API take it as `"baselineTestRunId": "control-group"`.
+
+  The synthetic "All aggregated" series and the URL panels have no control-group statistics, so they are listed with the current value only.
+
+  New endpoints: `GET /api/metrics/control-group/:testRunId` and `GET /api/metrics/control-group-statistics/:testRunId`. `GET /api/metrics/ds-metrics-comparison` now accepts a request without `baselineTestRunId` and returns the current run alone.
+
 ## [0.2.97.50] - 2026-11-07
 
 ### Changed

@@ -1,6 +1,39 @@
 import { RelatedTestRun, CompareSeries, MetricComparison } from '../types/compare.types';
 import { DiffThresholds } from './compare-bands';
 import { toUnitScale } from '@/lib/units';
+import {
+  CONTROL_GROUP_BASELINE,
+  controlGroupRunCount,
+  formatRunCount,
+  isControlGroupBaseline,
+  summariseControlGroupRuns,
+  type ControlGroup,
+} from '@/lib/control-group-baseline';
+
+/**
+ * The baseline picker's "Control group" option.
+ *
+ * It rides in the same list as the runs (and in the same `selectedTestRun` state) so every
+ * consumer that only needs an id — preset save and restore, the "is a baseline selected"
+ * checks — keeps working unchanged. The ones that would treat the id as a run branch on
+ * `isControlGroupBaseline` instead.
+ */
+export const controlGroupOption = (group: ControlGroup): RelatedTestRun => ({
+  test_run_id: CONTROL_GROUP_BASELINE,
+  created_at: group.last_datetime ?? '',
+  completed: true,
+  control_group: group,
+});
+
+/** True for the synthetic option above. */
+export const isControlGroupOption = (testRun: RelatedTestRun | null | undefined): boolean =>
+  !!testRun && isControlGroupBaseline(testRun.test_run_id);
+
+/** What the baseline is called in a caption: the run id, or "control group (3 runs)". */
+export const baselineDisplayName = (testRun: RelatedTestRun): string =>
+  isControlGroupOption(testRun)
+    ? `control group${testRun.control_group ? ` (${formatRunCount(controlGroupRunCount(testRun.control_group))})` : ''}`
+    : testRun.test_run_id;
 
 // Module-level: constructing an Intl.NumberFormat per call measured 14.8us vs 0.34us for a
 // cached one — 43x, on a table that formats two values per cell across up to 4 columns.
@@ -48,6 +81,12 @@ export const getDiffColor = (diff: number | null): string => {
  * Format test run display text
  */
 export const getTestRunDisplayText = (testRun: RelatedTestRun): string => {
+  // The synthetic option has no run behind it, so no timestamp to format.
+  if (isControlGroupOption(testRun)) {
+    return testRun.control_group
+      ? `Control group (${formatRunCount(controlGroupRunCount(testRun.control_group))})`
+      : 'Control group';
+  }
   const startTime = testRun.start_time || testRun.created_at;
   const formattedTime = new Date(startTime).toLocaleString('en-US', {
     year: 'numeric',
@@ -63,6 +102,9 @@ export const getTestRunDisplayText = (testRun: RelatedTestRun): string => {
  * Get test run secondary info string
  */
 export const getTestRunSecondaryInfo = (testRun: RelatedTestRun): string => {
+  if (isControlGroupOption(testRun)) {
+    return testRun.control_group ? `Runs: ${summariseControlGroupRuns(testRun.control_group.test_runs)}` : '';
+  }
   const parts = [];
 
   if (testRun.application_release) {

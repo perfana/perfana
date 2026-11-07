@@ -37,6 +37,9 @@ export function parseMetricTimeRange(from?: string, to?: string): MetricTimeRang
 const SERIES_MEMBERS_DESCRIPTION =
   'Set to `true` to skip series grouping and get the raw per-pod series: a group name is then answered by its members, unaggregated. Default: group names, each combined from its members.';
 
+/** Any RFC 4122-shaped id; Postgres accepts every version. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @ApiTags('metrics')
 @ApiBearerAuth()
 @Controller('metrics')
@@ -230,19 +233,26 @@ export class MetricsController {
   }
 
   @Get('ds-metrics-comparison')
-  @ApiOperation({ summary: 'Get raw DS metrics data for two test runs to compare in a graph' })
+  @ApiOperation({
+    summary: 'Get raw DS metrics data for two test runs to compare in a graph',
+    description:
+      'Omit `baselineTestRunId` to get the current run alone (`baselineMetrics` is then `[]`). ' +
+      'The Compare card does that when its baseline is the control group, which is a set of ' +
+      'runs with pooled statistics and no time series of its own.',
+  })
+  @ApiQuery({ name: 'baselineTestRunId', required: false, description: 'Baseline test run id. Omit for the current run only.' })
   @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
   async getDSMetricsComparison(
     @UserCtx() ctx: UserContext,
     @Query('currentTestRunId') currentTestRunId: string,
-    @Query('baselineTestRunId') baselineTestRunId: string,
+    @Query('baselineTestRunId') baselineTestRunId: string | undefined,
     @Query('applicationDashboardId') applicationDashboardId: string,
     @Query('panelId') panelId: string,
     @Query('metricName') metricName?: string,
     @Query('metricsSourceId') metricsSourceId?: string,
   ) {
-    if (!currentTestRunId || !baselineTestRunId || (!applicationDashboardId && !metricsSourceId) || !panelId) {
-      throw new BadRequestException('currentTestRunId, baselineTestRunId, applicationDashboardId (or metricsSourceId), and panelId are required');
+    if (!currentTestRunId || (!applicationDashboardId && !metricsSourceId) || !panelId) {
+      throw new BadRequestException('currentTestRunId, applicationDashboardId (or metricsSourceId), and panelId are required');
     }
 
     const panelIdNumber = parseInt(panelId, 10);
@@ -254,14 +264,16 @@ export class MetricsController {
       // Fetch metrics for both test runs - filter by metricName at database level for efficiency
       const [currentMetrics, baselineMetrics] = await Promise.all([
         this.metricsService.findDSMetricsForPanel(currentTestRunId, panelIdNumber, applicationDashboardId, metricName, ctx.userId, ctx.roles, metricsSourceId),
-        this.metricsService.findDSMetricsForPanel(baselineTestRunId, panelIdNumber, applicationDashboardId, metricName, ctx.userId, ctx.roles, metricsSourceId)
+        baselineTestRunId
+          ? this.metricsService.findDSMetricsForPanel(baselineTestRunId, panelIdNumber, applicationDashboardId, metricName, ctx.userId, ctx.roles, metricsSourceId)
+          : Promise.resolve([]),
       ]);
 
       return {
         currentMetrics: currentMetrics || [],
         baselineMetrics: baselineMetrics || [],
         currentTestRunId,
-        baselineTestRunId,
+        baselineTestRunId: baselineTestRunId || null,
         applicationDashboardId,
         metricsSourceId: metricsSourceId || null,
         panelId: panelIdNumber,
@@ -271,6 +283,65 @@ export class MetricsController {
       this.logger.error('Error fetching DS metrics comparison:', error);
       throw error;
     }
+  }
+
+  @Get('control-group/:testRunId')
+  @ApiOperation({
+    summary: 'The control group behind a test run\'s anomaly detection',
+    description:
+      'The earlier runs ADAPT compares this run against, as named by its latest conclusion. ' +
+      'Answers `null` when the run has no control group yet (a first run, or ADAPT has not run) ' +
+      'or the caller cannot see the run.',
+  })
+  async getControlGroup(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+  ) {
+    return this.metricsService.findControlGroup(testRunId, ctx.userId, ctx.roles);
+  }
+
+  @Get('control-group-statistics/:testRunId')
+  @ApiOperation({
+    summary: 'A panel\'s statistics over a test run\'s control group',
+    description:
+      'The pooled `ds_control_group_statistics` of the run\'s control group for one panel: the ' +
+      '"control" values anomaly detection compares against. `statistics` is keyed like ' +
+      '`ds-metric-statistics` (`avg`, `min`, `max`, `q50`, `q90`, `q95`, `q99`, `count`). Empty ' +
+      'when the run has no control group, or for series ADAPT does not pool (the synthetic ' +
+      '"All aggregated" series and the URL panels).',
+  })
+  @ApiQuery({ name: 'applicationDashboardId', required: false, description: 'Application dashboard UUID' })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
+  @ApiQuery({ name: 'panelId', required: true })
+  async getControlGroupStatistics(
+    @Param('testRunId') testRunId: string,
+    @UserCtx() ctx: UserContext,
+    @Query('panelId') panelId: string,
+    @Query('applicationDashboardId') applicationDashboardId?: string,
+    @Query('metricsSourceId') metricsSourceId?: string,
+  ) {
+    if ((!applicationDashboardId && !metricsSourceId) || !panelId) {
+      throw new BadRequestException('applicationDashboardId (or metricsSourceId) and panelId are required');
+    }
+    const panelIdNumber = Number(panelId);
+    if (!Number.isInteger(panelIdNumber)) {
+      throw new BadRequestException('Invalid panel ID');
+    }
+    // Both ids are bound as uuid: a malformed one would otherwise surface as a 500 from
+    // Postgres ("invalid input syntax for type uuid") instead of a 400.
+    for (const [name, value] of [['applicationDashboardId', applicationDashboardId], ['metricsSourceId', metricsSourceId]] as const) {
+      if (value && !UUID_PATTERN.test(value)) {
+        throw new BadRequestException(`${name} must be a UUID`);
+      }
+    }
+    return this.metricsService.findControlGroupStatistics(
+      testRunId,
+      panelIdNumber,
+      applicationDashboardId || undefined,
+      ctx.userId,
+      ctx.roles,
+      metricsSourceId || undefined,
+    );
   }
 
   @Get('control-group-trends/:testRunId')
