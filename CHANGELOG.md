@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.49] - 2026-11-07
+
+### Added
+- **A how-to for checking the UI with Vibium.** `docs/reference/Operations/Vibium.md` covers installing it, a scripted sign-in on the demo stack, opening Perfana pages reliably, reading chart values, checking what Copy produces, and the known issues. Vibium is installed per user and is not a repo dependency.
+
 ## [0.2.97.48] - 2026-11-07
 
 ### Fixed
