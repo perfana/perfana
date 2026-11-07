@@ -413,36 +413,12 @@ for the chart tokens, with a drift spec that preflight runs (`chart-tokens.spec.
 drift spec asserting the two values still match. Low stakes on its own — a divergence shows up
 as the Graphs card and the report drawing slightly different margins, never as wrong data.
 
-### A typed graph title is overwritten whenever a series is added or removed
-
-**Priority:** P3
-**Origin:** found while adding Clear all to the Graphs card (v0.2.96.28+).
-
-`useGraphsData` has an effect that regenerates `chartName` from `addedSeries` on every
-change:
-
-```ts
-useEffect(() => {
-  setChartName(generateChartName(addedSeries));
-}, [addedSeries]);
-```
-
-The card's title is an editable `InputBase`, so a user can type a name — and then loses it
-the moment they add or remove one series. Clearing all series empties it entirely, which is
-how this surfaced. The auto-name is useful as a *default*; it should stop applying once the
-user has edited the field (track a `nameIsUserEdited` flag, or only generate while the name
-is still the previously generated one).
-
-Pinned as current behaviour in
-`__tests__/app/test-runs/graphs/useGraphsData.addSeries.test.ts` so a fix has to update
-that test deliberately.
-
-### The eight chart copy buttons have no end-to-end test
+### The six modebar copy buttons have no end-to-end test
 
 **Priority:** P3
 **Origin:** test-coverage and testing reviews of v0.2.96.27.
 
-`apps/web/lib/plotly.ts` is well covered, but the eight modebar adapters that call it are
+`apps/web/lib/plotly.ts` is well covered, but the six modebar adapters that call it are
 not: no test asserts the filename, the toast, or that the download fallback fires. jsdom
 has no CSP, so the original bug could not have been caught there either — this wants one
 representative integration test (`transaction-graph-modal/utils/chart-config.ts` has a
@@ -2541,11 +2517,12 @@ Wrapping the `cascade` prop in `useCallback` instead is the trap — its deps in
 invalidates would serve a stale dashboard list.
 
 
-### Nine Plotly call sites still resize on `window` only
+### Three Plotly call sites still resize on `window` only
 
 **Priority:** P3
 **Origin:** deliberate scope cut in v0.2.95.2 (`fix/plotly-hover-align-resize-observer`), which
-fixed the three anomaly-detection charts and left the rest.
+fixed the three anomaly-detection charts and left the rest. Six of the nine it left have moved
+over since.
 **Why:** `react-plotly.js` 2.6.0's `useResizeHandler` is a `window` resize listener and nothing
 else, so a chart whose *container* changes size without the window changing keeps Plotly's cached
 geometry. The visible symptom is a hover label whose text and background box drift apart — the text
@@ -2562,12 +2539,8 @@ site and the chart, so anywhere the chart is sized or positioned by the element 
 currently renders needs a look. Do them in small batches with a visual check, not as one sweep.
 (Chart export is unaffected — the modebar handler is handed the graph div by Plotly itself, see
 `apps/web/lib/plotly.ts`.)
-**Where:** `compare/components/ComparisonPlot.tsx`, `dynatrace/HostPerformanceGraphs.tsx`,
-`graphs/GraphsChart.tsx`, `performance-analysis/RequestTimeSeriesModal.tsx`,
-`performance-analysis/error-analysis/components/ErrorsOverTimeChart.tsx`,
-`performance-analysis/transaction-graph-modal/components/TransactionChart.tsx`,
-`service-level-objectives/AggregatedSloChart.tsx`,
-`service-level-objectives/SLOMetricsChart.tsx`, `trends/components/TrendsChart.tsx` — all under
+**Where:** `dynatrace/HostPerformanceGraphs.tsx`, `service-level-objectives/AggregatedSloChart.tsx`
+and `service-level-objectives/SLOMetricsChart.tsx`, all under
 `apps/web/app/test-runs/[id]/components/`.
 
 **Do not delete the `onEntered` resize kicks as part of this.** MUI clips a `Collapse` rather than

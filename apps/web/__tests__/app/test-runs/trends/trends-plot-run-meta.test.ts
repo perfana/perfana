@@ -36,7 +36,7 @@ const row = (
 
 const plot = (metricsData: MetricStatistic[], addedSeries: TrendsSeries[] = [rt], trendsExpanded = true) =>
   renderHook(() =>
-    useTrendsPlot({ metricsData, trendsExpanded, addedSeries, showToast: jest.fn(), cursorIndex: null }),
+    useTrendsPlot({ metricsData, trendsExpanded, addedSeries, cursorIndex: null }),
   ).result.current.runMeta;
 
 it('keeps the release and the annotations of every run that carries them', () => {

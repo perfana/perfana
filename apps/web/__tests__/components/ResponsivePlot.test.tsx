@@ -52,6 +52,25 @@ afterEach(() => {
   delete (window as unknown as { Plotly?: unknown }).Plotly;
 });
 
+it("keeps Plots.resize from deleting the height off the caller's own layout", async () => {
+  const layout = { height: 694 };
+  const { rerender } = render(<ResponsivePlot data={[]} layout={layout} />);
+  await screen.findByTestId('plot-1');
+  const handedToPlotly = plotProps[plotProps.length - 1]!.layout as { height?: number };
+
+  // What Plots.resize does to the object it holds.
+  delete handedToPlotly.height;
+  expect(layout.height).toBe(694);
+
+  // A hover re-render with the same layout must not read as a new figure to react-plotly.
+  rerender(<ResponsivePlot data={[]} layout={layout} />);
+  expect(plotProps[plotProps.length - 1]!.layout).toBe(handedToPlotly);
+
+  const next = { height: 300 };
+  rerender(<ResponsivePlot data={[]} layout={next} />);
+  expect(plotProps[plotProps.length - 1]!.layout).toEqual(next);
+});
+
 it('forwards every prop, including useResizeHandler, to the underlying Plot', async () => {
   const layout = { title: 'trend' };
   render(<ResponsivePlot data={[{ x: [1] }]} layout={layout} useResizeHandler />);

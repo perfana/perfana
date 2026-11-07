@@ -160,6 +160,10 @@ describe('buildTimeSeriesLayout — shared gridlines', () => {
     expect(overlay(s('a', 'ms', 1), s('b', 'req/s', 1)).margin.r).toBe(46);
   });
 
+  it('never tops a zero-pinned axis out below the data', () => {
+    expect(overlay(s('a', 'ms', 466)).yaxis.range).toEqual([0, 600]);
+  });
+
   it('takes the overlay height unless a card overrides it', () => {
     expect(overlay(s('a', 'ms', 1)).height).toBe(SIZE.overlayHeight);
     const sized = buildTimeSeriesLayout({

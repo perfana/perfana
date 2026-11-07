@@ -29,7 +29,6 @@ const render = (metricsData: MetricStatistic[]) =>
       metricsData,
       trendsExpanded: true,
       addedSeries: [rt],
-      showToast: jest.fn(),
       cursorIndex: null,
     }),
   );

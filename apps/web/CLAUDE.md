@@ -160,6 +160,13 @@ Two consequences:
    the exact failure the flag exists to remove. `sloShape` has no production caller today; give
    it a paper ref before wiring one into a narrowed view.
 
+A zero-pinned axis uses the last entry of `tickValues` (`lib/charts/format.ts`) as its top, so that
+list has to reach the data. Until v0.2.97.48 it stopped at the tick nearest `max`, so 466 on a step
+of 200 gave `[0, 200, 400]`: a 0-400 axis with the peak cut off and nothing logged. Only a max less
+than half a step past a tick showed it, and the series table only gives it away when the peak sits
+inside the analysis window, since its stats cover that window alone. It now
+runs to the first tick at or above `max`, which costs some headroom (401 tops out at 600).
+
 ### The Graphs zoom reset
 
 1. **A reset is recognised only by `xaxis.autorange`, never by a full-span range.** Plotly
@@ -219,7 +226,7 @@ observes its own wrapper div, and calls `Plotly.Plots.resize` on **its own** gra
 call sites should import it (`import Plot from '@/components/ResponsivePlot'`) rather than writing
 `dynamic(() => import('@/components/plotly-cartesian'))` again.
 
-Four things about it are load-bearing:
+Five things about it are load-bearing:
 
 1. **It resizes that one chart, deliberately.** Dispatching a window resize instead — what
    `kickPlotlyResize` in `app/test-runs/[id]/components/shared/ExpandableCardHeader.tsx` does — wakes
@@ -236,10 +243,21 @@ Four things about it are load-bearing:
    `.js-plotly-plot` yet (the lazy chunk has not drawn) → skip, its first draw measures the current
    size anyway; and `Plots.resize` rejects when the div is hidden, so the call is `.catch`ed or the
    rejection surfaces as a page error.
-4. **Only three call sites use it so far** — `anomaly-detection/components/TrendChart.tsx`,
-   `anomaly-detection/.../AnomalyExpandedContent.tsx`, and `compare/CurrentTestRunChart.tsx`. Nine
-   others still call `dynamic(() => import('@/components/plotly-cartesian'))` directly and therefore still respond
-   to a window resize only; that is deliberate scope, tracked in TODOS.md, not an oversight.
+4. **Three call sites still bypass it** — `dynatrace/HostPerformanceGraphs.tsx`,
+   `service-level-objectives/AggregatedSloChart.tsx` and `service-level-objectives/SLOMetricsChart.tsx`
+   call `dynamic(() => import('@/components/plotly-cartesian'))` directly and therefore respond to a
+   window resize only; that is deliberate scope, tracked in TODOS.md, not an oversight.
+5. **It hands Plotly a copy of the layout, because `Plots.resize` deletes `width` and `height` from
+   the object it holds** (v0.2.97.48), and react-plotly gives it the caller's own. `GraphsChart` and
+   `TrendsChart` size their container from `layout.height ?? <300px default>`, so after any resize the
+   next render that reused the layout (on Graphs, any hover) took the default, and the following resize autosized the plot to
+   it. A lanes chart's domains are fractions, so four lanes built for 694px squeezed into 300 with
+   their captions over each other's ticks. An overlay chart's real height IS 300, so it never showed.
+   What triggers it is any `Plots.resize`: `config.responsive`'s window listener, `kickPlotlyResize`,
+   the observer above, a tab switch. The copy is memoized on the caller's layout, because a fresh
+   object per render reads as a new figure to react-plotly, which on Graphs is a `Plotly.react` per
+   hover. Trends and Compare already rebuild their layout on hover (`cursorIndex` is in their memo
+   deps), which is why a Trends chart squashed only until its next hover.
 
 jsdom has no `ResizeObserver`. `apps/web/jest.setup.js` stubs it so a component that observes its
 container mounts in tests at all.
@@ -254,14 +272,23 @@ violation reaches the `catch`, nothing distinguishes it from a dead network. Eve
 the button failed on **every chart, in every browser, on localhost and in production alike**,
 and reported it as a network error. Fixed in v0.2.96.27.
 
-`apps/web/lib/plotly.ts` is now the one implementation. All eight modebar copy buttons go
-through it: `graphs/utils/chart-utils.ts`, `compare/components/ComparisonPlot.tsx`,
+`apps/web/lib/plotly.ts` is now the one implementation. `components/charts/ChartActions.tsx` and
+six modebar copy buttons go through it: `graphs/utils/chart-utils.ts`,
 `compare/current-test-run-chart/utils/current-test-run-chart-utils.ts`,
-`anomaly-detection/components/utils/trends-plot-utils.ts`, `trends/hooks/useTrendsPlot.ts`,
+`anomaly-detection/components/utils/trends-plot-utils.ts`,
 `performance-analysis/RequestTimeSeriesModal.tsx`,
 `performance-analysis/transaction-graph-modal/utils/chart-config.ts`, and
-`service-level-objectives/utils/slo-chart-utils.ts`. A ninth button writes its own
+`service-level-objectives/utils/slo-chart-utils.ts`. Another button writes its own
 `toImage` chain at your peril.
+
+**A chart on the Analyst layout exports through `ChartActions`, never its graph div** (v0.2.97.48).
+`lib/charts/layout.ts` puts neither a title nor a legend on the canvas: both are HTML around the
+plot, so `plotlyPngBlob(gd, ...)` rasterises an unlabelled chart with unnamed lines. Compare's
+`ComparisonPlot` and Trends' `useTrendsPlot` did that from a modebar button, and Plotly's own
+download button does it too, so those cards hide the modebar (`displayModeBar: false`) rather than
+just swapping the copy handler. `GraphsChart` and `TrendsChart` clear their `graphEl` in `onPurge`,
+because their plot unmounts while the card stays and a purged div exports a blank image. The other modebar charts draw their own title or legend on the
+canvas, so they are not this bug. `card-chart-export.test.tsx` pins both cards.
 
 What the module owns, and why each piece is there:
 
@@ -695,6 +722,32 @@ Three rules follow:
 `UpdateGraphPresetRequest` deliberately omits `testRunId` (`apps/web/lib/graph-presets.ts`);
 the server's `UpdateGraphPresetDto` omits it too and the global `ValidationPipe` strips it, so
 sending it is a silent no-op that reads like a re-scope.
+
+### A graph's title is a preset field, and it is state only once someone chose it
+
+`useGraphsData` holds `customChartName` (`string | null`) and derives
+`chartName = customChartName ?? generateChartName(addedSeries)` (v0.2.97.48). It used to be an effect
+that regenerated the name on every series change, so loading a preset overwrote the title, and so
+did adding one series to a chart you had just named. Four things are easy to undo:
+
+- **`??`, never `||`.** An empty string is what the field holds while someone retypes it. With `||`
+  the generated name snaps back on the last backspace.
+- **The title lives in `chartOptions.title`, not in the preset's `name`.** The save dialog only
+  defaults the name to the title, and the two can differ. A preset with no stored title falls back
+  to its name, which is the best guess for one saved before v0.2.97.48.
+- **A loaded title equal to the composed default goes back to `null`,** so adding a series to that
+  chart keeps its name accurate instead of freezing a description of the old set.
+- **`chartOptions` is unvalidated and global presets are shared,** so the load path checks `typeof`
+  rather than trusting the type. A non-string reaches `exportFilename`'s `.toLowerCase()`.
+
+**Trends has no editable title and no column to store one**, so the loaded preset's `name` is the
+title: `useTrendsData.presetName`, rendered as `<name> (avg)`, set by applying or saving a preset.
+A preset that restores no series leaves it alone, because the chart still draws what it had.
+
+On both cards the title goes when the last series does, by Clear all or by removing them one at a
+time, since it named those series. Typing a Graphs title onto an empty chart first is fine: that is
+why this lives in the remove handlers and not in a derivation over `addedSeries`. Compare has
+nothing to restore, because its charts are per metric and titled by that metric.
 
 ### A compare preset's baseline is restored for both preset types, and they differ only in who wins
 

@@ -50,6 +50,7 @@ export default function TrendsCard({
     setSelectedDashboard: trendsData.setSelectedDashboard,
     setSelectedMetric: trendsData.setSelectedMetric,
     setEvaluateType: trendsData.setEvaluateType,
+    setPresetName: trendsData.setPresetName,
     setAddedSeries: trendsData.setAddedSeries,
   });
 
@@ -58,7 +59,6 @@ export default function TrendsCard({
     metricsData: trendsData.metricsData,
     trendsExpanded,
     addedSeries: trendsData.addedSeries,
-    showToast,
     cursorIndex,
   });
 
@@ -162,7 +162,8 @@ export default function TrendsCard({
 
               {/* Chart, with the series table as its legend */}
               <TrendsChart
-                title={`Trends (${trendsData.evaluateType})`}
+                title={`${trendsData.presetName ?? 'Trends'} (${trendsData.evaluateType})`}
+                showToast={showToast}
                 addedSeries={trendsData.addedSeries}
                 metricsLoading={trendsData.metricsLoading}
                 plotData={trendsPlot.plotData}

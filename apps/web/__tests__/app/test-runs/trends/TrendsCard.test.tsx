@@ -793,12 +793,21 @@ describe('TrendsCard', () => {
       });
     });
 
-    it('should apply preset when selected', async () => {
+    it('titles the chart after the applied preset', async () => {
+      (TrendsPresetsAPI.getAll as jest.Mock).mockResolvedValue([{
+        ...mockPresets[0],
+        series_config: [{
+          dashboardId: 'dashboard-1', dashboardLabel: 'System Performance', panelId: 1,
+          panelTitle: 'CPU Usage', metricName: 'cpu', source: 'grafana',
+        }],
+      }]);
       render(<TrendsCard {...defaultProps} trendsExpanded={true} />);
+      expect(screen.getByText('Trends (avg)')).toBeInTheDocument();
 
-      await waitFor(() => {
-        expect(TrendsPresetsAPI.getAll).toHaveBeenCalled();
-      });
+      fireEvent.click(screen.getByText(/Saved presets/i));
+      fireEvent.click(await screen.findByText('CPU Trends'));
+
+      expect(await screen.findByText('CPU Trends (avg)')).toBeInTheDocument();
     });
 
     it('should delete preset when delete clicked', async () => {

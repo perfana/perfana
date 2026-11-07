@@ -1,7 +1,7 @@
 'use client';
 
 import type { PlotParams } from 'react-plotly.js';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { getPlotly, type PlotlyGraphDiv } from '@/lib/plotly';
 
@@ -29,6 +29,12 @@ const Plot = dynamic(() => import('@/components/plotly-cartesian'), { ssr: false
  */
 export default function ResponsivePlot(props: PlotParams) {
   const ref = useRef<HTMLDivElement>(null);
+  // Plots.resize deletes `width` and `height` from the layout object it holds, and
+  // react-plotly hands it the caller's own. GraphsChart and TrendsChart size their container
+  // from that height, so after any resize a render that reused the layout fell back to their
+  // 300px default and squeezed every lane into it. Same identity while the caller's layout is
+  // unchanged, or each of those renders would be a Plotly.react.
+  const layout = useMemo(() => ({ ...props.layout }), [props.layout]);
 
   useEffect(() => {
     const el = ref.current;
@@ -55,7 +61,7 @@ export default function ResponsivePlot(props: PlotParams) {
 
   return (
     <div ref={ref} style={{ width: '100%', height: '100%' }}>
-      <Plot {...props} />
+      <Plot {...props} layout={layout} />
     </div>
   );
 }

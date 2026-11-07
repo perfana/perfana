@@ -59,6 +59,8 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   const [addedSeries, setAddedSeries] = useState<TrendsSeries[]>([]);
   const [metricsData, setMetricsData] = useState<MetricStatistic[]>([]);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  // The loaded preset's name, which titles the chart. A Trends preset has no title of its own.
+  const [presetName, setPresetName] = useState<string | null>(null);
 
   // Load Grafana dashboards
   const fetchApplicationDashboards = useCallback(async (): Promise<ApplicationDashboard[]> => {
@@ -304,7 +306,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     return [...grafanaOnly, ...perfTestOnly, ...dynatraceAsDashboards];
   }, [dashboards, dynatraceDashboards]);
 
-  // The cascade's first pick, kept as preset-save context and the chart title.
+  // The cascade's first pick, kept as preset-save context.
   const handlePrimaryChange = useCallback((dashboard: ApplicationDashboard | null, panel: Panel | null) => {
     setSelectedDashboard(dashboard);
     setSelectedMetric(panel);
@@ -359,12 +361,15 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
   // Handle removing a series
   const handleRemoveSeries = useCallback((seriesId: string) => {
     setAddedSeries(prev => prev.filter(s => s.id !== seriesId));
-  }, []);
+    // The preset's name titled these series, so it goes with the last of them.
+    if (addedSeries.every(s => s.id === seriesId)) setPresetName(null);
+  }, [addedSeries]);
 
   // Handle clearing all series
   const handleClearAllSeries = useCallback(() => {
     setAddedSeries([]);
     setMetricsData([]);
+    setPresetName(null);
   }, []);
 
   // Handle updating series unit
@@ -406,6 +411,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     timeRange,
     customTimeRange,
     evaluateType,
+    presetName,
     dashboards,
     dashboardsLoading,
     dynatraceDashboards,
@@ -419,6 +425,7 @@ export function useTrendsData({ testRun, testRunId, trendsExpanded }: UseTrendsD
     setSelectedDashboard,
     setSelectedMetric,
     setEvaluateType,
+    setPresetName,
     setAddedSeries,
 
     // Fetch functions

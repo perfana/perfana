@@ -51,13 +51,16 @@ export function niceStep(raw: number): number {
   return step * magnitude;
 }
 
-/** Tick values 0, step, 2·step … up to and just past `max`. */
+/**
+ * Tick values 0, step, 2·step … up to the first one at or above `max`. A zero-pinned axis
+ * uses the last tick as its top, so stopping short of `max` cuts the peak off the chart.
+ * Never more than `count` + 1 ticks, since `step` is at least `max / count`.
+ */
 export function tickValues(max: number, count: number): number[] {
   if (!Number.isFinite(max) || max <= 0 || count < 1) return [0];
   const step = niceStep(max / count);
-  const out: number[] = [];
-  for (let v = 0; v <= max + step / 2; v += step) out.push(Number(v.toFixed(10)));
-  return out;
+  // toPrecision, not toFixed: a fixed number of decimals rounds a tiny tick down past `max`.
+  return Array.from({ length: Math.ceil(max / step) + 1 }, (_, i) => Number((i * step).toPrecision(12)));
 }
 
 /** `HH:MM:SS` — the cursor readout in Graphs. */

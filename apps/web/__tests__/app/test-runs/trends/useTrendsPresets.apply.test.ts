@@ -6,7 +6,7 @@
  */
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useTrendsPresets } from '@/app/test-runs/[id]/components/trends/hooks/useTrendsPresets';
-import type { TrendsPreset } from '@/lib/trends-presets';
+import { TrendsPresetsAPI, type TrendsPreset } from '@/lib/trends-presets';
 import type { ApplicationDashboard, TrendsSeries } from '@/app/test-runs/[id]/components/trends/types';
 
 jest.mock('@/contexts/auth-context', () => ({
@@ -44,6 +44,7 @@ function setup(dashboards: ApplicationDashboard[], fetchApplicationDashboards = 
     setSelectedDashboard: jest.fn(),
     setSelectedMetric: jest.fn(),
     setEvaluateType: jest.fn(),
+    setPresetName: jest.fn(),
     setAddedSeries: jest.fn(),
   };
   const showToast = jest.fn();
@@ -69,6 +70,7 @@ it('restores the valid series and the evaluate type, and points the save context
   const restored: TrendsSeries[] = s.setAddedSeries.mock.calls[0]![0];
   expect(restored).toHaveLength(1);
   expect(restored[0]).toMatchObject({ dashboardId: 'dash-2', panelId: 5, metricName: 'used', yAxisFormat: 'bytes', metricsSourceId: 'ms-2' });
+  expect(s.setPresetName).toHaveBeenCalledWith('Heap trend');
   expect(s.showToast).toHaveBeenCalledWith('Applied preset: Heap trend');
   expect(s.fetchApplicationDashboards).not.toHaveBeenCalled();
 });
@@ -118,4 +120,21 @@ it('reports a failed apply instead of throwing', async () => {
 
   expect(s.showToast).toHaveBeenCalledWith('Failed to apply preset - please try again');
   await waitFor(() => expect(s.result.current.applyingPreset).toBe(false));
+});
+
+it('leaves the chart title alone when a preset restores no series', async () => {
+  const s = setup([jvm]);
+
+  await act(async () => { await s.result.current.applyPreset(preset({ series_config: [[] as never] })); });
+
+  expect(s.setPresetName).not.toHaveBeenCalled();
+});
+
+it('retitles the chart after the preset it was just saved as', async () => {
+  (TrendsPresetsAPI.create as jest.Mock).mockResolvedValue({ name: 'Saved name' });
+  const s = setup([jvm]);
+
+  await act(async () => { await s.result.current.savePreset({ name: 'Saved name' } as never); });
+
+  expect(s.setPresetName).toHaveBeenCalledWith('Saved name');
 });

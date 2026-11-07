@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.48] - 2026-11-07
+
+### Fixed
+- **A graph preset now brings back the title you gave the chart.** The title was never saved, so loading a preset replaced it with a name generated from the series, whatever you had typed. It is now stored with the preset. A preset saved before this version shows its preset name, which the save dialog defaults to the title on screen.
+- **A Trends preset now titles its chart.** The chart stayed at `Trends (avg)` whichever preset was loaded. It now reads `<preset name> (avg)`, and saving a preset retitles it the same way. Removing every series goes back to `Trends (avg)`. Compare is unaffected: its charts are titled by the metric they show, not by a preset.
+- **The copy button on an emptied Graphs or Trends chart is disabled.** It used to stay active and put a blank titled image on the clipboard.
+- **A chart copied or downloaded from the Compare or Trends card now carries its title and legend.** Both exported only the plot, so a pasted image had unnamed lines and nothing saying what it showed. Their copy and download are now buttons in the card header, as on the Graphs card, replacing the buttons that floated over the plot.
+- **A title you type on the Graphs card survives adding or removing a series.** Any change to the series used to overwrite it. Removing every series still resets it, and a chart whose title you never touched keeps naming itself after its series.
+- **Split-by-unit lanes no longer get squashed together.** After a window resize, a tab switch or a panel opening, the next hover shrank the chart to 300px and squeezed every lane into it, overlapping their captions and axis labels. The Trends card could do the same, until its next hover.
+- **A line can no longer run off the top of a chart's y-axis.** The axis stopped at the tick nearest the largest value, which could be below it: a series peaking at 466 ms was drawn on a 0-400 axis with its peak cut off. The axis now always reaches the data. This affects the Graphs card over a whole run, and Compare.
+
 ## [0.2.97.47] - 2026-11-05
 
 ### Changed

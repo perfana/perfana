@@ -12,6 +12,8 @@
  * absent case has to resolve to `'overlay'` rather than to `undefined` — the setter is
  * typed `'overlay' | 'split'` and an undefined would leave the card's state untouched at
  * whatever the previous preset set it to.
+ *
+ * `title` travels the same bag, with the same two failure modes, so it is pinned here too.
  */
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useGraphsPresets } from '@/app/test-runs/[id]/components/graphs/hooks/useGraphsPresets';
@@ -36,8 +38,9 @@ const ok = (body: unknown = []) => ({
   text: async () => JSON.stringify(body),
 });
 
-const setup = (axisMode: 'overlay' | 'split' = 'overlay') => {
+const setup = (axisMode: 'overlay' | 'split' = 'overlay', chartName = '') => {
   const setAxisMode = jest.fn();
+  const setChartName = jest.fn();
   const showToast = jest.fn();
   const { result } = renderHook(() =>
     useGraphsPresets({
@@ -47,13 +50,15 @@ const setup = (axisMode: 'overlay' | 'split' = 'overlay') => {
       addedSeries: [],
       axisMode,
       setAxisMode,
+      chartName,
+      setChartName,
       setAddedSeries: jest.fn(),
       setSeriesData: jest.fn(),
       setChartDataLoading: jest.fn(),
       fetchSeriesData: jest.fn().mockResolvedValue([]),
     } as never),
   );
-  return { result, setAxisMode, showToast };
+  return { result, setAxisMode, setChartName, showToast };
 };
 
 const preset = (over: Partial<GraphPreset> = {}): GraphPreset => ({
@@ -101,7 +106,7 @@ describe('saving the axis mode', () => {
     const create = authenticatedFetch.mock.calls.find((c) => c[1]?.method === 'POST');
     expect(create).toBeDefined();
     expect(JSON.parse((create![1] as { body: string }).body).chartOptions)
-      .toEqual({ axisMode: 'split' });
+      .toEqual({ axisMode: 'split', title: '' });
   });
 
   it('sends it on an upsert too, so editing a preset cannot silently reset its layout', async () => {
@@ -121,7 +126,82 @@ describe('saving the axis mode', () => {
     const patch = authenticatedFetch.mock.calls.find((c) => c[1]?.method === 'PATCH');
     expect(patch).toBeDefined();
     expect(JSON.parse((patch![1] as { body: string }).body).chartOptions)
-      .toEqual({ axisMode: 'split' });
+      .toEqual({ axisMode: 'split', title: '' });
+  });
+});
+
+describe('the chart title', () => {
+  const save = { name: 'Preset name', description: '', is_global: false, test_run_id: 'run-001' };
+  const sent = (method: string) => {
+    const call = authenticatedFetch.mock.calls.find((c) => c[1]?.method === method);
+    return JSON.parse((call![1] as { body: string }).body).chartOptions;
+  };
+  const series = {
+    dashboardId: 'd', dashboardLabel: 'JVM', panelId: 1, panelTitle: 'Heap', metricName: 'used',
+    source: 'grafana', yAxisFormat: 'bytes',
+  } as GraphPreset['seriesConfig'][number];
+
+  it('saves the title on a create, separately from the preset name', async () => {
+    const { result } = setup('overlay', 'My title');
+    await act(async () => { await result.current.handleSavePreset(save as never); });
+    expect(sent('POST').title).toBe('My title');
+  });
+
+  it('saves it on an upsert too', async () => {
+    getAll.mockResolvedValue([preset({ name: 'Preset name' })]);
+    const { result } = setup('overlay', 'My title');
+    await act(async () => { await result.current.fetchPresets(); });
+    await waitFor(() => expect(result.current.presets).toHaveLength(1));
+
+    await act(async () => { await result.current.handleSavePreset(save as never); });
+
+    expect(sent('PATCH').title).toBe('My title');
+  });
+
+  it('restores the stored title, not the preset name', async () => {
+    const { result, setChartName } = setup();
+    await act(async () => {
+      await result.current.handleLoadPreset(preset({ name: 'Preset name', chartOptions: { title: 'My title' } }));
+    });
+    expect(setChartName).toHaveBeenCalledWith('My title');
+  });
+
+  it('falls back to the preset name for a preset saved before the title was stored', async () => {
+    const { result, setChartName } = setup();
+    await act(async () => {
+      await result.current.handleLoadPreset(preset({ name: 'Preset name', chartOptions: { axisMode: 'overlay' } }));
+    });
+    expect(setChartName).toHaveBeenCalledWith('Preset name');
+  });
+
+  it('restores an emptied title rather than treating it as missing', async () => {
+    const { result, setChartName } = setup();
+    await act(async () => {
+      await result.current.handleLoadPreset(
+        preset({ name: 'Preset name', seriesConfig: [series], chartOptions: { title: '' } }),
+      );
+    });
+    expect(setChartName).toHaveBeenCalledWith('');
+  });
+
+  it('ignores a non-string title, because chartOptions is an unvalidated bag', async () => {
+    const { result, setChartName } = setup();
+    await act(async () => {
+      await result.current.handleLoadPreset(
+        preset({ name: 'Preset name', chartOptions: { title: { evil: true } } as never }),
+      );
+    });
+    expect(setChartName).toHaveBeenCalledWith('Preset name');
+  });
+
+  it('hands a title equal to the composed default back to the series', async () => {
+    const { result, setChartName } = setup();
+    await act(async () => {
+      await result.current.handleLoadPreset(
+        preset({ seriesConfig: [series], chartOptions: { title: 'JVM · Heap · used' } }),
+      );
+    });
+    expect(setChartName).toHaveBeenCalledWith(null);
   });
 });
 

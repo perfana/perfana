@@ -36,7 +36,6 @@ const render = (metricsData: MetricStatistic[], addedSeries: TrendsSeries[] = [r
       metricsData,
       trendsExpanded: true,
       addedSeries,
-      showToast: jest.fn(),
       cursorIndex: null,
     }),
   );
@@ -142,4 +141,9 @@ it('keeps the changepoint marker paper-referenced, so it cannot stretch the auto
   const shapes = (result.current.plotLayout.shapes ?? []) as Array<{ yref?: string }>;
   expect(shapes.length).toBeGreaterThan(0);
   for (const shape of shapes) expect(shape.yref).toBe('paper');
+});
+
+it('hides the modebar, whose buttons would export the chart with no title or legend', () => {
+  const { result } = render(BAND);
+  expect((result.current.plotConfig as { displayModeBar?: boolean }).displayModeBar).toBe(false);
 });
