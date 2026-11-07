@@ -198,3 +198,27 @@ it('empties the chart data and selection when a statistics request throws', asyn
   expect(result.current.metricsData).toEqual([]);
   expect(result.current.addedSeries).toHaveLength(1);
 });
+
+it('drops the loaded preset name when the chart is cleared, since it named those series', () => {
+  const { result } = setup();
+
+  act(() => { result.current.setPresetName('Heap trend'); });
+  expect(result.current.presetName).toBe('Heap trend');
+
+  act(() => { result.current.handleClearAllSeries(); });
+  expect(result.current.presetName).toBeNull();
+});
+
+it('keeps the preset name until the last series is removed', () => {
+  const { result } = setup();
+  act(() => {
+    result.current.setAddedSeries([{ id: 'a' }, { id: 'b' }] as never);
+    result.current.setPresetName('Heap trend');
+  });
+
+  act(() => { result.current.handleRemoveSeries('a'); });
+  expect(result.current.presetName).toBe('Heap trend');
+
+  act(() => { result.current.handleRemoveSeries('b'); });
+  expect(result.current.presetName).toBeNull();
+});

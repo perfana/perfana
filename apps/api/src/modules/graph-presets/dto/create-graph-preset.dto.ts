@@ -127,8 +127,8 @@ export class CreateGraphPresetDto {
   seriesConfig!: SeriesConfigDto[];
 
   @ApiPropertyOptional({
-    description: 'Chart-level options stored with the preset. `axisMode` is persisted and read back on load; other keys are accepted and round-tripped untouched.',
-    example: { axisMode: 'overlay' }
+    description: 'Chart-level options stored with the preset. `axisMode` and `title` are persisted and read back on load; other keys are accepted and round-tripped untouched.',
+    example: { axisMode: 'overlay', title: 'JVM pause times' }
   })
   @IsOptional()
   chartOptions?: Record<string, unknown>;

@@ -3,7 +3,6 @@
 import type { PlotData } from 'plotly.js';
 
 type TrendsTrace = Partial<PlotData>;
-import { PlotlyGraphDiv, copyPlotToClipboard, plotlyPngBlob, plotSize } from '@/lib/plotly';
 import { useMemo } from 'react';
 import { useTheme } from '@mui/material';
 import { MetricStatistic, RunMeta, TrendsSeries } from '../types';
@@ -28,7 +27,6 @@ interface UseTrendsPlotProps {
   metricsData: MetricStatistic[];
   trendsExpanded: boolean;
   addedSeries: TrendsSeries[];
-  showToast: (message: string) => void;
   /** Which run the cursor is on, so the table's cursor column can be filled. */
   cursorIndex: number | null;
 }
@@ -57,7 +55,6 @@ export function useTrendsPlot({
   metricsData,
   trendsExpanded,
   addedSeries,
-  showToast,
   cursorIndex,
 }: UseTrendsPlotProps) {
   const muiTheme = useTheme();
@@ -226,36 +223,9 @@ export function useTrendsPlot({
       height: axisLayoutMode === 'lanes' ? undefined : SIZE.trendsHeight,
     });
 
-    const plotConfig = {
-      responsive: true,
-      displayModeBar: true,
-      modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'],
-      displaylogo: false,
-      toImageButtonOptions: {
-        format: 'png',
-        filename: 'trends',
-        height: SIZE.trendsHeight,
-        width: 1200,
-        scale: 2,
-      },
-      modeBarButtonsToAdd: [
-        {
-          name: 'Copy to Clipboard',
-          icon: {
-            width: 1792,
-            height: 1792,
-            path: 'M768 1664h896v-640h-416q-40 0-68-28t-28-68v-416h-384v1152zm256-1440v-64q0-13-9.5-22.5t-22.5-9.5h-704q-13 0-22.5 9.5t-9.5 22.5v64q0 13 9.5 22.5t22.5 9.5h704q13 0 22.5-9.5t9.5-22.5zm256 672h299l-299-299v299zm512 128v672q0 40-28 68t-68 28h-960q-40 0-68-28t-28-68v-160h-544q-40 0-68-28t-28-68v-1344q0-40 28-68t68-28h1088q40 0 68 28t28 68v328q21 13 36 28l408 408q28 28 48 76t20 88z',
-            transform: 'scale(0.8)',
-          },
-          click: function (gd: PlotlyGraphDiv) {
-            copyPlotToClipboard(
-              () => plotlyPngBlob(gd, plotSize(gd, { width: 800, height: SIZE.trendsHeight })),
-              { fallbackFilename: 'trend_chart.png', notify: showToast },
-            );
-          },
-        },
-      ],
-    };
+    // No modebar: Plotly's own buttons export the live layout, which has no title and no
+    // legend. The copy and download actions are in the card header instead (ChartActions).
+    const plotConfig = { responsive: true, displayModeBar: false };
 
     // One row per added series, hidden included — the swatch is how a hidden one comes back.
     const rows: SeriesRow[] = addedSeries.map((series) => {
@@ -286,5 +256,5 @@ export function useTrendsPlot({
       plotData: traces, plotLayout, plotConfig, rows, runIds, traceIndexOf, runMeta,
       lanesNote: lanesNote(groups, axisLayoutMode),
     };
-  }, [metricsData, trendsExpanded, addedSeries, mode, showToast, cursorIndex]);
+  }, [metricsData, trendsExpanded, addedSeries, mode, cursorIndex]);
 }

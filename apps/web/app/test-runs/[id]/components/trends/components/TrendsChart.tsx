@@ -5,9 +5,9 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Box, Typography, CircularProgress, Button, useTheme } from '@mui/material';
 import Plot from '@/components/ResponsivePlot';
 import { RunMeta, TrendsSeries } from '../types';
-import { AnalystChartCard, SeriesTable, type SeriesRow } from '@/components/charts';
+import { AnalystChartCard, ChartActions, SeriesTable, type SeriesRow } from '@/components/charts';
 import { SIZE, chartTheme } from '@/lib/charts';
-import { dimOtherTraces } from '@/lib/plotly';
+import { dimOtherTraces, type PlotlyGraphDiv } from '@/lib/plotly';
 
 interface TrendsChartProps {
   addedSeries: TrendsSeries[];
@@ -33,6 +33,8 @@ interface TrendsChartProps {
   title?: string;
   /** Set when three or more unit families forced the chart into lanes. */
   lanesNote?: string;
+  /** Says when a copy fell back to a download, or could not render. */
+  showToast?: (message: string) => void;
 }
 
 /** Placeholder that keeps the chart's footprint while there is nothing to draw. */
@@ -72,11 +74,15 @@ export function TrendsChart({
   cascade,
   title = 'Trends',
   lanesNote,
+  showToast,
 }: TrendsChartProps) {
   const mode = useTheme().palette.mode === 'dark' ? 'dark' : 'light';
   const theme = chartTheme(mode);
   const [cascadeOpen, setCascadeOpen] = useState(false);
   const graphRef = useRef<HTMLElement | null>(null);
+  // The actions live in the header, outside the plot, so they need a re-render when the
+  // graph div appears: a ref alone would leave them permanently disabled.
+  const [graphEl, setGraphEl] = useState<PlotlyGraphDiv | null>(null);
   // Built once, not per render — the card keeps this panel MOUNTED while the picker is
   // closed (the card-link walk needs it), and the cursor state in TrendsCard re-renders this
   // component on every Plotly hover. An element rebuilt inline would re-render the whole
@@ -130,8 +136,13 @@ export function TrendsChart({
         width: '100%',
         height: `${((plotLayout as { height?: number }).height ?? SIZE.trendsHeight)}px`,
       }}
-      onInitialized={(_fig, gd) => { graphRef.current = gd as unknown as HTMLElement; }}
+      onInitialized={(_fig, gd) => {
+        graphRef.current = gd as unknown as HTMLElement;
+        setGraphEl(gd as unknown as PlotlyGraphDiv);
+      }}
       onUpdate={(_fig, gd) => { graphRef.current = gd as unknown as HTMLElement; }}
+      // The plot unmounts when the chart empties or reloads, and a purged div exports blank.
+      onPurge={() => setGraphEl(null)}
       onHover={(e) => onCursorChange(Number(e.points?.[0]?.x ?? NaN))}
       onUnhover={() => onCursorChange(null)}
       onClick={(e) => {
@@ -149,13 +160,16 @@ export function TrendsChart({
       cursor={cursorText}
       lanesNote={lanesNote}
       actions={
-        <Button
-          size="small"
-          onClick={onClearAllSeries}
-          sx={{ textTransform: 'none', fontSize: 11, color: theme.faint, '&:hover': { color: theme.error } }}
-        >
-          Remove all
-        </Button>
+        <>
+          <Button
+            size="small"
+            onClick={onClearAllSeries}
+            sx={{ textTransform: 'none', fontSize: 11, color: theme.faint, '&:hover': { color: theme.error } }}
+          >
+            Remove all
+          </Button>
+          <ChartActions graph={graphEl} mode={mode} chartName={title} notify={showToast} />
+        </>
       }
       addSeries={
         cascadePanel

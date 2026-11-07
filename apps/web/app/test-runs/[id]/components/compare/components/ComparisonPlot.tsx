@@ -6,8 +6,8 @@ import type { Config, Data, Layout } from 'plotly.js';
 import Plot from '@/components/ResponsivePlot';
 import { GraphData, Panel, RelatedTestRun } from '../types/compare.types';
 import { TestRun } from '@/types/test-runs';
-import { PlotlyGraphDiv, copyPlotToClipboard, dimOtherTraces, plotlyPngBlob, plotSize } from '@/lib/plotly';
-import { AnalystChartCard, SeriesTable, UnitPicker, type SeriesRow } from '@/components/charts';
+import { PlotlyGraphDiv, dimOtherTraces } from '@/lib/plotly';
+import { AnalystChartCard, ChartActions, SeriesTable, UnitPicker, type SeriesRow } from '@/components/charts';
 import {
   MONO,
   SIZE,
@@ -75,13 +75,6 @@ function analysisWindow(samples: Sample[], testRun: TestRun | null): {
   };
 }
 
-const COPY_ICON = {
-  width: 1792,
-  height: 1792,
-  path: 'M768 1664h896v-640h-416q-40 0-68-28t-28-68v-416h-384v1152zm256-1440v-64q0-13-9.5-22.5t-22.5-9.5h-704q-13 0-22.5 9.5t-9.5 22.5v64q0 13 9.5 22.5t22.5 9.5h704q13 0 22.5-9.5t9.5-22.5zm256 672h299l-299-299v299zm512 128v672q0 40-28 68t-68 28h-960q-40 0-68-28t-28-68v-160h-544q-40 0-68-28t-28-68v-1344q0-40 28-68t68-28h1088q40 0 68 28t28 68v328q21 13 36 28l408 408q28 28 48 76t20 88z',
-  transform: 'scale(0.8)',
-};
-
 /**
  * Baseline vs current for one metric.
  *
@@ -112,6 +105,9 @@ export default function ComparisonPlot({
   const [pickerEl, setPickerEl] = useState<HTMLElement | null>(null);
   const [cursorIndex, setCursorIndex] = useState<number | null>(null);
   const graphRef = useRef<HTMLElement | null>(null);
+  // The actions live in the header, outside the plot, so they need a re-render when the
+  // graph div appears: a ref alone would leave them permanently disabled.
+  const [graphEl, setGraphEl] = useState<PlotlyGraphDiv | null>(null);
 
   const plot = useMemo(() => {
     if (!graphData) return null;
@@ -202,34 +198,12 @@ export default function ComparisonPlot({
       },
     ];
 
-    const config = {
-      displayModeBar: true,
-      modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'autoScale2d', 'zoom2d', 'zoomIn2d', 'zoomOut2d', 'resetScale2d'],
-      displaylogo: false,
-      responsive: true,
-      toImageButtonOptions: {
-        format: 'png',
-        filename: `${metricName}_comparison`,
-        height: SIZE.compareHeight,
-        width: 1200,
-        scale: 2,
-      },
-      modeBarButtonsToAdd: [
-        {
-          name: 'Copy to Clipboard',
-          icon: COPY_ICON,
-          click: function (gd: PlotlyGraphDiv) {
-            copyPlotToClipboard(
-              () => plotlyPngBlob(gd, plotSize(gd, { width: 800, height: SIZE.compareHeight })),
-              { fallbackFilename: `${metricName}_comparison.png`, notify: showToast },
-            );
-          },
-        },
-      ],
-    };
+    // No modebar: Plotly's own buttons export the live layout, which has no title and no
+    // legend. The copy and download actions are in the card header instead (ChartActions).
+    const config = { displayModeBar: false, responsive: true };
 
     return { traces, layout, config, rows, display };
-  }, [graphData, unit, testRun, theme, metricName, showToast, cursorIndex]);
+  }, [graphData, unit, testRun, theme, cursorIndex]);
 
   const onHoverRow = useCallback((seriesId: string | null) => {
     dimOtherTraces(graphRef.current, 2, seriesId === 'baseline' ? 0 : seriesId === 'current' ? 1 : null);
@@ -268,6 +242,7 @@ export default function ComparisonPlot({
         subtitle="sample"
         cursor={cursorIndex !== null ? `sample ${cursorIndex}` : ''}
         footerNote="Applies to baseline and current"
+        actions={<ChartActions graph={graphEl} mode={mode} chartName={metricName} notify={showToast} />}
         headerExtra={
           <Box
             component="button"
@@ -307,7 +282,10 @@ export default function ComparisonPlot({
           layout={plot.layout as unknown as Partial<Layout>}
           config={plot.config as unknown as Partial<Config>}
           style={{ width: '100%', height: `${SIZE.compareHeight}px` }}
-          onInitialized={(_fig, gd) => { graphRef.current = gd as unknown as HTMLElement; }}
+          onInitialized={(_fig, gd) => {
+            graphRef.current = gd as unknown as HTMLElement;
+            setGraphEl(gd as unknown as PlotlyGraphDiv);
+          }}
           onUpdate={(_fig, gd) => { graphRef.current = gd as unknown as HTMLElement; }}
           onHover={(e) => setCursorIndex(Number(e.points?.[0]?.x ?? NaN))}
           onUnhover={() => setCursorIndex(null)}

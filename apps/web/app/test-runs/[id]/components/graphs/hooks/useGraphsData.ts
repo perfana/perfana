@@ -64,8 +64,10 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
   // Added series state
   const [addedSeries, setAddedSeries] = useState<SeriesConfig[]>([]);
 
-  // Chart name state
-  const [chartName, setChartName] = useState<string>('');
+  // A title of the chart's own, typed or restored from a preset. Null means there is none and
+  // the name follows the series, so adding or removing one never overwrites a chosen title.
+  const [customChartName, setChartName] = useState<string | null>(null);
+  const chartName = customChartName ?? generateChartName(addedSeries);
 
   // Overlay, or one lane per unit family. Saved with the preset.
   const [axisMode, setAxisMode] = useState<AxisDisplayMode>('overlay');
@@ -381,6 +383,8 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
    */
   const handleRemoveSeries = useCallback((seriesId: string, showToast: (message: string) => void) => {
     setAddedSeries(prev => prev.filter(s => s.id !== seriesId));
+    // A custom title named these series, so it goes with the last of them.
+    if (addedSeries.every(s => s.id === seriesId)) setChartName(null);
 
     // Also remove the series data
     setSeriesData(prev => {
@@ -390,7 +394,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     });
 
     showToast('Series removed');
-  }, []);
+  }, [addedSeries]);
 
   /**
    * Empty the chart: both the series list and the fetched points behind it.
@@ -398,11 +402,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
    * Looping handleRemoveSeries would fire one toast and one render per series — 17 of
    * each on the chart this was asked for — so it is its own handler.
    *
-   * axisMode is deliberately kept. chartName is NOT kept, and not by choice here: the
-   * effect below regenerates it from `addedSeries` on every change, so clearing resets
-   * it to ''. That effect also overwrites a title the user typed as soon as they add or
-   * remove a series — pre-existing, and filed in TODOS.md rather than fixed inside a
-   * clear-all handler.
+   * axisMode is deliberately kept. A custom title is not: it named the chart being cleared.
    */
   const handleClearAllSeries = useCallback((showToast: (message: string) => void) => {
     // Read the count from this render, NOT from inside the setState updater: the updater
@@ -410,6 +410,7 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
     const cleared = addedSeries.length;
     setAddedSeries([]);
     setSeriesData(new Map());
+    setChartName(null);
     showToast(cleared === 1 ? 'Series removed' : `${cleared} series removed`);
   }, [addedSeries.length]);
 
@@ -447,14 +448,6 @@ export function useGraphsData({ testRun, testRunId }: UseGraphsDataProps) {
       }
     }
   }, [testRun, dashboards.length, dynatraceDashboards.length, fetchApplicationDashboards, fetchDynatraceDashboardsList]);
-
-  /**
-   * Update chart name whenever series are added/removed
-   */
-  useEffect(() => {
-    const generatedName = generateChartName(addedSeries);
-    setChartName(generatedName);
-  }, [addedSeries]);
 
   /**
    * Get all dashboards merged (grafana + performance-test + dynatrace) for the grouped dropdown

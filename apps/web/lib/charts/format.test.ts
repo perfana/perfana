@@ -61,6 +61,16 @@ describe('niceStep / tickValues', () => {
     expect(tickValues(95, 4)).toEqual([0, 25, 50, 75, 100]);
     expect(tickValues(0, 4)).toEqual([0]);
   });
+
+  it('always reaches the largest value, because the last tick is the top of the axis', () => {
+    // 466 is 2.33 steps of 200, and rounding to the nearest step used to stop at 400.
+    expect(tickValues(466, 4)).toEqual([0, 200, 400, 600]);
+    for (const max of [1.2e-10, 0.0004, 0.3, 0.7, 1, 7.7, 95, 100, 101, 249, 466, 501, 1234, 99999, 3e7]) {
+      const ticks = tickValues(max, 4);
+      expect(ticks[ticks.length - 1]).toBeGreaterThanOrEqual(max);
+      expect(ticks.length).toBeLessThanOrEqual(5);
+    }
+  });
 });
 
 describe('colour slots', () => {

@@ -312,6 +312,8 @@ export default function GraphsChart({
         setGraphEl(gd as unknown as PlotlyGraphDiv);
       }}
       onUpdate={(_fig, gd) => { graphRef.current = gd as unknown as HTMLElement; }}
+      // The plot unmounts when the chart empties, and a purged div exports a blank image.
+      onPurge={() => setGraphEl(null)}
       onHover={(e) => setCursorIndex(Number(e.points?.[0]?.x ?? NaN))}
       onUnhover={() => setCursorIndex(null)}
       onRelayout={onRelayout}

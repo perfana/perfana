@@ -27,6 +27,7 @@ interface UseTrendsPresetsProps {
   setSelectedDashboard: (dashboard: ApplicationDashboard | null) => void;
   setSelectedMetric: (metric: Panel | null) => void;
   setEvaluateType: (type: string) => void;
+  setPresetName: (name: string | null) => void;
   setAddedSeries: (series: TrendsSeries[] | ((prev: TrendsSeries[]) => TrendsSeries[])) => void;
 }
 
@@ -42,6 +43,7 @@ export function useTrendsPresets({
   setSelectedDashboard,
   setSelectedMetric,
   setEvaluateType,
+  setPresetName,
   setAddedSeries,
 }: UseTrendsPresetsProps) {
   const { user } = useAuth();
@@ -151,6 +153,9 @@ export function useTrendsPresets({
             hidden: config.hidden
           }));
           setAddedSeries(restoredSeries);
+          // Only when its series went on the chart: otherwise the title would name a preset
+          // while the chart still draws whatever it had before.
+          setPresetName(preset.name);
         }
       }
 
@@ -168,6 +173,7 @@ export function useTrendsPresets({
     setSelectedDashboard,
     setSelectedMetric,
     setEvaluateType,
+    setPresetName,
     setAddedSeries,
   ]);
 
@@ -246,6 +252,7 @@ export function useTrendsPresets({
       };
 
       const newPreset = await TrendsPresetsAPI.create(createRequest);
+      setPresetName(newPreset.name);
       await fetchPresets();
       showToast(`Preset "${newPreset.name}" saved successfully`);
     } catch (error) {
@@ -255,7 +262,7 @@ export function useTrendsPresets({
     } finally {
       setPresetsSaving(false);
     }
-  }, [addedSeries, selectedSource, fetchPresets, showToast, testRun?.test_run_id]);
+  }, [addedSeries, selectedSource, fetchPresets, setPresetName, showToast, testRun?.test_run_id]);
 
   // Delete preset
   const deletePreset = useCallback(async (presetId: string) => {

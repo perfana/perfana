@@ -192,9 +192,6 @@ describe('handleClearAllSeries', () => {
     expect(showToast).toHaveBeenLastCalledWith('2 series removed');
   });
 
-  // Pins the real behaviour, which is not the behaviour you would want: the auto-naming
-  // effect regenerates chartName from addedSeries, so clearing empties it — and a title
-  // the user typed is overwritten on any add or remove. See TODOS.md.
   it('resets the auto-generated chart name, since the name is derived from the series', async () => {
     routeFetch({ '5': [point('used', 1)] });
     const { result, showToast } = setup();
@@ -211,6 +208,60 @@ describe('handleClearAllSeries', () => {
 
     await waitFor(() => expect(result.current.chartName).toBe(''));
     expect(showToast).toHaveBeenLastCalledWith('Series removed');
+  });
+
+  it('keeps a typed title through an add and a remove, and drops it on clear', async () => {
+    routeFetch({ '5': [point('used', 1)], '101': [point('T01', 280)] });
+    const { result, showToast } = setup();
+    const add = (dashboard: ApplicationDashboard, id: number, title: string, metricName: string) =>
+      act(async () => {
+        await result.current.handleAddSeries(
+          [{ dashboard, panel: panelOf(dashboard, id, title), metricName }],
+          showToast,
+        );
+      });
+
+    await add(jvmDashboard, 5, 'Heap', 'used');
+    act(() => { result.current.setChartName('My title'); });
+    await add(perfDashboard, 101, 'Transaction RT Avg', 'T01');
+    expect(result.current.chartName).toBe('My title');
+
+    act(() => { result.current.handleRemoveSeries(result.current.addedSeries[0]!.id, showToast); });
+    expect(result.current.chartName).toBe('My title');
+
+    act(() => { result.current.handleClearAllSeries(showToast); });
+    expect(result.current.chartName).toBe('');
+  });
+
+  it('drops a typed title when the last series is removed, since it named those series', async () => {
+    routeFetch({ '5': [point('used', 1)] });
+    const { result, showToast } = setup();
+    await act(async () => {
+      await result.current.handleAddSeries(
+        [{ dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap'), metricName: 'used' }],
+        showToast,
+      );
+    });
+    act(() => { result.current.setChartName('My title'); });
+
+    act(() => { result.current.handleRemoveSeries(result.current.addedSeries[0]!.id, showToast); });
+
+    expect(result.current.chartName).toBe('');
+  });
+
+  it('lets the user empty the title field without the generated name snapping back', async () => {
+    routeFetch({ '5': [point('used', 1)] });
+    const { result, showToast } = setup();
+    await act(async () => {
+      await result.current.handleAddSeries(
+        [{ dashboard: jvmDashboard, panel: panelOf(jvmDashboard, 5, 'Heap'), metricName: 'used' }],
+        showToast,
+      );
+    });
+
+    act(() => { result.current.setChartName(''); });
+
+    expect(result.current.chartName).toBe('');
   });
 });
 

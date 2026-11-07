@@ -17,6 +17,8 @@ export interface ChartOptions {
    * read back as `overlay`.
    */
   axisMode?: 'overlay' | 'split';
+  /** The chart's title when saved. Absent on older presets, which fall back to the preset name. */
+  title?: string;
   /** Room for the next chart-level option without a migration. */
   [key: string]: unknown;
 }
