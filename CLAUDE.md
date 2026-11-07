@@ -56,6 +56,7 @@ npm run dev
 - `npm run build` / `npm run test` / `npm run type-check` / `npm run lint`
 - `npm run dev:api` / `npm run dev:web` / `npm run dev:grafana-sync` — Individual services
 - `lsof -ti:3001,3002,4000 | xargs kill -9 && npm run dev` — Kill and restart
+- `npx vibium` — browser automation CLI for agents. `npm install` runs its postinstall, which downloads Chrome for Testing into the user cache (~400 MB on macOS, skipped once present); set `VIBIUM_SKIP_BROWSER_DOWNLOAD=1` to opt out. The agent skill is per user: `npx vibium add-skill` writes `~/.claude/skills/vibe-check`.
 
 ## Authentication System
 

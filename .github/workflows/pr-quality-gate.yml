@@ -42,6 +42,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  # npm ci runs scripts here, and vibium's postinstall would download a browser per job.
+  VIBIUM_SKIP_BROWSER_DOWNLOAD: '1'
+
 jobs:
   # Job 1: Shared Package Tests
   test-shared:

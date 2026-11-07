@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.49] - 2026-11-07
+
+### Added
+- **Vibium is available in the repo as a dev dependency.** `npx vibium` is a browser automation CLI for agents and people. `npm install` downloads its Chrome for Testing into the user cache, about 400 MB on macOS and skipped once present; set `VIBIUM_SKIP_BROWSER_DOWNLOAD=1` to opt out. The Docker development stage and the PR Quality Gate workflow opt out, because both run install scripts. The agent skill is per user: `npx vibium add-skill` writes `~/.claude/skills/vibe-check`.
+
 ## [0.2.97.48] - 2026-11-07
 
 ### Fixed

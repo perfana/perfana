@@ -84,6 +84,7 @@
   ],
   "ignoreDependencies": [
     "tsconfig-paths",
+    "vibium",
     "@types/.+",
     "@typescript-eslint/.+",
     "@testcontainers/.+",

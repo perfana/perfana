@@ -520,7 +520,8 @@ COPY --chown=perfana:perfana apps/web/package*.json ./apps/web/
 COPY --chown=perfana:perfana apps/api/package*.json ./apps/api/
 COPY --chown=perfana:perfana packages/shared/package*.json ./packages/shared/
 
-RUN npm ci \
+# Scripts run here, and vibium's postinstall would put a Chrome for Testing in the image.
+RUN VIBIUM_SKIP_BROWSER_DOWNLOAD=1 npm ci \
     && npm cache clean --force
 
 # Copy source code
