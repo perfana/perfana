@@ -54,8 +54,9 @@ export const SUT_RESOURCES: SutResource[] = [
                   UNION
                   SELECT dynatrace_config_id FROM dynatrace_queries WHERE system_under_test_id = $1
                 )` },
-  // generated_reports.template_id → report_templates(id) is NOT NULL, so the
-  // parent template must ship in the bundle or the import FK-violates. Templates
+  // generated_reports.template_id → report_templates(id): a report that still has its
+  // template needs it in the bundle or the import FK-violates (NULL once the template
+  // is deleted, which IN simply never matches). Templates
   // are scoped by system_id (SUT name) but can also be '*' (global, shared across
   // SUTs), so we can't filter by name — export exactly the templates referenced
   // by this SUT's generated_reports (superset of the selected runs → full cover).

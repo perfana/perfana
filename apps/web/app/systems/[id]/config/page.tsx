@@ -432,9 +432,12 @@ export default function SystemConfigurationPage() {
         <DialogTitle>Delete Template</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {`Are you sure you want to delete the template "${template.deletingTemplate?.name}"?`}
-            This action cannot be undone.
+            {`Are you sure you want to delete the template "${template.deletingTemplate?.name}"? `}
+            Reports generated from it are kept. This action cannot be undone.
           </DialogContentText>
+          {template.deleteError && (
+            <Alert severity="error" sx={{ mt: 2 }}>{template.deleteError}</Alert>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => template.setDeleteConfirmOpen(false)} disabled={template.deleteLoading}>

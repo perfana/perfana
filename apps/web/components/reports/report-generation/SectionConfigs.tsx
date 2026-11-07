@@ -25,6 +25,7 @@ import { useSectionTitle } from './SectionTitleContext';
 import {
   assignSectionAnchors,
   findAnchorProblems,
+  hasReportVariable,
   rawSlugOf,
   SECTION_ANCHOR_PREFIX,
 } from '@perfana/shared/utils';
@@ -314,10 +315,18 @@ interface HeaderConfigFormProps {
   allSections?: ReportSectionConfig[];
 }
 
+/**
+ * The preview dialog's title. A `{perfana-…}` value only resolves on the server, so a text holding
+ * one would read as raw placeholder syntax above a preview showing the real value.
+ */
+export function headerPreviewTitle(text: string | undefined): string {
+  return !text || hasReportVariable(text) ? 'Header' : text;
+}
+
 export function HeaderConfigForm({ config, onChange, text, onTextChange, testRunId, allSections }: HeaderConfigFormProps) {
   return (
     <SectionConfigShell
-      sectionTitle={config.text || 'Header'}
+      sectionTitle={headerPreviewTitle(config.text)}
       sectionType="Header"
       previewType="header"
       previewConfig={config}

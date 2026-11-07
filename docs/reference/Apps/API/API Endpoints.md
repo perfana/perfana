@@ -82,6 +82,7 @@ tags:
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/test-runs/:id/stats` | Transaction statistics |
+| `GET` | `/api/test-runs/:id/transactions/percentiles` | True P95 and P99 for the run, or for the scenarios named by repeated `scenario` params (empty means no scenario), and per scenario. Same store and window as `/transactions`; 202 while the rollup is being built |
 | `GET` | `/api/test-runs/:id/samples` | Transaction samples |
 | `GET` | `/api/test-runs/:id/timeseries` | Time series metrics |
 | `GET` | `/api/test-runs/:id/virtual-users` | Virtual user statistics |
@@ -193,7 +194,7 @@ Generation is queued on a worker; poll the download endpoint. Full pipeline reci
 | `POST` | `/api/reports/:reportId/pdf` | Queue PDF rendering |
 | `GET` | `/api/reports/:reportId/html/download` | Download HTML (202 while generating) |
 | `GET` | `/api/reports/:reportId/pdf/download` | Download PDF (auto-queues on first request) |
-| `POST` | `/api/reports/:reportId/retry` | Retry a failed generation |
+| `POST` | `/api/reports/:reportId/retry` | Retry a failed generation. 400 if its template has since been deleted |
 | `GET` | `/api/reports/:reportId/share` | Read share settings |
 | `PUT` | `/api/reports/:reportId/share` | Update share settings |
 | `GET` | `/api/reports/share/:shareId` | Public shared report |
@@ -210,7 +211,7 @@ Generation is queued on a worker; poll the download endpoint. Full pipeline reci
 | `POST` | `/api/report-templates/copy` | Copy a template into another scope |
 | `GET` | `/api/report-templates/:templateId` | Get template |
 | `PUT` | `/api/report-templates/:templateId` | Update template |
-| `DELETE` | `/api/report-templates/:templateId` | Delete template |
+| `DELETE` | `/api/report-templates/:templateId` | Delete template. Reports made from it are kept, with `template_id` NULL |
 | `POST` | `/api/report-templates/:templateId/duplicate` | Duplicate template |
 | `PUT` | `/api/report-templates/:templateId/set-default` | Make default for its scope (clears the flag on the others) |
 | `POST` | `/api/report-templates/:templateId/sections` | Append a section |

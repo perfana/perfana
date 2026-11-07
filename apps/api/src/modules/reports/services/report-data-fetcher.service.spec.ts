@@ -43,6 +43,15 @@ const makeTransactionRow = (overrides: Record<string, string> = {}) => ({
   ...overrides,
 });
 
+/** The percentile statement's answer: one row per scenario, then the whole-run row. */
+const makePercentileRows = (
+  overall: [string, string] = ['0', '0'],
+  scenarios: Record<string, [string, string]> = {},
+) => [
+  ...Object.entries(scenarios).map(([scenario, [p95, p99]]) => ({ scenario, is_overall: 0, p95_ms: p95, p99_ms: p99 })),
+  { scenario: null, is_overall: 1, p95_ms: overall[0], p99_ms: overall[1] },
+];
+
 const makeApdexTransactionRow = (overrides: Record<string, string> = {}) => ({
   transaction_name: 'T01_Login',
   scenario_name: 'BrowseAndSearch',
@@ -510,6 +519,7 @@ describe('ReportDataFetcherService', () => {
         });
 
         testRunRepo.query.mockResolvedValueOnce([row]); // allTransactions
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows(['200.00', '300.00']));
 
         const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
 
@@ -536,6 +546,7 @@ describe('ReportDataFetcherService', () => {
         ];
 
         testRunRepo.query.mockResolvedValueOnce(rows);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows(['200.00', '300.00']));
 
         const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
 
@@ -553,6 +564,7 @@ describe('ReportDataFetcherService', () => {
         ];
 
         testRunRepo.query.mockResolvedValueOnce(rows);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows(['200.00', '300.00']));
 
         const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
 
@@ -609,6 +621,7 @@ describe('ReportDataFetcherService', () => {
         ];
 
         testRunRepo.query.mockResolvedValueOnce(rows);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows(['200.00', '300.00']));
 
         const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
 
@@ -630,6 +643,7 @@ describe('ReportDataFetcherService', () => {
         setupSubordinateMocks();
 
         testRunRepo.query.mockResolvedValueOnce([makeApdexTransactionRow()]);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows(['200.00', '300.00']));
 
         const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
 
@@ -645,6 +659,7 @@ describe('ReportDataFetcherService', () => {
 
         const row = makeApdexTransactionRow({ scenario_name: '', total: '50', satisfied: '40', tolerating: '5' });
         testRunRepo.query.mockResolvedValueOnce([row]);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows(['200.00', '300.00']));
 
         const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
 
@@ -724,14 +739,71 @@ describe('ReportDataFetcherService', () => {
         ];
 
         testRunRepo.query.mockResolvedValueOnce(rows);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows(['200.00', '300.00']));
 
         const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
 
         const expectedWeightedAvg = (100 * 1000 + 200 * 500) / 1500;
         expect(result!.overall.avgMs).toBeCloseTo(expectedWeightedAvg, 1);
 
-        const expectedWeightedP95 = (200 * 1000 + 400 * 500) / 1500;
-        expect(result!.overall.p95Ms).toBeCloseTo(expectedWeightedP95, 1);
+      });
+    });
+
+    describe('percentiles of a whole scope', () => {
+      const rows = [
+        makeApdexTransactionRow({ transaction_name: 'Fast', scenario_name: 'Shop', total: '900', p95_ms: '100.00', p99_ms: '110.00' }),
+        makeApdexTransactionRow({ transaction_name: 'Slow', scenario_name: 'Pay', total: '100', p95_ms: '1000.00', p99_ms: '1100.00' }),
+      ];
+
+      // REGRESSION GUARD. These were count-weighted averages of the transactions' percentiles,
+      // printed as "95th percentile". Here that reads (100*900 + 1000*100) / 1000 = 190 ms for a
+      // run in which a tenth of the executions take a second, so its real P95 is 1000 ms.
+      it('reports the percentile of the executions, not an average of the transactions', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        setupSubordinateMocks();
+        testRunRepo.query.mockResolvedValueOnce(rows);
+        testRunRepo.query.mockResolvedValueOnce(
+          makePercentileRows(['1000.00', '1090.50'], { Shop: ['101.00', '111.00'], Pay: ['1001.00', '1101.00'] }),
+        );
+
+        const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
+
+        expect(result!.overall.p95Ms).toBe(1000);
+        expect(result!.overall.p99Ms).toBe(1090.5);
+        expect(result!.scenarios['Shop']!.summary.p95Ms).toBe(101);
+        expect(result!.scenarios['Shop']!.summary.p99Ms).toBe(111);
+        expect(result!.scenarios['Pay']!.summary.p95Ms).toBe(1001);
+        // The per-transaction rows keep their own.
+        expect(result!.scenarios['Pay']!.transactions[0]!.p95Ms).toBe(1000);
+      });
+
+      it('finds the percentiles of a transaction with no scenario under the same key as its rows', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        setupSubordinateMocks();
+        testRunRepo.query.mockResolvedValueOnce([makeApdexTransactionRow({ scenario_name: '' })]);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows(['5.00', '6.00'], { Unknown: ['7.00', '8.00'] }));
+
+        const result = await service.getApdexDataFromDatabase(testRun, 500, false, 'admin', ['perfana-admin']);
+
+        expect(result!.scenarios['Unknown']!.summary.p95Ms).toBe(7);
+      });
+
+      it('reads the same executions as the per-transaction rows', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        setupSubordinateMocks();
+        testRunRepo.query.mockResolvedValueOnce(rows);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows());
+
+        await service.getApdexDataFromDatabase(testRun, 500, true, 'admin', ['perfana-admin']);
+
+        const [txnSql, txnParams] = testRunRepo.query.mock.calls[1] as [string, unknown[]];
+        const [pctSql, pctParams] = testRunRepo.query.mock.calls[2] as [string, unknown[]];
+        expect(pctSql).toMatch(/GROUPING SETS/);
+        expect(pctSql).toMatch(/PERCENTILE_CONT\(0\.95\)/);
+        expect(pctParams).toEqual(txnParams);
+        // Same window, by the same clause: a difference here would describe different rows.
+        expect(pctSql).toMatch(/t\.time >= \$2/);
+        expect(txnSql).toMatch(/t\.time >= \$2/);
       });
     });
 

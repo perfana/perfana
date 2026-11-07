@@ -22,6 +22,7 @@ export {
   RecentFailure,
   SystemSummary,
   TransactionStats,
+  TransactionPercentiles,
   SamplerStats,
   RunSamplerStats,
   ErrorStats,
@@ -40,6 +41,7 @@ import {
   RecentFailure,
   SystemSummary,
   TransactionStats,
+  TransactionPercentiles,
   SamplerStats,
   RunSamplerStats,
   ErrorStats,
@@ -342,6 +344,18 @@ export class TestRunsQueryService {
   ): Promise<TransactionStats[] | RollupPendingResult> {
     const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
     return this.performanceService.getTransactionStats(testRunId, excludeRampUp, isAdmin, orgIds, sinceMinutes);
+  }
+
+  async getTransactionPercentiles(
+    testRunId: string,
+    userId: string,
+    roles: string[],
+    excludeRampUp?: boolean,
+    sinceMinutes?: number,
+    scenarios?: string[],
+  ): Promise<TransactionPercentiles | RollupPendingResult> {
+    const { orgIds, isAdmin } = await this.resolveOrganizationIds(userId, roles);
+    return this.performanceService.getTransactionPercentiles(testRunId, excludeRampUp, isAdmin, orgIds, sinceMinutes, scenarios);
   }
 
   async getAggregatedMetricTimeseries(

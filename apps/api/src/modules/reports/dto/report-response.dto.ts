@@ -341,10 +341,12 @@ export class ReportDetailDto {
   test_run_id!: string;
 
   @ApiProperty({
-    description: 'Template UUID',
+    description: 'Template UUID. Null once the template has been deleted; the report itself is kept.',
     example: '789e0123-e89b-12d3-a456-426614174000',
+    type: String,
+    nullable: true,
   })
-  template_id!: string;
+  template_id!: string | null;
 
   @ApiProperty({
     description: 'Report name',

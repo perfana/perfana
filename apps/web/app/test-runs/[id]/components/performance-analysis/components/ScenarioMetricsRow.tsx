@@ -13,12 +13,15 @@ import {
   apdexRating,
   ScenarioMetrics,
 } from '../utils/performance-formatters';
+import { PercentileFigures } from '../hooks/useScopePercentiles';
 
 export interface ScenarioMetricsRowProps {
   scenarioName: string;
   metrics: ScenarioMetrics;
   throughputStats: ThroughputStats | null;
   virtualUserStats: VirtualUserStats | null;
+  /** undefined while loading; null when unavailable, so the weighted figure stands in, labelled. */
+  percentiles: PercentileFigures | null | undefined;
   onToggleScenario: (scenarioName: string) => void;
 }
 
@@ -27,6 +30,7 @@ export function ScenarioMetricsRow({
   metrics,
   throughputStats,
   virtualUserStats,
+  percentiles,
   onToggleScenario,
 }: ScenarioMetricsRowProps) {
   const scenarioThroughput = throughputStats?.by_scenario?.find(s => s.scenario_name === scenarioName);
@@ -111,21 +115,29 @@ export function ScenarioMetricsRow({
 
           {/* P95 Response Time */}
           <Box sx={{ textAlign: 'center', px: 1 }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', display: 'block' }}>
+            <Typography
+              variant="caption"
+              title={percentiles === null ? "Average of this scenario's transaction P95s, weighted by executions. Not a percentile of all its transactions." : undefined}
+              sx={{ color: 'text.secondary', fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', display: 'block' }}
+            >
               P95 (ms)
             </Typography>
             <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 700, color: 'warning.main', fontSize: '0.9rem' }}>
-              {formatNumber(metrics.weightedP95ResponseTime)}
+              {percentiles === undefined ? '—' : formatNumber(percentiles?.p95_response_time ?? metrics.weightedP95ResponseTime)}
             </Typography>
           </Box>
 
           {/* P99 Response Time */}
           <Box sx={{ textAlign: 'center', px: 1 }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', display: 'block' }}>
+            <Typography
+              variant="caption"
+              title={percentiles === null ? "Average of this scenario's transaction P99s, weighted by executions. Not a percentile of all its transactions." : undefined}
+              sx={{ color: 'text.secondary', fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', display: 'block' }}
+            >
               P99 (ms)
             </Typography>
             <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: 700, color: 'error.main', fontSize: '0.9rem' }}>
-              {formatNumber(metrics.weightedP99ResponseTime)}
+              {percentiles === undefined ? '—' : formatNumber(percentiles?.p99_response_time ?? metrics.weightedP99ResponseTime)}
             </Typography>
           </Box>
 

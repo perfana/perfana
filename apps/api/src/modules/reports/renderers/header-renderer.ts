@@ -2,7 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { TestRun, ReportSectionConfig, getSectionText } from '@perfana/shared';
 import { ReportUtilsService } from '../services/report-utils.service';
 import { ReportDataFetcherService } from '../services/report-data-fetcher.service';
+import { statusFromConclusion } from './comparison-bands';
 import { sectionText } from './report-style';
+
+const nonBlank = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value : undefined;
+
+/** `level` is unvalidated JSON that ends up in a tag name, so only 1-6 gets through. */
+const coverHeadingTag = (level: unknown): string => {
+  const n = Number(level);
+  return `h${Number.isInteger(n) && n >= 1 && n <= 6 ? n : 1}`;
+};
 
 /**
  * Renderer for header section
@@ -26,7 +36,10 @@ export class HeaderRenderer {
     roles: string[] = [],
   ): Promise<string> {
     const config = section.config || {};
-    const title = (config.title as string) || 'Performance Test Report';
+    // The builder's "Header Text" is `config.text`. `config.title` is what a template posted
+    // straight to the API carries, and the form cannot see it, so an edit in the UI has to win.
+    const title = nonBlank(config.text) ?? nonBlank(config.title) ?? 'Performance Test Report';
+    const titleTag = coverHeadingTag(config.level);
     const subtitle = config.subtitle as string;
     const includeCoverPage = config.includeCoverPage !== false;
     const includeSummary = config.includeSummary !== false;
@@ -71,11 +84,7 @@ export class HeaderRenderer {
         sloStatusHtml = `<span class="badge badge-error">${sloSummary.passed}/${sloSummary.total} PASSED</span>`;
       }
 
-      if (anomalySummary.regressionCount > 0) {
-        anomalyStatusHtml = `<span class="badge badge-warning">${anomalySummary.regressionCount} REGRESSIONS DETECTED</span>`;
-      } else {
-        anomalyStatusHtml = '<span class="badge badge-success">NO REGRESSIONS</span>';
-      }
+      anomalyStatusHtml = this.anomalyBadge(anomalySummary.conclusion, anomalySummary.regressionCount);
     } else {
       sloStatusHtml = '<span class="badge badge-info">No SLO data</span>';
       anomalyStatusHtml = '<span class="badge badge-info">No anomaly data</span>';
@@ -87,7 +96,7 @@ export class HeaderRenderer {
     if (includeCoverPage) {
       html += `
         <div class="cover-page">
-          <h1>${this.utils.escapeHtml(title)}</h1>
+          <${titleTag}>${this.utils.escapeHtml(title)}</${titleTag}>
           ${subtitle ? `<div class="subtitle">${this.utils.escapeHtml(subtitle)}</div>` : ''}
 
           <div class="cover-info-card">
@@ -121,7 +130,7 @@ export class HeaderRenderer {
     if (includeSummary) {
       html += `
         <section>
-          <h2>Test Run Summary</h2>
+          <h2>${this.utils.escapeHtml(section.title || 'Test Run Summary')}</h2>
           ${sectionText(getSectionText(section))}
 
           <!-- Info Grid (3 columns x 3 rows) -->
@@ -183,5 +192,24 @@ export class HeaderRenderer {
     }
 
     return html;
+  }
+
+  /**
+   * Only a verdict may read as a pass. A run ADAPT never compared (first run, changepoint, no
+   * comparable results, a failed read) also has zero regressions, for a different reason, and the
+   * Anomaly Detection section reports it as N/A from the same `statusFromConclusion`.
+   *
+   * The conclusion also outranks the count: a run whose only regressions are tracked ones is
+   * `REGRESSION` with an empty `regressions` array.
+   */
+  private anomalyBadge(conclusion: string, regressionCount: number): string {
+    if (regressionCount > 0) {
+      const noun = regressionCount === 1 ? 'REGRESSION' : 'REGRESSIONS';
+      return `<span class="badge badge-warning">${regressionCount} ${noun} DETECTED</span>`;
+    }
+    const status = statusFromConclusion(conclusion);
+    if (status === 'regression') return '<span class="badge badge-warning">REGRESSIONS DETECTED</span>';
+    if (status === 'ok' || status === 'improvement') return '<span class="badge badge-success">NO REGRESSIONS</span>';
+    return '<span class="badge badge-info">NOT EVALUATED</span>';
   }
 }

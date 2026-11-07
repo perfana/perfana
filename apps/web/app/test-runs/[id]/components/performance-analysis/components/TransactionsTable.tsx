@@ -36,6 +36,7 @@ import { calculateScenarioMetrics } from '../utils/performance-formatters';
 
 // Sub-components
 import { TransactionsTableHeader } from './TransactionsTableHeader';
+import { ScopePercentiles } from '../hooks/useScopePercentiles';
 import { ScenarioMetricsRow } from './ScenarioMetricsRow';
 import { TransactionRow } from './TransactionRow';
 import { scenarioFilterKey } from '../utils/scenario-filter';
@@ -46,6 +47,7 @@ export interface TransactionsTableProps {
   transactions: TransactionStat[];
   throughputStats: ThroughputStats | null;
   virtualUserStats: VirtualUserStats | null;
+  scopePercentiles?: ScopePercentiles | null;
 
   // Sorting
   sortField: SortField;
@@ -77,6 +79,7 @@ export function TransactionsTable({
   scenarioGroups,
   throughputStats,
   virtualUserStats,
+  scopePercentiles,
   sortField,
   sortOrder,
   onSort,
@@ -207,6 +210,7 @@ export function TransactionsTable({
                     metrics={scenarioMetrics}
                     throughputStats={throughputStats}
                     virtualUserStats={virtualUserStats}
+                    percentiles={scopePercentiles === undefined ? undefined : scopePercentiles?.byScenario.get(scenarioName) ?? null}
                     onToggleScenario={onToggleScenario}
                   />
 

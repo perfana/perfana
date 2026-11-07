@@ -42,6 +42,190 @@ import {
   REPORT_INTERACTIVITY_SCRIPT,
 } from '../renderers/report-interactivity';
 
+/** The Header section's cover. Shared by the report and the section preview so neither drifts. */
+const coverPageCss = (primaryColor: string, secondaryColor: string): string => `
+    /* Cover Page */
+    .cover-page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(135deg, var(--bg-light) 0%, var(--bg-color) 100%);
+      page-break-after: always;
+      padding: 60px;
+    }
+
+    /* Any level: the Header section's level picks the tag, and H1 is its default. */
+    .cover-page h1,
+    .cover-page h2,
+    .cover-page h3,
+    .cover-page h4,
+    .cover-page h5,
+    .cover-page h6 {
+      font-size: 48pt;
+      font-weight: 700;
+      background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 20px;
+      text-align: center;
+      line-height: 1.2;
+    }
+
+    .cover-page h2 { font-size: 40pt; }
+    .cover-page h3 { font-size: 34pt; }
+    .cover-page h4 { font-size: 28pt; }
+    .cover-page h5 { font-size: 24pt; }
+    .cover-page h6 { font-size: 20pt; }
+
+    .cover-page .subtitle {
+      font-size: 16pt;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 60px;
+    }
+
+    .cover-info-card {
+      background: var(--bg-card);
+      border-radius: 8px;
+      padding: 40px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      max-width: 600px;
+      width: 100%;
+    }
+
+    .cover-info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .cover-info-row:last-child {
+      border-bottom: none;
+    }
+
+    .cover-info-label {
+      font-size: 10pt;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .cover-info-label::before {
+      content: "• ";
+      color: ${primaryColor};
+      font-weight: bold;
+      margin-right: 8px;
+    }
+
+    .cover-info-value {
+      font-size: 11pt;
+      font-weight: 600;
+      color: var(--text-color);
+      font-family: 'Courier New', monospace;
+      text-align: right;
+    }
+
+    .cover-info-value.link {
+      color: ${primaryColor};
+    }
+`;
+
+/** The Header section's summary block and the status badges in it, shared the same way. */
+const summaryBlockCss = (): string => `
+    /* Info Grid (3-column layout for test run summary) */
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 24px;
+      margin: 24px 0;
+    }
+
+    .info-item {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .info-label {
+      font-size: 9pt;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .info-value {
+      font-size: 12pt;
+      font-weight: 600;
+      color: var(--text-color);
+      font-family: 'Courier New', monospace;
+    }
+
+    /* Status Badges */
+    .badge {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 9pt;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .badge-success {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .badge-error {
+      background-color: #ffebee;
+      color: #c62828;
+    }
+
+    .badge-warning {
+      background-color: #fff3e0;
+      color: #e65100;
+    }
+
+    .badge-info {
+      background-color: #e3f2fd;
+      color: #1565c0;
+    }
+
+    /* Annotations Box */
+    .annotations-box {
+      border-left: 4px solid var(--warning-color);
+      background-color: #fff9c4;
+      padding: 16px 20px;
+      margin: 20px 0;
+    }
+
+    .annotations-box h4 {
+      font-size: 10pt;
+      font-weight: 600;
+      color: var(--text-color);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .annotations-box ul {
+      margin-left: 20px;
+      color: var(--text-color);
+    }
+
+    .annotations-box li {
+      margin-bottom: 6px;
+      font-size: 10pt;
+    }
+`;
+
 /**
  * Service for compiling report sections into HTML
  *
@@ -177,9 +361,11 @@ export class ReportHtmlCompilerService {
    * Copies rather than mutating: `sections` comes straight off the template/report
    * entity, and writing resolved values back would persist them on the next save.
    *
-   * Prose only — the accompanying text and a text block's body. NOT titles: a title
-   * is the section's address (see assignSectionAnchors), so resolving one would make
-   * anchors and every prose link pointing at them depend on the test run.
+   * Prose only — the accompanying text, a text block's body and the Header section's
+   * cover text. NOT titles: a title is the section's address (see assignSectionAnchors),
+   * so resolving one would make anchors and every prose link pointing at them depend on
+   * the test run. The Header section is never a link target and its cover text is
+   * `config.text`, not `section.title`, so it has no address to disturb.
    */
   private async resolveVariables(
     sections: ReportSectionConfig[],
@@ -190,7 +376,8 @@ export class ReportHtmlCompilerService {
     // the author's text vanished.
     if (!testRun) return sections;
 
-    const prose = sections.flatMap(s => [s.text, s.comment, s.config?.content])
+    const coverText = (s: ReportSectionConfig) => (s.type === 'header' ? s.config?.text : undefined);
+    const prose = sections.flatMap(s => [s.text, s.comment, s.config?.content, coverText(s)])
       .filter((v): v is string => typeof v === 'string');
     // Nothing authored a placeholder — skip the two queries below entirely. Most
     // reports never use a variable, and this runs on every render including every
@@ -213,6 +400,7 @@ export class ReportHtmlCompilerService {
     // unconditionally would blank the prose on every pre-2026-08-02 template.
     return sections.map(section => {
       const content = section.config?.content;
+      const cover = coverText(section);
       return {
         ...section,
         ...(typeof section.text === 'string'
@@ -221,8 +409,14 @@ export class ReportHtmlCompilerService {
         ...(typeof section.comment === 'string'
           ? { comment: substituteReportVariables(section.comment, values) }
           : {}),
-        ...(typeof content === 'string'
-          ? { config: { ...section.config, content: substituteReportVariables(content, values) } }
+        ...(typeof content === 'string' || typeof cover === 'string'
+          ? {
+              config: {
+                ...section.config,
+                ...(typeof content === 'string' ? { content: substituteReportVariables(content, values) } : {}),
+                ...(typeof cover === 'string' ? { text: substituteReportVariables(cover, values) } : {}),
+              },
+            }
           : {}),
       };
     });
@@ -444,6 +638,9 @@ export class ReportHtmlCompilerService {
       --bg-light: #f5f5f5;
       --text-primary: #212121;
       --text-secondary: #757575;
+      --text-color: #333333;
+      --bg-color: #ffffff;
+      --bg-card: #ffffff;
     }
 
     * {
@@ -539,6 +736,22 @@ export class ReportHtmlCompilerService {
       font-weight: 700;
       color: var(--text-primary);
       font-family: 'Monaco', 'Menlo', monospace;
+    }
+
+    /* The Header section's cover and summary. Their markup carries no inline styles, so without
+       these the preview banner's "exact HTML" was a stack of unstyled lines. */
+    ${coverPageCss(primaryColor, secondaryColor)}
+
+    ${summaryBlockCss()}
+
+    /* The report styles this heading through a bare section h2, which here would restyle every
+       other section's preview, so it is scoped to the block that needs it. */
+    section:has(> .info-grid) > h2 {
+      font-size: 18pt;
+      color: var(--primary-color);
+      border-bottom: 2px solid var(--primary-color);
+      padding-bottom: 12px;
+      margin-bottom: 24px;
     }
 
     /* The preview renders the SAME chart markup as the report, so it needs the same
@@ -644,84 +857,7 @@ export class ReportHtmlCompilerService {
       color: var(--text-secondary);
     }
 
-    /* Cover Page */
-    .cover-page {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      background: linear-gradient(135deg, var(--bg-light) 0%, var(--bg-color) 100%);
-      page-break-after: always;
-      padding: 60px;
-    }
-
-    .cover-page h1 {
-      font-size: 48pt;
-      font-weight: 700;
-      background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin-bottom: 20px;
-      text-align: center;
-      line-height: 1.2;
-    }
-
-    .cover-page .subtitle {
-      font-size: 16pt;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 60px;
-    }
-
-    .cover-info-card {
-      background: var(--bg-card);
-      border-radius: 8px;
-      padding: 40px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-      max-width: 600px;
-      width: 100%;
-    }
-
-    .cover-info-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 16px 0;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .cover-info-row:last-child {
-      border-bottom: none;
-    }
-
-    .cover-info-label {
-      font-size: 10pt;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-weight: 600;
-    }
-
-    .cover-info-label::before {
-      content: "• ";
-      color: ${primaryColor};
-      font-weight: bold;
-      margin-right: 8px;
-    }
-
-    .cover-info-value {
-      font-size: 11pt;
-      font-weight: 600;
-      color: var(--text-color);
-      font-family: 'Courier New', monospace;
-      text-align: right;
-    }
-
-    .cover-info-value.link {
-      color: ${primaryColor};
-    }
+    ${coverPageCss(primaryColor, secondaryColor)}
 
     /* Main Content Sections */
     section {
@@ -803,92 +939,7 @@ export class ReportHtmlCompilerService {
       margin-top: 4px;
     }
 
-    /* Info Grid (3-column layout for test run summary) */
-    .info-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 24px;
-      margin: 24px 0;
-    }
-
-    .info-item {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .info-label {
-      font-size: 9pt;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-weight: 600;
-    }
-
-    .info-value {
-      font-size: 12pt;
-      font-weight: 600;
-      color: var(--text-color);
-      font-family: 'Courier New', monospace;
-    }
-
-    /* Status Badges */
-    .badge {
-      display: inline-block;
-      padding: 6px 12px;
-      border-radius: 4px;
-      font-size: 9pt;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .badge-success {
-      background-color: #e8f5e9;
-      color: #2e7d32;
-    }
-
-    .badge-error {
-      background-color: #ffebee;
-      color: #c62828;
-    }
-
-    .badge-warning {
-      background-color: #fff3e0;
-      color: #e65100;
-    }
-
-    .badge-info {
-      background-color: #e3f2fd;
-      color: #1565c0;
-    }
-
-    /* Annotations Box */
-    .annotations-box {
-      border-left: 4px solid var(--warning-color);
-      background-color: #fff9c4;
-      padding: 16px 20px;
-      margin: 20px 0;
-    }
-
-    .annotations-box h4 {
-      font-size: 10pt;
-      font-weight: 600;
-      color: var(--text-color);
-      margin-bottom: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .annotations-box ul {
-      margin-left: 20px;
-      color: var(--text-color);
-    }
-
-    .annotations-box li {
-      margin-bottom: 6px;
-      font-size: 10pt;
-    }
+    ${summaryBlockCss()}
 
     /* Data Tables */
     .data-table {

@@ -35,6 +35,7 @@ interface UseReportingTemplateManagementReturn {
   formLoading: boolean;
   editFormLoading: boolean;
   deleteLoading: boolean;
+  deleteError: string | null;
 
   // Actions
   fetchTemplates: (systemId: string, environment: string, workload: string) => Promise<void>;
@@ -96,6 +97,7 @@ export function useReportingTemplateManagement(): UseReportingTemplateManagement
   const [formLoading, setFormLoading] = useState(false);
   const [editFormLoading, setEditFormLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Fetch templates
   const fetchTemplates = useCallback(async (systemId: string, environment: string, workload: string) => {
@@ -200,6 +202,7 @@ export function useReportingTemplateManagement(): UseReportingTemplateManagement
   // Handle delete template
   const handleDeleteTemplate = useCallback((template: TemplateListItem) => {
     setDeletingTemplate(template);
+    setDeleteError(null);
     setDeleteConfirmOpen(true);
   }, []);
 
@@ -209,9 +212,13 @@ export function useReportingTemplateManagement(): UseReportingTemplateManagement
 
     try {
       setDeleteLoading(true);
+      setDeleteError(null);
       await deleteTemplate(deletingTemplate.id);
       setTemplates((prev) => prev.filter((t) => t.id !== deletingTemplate.id));
       clearDeleteState();
+    } catch (err) {
+      // The dialog stays open on a failure, so this is the only thing that says why.
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete template');
     } finally {
       setDeleteLoading(false);
     }
@@ -284,6 +291,7 @@ export function useReportingTemplateManagement(): UseReportingTemplateManagement
     formLoading,
     editFormLoading,
     deleteLoading,
+    deleteError,
 
     // Actions
     fetchTemplates,

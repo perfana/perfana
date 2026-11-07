@@ -17,6 +17,7 @@ import { BullMQClientService } from '../../data-science/services/bullmq-client.s
 import { RollupPendingResult } from './test-runs-performance-query.types';
 import {
   TransactionStats,
+  TransactionPercentiles,
   SamplerStats,
   RunSamplerStats,
   ErrorStats,
@@ -25,6 +26,51 @@ import {
   ParallelGroupStats,
   ControllerRef,
 } from '../types/test-run.types';
+
+/** The run scope the 5 s transaction aggregates are read with. */
+interface TransactionCaggScope {
+  sut: string;
+  systemUnderTestId: string;
+  env: string;
+  workload: string | null;
+  startTime: Date;
+  endTime: Date;
+  cutoffTime: Date | null;
+}
+
+/** Which store answers a read of a run's transaction figures. */
+type TransactionSource =
+  | { kind: 'rollup' }
+  | { kind: 'cagg'; scope: TransactionCaggScope }
+  | { kind: 'pending'; pending: RollupPendingResult }
+  | { kind: 'raw' };
+
+/**
+ * One row per scenario plus one for the whole scope, told apart by GROUPING because a NULL
+ * scenario is a real group here. The scope row exists even over no rows, with NULL figures.
+ */
+const scopePercentilesSql = (scenarioColumn: string, digest: string, fromAndWhere: string): string => `
+  WITH agg AS (
+    SELECT
+      NULLIF(${scenarioColumn}, '')           AS scenario_name,
+      GROUPING(NULLIF(${scenarioColumn}, '')) AS is_overall,
+      ${digest}                               AS pct_agg
+    ${fromAndWhere}
+    GROUP BY GROUPING SETS ((NULLIF(${scenarioColumn}, '')), ())
+  )
+  SELECT
+    scenario_name,
+    is_overall,
+    ROUND(approx_percentile(0.95, pct_agg)::numeric, 2) AS p95_response_time,
+    ROUND(approx_percentile(0.99, pct_agg)::numeric, 2) AS p99_response_time
+  FROM agg
+`;
+
+/** Narrows a percentile read to the named scenarios, where '' is the rows with none. */
+const scenarioFilterSql = (scenarioColumn: string, scenarios: string[], params: unknown[]): string =>
+  scenarios.length > 0
+    ? `AND COALESCE(${scenarioColumn}, '') = ANY($${params.push(scenarios)}::text[])`
+    : '';
 
 interface SummaryTimeseriesBucket {
   timeSeconds: number;
@@ -626,15 +672,7 @@ export class TestRunsPerformanceQueryService {
    * the wrap is cheap insurance and matches the project pattern.
    */
   private async getTransactionStatsFromCagg(
-    scope: {
-      sut: string;
-      systemUnderTestId: string;
-      env: string;
-      workload: string | null;
-      startTime: Date;
-      endTime: Date;
-      cutoffTime: Date | null;
-    },
+    scope: TransactionCaggScope,
     excludeRampUp: boolean,
   ): Promise<TransactionStats[]> {
     const params: unknown[] = [
@@ -1091,6 +1129,77 @@ export class TestRunsPerformanceQueryService {
   }
 
   /**
+   * Picks the store for a run's transaction figures. The per-transaction rows and the scope
+   * percentiles both ask here, so a card's tiles and its rows never read different windows.
+   *
+   * Three-arm gate (rollup-pending plan), with CAGG fast path inserted:
+   *   ready           → fast-path read from rollup. Whole-run only, so sinceMinutes skips it.
+   *                     Dashboard latency drops from seconds-to-minutes to <100ms (#150, #151).
+   *   rollup-pending  → defer 202 until we've also probed the CAGG; if CAGG has data we serve
+   *                     a live 200 instead.
+   *   unavailable     → try CAGG; else fall through to live aggregation
+   *
+   * The CAGG avoids the raw transactions hypertable scan. Used when:
+   *   (a) sinceMinutes is unset AND rollup is 'rollup-pending' or 'unavailable' AND the CAGG has
+   *       data for this run's window: preferred over both 202 (better UX: live numbers) and raw
+   *       scan (faster + more correct Apdex since pct_agg_passed is success-filtered post-#298 /
+   *       migration 1779100000000)
+   *   (b) sinceMinutes is set: live windows during a running test (the pre-CAGG raw scan was
+   *       clamped to 60 min + statement_timeout 10s; CAGG reads typically <500 ms even for
+   *       10M-row runs)
+   */
+  private async resolveTransactionSource(
+    resolvedTestRunId: string,
+    excludeRampUp: boolean,
+    isAdmin: boolean,
+    organizationIds: string[],
+    clampedSinceMinutes: number | undefined,
+  ): Promise<TransactionSource> {
+    let pendingRollup: RollupPendingResult | null = null;
+    if (clampedSinceMinutes == null) {
+      const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
+      if (rollupStatus.status === 'ready') return { kind: 'rollup' };
+      if (rollupStatus.status === 'rollup-pending') pendingRollup = rollupStatus;
+    }
+
+    const caggScope = await this.loadCaggApdexScope(
+      resolvedTestRunId,
+      excludeRampUp,
+      isAdmin,
+      organizationIds,
+    );
+    if (caggScope?.hasTransactionsCagg) {
+      // For live windows, narrow the scope's startTime to NOW() - sinceMinutes
+      // (or keep scope.startTime if it's later than the live cutoff).
+      // Apply endCutoffTime (ramp_down) as the upper bound for completed runs;
+      // for in-flight runs endCutoffTime is null so endTime (NOW()) is used as-is.
+      const effectiveEndTime = caggScope.endCutoffTime ?? caggScope.endTime;
+      return {
+        kind: 'cagg',
+        scope: clampedSinceMinutes != null
+          ? {
+              ...caggScope,
+              endTime: effectiveEndTime,
+              startTime: new Date(Math.max(
+                caggScope.startTime.getTime(),
+                Date.now() - clampedSinceMinutes * 60_000,
+              )),
+            }
+          : { ...caggScope, endTime: effectiveEndTime },
+      };
+    }
+    // No CAGG: if rollup was 'rollup-pending', return that pending result (controller maps it to
+    // 202). Otherwise fall through to the raw-scan safety net.
+    if (pendingRollup) {
+      this.logger.debug(
+        `Rollup pending for ${resolvedTestRunId} and CAGG empty; returning rollup-pending result`,
+      );
+      return { kind: 'pending', pending: pendingRollup };
+    }
+    return { kind: 'raw' };
+  }
+
+  /**
    * Get transaction performance statistics for a test run.
    *
    * Percentiles (p95/p99) and Apdex are computed via TimescaleDB toolkit's
@@ -1129,86 +1238,26 @@ export class TestRunsPerformanceQueryService {
       // (the rollup-pending gate covers that case for completed runs).
       const clampedSinceMinutes = this.clampSinceMinutes(sinceMinutes);
 
-      // Fast path: if the rollup stage has written rows for this test run
-      // (completed runs only) AND sinceMinutes is not set (the rollup is
-      // whole-test-run only), read from the rollup table. Dashboard latency
-      // drops from seconds-to-minutes to <100ms.
-      // See: issues #150, #151.
-      //
-      // Three-arm gate (rollup-pending plan), with CAGG fast path inserted:
-      //   ready           → fast-path read from rollup
-      //   rollup-pending  → defer 202 until we've also probed the CAGG; if
-      //                     CAGG has data we serve a live 200 instead.
-      //   unavailable     → try CAGG; else fall through to live aggregation
-      let pendingRollup: RollupPendingResult | null = null;
-      if (clampedSinceMinutes == null) {
-        const rollupStatus = await this.getRollupStatus(resolvedTestRunId, isAdmin, organizationIds);
-        if (rollupStatus.status === 'ready') {
-          return await this.getTransactionStatsFromRollup(
-            resolvedTestRunId,
-            excludeRampUp,
-            isAdmin,
-            organizationIds,
-          );
-        }
-        if (rollupStatus.status === 'rollup-pending') {
-          // Hold the pending result; CAGG may serve a live 200 below. If the
-          // CAGG is empty too we'll return this and the controller maps it
-          // to HTTP 202 (preserves the pending-gate plan's cold-start
-          // behaviour).
-          pendingRollup = rollupStatus;
-        }
-        // status === 'unavailable' → try CAGG below, else fall through to
-        // live aggregation
-      }
-
-      // CAGG fast path: live-Apdex path that avoids the raw transactions
-      // hypertable scan by reading from transactions_5s + transactions_passed_5s.
-      // Used when:
-      //   (a) clampedSinceMinutes == null AND rollup is 'rollup-pending' or
-      //       'unavailable' AND the CAGG has data for this run's window —
-      //       preferred over both 202 (better UX: live numbers) and raw scan
-      //       (faster + more correct Apdex since pct_agg_passed is
-      //       success-filtered post-#298 / migration 1779100000000)
-      //   (b) clampedSinceMinutes != null — live windows during a running
-      //       test (the pre-CAGG raw scan was clamped to 60 min +
-      //       statement_timeout 10s; CAGG reads typically <500 ms even for
-      //       10M-row runs)
-      //
-      // Note (rollup-pending plan interaction): when the rollup status was
-      // 'rollup-pending' and we now serve from CAGG, we override the 202.
-      const caggScope = await this.loadCaggApdexScope(
+      const source = await this.resolveTransactionSource(
         resolvedTestRunId,
         excludeRampUp,
         isAdmin,
         organizationIds,
+        clampedSinceMinutes,
       );
-      if (caggScope?.hasTransactionsCagg) {
-        // For live windows, narrow the scope's startTime to NOW() - sinceMinutes
-        // (or keep scope.startTime if it's later than the live cutoff).
-        // Apply endCutoffTime (ramp_down) as the upper bound for completed runs;
-        // for in-flight runs endCutoffTime is null so endTime (NOW()) is used as-is.
-        const effectiveEndTime = caggScope.endCutoffTime ?? caggScope.endTime;
-        const adjustedScope = clampedSinceMinutes != null
-          ? {
-              ...caggScope,
-              endTime: effectiveEndTime,
-              startTime: new Date(Math.max(
-                caggScope.startTime.getTime(),
-                Date.now() - clampedSinceMinutes * 60_000,
-              )),
-            }
-          : { ...caggScope, endTime: effectiveEndTime };
-        return await this.getTransactionStatsFromCagg(adjustedScope, excludeRampUp);
-      }
-      // No CAGG: if rollup was 'rollup-pending', return that pending result
-      // (controller maps it to 202). Otherwise fall through to the raw-scan
-      // safety net below.
-      if (pendingRollup) {
-        this.logger.debug(
-          `Rollup pending for ${resolvedTestRunId} and CAGG empty; returning rollup-pending result`,
+      if (source.kind === 'rollup') {
+        return await this.getTransactionStatsFromRollup(
+          resolvedTestRunId,
+          excludeRampUp,
+          isAdmin,
+          organizationIds,
         );
-        return pendingRollup;
+      }
+      if (source.kind === 'cagg') {
+        return await this.getTransactionStatsFromCagg(source.scope, excludeRampUp);
+      }
+      if (source.kind === 'pending') {
+        return source.pending;
       }
 
       // Always bounded — the toggle narrows the window, it does not decide whether there
@@ -1353,6 +1402,153 @@ export class TestRunsPerformanceQueryService {
       this.logger.error(`Failed to get transaction stats for test run ${testRunId}:`, error);
       throw new DatabaseException('Failed to retrieve transaction statistics', error);
     }
+  }
+
+  /**
+   * P95 and P99 over every execution of a scope: the whole run and each scenario, or just the
+   * scenarios named. A percentile of a scope cannot be derived from per-transaction rows. The
+   * execution-weighted average of their P95s reads far too low whenever a slow minority of
+   * transactions forms the tail, so this merges the digests behind those rows instead, from the
+   * same store they were read from. A subset of scenarios can only be merged here, for the same
+   * reason: no digest reaches the client.
+   *
+   * @param scenarios - Scenarios to narrow to, '' meaning the rows with none. Empty means all.
+   */
+  async getTransactionPercentiles(
+    testRunId: string,
+    excludeRampUp: boolean = false,
+    isAdmin: boolean = false,
+    organizationIds: string[] = [],
+    sinceMinutes?: number,
+    scenarios: string[] = [],
+  ): Promise<TransactionPercentiles | RollupPendingResult> {
+    try {
+      if (!isAdmin && organizationIds.length === 0) {
+        return { overall: null, by_scenario: [] };
+      }
+
+      const resolvedTestRunId = await this.resolveTestRunId(testRunId);
+      const clampedSinceMinutes = this.clampSinceMinutes(sinceMinutes);
+      const source = await this.resolveTransactionSource(
+        resolvedTestRunId,
+        excludeRampUp,
+        isAdmin,
+        organizationIds,
+        clampedSinceMinutes,
+      );
+      if (source.kind === 'pending') return source.pending;
+
+      const rows = source.kind === 'rollup'
+        ? await this.readPercentilesFromRollup(resolvedTestRunId, excludeRampUp, isAdmin, organizationIds, scenarios)
+        : source.kind === 'cagg'
+          ? await this.readPercentilesFromCagg(source.scope, excludeRampUp, scenarios)
+          : await this.readPercentilesFromRaw(
+              resolvedTestRunId, excludeRampUp, isAdmin, organizationIds, clampedSinceMinutes, scenarios,
+            );
+
+      // A group with no digest has no percentile, which is not the same as 0 ms.
+      const measured = rows.filter((row) => row.p95_response_time != null);
+      const figures = (row: Record<string, unknown>) => ({
+        p95_response_time: this.mapper.parseFloat(row.p95_response_time),
+        p99_response_time: this.mapper.parseFloat(row.p99_response_time),
+      });
+      const overall = measured.find((row) => Number(row.is_overall) === 1);
+      return {
+        overall: overall ? figures(overall) : null,
+        by_scenario: measured
+          .filter((row) => Number(row.is_overall) === 0)
+          .map((row) => ({
+            scenario_name: (row.scenario_name as string | null) ?? null,
+            ...figures(row),
+          })),
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get transaction percentiles for test run ${testRunId}:`, error);
+      throw new DatabaseException('Failed to retrieve transaction percentiles', error);
+    }
+  }
+
+  private async readPercentilesFromRollup(
+    resolvedTestRunId: string,
+    excludeRampUp: boolean,
+    isAdmin: boolean,
+    organizationIds: string[],
+    scenarios: string[],
+  ): Promise<Array<Record<string, unknown>>> {
+    const params: unknown[] = [resolvedTestRunId, excludeRampUp];
+    const orgFilter = isAdmin ? '' : `AND sut.organization_id = ANY($${params.push(organizationIds)}::uuid[])`;
+    const scenarioFilter = scenarioFilterSql('trs.scenario_name', scenarios, params);
+    return withRequestEm(this.testRunRepo).query(
+      scopePercentilesSql('trs.scenario_name', 'rollup(trs.pct_agg)', `
+        FROM test_run_transaction_stats trs
+        JOIN test_runs tr ON tr.test_run_id = trs.test_run_id
+        JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+        WHERE trs.test_run_id = $1
+          AND trs.ramp_up_excluded = $2
+          AND trs.total_count > 0
+          ${orgFilter}
+          ${scenarioFilter}
+      `),
+      params,
+    );
+  }
+
+  /** The scope loader org-filters, so a run the caller cannot see never reaches this arm. */
+  private async readPercentilesFromCagg(
+    scope: TransactionCaggScope,
+    excludeRampUp: boolean,
+    scenarios: string[],
+  ): Promise<Array<Record<string, unknown>>> {
+    const params: unknown[] = [
+      scope.sut, scope.env, scope.startTime, scope.endTime, excludeRampUp, scope.cutoffTime,
+    ];
+    const scenarioFilter = scenarioFilterSql('c.scenario_name', scenarios, params);
+    return this.withStatementTimeout((em) => em.query(
+      scopePercentilesSql('c.scenario_name', 'rollup(c.pct_agg)', `
+        FROM transactions_5s c
+        WHERE c.system_under_test = $1
+          AND c.test_environment  = $2
+          AND c.bucket >= $3::timestamptz
+          AND c.bucket <  $4::timestamptz + interval '5 seconds'
+          AND ($5::boolean = false OR $6::timestamptz IS NULL
+               OR c.bucket >= time_bucket('5 seconds'::interval, $6::timestamptz))
+          ${scenarioFilter}
+      `),
+      params,
+    ));
+  }
+
+  private async readPercentilesFromRaw(
+    resolvedTestRunId: string,
+    excludeRampUp: boolean,
+    isAdmin: boolean,
+    organizationIds: string[],
+    clampedSinceMinutes: number | undefined,
+    scenarios: string[],
+  ): Promise<Array<Record<string, unknown>>> {
+    const time = timeBoundsSql(await this.getAnalysisBounds(resolvedTestRunId, excludeRampUp), 't.time', 2);
+    const params: unknown[] = [resolvedTestRunId, ...time.params];
+    const sinceFilter = clampedSinceMinutes != null
+      ? `AND t.time >= NOW() - ($${params.push(clampedSinceMinutes)}::numeric * interval '1 minute')`
+      : '';
+    const orgFilter = isAdmin ? '' : `AND sut.organization_id = ANY($${params.push(organizationIds)}::uuid[])`;
+    const scenarioFilter = scenarioFilterSql('t.scenario_name', scenarios, params);
+    return this.withStatementTimeout(async (em) => {
+      await em.query(`SET LOCAL work_mem = '512MB'`);
+      return em.query(
+        scopePercentilesSql('t.scenario_name', 'percentile_agg(t.response_time::double precision)', `
+          FROM transactions t
+          JOIN test_runs tr ON tr.test_run_id = t.test_run_id
+          JOIN systems_under_test sut ON sut.id = tr.system_under_test_id
+          WHERE t.test_run_id = $1
+            ${time.clause}
+            ${sinceFilter}
+            ${orgFilter}
+            ${scenarioFilter}
+        `),
+        params,
+      );
+    });
   }
 
   /**

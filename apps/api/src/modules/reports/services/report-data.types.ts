@@ -357,6 +357,14 @@ export interface TransactionRow {
 }
 
 /** Raw transaction row with Apdex columns from database query */
+/** One scope's percentiles. `is_overall` is 1 on the whole-run row, where `scenario` is NULL. */
+export interface ApdexPercentileRow {
+  scenario: string | null;
+  is_overall: number;
+  p95_ms: string | null;
+  p99_ms: string | null;
+}
+
 export interface ApdexTransactionRow extends TransactionRow {
   scenario_name: string;
   satisfied: string;

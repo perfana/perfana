@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.50] - 2026-11-07
+
+### Changed
+- **A generated report is private until someone shares it.** Every report used to get a public link the moment it was generated. Its row in the Reports card now has a share menu: **Create share link** turns the link on and copies it, **Stop sharing** turns it off, and turning it back on restores the same link. Changing this needs `test-run:update` on the report's run, so an org viewer can read a report but not publish it.
+
+  **Existing reports keep the setting they have, which is on.** Pipelines that fetch `/html/download` or `/pdf/download` with an API key are unaffected, but a script that builds a public link from `share_id` now has to call `PUT /api/reports/:reportId/share` first, or the link answers 404.
+
+### Fixed
+- **The Performance Analysis P95 and P99 are now real percentiles.** The tiles and scenario rows showed an average of the transactions' percentiles, which reads far too low when a slow minority forms the tail: 383 ms against a real 844 ms on the demo run. They now come from `GET /test-runs/:id/transactions/percentiles`, which merges the digests behind those rows over the same window, including for any selection of scenarios. If the API cannot answer, the old figure stays and is labelled as an average. Figures can differ from the report's by a couple of percent, because the digests are approximate and the windows differ at the ramp-down.
+- **The report's Apdex section prints real percentiles too.** Its overall and per-scenario P95 and P99 had the same averaging problem, printed as "95th percentile". The average and the Apdex score stay weighted, because for those the weighting is exact. Regenerate a report to get the new figures.
+- **A report template can be deleted once a report has been made from it.** A report generated straight from a template, which is the CI path, made that template undeletable: the delete answered 500 and the page said nothing. Reports now outlive their template (migration 1821), and only regenerating one needs it, so `POST /reports/:id/retry` answers 400 for those.
+- **A public share link no longer redirects to the sign-in page**, and the links Perfana copies point at the web app's real default port.
+- **A stopped or expired share link's PDF answers 404.** The public PDF route answered 400, where the HTML route and the route's own docs say 404.
+- **The report's Header section uses its settings.** Header Text, Header Level and Section Title were ignored. The text also accepts `{perfana-…}` values now, and a collapsed Header card names itself rather than showing the raw placeholder.
+- **A section preview of the Header looks like the report.** The preview had none of the cover or summary styling.
+- **The report's Anomaly Detection badge no longer claims NO REGRESSIONS for a run ADAPT did not compare.** A first run, a changepoint or a run with nothing comparable now reads NOT EVALUATED.
+- **The report's response-times chart no longer draws a false zero.** A transaction with no samples in a bucket dropped to 0 and back; the line now breaks there. A chart with a single bucket no longer produces invalid coordinates.
+- **A SUT import keeps a report with no template**, rather than dropping it as a row with a missing parent.
+
 ## [0.2.97.49] - 2026-11-07
 
 ### Added

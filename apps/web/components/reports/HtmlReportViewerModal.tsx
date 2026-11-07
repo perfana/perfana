@@ -274,7 +274,7 @@ export function HtmlReportViewerModal({
       // Use frontend HTML view page for public access
       const baseUrl = typeof window !== 'undefined'
         ? window.location.origin
-        : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:4001';
+        : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:4000';
       const htmlViewUrl = `${baseUrl}/reports/share/${shareId}`;
       window.open(htmlViewUrl, '_blank');
     } else if (htmlContent) {
@@ -530,15 +530,17 @@ export function HtmlReportViewerModal({
         </Tooltip>
 
         {/* Copy Share URL */}
-        <Tooltip title="Copy Share URL">
-          <IconButton
-            size="small"
-            onClick={handleCopyShareUrl}
-            disabled={loading || !!error || !shareId}
-            aria-label="Copy share URL to clipboard"
-          >
-            <ShareIcon fontSize="small" />
-          </IconButton>
+        <Tooltip title={shareId ? 'Copy Share URL' : "Sharing is off. Turn it on from this report's share menu in the list"}>
+          <span>
+            <IconButton
+              size="small"
+              onClick={handleCopyShareUrl}
+              disabled={loading || !!error || !shareId}
+              aria-label="Copy share URL to clipboard"
+            >
+              <ShareIcon fontSize="small" />
+            </IconButton>
+          </span>
         </Tooltip>
 
         {/* Open in new tab */}

@@ -419,6 +419,12 @@ Symptom index. Each entry names the cause and points at the file that explains i
 
 69. **A chart copied from the Compare or Trends card pastes with no title and no legend** → it exported its graph div, and the Analyst layout keeps both as HTML around the plot. Fixed in v0.2.97.48: those cards export through `ChartActions` and hide Plotly's modebar. A new chart on that layout has to do the same. See "A chart on the Analyst layout exports through `ChartActions`" in [apps/web/CLAUDE.md](apps/web/CLAUDE.md).
 
+70. **Deleting a report template answers 500 and the page says nothing** → `generated_reports.template_id` was NOT NULL under an `ON DELETE SET NULL` foreign key, two rules that cannot both hold, so the delete failed with 23502. Only a report generated straight from the template hits it, which is the CI path: the UI's reports point at a hidden ad-hoc copy. Fixed in v0.2.97.50 by migration 1821. A report with no template stays readable and shareable; `POST /reports/:id/retry` answers 400 for it. See `docs/reference/Features/Templates.md`.
+
+71. **A share link for a new report answers 404, or a script's public link stopped working** → reports are private when generated since v0.2.97.50. Turn sharing on with the Reports card's share menu or `PUT /api/reports/:reportId/share`, which needs `test-run:update` on the run. Reports generated earlier keep sharing on. If the link instead lands on the sign-in page, `/reports/share/` is missing from `publicRoutePrefixes` in `apps/web/components/layout/auth-layout.tsx`. See "Sharing a report" in `docs/reference/Features/Templates.md`.
+
+72. **The P95 and P99 tiles on Performance Analysis read far below the report's, or their caption says "Average of transaction P95s"** → the caption means `GET /test-runs/:id/transactions/percentiles` could not answer: a 202 while the rollup is being built, or a 404 from an API older than the web build, and the card has fallen back to the execution-weighted average. That average reads low whenever a slow minority of transactions forms the tail (383 ms against 844 ms on the demo run). A gap of a couple of percent with the caption reading "95th percentile" is not a bug: the card merges approximate digests and also excludes the ramp-down. The read picks its store through `resolveTransactionSource`, the same helper as the per-transaction rows, so do not give it a store decision of its own, or the tiles and rows can read different windows.
+
 ## Health Stack
 
 - typecheck: turbo run type-check
