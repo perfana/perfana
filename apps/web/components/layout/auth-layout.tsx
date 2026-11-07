@@ -10,11 +10,16 @@ interface AuthLayoutProps {
 
 const publicRoutes = ['/signin', '/signup', '/forgot-password']
 
+// A report share link is opened by people with no account. The page fetches a @Public() API route,
+// so redirecting them to sign-in made the link useless without protecting anything.
+const publicRoutePrefixes = ['/reports/share/']
+
 export function AuthLayout({ children }: AuthLayoutProps) {
   const { user, isLoading } = useAuth()
   const pathname = usePathname()
   
   const isPublicRoute = publicRoutes.includes(pathname)
+    || publicRoutePrefixes.some((prefix) => pathname.startsWith(prefix))
   
   // Show loading spinner while checking auth
   if (isLoading) {

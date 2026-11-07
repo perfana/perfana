@@ -168,6 +168,58 @@ describe('AuthLayout', () => {
     });
   });
 
+  describe('Report share links', () => {
+    const shareRoute = '/reports/share/875046f9-bb29-47db-83ab-72bd8c00fdd9';
+
+    // REGRESSION GUARD. The page says "no authentication required" and its API route is @Public(),
+    // but the exact-match route list sent every signed-out visitor to /signin.
+    it('should render a share link for a signed-out visitor with no redirect and no AppShell', () => {
+      mockUsePathname.mockReturnValue(shareRoute);
+      mockUseAuth.mockReturnValue({ user: null, isLoading: false });
+
+      render(
+        <AuthLayout>
+          <div>Shared Report</div>
+        </AuthLayout>
+      );
+
+      expect(screen.getByText('Shared Report')).toBeInTheDocument();
+      expect(screen.queryByTestId('app-shell')).not.toBeInTheDocument();
+      expect(window.location.href).toBe('');
+    });
+
+    it('should render a share link without the AppShell for a signed-in user too', () => {
+      mockUsePathname.mockReturnValue(shareRoute);
+      mockUseAuth.mockReturnValue({ user: { id: '1' }, isLoading: false });
+
+      render(
+        <AuthLayout>
+          <div>Shared Report</div>
+        </AuthLayout>
+      );
+
+      expect(screen.getByText('Shared Report')).toBeInTheDocument();
+      expect(screen.queryByTestId('app-shell')).not.toBeInTheDocument();
+    });
+
+    it.each(['/reports', '/reports/share', '/reports/shared/abc', '/test-runs/reports/share/abc'])(
+      'should keep %s protected',
+      (route) => {
+        mockUsePathname.mockReturnValue(route);
+        mockUseAuth.mockReturnValue({ user: null, isLoading: false });
+
+        render(
+          <AuthLayout>
+            <div>Protected Content</div>
+          </AuthLayout>
+        );
+
+        expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+        expect(window.location.href).toBe('/signin');
+      },
+    );
+  });
+
   describe('Protected Routes - Unauthenticated', () => {
     it('should redirect to signin when accessing protected route without authentication', () => {
       mockUsePathname.mockReturnValue('/test-runs');

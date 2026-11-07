@@ -10,6 +10,7 @@ describe('TestRunsMetricsTransactionController', () => {
     getTransactionStats: jest.fn(),
     getTransactionSamples: jest.fn(),
     getTransactionTimeSeries: jest.fn(),
+    getTransactionPercentiles: jest.fn(),
   };
   const ctx = { userId: 'u1', roles: ['user'] } as never;
 
@@ -111,6 +112,68 @@ describe('TestRunsMetricsTransactionController', () => {
         true,
       );
       expect(result).toMatchObject({ aggregation_seconds: 60 });
+    });
+  });
+
+  describe('GET .../transactions/percentiles', () => {
+    // Over HTTP, because what is under test is how the query string reaches the service.
+    let app: INestApplication;
+    const answer = { overall: null, by_scenario: [] };
+
+    beforeEach(async () => {
+      const moduleRef = await Test.createTestingModule({
+        controllers: [TestRunsMetricsTransactionController],
+        providers: [{ provide: TestRunsService, useValue: mockService }],
+      }).compile();
+      app = moduleRef.createNestApplication();
+      await app.init();
+      mockService.getTransactionPercentiles.mockResolvedValue(answer);
+    });
+
+    afterEach(async () => {
+      await app.close();
+    });
+
+    const get = (query: string) =>
+      request(app.getHttpServer()).get(`/test-runs/tr1/transactions/percentiles${query}`);
+    const scenariosSent = () => mockService.getTransactionPercentiles.mock.calls[0][5] as unknown;
+
+    it('asks for every scenario when none are named', async () => {
+      const response = await get('').expect(200);
+      expect(response.body).toEqual(answer);
+      expect(scenariosSent()).toEqual([]);
+      expect(mockService.getTransactionPercentiles.mock.calls[0][3]).toBe(false);
+    });
+
+    it('takes one scenario as a list of one', async () => {
+      await get('?scenario=Checkout').expect(200);
+      expect(scenariosSent()).toEqual(['Checkout']);
+    });
+
+    it('takes repeated scenarios, an empty one meaning no scenario', async () => {
+      await get('?scenario=Checkout&scenario=&excludeRampUp=true').expect(200);
+      expect(scenariosSent()).toEqual(['Checkout', '']);
+      expect(mockService.getTransactionPercentiles.mock.calls[0][3]).toBe(true);
+    });
+
+    it('drops a scenario that parsed into something other than a string', async () => {
+      await get('?scenario=Checkout&scenario[a]=b').expect(200);
+      for (const name of scenariosSent() as unknown[]) expect(typeof name).toBe('string');
+    });
+
+    it('parses sinceMinutes and refuses a non-number', async () => {
+      await get('?sinceMinutes=5').expect(200);
+      expect(mockService.getTransactionPercentiles.mock.calls[0][4]).toBe(5);
+      await get('?sinceMinutes=abc').expect(400);
+    });
+
+    it('answers 202 while the rollup is being built', async () => {
+      mockService.getTransactionPercentiles.mockResolvedValue({
+        status: 'rollup-pending',
+        stage: 'transaction-stats-rollup',
+      });
+      const response = await get('').expect(202);
+      expect(response.body).toMatchObject({ status: 'rollup-pending' });
     });
   });
 

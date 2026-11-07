@@ -26,6 +26,7 @@ import {
 import { DrillDownFilters } from './types/performance-analysis.types';
 
 import { usePerformanceAnalysisData } from './hooks/usePerformanceAnalysisData';
+import { useScopePercentiles } from './hooks/useScopePercentiles';
 import { usePerformanceAnalysisHandlers } from './hooks/usePerformanceAnalysisHandlers';
 import {
   PerformanceAnalysisCollapsedView,
@@ -131,6 +132,10 @@ export default function PerformanceAnalysisCard({
   const manualRefreshLabel = refreshState === 'off'
     ? 'Refresh metrics (auto-refresh off)'
     : 'Refresh metrics (auto-refresh paused — last fetch took >5s)';
+
+  const scopePercentiles = useScopePercentiles(
+    testRunId, excludeRampUp, sinceMinutes, selectedScenarios, transactions,
+  );
 
   const availableScenarios = useMemo(
     () => deriveAvailableScenarios(transactions),
@@ -557,6 +562,7 @@ export default function PerformanceAnalysisCard({
                     throughputStats={filteredThroughputStats}
                     virtualUserStats={filteredVirtualUserStats}
                     testLevelThreshold={testLevelThreshold}
+                    percentiles={scopePercentiles === undefined ? undefined : scopePercentiles?.overall ?? null}
                   />
                 )}
 
@@ -605,6 +611,7 @@ export default function PerformanceAnalysisCard({
                     transactions={filteredTransactions}
                     throughputStats={filteredThroughputStats}
                     virtualUserStats={filteredVirtualUserStats}
+                    scopePercentiles={scopePercentiles}
                     sortField={sortField}
                     sortOrder={sortOrder}
                     onSort={handleSort}

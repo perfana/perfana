@@ -108,6 +108,26 @@ describe('ReportHtmlCompilerService variable substitution', () => {
     expect(renderSlo.mock.calls[0][0].text).toBe('Run run-42');
   });
 
+  it('resolves variables in the Header section cover text before the renderer sees it', async () => {
+    const renderHeader = moduleRef.get(HeaderRenderer).renderHeaderSection as jest.Mock;
+    await service.renderSections(
+      [section({ type: 'header', config: { text: 'Report for {perfana-test-run-id}', level: 2 } })],
+      testRun,
+      null,
+    );
+    expect(renderHeader.mock.calls[0][0].config).toEqual({ text: 'Report for run-42', level: 2 });
+  });
+
+  it('does not treat config.text on another section type as cover text', async () => {
+    await service.renderSections(
+      [section({ type: 'slo', config: { text: '{perfana-test-run-id}' } })],
+      testRun,
+      null,
+    );
+    expect(findConfigs).not.toHaveBeenCalled();
+    expect(renderSlo.mock.calls[0][0].config.text).toBe('{perfana-test-run-id}');
+  });
+
   it('leaves a legacy comment-only section without an empty text that would mask it', async () => {
     await service.renderSections(
       [section({ type: 'slo', comment: 'Legacy {perfana-workload}' })],

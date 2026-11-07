@@ -49,7 +49,7 @@ describe('HeaderRenderer', () => {
           useValue: {
             getSloSummary: jest.fn().mockResolvedValue({ passed: 5, failed: 0, total: 5 }),
             getAnomalySummary: jest.fn().mockResolvedValue({
-              conclusion: 'no_regressions',
+              conclusion: 'PASSED',
               regressionCount: 0,
               improvementCount: 2,
             }),
@@ -94,6 +94,75 @@ describe('HeaderRenderer', () => {
 
       expect(html).toContain('Sprint 42 Report');
       expect(html).toContain('Nightly Load Test');
+    });
+
+    describe('the builder form', () => {
+      // REGRESSION GUARD. The form writes `config.text` and `config.level`; this renderer read
+      // `config.title` and hardcoded <h1>, so both fields were saved and shown on the card and
+      // never reached a report, with nothing logged.
+      it('should use Header Text as the cover title', async () => {
+        const section = makeSection({ config: { text: 'Nightly regression run' } });
+        const html = await renderer.renderHeaderSection(section, makeTestRun());
+
+        expect(html).toContain('<h1>Nightly regression run</h1>');
+        expect(html).not.toContain('Performance Test Report');
+      });
+
+      it('should let Header Text win over a title the form cannot see', async () => {
+        const section = makeSection({ config: { title: 'From the API', text: 'From the form' } });
+        const html = await renderer.renderHeaderSection(section, makeTestRun());
+
+        expect(html).toContain('From the form');
+        expect(html).not.toContain('From the API');
+      });
+
+      it('should fall back past blank text to the title and then the default', async () => {
+        const titled = makeSection({ config: { title: 'From the API', text: '   ' } });
+        const blank = makeSection({ config: { text: '   ' } });
+
+        expect(await renderer.renderHeaderSection(titled, makeTestRun())).toContain('<h1>From the API</h1>');
+        expect(await renderer.renderHeaderSection(blank, makeTestRun())).toContain('<h1>Performance Test Report</h1>');
+      });
+
+      it('should escape Header Text', async () => {
+        const section = makeSection({ config: { text: '<img onerror=alert(1)>' } });
+        const html = await renderer.renderHeaderSection(section, makeTestRun());
+
+        expect(html).not.toContain('<img onerror');
+        expect(html).toContain('&lt;img onerror');
+      });
+
+      it.each([1, 2, 3, 4, 5, 6])('should render level %i as that heading tag', async (level) => {
+        const section = makeSection({ config: { text: 'Levelled', level } });
+        const html = await renderer.renderHeaderSection(section, makeTestRun());
+
+        expect(html).toContain(`<h${level}>Levelled</h${level}>`);
+      });
+
+      // `level` is unvalidated JSON that lands in a tag name, so this is an injection check too.
+      it.each([[0], [7], [2.5], ['script'], ['1><script>alert(1)</script>'], [null], [undefined]])(
+        'should fall back to h1 for level %p',
+        async (level) => {
+          const section = makeSection({ config: { text: 'Levelled', level } });
+          const html = await renderer.renderHeaderSection(section, makeTestRun());
+
+          expect(html).toContain('<h1>Levelled</h1>');
+          expect(html).not.toContain('<script>');
+        },
+      );
+
+      it('should use the Section Title as the summary heading', async () => {
+        const html = await renderer.renderHeaderSection(makeSection({ title: 'Overview' }), makeTestRun());
+
+        expect(html).toContain('<h2>Overview</h2>');
+        expect(html).not.toContain('Test Run Summary');
+      });
+
+      it('should escape the Section Title', async () => {
+        const html = await renderer.renderHeaderSection(makeSection({ title: '<b>x</b>' }), makeTestRun());
+
+        expect(html).toContain('<h2>&lt;b&gt;x&lt;/b&gt;</h2>');
+      });
     });
 
     it('should skip cover page when includeCoverPage is false', async () => {
@@ -156,6 +225,50 @@ describe('HeaderRenderer', () => {
 
       expect(html).toContain('NO REGRESSIONS');
       expect(html).toContain('badge-success');
+    });
+
+    it('should not pluralize a single regression', async () => {
+      dataFetcher.getAnomalySummary.mockResolvedValue({
+        conclusion: 'REGRESSION',
+        regressionCount: 1,
+        improvementCount: 0,
+      });
+
+      const html = await renderer.renderHeaderSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('1 REGRESSION DETECTED');
+    });
+
+    // REGRESSION GUARD. A run ADAPT never compared has zero regressions for a different reason.
+    // The badge keyed on the count alone, so the summary read a green NO REGRESSIONS directly
+    // above an Anomaly Detection section saying N/A.
+    it.each(['INSUFFICIENT_DATA', 'SKIPPED', 'NO_BASELINES_FOUND', 'no_data', 'unknown'])(
+      'should not claim a pass for conclusion %s',
+      async (conclusion) => {
+        dataFetcher.getAnomalySummary.mockResolvedValue({ conclusion, regressionCount: 0, improvementCount: 0 });
+
+        const html = await renderer.renderHeaderSection(makeSection(), makeTestRun());
+
+        expect(html).toContain('NOT EVALUATED');
+        expect(html).not.toContain('NO REGRESSIONS');
+        // The SLO row above it is a real pass and keeps its own badge-success.
+        expect(html).toContain('<span class="badge badge-info">NOT EVALUATED</span>');
+      },
+    );
+
+    it('should not claim a pass when the only regressions are tracked ones', async () => {
+      // buildConclusionSQL says REGRESSION on tracked_regression_count alone, and a tracked
+      // regression is not in the `regressions` array the count comes from.
+      dataFetcher.getAnomalySummary.mockResolvedValue({
+        conclusion: 'REGRESSION',
+        regressionCount: 0,
+        improvementCount: 0,
+      });
+
+      const html = await renderer.renderHeaderSection(makeSection(), makeTestRun());
+
+      expect(html).toContain('<span class="badge badge-warning">REGRESSIONS DETECTED</span>');
+      expect(html).not.toContain('NO REGRESSIONS');
     });
   });
 

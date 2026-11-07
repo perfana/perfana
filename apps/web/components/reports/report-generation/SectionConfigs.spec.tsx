@@ -3,6 +3,7 @@ import { GraphPresetsAPI } from '@/lib/graph-presets';
 import { TrendsPresetsAPI } from '@/lib/trends-presets';
 import {
   HeaderConfigForm,
+  headerPreviewTitle,
   IndexConfigForm,
   TextBlockConfigForm,
   SloConfigForm,
@@ -402,6 +403,20 @@ describe('HeaderConfigForm (caption vs accompanying text independence)', () => {
     fireEvent.blur(textField);
     expect(onTextChange).toHaveBeenCalledWith('New accompanying text');
     expect(onChange).toHaveBeenCalledTimes(1); // still just the earlier caption edit
+  });
+});
+
+describe('headerPreviewTitle', () => {
+  it('shows the Header Text', () => {
+    expect(headerPreviewTitle('Nightly regression')).toBe('Nightly regression');
+  });
+
+  it.each([undefined, ''])('falls back to the section name for %p', (text) => {
+    expect(headerPreviewTitle(text)).toBe('Header');
+  });
+
+  it('never shows raw placeholder syntax, which only the server can resolve', () => {
+    expect(headerPreviewTitle('Release check {perfana-test-run-id}')).toBe('Header');
   });
 });
 

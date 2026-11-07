@@ -6,12 +6,15 @@ import { TransactionStat, VirtualUserStats, ThroughputStats } from '../types/per
 import {
   ERROR_RATE_WARN_PCT,
   computeErrorRate, formatNumber, apdexRating, calculateScenarioMetrics } from '../utils/performance-formatters';
+import { PercentileFigures } from '../hooks/useScopePercentiles';
 
 interface OverallTestMetricsProps {
   transactions: TransactionStat[];
   throughputStats: ThroughputStats | null;
   virtualUserStats: VirtualUserStats | null;
   testLevelThreshold: number;
+  /** undefined while loading; null when unavailable, so the weighted figure stands in, labelled. */
+  percentiles: PercentileFigures | null | undefined;
 }
 
 export default function OverallTestMetrics({
@@ -19,6 +22,7 @@ export default function OverallTestMetrics({
   throughputStats,
   virtualUserStats,
   testLevelThreshold,
+  percentiles,
 }: OverallTestMetricsProps) {
   // Calculate metrics
   const totalRequests = transactions.reduce((sum, t) => sum + t.total_count, 0);
@@ -176,10 +180,10 @@ export default function OverallTestMetrics({
             P95 Response Time
           </Typography>
           <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 700, color: 'warning.main' }}>
-            {formatNumber(weightedP95ResponseTime)} ms
+            {percentiles === undefined ? '—' : `${formatNumber(percentiles?.p95_response_time ?? weightedP95ResponseTime)} ms`}
           </Typography>
           <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
-            95th percentile
+            {percentiles === null ? 'Average of transaction P95s' : '95th percentile'}
           </Typography>
         </Box>
 
@@ -196,10 +200,10 @@ export default function OverallTestMetrics({
             P99 Response Time
           </Typography>
           <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 700, color: 'error.main' }}>
-            {formatNumber(weightedP99ResponseTime)} ms
+            {percentiles === undefined ? '—' : `${formatNumber(percentiles?.p99_response_time ?? weightedP99ResponseTime)} ms`}
           </Typography>
           <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
-            99th percentile
+            {percentiles === null ? 'Average of transaction P99s' : '99th percentile'}
           </Typography>
         </Box>
 

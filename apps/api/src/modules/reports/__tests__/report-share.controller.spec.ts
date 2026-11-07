@@ -16,6 +16,8 @@ jest.mock('@nestjs/typeorm', () => ({
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { Response } from 'express';
+import { ResourceNotFoundException, ValidationException } from '../../../common/exceptions/business.exception';
 import { ReportShareController } from '../controllers/report-share.controller';
 import { ReportShareService } from '../services/report-share.service';
 import { ShareParamsDto } from '../dto';
@@ -43,6 +45,7 @@ describe('ReportShareController', () => {
           provide: ReportShareService,
           useValue: {
             getPublicReport: jest.fn(),
+            getPublicReportPdf: jest.fn(),
             validateShareLink: jest.fn(),
             findByShareId: jest.fn(),
           },
@@ -65,6 +68,62 @@ describe('ReportShareController', () => {
 
     it('should have service injected', () => {
       expect(reportShareService).toBeDefined();
+    });
+  });
+
+  // ==================== Public PDF ====================
+
+  describe('downloadPublicPdf', () => {
+    const params = { shareId: '123e4567-e89b-12d3-a456-426614174000' } as ShareParamsDto;
+    const res = { set: jest.fn() } as unknown as Response;
+    const pdfService = () => reportShareService.getPublicReportPdf as unknown as jest.Mock;
+
+    // REGRESSION GUARD. The service reports these as HttpExceptions, and rethrowing those first
+    // answered a stopped link with a 400 where the HTML route and this route's docs say 404. Copy
+    // Share Link hands out this URL, so a stopped link lands here.
+    it.each([
+      'Sharing is not enabled for this report',
+      'This share link has expired',
+      'Report content is not yet available',
+    ])('should answer "%s" with a 404', async (message) => {
+      pdfService().mockRejectedValue(new ValidationException(message));
+
+      const error = await controller.downloadPublicPdf(params, res).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(HttpStatus.NOT_FOUND);
+    });
+
+    it('should answer an unknown share id with a 404', async () => {
+      pdfService().mockRejectedValue(new ResourceNotFoundException('Shared Report', params.shareId));
+
+      const error = await controller.downloadPublicPdf(params, res).catch((e: unknown) => e);
+
+      expect((error as HttpException).getStatus()).toBe(HttpStatus.NOT_FOUND);
+    });
+
+    it('should answer a report with no PDF yet with a 404', async () => {
+      pdfService().mockResolvedValue(null);
+
+      const error = await controller.downloadPublicPdf(params, res).catch((e: unknown) => e);
+
+      expect((error as HttpException).getStatus()).toBe(HttpStatus.NOT_FOUND);
+    });
+
+    it('should leave any other HTTP status alone', async () => {
+      pdfService().mockRejectedValue(new HttpException('Slow down', HttpStatus.TOO_MANY_REQUESTS));
+
+      const error = await controller.downloadPublicPdf(params, res).catch((e: unknown) => e);
+
+      expect((error as HttpException).getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
+    });
+
+    it('should answer an unexpected failure with a 500', async () => {
+      pdfService().mockRejectedValue(new Error('connection terminated'));
+
+      const error = await controller.downloadPublicPdf(params, res).catch((e: unknown) => e);
+
+      expect((error as HttpException).getStatus()).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
     });
   });
 

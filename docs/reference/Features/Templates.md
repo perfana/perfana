@@ -59,6 +59,21 @@ One dialog, `GenerateReportDialog`: **Generate Report** on a test run's Reportin
 - Configurable metric selections
 - Preview functionality for report sections
 - Collapsed section cards summarize their own configuration (header level and text, text-block content, response-time scenario, baseline-run dashboard/panel count) so multiple sections of the same type can be told apart without expanding them
+- **Deleting a template keeps the reports made from it.** Their `template_id` becomes NULL (migration 1821) and they stay readable, downloadable and shared. Only regenerating one needs the template, so `POST /reports/:id/retry` answers 400 for those
+
+#### Header sections
+
+**Header Text** is the title on the report's cover page and accepts the same `{perfana-…}` values as prose, while **Header Level** picks that title's heading tag, H1 by default, scaling it down from there. **Section Title** names the summary block under the cover, "Test Run Summary" when blank. A template posted straight to the API may carry the cover title as `config.title`; `config.text` wins when both are set, because the builder form can only see that one.
+
+The summary's **Anomaly Detection** badge reads NO REGRESSIONS only for a run ADAPT actually compared. A run it did not (the first run, a changepoint, nothing comparable) reads NOT EVALUATED, matching the N/A in the Anomaly Detection section.
+
+#### Sharing a report
+
+A report is private when generated. Its row in the Reports card has a share menu: **Create share link** turns on a public link and copies it, and anyone holding that link can read the report without signing in, until someone chooses **Stop sharing**. Turning it back on restores the same link. Changing this needs `test-run:update` on the report's run, so an org viewer can read a report but not publish it. Pipelines are unaffected: `/html/download` and `/pdf/download` take an API key and never need a share link. Reports generated before this default existed keep whatever setting they have, which is on.
+
+#### Percentiles in the Apdex section
+
+The overall and per-scenario **P95** and **P99** are percentiles of the executions in that scope, and so are the ones on the Performance Analysis card. Both read the analysis window, excluding the ramp-up and the ramp-down, or the whole run when the section's option is off. They agree to within a couple of percent rather than exactly, because the report sorts the executions and the card merges t-digests, which are approximate. The section's throughput and virtual-user figures read the same window. When a run is too short for its offsets, the section reads the whole run, as the analysis pipeline does. Against an API older than the card, or while a run's rollup is still being built, the card falls back to the execution-weighted average of the transactions' percentiles and labels it as that. That figure reads lower whenever a slow minority of transactions forms the tail.
 
 #### Comparison sections: pinned baseline, previous run, or previous SLO-passing run
 

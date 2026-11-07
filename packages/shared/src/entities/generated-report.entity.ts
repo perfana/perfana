@@ -76,8 +76,10 @@ export class GeneratedReport {
   @Column({ type: 'uuid' })
   test_run_id!: string;
 
-  @Column({ type: 'uuid' })
-  template_id!: string;
+  // NULL once the template is deleted. The report keeps its stored HTML and PDF; only
+  // regenerating it needs the template. See migration 1821.
+  @Column({ type: 'uuid', nullable: true })
+  template_id!: string | null;
 
   @Column({ type: 'varchar', length: 255 })
   name!: string;
@@ -196,5 +198,5 @@ export class GeneratedReport {
 
   @ManyToOne(() => ReportTemplate, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'template_id' })
-  template?: ReportTemplate;
+  template?: ReportTemplate | null;
 }

@@ -114,6 +114,14 @@ describe('TestRunsPerformanceQueryService raw-hypertable time bounds (#674)', ()
   it.each([
     [false, [WINDOW_START, WINDOW_END] as [Date, Date]],
     [true, [ANALYSIS_START, ANALYSIS_END] as [Date, Date]],
+  ])('getTransactionPercentiles (excludeRampUp=%s)', async (excludeRampUp, expected) => {
+    await service.getTransactionPercentiles(TEST_RUN_ID, excludeRampUp, true, []);
+    assertBounded(expected);
+  });
+
+  it.each([
+    [false, [WINDOW_START, WINDOW_END] as [Date, Date]],
+    [true, [ANALYSIS_START, ANALYSIS_END] as [Date, Date]],
   ])('getTransactionSamples (excludeRampUp=%s)', async (excludeRampUp, expected) => {
     await service.getTransactionSamples(TEST_RUN_ID, TRANSACTION, excludeRampUp, true, []);
     assertBounded(expected);

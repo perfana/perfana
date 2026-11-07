@@ -140,6 +140,21 @@ export interface SystemSummary {
 /**
  * Transaction statistics with Apdex score
  */
+/** P95 and P99 over every execution of a scope, in milliseconds. */
+export interface PercentileFigures {
+  p95_response_time: number;
+  p99_response_time: number;
+}
+
+/**
+ * `overall` is every execution in the requested scope: the whole run, or the scenarios asked for.
+ * A scenario with no name comes back as `scenario_name: null`.
+ */
+export interface TransactionPercentiles {
+  overall: PercentileFigures | null;
+  by_scenario: Array<PercentileFigures & { scenario_name: string | null }>;
+}
+
 export interface TransactionStats {
   transaction_name: string;
   scenario_name?: string;

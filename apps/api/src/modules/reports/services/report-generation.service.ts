@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOneOptions, Repository, SelectQueryBuilder } from 'typeorm';
 import {
@@ -20,6 +20,7 @@ import {
   ValidationException,
   InvalidStateException,
 } from '../../../common/exceptions/business.exception';
+import { Capability } from '../../../constants/capabilities.constants';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import { withOrgFilter } from '../../../common/utils/with-org-filter';
 import { AuditService } from '../../audit/audit.service';
@@ -382,7 +383,7 @@ export class ReportGenerationService {
         name: reportName,
         generated_by: options.generatedBy,
         status: 'pending' as ReportStatus,
-        share_enabled: true,
+        share_enabled: false, // public only once someone asks: see assertCanChangeSharing
         retry_count: 0,
         max_retries: 3,
       });
@@ -513,7 +514,7 @@ export class ReportGenerationService {
         name: options.name,
         generated_by: options.generatedBy,
         status: 'pending' as ReportStatus,
-        share_enabled: true,
+        share_enabled: false, // public only once someone asks: see assertCanChangeSharing
         retry_count: 0,
         max_retries: 3,
       });
@@ -546,6 +547,32 @@ export class ReportGenerationService {
    * @param roles - User roles from JWT token (for admin bypass)
    * @returns Report entity with relations
    */
+  /**
+   * Who may turn a report's public link on or off. Sharing is off by default, so this is what
+   * stands between a report and anyone on the internet, and RLS cannot help: ReportShareService
+   * uses the pooled repository, outside the request's transaction.
+   *
+   * A report the caller cannot see is a 404, so existence stays unlearnable. Seeing it is not
+   * enough to publish it, so this also asks for the capability every other run-level write
+   * needs. The API-key carve-out is TestRunsMutationService's: a key has no membership row, so
+   * getCapabilities answers empty for it, and issuing one already took `api-key:create`.
+   */
+  async assertCanChangeSharing(reportId: string, userId: string, roles: string[]): Promise<void> {
+    const report = await this.findById(reportId, userId, roles);
+    if (userId.startsWith('api-key:')) return;
+
+    const caps = await this.authzService.getCapabilities(
+      userId,
+      roles,
+      report.test_run?.organizationId ?? null,
+      report.test_run?.teamId ?? null,
+    );
+    if (!caps.includes(Capability.TestRunUpdate)) {
+      this.logger.warn(`Share change denied: userId=${userId} report=${reportId}`);
+      throw new ForbiddenException('You do not have permission to change sharing for this report');
+    }
+  }
+
   async findById(
     reportId: string,
     userId: string = '',

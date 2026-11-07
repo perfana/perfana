@@ -17,6 +17,7 @@ import {
 import {
   AnalysisBounds,
   analysisBoundsFromEntity,
+  ANALYSED_SECONDS_SQL,
   analysisBoundsFromRow,
   spanBounds,
   timeBoundsSql,
@@ -35,6 +36,7 @@ import {
   AdaptResultRow,
   AnomalySummary,
   ApdexData,
+  ApdexPercentileRow,
   ApdexScenarioData,
   ApdexTransactionRow,
   AwrData,
@@ -207,27 +209,11 @@ export class ReportDataFetcherService {
    * start cutoff runs past it, and the graphs section now draws the two on ONE chart —
    * two lines ending at different x positions.
    */
-  /**
-   * @param endBound which end the window gets.
-   *
-   * `'analysis'` trims the ramp-DOWN band, which is what a reader paired with a
-   * `ds_metrics` series needs (see the paragraph above).
-   *
-   * **`'head-trimmed'` is not a variant — it is the pre-#674 contract.** Before this
-   * change, the Apdex, throughput and virtual-user reads carried
-   * `AND ($2::boolean = false OR t.time >= $3)`: a START cutoff and no end at all. Giving
-   * them an analysis end would silently re-cut the default report — measured on
-   * `PerfanaWebshop-acc-loadTest-k6-00019`, the Apdex table lost 131 of 275 rows and its
-   * average moved 282.41 → 286.58 ms, on 58 of 60 runs on the dev database. #674 is a
-   * lock fix; it does not get to change a published number. Trimming the report's
-   * ramp-down band may well be right, but it is a product change and ships on its own.
-   */
   private async getAnalysisWindowBounds(
     testRunId: string,
     excludeRampUp: boolean,
     userId: string = '',
     roles: string[] = [],
-    endBound: 'analysis' | 'head-trimmed' = 'analysis',
   ): Promise<AnalysisBounds> {
     // Internal/system calls (no userId) or admin users bypass org filtering
     const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
@@ -251,11 +237,7 @@ export class ReportDataFetcherService {
       return { startCutoff: null, endCutoff: null };
     }
 
-    const bounds = analysisBoundsFromRow(row, excludeRampUp);
-    if (endBound === 'head-trimmed') {
-      return { startCutoff: bounds.startCutoff, endCutoff: analysisBoundsFromRow(row, false).endCutoff };
-    }
-    return bounds;
+    return analysisBoundsFromRow(row, excludeRampUp);
   }
 
   /**
@@ -1038,20 +1020,20 @@ export class ReportDataFetcherService {
   /**
    * Get Apdex data from database for all scenarios
    *
-   * IMPORTANT: This method uses WEIGHTED AVERAGES of per-transaction percentiles
-   * to match how the Performance Analysis card calculates aggregated metrics.
+   * The overall and per-scenario P95/P99 are percentiles of the executions in that scope, read
+   * by their own statement. They used to be count-weighted averages of the per-transaction
+   * percentiles, printed as "95th percentile", which understates exactly when it matters: a slow
+   * minority barely moves the average of everyone's P95, while it IS the tail. 1000 executions
+   * at 50 ms and 100 at 500 ms have a P95 of 500 ms and a weighted average of 91 ms. On
+   * PerfanaWebshop-acc-loadTest-00004 that was 383 ms against a real 850 ms.
    *
-   * Why weighted averages instead of global percentiles:
-   * - Global PERCENTILE_CONT across all transactions is misleading when transaction types
-   *   have vastly different performance characteristics and volumes
-   * - Example: 1000 fast transactions (50ms) + 100 slow transactions (500ms)
-   *   - Global P95: ~100ms (dominated by high-volume fast transactions)
-   *   - Weighted avg of per-transaction P95s: more representative of actual user experience
-   * - This matches how analysts naturally aggregate metrics in Performance Analysis
+   * The average and the Apdex score stay weighted, because for those the weighting IS exact.
+   * The Performance Analysis card has the same problem and asks
+   * `GET /test-runs/:id/transactions/percentiles`, which merges digests rather than sorting.
    *
    * @param testRun - Test run to fetch data for
    * @param apdexThreshold - Apdex threshold T in milliseconds
-   * @param excludeRampUp - Whether to exclude ramp-up period from calculations
+   * @param excludeRampUp - Whether to restrict to the analysis window, after ramp-up and before ramp-down
    * @param roles - User roles from JWT token (for admin bypass)
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @returns Apdex data structure with overall and per-scenario metrics
@@ -1068,9 +1050,7 @@ export class ReportDataFetcherService {
 
       // Always bounded, toggle or not — see @perfana/shared/database/run-window. The same bounds
       // go to the throughput and virtual-user reads below, so this is one lookup.
-      // 'head-trimmed': this read had a start cutoff and no end before #674. See the
-      // getAnalysisWindowBounds docblock — an analysis end here moves published numbers.
-      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       const time = timeBoundsSql(bounds, 't.time', 2);
 
       // Build organization filter for queries
@@ -1079,9 +1059,8 @@ export class ReportDataFetcherService {
       // Note: apdexThreshold parameter no longer used in query - we fetch per-transaction thresholds from DB
       const queryParams = [testRunId, ...time.params, ...orgFilter.params];
 
-      // Query all per-transaction statistics first (this matches Performance Analysis approach)
-      // We get per-transaction percentiles, then calculate weighted averages for overall/scenario summaries
-      // IMPORTANT: Use per-transaction Apdex thresholds from database (not global threshold)
+      // Per-transaction statistics. IMPORTANT: use per-transaction Apdex thresholds from the
+      // database (not a global threshold).
       const allTransactionsQuery = `
         SELECT
           t.transaction_name,
@@ -1120,14 +1099,35 @@ export class ReportDataFetcherService {
         return null;
       }
 
-      // Calculate overall metrics using weighted averages (matches Performance Analysis)
+      // A percentile of a whole scope cannot be derived from its parts, so this reads the rows
+      // again. Same window and filters as above, so the two statements describe the same
+      // executions. The scenario key matches the `|| 'Unknown'` grouping further down.
+      const percentileRows: ApdexPercentileRow[] = await withRequestEm(this.testRunRepo).query(
+        `
+        SELECT
+          COALESCE(NULLIF(t.scenario_name, ''), 'Unknown') AS scenario,
+          GROUPING(COALESCE(NULLIF(t.scenario_name, ''), 'Unknown')) AS is_overall,
+          ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p95_ms,
+          ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY t.response_time)::numeric, 2) AS p99_ms
+        FROM transactions t
+        LEFT JOIN test_runs tr ON tr.test_run_id = t.test_run_id
+        WHERE t.test_run_id = $1
+          ${time.clause}
+          ${orgFilter.clause}
+        GROUP BY GROUPING SETS ((COALESCE(NULLIF(t.scenario_name, ''), 'Unknown')), ())
+        `,
+        queryParams,
+      );
+      const overallPercentiles = percentileRows.find((r) => Number(r.is_overall) === 1);
+      const percentilesOf = (scenario: string) =>
+        percentileRows.find((r) => Number(r.is_overall) === 0 && r.scenario === scenario);
+
+      // The average and the Apdex score are exact when weighted by execution count.
       let totalCount = 0;
       let _totalSatisfied = 0;
       let _totalTolerating = 0;
       let totalFailed = 0;
       let weightedAvg = 0;
-      let weightedP95 = 0;
-      let weightedP99 = 0;
       let weightedApdex = 0;
       const thresholdSet = new Set<number>();
 
@@ -1142,16 +1142,14 @@ export class ReportDataFetcherService {
         _totalTolerating += txnTolerating;
         totalFailed += parseInt(txn.fail);
         weightedAvg += parseFloat(txn.avg_ms) * count;
-        weightedP95 += parseFloat(txn.p95_ms) * count;
-        weightedP99 += parseFloat(txn.p99_ms) * count;
         weightedApdex += txnApdex * count;
         thresholdSet.add(parseInt(txn.active_threshold) || 500);
       }
 
       const overallApdex = totalCount > 0 ? weightedApdex / totalCount : 0;
       const overallAvg = totalCount > 0 ? Math.round((weightedAvg / totalCount) * 100) / 100 : 0;
-      const overallP95 = totalCount > 0 ? Math.round((weightedP95 / totalCount) * 100) / 100 : 0;
-      const overallP99 = totalCount > 0 ? Math.round((weightedP99 / totalCount) * 100) / 100 : 0;
+      const overallP95 = parseFloat(overallPercentiles?.p95_ms ?? '0') || 0;
+      const overallP99 = parseFloat(overallPercentiles?.p99_ms ?? '0') || 0;
       const overallErrorRate = totalCount > 0 ? (totalFailed / totalCount) * 100 : 0;
 
       // Fetch peak throughput metrics (transactions/sec and requests/sec) with organization filtering
@@ -1173,14 +1171,11 @@ export class ReportDataFetcherService {
       const scenarios: Record<string, ApdexScenarioData> = {};
 
       for (const [scenarioName, scenarioTransactions] of Object.entries(scenarioMap)) {
-        // Calculate scenario summary using weighted averages (matches Performance Analysis)
         let scenarioTotal = 0;
         let _scenarioSatisfied = 0;
         let _scenarioTolerating = 0;
         let scenarioFailed = 0;
         let scenarioWeightedAvg = 0;
-        let scenarioWeightedP95 = 0;
-        let scenarioWeightedP99 = 0;
         let scenarioWeightedApdex = 0;
 
         const transactions = scenarioTransactions.map((txn: ApdexTransactionRow) => {
@@ -1196,8 +1191,6 @@ export class ReportDataFetcherService {
           _scenarioTolerating += txnTolerating;
           scenarioFailed += parseInt(txn.fail);
           scenarioWeightedAvg += parseFloat(txn.avg_ms) * txnTotal;
-          scenarioWeightedP95 += parseFloat(txn.p95_ms) * txnTotal;
-          scenarioWeightedP99 += parseFloat(txn.p99_ms) * txnTotal;
           scenarioWeightedApdex += txnApdex * txnTotal;
 
           return {
@@ -1215,8 +1208,9 @@ export class ReportDataFetcherService {
 
         const scenarioApdex = scenarioTotal > 0 ? scenarioWeightedApdex / scenarioTotal : 0;
         const scenarioAvg = scenarioTotal > 0 ? Math.round((scenarioWeightedAvg / scenarioTotal) * 100) / 100 : 0;
-        const scenarioP95 = scenarioTotal > 0 ? Math.round((scenarioWeightedP95 / scenarioTotal) * 100) / 100 : 0;
-        const scenarioP99 = scenarioTotal > 0 ? Math.round((scenarioWeightedP99 / scenarioTotal) * 100) / 100 : 0;
+        const scenarioPercentiles = percentilesOf(scenarioName);
+        const scenarioP95 = parseFloat(scenarioPercentiles?.p95_ms ?? '0') || 0;
+        const scenarioP99 = parseFloat(scenarioPercentiles?.p99_ms ?? '0') || 0;
         const errorRate = scenarioTotal > 0 ? (scenarioFailed / scenarioTotal) * 100 : 0;
 
         // Get peak metrics for this scenario
@@ -1478,8 +1472,7 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<ThroughputStats> {
     try {
-      // 'head-trimmed' — see getApdexDataFromDatabase.
-      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
@@ -1489,10 +1482,14 @@ export class ReportDataFetcherService {
       // pre-aggregated rows. See issue #288.
       const runInfo = await this.loadThroughputRunInfoForReport(testRunId, orgIds);
       if (runInfo && runInfo.hasCagg) {
-        // The CAGGs are already bucket-bounded by the run window, so they only need the
-        // ramp cutoff — and only when the toggle asked for one.
+        // The CAGGs are bucket-bounded by the run window, and keyed on system and environment
+        // rather than on the run, so that window is all that keeps another run's buckets out.
+        // The analysis window may only narrow it: its padded end would read the next run.
+        const endTime = window.endCutoff && window.endCutoff < runInfo.endTime
+          ? window.endCutoff
+          : runInfo.endTime;
         return await this.getThroughputStatsFromCaggForReport(
-          runInfo, excludeRampUp, excludeRampUp ? window.startCutoff : null);
+          { ...runInfo, endTime }, excludeRampUp, excludeRampUp ? window.startCutoff : null);
       }
 
       // Fallback: in-flight run that pre-dates the next CAGG refresh (≤30 s lag),
@@ -1651,8 +1648,7 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<VirtualUserStats> {
     try {
-      // 'head-trimmed' — see getApdexDataFromDatabase.
-      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
@@ -2672,7 +2668,7 @@ export class ReportDataFetcherService {
               ROUND(a.avg_latency::numeric, 2) AS avg_latency,
               ROUND(a.avg_connect_time::numeric, 2) AS avg_connect_time,
               ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2) AS error_percentage,
-              ROUND(a.total_count::numeric / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2) AS throughput
+              ROUND(a.total_count::numeric / NULLIF(${ANALYSED_SECONDS_SQL}, 0), 2) AS throughput
        FROM agg a
        JOIN test_runs tr ON tr.test_run_id = a.test_run_id
        LEFT JOIN url_patterns up
@@ -2920,7 +2916,7 @@ export class ReportDataFetcherService {
               ROUND(a.avg_latency::numeric, 2) AS avg_latency,
               ROUND(a.avg_connect_time::numeric, 2) AS avg_connect_time,
               ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2) AS error_percentage,
-              ROUND(a.total_count::numeric / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2) AS throughput
+              ROUND(a.total_count::numeric / NULLIF(${ANALYSED_SECONDS_SQL}, 0), 2) AS throughput
        FROM agg a
        JOIN test_runs tr ON tr.test_run_id = a.test_run_id
        LEFT JOIN url_patterns up

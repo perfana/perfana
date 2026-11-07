@@ -256,6 +256,8 @@ describe('ReportGenerationService', () => {
 
       // Assert
       expect(result).toEqual(mockReport);
+      // A report is private until someone asks for a link.
+      expect(reportRepo.create).toHaveBeenCalledWith(expect.objectContaining({ share_enabled: false }));
       expect(testRunRepo.findOne).toHaveBeenCalledWith({
         where: { id: options.testRunId },
         relations: ['systemUnderTest', 'systemUnderTest.team'],
@@ -507,6 +509,7 @@ describe('ReportGenerationService', () => {
 
       // Assert
       expect(result).toEqual(mockReport);
+      expect(reportRepo.create).toHaveBeenCalledWith(expect.objectContaining({ share_enabled: false }));
       expect(templateRepo.create).toHaveBeenCalled();
       expect(templateRepo.save).toHaveBeenCalled();
     });

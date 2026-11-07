@@ -1,8 +1,10 @@
 import {
+  ANALYSED_SECONDS_SQL,
   CHUNK_CACHE_TTL_MS,
   RUN_WINDOW_PAD_MS,
   analysisBoundsFromEntity,
   analysisBoundsFromRow,
+  analysisOffsetsFit,
   resetChunkCache,
   snapBoundsToChunks,
   spanBounds,
@@ -20,7 +22,63 @@ describe('run-window', () => {
   const END = '2026-01-01T11:00:00.000Z';
   const row = { start_time: START, end_time: END, ramp_up: '120', ramp_down: '60' };
 
+  /**
+   * The offsets are a request to trim, not to discard. Reading nothing from a run that has data
+   * was the failure on every path that lacked this: issue #7 in the root CLAUDE.md.
+   */
+  describe('analysisOffsetsFit', () => {
+    const hourLong = (ramp_up: unknown, ramp_down: unknown) =>
+      ({ start_time: START, end_time: END, ramp_up, ramp_down }) as Parameters<typeof analysisOffsetsFit>[0];
+
+    it.each([
+      ['both fit', 120, 60, true],
+      ['they fit by a second', 1800, 1799, true],
+      ['they exactly fill the run, which leaves an empty window', 1800, 1800, false],
+      ['together they overrun it', 2000, 2000, false],
+      ['the ramp-up alone overruns it', 4000, 0, false],
+      ['the ramp-down alone overruns it', 0, 4000, false],
+      ['they arrive as strings, the way pg returns them', '2000', '2000', false],
+      ['there are none', null, null, true],
+      ['one is negative, which is not a trim', -4000, 60, true],
+    ])('when %s', (_name, up, down, expected) => {
+      expect(analysisOffsetsFit(hourLong(up, down))).toBe(expected);
+    });
+
+    it('fits a run with no end yet, whose length is not known', () => {
+      expect(analysisOffsetsFit({ start_time: START, end_time: null, ramp_up: 86400, ramp_down: 86400 })).toBe(true);
+    });
+
+    it('fits a run with no row at all, leaving the lookup to say so', () => {
+      expect(analysisOffsetsFit(null)).toBe(true);
+      expect(analysisOffsetsFit({ start_time: null, end_time: END, ramp_up: 86400 })).toBe(true);
+    });
+  });
+
+  describe('ANALYSED_SECONDS_SQL', () => {
+    it('only subtracts the ramp-up when both offsets fit the run, measured from its timestamps', () => {
+      expect(ANALYSED_SECONDS_SQL).toMatch(
+        /EXTRACT\(EPOCH FROM \(tr\.end_time - tr\.start_time\)\) > COALESCE\(tr\.ramp_up, 0\) \+ COALESCE\(tr\.ramp_down, 0\)\s+THEN COALESCE\(tr\.ramp_up, 0\)\s+ELSE 0/,
+      );
+    });
+
+    it('keeps subtracting it for a run with no end yet, as analysisOffsetsFit does', () => {
+      expect(ANALYSED_SECONDS_SQL).toMatch(/WHEN tr\.start_time IS NULL OR tr\.end_time IS NULL\s+OR /);
+    });
+  });
+
   describe('analysisBoundsFromRow', () => {
+    it('reads the whole run, padded, when the offsets do not fit it', () => {
+      const b = analysisBoundsFromRow({ ...row, ramp_up: '2000', ramp_down: '2000' }, true);
+      expect(b.startCutoff!.toISOString()).toBe('2026-01-01T09:00:00.000Z');
+      expect(b.endCutoff!.toISOString()).toBe('2026-01-01T12:00:00.000Z');
+    });
+
+    it('still trims a run with no end yet, whatever its offsets', () => {
+      const b = analysisBoundsFromRow({ start_time: START, end_time: null, ramp_up: '86400' }, true);
+      expect(b.startCutoff!.toISOString()).toBe('2026-01-02T10:00:00.000Z');
+      expect(b.endCutoff).toBeNull();
+    });
+
     it('pads the run window by an hour either side when the toggle is off', () => {
       // The padding is not cosmetic: ingest has been observed arriving 36 s past
       // end_time, and a load generator's clock can run ahead of start_time.

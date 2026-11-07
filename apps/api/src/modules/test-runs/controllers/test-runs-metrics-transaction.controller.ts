@@ -73,6 +73,78 @@ export class TestRunsMetricsTransactionController {
     return result;
   }
 
+  @Get(':testRunId/transactions/percentiles')
+  @ApiOperation({
+    summary: 'True P95 and P99 for a run, its selected scenarios, and each scenario',
+    description:
+      'Percentiles over every execution in the scope, merged from the same digests and the same ' +
+      'window as `GET /test-runs/:testRunId/transactions`. They cannot be derived from that ' +
+      "endpoint's per-transaction rows: an average of those percentiles reads too low whenever a " +
+      'slow minority of transactions forms the tail.',
+  })
+  @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
+  @ApiQuery({ name: 'excludeRampUp', required: false, type: Boolean, example: false })
+  @ApiQuery({
+    name: 'sinceMinutes',
+    required: false,
+    type: Number,
+    example: 5,
+    description: 'Restrict to the last N minutes (live view of a running test)',
+  })
+  @ApiQuery({
+    name: 'scenario',
+    required: false,
+    type: String,
+    isArray: true,
+    description: 'Repeat to narrow to several scenarios, so `overall` covers just those. An empty value means the executions with no scenario.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '`overall` is null when the scope has no executions; a scenario with no name has `scenario_name: null`',
+    schema: {
+      type: 'object',
+      properties: {
+        overall: {
+          type: 'object',
+          nullable: true,
+          properties: {
+            p95_response_time: { type: 'number', example: 844.19 },
+            p99_response_time: { type: 'number', example: 1122.87 },
+          },
+        },
+        by_scenario: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              scenario_name: { type: 'string', nullable: true, example: 'Checkout' },
+              p95_response_time: { type: 'number', example: 990.83 },
+              p99_response_time: { type: 'number', example: 1190.6 },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 202, description: 'Rollup is being built by the analyze pipeline' })
+  @ApiResponse({ status: 400, description: 'sinceMinutes is not a number' })
+  async getTransactionPercentiles(
+    @Param('testRunId') testRunId: string,
+    @Query('excludeRampUp', new DefaultValuePipe(false), ParseBoolPipe) excludeRampUp: boolean,
+    @UserCtx() ctx: UserContext,
+    @Query('sinceMinutes', new ParseIntPipe({ optional: true })) sinceMinutes?: number,
+    @Query('scenario') scenario?: string | string[],
+  ) {
+    const scenarios = [scenario ?? []].flat().filter((name) => typeof name === 'string');
+    const result = await this.testRunsService.getTransactionPercentiles(
+      testRunId, ctx.userId, ctx.roles, excludeRampUp, sinceMinutes, scenarios,
+    );
+    if (isRollupPending(result)) {
+      throw new HttpException(result, HttpStatus.ACCEPTED);
+    }
+    return result;
+  }
+
   @Get(':testRunId/samplers')
   @ApiOperation({ summary: 'Every sampler of a run from the sampler rollup, in one read (Top 10 tabs)' })
   @ApiParam({ name: 'testRunId', description: 'Test run ID', type: String })
