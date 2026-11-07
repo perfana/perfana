@@ -56,6 +56,7 @@ npm run dev
 - `npm run build` / `npm run test` / `npm run type-check` / `npm run lint`
 - `npm run dev:api` / `npm run dev:web` / `npm run dev:grafana-sync` — Individual services
 - `lsof -ti:3001,3002,4000 | xargs kill -9 && npm run dev` — Kill and restart
+- Check a UI change in a real browser with Vibium, installed globally: sign-in, selectors and chart checks are in [docs/reference/Operations/Vibium.md](docs/reference/Operations/Vibium.md)
 
 ## Authentication System
 
