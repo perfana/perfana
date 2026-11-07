@@ -1,5 +1,5 @@
 import { EntityManager } from 'typeorm';
-import { analysisBoundsFromRow, timeBoundsSql } from '@perfana/shared/database/run-window';
+import { analysisBoundsFromRow, analysisOffsetsFit, timeBoundsSql } from '@perfana/shared/database/run-window';
 import type { Logger } from 'pino';
 import { BaseCheckService } from './BaseCheckService.js';
 import type { TestRun } from './BenchmarkMatcher.js';
@@ -144,7 +144,13 @@ export class AggregatedBenchmarkEvaluator extends BaseCheckService {
             end_time: testRun.end_time ?? null,
             ramp_up: testRun.ramp_up ?? null,
           },
-          benchmark.exclude_ramp_up_time === true,
+          // ramp_down only decides whether the offsets fit. The window trims the head alone.
+          benchmark.exclude_ramp_up_time === true && analysisOffsetsFit({
+            start_time: testRun.start_time ?? null,
+            end_time: testRun.end_time ?? null,
+            ramp_up: testRun.ramp_up ?? null,
+            ramp_down: testRun.ramp_down ?? null,
+          }),
         ),
         'time',
         paramIndex,

@@ -2,6 +2,7 @@ import { EntityManager } from 'typeorm';
 import {
   TEST_RUN_TIMES_SQL,
   analysisBoundsFromRow,
+  analysisOffsetsFit,
   timeBoundsSql,
 } from '@perfana/shared/database/run-window';
 import type { Logger } from 'pino';
@@ -204,11 +205,16 @@ export class ApdexCalculator extends BaseCheckService {
           start_time: testRun.start_time ?? null,
           end_time: testRun.end_time ?? null,
           ramp_up: testRun.ramp_up ?? null,
-          // This TestRun shape carries no ramp_down, so the toggle trims the head only
-          // — unchanged from before; the tail is bounded by the padded end either way.
+          // The toggle trims the head only, unchanged from before; the tail is bounded by
+          // the padded end either way. ramp_down only decides whether the offsets fit.
           ramp_down: null,
         },
-        excludeRampUp,
+        excludeRampUp && analysisOffsetsFit({
+          start_time: testRun.start_time ?? null,
+          end_time: testRun.end_time ?? null,
+          ramp_up: testRun.ramp_up ?? null,
+          ramp_down: testRun.ramp_down ?? null,
+        }),
       ),
       'time',
       paramIndex,
@@ -1048,7 +1054,7 @@ export class ApdexCalculator extends BaseCheckService {
   ): Promise<ApdexResult> {
     // Create a minimal test run for calculation
     const testRunResult = await this.manager.query(`
-      SELECT test_run_id, system_under_test_id, test_environment, workload, start_time, end_time, ramp_up
+      SELECT test_run_id, system_under_test_id, test_environment, workload, start_time, end_time, ramp_up, ramp_down
       FROM test_runs
       WHERE test_run_id = $1
     `, [testRunId]);
@@ -1065,6 +1071,7 @@ export class ApdexCalculator extends BaseCheckService {
       start_time: testRunResult[0].start_time,
       end_time: testRunResult[0].end_time,
       ramp_up: testRunResult[0].ramp_up,
+      ramp_down: testRunResult[0].ramp_down,
     };
 
     return this.calculateApdex({

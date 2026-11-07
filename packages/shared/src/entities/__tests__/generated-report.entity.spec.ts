@@ -872,7 +872,6 @@ describe('GeneratedReport Entity', () => {
       // These columns should NOT be nullable
       const requiredColumns = [
         'test_run_id',
-        'template_id',
         'name',
         'generated_by',
       ];
@@ -881,6 +880,18 @@ describe('GeneratedReport Entity', () => {
         const column = entityColumns.find((c) => c.propertyName === colName);
         expect(column?.options?.nullable).not.toBe(true);
       });
+    });
+
+    /**
+     * A report outlives the template it was made from (migration 1821). The foreign key is
+     * ON DELETE SET NULL, which a NOT NULL column made impossible: deleting a template that a
+     * CI report pointed at failed with 23502.
+     */
+    it('lets template_id be null, so a report survives its template', () => {
+      const column = getMetadataArgsStorage().columns.find(
+        (c) => c.target === GeneratedReport && c.propertyName === 'template_id',
+      );
+      expect(column?.options?.nullable).toBe(true);
     });
 
     it('should have all nullable columns correctly marked', () => {

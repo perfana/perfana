@@ -180,9 +180,14 @@ export const calculateScenarioMetrics = (transactions: TransactionStatLike[]): S
   const weightedP99ResponseTime = totalRequests > 0
     ? transactions.reduce((sum, t) => sum + (t.p99_response_time * t.total_count), 0) / totalRequests
     : 0;
-  // Only transactions whose own score is meaningful contribute; otherwise one all-failing
-  // transaction's "Excellent" would lift the scenario average it has no business in.
-  const scoreable = transactions.filter((t) => apdexRating(t.apdex_score, t.passed_count).reason === null);
+  // Apdex is additive over executions, so a scope's score counts every transaction, however few
+  // its samples. The sample floor belongs to one transaction's own rating: applied here, it
+  // dropped exactly the slow transactions that run less often and read a Good run as Excellent.
+  // The weight is successful executions, so a transaction that failed every one weighs nothing
+  // and its sketch, which rates the failures' fast response times as Excellent, lifts nothing.
+  // A missing score is left out, or it would make the sum NaN. The scope's own count goes
+  // through apdexRating, so a scope with too few successful executions still says so.
+  const scoreable = transactions.filter((t) => Number.isFinite(t.apdex_score));
   const apdexSampleCount = scoreable.reduce((sum, t) => sum + t.passed_count, 0);
   const weightedApdexScore = apdexSampleCount > 0
     ? scoreable.reduce((sum, t) => sum + (t.apdex_score * t.passed_count), 0) / apdexSampleCount

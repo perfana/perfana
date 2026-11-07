@@ -142,6 +142,42 @@ describe('TransactionStatsRollupPipeline', () => {
       expect(sqlCalls.some(s => /INSERT INTO test_run_sampler_stats/i.test(s))).toBe(true);
     });
 
+    /**
+     * Every reader of the ramp-excluded rows, the Apdex SLO fast path and the Performance
+     * Analysis card among them, comes back empty if a short run writes none. Those rows have to
+     * hold exactly what the full-run rows hold, so the cutoffs are the padded read window.
+     */
+    describe('cutoffs for the ramp-excluded rows', () => {
+      // The three rollup statements bind ($1 run, $2 start cutoff, $3 end cutoff, $4/$5 window).
+      const cutoffs = () =>
+        (mockManagerQuery.mock.calls as [string, unknown[] | undefined][])
+          .filter(([, params]) => params?.length === 5 && params[1] instanceof Date)
+          .map(([, params]) => [(params![1] as Date).toISOString(), (params![2] as Date).toISOString()]);
+
+      const run = async (analysisStartOffset: number, analysisEndOffset: number) => {
+        mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun({ analysisStartOffset, analysisEndOffset }));
+        wireTransaction({ tx: 8, sampler: 42 });
+        await pipeline.execute({ testRunId: 'run-001' });
+        const all = cutoffs();
+        expect(all).toHaveLength(3);
+        expect(new Set(all.map(String)).size).toBe(1);
+        return all[0];
+      };
+
+      it('trims both ends when the offsets fit the 600 s run', async () => {
+        expect(await run(60, 30)).toEqual(['2026-04-10T10:01:00.000Z', '2026-04-10T10:09:30.000Z']);
+      });
+
+      it.each([
+        ['together overrun the run', 400, 400],
+        ['exactly fill it', 300, 300],
+        ['overrun it through the ramp-up alone', 900, 0],
+        ['overrun it through the ramp-down alone', 0, 900],
+      ])('covers the whole run when the offsets %s', async (_name, up, down) => {
+        expect(await run(up, down)).toEqual(['2026-04-10T09:00:00.000Z', '2026-04-10T11:10:00.000Z']);
+      });
+    });
+
     it('rolls up parallel-group stats alongside the transaction and sampler rollups', async () => {
       mockDb.getTestRunByTestRunId.mockResolvedValue(makeTestRun());
       wireTransaction({ tx: 8, sampler: 42 });

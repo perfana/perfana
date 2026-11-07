@@ -11,6 +11,7 @@
  * - getMockScenarioData: known scenarios, unknown scenario
  */
 
+import { ANALYSED_SECONDS_SQL } from '@perfana/shared/database/run-window';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -209,6 +210,76 @@ describe('ReportDataFetcherService', () => {
 
         // No ramp to trim, but still bounded — an unbounded read locks every chunk.
         expect(result!.toISOString()).toBe('2025-01-01T09:00:00.000Z');
+      });
+
+      describe('when the offsets do not fit the run', () => {
+        const getBounds = (ramp_up: string, ramp_down: string, minutes = 5) => {
+          testRunRepo.query.mockResolvedValueOnce([{
+            start_time: '2025-01-01T10:00:00.000Z',
+            end_time: new Date(Date.UTC(2025, 0, 1, 10, minutes)).toISOString(),
+            ramp_up,
+            ramp_down,
+          }]);
+          authzService.isGlobalAdmin.mockReturnValue(true);
+          return (service as unknown as {
+            getAnalysisWindowBounds: (id: string, exclude: boolean, u: string, r: string[]) =>
+              Promise<{ startCutoff: Date; endCutoff: Date }>;
+          }).getAnalysisWindowBounds('run-001', true, 'admin-user', ['perfana-admin']);
+        };
+        const WHOLE_RUN = ['2025-01-01T09:00:00.000Z', '2025-01-01T11:05:00.000Z'];
+        const iso = (b: { startCutoff: Date; endCutoff: Date }) =>
+          [b.startCutoff.toISOString(), b.endCutoff.toISOString()];
+
+        it('reads the whole run rather than an inverted window', async () => {
+          expect(iso(await getBounds('240', '240'))).toEqual(WHOLE_RUN);
+        });
+
+        it('treats offsets that exactly fill the run as not fitting: that window is empty', async () => {
+          expect(iso(await getBounds('180', '120'))).toEqual(WHOLE_RUN);
+        });
+
+        it.each([
+          ['ramp-up', '600', '0'],
+          ['ramp-down', '0', '600'],
+        ])('covers a %s longer than the run on its own, which inverts nothing but still reads nothing', async (_name, up, down) => {
+          expect(iso(await getBounds(up, down))).toEqual(WHOLE_RUN);
+        });
+
+        it('still trims when they fit by one second', async () => {
+          expect(iso(await getBounds('180', '119'))).toEqual([
+            '2025-01-01T10:03:00.000Z',
+            '2025-01-01T10:03:01.000Z',
+          ]);
+        });
+
+        /**
+         * The rollup's ramp-excluded rows hold the whole run on such a run, so a rate over them has
+         * to divide by the whole run too. Divided by a duration less its ramp-up, it reads high.
+         */
+        it.each(['getUrlTrends', 'getUrlComparison'])('%s divides its throughput by what those rows hold', async (method) => {
+          testRunRepo.query.mockResolvedValue([]);
+          authzService.isGlobalAdmin.mockReturnValue(true);
+          const selections = [{ panelId: 210, dashboardLabel: 'd', metricName: 'm' }];
+          const call = (service as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>);
+
+          await (method === 'getUrlTrends'
+            ? call.getUrlTrends(['run-001'], selections, 'avg')
+            : call.getUrlComparison('run-001', 'run-000', selections, { metrics: ['avg'], userId: '', roles: [] }));
+
+          const sql = (testRunRepo.query.mock.calls as [string][]).map(([s]) => s).find((s) => /AS throughput/.test(s));
+          expect(sql).toContain(ANALYSED_SECONDS_SQL);
+        });
+
+        it('keeps trimming a run with no end yet, whose length is not known', async () => {
+          testRunRepo.query.mockResolvedValueOnce([{
+            start_time: '2025-01-01T10:00:00.000Z', end_time: null, ramp_up: '86400', ramp_down: '86400',
+          }]);
+          authzService.isGlobalAdmin.mockReturnValue(true);
+
+          const result = await getBoundsStart('run-001', true, 'admin-user', ['perfana-admin']);
+
+          expect(result!.toISOString()).toBe('2025-01-02T10:00:00.000Z');
+        });
       });
 
       it('should skip org filter and not call getAccessibleOrganizations for admin users', async () => {
@@ -677,12 +748,26 @@ describe('ReportDataFetcherService', () => {
         const [sql, params] = testRunRepo.query.mock.calls[1] as [string, unknown[]];
         expect(sql).toContain('t.time >= $2');
         expect(sql).toContain('t.time <= $3');
-        // 10:00 + 120s ramp-up for the head. The END is the PADDED run window, not
-        // 11:00 − 60s: this reader trimmed only the head before #674 and must keep
-        // doing so, or the default report's Apdex numbers move. See the
-        // getAnalysisWindowBounds docblock.
+        // 10:00 + 120s ramp-up, 11:00 - 60s ramp-down: the window the Performance Analysis card reads.
         expect((params[1] as Date).toISOString()).toBe('2025-01-01T10:02:00.000Z');
-        expect((params[2] as Date).toISOString()).toBe('2025-01-01T12:00:00.000Z');
+        expect((params[2] as Date).toISOString()).toBe('2025-01-01T10:59:00.000Z');
+      });
+
+      it('hands the throughput and virtual-user reads the same window, so the section reads one', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        setupSubordinateMocks();
+        testRunRepo.query.mockResolvedValueOnce([makeApdexTransactionRow()]);
+        testRunRepo.query.mockResolvedValueOnce(makePercentileRows());
+
+        await service.getApdexDataFromDatabase(testRun, 500, true, 'admin', ['perfana-admin']);
+
+        const window = {
+          startCutoff: new Date('2025-01-01T10:02:00.000Z'),
+          endCutoff: new Date('2025-01-01T10:59:00.000Z'),
+        };
+        for (const read of [service.getThroughputStatsForReport, service.getVirtualUserStatsForReport]) {
+          expect(read).toHaveBeenCalledWith(testRun.testRunId, true, window, 'admin', ['perfana-admin']);
+        }
       });
 
       /**
@@ -908,9 +993,31 @@ describe('ReportDataFetcherService', () => {
           expect(params[0]).toBe('webshop');
           expect(params[1]).toBe('acc');
           expect(params[2]).toEqual(new Date(REPORT_RUN_INFO_CAGG.start_time));
-          expect(params[3]).toEqual(new Date(REPORT_RUN_INFO_CAGG.end_time));
+          expect(params[3]).toEqual(new Date('2025-01-01T10:59:00Z')); // 11:00 - 60s ramp-down
           expect(params[4]).toBe(true);
           expect(params[5]).toEqual(cutoff);
+        }
+      });
+
+      /**
+       * The CAGGs are keyed on system and environment, so a read past the run's own end picks up
+       * the next run's buckets. With offsets too long for the run the window falls back to the
+       * padded run window, and its end must not reach these queries.
+       */
+      it('stops at the run\'s own end when the offsets do not fit the run', async () => {
+        authzService.isGlobalAdmin.mockReturnValue(true);
+        testRunRepo.query.mockImplementation(async (sql: unknown) => {
+          if (isRunWindowLookup(sql)) return [{ ...RUN_WINDOW_ROW[0], ramp_up: '3000', ramp_down: '3000' }];
+          if (isReportRunInfoLookup(sql)) return [REPORT_RUN_INFO_CAGG];
+          return [];
+        });
+
+        await service.getThroughputStatsForReport('run-001', true, null, 'admin', ['perfana-admin']);
+
+        const dc = dataCalls();
+        expect(dc).toHaveLength(3);
+        for (const call of dc) {
+          expect((call[1] as unknown[])[3]).toEqual(new Date(REPORT_RUN_INFO_CAGG.end_time));
         }
       });
 
@@ -926,6 +1033,7 @@ describe('ReportDataFetcherService', () => {
         await service.getThroughputStatsForReport('run-001', false, null, 'admin', ['perfana-admin']);
 
         for (const call of dataCalls()) {
+          expect((call[1] as unknown[])[3]).toEqual(new Date(REPORT_RUN_INFO_CAGG.end_time));
           expect((call[1] as unknown[])[5]).toBeNull();
         }
       });
@@ -993,9 +1101,8 @@ describe('ReportDataFetcherService', () => {
           const [sql, params] = call as [string, unknown[]];
           expect(sql).toContain('time >= $2');
           expect(sql).toContain('time <= $3');
-          // Head-only trim, as before #674 — the end is the padded run window.
           expect((params[1] as Date).toISOString()).toBe('2025-01-01T10:02:00.000Z');
-          expect((params[2] as Date).toISOString()).toBe('2025-01-01T12:00:00.000Z');
+          expect((params[2] as Date).toISOString()).toBe('2025-01-01T10:59:00.000Z');
         }
       });
 

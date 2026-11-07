@@ -73,7 +73,7 @@ A report is private when generated. Its row in the Reports card has a share menu
 
 #### Percentiles in the Apdex section
 
-The overall and per-scenario **P95** and **P99** are percentiles of the executions in that scope, and so are the ones on the Performance Analysis card. They agree to within a couple of percent rather than exactly: the report sorts the executions and excludes only the ramp-up, while the card merges t-digests, which are approximate, over a window that excludes the ramp-down as well. Against an API older than the card, or while a run's rollup is still being built, the card falls back to the execution-weighted average of the transactions' percentiles and labels it as that. That figure reads lower whenever a slow minority of transactions forms the tail.
+The overall and per-scenario **P95** and **P99** are percentiles of the executions in that scope, and so are the ones on the Performance Analysis card. Both read the analysis window, excluding the ramp-up and the ramp-down, or the whole run when the section's option is off. They agree to within a couple of percent rather than exactly, because the report sorts the executions and the card merges t-digests, which are approximate. The section's throughput and virtual-user figures read the same window. When a run is too short for its offsets, the section reads the whole run, as the analysis pipeline does. Against an API older than the card, or while a run's rollup is still being built, the card falls back to the execution-weighted average of the transactions' percentiles and labels it as that. That figure reads lower whenever a slow minority of transactions forms the tail.
 
 #### Comparison sections: pinned baseline, previous run, or previous SLO-passing run
 

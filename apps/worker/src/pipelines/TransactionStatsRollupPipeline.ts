@@ -1,5 +1,5 @@
 import { BasePipelineTypeORM } from './BasePipelineTypeORM.js';
-import { RUN_WINDOW_PAD_MS } from '@perfana/shared/database/run-window';
+import { RUN_WINDOW_PAD_MS, analysisOffsetsFit } from '@perfana/shared/database/run-window';
 import { PipelineResult } from '../types/pipeline.js';
 
 interface TransactionStatsRollupInput {
@@ -127,18 +127,30 @@ export class TransactionStatsRollupPipeline extends BasePipelineTypeORM {
       // excluded at the tail.
       const rampUpSeconds   = testRun.analysisStartOffset ?? 0;
       const rampDownSeconds = testRun.analysisEndOffset ?? 0;
-      const startCutoff = new Date(
-        testRun.startTime.getTime() + rampUpSeconds * 1000
-      );
-      const endCutoff = new Date(testRun.endTime.getTime() - rampDownSeconds * 1000);
 
       // The run's own window, hour-padded for ingest lag. This is NOT the ramp window
-      // above — it bounds the three reads so each locks the run's chunks instead of
+      // below — it bounds the three reads so each locks the run's chunks instead of
       // every chunk in the table (#674, see @perfana/shared/database/run-window). It is
       // a superset of every row the run wrote, so the full-run aggregates are unchanged;
       // the ramp-excluded ones come from the FILTERs on $2/$3 and are untouched.
       const windowStart = new Date(testRun.startTime.getTime() - RUN_WINDOW_PAD_MS);
       const windowEnd = new Date(testRun.endTime.getTime() + RUN_WINDOW_PAD_MS);
+
+      // Offsets that do not fit the run would match nothing and write no ramp-excluded rows,
+      // and every reader of those rows would come back empty. They hold the whole run instead,
+      // which the padded window makes identical to the full-run rows, late ingest included.
+      const offsetsFit = analysisOffsetsFit({
+        start_time: testRun.startTime,
+        end_time: testRun.endTime,
+        ramp_up: rampUpSeconds,
+        ramp_down: rampDownSeconds,
+      });
+      const startCutoff = offsetsFit
+        ? new Date(testRun.startTime.getTime() + rampUpSeconds * 1000)
+        : windowStart;
+      const endCutoff = offsetsFit
+        ? new Date(testRun.endTime.getTime() - rampDownSeconds * 1000)
+        : windowEnd;
 
       this.logger.info(
         `🎯 Rolling up transaction stats for ${testRunId} (ramp_up=${rampUpSeconds}s, ramp_down=${rampDownSeconds}s, startCutoff=${startCutoff.toISOString()}, endCutoff=${endCutoff.toISOString()})`

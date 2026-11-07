@@ -1322,6 +1322,7 @@ describe('ChecksPipeline', () => {
         start_time: new Date('2024-01-01T10:00:00Z'),
         end_time: new Date('2024-01-01T11:00:00Z'),
         ramp_up: 300,
+        ramp_down: 120,
       };
 
       mockManager.query.mockResolvedValue([mockTestRunData]);
@@ -1331,6 +1332,8 @@ describe('ChecksPipeline', () => {
 
       // Assert
       expect(result).toEqual(mockTestRunData);
+      // The SLO readers need it to tell whether the offsets fit the run.
+      expect(mockManager.query.mock.calls[0][0]).toMatch(/\bramp_down\b/);
       expect(mockManager.query).toHaveBeenCalledWith(
         expect.stringContaining('SELECT'),
         ['test-run-1']

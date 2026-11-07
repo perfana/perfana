@@ -102,6 +102,13 @@ export function calculateAnalysisWindowIndices(
   const firstTime = Number.isNaN(runStart) ? new Date(sortedTimestamps[0]).getTime() : runStart;
   const lastTime = Number.isNaN(runEnd) ? new Date(sortedTimestamps[n - 1]).getTime() : runEnd;
 
+  // Offsets that do not fit the run trim nothing: the whole run is what was analysed, and
+  // the two indices would otherwise collapse onto each other, as described above.
+  const offsets = (testRun.analysis_start_offset ?? 0) + (testRun.analysis_end_offset ?? 0);
+  if (!Number.isNaN(runStart) && !Number.isNaN(runEnd) && (runEnd - runStart) / 1000 <= offsets) {
+    return { startIndex: null, endIndex: null };
+  }
+
   let startIndex: number | null = null;
   if (testRun.analysis_start_offset) {
     const boundary = firstTime + testRun.analysis_start_offset * 1000;

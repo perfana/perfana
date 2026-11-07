@@ -12,6 +12,7 @@ export interface TestRun {
   start_time?: Date;
   end_time?: Date;
   ramp_up?: number;
+  ramp_down?: number;
 }
 
 type BenchmarkType = 'metric' | 'apdex' | 'aggregated';

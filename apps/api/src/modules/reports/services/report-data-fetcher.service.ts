@@ -17,6 +17,7 @@ import {
 import {
   AnalysisBounds,
   analysisBoundsFromEntity,
+  ANALYSED_SECONDS_SQL,
   analysisBoundsFromRow,
   spanBounds,
   timeBoundsSql,
@@ -208,27 +209,11 @@ export class ReportDataFetcherService {
    * start cutoff runs past it, and the graphs section now draws the two on ONE chart —
    * two lines ending at different x positions.
    */
-  /**
-   * @param endBound which end the window gets.
-   *
-   * `'analysis'` trims the ramp-DOWN band, which is what a reader paired with a
-   * `ds_metrics` series needs (see the paragraph above).
-   *
-   * **`'head-trimmed'` is not a variant — it is the pre-#674 contract.** Before this
-   * change, the Apdex, throughput and virtual-user reads carried
-   * `AND ($2::boolean = false OR t.time >= $3)`: a START cutoff and no end at all. Giving
-   * them an analysis end would silently re-cut the default report — measured on
-   * `PerfanaWebshop-acc-loadTest-k6-00019`, the Apdex table lost 131 of 275 rows and its
-   * average moved 282.41 → 286.58 ms, on 58 of 60 runs on the dev database. #674 is a
-   * lock fix; it does not get to change a published number. Trimming the report's
-   * ramp-down band may well be right, but it is a product change and ships on its own.
-   */
   private async getAnalysisWindowBounds(
     testRunId: string,
     excludeRampUp: boolean,
     userId: string = '',
     roles: string[] = [],
-    endBound: 'analysis' | 'head-trimmed' = 'analysis',
   ): Promise<AnalysisBounds> {
     // Internal/system calls (no userId) or admin users bypass org filtering
     const orgFilter = await this.resolveOrgFilter(userId, roles, 2, 'tr');
@@ -252,11 +237,7 @@ export class ReportDataFetcherService {
       return { startCutoff: null, endCutoff: null };
     }
 
-    const bounds = analysisBoundsFromRow(row, excludeRampUp);
-    if (endBound === 'head-trimmed') {
-      return { startCutoff: bounds.startCutoff, endCutoff: analysisBoundsFromRow(row, false).endCutoff };
-    }
-    return bounds;
+    return analysisBoundsFromRow(row, excludeRampUp);
   }
 
   /**
@@ -1044,7 +1025,7 @@ export class ReportDataFetcherService {
    * percentiles, printed as "95th percentile", which understates exactly when it matters: a slow
    * minority barely moves the average of everyone's P95, while it IS the tail. 1000 executions
    * at 50 ms and 100 at 500 ms have a P95 of 500 ms and a weighted average of 91 ms. On
-   * PerfanaWebshop-acc-loadTest-00004 that was 363 ms against a real 851 ms.
+   * PerfanaWebshop-acc-loadTest-00004 that was 383 ms against a real 850 ms.
    *
    * The average and the Apdex score stay weighted, because for those the weighting IS exact.
    * The Performance Analysis card has the same problem and asks
@@ -1052,7 +1033,7 @@ export class ReportDataFetcherService {
    *
    * @param testRun - Test run to fetch data for
    * @param apdexThreshold - Apdex threshold T in milliseconds
-   * @param excludeRampUp - Whether to exclude ramp-up period from calculations
+   * @param excludeRampUp - Whether to restrict to the analysis window, after ramp-up and before ramp-down
    * @param roles - User roles from JWT token (for admin bypass)
    * @param organizationIds - User's accessible organization IDs from JWT token
    * @returns Apdex data structure with overall and per-scenario metrics
@@ -1069,9 +1050,7 @@ export class ReportDataFetcherService {
 
       // Always bounded, toggle or not — see @perfana/shared/database/run-window. The same bounds
       // go to the throughput and virtual-user reads below, so this is one lookup.
-      // 'head-trimmed': this read had a start cutoff and no end before #674. See the
-      // getAnalysisWindowBounds docblock — an analysis end here moves published numbers.
-      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const bounds = await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       const time = timeBoundsSql(bounds, 't.time', 2);
 
       // Build organization filter for queries
@@ -1493,8 +1472,7 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<ThroughputStats> {
     try {
-      // 'head-trimmed' — see getApdexDataFromDatabase.
-      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
@@ -1504,10 +1482,14 @@ export class ReportDataFetcherService {
       // pre-aggregated rows. See issue #288.
       const runInfo = await this.loadThroughputRunInfoForReport(testRunId, orgIds);
       if (runInfo && runInfo.hasCagg) {
-        // The CAGGs are already bucket-bounded by the run window, so they only need the
-        // ramp cutoff — and only when the toggle asked for one.
+        // The CAGGs are bucket-bounded by the run window, and keyed on system and environment
+        // rather than on the run, so that window is all that keeps another run's buckets out.
+        // The analysis window may only narrow it: its padded end would read the next run.
+        const endTime = window.endCutoff && window.endCutoff < runInfo.endTime
+          ? window.endCutoff
+          : runInfo.endTime;
         return await this.getThroughputStatsFromCaggForReport(
-          runInfo, excludeRampUp, excludeRampUp ? window.startCutoff : null);
+          { ...runInfo, endTime }, excludeRampUp, excludeRampUp ? window.startCutoff : null);
       }
 
       // Fallback: in-flight run that pre-dates the next CAGG refresh (≤30 s lag),
@@ -1666,8 +1648,7 @@ export class ReportDataFetcherService {
     roles: string[] = [],
   ): Promise<VirtualUserStats> {
     try {
-      // 'head-trimmed' — see getApdexDataFromDatabase.
-      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles, 'head-trimmed');
+      const window = bounds ?? await this.getAnalysisWindowBounds(testRunId, excludeRampUp, userId, roles);
       // Internal/system calls (no userId) or admin users bypass org filtering
       const orgIds = userId ? await withOrgFilter(userId, roles, this.authzService) : null;
 
@@ -2687,7 +2668,7 @@ export class ReportDataFetcherService {
               ROUND(a.avg_latency::numeric, 2) AS avg_latency,
               ROUND(a.avg_connect_time::numeric, 2) AS avg_connect_time,
               ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2) AS error_percentage,
-              ROUND(a.total_count::numeric / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2) AS throughput
+              ROUND(a.total_count::numeric / NULLIF(${ANALYSED_SECONDS_SQL}, 0), 2) AS throughput
        FROM agg a
        JOIN test_runs tr ON tr.test_run_id = a.test_run_id
        LEFT JOIN url_patterns up
@@ -2935,7 +2916,7 @@ export class ReportDataFetcherService {
               ROUND(a.avg_latency::numeric, 2) AS avg_latency,
               ROUND(a.avg_connect_time::numeric, 2) AS avg_connect_time,
               ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2) AS error_percentage,
-              ROUND(a.total_count::numeric / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2) AS throughput
+              ROUND(a.total_count::numeric / NULLIF(${ANALYSED_SECONDS_SQL}, 0), 2) AS throughput
        FROM agg a
        JOIN test_runs tr ON tr.test_run_id = a.test_run_id
        LEFT JOIN url_patterns up

@@ -6,7 +6,9 @@ import {
   AnalysisBounds,
   RUN_WINDOW_PAD_MS,
   TEST_RUN_TIMES_SQL,
+  ANALYSED_SECONDS_SQL,
   analysisBoundsFromRow,
+  analysisOffsetsFit,
   timeBoundsSql,
 } from '@perfana/shared/database/run-window';
 import { TestRun as TestRunEntity } from '../../../entities';
@@ -2666,8 +2668,10 @@ export class TestRunsPerformanceQueryService {
     const startTime = new Date(row.start_time);
     const endTime = new Date(row.end_time);
 
+    const trim = excludeRampUp && analysisOffsetsFit(row);
+
     let cutoffTime: Date | null = null;
-    if (excludeRampUp && row.ramp_up != null) {
+    if (trim && row.ramp_up != null) {
       const rampUpSeconds = this.mapper.parseInt(row.ramp_up);
       if (rampUpSeconds > 0) {
         cutoffTime = new Date(startTime.getTime() + rampUpSeconds * 1000);
@@ -2675,7 +2679,7 @@ export class TestRunsPerformanceQueryService {
     }
 
     let endCutoffTime: Date | null = null;
-    if (excludeRampUp && row.ramp_down != null) {
+    if (trim && row.ramp_down != null) {
       const rampDownSeconds = this.mapper.parseInt(row.ramp_down);
       if (rampDownSeconds > 0) {
         endCutoffTime = new Date(endTime.getTime() - rampDownSeconds * 1000);
@@ -2795,8 +2799,10 @@ export class TestRunsPerformanceQueryService {
     // test go through the same path.
     const endTime = row.end_time ? new Date(row.end_time) : new Date();
 
+    const trim = excludeRampUp && analysisOffsetsFit(row);
+
     let cutoffTime: Date | null = null;
-    if (excludeRampUp && row.ramp_up != null) {
+    if (trim && row.ramp_up != null) {
       const rampUpSeconds = this.mapper.parseInt(row.ramp_up);
       if (rampUpSeconds > 0) {
         cutoffTime = new Date(startTime.getTime() + rampUpSeconds * 1000);
@@ -2807,7 +2813,7 @@ export class TestRunsPerformanceQueryService {
     // For in-flight runs we clamp endTime to NOW() above but intentionally
     // leave endCutoffTime null — there is no tail to trim on a running test.
     let endCutoffTime: Date | null = null;
-    if (excludeRampUp && row.end_time && row.ramp_down != null) {
+    if (trim && row.end_time && row.ramp_down != null) {
       const rampDownSeconds = this.mapper.parseInt(row.ramp_down);
       if (rampDownSeconds > 0) {
         endCutoffTime = new Date(endTime.getTime() - rampDownSeconds * 1000);
@@ -3640,7 +3646,7 @@ export class TestRunsPerformanceQueryService {
         ROUND(a.avg_connect_time::numeric, 2)                                      AS avg_connect_time,
         ROUND(a.failed_count::numeric / NULLIF(a.total_count, 0) * 100, 2)         AS error_percentage,
         ROUND(a.total_count::numeric
-              / NULLIF(GREATEST(tr.duration - COALESCE(tr.ramp_up, 0), 0), 0), 2)  AS throughput
+              / NULLIF(${ANALYSED_SECONDS_SQL}, 0), 2)                             AS throughput
       FROM agg a
       JOIN test_runs tr           ON tr.test_run_id = a.test_run_id
       LEFT JOIN url_patterns up

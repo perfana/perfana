@@ -126,30 +126,19 @@ describe('ReportDataFetcherService raw-hypertable time bounds (#674)', () => {
     assertBounded(excludeRampUp ? [ANALYSIS_START, ANALYSIS_END] : [WINDOW_START, WINDOW_END]);
   });
 
-  /**
-   * #674 regression guard, and the reason it is not `[ANALYSIS_START, ANALYSIS_END]`.
-   *
-   * Before #674 these three readers carried `AND ($2::boolean = false OR t.time >= $3)` —
-   * a START cutoff and NO end. Handing them an analysis end re-cuts the default report:
-   * measured on a real run, the Apdex table lost 131 of 275 rows and its average moved
-   * 282.41 → 286.58 ms, on 58 of 60 runs on the dev database. The toggle still trims the
-   * head; the end is the padded run window and exists only to bound the locks.
-   */
-  it.each([false, true])('getApdexDataFromDatabase keeps its pre-#674 head-only trim (excludeRampUp=%s)', async (excludeRampUp) => {
+  it.each([false, true])('getApdexDataFromDatabase (excludeRampUp=%s)', async (excludeRampUp) => {
     await service.getApdexDataFromDatabase(testRun, 500, excludeRampUp, '', []);
-    assertBounded([excludeRampUp ? ANALYSIS_START : WINDOW_START, WINDOW_END]);
+    assertBounded(excludeRampUp ? [ANALYSIS_START, ANALYSIS_END] : [WINDOW_START, WINDOW_END]);
   });
 
   it.each([false, true])('getThroughputStatsForReport (excludeRampUp=%s)', async (excludeRampUp) => {
     await service.getThroughputStatsForReport('run-001', excludeRampUp, null, '', []);
-    // Head-only trim, as before #674 — see getApdexDataFromDatabase above.
-    assertBounded([excludeRampUp ? ANALYSIS_START : WINDOW_START, WINDOW_END]);
+    assertBounded(excludeRampUp ? [ANALYSIS_START, ANALYSIS_END] : [WINDOW_START, WINDOW_END]);
   });
 
   it.each([false, true])('getVirtualUserStatsForReport (excludeRampUp=%s)', async (excludeRampUp) => {
     await service.getVirtualUserStatsForReport('run-001', excludeRampUp, null, '', []);
-    // Head-only trim, as before #674 — see getApdexDataFromDatabase above.
-    assertBounded([excludeRampUp ? ANALYSIS_START : WINDOW_START, WINDOW_END]);
+    assertBounded(excludeRampUp ? [ANALYSIS_START, ANALYSIS_END] : [WINDOW_START, WINDOW_END]);
   });
 
   it.each([false, true])('getAggregatedSeries (excludeRampUp=%s)', async (excludeRampUp) => {
