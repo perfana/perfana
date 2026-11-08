@@ -1,9 +1,10 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isDeepStrictEqual } from 'util';
 import * as yaml from 'js-yaml';
 import {
   Profile,
@@ -18,8 +19,31 @@ import {
 } from '@perfana/shared/constants';
 import { validateRegexPattern } from '@perfana/shared/utils';
 import { PROFILE_BENCHMARK_SOURCES } from '../profiles/dto/profile-benchmark.dto';
+import { parseTemplateItem, templateKey, TemplateColumns } from './compare-template-codec';
 
 const SYSTEM_ACTOR = 'system:provisioning';
+
+/**
+ * Serialises compare-template provisioning across API replicas booting together. Session-level on
+ * one dedicated connection, not `pg_advisory_xact_lock`: each item is written on its own so one bad
+ * item cannot abort the rest, and a transaction would (25P02 after the first failed statement).
+ */
+const TEMPLATE_LOCK_KEY = "hashtext('perfana:provisioning:compare-templates')";
+/**
+ * How long a booting replica waits for another one to finish template provisioning. A normal run
+ * takes well under a second; a lock still held after this belongs to a backend whose host died, and
+ * Postgres keeps it until TCP keepalive reaps it, so this replica skips the step instead of hanging
+ * its own boot (and readiness probe) behind it.
+ */
+const TEMPLATE_LOCK_ATTEMPTS = 30;
+const TEMPLATE_LOCK_RETRY_MS = 1000;
+
+type ProvisioningSummary = { created: number; updated: number; skipped: number; errors: number };
+export type TemplateProvisioningSummary = ProvisioningSummary & {
+  unchanged: number;
+  takenOver: number;
+  pruned: number;
+};
 
 interface ProvisioningFile<T> {
   organizationId?: string | null;
@@ -76,23 +100,6 @@ interface BenchmarkYaml {
   };
 }
 
-interface MetricClassificationYaml {
-  /** Omit to apply the template to every dashboard carrying `panelId`. */
-  dashboardUid?: string;
-  /** `true`: `dashboardUid` and `panelTitle` are regular expressions. */
-  regex?: boolean;
-  dashboardLabel?: string;
-  /** Omit to select panels by `panelTitle` instead, resolved per dashboard from its collected panels. */
-  panelId?: number;
-  /** Descriptive beside `panelId`; the matching key when `panelId` is omitted. */
-  panelTitle?: string;
-  metricClassification: string;
-  higherIsBetter?: boolean;
-  absThreshold?: number;
-  ignore?: boolean;
-  ignoreMeanDiffSmallerThan?: number;
-}
-
 @Injectable()
 export class ProvisioningService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ProvisioningService.name);
@@ -107,6 +114,8 @@ export class ProvisioningService implements OnApplicationBootstrap {
     private readonly benchmarkRepo: Repository<ProfileBenchmark>,
     @InjectRepository(ProvisionedTemplateDsCompareConfig)
     private readonly templateRepo: Repository<ProvisionedTemplateDsCompareConfig>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -179,7 +188,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
     }
 
     // 4. Metric Classifications (no FK dependencies)
-    const classifications = this.loadYamlFile<MetricClassificationYaml>(
+    const classifications = this.loadYamlFile<unknown>(
       dir,
       'template_ds_compare_configs.yaml',
     );
@@ -220,6 +229,14 @@ export class ProvisioningService implements OnApplicationBootstrap {
 
       if (parsed && typeof parsed === 'object' && 'items' in parsed) {
         const wrapped = parsed as { organizationId?: string | null; items: T[] };
+        // Only a real list is a declared state. A typo such as `items:` with nothing after it reads
+        // as null, and treating that as "no items" would prune every provisioned template.
+        if (!Array.isArray(wrapped.items)) {
+          this.logger.error(
+            `${filename}: items must be a list — nothing is provisioned or pruned from this file`,
+          );
+          return null;
+        }
         return {
           organizationId: wrapped.organizationId ?? null,
           items: wrapped.items,
@@ -488,79 +505,165 @@ export class ProvisioningService implements OnApplicationBootstrap {
     return result;
   }
 
+  /**
+   * Makes the template table match `template_ds_compare_configs.yaml`: creates and updates the
+   * templates it declares, takes over a UI-created row holding one of its keys, and prunes the
+   * provisioned templates it no longer declares.
+   *
+   * The key is `templateKey()` (migration 1822's unique index). Every item is parsed before any
+   * write, so an item that fails to parse or write still declares its key and is not pruned. An
+   * item whose key cannot be read at all suppresses the prune for this boot: it may be the edited
+   * form of a template the file still means to keep.
+   */
   async provisionMetricClassifications(
-    items: MetricClassificationYaml[],
+    items: unknown[],
     organizationId?: string | null,
-  ): Promise<{ created: number; updated: number; skipped: number; errors: number }> {
-    const result = { created: 0, updated: 0, skipped: 0, errors: 0 };
+  ): Promise<TemplateProvisioningSummary> {
+    const result = { created: 0, updated: 0, unchanged: 0, takenOver: 0, pruned: 0, skipped: 0, errors: 0 };
+    const label = (index: number) => `template_ds_compare_configs.yaml item ${index + 1}`;
 
-    for (const item of items) {
-      try {
-        if (item.panelId == null && !item.panelTitle) {
-          throw new Error('panelId or panelTitle is required');
+    const declared = new Set<string>();
+    let unidentified = 0;
+    const byKey = new Map<string, Array<{ index: number; values: TemplateColumns }>>();
+    items.forEach((item, index) => {
+      const parsed = parseTemplateItem(item, organizationId ?? null);
+      if (parsed.key) declared.add(parsed.key);
+      else unidentified++;
+      if (!parsed.ok) {
+        this.logger.error(`${label(index)}: ${parsed.error} — skipped`);
+        result.errors++;
+        return;
+      }
+      for (const warning of parsed.warnings) this.logger.warn(`${label(index)}: ${warning}`);
+      byKey.set(parsed.key, [...(byKey.get(parsed.key) ?? []), { index, values: parsed.values }]);
+    });
+
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    try {
+      let locked = false;
+      for (let attempt = 1; attempt <= TEMPLATE_LOCK_ATTEMPTS && !locked; attempt++) {
+        const rows: Array<{ locked: boolean }> = await runner.query(
+          `SELECT pg_try_advisory_lock(${TEMPLATE_LOCK_KEY}) AS locked`,
+        );
+        locked = rows?.[0]?.locked === true;
+        if (!locked && attempt < TEMPLATE_LOCK_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, TEMPLATE_LOCK_RETRY_MS));
         }
-        // Upsert key: dashboard_uid (NULL = wildcard) + panel (id, or title when there is no id) +
-        // regex, so a pattern row and a literal row with the same text, wildcard rows on different
-        // panels, or title-only rows on different titles, never collide.
-        const existing = await this.templateRepo.findOne({
-          where: {
-            dashboard_uid: item.dashboardUid ?? IsNull(),
-            regex: item.regex ?? false,
-            ...(item.panelId != null ? { panel_id: item.panelId } : { panel_id: IsNull(), panel_title: item.panelTitle }),
-          },
-        });
-
-        // Build config_overrides from threshold fields in the YAML
-        const configOverrides: Record<string, number | boolean | string> = {};
-        if (item.absThreshold !== undefined) configOverrides.absThreshold = item.absThreshold;
-        if (item.ignore !== undefined) configOverrides.ignore = item.ignore;
-        if (item.ignoreMeanDiffSmallerThan !== undefined) configOverrides.ignoreMeanDiffSmallerThan = item.ignoreMeanDiffSmallerThan;
-
-        const values = {
-          dashboard_uid: item.dashboardUid ?? null,
-          regex: item.regex ?? false,
-          dashboard_label: item.dashboardLabel,
-          panel_id: item.panelId ?? null,
-          panel_title: item.panelTitle,
-          metric_classification: item.metricClassification,
-          higher_is_better: item.higherIsBetter,
-          ...(Object.keys(configOverrides).length > 0 ? { config_overrides: configOverrides } : {}),
-          ...(organizationId ? { organization_id: organizationId } : {}),
-        };
-
-        if (existing) {
-          await this.templateRepo.update(existing.id, {
-            ...values,
-            updated_by: SYSTEM_ACTOR,
-          } as unknown as Parameters<typeof this.templateRepo.update>[1]);
-          result.updated++;
-        } else {
-          await this.templateRepo.insert({
-            ...values,
-            created_by: SYSTEM_ACTOR,
-            updated_by: SYSTEM_ACTOR,
-          } as unknown as Parameters<typeof this.templateRepo.insert>[0]);
-          result.created++;
-        }
-      } catch (error) {
+      }
+      if (!locked) {
         this.logger.error(
-          `Failed to provision metric classification for dashboard "${item.dashboardUid ?? '*'}" panel ${item.panelId ?? item.panelTitle}`,
-          error instanceof Error ? error.message : String(error),
+          `template_ds_compare_configs.yaml: another API instance held the provisioning lock for ${(TEMPLATE_LOCK_ATTEMPTS * TEMPLATE_LOCK_RETRY_MS) / 1000}s — nothing provisioned or pruned this boot`,
         );
         result.errors++;
+        return result;
       }
+      try {
+        // Rows an API older than migration 1822 wrote after it ran (a rolling deploy, a rollback)
+        // carry read_only false or NULL, and the prune skips those: mark provisioning's own again.
+        await runner.query(
+          `UPDATE provisioned_template_ds_compare_configs SET read_only = true
+            WHERE created_by = $1 AND system_under_test_id IS NULL AND read_only IS NOT TRUE`,
+          [SYSTEM_ACTOR],
+        );
+        const rows = await this.templateRepo.find({ where: { system_under_test_id: IsNull() } });
+        const existing = new Map(rows.map((row) => [templateKey(row), row]));
+
+        let writeFailures = 0;
+        for (const group of byKey.values()) {
+          if (group.length > 1) {
+            // Both would write on every boot, so neither is applied; the key stays declared.
+            this.logger.error(
+              `${group.map((g) => label(g.index)).join(', ')} declare the same template — all skipped`,
+            );
+            result.errors += group.length;
+            continue;
+          }
+          const [{ index, values }] = group as [{ index: number; values: TemplateColumns }];
+          try {
+            const row = existing.get(templateKey(values));
+            if (!row) {
+              await this.templateRepo.insert({
+                ...values,
+                read_only: true,
+                created_by: SYSTEM_ACTOR,
+                updated_by: SYSTEM_ACTOR,
+              } as unknown as Parameters<typeof this.templateRepo.insert>[0]);
+              result.created++;
+            } else if (!row.read_only) {
+              await this.templateRepo.update(row.id, {
+                ...values,
+                read_only: true,
+                updated_by: SYSTEM_ACTOR,
+              } as unknown as Parameters<typeof this.templateRepo.update>[1]);
+              result.takenOver++;
+            } else if (this.templateDiffers(row, values)) {
+              await this.templateRepo.update(row.id, {
+                ...values,
+                updated_by: SYSTEM_ACTOR,
+              } as unknown as Parameters<typeof this.templateRepo.update>[1]);
+              result.updated++;
+            } else {
+              result.unchanged++;
+            }
+          } catch (error) {
+            this.logger.error(
+              `Failed to provision ${label(index)}`,
+              error instanceof Error ? error.message : String(error),
+            );
+            result.errors++;
+            writeFailures++;
+          }
+        }
+
+        // Either case means the file's keys may not be what the database would store, so a stored
+        // template the file still means to keep could read as undeclared. Pruning waits for a clean boot.
+        if (unidentified > 0 || writeFailures > 0) {
+          this.logger.error(
+            `template_ds_compare_configs.yaml: ${unidentified} item(s) could not be identified and ${writeFailures} failed to write, so no provisioned template is pruned this boot`,
+          );
+        } else {
+          for (const row of rows) {
+            if (!row.read_only || declared.has(templateKey(row))) continue;
+            try {
+              await this.templateRepo.delete(row.id);
+              this.logger.log(
+                `Pruned compare-config template ${row.id} (dashboard "${row.dashboard_uid ?? '*'}" panel ${row.panel_id ?? row.panel_title}${row.metric_name ? ` metric "${row.metric_name}"` : ''}): no longer in the file`,
+              );
+              result.pruned++;
+            } catch (error) {
+              this.logger.error(
+                `Failed to prune compare-config template ${row.id}`,
+                error instanceof Error ? error.message : String(error),
+              );
+              result.errors++;
+            }
+          }
+        }
+      } finally {
+        await runner.query(`SELECT pg_advisory_unlock(${TEMPLATE_LOCK_KEY})`);
+      }
+    } finally {
+      await runner.release();
     }
 
     this.logger.log(
-      `Metric classifications: ${result.created} created, ${result.updated} updated, ${result.errors} errors`,
+      `Metric classifications: ${result.created} created, ${result.updated} updated, ${result.unchanged} unchanged, ` +
+        `${result.takenOver} taken over, ${result.pruned} pruned, ${result.errors} errors`,
     );
     return result;
   }
 
-  private mergeSummary(
-    target: { created: number; updated: number; skipped: number; errors: number },
-    source: { created: number; updated: number; skipped: number; errors: number },
-  ): void {
+  /** Whether the file's values differ from the stored row. A NULL and an empty `config_overrides` are the same. */
+  private templateDiffers(row: ProvisionedTemplateDsCompareConfig, values: TemplateColumns): boolean {
+    return (Object.keys(values) as Array<keyof TemplateColumns>).some((k) =>
+      k === 'config_overrides'
+        ? !isDeepStrictEqual(row.config_overrides ?? {}, values.config_overrides)
+        : (row[k] ?? null) !== (values[k] ?? null),
+    );
+  }
+
+  private mergeSummary(target: ProvisioningSummary, source: ProvisioningSummary): void {
     target.created += source.created;
     target.updated += source.updated;
     target.skipped += source.skipped;
