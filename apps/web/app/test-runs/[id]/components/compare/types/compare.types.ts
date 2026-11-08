@@ -1,4 +1,5 @@
 import { TestRun } from '@/types/test-runs';
+import type { ControlGroup } from '@/lib/control-group-baseline';
 
 export interface CompareCardProps {
   testRun: TestRun | null;
@@ -15,6 +16,11 @@ export interface RelatedTestRun {
   application_release?: string;
   start_time?: string;
   annotations?: string[];
+  /**
+   * Set on the one synthetic option that stands for the run's control group, whose
+   * `test_run_id` is then `CONTROL_GROUP_BASELINE` — not a run. See `controlGroupOption`.
+   */
+  control_group?: ControlGroup;
 }
 
 export interface ComparisonStatus {
@@ -95,7 +101,8 @@ export interface GraphData {
   currentMetrics: MetricDataPoint[];
   baselineMetrics: MetricDataPoint[];
   currentTestRunId: string;
-  baselineTestRunId: string;
+  /** Null when the baseline is the control group, which has no time series of its own. */
+  baselineTestRunId: string | null;
   applicationDashboardId: string;
   panelId: number;
   metricName: string | null;

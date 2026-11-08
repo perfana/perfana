@@ -16,7 +16,7 @@ import {
   buildAggregatedMetricName,
   isAllAggregatedDashboard,
 } from '@/lib/aggregated-perf-series';
-import { graphKeyOf } from '../utils/compare-utils';
+import { graphKeyOf, isControlGroupOption } from '../utils/compare-utils';
 import type { SeriesPick } from '../components/CompareSelectionPanel';
 
 interface UseCompareHandlersProps {
@@ -120,11 +120,15 @@ export function useCompareHandlers({
     try {
       const params = new URLSearchParams({
         currentTestRunId: testRun?.test_run_id || testRunId,
-        baselineTestRunId: selectedTestRun.test_run_id,
         applicationDashboardId: row.dashboardId,
         panelId: row.panelId.toString(),
         metricName: row.metricName,
       });
+      // A control group has no time series of its own: ask for the current run alone, and the
+      // plot draws the group's pooled mean as a flat line (see ComparisonPlot).
+      if (!isControlGroupOption(selectedTestRun)) {
+        params.set('baselineTestRunId', selectedTestRun.test_run_id);
+      }
 
       const response = await authenticatedFetch(`/metrics/ds-metrics-comparison?${params.toString()}`);
       if (response.ok) {

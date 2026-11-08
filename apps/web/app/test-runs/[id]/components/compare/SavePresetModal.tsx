@@ -19,7 +19,8 @@ import {
   FormLabel
 } from '@mui/material';
 import { Save } from '@mui/icons-material';
-import { CompareSeriesConfig } from '@/lib/compare-presets';
+import { CompareSeriesConfig, presetBaselineLabel } from '@/lib/compare-presets';
+import { isControlGroupBaseline } from '@/lib/control-group-baseline';
 import { DisplayConfig, resolvePresetDashboardId } from './utils/compare-utils';
 import { composeSeriesName } from '@/lib/series-name';
 
@@ -162,7 +163,7 @@ export default function SavePresetModal({
     }
 
     if (currentFilters.selectedTestRun) {
-      parts.push(`Baseline: ${currentFilters.selectedTestRun.test_run_id}`);
+      parts.push(`Baseline: ${presetBaselineLabel(currentFilters.selectedTestRun.test_run_id)}`);
     }
 
     return parts.join('. ');
@@ -183,9 +184,11 @@ export default function SavePresetModal({
     }));
   };
   
-  // Determine initial preset type based on test run selection
+  // Determine initial preset type based on test run selection. The control group is not a
+  // run to lock to: every run has its own, so a preset saved against it is reusable as is.
   const getInitialPresetType = (): 'generic' | 'specific' => {
-    return currentFilters.selectedTestRun ? 'specific' : 'generic';
+    const baseline = currentFilters.selectedTestRun?.test_run_id;
+    return baseline && !isControlGroupBaseline(baseline) ? 'specific' : 'generic';
   };
   
   const [formData, setFormData] = useState<PresetFormData>({
@@ -443,7 +446,7 @@ export default function SavePresetModal({
 
               {formData.preset_type === 'specific' && currentFilters.selectedTestRun && (
                 <Chip
-                  label={`Baseline: ${currentFilters.selectedTestRun.test_run_id}`}
+                  label={`Baseline: ${presetBaselineLabel(currentFilters.selectedTestRun.test_run_id)}`}
                   sx={{
                     background: 'linear-gradient(135deg, rgba(244, 67, 54, 0.08) 0%, rgba(244, 67, 54, 0.12) 100%)',
                     border: '1px solid rgba(244, 67, 54, 0.3)',

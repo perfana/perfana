@@ -1,4 +1,12 @@
 import { authenticatedFetch } from './api';
+import { isControlGroupBaseline } from './control-group-baseline';
+
+/**
+ * A stored baseline as a reader sees it: the run id, or "control group" when the preset was
+ * saved against the run's control group (`CONTROL_GROUP_BASELINE`, which is not a run id).
+ */
+export const presetBaselineLabel = (baselineTestRunId: string): string =>
+  isControlGroupBaseline(baselineTestRunId) ? 'control group' : baselineTestRunId;
 
 export enum PresetType {
   GENERIC = 'generic',
@@ -181,7 +189,7 @@ export const PresetUtils = {
     const parts = [preset.name];
     
     if (preset.preset_type === PresetType.SPECIFIC && preset.baseline_test_run_id) {
-      parts.push(`(${preset.baseline_test_run_id})`);
+      parts.push(`(${presetBaselineLabel(preset.baseline_test_run_id)})`);
     }
     
     if (preset.is_global) {
@@ -210,7 +218,7 @@ export const PresetUtils = {
     }
     
     if (preset.preset_type === PresetType.SPECIFIC && preset.baseline_test_run_id) {
-      parts.push(`Baseline: ${preset.baseline_test_run_id}`);
+      parts.push(`Baseline: ${presetBaselineLabel(preset.baseline_test_run_id)}`);
     }
     
     return parts.join(' • ');

@@ -99,6 +99,7 @@ truth:
 ### Reports (`types/reports.types.ts`)
 - Report generation types — section types, statuses, defaults
 - `PREVIOUS_RUN_BASELINE` (`'previous'`) and `PREVIOUS_SUCCESSFUL_RUN_BASELINE` (`'previous-successful'`) — the two reserved values for a comparison section's `baselineTestRunId`. `'previous'` is the run immediately before this one in the same system / environment / workload; `'previous-successful'` is the most recent earlier run whose SLOs passed (`consolidated_result.meetsRequirement`). The API resolves both in the comparisons renderer, the builder offers both as synthetic options under a "Resolved per report" group; declared once each so a rename fails the build instead of silently no longer resolving. See [[Templates]]
+- `CONTROL_GROUP_BASELINE` (`'control-group'`) — compare against the run's control group (the runs ADAPT judges it against, pooled in `ds_control_group_statistics`) instead of one run. Unlike the two above it is never resolved to a run id, so nothing may look it up in `test_runs`. Shared by the report's comparisons section (`baselineTestRunId`), the Compare card's baseline picker and the compare presets that store that picker's value (`baseline_test_run_id`)
 - `MAX_REPORT_SECTIONS` (`20`) — most sections one report may hold. The builder enforces it while composing, the ad-hoc generate DTO enforces it at the API boundary
 
 ### Other Types

@@ -3,6 +3,10 @@
 /**
  * Baseline run + the shared dashboards → panels → series cascade (MetricSeriesCascade),
  * the same shape the report's comparison section config uses (MetricSelectionCascade).
+ *
+ * The baseline can also be the run's control group — the earlier runs anomaly detection
+ * judges it against — offered first in the list when the run has one, as the report's
+ * baseline picker (`BaselineRunSelect`) offers it.
  */
 
 import React from 'react';
@@ -13,7 +17,18 @@ import {
   RelatedTestRun,
 } from '../types';
 import { TestRun } from '@/types/test-runs';
-import { getTestRunDisplayText, getTestRunSecondaryInfo } from '../utils/compare-utils';
+import {
+  controlGroupOption,
+  getTestRunDisplayText,
+  getTestRunSecondaryInfo,
+  isControlGroupOption,
+} from '../utils/compare-utils';
+import {
+  controlGroupRunCount,
+  formatRunCount,
+  summariseControlGroupRuns,
+  type ControlGroup,
+} from '@/lib/control-group-baseline';
 import type { PanelOption, SeriesPick } from '../utils/metric-options';
 import { SeriesCascadePanel } from '@/components/charts';
 import type { AddedSeriesKey } from '../../shared/MetricSeriesCascade';
@@ -23,6 +38,8 @@ export type { SeriesPick };
 interface CompareSelectionPanelProps {
   // Test Run Selection
   relatedTestRuns: RelatedTestRun[];
+  /** The run's control group, offered as the first baseline option. Null when it has none. */
+  controlGroup?: ControlGroup | null;
   selectedTestRun: RelatedTestRun | null;
   onTestRunSelect: (testRun: RelatedTestRun | null) => void;
 
@@ -53,6 +70,15 @@ export function formatStartedAt(value: string | null | undefined): string | null
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
 }
 
+/** Autocomplete group headers — the control group is a different kind of thing from a run. */
+const GROUP_CONTROL = 'Anomaly detection baseline';
+const GROUP_RUNS = 'Test runs';
+
+/** What the "Control group" option says about itself, in the list and under the field. */
+export function controlGroupHint(group: ControlGroup): string {
+  return `Pooled statistics of the ${formatRunCount(controlGroupRunCount(group))} anomaly detection compares this run with — the control values on the Anomaly Detection card`;
+}
+
 /** One caption line: a run with a dozen annotations would otherwise wrap into the row above. */
 export function summariseAnnotations(annotations: string[] | null | undefined): string | null {
   if (!annotations?.length) return null;
@@ -62,6 +88,7 @@ export function summariseAnnotations(annotations: string[] | null | undefined): 
 
 export function CompareSelectionPanel({
   relatedTestRuns,
+  controlGroup = null,
   selectedTestRun,
   onTestRunSelect,
   allDashboards,
@@ -85,12 +112,18 @@ export function CompareSelectionPanel({
     if (match) onRemoveSeries(match.id);
   };
 
+  const options = controlGroup ? [controlGroupOption(controlGroup), ...relatedTestRuns] : relatedTestRuns;
+  const runCount = `${relatedTestRuns.length} comparable run${relatedTestRuns.length === 1 ? '' : 's'}`;
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* Test Run Selection */}
       <Autocomplete
-        options={relatedTestRuns}
+        options={options}
         getOptionLabel={getTestRunDisplayText}
+        // The option objects are rebuilt per render; identity is the id.
+        isOptionEqualToValue={(option, value) => option.test_run_id === value.test_run_id}
+        groupBy={controlGroup ? (option) => (isControlGroupOption(option) ? GROUP_CONTROL : GROUP_RUNS) : undefined}
         value={selectedTestRun}
         onChange={(_, newValue) => onTestRunSelect(newValue)}
         renderInput={(params) => (
@@ -99,11 +132,28 @@ export function CompareSelectionPanel({
             label="Select Test Run for Comparison"
             variant="outlined"
             fullWidth
-            helperText={`${relatedTestRuns.length} comparable run${relatedTestRuns.length === 1 ? '' : 's'}`}
+            helperText={controlGroup ? `${runCount}, or the control group` : runCount}
           />
         )}
         renderOption={(props, option) => {
           const { key, ...otherProps } = props;
+          if (isControlGroupOption(option) && option.control_group) {
+            return (
+              <Box component="li" key={key} {...otherProps}>
+                <Box sx={{ width: '100%' }}>
+                  <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                    Control group
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {controlGroupHint(option.control_group)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {getTestRunSecondaryInfo(option)}
+                  </Typography>
+                </Box>
+              </Box>
+            );
+          }
           return (
             <Box component="li" key={key} {...otherProps}>
               <Box sx={{ width: '100%' }}>
@@ -130,12 +180,22 @@ export function CompareSelectionPanel({
 
       {selectedTestRun && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: -1 }}>
-          {[
-            `Baseline: ${selectedTestRun.test_run_id}`,
-            formatStartedAt(selectedTestRun.start_time || selectedTestRun.created_at),
-            selectedTestRun.application_release,
-            summariseAnnotations(selectedTestRun.annotations),
-          ].filter(Boolean).join('  ·  ')}
+          {isControlGroupOption(selectedTestRun)
+            ? [
+                'Baseline: control group',
+                selectedTestRun.control_group
+                  ? formatRunCount(controlGroupRunCount(selectedTestRun.control_group))
+                  : null,
+                selectedTestRun.control_group
+                  ? summariseControlGroupRuns(selectedTestRun.control_group.test_runs)
+                  : null,
+              ].filter(Boolean).join('  ·  ')
+            : [
+                `Baseline: ${selectedTestRun.test_run_id}`,
+                formatStartedAt(selectedTestRun.start_time || selectedTestRun.created_at),
+                selectedTestRun.application_release,
+                summariseAnnotations(selectedTestRun.annotations),
+              ].filter(Boolean).join('  ·  ')}
         </Typography>
       )}
 

@@ -19,6 +19,7 @@ import {
   unitText,
   windowStats,
 } from '@/lib/charts';
+import { formatRunCount } from '@/lib/control-group-baseline';
 
 interface ComparisonPlotProps {
   metricName: string;
@@ -30,6 +31,13 @@ interface ComparisonPlotProps {
   testRun: TestRun | null;
   relatedTestRuns: RelatedTestRun[];
   showToast: (message: string) => void;
+  /**
+   * Set when the baseline is the run's control group. A control group is several runs pooled
+   * into one distribution, so it has no series to overlay — only the mean its table cell
+   * prints, which is drawn as a flat dashed line across the current run. `mean` is null when
+   * the group has no value for this series; the plot then shows the current run alone.
+   */
+  controlGroup?: { mean: number | null; runCount: number };
 }
 
 type Sample = { time: string; value: number; ramp_up?: boolean };
@@ -93,7 +101,11 @@ export default function ComparisonPlot({
   panelUnit,
   testRun,
   showToast,
+  controlGroup,
 }: ComparisonPlotProps) {
+  const againstControlGroup = controlGroup !== undefined;
+  const controlGroupMean = controlGroup?.mean ?? null;
+  const controlGroupRuns = controlGroup?.runCount ?? 0;
   const mode = useTheme().palette.mode === 'dark' ? 'dark' : 'light';
   const theme = chartTheme(mode);
 
@@ -114,8 +126,18 @@ export default function ComparisonPlot({
 
     const byTime = (a: { time: string }, b: { time: string }) =>
       new Date(a.time).getTime() - new Date(b.time).getTime();
-    const baseline = [...graphData.baselineMetrics].sort(byTime) as Sample[];
     const current = [...graphData.currentMetrics].sort(byTime) as Sample[];
+    const baseline: Sample[] = againstControlGroup
+      ? (controlGroupMean !== null && Number.isFinite(controlGroupMean)
+          ? current.map((d) => ({ time: d.time, value: controlGroupMean }))
+          : [])
+      : ([...graphData.baselineMetrics].sort(byTime) as Sample[]);
+    const baselineTrace = againstControlGroup
+      ? `Control group mean (${formatRunCount(controlGroupRuns)})`
+      : `Baseline (${graphData.baselineTestRunId})`;
+    const baselineRow = againstControlGroup
+      ? `Control group · mean of ${formatRunCount(controlGroupRuns)}`
+      : `Baseline · ${graphData.baselineTestRunId}`;
 
     const all = [...baseline, ...current].map((d) => d.value).filter((v) => Number.isFinite(v));
     const axisInput = [
@@ -151,7 +173,7 @@ export default function ComparisonPlot({
     });
 
     const traces = [
-      line(baseline, `Baseline (${graphData.baselineTestRunId})`, true),
+      line(baseline, baselineTrace, true),
       line(current, `Current (${graphData.currentTestRunId})`, false),
     ];
 
@@ -171,7 +193,7 @@ export default function ComparisonPlot({
     const rows: SeriesRow[] = [
       {
         id: 'baseline',
-        name: `Baseline · ${graphData.baselineTestRunId}`,
+        name: baselineRow,
         color: theme.baseline,
         dashed: true,
         unit,
@@ -203,7 +225,7 @@ export default function ComparisonPlot({
     const config = { displayModeBar: false, responsive: true };
 
     return { traces, layout, config, rows, display };
-  }, [graphData, unit, testRun, theme, cursorIndex]);
+  }, [graphData, unit, testRun, theme, cursorIndex, againstControlGroup, controlGroupMean, controlGroupRuns]);
 
   const onHoverRow = useCallback((seriesId: string | null) => {
     dimOtherTraces(graphRef.current, 2, seriesId === 'baseline' ? 0 : seriesId === 'current' ? 1 : null);
@@ -241,7 +263,7 @@ export default function ComparisonPlot({
         title={metricName}
         subtitle="sample"
         cursor={cursorIndex !== null ? `sample ${cursorIndex}` : ''}
-        footerNote="Applies to baseline and current"
+        footerNote={againstControlGroup ? 'Applies to control group and current' : 'Applies to baseline and current'}
         actions={<ChartActions graph={graphEl} mode={mode} chartName={metricName} notify={showToast} />}
         headerExtra={
           <Box

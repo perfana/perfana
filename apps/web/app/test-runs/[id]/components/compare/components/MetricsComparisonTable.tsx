@@ -18,7 +18,10 @@ import {
   METRIC_COLUMN_LABELS,
   graphKeyOf,
   formatCompareNumber,
+  baselineDisplayName,
+  isControlGroupOption,
 } from '../utils/compare-utils';
+import { controlGroupRunCount } from '@/lib/control-group-baseline';
 import {
   bandOf,
   worstBand,
@@ -187,6 +190,9 @@ export default function MetricsComparisonTable({
     [addedSeries],
   );
 
+  const againstControlGroup = isControlGroupOption(selectedTestRun);
+  const controlGroupRuns = selectedTestRun.control_group ? controlGroupRunCount(selectedTestRun.control_group) : 0;
+
   const thresholds = toDiffThresholds(displayConfig);
   const columns = getMetricColumns(displayConfig);
   const gridTemplateColumns = `minmax(180px, 2fr) ${columns.map(() => 'minmax(150px, 1fr)').join(' ')} 44px`;
@@ -276,7 +282,7 @@ export default function MetricsComparisonTable({
       {/* Legend */}
       <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2.5, mb: 3,
         color: 'text.secondary', fontSize: '0.78rem' }}>
-        <span>Each cell: <strong>current</strong> · vs baseline · Δ%. Bar shows regression magnitude.</span>
+        <span>Each cell: <strong>current</strong> · vs {againstControlGroup ? 'control group' : 'baseline'} · Δ%. Bar shows regression magnitude.</span>
         {legendDot(BAND_COLORS.good, `≤ ${displayConfig.warningThreshold}%`)}
         {legendDot(BAND_COLORS.warn, `${displayConfig.warningThreshold}–${displayConfig.regressionThreshold}%`)}
         {legendDot(BAND_COLORS.bad, `> ${displayConfig.regressionThreshold}%`)}
@@ -291,7 +297,7 @@ export default function MetricsComparisonTable({
           </ToggleButtonGroup>
         </Box>
         <Box component="span" sx={{ color: 'text.disabled' }}>
-          baseline: {selectedTestRun.test_run_id}
+          baseline: {baselineDisplayName(selectedTestRun)}
         </Box>
       </Box>
 
@@ -456,6 +462,11 @@ export default function MetricsComparisonTable({
                             testRun={testRun}
                             relatedTestRuns={relatedTestRuns}
                             showToast={showToast}
+                            // The group's pooled mean is the `avg` cell's baseline; it is
+                            // the only level a pooled distribution can draw as a line.
+                            controlGroup={againstControlGroup
+                              ? { mean: row.byColumn.avg?.selected_value ?? null, runCount: controlGroupRuns }
+                              : undefined}
                           />
                         </Box>
                       </Collapse>

@@ -115,6 +115,9 @@ a silently shortened list returns an aggregate that looks complete but omits run
 | `GET` | `/api/test-runs/check-results` | Config change check results |
 | `GET` | `/api/test-runs/expected-config-changes` | Expected config changes |
 | `POST` | `/api/test-runs/expected-config-changes` | Create expected change |
+| `GET` | `/api/metrics/control-group/:testRunId` | The run's control group — the earlier runs ADAPT judges it against, as named by its latest conclusion. `null` when it has none. The Compare card offers it as the "Control group" baseline |
+| `GET` | `/api/metrics/control-group-statistics/:testRunId` | One panel's pooled `ds_control_group_statistics` over that group (`?panelId=` plus `applicationDashboardId` or `metricsSourceId`), keyed like `ds-metric-statistics`. Empty for series ADAPT does not pool (URL panels, synthetic "All aggregated") |
+| `GET` | `/api/metrics/ds-metrics-comparison` | Two runs' series for one panel and metric. `baselineTestRunId` is optional: omitted, only the current run is returned, which is what the Compare card asks for against a control group |
 
 ### Dashboard
 

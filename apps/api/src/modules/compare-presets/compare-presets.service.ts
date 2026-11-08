@@ -12,6 +12,20 @@ import { ResourceNotFoundException } from '../../common/exceptions/business.exce
 import { AuthorizationService } from '../../common/services/authorization.service';
 import { withOrgFilter } from '../../common/utils/with-org-filter';
 import { AuditService } from '../audit/audit.service';
+import { CONTROL_GROUP_BASELINE } from '@perfana/shared/types';
+
+/**
+ * The run a stored baseline names, or undefined when it names none.
+ *
+ * `baseline_test_run_id` also carries the `CONTROL_GROUP_BASELINE` sentinel: the Compare card
+ * can compare against the run's control group instead of one run. That is not a run id, so it
+ * must not reach an access check (a non-admin's save would 404 on a run that does not exist),
+ * the parent lookup the preset inherits its organization from, or the release/annotations
+ * enrichment. The value itself is still stored and returned unchanged.
+ */
+export function baselineRunOf(baselineTestRunId: string | null | undefined): string | undefined {
+  return baselineTestRunId && baselineTestRunId !== CONTROL_GROUP_BASELINE ? baselineTestRunId : undefined;
+}
 
 @Injectable()
 export class ComparePresetsService {
@@ -69,13 +83,11 @@ export class ComparePresetsService {
       // Validate access to referenced test runs for non-admin users
       if (orgIds !== null) {
         // Check baseline test run access
-        if (createComparePresetDto.baseline_test_run_id) {
-          const hasAccess = await this.validateTestRunAccess(
-            createComparePresetDto.baseline_test_run_id,
-            orgIds,
-          );
+        const baselineRun = baselineRunOf(createComparePresetDto.baseline_test_run_id);
+        if (baselineRun) {
+          const hasAccess = await this.validateTestRunAccess(baselineRun, orgIds);
           if (!hasAccess) {
-            throw new ResourceNotFoundException('TestRun', createComparePresetDto.baseline_test_run_id);
+            throw new ResourceNotFoundException('TestRun', baselineRun);
           }
         }
 
@@ -96,7 +108,7 @@ export class ComparePresetsService {
       // the caller's first accessible org (legacy presets without test-run scope).
       const parentTestRunId =
         createComparePresetDto.created_for_test_run_id ||
-        createComparePresetDto.baseline_test_run_id;
+        baselineRunOf(createComparePresetDto.baseline_test_run_id);
       let organizationId: string;
       let teamId: string | undefined;
       if (parentTestRunId) {
@@ -242,8 +254,9 @@ export class ComparePresetsService {
           // Global presets: check access to referenced test runs
           let hasAccess = true;
 
-          if (preset.baselineTestRunId) {
-            hasAccess = await this.validateTestRunAccess(preset.baselineTestRunId, orgIds);
+          const baselineRun = baselineRunOf(preset.baselineTestRunId);
+          if (baselineRun) {
+            hasAccess = await this.validateTestRunAccess(baselineRun, orgIds);
           }
 
           if (hasAccess && preset.createdForTestRunId) {
@@ -262,11 +275,12 @@ export class ComparePresetsService {
         filteredData.map(async (preset) => {
           let testRunData = null;
 
-          // Fetch test run data if baseline_test_run_id exists
-          if (preset.baselineTestRunId) {
+          // Fetch test run data if baseline_test_run_id names a run
+          const baselineRun = baselineRunOf(preset.baselineTestRunId);
+          if (baselineRun) {
             try {
               testRunData = await withRequestEm(this.testRunRepo).findOne({
-                where: { testRunId: preset.baselineTestRunId },
+                where: { testRunId: baselineRun },
                 select: ['applicationRelease', 'annotations']
               });
             } catch (error) {
@@ -310,8 +324,9 @@ export class ComparePresetsService {
 
       // For non-admin users accessing global presets, verify organization access to referenced test runs
       if (orgIds !== null && preset.createdBy !== userId) {
-        if (preset.baselineTestRunId) {
-          const hasAccess = await this.validateTestRunAccess(preset.baselineTestRunId, orgIds);
+        const baselineRun = baselineRunOf(preset.baselineTestRunId);
+        if (baselineRun) {
+          const hasAccess = await this.validateTestRunAccess(baselineRun, orgIds);
           if (!hasAccess) {
             throw new NotFoundException(`Compare preset with ID ${id} not found`);
           }
@@ -327,10 +342,11 @@ export class ComparePresetsService {
 
       // Fetch test run data if baseline_test_run_id exists
       let testRunData = null;
-      if (preset.baselineTestRunId) {
+      const baselineRun = baselineRunOf(preset.baselineTestRunId);
+      if (baselineRun) {
         try {
           testRunData = await withRequestEm(this.testRunRepo).findOne({
-            where: { testRunId: preset.baselineTestRunId },
+            where: { testRunId: baselineRun },
             select: ['applicationRelease', 'annotations']
           });
         } catch (error) {
@@ -372,13 +388,11 @@ export class ComparePresetsService {
 
       // Validate access to new test run references for non-admin users
       if (orgIds !== null) {
-        if (updateComparePresetDto.baseline_test_run_id !== undefined && updateComparePresetDto.baseline_test_run_id) {
-          const hasAccess = await this.validateTestRunAccess(
-            updateComparePresetDto.baseline_test_run_id,
-            orgIds,
-          );
+        const baselineRun = baselineRunOf(updateComparePresetDto.baseline_test_run_id);
+        if (baselineRun) {
+          const hasAccess = await this.validateTestRunAccess(baselineRun, orgIds);
           if (!hasAccess) {
-            throw new ResourceNotFoundException('TestRun', updateComparePresetDto.baseline_test_run_id);
+            throw new ResourceNotFoundException('TestRun', baselineRun);
           }
         }
       }
@@ -429,10 +443,11 @@ export class ComparePresetsService {
 
       // Fetch test run data if needed
       let testRunData = null;
-      if (updated.baselineTestRunId) {
+      const updatedBaselineRun = baselineRunOf(updated.baselineTestRunId);
+      if (updatedBaselineRun) {
         try {
           testRunData = await withRequestEm(this.testRunRepo).findOne({
-            where: { testRunId: updated.baselineTestRunId },
+            where: { testRunId: updatedBaselineRun },
             select: ['applicationRelease', 'annotations']
           });
         } catch (error) {

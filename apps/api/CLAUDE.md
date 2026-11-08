@@ -1084,6 +1084,30 @@ group name back to its members. Five things about it:
    table, ADAPT, SLO checks) already see group names and must **not** expand them. `?members=true`
    on the metric routes returns the raw per-pod series for drill-down.
 
+### A control group as a comparison baseline: one resolver, and a sentinel that is not a run
+
+`CONTROL_GROUP_BASELINE` (`'control-group'`, `@perfana/shared/types`, v0.2.97.51) lets the
+Compare card and the report's Comparisons section compare a run against its control group instead
+of one run. `modules/metrics/control-group-baseline.ts` is the one place that finds the group and
+reads its pooled `ds_control_group_statistics`; `MetricsService` (two new routes) and
+`ReportDataFetcherService.getControlGroupComparison` both go through it. Four things to keep:
+
+1. **The group is the one the latest `ds_adapt_conclusion` names**, falling back to the group keyed
+   on the run's own id — the same group the Regressions section and the anomaly card describe.
+   Neither table has an RLS policy or an org column the caller can be checked against, so every
+   reader authorizes the CURRENT run first and reads the group only after; the report path reads
+   it only once the run's own org-filtered statistics have answered.
+2. **Pair on `(application_dashboard_id, panel_id, metric_name)`**, ADAPT's identity, not on the
+   labels the run-vs-run path pairs on. A control group shares the run's environment, which is
+   also why `dashboardMap` is ignored with it.
+3. **Never invent a baseline for an unpooled series.** URL panels and the synthetic "All
+   aggregated" series have no pooled rows; `getAggregatedSeriesRows` and `getUrlComparison` take
+   a `null` baseline run for this and emit the current value with an empty baseline.
+4. **The sentinel is stored in `compare_filter_presets.baseline_test_run_id`.** `baselineRunOf`
+   keeps it out of the run access checks, the org-inheritance parent lookup and the
+   release/annotations enrichment. A new reader of that column that treats it as a run id
+   reintroduces a 404 on save for every non-admin.
+
 ### Series grouping rules: who may write them, and what apply does
 
 `modules/series-grouping/` (v0.2.97.43) holds the rules API: CRUD with copy-to-other-workloads

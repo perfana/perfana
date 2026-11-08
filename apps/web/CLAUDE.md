@@ -788,6 +788,34 @@ it to unconditional fails the don't-override case. Its `setup()` deliberately do
 awaiting it never settles and every case times out at 10 s. The unwrapped-act warning is noise;
 the hang is not.
 
+### The Compare card's "Control group" baseline is a sentinel riding in `selectedTestRun`
+
+The baseline picker offers the run's control group (the runs anomaly detection judges it against)
+first, as a synthetic `RelatedTestRun` whose `test_run_id` is `CONTROL_GROUP_BASELINE` and whose
+`control_group` carries the group (`controlGroupOption` in `compare/utils/compare-utils.ts`,
+v0.2.97.51). Sharing the state keeps every id-only consumer working — "is a baseline selected",
+preset save — and makes everything that would treat the id as a run a bug unless it branches on
+`isControlGroupOption`. Four places do, and each fails silently if the branch is lost:
+
+1. **The pairing in `useCompareData`.** The baseline comes from
+   `/metrics/control-group-statistics/:run` (pooled `ds_control_group_statistics`), never from the
+   rows of `ds-metric-statistics`, which would match nothing for the sentinel. URL panels and the
+   synthetic "All aggregated" series have no pooled rows: they are fetched for the current run alone
+   and shown with an empty baseline, never a stand-in.
+2. **The graph.** `fetchGraphData` omits `baselineTestRunId` (now optional on
+   `ds-metrics-comparison`), and `ComparisonPlot` draws the group's pooled mean — the `avg` cell's
+   `selected_value` — as a flat dashed line, since a pooled distribution has no time series.
+3. **Captions.** `baselineDisplayName` / `getTestRunDisplayText` print "control group (N runs)";
+   the raw sentinel must never reach the screen.
+4. **Preset restore.** `CompareCard` hands `useComparePresets` the `baselineOptions`, not
+   `relatedTestRuns`, so a preset stored with the sentinel finds the option. `SavePresetModal`
+   defaults such a preset to **generic**: every run has its own control group, so it is reusable.
+   The API's `baselineRunOf` (`compare-presets.service.ts`) keeps the sentinel away from the run
+   access checks — without it a non-admin's save 404s.
+
+The group is fetched once per run on first expand (`undefined` = not asked yet, `null` = none), so
+a preset applied before it lands leaves the selector alone, as for a missing run.
+
 ### An SLO with no targets must not borrow the panel's series
 
 `useSLOMetricsChart` falls back to "every series on the panel" when a target matches no

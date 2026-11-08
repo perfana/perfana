@@ -56,7 +56,8 @@ export default function CompareCard({
     selectedSource: compareData.selectedSource,
     addedSeries: compareData.addedSeries,
     dashboards: compareData.dashboards,
-    relatedTestRuns: compareData.relatedTestRuns,
+    // The options, not just the runs: a preset saved against the control group restores it.
+    relatedTestRuns: compareData.baselineOptions,
     selectedTestRun: compareData.selectedTestRun,
     setSelectedSource: compareData.setSelectedSource,
     setSelectedDashboard: compareData.setSelectedDashboard,
@@ -149,6 +150,7 @@ export default function CompareCard({
               onDeletePreset={comparePresets.deletePreset}
               onSavePresetClick={() => comparePresets.setSavePresetModalOpen(true)}
               relatedTestRuns={compareData.relatedTestRuns}
+              controlGroup={compareData.controlGroup}
               selectedTestRun={compareData.selectedTestRun}
               onTestRunSelect={compareData.setSelectedTestRun}
               allDashboards={compareData.getAllDashboardsMerged()}

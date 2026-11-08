@@ -42,8 +42,25 @@ import { toUnitScale, unitLabel } from './unit-format';
  * the day after it is chosen — every nightly report keeps comparing against the same old run.
  * Storing this instead makes each report resolve its own predecessor at render time.
  */
-import { PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE } from '@perfana/shared/types';
-export { PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE };
+import {
+  CONTROL_GROUP_BASELINE,
+  PREVIOUS_RUN_BASELINE,
+  PREVIOUS_SUCCESSFUL_RUN_BASELINE,
+} from '@perfana/shared/types';
+export { CONTROL_GROUP_BASELINE, PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE };
+import type { ControlGroupInfo } from '../../metrics/control-group-baseline';
+
+/**
+ * What a section compares against: one run, or the run's control group. A control group has
+ * pooled statistics and no time series of its own, which is what every branch below that
+ * reads `controlGroup` is working around.
+ */
+type ResolvedBaseline =
+  | { kind: 'run'; id: string }
+  | { kind: 'control-group'; group: ControlGroupInfo };
+
+/** How many control-group run ids the section names before folding the rest into "+N more". */
+const CONTROL_GROUP_RUNS_LISTED = 8;
 
 /** The only metric keys the baseline-run comparison understands. */
 const ALLOWED_BASELINE_METRICS = ['avg', 'p90', 'p95', 'p99'] as const;
@@ -110,7 +127,7 @@ export class ComparisonsRenderer {
   private async renderRowCharts(
     rows: BaselineComparisonRow[],
     testRun: TestRun,
-    baselineId: string,
+    baselineRef: ResolvedBaseline,
     dashboardMap: { current: string; baseline: string }[] | undefined,
     userId: string,
     roles: string[],
@@ -149,17 +166,21 @@ export class ComparisonsRenderer {
     // Two round trips per row, both batched into one await each. `getMetricsTimeSeries`
     // issues one query per selector, so this is 2N queries for N charted rows — bounded by
     // MAX_ROW_CHARTS, which is what keeps that number small.
+    // A control group has no series to fetch — its baseline line is drawn from the row's own
+    // pooled mean below — so it costs one round trip, not two.
     const [current, baseline] = await Promise.all([
       this.dataFetcher.getMetricsTimeSeries(
         testRun.testRunId,
         chartable.map((r) => selector(r, r.dashboardLabel!)),
         false, userId, roles,
       ),
-      this.dataFetcher.getMetricsTimeSeries(
-        baselineId,
-        chartable.map((r) => selector(r, baselineDashboard(r.dashboardLabel!))),
-        false, userId, roles,
-      ),
+      baselineRef.kind === 'run'
+        ? this.dataFetcher.getMetricsTimeSeries(
+            baselineRef.id,
+            chartable.map((r) => selector(r, baselineDashboard(r.dashboardLabel!))),
+            false, userId, roles,
+          )
+        : Promise.resolve([] as MetricsTimeSeriesPanel[]),
     ]);
 
     // Paired on the echoed `key`, never on the echoed fields: `perfPanelTitle` collapses
@@ -187,13 +208,40 @@ export class ComparisonsRenderer {
       };
     };
 
+    /**
+     * The control group's pooled mean as a flat line across the current run's own span.
+     *
+     * A control group is several runs pooled into one distribution, so there is no "baseline
+     * at minute 12" to draw — only the number its table cell already prints. A flat line at
+     * that number is the honest picture of it. Only the mean has one (the `avg` column); a
+     * section that did not ask for `avg` gets no baseline line rather than a percentile drawn
+     * as if it were a level.
+     */
+    const controlGroupLine = (r: BaselineComparisonRow, cur: MetricsTimeSeriesPanel): MetricsTimeSeriesPanel | undefined => {
+      const mean = r.metrics.find((m) => m.key === 'avg')?.baseline;
+      const points = cur.dataPoints;
+      if (mean == null || !Number.isFinite(mean) || points.length === 0) return undefined;
+      return {
+        ...cur,
+        panelTitle: '',
+        metricName: 'Control group mean',
+        dataPoints: [
+          { time: points[0]!.time, value: mean },
+          { time: points[points.length - 1]!.time, value: mean },
+        ],
+      };
+    };
+
     for (const r of chartable) {
       const cur = curBy.get(ComparisonsRenderer.rowKey(r));
-      const base = baseBy.get(ComparisonsRenderer.rowKey(r));
+      const rebasedCur = cur ? rebase(cur) : undefined;
+      const base = baselineRef.kind === 'run'
+        ? (() => { const b = baseBy.get(ComparisonsRenderer.rowKey(r)); return b ? rebase(b) : undefined; })()
+        : rebasedCur ? controlGroupLine(r, rebasedCur) : undefined;
       const series: ChartSeries[] = [];
       // Current first, so it takes the solid line and the first colour slot.
-      if (cur) series.push({ ...rebase(cur), color: ACCENT });
-      if (base) series.push({ ...rebase(base), color: REPORT_COLORS.mutedInk, dashed: true });
+      if (rebasedCur) series.push({ ...rebasedCur, color: ACCENT });
+      if (base) series.push({ ...base, color: REPORT_COLORS.mutedInk, dashed: true });
       if (series.length === 0) continue;
       const chart = this.chartSvg.renderTimeSeriesChart(
         [r.dashboardLabel, r.panelTitle, r.label].filter(Boolean).join(' · '),
@@ -210,10 +258,14 @@ export class ComparisonsRenderer {
       // The summary is the whole row's width and says what the graph is; the row above
       // already names the metric, so this only has to say "graph" and flag a missing
       // baseline.
+      const summary = baselineRef.kind === 'run'
+        ? `Graph &middot; current solid, baseline dashed, both from their own start
+          ${base ? '' : '<span style="color:' + REPORT_COLORS.faintInk + ';"> &mdash; baseline has no series for this metric</span>'}`
+        : `Graph &middot; current solid, control-group mean dashed
+          ${base ? '' : '<span style="color:' + REPORT_COLORS.faintInk + ';"> &mdash; the control group has no mean for this metric</span>'}`;
       charts.set(ComparisonsRenderer.rowKey(r), `<details class="report-row-graph" style="margin:0;">
         <summary style="cursor:pointer; font-size:12px; color:${REPORT_COLORS.mutedInk};">
-          Graph &middot; current solid, baseline dashed, both from their own start
-          ${base ? '' : '<span style="color:' + REPORT_COLORS.faintInk + ';"> &mdash; baseline has no series for this metric</span>'}
+          ${summary}
         </summary>
         <div style="padding:8px 0 4px;">${chart}</div>
       </details>`);
@@ -223,8 +275,22 @@ export class ComparisonsRenderer {
   }
 
   /**
-   * The baseline this report should compare against: whatever the template pinned, or the run
-   * before this one when the template said to follow along.
+   * The control group's run ids, after a colon, folded past `CONTROL_GROUP_RUNS_LISTED`.
+   *
+   * Named in the document itself because a report is read long after it was generated, and a
+   * control group is rebuilt on every re-evaluate: "its control group" alone would not let a
+   * reader say which runs the numbers came from.
+   */
+  private controlGroupRunList(group: ControlGroupInfo): string {
+    if (group.testRuns.length === 0) return '';
+    const shown = group.testRuns.slice(0, CONTROL_GROUP_RUNS_LISTED);
+    const more = group.testRuns.length - shown.length;
+    return `: <span style="color:${REPORT_COLORS.secondaryInk};">${shown.map((id) => escapeHtml(id)).join(', ')}${more > 0 ? ` (+${formatInt(more)} more)` : ''}</span>`;
+  }
+
+  /**
+   * The baseline this report should compare against: whatever the template pinned, the run
+   * before this one when the template said to follow along, or the run's control group.
    *
    * Returns undefined when there is no predecessor — the first run in a system, environment and
    * workload has nothing behind it, and the section then renders its existing empty state rather
@@ -233,19 +299,30 @@ export class ComparisonsRenderer {
   private async resolveBaseline(
     configured: unknown,
     testRun: TestRun | null,
-  ): Promise<{ id?: string; reason?: string }> {
+  ): Promise<{ baseline?: ResolvedBaseline; reason?: string }> {
     if (typeof configured !== 'string' || configured === '') {
       return { reason: 'no baseline run is configured for this section.' };
     }
+    if (configured === CONTROL_GROUP_BASELINE) {
+      if (!testRun) {
+        return { reason: 'this section was rendered without a test run.' };
+      }
+      const group = await this.dataFetcher.getControlGroupForRun(testRun.testRunId);
+      if (group) return { baseline: { kind: 'control-group', group } };
+      return {
+        reason:
+          'this run has no control group yet. Anomaly detection builds one from earlier runs of the same system, environment and workload — the first runs have none, and a run whose analysis has not finished has none yet.',
+      };
+    }
     const sloPassedOnly = configured === PREVIOUS_SUCCESSFUL_RUN_BASELINE;
     if (configured !== PREVIOUS_RUN_BASELINE && !sloPassedOnly) {
-      return { id: configured };
+      return { baseline: { kind: 'run', id: configured } };
     }
     if (!testRun) {
       return { reason: 'this section was rendered without a test run.' };
     }
     const previous = await this.dataFetcher.getPreviousTestRun(testRun, { sloPassedOnly });
-    if (previous?.testRunId) return { id: previous.testRunId };
+    if (previous?.testRunId) return { baseline: { kind: 'run', id: previous.testRunId } };
     const firstRun =
       'this is the first run for its system, environment and workload — there is no previous run behind it.';
     if (!sloPassedOnly) return { reason: firstRun };
@@ -265,11 +342,14 @@ export class ComparisonsRenderer {
   }
 
   /**
-   * Render the Comparisons section: this run against a baseline run.
+   * Render the Comparisons section: this run against a baseline run, or against its control
+   * group.
    *
    * The old control-group mode (a table of ADAPT conclusions for this run) was dropped — it
    * answered a different question than the section's title promises and duplicated the
-   * Regressions section, so there is only one mode left and no mode switch.
+   * Regressions section. Its successor is not a mode but a baseline: `CONTROL_GROUP_BASELINE`
+   * fills the same current-vs-baseline table from the control group's pooled statistics, so
+   * the section keeps one shape whichever baseline it is given.
    */
   async renderComparisonsSection(
     section: ReportSectionConfig,
@@ -301,26 +381,36 @@ export class ComparisonsRenderer {
         : DEFAULT_THRESHOLDS),
       minAbsolute: Number.isFinite(minAbsT) && minAbsT > 0 ? minAbsT : undefined,
     };
-    const baseline = await this.resolveBaseline(config.baselineTestRunId, testRun);
-    const baselineId = baseline.id;
-    const dashboardMap = Array.isArray(config.dashboardMap)
+    const resolved = await this.resolveBaseline(config.baselineTestRunId, testRun);
+    const baselineRef = resolved.baseline;
+    const baselineId = baselineRef?.kind === 'run' ? baselineRef.id : undefined;
+    const controlGroup = baselineRef?.kind === 'control-group' ? baselineRef.group : undefined;
+    // A control group is built from the same system and environment, so there is no
+    // differently named dashboard to map onto: a stored mapping is ignored rather than
+    // applied to a pairing that does not go by label.
+    const dashboardMap = !controlGroup && Array.isArray(config.dashboardMap)
       ? (config.dashboardMap as { current: string; baseline: string }[])
       : undefined;
     const selections = buildSelections(config);
 
-    const data = testRun && baselineId
-      ? await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineId, source,
-          { metrics, userId, roles, dashboardMap, selections })
-      : null;
+    const data = !testRun || !baselineRef
+      ? null
+      : baselineRef.kind === 'control-group'
+        ? await this.dataFetcher.getControlGroupComparison(testRun.testRunId, baselineRef.group.id, source,
+            { metrics, userId, roles, selections })
+        : await this.dataFetcher.getBaselineRunComparison(testRun.testRunId, baselineRef.id, source,
+            { metrics, userId, roles, dashboardMap, selections });
     const hostLabels = await this.dataFetcher.getDynatraceHostLabels(testRun);
 
     if (!data || data.rows.length === 0) {
-      // Five ways to end up empty, one message each — a silent empty section is
+      // Six ways to end up empty, one message each — a silent empty section is
       // indistinguishable from "nothing regressed", which is the opposite conclusion.
       const why = !testRun
         ? 'this section was rendered without a test run.'
-        : baseline.reason
-          ?? `baseline run ${baselineId} returned no metrics comparable with this run — check that it exists and collected ${source} data.`;
+        : resolved.reason
+          ?? (controlGroup
+            ? `its control group (${formatInt(controlGroup.nTestRuns)} ${controlGroup.nTestRuns === 1 ? 'run' : 'runs'}) has no ${source} statistics comparable with this run — check that its analysis has finished.`
+            : `baseline run ${baselineId} returned no metrics comparable with this run — check that it exists and collected ${source} data.`);
       return `<section class="comparisons-section">${sectionHeader(title)}
         ${sectionText(text)}
         ${emptyState(`No comparison data available: ${why}`)}</section>`;
@@ -440,9 +530,14 @@ export class ComparisonsRenderer {
     // when read out of context (current run vs the chosen baseline run id).
     // Wording deliberately avoids a bare ">Current</span>"/">Baseline</span>" token —
     // that's the mapping-caption signature the renderer tests key on.
+    const strong = (v: string) =>
+      `<strong style="color:${REPORT_COLORS.ink}; font-weight:600;">${escapeHtml(v)}</strong>`;
+    const against = controlGroup
+      ? `against its control group: the ${strong(`${formatInt(controlGroup.nTestRuns)} earlier ${controlGroup.nTestRuns === 1 ? 'run' : 'runs'}`)} anomaly detection compares it with${this.controlGroupRunList(controlGroup)}`
+      : `against baseline run ${strong(baselineId ?? '')}`;
     const runIds = `<div style="font-size:12.5px; color:${REPORT_COLORS.mutedInk}; margin-top:6px;">
-      Comparing current run <strong style="color:${REPORT_COLORS.ink}; font-weight:600;">${escapeHtml(testRun?.testRunId ?? '')}</strong>
-      against baseline run <strong style="color:${REPORT_COLORS.ink}; font-weight:600;">${escapeHtml(baselineId ?? '')}</strong>
+      Comparing current run ${strong(testRun?.testRunId ?? '')}
+      ${against}
     </div>`;
 
     const minAbsNote = thresholds.minAbsolute != null
@@ -450,7 +545,7 @@ export class ComparisonsRenderer {
       : '';
 
     const legend = `<div style="font-size:12.5px; color:${REPORT_COLORS.mutedInk}; margin-top:12px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
-      <span>Each cell shows <strong style="color:${REPORT_COLORS.ink}; font-weight:600;">current</strong> &#183; vs baseline &#183; &#916;%. Bar shows regression magnitude.</span>
+      <span>Each cell shows <strong style="color:${REPORT_COLORS.ink}; font-weight:600;">current</strong> &#183; vs ${controlGroup ? 'control group' : 'baseline'} &#183; &#916;%. Bar shows regression magnitude.</span>
       <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:${REPORT_COLORS.dot.good};"></span> &#8804; ${thresholds.good}%</span>
       <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:${REPORT_COLORS.dot.warn};"></span> ${thresholds.good}&#8211;${thresholds.warning}%</span>
       <span style="display:inline-flex; align-items:center; gap:6px;"><span style="width:9px; height:9px; border-radius:50%; background:${REPORT_COLORS.dot.bad};"></span> &gt; ${thresholds.warning}%</span>
@@ -459,7 +554,7 @@ export class ComparisonsRenderer {
 
     // Opt-in: one SVG per row in a document that is stored, shared and printed, so the
     // author asks for it. Off keeps the section byte-for-byte what it was.
-    const rowCharts = config.showRowGraphs === true && testRun && baselineId
+    const rowCharts = config.showRowGraphs === true && testRun && baselineRef
       ? await this.renderRowCharts(
           data.rows
             // Only what moved — a row inside the good band has nothing for a reader to see.
@@ -467,7 +562,7 @@ export class ComparisonsRenderer {
             .sort((a, b) => worstRank(b) - worstRank(a))
             .slice(0, ComparisonsRenderer.MAX_ROW_CHARTS),
           testRun,
-          baselineId,
+          baselineRef,
           dashboardMap,
           userId,
           roles,
