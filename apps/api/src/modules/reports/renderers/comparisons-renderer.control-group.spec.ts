@@ -20,6 +20,15 @@ const group = {
   lastDatetime: '2026-11-04T10:00:00.000Z',
 };
 
+/**
+ * The current run's CPU series, one point a minute. The renderer pairs it with its row on
+ * dashboard, panel and name, NUL-joined.
+ */
+const cpuSeries = (unit: string, values: number[]) => ({
+  panelTitle: 'CPU', dashboardLabel: 'Kubernetes', metricName: 'api', unit, key: ['Kubernetes', 4, 'api'].join('\u0000'),
+  dataPoints: values.map((value, i) => ({ time: new Date(Date.UTC(2026, 10, 7, 10, i)), value })),
+});
+
 const cpuRow = {
   group: 'Kubernetes / CPU',
   label: 'api',
@@ -33,6 +42,7 @@ const cpuRow = {
 describe('ComparisonsRenderer — control group baseline', () => {
   let renderer: ComparisonsRenderer;
   let dataFetcher: jest.Mocked<ReportDataFetcherService>;
+  let renderChart: jest.SpyInstance<string, Parameters<ChartSvgService['renderTimeSeriesChart']>>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -57,6 +67,7 @@ describe('ComparisonsRenderer — control group baseline', () => {
 
     renderer = module.get(ComparisonsRenderer);
     dataFetcher = module.get(ReportDataFetcherService);
+    renderChart = jest.spyOn(module.get(ChartSvgService), 'renderTimeSeriesChart');
   });
 
   it('compares against the control group\'s statistics and never looks the sentinel up as a run', async () => {
@@ -118,23 +129,41 @@ describe('ComparisonsRenderer — control group baseline', () => {
     expect(dataFetcher.getControlGroupComparison).not.toHaveBeenCalled();
   });
 
-  it('says why when the control group has nothing comparable', async () => {
+  it('says the control group is what is missing when it has nothing to pair with', async () => {
+    dataFetcher.getControlGroupComparison.mockResolvedValue({ source: 'dynatrace', rows: [] });
+
     const html = await renderer.renderComparisonsSection(
       section({ baselineTestRunId: CONTROL_GROUP_BASELINE, source: 'dynatrace' }), testRun);
 
-    expect(html).toContain('its control group (3 runs) has no dynatrace statistics comparable with this run');
+    expect(html).toContain('nothing in this section pairs with its control group (3 runs)');
+    expect(html).toContain('the group may hold no dynatrace statistics for the rest yet');
+    expect(html).not.toContain('within range');
+  });
+
+  // Value: protects=control-group run ids reach stored report HTML escaped; fails_when=escapeHtml is dropped from the heading's run list; why_new=the renderer's escaping test covers the metrics config only; seam=none; no_claim=the report iframe's own sandbox.
+  it('escapes the control group\'s run ids in the heading', async () => {
+    dataFetcher.getControlGroupForRun.mockResolvedValue({ ...group, testRuns: ['<b>run-2</b>'], nTestRuns: 1 });
+    dataFetcher.getControlGroupComparison.mockResolvedValue({ source: 'grafana', rows: [cpuRow] });
+
+    const html = await renderer.renderComparisonsSection(
+      section({ baselineTestRunId: CONTROL_GROUP_BASELINE, source: 'grafana', metrics: ['avg'] }), testRun);
+
+    expect(html).not.toContain('<b>run-2</b>');
+    expect(html).toContain('&lt;b&gt;run-2&lt;/b&gt;');
+  });
+
+  it('says the run is what is missing when it has no statistics of its own', async () => {
+    // null: the run's statistics came back empty, so the group was never read.
+    const html = await renderer.renderComparisonsSection(
+      section({ baselineTestRunId: CONTROL_GROUP_BASELINE, source: 'dynatrace' }), testRun);
+
+    expect(html).toContain('this run has no dynatrace statistics to compare');
+    expect(html).not.toContain('its control group (3 runs) has no');
   });
 
   it('draws the control-group mean as a flat dashed line on a row graph, fetching only the current run', async () => {
     dataFetcher.getControlGroupComparison.mockResolvedValue({ source: 'grafana', rows: [cpuRow] });
-    dataFetcher.getMetricsTimeSeries.mockResolvedValue([{
-      panelTitle: 'CPU',
-      dashboardLabel: 'Kubernetes',
-      metricName: 'api',
-      unit: 'percent',
-      key: 'Kubernetes\u00004\u0000api',
-      dataPoints: [0, 1, 2, 3].map((i) => ({ time: new Date(Date.UTC(2026, 10, 7, 10, i)), value: 70 + i })),
-    }]);
+    dataFetcher.getMetricsTimeSeries.mockResolvedValue([cpuSeries('percent', [70, 71, 72, 73])]);
 
     const html = await renderer.renderComparisonsSection(
       section({ baselineTestRunId: CONTROL_GROUP_BASELINE, source: 'grafana', metrics: ['avg'], showRowGraphs: true }),
@@ -145,7 +174,30 @@ describe('ComparisonsRenderer — control group baseline', () => {
     expect(dataFetcher.getMetricsTimeSeries.mock.calls[0]![0]).toBe('run-7');
     expect(html).toContain('current solid, control-group mean dashed');
     expect(html).toContain('Control group mean');
-    expect(html).toContain('stroke-dasharray');
+    // What was drawn, not that some dash exists: every gridline carries stroke-dasharray.
+    const [, series] = renderChart.mock.calls[0]!;
+    expect(series).toHaveLength(2);
+    expect(series[1]).toMatchObject({ metricName: 'Control group mean', dashed: true, unit: 'percent' });
+    expect(series[1]!.dataPoints.map((p) => p.value)).toEqual([50, 50]);
+    // Flat across the current run's own (rebased) span.
+    expect(series[1]!.dataPoints.map((p) => p.time.getTime())).toEqual([0, 3 * 60000]);
+  });
+
+  it('draws the mean in the control rows\' unit when the panel\'s unit changed since', async () => {
+    dataFetcher.getControlGroupComparison.mockResolvedValue({
+      source: 'grafana',
+      rows: [{ ...cpuRow, unit: 'ms', baselineUnit: 's' }],
+    });
+    dataFetcher.getMetricsTimeSeries.mockResolvedValue([cpuSeries('ms', [70, 70])]);
+
+    await renderer.renderComparisonsSection(
+      section({ baselineTestRunId: CONTROL_GROUP_BASELINE, source: 'grafana', metrics: ['avg'], showRowGraphs: true }),
+      testRun,
+    );
+
+    const [, series] = renderChart.mock.calls[0]!;
+    expect(series[0]!.unit).toBe('ms');
+    expect(series[1]!.unit).toBe('s');
   });
 
   it('draws no baseline line when the section did not ask for the mean', async () => {
@@ -153,17 +205,32 @@ describe('ComparisonsRenderer — control group baseline', () => {
       source: 'grafana',
       rows: [{ ...cpuRow, metrics: [{ key: 'p95' as const, current: 90, baseline: 60, diffPercent: 50 }] }],
     });
-    dataFetcher.getMetricsTimeSeries.mockResolvedValue([{
-      panelTitle: 'CPU',
-      dashboardLabel: 'Kubernetes',
-      metricName: 'api',
-      unit: 'percent',
-      key: 'Kubernetes\u00004\u0000api',
-      dataPoints: [0, 1].map((i) => ({ time: new Date(Date.UTC(2026, 10, 7, 10, i)), value: 80 })),
-    }]);
+    dataFetcher.getMetricsTimeSeries.mockResolvedValue([cpuSeries('percent', [80, 80])]);
 
     const html = await renderer.renderComparisonsSection(
       section({ baselineTestRunId: CONTROL_GROUP_BASELINE, source: 'grafana', metrics: ['p95'], showRowGraphs: true }),
+      testRun,
+    );
+
+    // The group HAS a mean; the section just did not ask for it.
+    expect(html).toContain('the mean is drawn only when the section shows the Avg column');
+    expect(html).not.toContain('the control group has no mean');
+    expect(html).not.toContain('Control group mean');
+  });
+
+  // Value: protects=the caption names the group's missing mean when Avg is shown; fails_when=the two caption arms swap or the Avg check goes; why_new=only the Avg-not-selected arm was asserted; seam=none; no_claim=which rows are charted.
+  it('says the group has no mean when the Avg column is shown but empty', async () => {
+    dataFetcher.getControlGroupComparison.mockResolvedValue({
+      source: 'grafana',
+      rows: [{ ...cpuRow, metrics: [
+        { key: 'avg' as const, current: 75, baseline: null, diffPercent: null },
+        { key: 'p95' as const, current: 90, baseline: 60, diffPercent: 50 },
+      ] }],
+    });
+    dataFetcher.getMetricsTimeSeries.mockResolvedValue([cpuSeries('percent', [80, 80])]);
+
+    const html = await renderer.renderComparisonsSection(
+      section({ baselineTestRunId: CONTROL_GROUP_BASELINE, source: 'grafana', metrics: ['avg', 'p95'], showRowGraphs: true }),
       testRun,
     );
 
