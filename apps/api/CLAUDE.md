@@ -919,6 +919,49 @@ dead backend skips the step instead of hanging the API's boot.
 `regex` support landed in v0.2.95.35 and `panelTitle` in v0.2.95.37; a deploy older than those
 ignores both halves of such a template.
 
+### The compare-templates API is the codec with a scope on it
+
+`/compare-templates` (CRUD) and `GET /provisioning/compare-templates/export` (v0.2.97.55) live in
+`modules/provisioning/compare-templates.{controller,service}.ts`, beside the codec they share with
+provisioning. Organization and install-wide templates only; profile templates are filed in TODOS.md.
+Six things to keep:
+
+1. **A definition goes through `parseTemplateItem`, never a validator of its own.** The body is one file
+   item; the service hands it to the codec with the scope's organization and stores `parsed.values`.
+   That is the whole reason a UI row exported and committed is taken over with identical content: the
+   provisioning side stores the same `TemplateColumns` for the same item. The DTO's class-validator
+   decorators check types and widths only. A second set of rules here would let the API store something
+   the file stores differently, and the takeover would then rewrite it silently — the takeover counter
+   cannot see content, which is why the round-trip spec compares the stored columns, not the counts.
+   **The body is typed `unknown` on purpose.** With the DTO as the parameter type, the global
+   `ValidationPipe`'s `whitelist` strips an undeclared key before the service sees it, so a misspelt
+   `absoluteThreshold` created a template that forced nothing, with a 201 (caught on the local stack, not
+   by a unit test: the spec calls the service directly). The service runs class-validator itself
+   (`validateSync`) and hands the raw object to the codec, whose unknown-field warning, near-miss hint
+   included, becomes a 400.
+2. **The scope is the collection's, and it never changes.** `?organizationId=` or `?scope=install`,
+   exactly one (a missing one is a 400, never a default). A body that names `organizationId` is a 400
+   rather than ignored, since a caller who sent it meant something by it. `PUT` replaces the definition
+   wholesale, like re-provisioning an item, and keeps the row's organization.
+3. **No RLS stands behind any of it.** The table is `rls: false`; `withRequestEm()` filters nothing. Every
+   method takes `accessibleOrgIds` as a required parameter, a template or organization outside it answers
+   404, and a global admin naming an organization that does not exist gets a 404 too (no FK on
+   `organization_id`). Install-wide templates are readable by anyone signed in and writable only by a
+   global admin; organization templates need `benchmark:manage`, checked after the 404 scoping.
+4. **Every path is `system_under_test_id IS NULL`.** `classifyMetric` writes system-scoped rows into the
+   same table; `findOne` by id includes the predicate, so those rows are a 404 here.
+5. **`read_only` rows answer 409 on `PUT` and `DELETE`**, after the capability check, so a 409 only
+   reaches someone who could otherwise write. The way out is a copy into another scope (the same scope
+   would collide on the key) or the file.
+6. **A key collision is a pre-check 409 that names the holder, and the index is the backstop.** The
+   pre-check reads the scope's templates and compares `templateKey()`; a race that slips past it hits
+   `uq_provisioned_template_ds_compare_configs_key` and is mapped to 409 by `isDuplicateTemplateKey`.
+   Nothing runs after a refused write, so no SAVEPOINT is needed (CODING_RULES.md).
+
+The export is `serializeTemplates` over every template row, so it is the whole file; committing a partial
+one would prune what it leaves out. It is admin-only at the guard (`@AdminOnly()`) and again in the
+service.
+
 ### An artificial Dynatrace dashboard is per-workload, but its unique constraint is not
 
 `generateDynatraceDashboardUuid` hashes `(system, environment, workload, label)`, so every

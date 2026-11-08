@@ -18,6 +18,9 @@ the API, and the next completed run of every workload it reaches picks the chang
 saved by hand in the anomaly card are never touched. Design:
 `docs/design/2026-11-08-compare-config-templates-design.md`.
 
+Since v0.2.97.55 templates can also be created, edited and deleted in the UI, and exported back to
+this file ([Managing templates in the UI](#managing-templates-in-the-ui)).
+
 ## The file
 
 The API reads `template_ds_compare_configs.yaml` from `PROVISIONING_DIR` (default
@@ -120,7 +123,7 @@ noticed yet) skips template provisioning for that boot with an error rather than
 ### Prune
 
 After writing, provisioning deletes every provisioned template the file no longer declares, and logs
-each one. Templates created in the UI (from PR 2 on) are never pruned. Nothing is pruned when:
+each one. Templates created in the UI are never pruned. Nothing is pruned when:
 
 - the file is missing, or does not parse;
 - `items` is not a list (`items:` with nothing after it reads as null);
@@ -134,6 +137,78 @@ An explicit `items: []` is a declared empty state and prunes every provisioned t
 
 If the file declares a template that a UI-created template already holds, the file takes it over: the
 row becomes read-only and gets the file's values. It is counted as `taken over`, not `updated`.
+
+## Managing templates in the UI
+
+**Settings → Profiles** has two pinned entries above the profiles:
+
+- **All runs in &lt;organization&gt;**: the selected organization's templates. They apply to every run in
+  that organization. Members can read them; changing them needs `benchmark:manage` there (org admins
+  and members, not viewers).
+- **All runs on this install**: install-wide templates. They apply to every run in every organization.
+  Anyone signed in can read them; only a global admin can change them.
+
+Each opens `/settings/profiles/adapt-templates` for that scope: a table of its templates in the order
+the export writes them, with what each one forces. The edit dialog asks which panels the template
+reaches (dashboard UID, regex, panel id or title, metric), the classification, and then each field it
+forces, ticked one by one. A field left unticked is left out of the template and keeps each panel's own
+value, exactly as an item that omits the key in the file. Direction has a third choice, **No direction**,
+which is `higherIsBetter: null`; **None** beside the absolute threshold is `absThreshold: null`. The
+percentage is typed as a percent and stored as the file's fraction (15 becomes `0.15`).
+
+A template created in the UI follows the same rules as a file item, because the API validates it with
+the same parser. It applies on the next completed run of matching workloads, to panels nobody has
+hand-edited.
+
+**Provisioned templates are locked.** They show a lock, can be viewed but not edited or deleted (the API
+answers 409), and are changed in the file. **Copy to another scope** makes an editable copy elsewhere;
+the copy cannot go into the same scope, where it would have the same identity as the provisioned one.
+Once a file declares a template a UI copy holds, the next boot takes the copy over and it becomes
+locked too.
+
+Deleting a UI template hands the panels it configured to the next matching template, or rebuilds them
+from their own base configuration, on each workload's next completed run.
+
+### The API
+
+| Route | Who |
+|---|---|
+| `GET /api/compare-templates?organizationId=<uuid>` | members of the organization |
+| `GET /api/compare-templates?scope=install` | anyone signed in |
+| `POST` the same two | `benchmark:manage` in the organization; a global admin for `scope=install` |
+| `GET`, `PUT`, `DELETE /api/compare-templates/:id` | as above for the template's own scope |
+| `GET /api/provisioning/compare-templates/export` | global admin |
+
+A list or create names exactly one scope. The body of `POST` and `PUT` is one item of the file, without
+`organizationId`: the scope comes from the collection and never changes, so moving a template means
+copying it. `PUT` replaces the whole definition, so a field left out stops being forced. A template or
+organization outside the caller's organizations answers 404. A second template with the same identity
+in the same scope answers 409 with a message naming the scope and the identity, and whether the holder
+is provisioned. The list carries `canWrite`, whether the caller may change that scope.
+
+The API refuses what the file only warns about: an unknown field (with the same hint the file's
+warning gives, `absoluteThreshold` pointing at `absThreshold`), and a `minSampleCount` that is not a whole
+number of at least 1 (the file floors and clamps it). A body that names `organizationId` is refused
+too. Writes are audit-logged as `provisioned-template-ds-compare-configs`.
+
+### Exporting the file
+
+**Export YAML** on the install-wide page (global admins) shows and downloads
+`template_ds_compare_configs.yaml`, generated from the database. It is the whole file: every template,
+provisioned or created in the UI, in every organization. Commit it in place of the installed file; a
+partial file would make the next boot prune the provisioned templates it leaves out. When every
+template shares one scope the file carries it once at the top, otherwise each item names its own
+(`null` for install-wide).
+
+The round trip, verified on a local stack:
+
+1. Create templates in the UI and export.
+2. Commit the file and restart the API: `0 created, 0 updated, 0 unchanged, N taken over, 0 pruned`. The
+   templates are now locked.
+3. Restart again: `N unchanged`, and exporting again gives the same bytes.
+
+The first export of a hand-written file drops its comments and reorders its keys, so commit that first
+export once; from then on export, provision, export is byte-identical.
 
 ## When templates are applied
 
