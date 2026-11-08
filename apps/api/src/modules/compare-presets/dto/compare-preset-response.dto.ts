@@ -70,7 +70,10 @@ export class ComparePresetResponseDto {
   panel_title?: string;
 
   @ApiPropertyOptional({
-    description: 'Baseline test run ID (only for test run-specific presets)',
+    description:
+      'Baseline the preset compares against: a test run id, or the reserved value `control-group` ' +
+      '(CONTROL_GROUP_BASELINE in @perfana/shared) meaning the anchor run\'s own control group. That ' +
+      'value names no run, so baseline_application_release and baseline_annotations stay empty for it.',
     example: 'MyApp-prod-loadTest-00042'
   })
   baseline_test_run_id?: string;

@@ -19,6 +19,15 @@ This lets you see how one run stacks up against another, and how a metric moves 
 3. Read the differences to see what changed between the two runs.
    You can tell whether response times, throughput, or errors moved, and in which direction.
 
+### Compare against the control group instead
+
+The first option in the run picker, when it is there, is **Control group**. It compares the current run against the earlier runs anomaly detection judges it against, using their pooled figures. Those are the same "control" values the Anomaly Detection card shows, and they move less than any single run does.
+
+- Once you choose it, the caption under the picker names the runs in the group.
+- Opening a metric's graph shows the group's average as a flat dashed line, because a pooled group has no timeline of its own.
+- URL panels, and the "All aggregated" entry on a scenario's panels, have no control-group figures, so they show the current value only.
+- The first runs of a workload, and a run whose analysis has not finished, have no control group yet, so the option is not offered.
+
 ## See a metric trend across many runs
 
 1. On the **Reporting** tab, find the **Trends** card.

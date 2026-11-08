@@ -150,6 +150,68 @@ describe('ReportDataFetcherService.getControlGroupComparison', () => {
     ]);
   });
 
+  /**
+   * Value: protects=a section that picked only unpooled series reads no statistics and is an empty comparison;
+   * fails_when=the early return goes and the emptied selection reads as "no selection", an unscoped read of every statistic;
+   * why_new=the existing unpooled case also picks a pooled panel, so the emptied-selection branch never runs; seam=none;
+   * no_claim=the URL rows' own values, which the case above already pins.
+   */
+  it('reads no statistics when every selected series is one ADAPT does not pool', async () => {
+    // A statistics row that an unscoped read would happily return and pair.
+    const dataSource = dataSourceAnswering([currentRow()], [controlRow()]);
+    const testRunRepo = {
+      query: jest.fn(async (sql: string) => (sql.includes('FROM test_run_sampler_stats s') && sql.includes('normalized_url')
+        ? [{ test_run_id: 'run-7', normalized_url: '/api/login', avg_response_time: '80', p90: '90', p95: '95', p99: '99',
+          avg_latency: null, avg_connect_time: null, error_percentage: null, throughput: null }]
+        : [])),
+    };
+    const svc = new ReportDataFetcherService(testRunRepo as never, adminAuthz, dataSource as never);
+    jest.spyOn(svc as never as { getAggregatedScalars: () => unknown }, 'getAggregatedScalars')
+      .mockResolvedValue({ avg: 70, p90: 80, p95: 90, p99: 99 } as never);
+
+    const data = await svc.getControlGroupComparison('run-7', 'run-7', 'performance-metrics', {
+      metrics: ['avg'],
+      userId: '',
+      roles: [],
+      selections: [
+        { dashboardLabel: 'Perf', panelId: 101, metricNames: ['All aggregated'] },
+        { dashboardLabel: 'Perf', panelId: 210 },
+      ],
+    });
+
+    // Nothing in it has a baseline, so it is an empty comparison (the renderer explains why),
+    // not two current-only rows the section would count as "within range".
+    expect(data).toEqual({ source: 'performance-metrics', rows: [] });
+    expect(dataSource.query.mock.calls.some(([q]) => q.includes('report:control-group-comparison'))).toBe(false);
+    expect(dataSource.query.mock.calls.some(([q]) => q.includes('control-group:statistics'))).toBe(false);
+  });
+
+  it('answers an empty list, not baseline-less rows, when the group has nothing to pair with', async () => {
+    // The group's pooled statistics were never written (control-group-statistics timed out),
+    // or hold another source: every row would read "vs –" and count as within range.
+    const dataSource = dataSourceAnswering([currentRow()], [controlRow({ application_dashboard_id: OTHER_DASH })]);
+    const svc = new ReportDataFetcherService({ query: jest.fn() } as never, adminAuthz, dataSource as never);
+
+    const data = await svc.getControlGroupComparison('run-7', 'run-7', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: [] });
+
+    expect(data).toEqual({ source: 'grafana', rows: [] });
+  });
+
+  // Value: protects=a series whose metrics source changed since the group's runs gets no baseline, as ADAPT calls it incomparable; fails_when=the pairing key drops metrics_source_id; why_new=every other case uses one source; seam=none; no_claim=ADAPT's own join, which lives in the worker.
+  it('pairs on the metrics source too, as ADAPT does', async () => {
+    const dataSource = dataSourceAnswering(
+      [currentRow({ metrics_source_id: 'src-new' }), currentRow({ metric_name: 'web', metrics_source_id: 'src-old' })],
+      [controlRow({ metrics_source_id: 'src-old' }), controlRow({ metric_name: 'web', metrics_source_id: 'src-old' })],
+    );
+    const svc = new ReportDataFetcherService({ query: jest.fn() } as never, adminAuthz, dataSource as never);
+
+    const data = await svc.getControlGroupComparison('run-7', 'run-7', 'grafana',
+      { metrics: ['avg'], userId: 'u', roles: [] });
+
+    expect(data!.rows.map((r) => [r.label, r.metrics[0]!.baseline])).toEqual([['api', null], ['web', 50]]);
+  });
+
   it('does not read the control group when the run\'s own statistics are hidden from the caller', async () => {
     const dataSource = dataSourceAnswering([], [controlRow()]);
     const authz = {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { authenticatedFetch } from '@/lib/api';
 import { fetchDynatraceDashboards, DynatraceDashboard } from '@/lib/dynatrace';
 import {
@@ -184,9 +184,17 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     }
   }, [testRun]);
 
+  // Only the latest comparison request may write state. Switching baseline while one is out
+  // (control group <-> run, run <-> run) would otherwise let whichever answers last win, pairing
+  // one baseline's numbers with the other's legend; the control-group call waits on an extra
+  // request per panel, so it routinely answers last.
+  const comparisonRequestRef = useRef(0);
+
   // Fetch metrics comparison
   const fetchMetricsComparison = useCallback(async () => {
     if (!selectedTestRun || !testRun || addedSeries.length === 0) return;
+    const request = ++comparisonRequestRef.current;
+    const isStale = () => request !== comparisonRequestRef.current;
 
     // Against the control group the baseline is not a run: its values come from the group's
     // pooled statistics, and the series ADAPT does not pool (URL panels, "All aggregated")
@@ -367,16 +375,18 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
         }
       }
 
+      if (isStale()) return;
       setCurrentMetrics(allCurrentMetrics);
       setSelectedMetrics(allSelectedMetrics);
       setMetricComparisons(allComparisons);
     } catch (error) {
+      if (isStale()) return;
       console.error('Error fetching metrics comparison:', error);
       setCurrentMetrics([]);
       setSelectedMetrics([]);
       setMetricComparisons([]);
     } finally {
-      setMetricsLoading(false);
+      if (!isStale()) setMetricsLoading(false);
     }
   }, [selectedTestRun, testRun, addedSeries]);
 
@@ -477,6 +487,8 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
     if (selectedTestRun && addedSeries.length > 0) {
       fetchMetricsComparison();
     } else {
+      comparisonRequestRef.current++; // a request still out must not repopulate the cleared table
+      setMetricsLoading(false);
       setMetricComparisons([]);
       setCurrentMetrics([]);
       setSelectedMetrics([]);
@@ -485,6 +497,16 @@ export function useCompareData({ testRun, testRunId, compareExpanded }: UseCompa
       setGraphLoading({});
     }
   }, [selectedTestRun, addedSeries, fetchMetricsComparison]);
+
+  // An open graph was fetched against the previous baseline. Collapse it rather than draw it
+  // under the new one: leaving the control group for a run otherwise kept the group's graph
+  // data and drew it as "Baseline (null)". Re-opening refetches (toggleGraph).
+  const baselineId = selectedTestRun?.test_run_id;
+  useEffect(() => {
+    setShowGraphs({});
+    setGraphData({});
+    setGraphLoading({});
+  }, [baselineId]);
 
   return {
     // State

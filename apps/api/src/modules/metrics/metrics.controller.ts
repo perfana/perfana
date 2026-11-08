@@ -290,8 +290,9 @@ export class MetricsController {
     summary: 'The control group behind a test run\'s anomaly detection',
     description:
       'The earlier runs ADAPT compares this run against, as named by its latest conclusion. ' +
-      'Answers `null` when the run has no control group yet (a first run, or ADAPT has not run) ' +
-      'or the caller cannot see the run.',
+      'When the run has no control group yet (a first run, or ADAPT has not run) or the caller ' +
+      'cannot see the run, the handler returns null, which Nest sends as a 200 with an EMPTY body ' +
+      '(no JSON): read the body as text and treat an empty one as "no group".',
   })
   async getControlGroup(
     @Param('testRunId') testRunId: string,
@@ -306,12 +307,14 @@ export class MetricsController {
     description:
       'The pooled `ds_control_group_statistics` of the run\'s control group for one panel: the ' +
       '"control" values anomaly detection compares against. `statistics` is keyed like ' +
-      '`ds-metric-statistics` (`avg`, `min`, `max`, `q50`, `q90`, `q95`, `q99`, `count`). Empty ' +
-      'when the run has no control group, or for series ADAPT does not pool (the synthetic ' +
-      '"All aggregated" series and the URL panels).',
+      '`ds-metric-statistics` (`avg`, `min`, `max`, `q50`, `q90`, `q95`, `q99`, `count`), where ' +
+      '`count` is the MEAN per-run sample count across the group\'s runs, not the pooled sum, so it ' +
+      'is comparable with one run\'s count. Empty when the run has no control group, or for series ' +
+      'ADAPT does not pool (the synthetic "All aggregated" series and the URL panels). Given both ' +
+      'ids, both narrow: one metrics source can back several dashboards.',
   })
   @ApiQuery({ name: 'applicationDashboardId', required: false, description: 'Application dashboard UUID' })
-  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID (preferred over applicationDashboardId)' })
+  @ApiQuery({ name: 'metricsSourceId', required: false, description: 'Metrics source UUID; narrows together with applicationDashboardId when both are given' })
   @ApiQuery({ name: 'panelId', required: true })
   async getControlGroupStatistics(
     @Param('testRunId') testRunId: string,
@@ -324,7 +327,8 @@ export class MetricsController {
       throw new BadRequestException('applicationDashboardId (or metricsSourceId) and panelId are required');
     }
     const panelIdNumber = Number(panelId);
-    if (!Number.isInteger(panelIdNumber)) {
+    // panel_id is int4: a larger integer would surface as a 500 ("out of range for type integer").
+    if (!Number.isInteger(panelIdNumber) || Math.abs(panelIdNumber) > 2147483647) {
       throw new BadRequestException('Invalid panel ID');
     }
     // Both ids are bound as uuid: a malformed one would otherwise surface as a 500 from

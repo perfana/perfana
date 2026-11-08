@@ -3300,9 +3300,17 @@ export class ReportDataFetcherService {
    * Compare this run against its control group: the pooled `ds_control_group_statistics` the
    * anomaly-detection card shows as "control", instead of another single run's statistics.
    *
-   * Pairs on `(application_dashboard_id, panel_id, metric_name)` — ADAPT's own identity, and
-   * unambiguous because a control group is built from the same system and environment, so the
-   * dashboard ids agree. That is also why a `dashboardMap` has no meaning here and is ignored.
+   * Pairs on `(application_dashboard_id, panel_id, metric_name, metrics_source_id)`. ADAPT joins
+   * the control rows on `metrics_source_id IS NOT DISTINCT FROM` + panel + series, so a series
+   * whose source changed since the group's runs is "incomparable" there and gets no baseline
+   * here either; the dashboard id keeps two dashboards that share a source apart. A control
+   * group is built from the same system and environment, so the dashboard ids agree, which is
+   * also why a `dashboardMap` has no meaning here and is ignored.
+   *
+   * Answers null when there is nothing to show at all, and an empty row list when there are
+   * rows but not one of them has a baseline: the selection holds only series ADAPT does not
+   * pool, or the group's statistics are missing or hold another source. A table of
+   * baseline-less rows would count every one "within range", the opposite conclusion.
    *
    * Three shapes differ from the run-vs-run comparison:
    *  - A performance-metrics section with NO selection compares Transaction RT Avg (panel 101)
@@ -3310,7 +3318,8 @@ export class ReportDataFetcherService {
    *    raw percentiles over a whole control group is not what anomaly detection compares and
    *    would scan every member run, so the control-group default reads the panel ADAPT reads.
    *  - The synthetic "All aggregated" series and the URL panels have no pooled control rows.
-   *    They are listed with the current value only, never with an invented baseline.
+   *    Beside pooled series they are listed with the current value only, never with an
+   *    invented baseline; on their own they leave nothing to compare (the empty list above).
    *  - A series the control group has no row for (new since the group was built) keeps its
    *    row with an empty baseline, exactly as a series missing from a baseline run does.
    */
@@ -3325,6 +3334,11 @@ export class ReportDataFetcherService {
       selections?: BaselineComparisonSelection[];
     },
   ): Promise<BaselineComparisonData | null> {
+    // One rule for every exit (see the docblock): rows, but no baseline anywhere -> empty list.
+    const answer = (rows: BaselineComparisonRow[]): BaselineComparisonData | null => {
+      if (rows.length === 0) return null;
+      return { source, rows: rows.some((r) => r.metrics.some((m) => m.baseline != null)) ? rows : [] };
+    };
     let selections = opts.selections ?? [];
     let unpooledRows: { aggregated: BaselineComparisonRow[]; url: BaselineComparisonRow[] } = { aggregated: [], url: [] };
     let defaultPanels: number[] | undefined;
@@ -3342,10 +3356,7 @@ export class ReportDataFetcherService {
             ? { ...s, metricNames: s.metricNames!.filter((m) => m !== ALL_AGGREGATED_SERIES) }
             : s))
           .filter((s) => !(s.metricNames && s.metricNames.length === 0));
-        if (selections.length === 0) {
-          const rows = [...unpooledRows.aggregated, ...unpooledRows.url];
-          return rows.length ? { source, rows } : null;
-        }
+        if (selections.length === 0) return answer([...unpooledRows.aggregated, ...unpooledRows.url]);
       }
     }
 
@@ -3365,14 +3376,15 @@ export class ReportDataFetcherService {
     params.push(...orgFilter.params);
     const current: Array<StatisticsComparisonSide & {
       application_dashboard_id: string;
+      metrics_source_id: string | null;
       dashboard_label: string | null;
       panel_title: string | null;
       panel_id: number | null;
       metric_name: string | null;
     }> = await this.dataSource.query(
       `/* report:control-group-comparison */
-       SELECT s.application_dashboard_id, s.dashboard_label, s.panel_title, s.panel_id, s.metric_name,
-              s.unit, s.mean, s.q90, s.q95, s.q99
+       SELECT s.application_dashboard_id, s.metrics_source_id, s.dashboard_label, s.panel_title, s.panel_id,
+              s.metric_name, s.unit, s.mean, s.q90, s.q95, s.q99
        FROM ds_metric_statistics s
        JOIN test_runs tr ON tr.test_run_id = s.test_run_id
        LEFT JOIN metrics_sources ms ON ms.id = s.metrics_source_id
@@ -3395,8 +3407,10 @@ export class ReportDataFetcherService {
     const control = cur.length
       ? await loadControlGroupStatistics(this.dataSource, controlGroupId)
       : [];
-    const key = (r: { application_dashboard_id: string; panel_id: number | null; metric_name: string | null }) =>
-      `${r.application_dashboard_id}||${r.panel_id}||${r.metric_name}`;
+    // NULL source ids pair with each other, as ADAPT's IS NOT DISTINCT FROM does.
+    const key = (r: {
+      application_dashboard_id: string; panel_id: number | null; metric_name: string | null; metrics_source_id: string | null;
+    }) => `${r.application_dashboard_id}||${r.panel_id}||${r.metric_name}||${r.metrics_source_id ?? ''}`;
     const controlByKey = new Map(control.map((r) => [key(r), r]));
 
     const urlByMetricName = source === 'performance-metrics' && cur.some((r) => isRequestPanel(r.panel_id))
@@ -3405,8 +3419,7 @@ export class ReportDataFetcherService {
     const statRows = cur.map((c) =>
       this.statisticsComparisonRow(c, controlByKey.get(key(c)), source, opts.metrics, urlByMetricName));
 
-    const rows = [...unpooledRows.aggregated, ...statRows, ...unpooledRows.url];
-    return rows.length ? { source, rows } : null;
+    return answer([...unpooledRows.aggregated, ...statRows, ...unpooledRows.url]);
   }
 
   /**

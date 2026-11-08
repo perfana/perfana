@@ -47,7 +47,7 @@ import {
   PREVIOUS_RUN_BASELINE,
   PREVIOUS_SUCCESSFUL_RUN_BASELINE,
 } from '@perfana/shared/types';
-export { CONTROL_GROUP_BASELINE, PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE };
+export { PREVIOUS_RUN_BASELINE, PREVIOUS_SUCCESSFUL_RUN_BASELINE };
 import type { ControlGroupInfo } from '../../metrics/control-group-baseline';
 
 /**
@@ -223,6 +223,9 @@ export class ComparisonsRenderer {
       if (mean == null || !Number.isFinite(mean) || points.length === 0) return undefined;
       return {
         ...cur,
+        // The mean is in the control rows' unit, which can differ from the run's if the panel's
+        // unit changed since those runs (s -> ms would otherwise draw the line 1000x off).
+        unit: r.baselineUnit ?? cur.unit,
         panelTitle: '',
         metricName: 'Control group mean',
         dataPoints: [
@@ -262,7 +265,9 @@ export class ComparisonsRenderer {
         ? `Graph &middot; current solid, baseline dashed, both from their own start
           ${base ? '' : '<span style="color:' + REPORT_COLORS.faintInk + ';"> &mdash; baseline has no series for this metric</span>'}`
         : `Graph &middot; current solid, control-group mean dashed
-          ${base ? '' : '<span style="color:' + REPORT_COLORS.faintInk + ';"> &mdash; the control group has no mean for this metric</span>'}`;
+          ${base ? '' : '<span style="color:' + REPORT_COLORS.faintInk + ';"> &mdash; ' + (r.metrics.some((m) => m.key === 'avg')
+            ? 'the control group has no mean for this metric'
+            : 'the mean is drawn only when the section shows the Avg column') + '</span>'}`;
       charts.set(ComparisonsRenderer.rowKey(r), `<details class="report-row-graph" style="margin:0;">
         <summary style="cursor:pointer; font-size:12px; color:${REPORT_COLORS.mutedInk};">
           ${summary}
@@ -292,9 +297,10 @@ export class ComparisonsRenderer {
    * The baseline this report should compare against: whatever the template pinned, the run
    * before this one when the template said to follow along, or the run's control group.
    *
-   * Returns undefined when there is no predecessor — the first run in a system, environment and
-   * workload has nothing behind it, and the section then renders its existing empty state rather
-   * than comparing a run against itself.
+   * Returns `{ baseline }` when one resolves, otherwise `{ reason }`, which the section prints as
+   * its empty state: no baseline configured, no test run, no predecessor (the first run in a
+   * system, environment and workload has nothing behind it, and a run is never compared against
+   * itself), or no control group yet.
    */
   private async resolveBaseline(
     configured: unknown,
@@ -405,11 +411,16 @@ export class ComparisonsRenderer {
     if (!data || data.rows.length === 0) {
       // Six ways to end up empty, one message each — a silent empty section is
       // indistinguishable from "nothing regressed", which is the opposite conclusion.
+      // For a control group the fetcher answers null when THIS run has no statistics (the
+      // group is then never read), and an empty row list when there are rows but not one has a
+      // baseline — those would otherwise all count as "within range".
       const why = !testRun
         ? 'this section was rendered without a test run.'
         : resolved.reason
           ?? (controlGroup
-            ? `its control group (${formatInt(controlGroup.nTestRuns)} ${controlGroup.nTestRuns === 1 ? 'run' : 'runs'}) has no ${source} statistics comparable with this run — check that its analysis has finished.`
+            ? (data
+              ? `nothing in this section pairs with its control group (${formatInt(controlGroup.nTestRuns)} ${controlGroup.nTestRuns === 1 ? 'run' : 'runs'}). Anomaly detection does not pool the URL panels or the "All aggregated" series, and the group may hold no ${source} statistics for the rest yet, or only under another metrics source — re-evaluate the run if it stays empty.`
+              : `this run has no ${source} statistics to compare — check that its analysis has finished and that it collected ${source} data.`)
             : `baseline run ${baselineId} returned no metrics comparable with this run — check that it exists and collected ${source} data.`);
       return `<section class="comparisons-section">${sectionHeader(title)}
         ${sectionText(text)}

@@ -54,10 +54,26 @@ describe('loadControlGroupForRun', () => {
       ),
     ).toBeNull();
   });
+
+  // Value: protects=a group whose run list lags ADAPT's count is still offered; fails_when=the empty-group guard tests either half alone (`||`); why_new=only the both-empty case was pinned; seam=none; no_claim=how the worker fills test_runs.
+  it('keeps a group whose run list lags ADAPT\'s count, and counts the list when there is no count', async () => {
+    const lagging = await loadControlGroupForRun(
+      { query: jest.fn().mockResolvedValue([{ ...groupRow, test_runs: [], n_test_runs: 3 }]) }, 'run-7');
+    expect(lagging).toMatchObject({ id: 'run-7', testRuns: [], nTestRuns: 3 });
+
+    const uncounted = await loadControlGroupForRun(
+      { query: jest.fn().mockResolvedValue([{ ...groupRow, n_test_runs: null }]) }, 'run-7');
+    expect(uncounted!.nTestRuns).toBe(3);
+
+    // The column is NOT NULL DEFAULT 0, so a zero beside a filled list is the real shape.
+    const zeroed = await loadControlGroupForRun(
+      { query: jest.fn().mockResolvedValue([{ ...groupRow, n_test_runs: 0 }]) }, 'run-7');
+    expect(zeroed!.nTestRuns).toBe(3);
+  });
 });
 
 describe('loadControlGroupStatistics', () => {
-  it('prefers the metrics source over the dashboard, as the run-side reads do', async () => {
+  it('narrows on the metrics source AND the dashboard, so a source shared by two dashboards stays apart', async () => {
     const q = { query: jest.fn().mockResolvedValue([]) };
 
     await loadControlGroupStatistics(q, 'run-7', { applicationDashboardId: DASH, metricsSourceId: SOURCE, panelId: 101 });
@@ -65,10 +81,13 @@ describe('loadControlGroupStatistics', () => {
     const [sql, params] = q.query.mock.calls[0];
     expect(sql).toMatch(/FROM ds_control_group_statistics s/);
     expect(sql).toMatch(/s\.control_group_id = \$1/);
+    // The source filter is ADAPT's: a series whose source changed gets no control row.
     expect(sql).toMatch(/s\.metrics_source_id = \$2::uuid/);
-    expect(sql).not.toMatch(/application_dashboard_id = \$/);
-    expect(sql).toMatch(/s\.panel_id = \$3/);
-    expect(params).toEqual(['run-7', SOURCE, 101]);
+    expect(sql).toMatch(/s\.application_dashboard_id = \$3::uuid/);
+    // The worker stores a missing unit as '', which would defeat every `??` fallback downstream.
+    expect(sql).toMatch(/NULLIF\(s\.unit, ''\) AS unit/);
+    expect(sql).toMatch(/s\.panel_id = \$4/);
+    expect(params).toEqual(['run-7', SOURCE, DASH, 101]);
   });
 
   it('binds every value and reads the whole group when nothing narrows it', async () => {
@@ -200,6 +219,8 @@ describe('MetricsController — control group routes', () => {
   it('refuses what Postgres would refuse with a 500', async () => {
     const { controller } = build();
     await expect(controller.getControlGroupStatistics('run-7', ctx, 'abc', DASH)).rejects.toBeInstanceOf(BadRequestException);
+    // panel_id is int4: past its range Postgres would answer a 500.
+    await expect(controller.getControlGroupStatistics('run-7', ctx, '99999999999', DASH)).rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.getControlGroupStatistics('run-7', ctx, '101')).rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.getControlGroupStatistics('run-7', ctx, '101', 'not-a-uuid')).rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.getControlGroupStatistics('run-7', ctx, '101', undefined, 'nope')).rejects.toBeInstanceOf(BadRequestException);
