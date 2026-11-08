@@ -57,6 +57,9 @@ RUN npm init -y && \
 # the stale package. Overlay the patched libssl3 + dpkg metadata from
 # debian:12-slim so scanners see the fixed version. (Same pattern as Dockerfile.)
 FROM debian:12-slim AS openssl-patch
+# Busts the GHA build cache so apt resolves the current libssl3 on every release
+# (see ARG BUILD_DATE in Dockerfile's perfana-report stage).
+ARG BUILD_DATE
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libssl3 \
     && rm -rf /var/lib/apt/lists/* \

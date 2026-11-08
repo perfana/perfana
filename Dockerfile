@@ -201,6 +201,9 @@ RUN chmod -R g=u apps/web/public apps/web/.next
 # scanners see the fixed version. Unpinned install = always the latest security
 # build; the per-arch buildx stage resolves the correct /usr/lib/<arch> path.
 FROM debian:12-slim AS openssl-patch
+# "Always the latest" holds only if the layer is rebuilt: see ARG BUILD_DATE in the
+# perfana-report stage for why the GHA cache would otherwise replay an old libssl3.
+ARG BUILD_DATE
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libssl3 \
     && rm -rf /var/lib/apt/lists/* \
@@ -430,6 +433,13 @@ CMD ["apps/worker/dist/worker.js"]
 # ================================================================================================
 # Note: Cannot use distroless base because Puppeteer requires Chromium and system libraries
 FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS perfana-report
+
+# Busts the build cache for the apk layer below: CI restores layers from the GHA cache, so
+# without a changing input `apk upgrade` replays whatever was current when the layer was
+# first built. v0.2.97.51 shipped glib 2.86.3 that way, eight hours after Alpine published
+# the 2.86.5 that closed a critical Integer Underflow (SNYK-ALPINE323-GLIB-22281442). CI
+# passes the commit timestamp, so every release re-resolves the packages.
+ARG BUILD_DATE
 
 # Security labels and metadata
 LABEL \

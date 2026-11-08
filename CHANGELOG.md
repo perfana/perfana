@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.52] - 2026-11-08
+
+### Security
+- **The perfana-report image picks up Alpine security fixes again.** CI restores image layers from its build cache, so the report stage's `apk upgrade` kept replaying the package set from when that layer was first built. v0.2.97.51 shipped glib 2.86.3, with 17 open Snyk issues including a critical Integer Underflow (SNYK-ALPINE323-GLIB-22281442), eight hours after Alpine 3.23 had published the fixed 2.86.5. The stage now declares `BUILD_DATE`, which CI sets to the commit timestamp, so every release resolves its packages fresh. The `openssl-patch` stage, the source of the patched `libssl3` in the api, web, worker and grafana-sync images, had the same gap and gets the same fix, as does its copy in the migration image, whose CI job now passes `BUILD_DATE` too.
+
 ## [0.2.97.51] - 2026-11-07
 
 ### Added
