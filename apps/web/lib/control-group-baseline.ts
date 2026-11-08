@@ -15,6 +15,8 @@
 import { CONTROL_GROUP_BASELINE } from '@perfana/shared/types';
 import { authenticatedFetch } from './api';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export { CONTROL_GROUP_BASELINE };
 
 /** `GET /metrics/control-group/:testRunId`. */
@@ -87,8 +89,13 @@ export async function fetchControlGroupStatistics(
 ): Promise<ControlGroupStatistic[]> {
   try {
     const params = new URLSearchParams({ panelId: String(scope.panelId) });
+    // Both ids narrow server-side: one metrics source can back several dashboards, and pairing
+    // by series name would otherwise take whichever dashboard's row came first. A non-uuid
+    // dashboard id (a synthetic list entry) names no dashboard and would be refused with a 400.
     if (scope.metricsSourceId) params.set('metricsSourceId', scope.metricsSourceId);
-    else if (scope.applicationDashboardId) params.set('applicationDashboardId', scope.applicationDashboardId);
+    if (scope.applicationDashboardId && UUID_RE.test(scope.applicationDashboardId)) {
+      params.set('applicationDashboardId', scope.applicationDashboardId);
+    }
     const res = await authenticatedFetch(
       `/metrics/control-group-statistics/${encodeURIComponent(testRunId)}?${params.toString()}`,
     );
