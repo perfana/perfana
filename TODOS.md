@@ -4235,6 +4235,185 @@ were used). Each is correct code without a test; mutations noted survive today.
 **Where:** `.../hooks/__tests__/usePerformanceAnalysisData.test.ts`,
 `apps/web/__tests__/app/test-runs/performance-analysis/PerformanceAnalysisCard.test.tsx`.
 
+## Compare-config templates
+
+Design: `docs/design/2026-11-08-compare-config-templates-design.md` (ADAPT templates in the UI with
+a YAML round trip). Both items came out of its eng review (D13, D15).
+
+### Release provisioned compare-config templates to the UI (P3)
+
+**What:** A global-admin action on the ADAPT templates tab that clears `read_only` on chosen
+provisioned template rows, so they become UI-editable instead of being deleted.
+
+**Why:** Once templates are provisioned from `template_ds_compare_configs.yaml` they are locked in
+the UI. A customer who stops using provisioning has one exit: commit `items: []`, which prunes every
+provisioned template, then re-create each one by hand. A missing file is "no opinion" and changes
+nothing, so simply removing the file leaves them locked forever.
+
+**Pros:** Leaving provisioning keeps the templates and the rows they own. Small: one action, a
+confirmation and an audit entry.
+
+**Cons:** One more admin control to explain, and a released row reappearing in a later file is taken
+over again, which has to be said in the confirmation.
+
+**Context:** Prune and takeover are keyed on `read_only` (design §3). Releasing a row is
+`read_only = false` plus `updated_by` set to the admin; the next boot then treats it as a UI row,
+and a file that declares its key takes it over again. Nobody has asked for this yet; build it when
+the first customer leaves provisioning.
+
+**Effort:** S (human ~3h / CC ~20min)
+**Priority:** P3
+**Depends on:** PR 2 of the design (the ADAPT templates tab and the `/compare-templates` API).
+
+### `ignoreMeanDiffSmallerThan` and `defaultValueIfControlGroupMissing` are written into compare configs and nothing reads them (P3)
+
+**What:** Either make ADAPT honour `config_data.ignoreMeanDiffSmallerThan` and
+`config_data.defaultValueIfControlGroupMissing`, or stop accepting them in
+`template_ds_compare_configs.yaml` and drop them from the applier.
+
+**Why:** The provisioning YAML, the golden-path applier and the anomaly card all carry both fields.
+`apps/worker/src` has no reference to `ignoreMeanDiffSmallerThan` at all, and both ADAPT result
+builders hard-code `false as uses_default_value, NULL as default_value` instead of reading the
+other, so an operator who sets either gets no effect and no warning. Pre-existing on main; found
+during the PR 1 coverage audit and the API contract review (2026-11-08).
+
+**Context:** `docs/reference/Features/Compare Config Templates.md` marks both as stored but unread.
+The closest existing behaviour is `absoluteThreshold`, which ADAPT does apply.
+
+**Depends on:** nothing.
+
+### Retire `POST /test-runs/:testRunId/classify-metric` and its system-scoped template rows (P3)
+
+**What:** Remove the classify-metric endpoint (`test-runs-analysis.controller.ts:370`,
+`TestRunsMetricsService.classifyMetric`) and decide whether to delete the rows it wrote into
+`provisioned_template_ds_compare_configs` (those with `system_under_test_id` set).
+
+**Why:** It is a second writer to the template table. Its rows are read by nothing found on
+2026-11-08: the golden-path applier reads only `system_under_test_id IS NULL`, and no `apps/web`
+code calls the endpoint. Every new template path has to fence those rows off with the same filter.
+
+**Pros:** One writer to the table; the `system_under_test_id IS NULL` fence becomes belt and braces
+rather than load-bearing.
+
+**Cons:** An external script or CI step may call the endpoint; removal breaks it. The rows'
+fate (delete or keep) is a data decision.
+
+**Context:** Before removing, check API access logs or customer CI configs for callers, and check
+`apps/mcp` (its `helpers.ts` `classifyMetric` is an unrelated local function, not a caller). The
+compare-config templates design keeps every PR 1 and PR 2 path scoped to
+`system_under_test_id IS NULL`, so nothing there depends on this cleanup.
+
+**Effort:** S (human ~2h / CC ~15min, plus the caller check)
+**Priority:** P3
+**Depends on:** None (independent of the design's PRs).
+
+### Measure, then index, the stale trigger a template re-merge fires (P2)
+
+**What:** Read the golden-path summary line (`rewrote=<rows> in <ms>ms`) on a production install after
+a template edit. If the time is material, add a partial index on
+`ds_adapt_results (application_dashboard_id, panel_id) WHERE is_stale = false` (1814/1822's plpgsql
+`lock_timeout` retry), or move the applier out of the completion request into the first stage of the
+analyze job ahead of `adapt-analysis`.
+
+**Why:** Each row the re-merge rewrites fires `trigger_mark_stale_on_config_update`, whose `UPDATE`
+reaches `ds_adapt_results` only through the single-column `idx_ds_adapt_results_app_dashboard`, so it
+visits the dashboard's results across every run and workload. Before v0.2.97.54 the trigger fired at
+most once per row ever; now one edit to a wildcard or regex template rewrites every row it owns on each
+workload's next completion, inside the CI's completion request with its RLS transaction open.
+Raised by the performance review (2026-11-08); unmeasured because the dev database is small.
+
+**Context:** `EXPLAIN (ANALYZE, BUFFERS)` the trigger's `UPDATE` on the largest dashboard first.
+The second rewrite of an already-stale panel is cheap once the partial index exists.
+
+**Depends on:** a production template edit to measure against. The /ship adversarial review
+(2026-11-08) adds a reason to move it out of the request: a CI client that times out on completion
+retries `completed=true` and starts a second applier. That is safe since v0.2.97.54 (writes are
+conditional on the author read, a 23505 insert is skipped), but it doubles the work.
+
+### Derive a real base for rows the pre-1822 applier inserted (P3)
+
+**What:** In a migration, set `template_base` for `ds_compare_config` rows with
+`created_by = updated_by = 'system:golden-path' AND template_base IS NULL`: their `config_data` with
+`metricClassification` reset to `{classification: 'none', higherIsBetter: null}`,
+`thresholds.absoluteThreshold` set to null, and `ignore` / `ignoreMeanDiffSmallerThan` removed.
+
+**Why:** Today such a row takes its current, already-merged config as its base on its first re-merge
+after the upgrade, so the old template's values are baked in and removing the template never strips
+them. For rows the old applier INSERTED (64 of 80 golden-path rows on the dev database) the true base
+is derivable, because the old insert wrote only those fields over fixed defaults. Merged rows keep
+the current behaviour; their seeded original is gone. Raised by the data-migration review (2026-11-08).
+
+**Context:** Do not use `INSERT_BASE` as-is: it would drop later non-template edits such as migration
+1806's `minSampleCount`. And keep v0.2.97.54's rule: a pre-1822 row whose template would change it is
+left alone, because before v0.2.95.42 a hand edit kept `updated_by = 'system:golden-path'`. A derived
+base is safe only for a row whose `config_data` equals what the old insert would have written.
+
+**Depends on:** nothing.
+
+### An empty template file prunes every provisioned template (P3)
+
+**What:** Refuse to prune more than a set share of provisioned templates in one boot unless the file
+says so explicitly (for example `pruneAll: true`), and log what was held back.
+
+**Why:** `items: []` is deliberately "declared empty" and prunes everything, which a spec pins. But a
+Helm default or an empty ConfigMap produces exactly that file, and the consequence is wide: on each
+workload's next completion every template-owned row reverts to its base, and restoring the file
+recreates the templates under new ids, so every row is rewritten again. Raised by the /ship
+adversarial review (2026-11-08).
+
+**Depends on:** nothing.
+
+### Runs closed by stale detection never run the golden-path applier (P3)
+
+**What:** Call `applyGoldenPathClassifications` from `TestRunsStaleDetectionService` before it enqueues
+the analysis, the way `TestRunsMutationService` does on `completed=true`.
+
+**Why:** A run whose client never posts completion is closed by stale detection
+(`triggerAnalysisForStaleRun`), which only enqueues analysis. Such a workload never gets template
+inserts, and since v0.2.97.54 never gets template edits either. Pre-existing for inserts. Raised by the
+/ship adversarial review (2026-11-08).
+
+**Depends on:** nothing.
+
+### A wildcard `panelId` template reaches panels with that number on every dashboard (P3)
+
+**What:** For a template with `panelId` and no `dashboardUid`, apply it only on dashboards that
+actually carry that panel (`ds_panels`, or the perf-test panel list for perf-test dashboards).
+
+**Why:** Grafana panel ids are per dashboard, so `panelId: 105` meant for the perf-test Transaction
+Error Rate panel also classifies, direction included, Grafana panel 105 on any large dashboard of the
+system. Pre-existing; the re-merge now re-asserts it on every completion. Raised by the /ship
+adversarial review (2026-11-08).
+
+**Depends on:** nothing.
+
+### The template parser accepts values the insert rejects (P3)
+
+**What:** Bound `panelId` to the int4 range and `dashboardUid`, `metricName` and `dashboardLabel` to
+255 characters and `panelTitle` to 500 in `parseTemplateItem`.
+
+**Why:** Such a value passes parsing, fails the INSERT, counts as a write failure, and so suppresses
+the prune on every boot until the file is fixed. Failing the item at parse time keeps its key known and
+lets the prune run. The failure is safe today, just noisy. Raised by the /ship adversarial review
+(2026-11-08).
+
+**Depends on:** nothing.
+
+### Delete an applier-inserted row when its template is gone (P3)
+
+**What:** When a template-owned row has no winner and was inserted by the applier
+(`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`), delete it instead of rewriting it
+to the defaults, and mark that panel's ADAPT results stale explicitly (a delete fires no update
+trigger).
+
+**Why:** "Rebuild from base alone" leaves a defaults row (mean, 15 %, no `minSampleCount`) where there
+was no row before the template. It shadows `DEFAULT_COMPARE_CONFIG` (median) and occupies the unique
+slot, so the worker's later `ON CONFLICT DO NOTHING` seed (`minSampleCount: 1` on the perf-test
+scenario panels) never lands. Raised by the red-team review (2026-11-08); the approved design chose
+rebuild-to-base, so this is a design change.
+
+**Depends on:** nothing.
+
 ## Completed
 
 ### A landed card-link could not be recovered after a tab switch, and its key omitted the run

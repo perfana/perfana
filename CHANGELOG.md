@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.54] - 2026-11-08
+
+### Added
+- **Changing a compare-config template now reaches the panels it already configured.** A template in the provisioning file (`template_ds_compare_configs.yaml`) used to be applied once, when a panel first got its anomaly detection config, and never again. Now each run that reports its completion re-applies the template to every panel it owns: edit a threshold in the file, restart the API, and the next run of each workload uses it. A run closed by stale detection does not apply templates yet. A panel someone has edited by hand is never touched, and ADAPT results are marked stale only where the configuration actually changed. The page "Compare Config Templates" in the reference docs describes the file, the precedence rules and what a template owns.
+- **Templates removed from the provisioning file are removed from the database.** Each boot prunes the provisioned templates the file no longer declares. Nothing is pruned when an item in the file cannot be identified or a write failed on that boot, so a typo cannot wipe your templates.
+- **The provisioning file is checked as it is read.** An unknown key is reported with a suggestion when it looks like a misspelling (`absoluteThreshold` for `absThreshold`), out-of-range values are refused (`percentageThreshold` is a fraction, so `15` is rejected), a regex that could hang the matcher is refused, and an `organizationId` that is not a UUID makes the item unidentified instead of silently matching nothing.
+- **Two API replicas booting together no longer write duplicate templates.** Provisioning runs under a lock and waits up to 30 seconds for the other replica.
+
+### Changed
+- **Upgrade notes. Read these before deploying.**
+  - **Migration 1822 refuses to run while duplicate template rows exist** and names them. The reference page gives the query to find them; delete all but the oldest of each group and deploy again.
+  - **Restart the API once after the migration** if it started before the migration finished. Provisioning only runs at boot, and that boot skips it.
+  - **The first boot prunes every provisioned template your file no longer declares.** Before this version they stayed in the database.
+  - **A file that sets `organizationId` now scopes its templates to that organization.** Before, the value was only recorded and the template reached every organization. A single-organization install is unaffected; on one with several, remove `organizationId` to keep a template install-wide.
+  - **A template that leaves out `higherIsBetter` no longer clears a panel's direction.** A row seeded by the worker or by a Dynatrace host mapping keeps the direction it was seeded with, so a regression on it can now fail a run. Write `higherIsBetter: null` on the item to keep the old behaviour.
+  - **Panels the template applier configured before the upgrade start following their template, where the template agrees with them.** Before v0.2.95.42 saving a compare config did not record who saved it, so such a panel can hold a hand edit under the template's name. One the template would change is left alone, as before, and counted in the run's log line. Delete that config to hand the panel to its template.
+  - **Until migration 1822 has run, the anomaly card cannot read or save compare configs.** Run the migration before the API takes traffic; it recovers by itself once the migration lands.
+  - **Do not roll back to an older API with a template file that uses `metricName` or a per-item `organizationId`.** The older API ignores both and can write a series-level template's values over the panel-level one.
+
+### Fixed
+- **Saving an anomaly detection config for one series no longer overwrites the panel's config.** When a panel had only a panel-level config, saving a config for a single series on it rewrote the panel's row with that series' settings, which then applied to every other series on the panel. The save now writes a row for that series and leaves the panel row alone.
+- **Applying templates on test completion is safe alongside other writers.** A compare config someone saves while templates are being applied keeps their save. A config another process creates at the same moment no longer aborts applying the rest. A stored regex template that could hang the matcher is skipped instead of run.
+
 ## [0.2.97.53] - 2026-11-08
 
 ### Security
