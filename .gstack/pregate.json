@@ -13,8 +13,14 @@
     "LICENSE": [],
     "VERSION": [],
     "apps/mcp/**": [],
+    "apps/worker/src/pipelines/helpers/series-grouping-plan.ts": [
+      "apps/worker/src/test/unit/pipelines/statistics-series-grouping.test.ts"
+    ],
     "docs/**": [],
     "package-lock.json": [],
+    "packages/shared/src/entities/__tests__/__snapshots__/auditable-fields.snapshot.spec.ts.snap": [
+      "packages/shared/src/entities/__tests__/auditable-fields.snapshot.spec.ts"
+    ],
     "scripts/pregate-runner.sh": [],
     "tsconfig*.json": []
   },

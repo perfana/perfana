@@ -74,6 +74,22 @@ export class DsCompareConfig {
   @Column({ type: 'uuid', nullable: true })
   metrics_source_id?: string;
 
+  /**
+   * The compare-config template that last applied to this row. Display provenance only, with no
+   * foreign key: ownership is `updated_by = 'system:golden-path'`, and a deleted template leaves a
+   * dangling id that reads as "template removed".
+   */
+  @Column({ type: 'uuid', nullable: true })
+  template_id?: string | null;
+
+  /**
+   * The row's `config_data` before any template applied. A template-owned row is rebuilt from this
+   * plus the winning template's named fields on every completed run, so a field the template stops
+   * naming reverts. Outside `config_data` so writing it never marks ADAPT results stale.
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  template_base?: Record<string, unknown> | null;
+
   @ManyToOne(() => ApplicationDashboard, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'application_dashboard_id' })
   application_dashboard?: ApplicationDashboard;

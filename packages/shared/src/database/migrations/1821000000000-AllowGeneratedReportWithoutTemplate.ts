@@ -18,20 +18,27 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * Dropping NOT NULL needs no table scan, but it does need ACCESS EXCLUSIVE, so the lock discipline
  * is 1818's: a plpgsql retry with a short `lock_timeout`, since nothing orders a migration behind a
  * running API and an unbounded wait would queue every later query on this table behind it.
+ *
+ * The previous `lock_timeout` is restored on both exit paths (1819's fix): `set_config(..., true)`
+ * lasts until the batch transaction ends, so a 3s left behind would make every later migration in
+ * the same deploy fail with 55P03. Restoring changes nothing for a database that already ran this.
  */
 const alterWithRetry = (statement: string): string => `
   DO $alter$
   DECLARE
     attempt int := 0;
+    prev_lock_timeout text := current_setting('lock_timeout');
   BEGIN
     PERFORM set_config('lock_timeout', '3s', true);
     LOOP
       attempt := attempt + 1;
       BEGIN
         EXECUTE '${statement}';
+        PERFORM set_config('lock_timeout', prev_lock_timeout, true);
         RETURN;
       EXCEPTION WHEN lock_not_available THEN
         IF attempt >= 10 THEN
+          PERFORM set_config('lock_timeout', prev_lock_timeout, true);
           RAISE EXCEPTION
             'could not alter generated_reports.template_id: the table stayed locked across % attempts. Find the long-running transaction (pg_stat_activity) and retry the deploy.', attempt;
         END IF;

@@ -1,0 +1,307 @@
+import * as yaml from 'js-yaml';
+import { validateRegexPattern } from '@perfana/shared/utils';
+
+/**
+ * One file format for compare-config templates, read by provisioning and written by the exporter.
+ *
+ * Both directions live here so they cannot drift: a field the reader accepts and the writer drops
+ * would be pruned on the next boot after an export is committed. `compare-template-codec.spec.ts`
+ * round-trips a canonical file through both.
+ */
+
+/** The values the anomaly card's aggregation select offers (`MetricConfigForm.tsx`). */
+export const TEMPLATE_AGGREGATIONS = [
+  'mean', 'median', 'min', 'max', 'last', 'q10', 'q25', 'q75', 'q90', 'q95', 'q99',
+] as const;
+
+/**
+ * Fields a template forces onto a `ds_compare_config` row, in export order. They are stored in
+ * `config_overrides` only when the item names them, explicit `null` included, because presence is
+ * what makes a template force a value rather than leave the row's own.
+ */
+export const OVERRIDE_KEYS = [
+  'higherIsBetter',
+  'absThreshold',
+  'ignore',
+  'ignoreMeanDiffSmallerThan',
+  'percentageThreshold',
+  'iqrThreshold',
+  'aggregation',
+  'minSampleCount',
+  'defaultValueIfControlGroupMissing',
+] as const;
+export type OverrideKey = (typeof OVERRIDE_KEYS)[number];
+
+export interface MetricClassificationYaml {
+  /** Overrides the file-level `organizationId`. `null` means install-wide. */
+  organizationId?: string | null;
+  /** Omit to apply the template to every dashboard carrying the panel. */
+  dashboardUid?: string;
+  /** `true`: `dashboardUid` and `panelTitle` are regular expressions. */
+  regex?: boolean;
+  /** Descriptive only; not part of the template's identity. */
+  dashboardLabel?: string;
+  /** Omit to select panels by `panelTitle` instead, resolved per dashboard from its collected panels. */
+  panelId?: number;
+  /** Descriptive beside `panelId`; the matching key when `panelId` is omitted. */
+  panelTitle?: string;
+  /** Omit for a panel-level template. A metric-level template only reaches rows of that metric. */
+  metricName?: string;
+  metricClassification: string;
+  /** `null` forces "no direction", which no regression can fail a run on. */
+  higherIsBetter?: boolean | null;
+  absThreshold?: number | null;
+  ignore?: boolean;
+  ignoreMeanDiffSmallerThan?: number;
+  /** A fraction, as stored: 0.15 is 15 %. */
+  percentageThreshold?: number;
+  iqrThreshold?: number;
+  aggregation?: (typeof TEMPLATE_AGGREGATIONS)[number];
+  /** Floored, and clamped to at least 1, the way the worker reads it. */
+  minSampleCount?: number;
+  defaultValueIfControlGroupMissing?: number;
+}
+
+/** The template-table columns the file decides. */
+export interface TemplateColumns {
+  organization_id: string | null;
+  dashboard_uid: string | null;
+  regex: boolean;
+  dashboard_label: string | null;
+  panel_id: number | null;
+  panel_title: string | null;
+  metric_name: string | null;
+  metric_classification: string;
+  higher_is_better: boolean | null;
+  config_overrides: Record<string, unknown>;
+}
+
+type KeyColumns = Partial<
+  Pick<TemplateColumns, 'organization_id' | 'dashboard_uid' | 'regex' | 'panel_id' | 'panel_title' | 'metric_name'>
+>;
+
+/**
+ * A template's identity: the same five terms as `COMPARE_TEMPLATE_KEY_SQL` in migration 1822, whose
+ * unique index enforces it. Encoded as JSON so a `|` inside a uid cannot make two keys collide.
+ */
+export function templateKey(row: KeyColumns): string {
+  return JSON.stringify([
+    row.organization_id ?? 'install',
+    row.dashboard_uid ?? '',
+    row.regex ?? false,
+    row.panel_id != null ? String(row.panel_id) : `title:${row.panel_title}`,
+    row.metric_name ?? '',
+  ]);
+}
+
+export type ParsedTemplateItem =
+  | { ok: true; key: string; values: TemplateColumns; warnings: string[] }
+  /** `key` is null when the item's identity could not be read, so nothing it names is declared. */
+  | { ok: false; key: string | null; error: string };
+
+/** Every key an item may carry. Anything else is reported: a misspelt override forces nothing. */
+const KNOWN_KEYS = new Set<string>([
+  'organizationId', 'dashboardUid', 'regex', 'dashboardLabel', 'panelId', 'panelTitle', 'metricName',
+  'metricClassification', ...OVERRIDE_KEYS,
+]);
+/** The config_data spellings an operator copies from a stored row, mapped to the file's own. */
+const NEAR_MISSES: Record<string, string> = { absoluteThreshold: 'absThreshold', higherIsbetter: 'higherIsBetter' };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * An organization id as Postgres returns it: lowercase, hyphenated. It is part of the template's
+ * key, so a spelling the database would store differently (upper case, braces) never matches its
+ * own row: the insert collides and the prune deletes the stored row, on every other boot. A value
+ * that is not a uuid at all would fail every insert while the prune deleted every stored template.
+ */
+const canonicalOrganizationId = (v: unknown): string | null | Error => {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string' && UUID.test(v.trim())) return v.trim().toLowerCase();
+  return new Error('organizationId must be a uuid or null');
+};
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+const isText = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** Optional text field: absent is fine, present must be non-empty text. */
+const optionalText = (item: Record<string, unknown>, field: string): string | null | Error => {
+  if (!(field in item) || item[field] === undefined) return null;
+  return isText(item[field]) ? (item[field] as string) : new Error(`${field} must be a non-empty string`);
+};
+
+/**
+ * Reads one item of `template_ds_compare_configs.yaml`. The file is operator-written, so every
+ * field is checked: a wrong type, a non-finite number or an unknown aggregation fails the item.
+ * Identity is read first, so an item failing on any other field still declares its key and the
+ * template it already provisioned survives the prune.
+ */
+export function parseTemplateItem(item: unknown, fileOrganizationId: string | null): ParsedTemplateItem {
+  if (!isObject(item)) return { ok: false, key: null, error: 'item is not a mapping' };
+
+  // ---- identity
+  const organizationId = canonicalOrganizationId('organizationId' in item ? item.organizationId : fileOrganizationId);
+  if (organizationId instanceof Error) return { ok: false, key: null, error: organizationId.message };
+  const dashboardUid = optionalText(item, 'dashboardUid');
+  const panelTitle = optionalText(item, 'panelTitle');
+  const metricName = optionalText(item, 'metricName');
+  for (const v of [dashboardUid, panelTitle, metricName]) {
+    if (v instanceof Error) return { ok: false, key: null, error: v.message };
+  }
+  if (item.regex !== undefined && typeof item.regex !== 'boolean') {
+    return { ok: false, key: null, error: 'regex must be true or false' };
+  }
+  if (item.panelId !== undefined && !Number.isInteger(item.panelId)) {
+    return { ok: false, key: null, error: 'panelId must be an integer' };
+  }
+  const panelId = (item.panelId as number | undefined) ?? null;
+  if (panelId == null && panelTitle == null) {
+    return { ok: false, key: null, error: 'panelId or panelTitle is required' };
+  }
+  const identity = {
+    organization_id: organizationId,
+    dashboard_uid: dashboardUid as string | null,
+    regex: (item.regex as boolean | undefined) ?? false,
+    panel_id: panelId,
+    panel_title: panelTitle as string | null,
+    metric_name: metricName as string | null,
+  };
+  const key = templateKey(identity);
+  const fail = (error: string): ParsedTemplateItem => ({ ok: false, key, error });
+
+  // ---- attributes
+  const dashboardLabel = optionalText(item, 'dashboardLabel');
+  if (dashboardLabel instanceof Error) return fail(dashboardLabel.message);
+  if (!isText(item.metricClassification)) return fail('metricClassification is required');
+  // A regex template runs on the event loop inside the completion request, against uids and titles
+  // Grafana editors control; the same guard the profile benchmarks use. The pattern is part of the
+  // key, so a refused item never replaces a stored row: the applier runs the same check on what is
+  // stored and skips the template. The title is a pattern only when there is no panelId.
+  if (identity.regex) {
+    const patterns = [['dashboardUid', identity.dashboard_uid], ['panelTitle', panelId == null ? identity.panel_title : null]] as const;
+    for (const [field, pattern] of patterns) {
+      if (pattern == null) continue;
+      const check = validateRegexPattern(pattern, { maxLength: 255 });
+      if (!check.safe) return fail(`${field} is not a usable regular expression: ${check.error}`);
+    }
+  }
+
+  const overrides: Record<string, unknown> = {};
+  const warnings: string[] = Object.keys(item)
+    .filter((k) => !KNOWN_KEYS.has(k))
+    .map((k) => `unknown field "${k}" ignored${Object.hasOwn(NEAR_MISSES, k) ? ` (did you mean "${NEAR_MISSES[k]}"?)` : ''}`);
+  for (const field of OVERRIDE_KEYS) {
+    if (!(field in item) || item[field] === undefined) continue;
+    const v = item[field];
+    switch (field) {
+      case 'higherIsBetter':
+      case 'ignore':
+        if (typeof v !== 'boolean' && !(field === 'higherIsBetter' && v === null)) {
+          return fail(`${field} must be ${field === 'higherIsBetter' ? 'true, false or null' : 'true or false'}`);
+        }
+        break;
+      case 'absThreshold':
+        if (v !== null && !(isFiniteNumber(v) && v >= 0)) return fail('absThreshold must be a number of at least 0, or null');
+        break;
+      case 'percentageThreshold':
+        // A fraction, as stored. `15` meaning 15 % would read as 1500 % and never flag a regression.
+        if (!isFiniteNumber(v) || v < 0 || v > 1) return fail('percentageThreshold must be a fraction from 0 to 1 (0.15 is 15 %)');
+        break;
+      case 'iqrThreshold':
+      case 'ignoreMeanDiffSmallerThan':
+        if (!isFiniteNumber(v) || v < 0) return fail(`${field} must be a number of at least 0`);
+        break;
+      case 'aggregation':
+        if (!(TEMPLATE_AGGREGATIONS as readonly unknown[]).includes(v)) {
+          return fail(`aggregation must be one of ${TEMPLATE_AGGREGATIONS.join(', ')}`);
+        }
+        break;
+      case 'minSampleCount':
+        // The worker's untrusted rule (root CLAUDE.md, ADAPT_MIN_SAMPLE_COUNT): a non-number is
+        // ignored, a fraction floored, anything below 1 clamped to 1. Store what it will read.
+        if (!isFiniteNumber(v)) {
+          warnings.push('minSampleCount is not a number and was ignored');
+          continue;
+        }
+        overrides.minSampleCount = Math.max(1, Math.floor(v));
+        continue;
+      default:
+        if (!isFiniteNumber(v)) return fail(`${field} must be a finite number`);
+    }
+    overrides[field] = v;
+  }
+
+  return {
+    ok: true,
+    key,
+    warnings,
+    values: {
+      ...identity,
+      dashboard_label: dashboardLabel as string | null,
+      metric_classification: item.metricClassification,
+      higher_is_better: 'higherIsBetter' in overrides ? (overrides.higherIsBetter as boolean | null) : null,
+      config_overrides: overrides,
+    },
+  };
+}
+
+/** Row -> item. A key is written exactly when it is present on the row, never dropped for equalling a default. */
+export function rowToItem(row: Partial<TemplateColumns>, withOrganization: boolean): MetricClassificationYaml {
+  const item: Record<string, unknown> = {};
+  if (withOrganization) item.organizationId = row.organization_id ?? null;
+  if (row.dashboard_uid != null) item.dashboardUid = row.dashboard_uid;
+  if (row.regex) item.regex = true;
+  if (row.dashboard_label != null) item.dashboardLabel = row.dashboard_label;
+  if (row.panel_id != null) item.panelId = row.panel_id;
+  if (row.panel_title != null) item.panelTitle = row.panel_title;
+  if (row.metric_name != null) item.metricName = row.metric_name;
+  item.metricClassification = row.metric_classification;
+  const overrides = row.config_overrides ?? {};
+  for (const field of OVERRIDE_KEYS) {
+    if (field in overrides) item[field] = overrides[field];
+    // An older API strips the key and keeps the column; the applier reads it the same way
+    // (namedHigherIsBetter), so an export must not drop the direction.
+    else if (field === 'higherIsBetter' && row.higher_is_better != null) item.higherIsBetter = row.higher_is_better;
+  }
+  return item as unknown as MetricClassificationYaml;
+}
+
+const byText = (a: string | null | undefined, b: string | null | undefined): number => {
+  if (a == null || b == null) return Number(a != null) - Number(b != null); // absent first
+  return a < b ? -1 : a > b ? 1 : 0; // code-unit order: locale-independent, so byte-stable
+};
+
+/**
+ * The export's total order over the key: scope (install-wide, then organizations by id), uid
+ * (absent first), regex (false first), panel (ids ascending before titles), metric (absent first).
+ */
+export function compareTemplateRows(a: KeyColumns, b: KeyColumns): number {
+  return (
+    byText(a.organization_id, b.organization_id) ||
+    byText(a.dashboard_uid, b.dashboard_uid) ||
+    Number(a.regex ?? false) - Number(b.regex ?? false) ||
+    Number(a.panel_id == null) - Number(b.panel_id == null) ||
+    // Beside an id the title is descriptive, not key, so it must not order two id items.
+    (a.panel_id != null && b.panel_id != null ? a.panel_id - b.panel_id : byText(a.panel_title, b.panel_title)) ||
+    byText(a.metric_name, b.metric_name)
+  );
+}
+
+/**
+ * The whole `template_ds_compare_configs.yaml`, ready to commit in place of the installed one. Its
+ * caller, the global-admin export route, lands in PR 2 of the templates design; the round trip is
+ * pinned here first so the reader and writer cannot drift in the meantime.
+ * When every row shares one scope the file carries it once (and an install-wide file carries none);
+ * otherwise each item names its own, `null` for install-wide.
+ */
+export function serializeTemplates(rows: Array<Partial<TemplateColumns>>): string {
+  const sorted = [...rows].sort(compareTemplateRows);
+  const scopes = new Set(sorted.map((r) => r.organization_id ?? null));
+  const mixed = scopes.size > 1;
+  const doc: Record<string, unknown> = {};
+  const fileOrganizationId = mixed ? null : (sorted[0]?.organization_id ?? null);
+  if (fileOrganizationId) doc.organizationId = fileOrganizationId;
+  doc.items = sorted.map((r) => rowToItem(r, mixed));
+  return yaml.dump(doc, { lineWidth: -1, noRefs: true });
+}
