@@ -290,8 +290,7 @@ export function compareTemplateRows(a: KeyColumns, b: KeyColumns): number {
 
 /**
  * The whole `template_ds_compare_configs.yaml`, ready to commit in place of the installed one. Its
- * caller, the global-admin export route, lands in PR 2 of the templates design; the round trip is
- * pinned here first so the reader and writer cannot drift in the meantime.
+ * caller is `GET /provisioning/compare-templates/export` (`CompareTemplatesService.exportYaml`).
  * When every row shares one scope the file carries it once (and an install-wide file carries none);
  * otherwise each item names its own, `null` for install-wide.
  */
