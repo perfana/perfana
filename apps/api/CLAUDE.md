@@ -789,7 +789,7 @@ run completion and refuses to overwrite a `ds_compare_config` row that already s
 user edits must survive. Its one exception used to be `updated_by = 'worker-pipeline'`, the default
 row `PerformanceTestMetricsPipeline` seeds during the run.
 
-**"Already sits on the panel" means a PANEL-LEVEL row, as of v0.2.97.44.** `existingPanels` counted
+**"Already sits on the panel" means a PANEL-LEVEL row, as of v0.2.97.44.** The applier's `existingPanels` set counted
 every row at any level, so one metric-level row — a per-series override — blocked the panel's
 template for good. That is wrong on its own terms: resolution picks metric before panel, so
 applying the panel default alongside an override changes nothing for the overridden series. It was
@@ -810,9 +810,11 @@ that no save path can rewrite. The marker still exists, for provenance and for t
 filed in TODOS.md — it is just not load-bearing. One behaviour change rides along: a panel whose
 only row is metric-level now receives its panel-level template on the next completed run.
 
-`workerSeeded` is unaffected and still keys on `dashboard|panel|metric`, so a metric-level template
-naming a derived series merges into the worker's row rather than being skipped — which is what the
-`created_by`/`updated_by = 'worker-pipeline'` stamp on that INSERT buys.
+Machine-seeded rows are keyed on `dashboard|panel|metric` too, so a metric-level template naming a
+derived series merges into the worker's row rather than being skipped — which is what the
+`created_by`/`updated_by = 'worker-pipeline'` stamp on that INSERT buys. (Since v0.2.97.54 the
+applier keys every row that way, `existingPanels` and `workerSeeded` are gone, and a template reaches
+only rows of its own `metric_name`.)
 
 **`createDsCompareConfigForMetric` (`modules/dynatrace/dynatrace.repository.ts`) writes a panel-level
 row the moment a HOST is mapped, and its INSERT names no `created_by`/`updated_by` at all.** So the
@@ -827,19 +829,92 @@ guaranteed no-op on every run, forever. The provisioning side was fine — the r
 The discriminator is `config_data.source`, not authorship:
 
 - The Dynatrace insert stamps `source: 'dynatrace-host'`, and a UI save rewrites it to
-  `'metric'`/`'panel'` **and** sets `updated_by` (`updateDsCompareConfig`). So
+  `'metric'`/`'panel'` **and** sets `updated_by` (`updateDsCompareConfig`; since v0.2.97.54 the
+  insert in `createOrUpdateDsCompareConfig` stamps it too). So
   `!updated_by && source === 'dynatrace-host'` is the one shape nobody has touched. 591 of the dev
   database's 592 null-author rows match it; the one that does not reads `source: 'panel'`.
 - **The merge is self-limiting.** It stamps `GOLDEN_PATH_ACTOR`, so the row stops matching after the
-  first pass — which is also why the null-author half of the test cannot be dropped.
+  first pass and is template-owned from then on — which is also why the null-author half of the test
+  cannot be dropped.
 - **It takes effect on the next completed run**, not at boot. Rows already written stay as they are
   until that run analyses.
-- `higher_is_better` comes from the template, so a template whose `panelTitle` reaches
-  `Network Traffic` would overwrite the `higherIsBetter: null` the Dynatrace path sets deliberately
-  for an informational metric. The shipped templates name CPU and Memory only.
+- The direction comes from the template only when the template names one, so a template whose
+  `panelTitle` reaches `Network Traffic` keeps the `higherIsBetter: null` the Dynatrace path sets
+  deliberately for an informational metric — unless it says `higherIsBetter` itself.
 
-A row the golden path itself authored is never revisited, so **editing a template's `absThreshold` in
-YAML does not propagate to panels it already seeded** — that was true before this fix and still is.
+**Since v0.2.97.54 a template-owned row follows its template** (migration 1822; design in
+`docs/design/2026-11-08-compare-config-templates-design.md`, file format in
+`docs/reference/Features/Compare Config Templates.md`). Before that, a row the golden path authored
+was never revisited, so editing a template's `absThreshold` in YAML reached no panel it had already
+seeded. Now every completion rebuilds each `system:golden-path` row from its `template_base` plus the
+fields the current winning template names. Eight things that are easy to undo:
+
+1. **Ownership is `updated_by`, never `template_id`.** `template_id` is display provenance with no
+   foreign key; a hand edit sets `updated_by` to the user and the row is never touched again.
+2. **`template_base` is the row's config before any template.** An inserted row gets `INSERT_BASE`; a
+   machine-seeded row gets its seeded config on its first merge; a row written before 1822 takes its
+   current config, but only when its winner would not change it (rule 7). A field the template stops
+   naming reverts to the base, and a
+   row nothing matches any more is rebuilt from the base alone, with `template_id` cleared.
+3. **Only a difference is written.** `trigger_mark_stale_on_config_update` fires on any `config_data`
+   change, so the applier compares first; `template_id` and `template_base` sit outside `config_data`
+   and never fire it. The comparison deep-copies through JSON, not `structuredClone`: under Jest the
+   latter returns objects from Node's outer realm and `isDeepStrictEqual` then calls every row changed.
+4. **A template reaches only rows of its own `metric_name` (NULL to NULL)**, so a panel template never
+   claims a series-grouping derived row such as `api (sum)`, and an organization template only
+   dashboards of its own organization (read from the dashboard, not from the optional `TestRun` field).
+5. **`higherIsBetter` is named through `config_overrides` first.** A template that omits it leaves the
+   row's own direction, where the merge used to write `null`. The `higher_is_better` column still
+   counts when set and the key is missing, and that fallback is load-bearing, not a leftover: it is
+   what 1822's backfill copies into the overrides, and it keeps a template's direction when an API
+   older than 1822 runs after the migration (a rollback, a replica not yet replaced) and rewrites
+   `config_overrides` without the key. Observed on the dev database: the old image stripped the key
+   from 22 of 68 templates on one boot while leaving the column set.
+6. **The collection-gap guard covers title-owned rows only.** A row whose `template_id` is a title
+   template, and whose panel is missing from the recent `ds_panels` list, is left alone and named in the
+   summary line, so a panel missing from one collection never makes its config flap. A row an id
+   template owns is rebuilt regardless: perf-test dashboards never get `ds_panels` rows at all, and a
+   guard keyed on "a title template reaches this dashboard" froze every owned row there for good. A row
+   with no `template_id` yet (written before 1822) is decidable when a template wins it now, and
+   otherwise waits while a title template of its own metric reaches the dashboard. The rows of a
+   template skipped for a bad pattern are left alone as well, so a regex typo in the YAML does not
+   revert everything that template owned. The applier runs `validateRegexPattern` on what is stored,
+   not only the parser on what is read: a pattern is part of the template's key, so a refused file
+   item never replaces the stored row, and patterns stored before this version were never checked.
+7. **A row written before 1822 is not proof the template wrote its current config.** Until v0.2.95.42
+   `updateDsCompareConfig` set only `config_data`, so a hand edit on a golden-path row kept
+   `updated_by = 'system:golden-path'`. Rebuilding such a row from its current config would re-assert
+   the template over the user's direction, `ignore` and thresholds on every completion. It is adopted
+   only when `rebuildConfig(current, winner)` deep-equals it; otherwise it is left alone and counted
+   (`pre-v0.2.97.54 row(s) left alone`). Do not "simplify" that into adopting every legacy row.
+8. **Every write is conditional on the author the snapshot saw** (`updateRow`: `WHERE id AND
+   updated_by = <as read>`, NULL via `IsNull()`), and `affected = 0` skips the row. The loop runs for
+   seconds on a large SUT; keyed on id alone, a user save in that window was overwritten by a rebuild
+   that also left the user's stamp on it, detaching the row with template values. An insert that hits
+   a concurrent writer's row (23505: a live tick's seed, an overlapping completion) is counted and
+   skipped rather than aborting the rest of the run; these writes are not on the request transaction,
+   so the failed INSERT aborts nothing else.
+
+**A compare-config save upserts the exact row, never the one `getDsCompareConfig` falls back to**
+(v0.2.97.54). `getDsCompareConfig` answers a series lookup with the panel's row when the series has
+none of its own, which is right for a read and wrong for a write: `createOrUpdateDsCompareConfig` used
+it as "the existing row" and so rewrote the panel row with one series' settings, which then applied to
+every series on the panel and, stamped as a hand edit, detached that row from its template for good.
+The upsert now updates only a row whose `metric_name` equals the request's (NULL to NULL) and inserts a
+series row otherwise. The insert stamps `created_by`/`updated_by` like an update does.
+
+The applier runs inside the completion request, before ADAPT is queued, so the completing run is the
+first one judged on the re-merged config. Its summary line carries `rewrote=<rows> in <ms>ms` and is
+logged at warn past 5000 ms; each rewritten row fires the stale trigger, whose cost on a large install
+has not been measured.
+
+On the provisioning side, three rules keep the prune from deleting templates the file still means:
+the organization id is validated as a uuid and lowercased before it enters the key (Postgres returns
+it lowercase, so an upper-case spelling never matched its own row and flapped between insert and
+prune); no prune runs on a boot where any item failed to identify or to write; and each pass first
+re-marks `created_by = 'system:provisioning'` rows as `read_only`, which an older API writing after
+1822 leaves unset. The advisory lock is `pg_try_advisory_lock` with a 30 s bound, so a lock held by a
+dead backend skips the step instead of hanging the API's boot.
 
 `regex` support landed in v0.2.95.35 and `panelTitle` in v0.2.95.37; a deploy older than those
 ignores both halves of such a template.

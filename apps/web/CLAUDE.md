@@ -908,9 +908,12 @@ panel-level row it writes when a host is mapped, and the same value `TestRunsMet
 "A golden-path template loses to any row already on the panel" in
 [apps/api/CLAUDE.md](../api/CLAUDE.md) for the full mechanism and the bug it fixes). The web side's
 part of the contract: `handleConfigSave` above always overwrites `source` with `'metric'` or
-`'panel'` on any UI save, which is what makes a user edit distinguishable from the Dynatrace
-boilerplate in the first place — a future save path that skips this field would make every row it
-touches look machine-seeded again.
+`'panel'` on any UI save, which is what made a user edit distinguishable from the Dynatrace
+boilerplate in the first place. It is no longer the only guard: the golden path reads a
+Dynatrace-marked row as machine-seeded only when it has no author, and the API stamps one on every
+save (`updateDsCompareConfig` since v0.2.95.42, the insert in `createOrUpdateDsCompareConfig` since
+v0.2.97.54). A save path that bypassed both methods and also skipped `source` would still make every
+row it touches look machine-seeded again.
 
 ### Series grouping in the web: where a group's badge comes from, and what the dialog fetches
 
