@@ -13,6 +13,8 @@ Everything here is a read — collection is the worker's job
 | `metrics.module.ts` | Module definition |
 | `metrics.service.ts` | All query logic — panel lists, time series, statistics, comparisons, trends |
 | `metrics.controller.ts` | REST endpoints under `/metrics` |
+| `control-group-baseline.ts` | Finds a run's control group and reads its pooled `ds_control_group_statistics`; shared by the two control-group routes and the report's Comparisons section |
+| `series-group-resolver.ts` | Maps a series-group name back to its member series for every raw `ds_metrics` reader (see "A series group is not a `ds_metrics` series" in `apps/api/CLAUDE.md`) |
 
 ## Endpoints
 
@@ -22,8 +24,10 @@ Everything here is a read — collection is the worker's job
 | `GET ds-metrics/time-series/:testRunId` | `getMetricTimeSeries` | Chart data for a single metric |
 | `GET ds-metrics/:testRunId/:panelId` | `findDSMetricsForPanel` | Panel chart data (LTTB-downsampled above a threshold). Optional `from`/`to` (ISO-8601) narrow the query to a window, so the 4000-point budget is spent on it rather than on the whole run — what a Graphs-card zoom sends. Both or neither: one alone, an unparseable value, or `from` after `to` is a 400 |
 | `GET ds-metric-statistics` | `findDSMetricStatistics(Multiple)` | Per-metric aggregates for a run |
-| `GET ds-metrics-comparison` | comparison query | Run-vs-run metric comparison |
+| `GET ds-metrics-comparison` | comparison query | Run-vs-run metric comparison. Without `baselineTestRunId` it returns the current run alone, which the Compare card asks for against the control group |
 | `GET control-group-trends/:testRunId` | `findControlGroupTrends` | Baseline trend series |
+| `GET control-group/:testRunId` | `findControlGroup` | The run's control group (the runs its latest ADAPT conclusion names), offered as the Compare card's "Control group" baseline. A 200 with an empty body when there is none |
+| `GET control-group-statistics/:testRunId` | `findControlGroupStatistics` | One panel's pooled `ds_control_group_statistics`, keyed like `ds-metric-statistics`. `applicationDashboardId` and `metricsSourceId` both narrow when both are given. SQL in `control-group-baseline.ts`, shared with the report fetcher |
 | `GET ds-metrics/panels-by-dashboard` | `getPanelsByApplicationDashboard` | Panel list for one application dashboard |
 | `GET ds-metrics/distinct-names` | `getDistinctMetricNames` | Metric-name dropdown — since v0.2.97.6 the per-panel **fallback** for the cards' cascade (a panel the run-wide rows do not mention, an ambiguous dashboard label, or a failed run-wide fetch); still the primary path for report generation and trends presets |
 

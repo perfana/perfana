@@ -91,7 +91,9 @@ export async function loadControlGroupForRun(
   const row = rows?.[0];
   if (!row) return null;
   const testRuns = Array.isArray(row.test_runs) ? row.test_runs : [];
-  const nTestRuns = row.n_test_runs ?? testRuns.length;
+  // n_test_runs is NOT NULL DEFAULT 0, so `??` alone never fell back: a 0 beside a filled list
+  // printed "the 0 earlier runs: a, b, c". ADAPT's count may also run ahead of the list.
+  const nTestRuns = Math.max(row.n_test_runs ?? 0, testRuns.length);
   if (testRuns.length === 0 && nTestRuns === 0) return null;
   const iso = (v: Date | string | null): string | null =>
     v == null ? null : v instanceof Date ? v.toISOString() : String(v);
@@ -107,9 +109,12 @@ export async function loadControlGroupForRun(
 /**
  * The control group's statistics, optionally narrowed to one panel.
  *
- * `metricsSourceId` wins over `applicationDashboardId`, matching the run-side reads in
- * `MetricsService` (`findDSMetricStatisticsMultiple`), so both sides of a comparison select
- * the same rows. Every value is bound; nothing is interpolated.
+ * Both ids narrow when both are given. One metrics source can back several application
+ * dashboards (the same uid on two Grafana instances), so the source alone would mix their rows,
+ * and a caller pairing by series name would take whichever came first. Filtering on the source
+ * as well is what ADAPT does (`metrics_source_id IS NOT DISTINCT FROM`): a series whose source
+ * changed since the group's runs gets no control row here, as it is "incomparable" there.
+ * Every value is bound; nothing is interpolated.
  */
 export async function loadControlGroupStatistics(
   q: ControlGroupSqlRunner,
@@ -121,7 +126,8 @@ export async function loadControlGroupStatistics(
   if (scope.metricsSourceId) {
     params.push(scope.metricsSourceId);
     filter += ` AND s.metrics_source_id = $${params.length}::uuid`;
-  } else if (scope.applicationDashboardId) {
+  }
+  if (scope.applicationDashboardId) {
     params.push(scope.applicationDashboardId);
     filter += ` AND s.application_dashboard_id = $${params.length}::uuid`;
   }
@@ -132,7 +138,7 @@ export async function loadControlGroupStatistics(
   const rows: ControlGroupStatisticRow[] = await q.query(
     `/* control-group:statistics */
      SELECT s.application_dashboard_id, s.panel_id, s.panel_title, s.dashboard_label,
-            s.metric_name, s.unit, s.metrics_source_id,
+            s.metric_name, NULLIF(s.unit, '') AS unit, s.metrics_source_id,
             s.mean, s.median, s.min_value, s.max_value, s.q90, s.q95, s.q99, s.count
      FROM ds_control_group_statistics s
      WHERE s.control_group_id = $1

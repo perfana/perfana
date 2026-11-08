@@ -2584,6 +2584,10 @@ code: for each preset the caller does not own it calls `validateTestRunAccess` o
    starts `true` and is only reassigned inside those two `if` blocks, so such a row is pushed
    unchecked — visible across organizations. The SQL explicitly ORs
    `preset.createdForTestRunId IS NULL`, so that shape is reachable by design, not an edge case.
+   Since v0.2.97.51 a preset whose baseline is the `control-group` sentinel counts as carrying no
+   run id too (`baselineRunOf` returns undefined for it), so a global preset with that baseline and
+   no created-for run is the same shape. Only the API can create one; the web UI always sends a
+   created-for run. Found by the security review of PR #711; kept here rather than fixed there.
 2. **It is an N+1**: two access queries per preset per list, where the org filter could be one
    predicate. Invisible at 2 presets; not at 200.
 
@@ -2634,6 +2638,86 @@ scroll container, which may make the shared hook unnecessary; check before reach
 
 
 ## Reports
+
+### A control-group Comparisons section with no selection labels per-bucket percentiles as P90/P95 (P3)
+
+**Priority:** P3
+**Origin:** review of PR #711 (2026-11-08), control-group baseline.
+**Why:** With no dashboard selected, a performance-metrics section against the control group reads panel 101
+(Transaction RT Avg) from `ds_metric_statistics`, so its P90/P95 columns are percentiles of the per-bucket averages. The
+run-vs-run default computes the same headers with `PERCENTILE_CONT` over raw `transactions`. Switching a template from
+`previous` to `control-group` therefore lowers the CURRENT run's P90/P95 for the same run under identical headers. The avg
+column is unaffected. Reading raw percentiles for the group is not an option (it would scan every member run, and it is
+not what ADAPT compares), so the fix is a header or caption that says what the columns are on this path.
+Two more differences the red-team pass found: the statistics cover the analysis window only
+(`ramp_up = false`) where the run-vs-run default reads the full run, and the read keeps the
+`metrics_source_id IS NULL` arm, so a legacy or SUT-imported Grafana panel that happens to have id
+101 and no source would join the default. Options: read p90/p95/p99 from their own panels
+(102/103/104), restrict the control-group default to avg, or label the columns; and drop the NULL arm
+for the default.
+**Where:** `getControlGroupComparison` (`PERF_TXN_RT_AVG_PANEL_ID`) in `report-data-fetcher.service.ts`; the column
+headers in `comparisons-renderer.ts`.
+
+### Control-group baseline: deferred findings from the PR #711 review (P3)
+
+**Priority:** P3
+**Origin:** /ship review of PR #711 (2026-11-08): seven specialists plus a red-team pass. The real bugs
+were fixed in that PR; these were judged follow-ups.
+**Why / what, one line each:**
+1. **The Compare card counts baseline-less rows as "within range".** The report shows an empty state
+   when nothing pairs with the group; the card has no such rule, so a panel whose group statistics
+   are missing reads "N within range". `MetricsComparisonTable`'s band tally treats a null diff as ok.
+2. **ADAPT's sample floor is not applied.** ADAPT folds `ADAPT_MIN_SAMPLE_COUNT` (or a config's
+   `thresholds.minSampleCount`) into `control_exists`, so a 1-vs-1 artefact series is incomparable
+   there. The report and the card draw a regression band for it. Panels 301-303 need a floor of 1.
+3. **Membership and pooled statistics can describe different groups.** A re-evaluate rewrites
+   `ds_control_groups` before `control-group-statistics` runs (heavy stage, softFail, upsert with no
+   DELETE), and `delete-test-run`'s `updateControlGroup` deletes the group's statistics without
+   recomputing them. The heading names the current members beside numbers from another membership,
+   or none. Candidate: read only rows with `s.updated_at >= g.updated_at`.
+4. **Unscoped and fanned-out reads.** The report reads the group's whole `ds_control_group_statistics`
+   per section; the card sends one `/metrics/control-group-statistics` per panel, each re-authorizing
+   and re-resolving the group. Scope by `cur`'s dashboard and panel ids; add a batch endpoint.
+5. **Units.** The worker picks a control row's unit by `DISTINCT ON` order, not recency, and the card
+   does not rescale control values by unit while the report does.
+6. **Design polish.** The graph's series table shows equal min/mean/max for the flat mean line; an
+   empty "Control group" row and footer remain when there is no mean; the caption under the picker
+   lists up to five long run ids and repeats the run count; the field label still says "Select Test
+   Run"; the two pickers describe the control group in different words; `SavePresetModal`'s baseline
+   chip uses mode-blind `error.dark` (pre-existing styling).
+7. **Simplification (advisory).** `ParseUUIDPipe`/`ParseIntPipe` instead of the hand-rolled checks in
+   `getControlGroupStatistics`; `ControlGroupInfo` duplicates `ControlGroupSummary`;
+   `ControlGroupSqlRunner` duplicates `series-grouping/run-scope.ts`'s `SqlRunner`;
+   `getControlGroupComparison` re-implements the run-vs-run selection helpers.
+8. **The card's CURRENT side still lets the metrics source win.** v0.2.97.52 made the control side
+   AND the dashboard and source ids, but `findDSMetricStatisticsMultiple` (shared with run-vs-run
+   and Trends) still takes the source alone, and the card pairs by series name on a response that
+   carries no dashboard id. On a source shared by two dashboards the current value can be the other
+   dashboard's. Predates the control group; fix on the shared read and check Trends.
+9. **A partly paired report section still counts never-compared rows as "within range".** The
+   empty-state rule covers a section where NOTHING pairs; beside pooled series, every URL or "All
+   aggregated" row (and in run-vs-run, every series missing from the baseline run) is rank 0 and
+   lands in the ok tally and its filter chip. Needs a "not compared" band in the renderer, which
+   touches the CSS-only filter contract (see "The Comparisons groups and filters run with no script"
+   in `apps/api/CLAUDE.md`).
+10. **Failures read as facts.** `getControlGroupForRun` maps a database error to "no control group
+    yet" in a stored report; the web caches a failed `fetchControlGroup` as "no group" for the
+    session, and maps a 4xx/5xx statistics answer to "not pooled".
+11. **A zero baseline reads as "within range".** `percentDiff` returns null for a 0 baseline, so a
+    healthy group's 0% error rate against 5% now is neutral. Pre-existing, but common in this mode.
+12. **The sentinel is not reserved.** A run whose id is literally `control-group` (or `previous`,
+    `previous-successful`) would be read as the sentinel. Reserve the names at ingestion.
+
+### Two Compare-card wirings for the control group have no test
+
+**Priority:** P3
+**Origin:** review of PR #711 (2026-11-08).
+**Why:** Both were checked by hand in the running app, and nothing pins them. `CompareCard` hands `useComparePresets`
+`compareData.baselineOptions` rather than `relatedTestRuns`; revert that and a preset saved against the control group
+silently stops restoring its baseline (series load, card renders nothing). `MetricsComparisonTable` passes
+`{ mean: row.byColumn.avg?.selected_value }` to `ComparisonPlot`; mis-key it and the flat mean line disappears. The
+existing tests feed the hook and the plot hand-built props, so neither revert fails a test. Needs a render of each
+parent, not of the child.
 
 ### A late template load in the settings dialog can overwrite a different template
 
