@@ -801,7 +801,11 @@ preset save — and makes everything that would treat the id as a run a bug unle
    `/metrics/control-group-statistics/:run` (pooled `ds_control_group_statistics`), never from the
    rows of `ds-metric-statistics`, which would match nothing for the sentinel. URL panels and the
    synthetic "All aggregated" series have no pooled rows: they are fetched for the current run alone
-   and shown with an empty baseline, never a stand-in.
+   and shown with an empty baseline, never a stand-in. `fetchControlGroupStatistics` sends the
+   series' dashboard id together with its metrics source, and the API ANDs them: one source can
+   back several dashboards, and filtering on the source is what anomaly detection does, so a series
+   whose source changed gets no control value, as it is incomparable there. A non-uuid dashboard id
+   (a synthetic list entry) is not sent.
 2. **The graph.** `fetchGraphData` omits `baselineTestRunId` (now optional on
    `ds-metrics-comparison`), and `ComparisonPlot` draws the group's pooled mean — the `avg` cell's
    `selected_value` — as a flat dashed line, since a pooled distribution has no time series.
@@ -815,6 +819,20 @@ preset save — and makes everything that would treat the id as a run a bug unle
 
 The group is fetched once per run on first expand (`undefined` = not asked yet, `null` = none), so
 a preset applied before it lands leaves the selector alone, as for a missing run.
+
+Two things in `useCompareData` keep the modes from bleeding into each other (v0.2.97.52):
+
+- **An open graph closes when the baseline id changes.** `graphData` holds what was fetched for
+  the old baseline, and the table re-renders the open row against the new one: leaving the
+  control group for a run drew "Baseline (null)" with no line. `toggleGraph` refetches on open,
+  so closing is enough for a graph that has landed. One still loading when the baseline changes
+  is dropped in `useCompareHandlers` (`baselineIdRef`): `fetchGraphData` resolves `false`, so the
+  late answer neither writes `graphData` nor reopens the row under the new baseline.
+- **Only the latest `fetchMetricsComparison` writes state** (`comparisonRequestRef`). The
+  control-group branch waits on an extra request per panel, so it routinely answers after a run
+  picked later and would otherwise fill the table with the group's numbers under the run's
+  legend. The empty-selection arm bumps the counter too, so a request still out cannot
+  repopulate a cleared table.
 
 ### An SLO with no targets must not borrow the panel's series
 

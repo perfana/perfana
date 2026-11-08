@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.52] - 2026-11-08
+
+### Fixed
+- **Compare card: switching the baseline no longer leaves a stale graph open.** Moving from the control group to a run kept the open graph, which then read "Baseline (null)" with no baseline line until it was closed and opened again. An open graph now closes when the baseline changes. A slow comparison request can also no longer overwrite a newer one. Before, picking a run while the control group was still loading could fill the table with the group's numbers under the run's name.
+- **Report: a control-group comparison where nothing pairs says so, instead of reporting everything within range.** When the group's pooled statistics were missing, held another source, or the section selected only series anomaly detection does not pool (the URL panels and "All aggregated"), every row read "vs –" and was counted as within range, and a stored CI report kept that. The section now shows an empty state saying why. When it is the run itself that has no statistics, the message names the run instead. A row graph whose section leaves out the Avg column now says that is why no mean is drawn, and the mean line uses the control group's own unit.
+- **Control-group rows now pair the way anomaly detection does: by metrics source as well as dashboard, panel and series.** A series anomaly detection calls incomparable, for example because its metrics source changed since the group's runs, showed a delta and a coloured band in the report. The Compare card could pair one dashboard's value with another's when two dashboards share a metrics source. Both now leave such a series without a baseline.
+- **Smaller control-group fixes.**
+  - A graph that was still loading when the baseline changed no longer reopens under the new baseline.
+  - The group's run count no longer reads 0 beside a list of runs.
+  - A control value with no unit takes the series' unit instead of being scaled as unitless.
+  - An out-of-range `panelId` is answered with a 400, not a 500.
+- **API docs.** `GET /api/metrics/control-group/:testRunId` is documented as answering a 200 with an empty body when there is no group. It never sent `null`. `count` from `GET /api/metrics/control-group-statistics/:testRunId` is documented as the mean per-run sample count. The compare preset API documents the `control-group` baseline value. The user guide's "Compare test runs" page now explains the Control group option.
+
 ## [0.2.97.51] - 2026-11-07
 
 ### Added

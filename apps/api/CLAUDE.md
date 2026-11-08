@@ -1090,23 +1090,38 @@ group name back to its members. Five things about it:
 Compare card and the report's Comparisons section compare a run against its control group instead
 of one run. `modules/metrics/control-group-baseline.ts` is the one place that finds the group and
 reads its pooled `ds_control_group_statistics`; `MetricsService` (two new routes) and
-`ReportDataFetcherService.getControlGroupComparison` both go through it. Four things to keep:
+`ReportDataFetcherService.getControlGroupComparison` both go through it. Five things to keep:
 
 1. **The group is the one the latest `ds_adapt_conclusion` names**, falling back to the group keyed
    on the run's own id — the same group the Regressions section and the anomaly card describe.
    Neither table has an RLS policy or an org column the caller can be checked against, so every
    reader authorizes the CURRENT run first and reads the group only after; the report path reads
    it only once the run's own org-filtered statistics have answered.
-2. **Pair on `(application_dashboard_id, panel_id, metric_name)`**, ADAPT's identity, not on the
-   labels the run-vs-run path pairs on. A control group shares the run's environment, which is
-   also why `dashboardMap` is ignored with it.
+2. **Pair on dashboard id, panel, series AND metrics source** (v0.2.97.52), not on the labels the
+   run-vs-run path pairs on. ADAPT joins the control rows on `metrics_source_id IS NOT DISTINCT FROM` +
+   panel + series (`sql-builder.ts`), so a series whose source changed since the group's runs (a
+   renamed JMeter scenario is the known case) is "incomparable" there; leaving the source out of
+   the key made the report and the card show a delta and a band for it. The dashboard id keeps two
+   dashboards that share one source apart, which is why `loadControlGroupStatistics` ANDs both
+   ids rather than letting the source win, and the web client sends both (a non-uuid dashboard id
+   is dropped, since it names no dashboard). A control group shares the run's environment, which
+   is also why `dashboardMap` is ignored with it.
 3. **Never invent a baseline for an unpooled series.** URL panels and the synthetic "All
    aggregated" series have no pooled rows; `getAggregatedSeriesRows` and `getUrlComparison` take
-   a `null` baseline run for this and emit the current value with an empty baseline.
+   a `null` baseline run for this and emit the current value with an empty baseline. That is only
+   shown beside series that DO pair — see item 5.
 4. **The sentinel is stored in `compare_filter_presets.baseline_test_run_id`.** `baselineRunOf`
    keeps it out of the run access checks, the org-inheritance parent lookup and the
    release/annotations enrichment. A new reader of that column that treats it as a run id
    reintroduces a 404 on save for every non-admin.
+5. **`getControlGroupComparison` has two empty answers, one rule, and the renderer words them
+   apart** (v0.2.97.52). `null` means there is nothing to show at all (the run has no statistics for the
+   source; the group is never read then). An empty `rows` list means there are rows but not one
+   has a baseline: the selection holds only unpooled series, the group's `control-group-statistics`
+   stage timed out, or its rows are under another source. Every exit goes through the same
+   `answer()` check. Returning baseline-less rows instead counts every one "within range" (the
+   renderer's rank-0 branch), which a stored CI report keeps forever. A partly paired section keeps
+   its unpaired rows, as run-vs-run does.
 
 ### Series grouping rules: who may write them, and what apply does
 
