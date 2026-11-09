@@ -174,67 +174,82 @@ describe('fields Edit cannot change are left to the server', () => {
   });
 });
 
-// Value: protects=a threshold edited on an SLO whose record has no unit (a perf-test SLO saved
-// before its panel carried one) is converted to the panel's unit, the unit the save now stores;
-// fails_when=updateSlo converts only in the record's unit, so "0.5s" on a ms panel is stored as
-// 0.5 and labelled ms; why_new=no handler test covered a unit-less record; seam=none;
-// no_claim=the API turning configuration.yAxesFormat into metric_unit (covered server-side).
-describe('a record with no unit converts in the panel unit', () => {
-  const perfPanel = { id: 201, title: 'Request RT Avg', yAxesFormat: 'ms' } as unknown as SLOFormData['selectedPanel'];
-
-  it('stores "0.5s" as 500 on a ms panel when the record has no unit', async () => {
+// Value: protects=the save converts into the form's ONE thresholdUnit and labels the result with
+// that same unit, whatever the selected panel object carries; fails_when=updateSlo reads the
+// record or the panel for either half again, so the stored number and its label disagree (an SLO
+// that always passes or always fails); why_new=v0.2.97.58 converted in the record's unit and
+// labelled with the panel's; seam=none; no_claim=how the form decides thresholdUnit (useEditSLOForm
+// and adoptPanelUnit tests) and the API copying yAxesFormat into metric_unit (server-side).
+describe('the save converts into and labels with thresholdUnit alone', () => {
+  async function save(sloFormData: SLOFormData, bm: Benchmark = benchmark) {
     mockFetch.mockResolvedValue(okResponse());
-
-    const { result } = setup({ ...formData, source: 'performance-metrics', selectedPanel: perfPanel, requirementValue: '0.5s' });
+    const { result } = setup(sloFormData, bm);
     await act(async () => {
       result.current.handleSaveDialogConfirm('none');
     });
+    return JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+  }
+  const panel = (yAxesFormat?: string) =>
+    ({ id: 7, title: 'Some panel', yAxesFormat }) as unknown as SLOFormData['selectedPanel'];
 
-    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+  it('stores "0.5s" as 500 when thresholdUnit is ms', async () => {
+    const body = await save({ ...formData, selectedPanel: panel('ms'), thresholdUnit: 'ms', requirementValue: '0.5s' });
     expect(body.requirementValue).toBe('500');
     expect(body.configuration).toMatchObject({ yAxesFormat: 'ms', requirement: { value: '500' } });
   });
 
-  // A unit-less record on a percentunit panel was displayed as its raw 0-1 value, so the save
-  // must not scale it again (#719): 0.9 stays 0.9, never 0.009.
-  it('does not rescale a unit-less record on a percentunit panel', async () => {
-    mockFetch.mockResolvedValue(okResponse());
-
-    const pctPanel = { id: 7, title: 'Pool in use', yAxesFormat: 'percentunit' } as unknown as SLOFormData['selectedPanel'];
-    const { result } = setup({ ...formData, selectedPanel: pctPanel, requirementValue: '0.9' });
-    await act(async () => {
-      result.current.handleSaveDialogConfirm('none');
-    });
-
-    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
-    expect(body.requirementValue).toBe('0.9');
+  // A Grafana panel whose unit changed since the SLO was made: the record (and so thresholdUnit)
+  // is ms, the live panel s. Converting in one and labelling with the other mis-scales by 1000x.
+  it('labels with thresholdUnit, not the live panel unit, when they differ', async () => {
+    const body = await save({ ...formData, selectedPanel: panel('s'), thresholdUnit: 'ms', requirementValue: '0.5s' });
+    expect(body.requirementValue).toBe('500');
+    expect(body.configuration.yAxesFormat).toBe('ms');
   });
 
-  // An explicit "90%" is unambiguous: it converts to 0.9, the scale validation checked and the
-  // percentunit data uses. Stored as 90 it would make the SLO always pass.
-  it('converts a typed "90%" on a percentunit panel for a unit-less record', async () => {
-    mockFetch.mockResolvedValue(okResponse());
-
-    const pctPanel = { id: 7, title: 'Pool in use', yAxesFormat: 'percentunit' } as unknown as SLOFormData['selectedPanel'];
-    const { result } = setup({ ...formData, selectedPanel: pctPanel, requirementValue: '90%' });
-    await act(async () => {
-      result.current.handleSaveDialogConfirm('none');
-    });
-
-    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+  // A bare number on a percentunit SLO was shown as 0-100 (useEditSLOForm), so it is scaled back.
+  // That includes a Duplicate re-pointed at a percentunit panel, whose record was not percentunit.
+  it('scales a bare number on a percentunit thresholdUnit back to 0-1', async () => {
+    const withMs = { ...benchmark, metric_unit: 'ms' } as unknown as Benchmark;
+    const body = await save({ ...formData, selectedPanel: panel('percentunit'), thresholdUnit: 'percentunit', requirementValue: '90' }, withMs);
     expect(body.requirementValue).toBe('0.9');
+    expect(body.configuration.yAxesFormat).toBe('percentunit');
   });
 
-  it("keeps the record's own unit when it has one", async () => {
-    mockFetch.mockResolvedValue(okResponse());
+  // #719: no thresholdUnit means the value was shown as stored, so a bare 0.9 stays 0.9 even on a
+  // percentunit panel (adoptPanelUnit declined the unit because the user had typed over it).
+  it('stores a bare number unscaled when there is no thresholdUnit', async () => {
+    const body = await save({ ...formData, selectedPanel: panel('percentunit'), requirementValue: '0.9' });
+    expect(body.requirementValue).toBe('0.9');
+    expect(body.configuration.yAxesFormat).toBeNull();
+  });
 
-    const withUnit = { ...benchmark, metric_unit: 's' } as unknown as Benchmark;
-    const { result } = setup({ ...formData, source: 'performance-metrics', selectedPanel: perfPanel, requirementValue: '0.5s' }, withUnit);
-    await act(async () => {
-      result.current.handleSaveDialogConfirm('none');
+  // A typed suffix is unambiguous and converts.
+  it.each([
+    ['90%', 'percentunit', '0.9'],
+    ['500ms', 's', '0.5'],
+  ])('converts a typed %p into %s', async (requirementValue, thresholdUnit, stored) => {
+    const body = await save({ ...formData, selectedPanel: panel(thresholdUnit), thresholdUnit, requirementValue });
+    expect(body.requirementValue).toBe(stored);
+  });
+
+  // Dynatrace: the synthetic and unmatched metric carry no unit, the record does. The revert of
+  // 48646fc6 was this case converting with no unit, "1s" stored as 1 on a ms SLO.
+  it('converts a Dynatrace SLO whose metric carries no unit in thresholdUnit', async () => {
+    const body = await save({
+      ...formData,
+      source: 'dynatrace',
+      selectedPanel: { panelTitle: 'Response time' } as unknown as SLOFormData['selectedPanel'],
+      thresholdUnit: 'ms',
+      requirementValue: '1s',
     });
+    expect(body.requirementValue).toBe('1000');
+    expect(body.configuration.yAxesFormat).toBe('ms');
+  });
 
-    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
-    expect(body.requirementValue).toBe('0.5');
+  // A trend is %/h: nothing converts, but the base unit is kept for a later edit back to avg.
+  it('does not convert a trend but keeps its base unit', async () => {
+    const body = await save({ ...formData, evaluateType: 'trend', selectedPanel: panel('percentunit'), thresholdUnit: 'percentunit', requirementValue: '5' });
+    expect(body.requirementValue).toBe('5');
+    expect(body.configuration.yAxesFormat).toBe('percentunit');
   });
 });

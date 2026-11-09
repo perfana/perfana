@@ -14,7 +14,8 @@ import {
   UseEditSLOFormReturn,
   initialSLOFormData,
 } from '../types';
-import { SUPPORTED_PANEL_TYPES, convertDecimalToPercentageForDisplay, storedThresholdUnit } from '../utils/slo-validators';
+import { SUPPORTED_PANEL_TYPES, adoptPanelUnit, convertDecimalToPercentageForDisplay, storedThresholdUnit, thresholdUnitFormat } from '../utils/slo-validators';
+import { getEffectiveUnitFormat } from '../utils/slo-formatters';
 import { isPerformanceTest } from '@/lib/metrics-source-utils';
 import { perfPanelUnitCode } from '@/lib/units';
 
@@ -175,8 +176,10 @@ export function useEditSLOForm({
       // here, a duplicate-target 409 raised on one SLO is still on screen when the user
       // reopens Edit on a different one.
       setValidationErrors({});
-      // Show a percentunit decimal as a percentage, in the same unit updateSlo saves in.
-      const effectiveUnitFormat = storedThresholdUnit(benchmark);
+      // The record's unit is the form's one thresholdUnit (see SLOFormData). A percentunit
+      // decimal is shown as a percentage; a trend's %/h number is shown as stored.
+      const thresholdUnit = storedThresholdUnit(benchmark);
+      const effectiveUnitFormat = thresholdUnitFormat({ thresholdUnit, evaluateType: benchmark.evaluate_type || 'avg' });
       const displayRequirementValue = convertDecimalToPercentageForDisplay(
         benchmark.requirement_value,
         effectiveUnitFormat
@@ -222,8 +225,7 @@ export function useEditSLOForm({
             id: rawPanelId != null ? Number(rawPanelId) : undefined,
             title: panelTitle,
             type: 'timeseries',
-            yAxesFormat: benchmark.configuration?.yAxesFormat,
-            metricUnit: benchmark.configuration?.metricUnit || benchmark.metric_unit,
+            yAxesFormat: thresholdUnit,
           };
 
       setSloFormData({
@@ -241,6 +243,7 @@ export function useEditSLOForm({
         validateWithDefaultIfNoData: benchmark.configuration?.validateWithDefaultIfNoData || false,
         validateWithDefaultIfNoDataValue: displayDefaultValue,
         enabled: benchmark.enabled !== false,
+        thresholdUnit,
       });
 
       // Also fetch real dashboards in background — if a match is found, it will
@@ -359,7 +362,11 @@ export function useEditSLOForm({
       if (matchingMetric) {
         // Only upgrade the synthetic panel. After the user re-points the dashboard the
         // panel is null on purpose, and the benchmark's old title must not re-select one.
-        setSloFormData((prev) => (prev.selectedPanel ? { ...prev, selectedPanel: matchingMetric } : prev));
+        // The metric's unit is adopted only when the record had none: an unmatched or unit-less
+        // metric must never take the record's unit away (1s was once saved as 1 ms that way).
+        setSloFormData((prev) => (prev.selectedPanel
+          ? adoptPanelUnit({ ...prev, selectedPanel: matchingMetric }, getEffectiveUnitFormat(matchingMetric), benchmark)
+          : prev));
       }
     }
   }, [availableDynatraceMetrics, benchmark]);
@@ -417,7 +424,13 @@ export function useEditSLOForm({
       if (matchingPanel) {
         // Only upgrade the synthetic panel. After the user re-points the dashboard the
         // panel is null on purpose, and the benchmark's old title must not re-select one.
-        setSloFormData((prev) => (prev.selectedPanel ? { ...prev, selectedPanel: matchingPanel } : prev));
+        // The panel's unit is adopted only when the record had none (adoptPanelUnit).
+        // Only the benchmark's own panel is upgraded: in Duplicate a late fetch for the original
+        // dashboard must not swap back a panel the user picked, which carries its own unit.
+        const panel = matchingPanel as SLOFormData['selectedPanel'];
+        setSloFormData((prev) => (prev.selectedPanel && (prev.selectedPanel.id == null || panelId == null || String(prev.selectedPanel.id) === String(panelId))
+          ? adoptPanelUnit({ ...prev, selectedPanel: panel }, getEffectiveUnitFormat(panel), benchmark)
+          : prev));
       }
     }
   }, [availablePanels, benchmark]);
