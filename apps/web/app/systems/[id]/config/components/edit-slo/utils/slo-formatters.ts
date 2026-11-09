@@ -155,8 +155,7 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   gbytes: '2', decgbytes: '2',
 };
 
-export function getRequirementValuePlaceholder(selectedPanel: SloPanel | null | undefined): string {
-  const effectiveUnitFormat = selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
+export function getRequirementValuePlaceholder(effectiveUnitFormat: string | null | undefined): string {
   if (effectiveUnitFormat) {
     return `e.g. ${PLACEHOLDER_VALUES[effectiveUnitFormat] ?? '100'} ${unitLabel(effectiveUnitFormat)}`.trim();
   }
@@ -168,12 +167,11 @@ export function getRequirementValuePlaceholder(selectedPanel: SloPanel | null | 
  */
 export function getRequirementValueHelperText(
   value: string,
-  selectedPanel: SloPanel | null | undefined,
+  effectiveUnitFormat: string | null | undefined,
   evaluateType?: string
 ): string {
-  const effectiveUnitFormat = selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
   // Say what will be stored when the typed unit differs from the panel's, or why it can't be.
-  const result = convertThresholdInput(value, evaluateType === 'trend' ? undefined : effectiveUnitFormat);
+  const result = convertThresholdInput(value, evaluateType === 'trend' ? undefined : effectiveUnitFormat ?? undefined);
   if (result && 'error' in result) return result.error;
   if (result?.from && result.to && unitLabel(result.from) !== unitLabel(result.to)) {
     return `${parseValueWithUnit(value.trim()).value} ${unitLabel(result.from)} = ${result.value} ${unitLabel(result.to)}`;
@@ -190,7 +188,9 @@ export function getRequirementValueHelperText(
 }
 
 /**
- * Get the effective unit format from a panel
+ * A panel's (or Dynatrace metric's) own unit. In Edit this is the LIVE panel's unit, an input
+ * to `adoptPanelUnit` and the metric picker; everything that shows or converts the threshold
+ * reads the form's `thresholdUnit` instead.
  */
 export function getEffectiveUnitFormat(selectedPanel: SloPanel | null | undefined): string | undefined {
   return selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
@@ -199,11 +199,10 @@ export function getEffectiveUnitFormat(selectedPanel: SloPanel | null | undefine
 /**
  * Get the unit chip label for a value
  */
-export function getUnitChipLabel(value: string, selectedPanel: SloPanel | null | undefined, evaluateType?: string): string | null {
+export function getUnitChipLabel(value: string, effectiveUnitFormat: string | null | undefined, evaluateType?: string): string | null {
   // A trend is % of the series mean per hour regardless of what the panel measures.
   if (evaluateType === 'trend') return '%/h';
   const parsed = parseValueWithUnit(value);
-  const effectiveUnitFormat = getEffectiveUnitFormat(selectedPanel);
   const panelUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;
 
   if (parsed.unit || panelUnit?.format) {

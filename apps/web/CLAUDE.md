@@ -867,11 +867,31 @@ Two things to keep:
 - **The Add dialog stores the panel id as `configuration.id`, never `panelId`.** Edit's panel
   upgrade matches `configuration.panelId ?? configuration.id`. Matching `panelId` alone sent every
   UI-created SLO to title and fuzzy matching, and the matched panel's unit is what the save uses.
-- **Edit decides its unit in more than one place.** The display reads the record's unit, while
-  validation and the stored label read the selected panel's. They can disagree, which is a P1 in
-  TODOS.md ("The Edit SLO dialog decides its unit in more than one place"). A single-unit attempt
-  was reverted on the v0.2.97.58 branch because Dynatrace SLOs have no unit on their synthetic
-  panel. Cover that case first.
+- **Edit has one unit, `sloFormData.thresholdUnit`** (v0.2.97.60). It is what the stored value is
+  shown in (percentunit 0-1 as 0-100), what validation, the helper text, the placeholder and the
+  chip read, what the save converts into, and what it sends as `configuration.yAxesFormat`.
+  `thresholdUnitFormat` turns it into "no unit" for a trend, which is %/h. Nothing in Edit reads
+  the selected panel's unit for any of that; doing so again is how a stored number and its label
+  came apart, an SLO that always passes or always fails with nothing logged. It is set in three
+  places only:
+  1. **At open, from the record** (`storedThresholdUnit`): `configuration.yAxesFormat`, then
+     `configuration.metricUnit`, then `metric_unit`, skipping `'%/h'` per candidate, because the
+     API writes that label for a trend and a former trend keeps it after an edit to avg.
+  2. **When the live panel or Dynatrace metric arrives** (`adoptPanelUnit`), only if the record had
+     none. A record with a unit keeps it even when the panel's unit has changed since, and the
+     threshold section says so under the field. A Dynatrace SLO therefore keeps the record's unit
+     whether or not its metric matches; the reverted single-unit attempt took the unit from the
+     panel, which a Dynatrace synthetic or unmatched metric does not have, and saved `1s` as 1 ms.
+     Adopting percentunit re-shows the untouched value scaled, for a non-trend record only, and
+     declines if the user already typed a bare number over it: that number was entered against no
+     unit and is saved as typed (#719, never scaled twice). A typed suffix (`90%`) does not block
+     it: it converts under the adopted unit. Only the benchmark's own panel is upgraded, so in
+     Duplicate a late fetch for the original dashboard cannot swap back a panel the user picked.
+  3. **When Duplicate picks another metric** (`SLOFormFields`): the new metric's unit, since the
+     clone's record unit belongs to the old one.
+
+  For a trend the base unit is still saved in `configuration.yAxesFormat`; the API puts `'%/h'` in
+  `metric_unit` and keeps the configuration, so a later edit back to avg finds the panel's unit.
 
 ### The error rate has one threshold and one set of formatters
 

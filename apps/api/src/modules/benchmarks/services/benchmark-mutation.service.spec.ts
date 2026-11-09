@@ -86,10 +86,9 @@ describe('BenchmarkMutationService', () => {
         {
           provide: BenchmarkTagHelper,
           useValue: {
-            inheritTagsFromDashboard: jest.fn().mockResolvedValue([]),
+            findInScope: jest.fn().mockResolvedValue(null),
+            inheritTagsFromDashboard: jest.fn().mockReturnValue([]),
             getInheritedTagsForUpdate: jest.fn().mockResolvedValue([]),
-            metricsSourceIdOf: jest.fn().mockResolvedValue('ms-new'),
-            grafanaInstanceLabelOf: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -124,12 +123,15 @@ describe('BenchmarkMutationService', () => {
     jest.clearAllMocks();
   });
 
+  const findInScope = () => (service as unknown as { tagHelper: { findInScope: jest.Mock } }).tagHelper.findInScope;
+
   describe('update() re-pointing the dashboard', () => {
     it('moves application_dashboard_id and metrics_source_id together', async () => {
       const before = buildEntity({ id: 'bm-1', application_dashboard_id: 'ad-old', metrics_source_id: 'ms-old' });
       queryService.findOne.mockResolvedValue(before as never);
       benchmarkRepo.findOne.mockResolvedValue(before);
       benchmarkRepo.update.mockResolvedValue({} as never);
+      findInScope().mockResolvedValueOnce({ id: 'ad-new', metricsSourceId: 'ms-new' });
 
       await service.update('bm-1', userId, roles, { applicationDashboardId: 'ad-new' });
 
@@ -156,7 +158,6 @@ describe('BenchmarkMutationService', () => {
   // #720: the web form has no instance label for a dashboard picked from the list and sent
   // 'Default' for every new SLO; the dashboard row knows its instance.
   describe('grafana_instance comes from the dashboard', () => {
-    const labelOf = () => (service as unknown as { tagHelper: { grafanaInstanceLabelOf: jest.Mock } }).tagHelper.grafanaInstanceLabelOf;
     const base = { systemUnderTestId: 'sut-1', testEnvironment: 'production', workload: 'loadTest', evaluateType: 'avg' };
 
     beforeEach(() => {
@@ -166,15 +167,17 @@ describe('BenchmarkMutationService', () => {
     });
 
     it('create() stores the dashboard instance label instead of the posted Default', async () => {
-      labelOf().mockResolvedValueOnce('Demo');
+      findInScope().mockResolvedValueOnce({ id: 'ad-1', grafanaInstance: { label: 'Demo' } });
 
       await service.create(userId, roles, { ...base, applicationDashboardId: 'ad-1', grafanaInstance: 'Default' } as never);
 
-      expect(labelOf()).toHaveBeenCalledWith('ad-1');
+      expect(findInScope()).toHaveBeenCalledWith('ad-1', { systemUnderTestId: 'sut-1', testEnvironment: 'production' });
       expect((benchmarkRepo.create as jest.Mock).mock.calls[0][0]).toMatchObject({ grafana_instance: 'Demo' });
     });
 
     it('create() keeps the posted value when the dashboard has no Grafana instance (Dynatrace, perf metrics)', async () => {
+      findInScope().mockResolvedValueOnce({ id: 'ad-dt', grafanaInstance: null });
+
       await service.create(userId, roles, { ...base, applicationDashboardId: 'ad-dt', grafanaInstance: 'Dynatrace' } as never);
 
       expect((benchmarkRepo.create as jest.Mock).mock.calls[0][0]).toMatchObject({ grafana_instance: 'Dynatrace' });
@@ -185,7 +188,7 @@ describe('BenchmarkMutationService', () => {
       queryService.findOne.mockResolvedValue(before as never);
       benchmarkRepo.findOne.mockResolvedValue(before);
       benchmarkRepo.update.mockResolvedValue({} as never);
-      labelOf().mockResolvedValueOnce('Demo');
+      findInScope().mockResolvedValueOnce({ id: 'ad-new', grafanaInstance: { label: 'Demo' } });
 
       await service.update('bm-1', userId, roles, { applicationDashboardId: 'ad-new' });
 

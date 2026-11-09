@@ -9,7 +9,7 @@ import {
   UseEditSLOHandlersProps,
   UseEditSLOHandlersReturn,
 } from '../types';
-import { validateSLOForm, isFormValid as checkFormValid, toStoredThresholdValue, storedThresholdUnit, thresholdUnitFormat, parseValueWithUnit } from '../utils/slo-validators';
+import { validateSLOForm, isFormValid as checkFormValid, toStoredThresholdValue, thresholdUnitFormat } from '../utils/slo-validators';
 
 export function useEditSLOHandlers({
   benchmark,
@@ -95,20 +95,13 @@ export function useEditSLOHandlers({
       try {
         setSloFormLoading(true);
 
-        // Strip/convert the suffix and scale percentunit back to 0-1, in the unit the dialog displayed
-        // the value in. The evaluate type is the edited one: a trend is %/h and is never scaled.
-        // A record with no unit (a perf-test SLO saved before its panel carried one) falls back to
-        // the panel's, the unit validation already checked against and the one this save stores.
-        // Except a bare number on a percentunit panel: the dialog displayed that record's raw 0-1
-        // value, and scaling it here would store 0.9 as 0.009 (#719). A typed "90%" is
-        // unambiguous and still converts, or it would be stored as 90 against 0-1 data.
-        const recordUnit = storedThresholdUnit({ ...benchmark, evaluate_type: sloFormData.evaluateType });
-        const panelUnit = thresholdUnitFormat(sloFormData);
-        const unitFor = (value: string): string | undefined => recordUnit
-          ?? (panelUnit === 'percentunit' && !parseValueWithUnit(value.trim()).unitId ? undefined : panelUnit);
+        // Convert into the form's one thresholdUnit: the unit the value was shown in, validated
+        // against and labelled with below (none for a trend, which is %/h). A bare number on a
+        // percentunit SLO was shown as 0-100 and is scaled back to 0-1; a typed suffix converts.
+        const unit = thresholdUnitFormat(sloFormData);
         const processedRequirementValue = toStoredThresholdValue(
           sloFormData.requirementValue,
-          unitFor(sloFormData.requirementValue),
+          unit,
         );
 
         // Handle percentunit conversion for default value too
@@ -116,7 +109,7 @@ export function useEditSLOHandlers({
         if (sloFormData.validateWithDefaultIfNoData) {
           processedDefaultValue = toStoredThresholdValue(
             sloFormData.validateWithDefaultIfNoDataValue,
-            unitFor(sloFormData.validateWithDefaultIfNoDataValue),
+            unit,
           );
         }
 
@@ -157,7 +150,9 @@ export function useEditSLOHandlers({
             dashboardUid: sloFormData.selectedDashboard?.dashboard_uid,
             // Grafana panels carry `id`, Dynatrace metrics `panelId` (see useAddSLOHandlers).
             id: sloFormData.selectedPanel?.id ?? sloFormData.selectedPanel?.panelId,
-            yAxesFormat: sloFormData.selectedPanel?.yAxesFormat || sloFormData.selectedPanel?.metricUnit || null,
+            // The same unit the value was converted into, a trend included: the API writes '%/h'
+            // into metric_unit for a trend and keeps this, so an edit back to avg finds it.
+            yAxesFormat: sloFormData.thresholdUnit || null,
             excludeRampUpTime: sloFormData.excludeRampUpTime,
             averageAll: sloFormData.averageAll,
             matchPattern: sloFormData.matchPattern,

@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.60] - 2026-11-09
+
+### Fixed
+- **Editing an SLO saves its threshold in the same unit the dialog showed it in.** The Edit dialog showed the value in one unit, checked and converted it against another, and saved it under a third label, so a threshold could be stored in one unit and read in another: an SLO that always passes or always fails, with nothing logged. One unit now drives all of it. Cases this fixes:
+  - A Grafana panel whose unit changed after the SLO was made: the SLO keeps its own unit, and the dialog now says the panel shows something else.
+  - A former trend SLO edited as an average no longer keeps `%/h` as its unit, so a typed `0.5s` is converted again.
+  - **Duplicate** onto a different panel takes that panel's unit: `90` on a 0-1 percentage panel is saved as 0.9, not 90.
+  - A trend with no stored unit switched to an average on a 0-1 percentage panel is converted the same way.
+  - Dynatrace SLOs keep their unit whether or not the dialog finds their metric, so `1s` is still saved as 1000 ms.
+- **An SLO with no stored unit on a 0-1 percentage panel now opens as a percentage.** It used to show the raw 0.9; it shows 90 and saves 0.9, the same number, under the panel's unit. If you type over the value before the panel has loaded, your number is saved as typed, never scaled twice.
+## [0.2.97.59] - 2026-11-09
+
+### Security
+- **Creating or editing an SLO no longer reads another organization's dashboard.** `POST /api/benchmarks` and `PUT /api/benchmarks/:id` looked up the `applicationDashboardId` in the body by id alone, and copied that dashboard's Grafana instance label (since v0.2.97.56), its tags and its metrics source into the SLO, where the caller could read them back. Nothing checked that the dashboard belonged to the system under test the request was authorized for, and a default deploy has no row-level security to catch it (`DB_ENABLE_RLS_ROLE` is off). The lookup is now limited to the SLO's own system and environment.
+- **An SLO can no longer point at a dashboard outside its system and environment.** Such an id used to be stored as given, so the response told a caller whether another organization's dashboard existed: 201 when it did, 500 when it did not. Both now answer the same 400, as does an id that is not a uuid. The Add and Edit SLO dialogs only offer dashboards of the SLO's own system and environment, so they are unaffected.
+- **A new SLO's `metricsSourceId` has to be its dashboard's.** `POST /api/benchmarks` stored any `metricsSourceId` it was sent. Another organization's id was saved and readable back, and while it was referenced that organization could not delete its own metrics source; a missing id hit the foreign key (500). Anything other than the metrics source of the SLO's `applicationDashboardId` now gets one 400, including an id sent without a dashboard. The web client never sends this field.
+- **Moving an SLO to another system checks that system.** `PUT /api/benchmarks/:id` accepted any `systemUnderTestId`, so an SLO could be moved into another organization's system, where its runs would be checked against it. The target system now has to be one the caller can access, and the SLO takes that system's organization and team, as a new SLO does. The UI never moves an SLO between systems.
+- **A refused system id no longer reveals whether it exists.** Creating, copying and duplicating SLOs answered "System under test X not found" for a missing system and "You do not have access to this system" for another organization's. Both now give the same 403.
+
 ## [0.2.97.58] - 2026-11-09
 
 ### Fixed
