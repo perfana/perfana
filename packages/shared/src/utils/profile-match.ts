@@ -1,6 +1,9 @@
 /**
  * Which profiles a test run matches: the one rule shared by grafana-sync's auto-config (profile
- * dashboards and SLOs) and the API's golden-path applier (profile compare-config templates).
+ * dashboards and SLOs) and the API's golden-path applier (profile compare-config templates). The
+ * rule is shared; the organization each caller passes is its own: grafana-sync passes the run's,
+ * the applier the application dashboard's (NOT NULL, and the organization the templates' rows
+ * belong to). The two agree whenever a run's organization is its system's.
  *
  * A profile matches a run when they share at least one tag AND both belong to the same
  * organization. It FAILS CLOSED on a missing organization, in both directions:

@@ -524,6 +524,12 @@ describe('CompareTemplatesService', () => {
       await expect(service.findOne(id, [ORG_B])).rejects.toThrow(NotFoundException);
     });
 
+    it('accepts the route profile id in upper case, as ParseUUIDPipe does', async () => {
+      const id = '11111111-0000-4000-8000-000000000016';
+      build([profileTemplate(id, P_JVM)]);
+      await expect(service.findOne(id, [ORG_A], P_JVM.toUpperCase())).resolves.toMatchObject({ id, profileId: P_JVM });
+    });
+
     it("answers 404 when the route's profile is not the template's", async () => {
       const id = '11111111-0000-4000-8000-000000000003';
       build([profileTemplate(id, P_JVM), { id: '11111111-0000-4000-8000-000000000004', organization_id: ORG_A, panel_id: 1, metric_classification: 'x' }]);

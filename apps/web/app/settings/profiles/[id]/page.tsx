@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
   Box, Typography, Card, CardContent, Divider, CircularProgress,
@@ -49,7 +49,8 @@ export default function ProfileDetailsPage() {
 
   const [activeTab, setActiveTab] = useState(() => tabFromParam(searchParams?.get('tab')));
   // Read fresh when the delete confirmation opens: templates can change on the tab in between.
-  const [templateCount, setTemplateCount] = useState<number | undefined>(undefined);
+  // undefined = not read yet, null = the fresh read failed (the sentence then hedges).
+  const [templateCount, setTemplateCount] = useState<number | null | undefined>(undefined);
   // Delete stays disabled until that fresh count has landed, so the warning is seen before confirming.
   const [countLoading, setCountLoading] = useState(false);
   const [snackbar, setSnackbar] = useState<SnackbarState>({ open: false, message: '', severity: 'success' });
@@ -74,15 +75,25 @@ export default function ProfileDetailsPage() {
 
   const templateScope = useMemo<CompareTemplateScope>(() => ({ kind: 'profile', profileId }), [profileId]);
 
+  // Only the latest read may write: reopening the dialog while an earlier read is still out
+  // must not let that one clear countLoading or overwrite the count.
+  const countRequest = useRef(0);
   const openDeleteDialog = () => {
+    const seq = ++countRequest.current;
     setTemplateCount(profile?.adaptTemplateCount);
     setCountLoading(true);
     setDeleteDialogOpen(true);
-    // On failure the seeded count stays, and the dialog is usable again.
     fetchProfile(profileId)
-      .then((fresh) => setTemplateCount(fresh.adaptTemplateCount))
-      .catch(() => undefined)
-      .finally(() => setCountLoading(false));
+      .then((fresh) => {
+        if (seq === countRequest.current) setTemplateCount(fresh.adaptTemplateCount);
+      })
+      // A failed read must not leave a stale count (0 says nothing): warn without a number.
+      .catch(() => {
+        if (seq === countRequest.current) setTemplateCount(null);
+      })
+      .finally(() => {
+        if (seq === countRequest.current) setCountLoading(false);
+      });
   };
 
   const handleBack = () => router.push('/settings/profiles');

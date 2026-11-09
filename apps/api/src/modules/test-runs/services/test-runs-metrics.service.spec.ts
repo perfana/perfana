@@ -804,7 +804,7 @@ describe('TestRunsMetricsService', () => {
         expect(summary).not.toContain('decided by template id');
       });
 
-      it("rebuilds a profile-owned row from its base when the next run's tags do not match", async () => {
+      it("rebuilds a profile-owned row it merged from a machine seed from its base when the next run's tags do not match", async () => {
         const base = {
           thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
           metricClassification: { classification: 'none', higherIsBetter: null },
@@ -814,7 +814,9 @@ describe('TestRunsMetricsService', () => {
         templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
         compareConfigRepo.find.mockResolvedValue([
           {
-            id: 'cfg-1', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null, updated_by: 'system:golden-path',
+            // The worker seeded it (created_by), the template merged into it: its base is the seed.
+            id: 'cfg-1', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null,
+            created_by: 'worker-pipeline', updated_by: 'system:golden-path',
             template_base: base, template_id: 'p-tmpl',
             config_data: { ...base, thresholds: { ...base.thresholds, absoluteThreshold: 3 }, metricClassification: { classification: 'USE_saturation', higherIsBetter: null } },
           },
@@ -826,6 +828,62 @@ describe('TestRunsMetricsService', () => {
           { id: 'cfg-1', updated_by: 'system:golden-path' },
           { config_data: base, template_id: null },
         );
+        expect(compareConfigRepo.delete).not.toHaveBeenCalled();
+      });
+
+      /**
+       * Value: protects=an untagged run is compared on ADAPT's own default after a tagged one, not on the insert defaults;
+       *   fails_when=a row the applier inserted for a profile template is rebuilt to INSERT_BASE (mean) instead of removed,
+       *   or removed without marking its results stale;
+       *   why_new=the rebuild case above is a merged machine seed, whose base IS the panel's own config;
+       *   seam=none; no_claim=the stale UPDATE's effect on Postgres (SQL text asserted, not executed).
+       */
+      it("removes the row it inserted for a profile template once the run's tags no longer match, and marks its results stale", async () => {
+        const base = {
+          thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
+          metricClassification: { classification: 'none', higherIsBetter: null },
+          defaultValueIfControlGroupMissing: 0,
+        };
+        templateRepo.find.mockResolvedValue([tmpl({ id: 'p-tmpl', profile_id: 'p-jvm', organization_id: 'org-a', config_overrides: { absThreshold: 3 } })] as any);
+        templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            id: 'cfg-ins', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null,
+            created_by: 'system:golden-path', updated_by: 'system:golden-path', template_base: base, template_id: 'p-tmpl',
+            config_data: { ...base, thresholds: { ...base.thresholds, absoluteThreshold: 3 } },
+          },
+        ] as any);
+        compareConfigRepo.delete.mockResolvedValue({ affected: 1, raw: [] } as any);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: [] });
+
+        expect(compareConfigRepo.delete).toHaveBeenCalledWith({ id: 'cfg-ins', updated_by: 'system:golden-path' });
+        expect(compareConfigRepo.update).not.toHaveBeenCalled();
+        expect(compareConfigRepo.query).toHaveBeenCalledWith(
+          expect.stringMatching(/UPDATE ds_adapt_results\s+SET is_stale = true/),
+          ['sut-uuid-1', 'production', 'loadTest', 'dash-1', 7, null],
+        );
+      });
+
+      it('marks nothing stale when a user saved the row while the applier ran (the delete matched no row)', async () => {
+        const base = {
+          thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
+          metricClassification: { classification: 'none', higherIsBetter: null },
+          defaultValueIfControlGroupMissing: 0,
+        };
+        templateRepo.find.mockResolvedValue([]);
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            id: 'cfg-ins', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null,
+            created_by: 'system:golden-path', updated_by: 'system:golden-path', template_base: base, template_id: 'gone', config_data: base,
+          },
+        ] as any);
+        compareConfigRepo.delete.mockResolvedValue({ affected: 0, raw: [] } as any);
+
+        await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(compareConfigRepo.delete).toHaveBeenCalledTimes(1);
+        expect(compareConfigRepo.query).not.toHaveBeenCalled();
       });
 
       it('reads no profiles when no template belongs to one', async () => {

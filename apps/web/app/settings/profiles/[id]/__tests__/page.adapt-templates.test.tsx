@@ -92,6 +92,23 @@ describe('ProfileDetailsPage: ADAPT templates', () => {
   });
 
   /**
+   * Value: protects=a failed fresh count still warns that ADAPT templates go with the profile;
+   *   fails_when=the page keeps the page-load count (0 says nothing), or Delete stays disabled forever;
+   *   why_new=the case above covers only a read that succeeds; seam=none; no_claim=the API error itself.
+   */
+  it('warns without a number, and re-enables Delete, when the fresh count cannot be read', async () => {
+    mockProfileRef.current = { ...profile, adaptTemplateCount: 0 };
+    mockFetchProfile.mockRejectedValue(new Error('network'));
+    render(<ProfileDetailsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /delete profile/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText(/It also deletes the profile's ADAPT templates, if it has any/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeEnabled();
+  });
+
+  /**
    * Value: protects=templatesPageHref's profile link (?tab=adapt-templates) opens that profile's templates tab;
    *   fails_when=the page's tab-param map and the link builder drift apart, landing the link on Dashboards;
    *   why_new=lib/compare-templates.test pins the href only; the page side of the same contract was untested;

@@ -554,7 +554,7 @@ export class TestRunsMetricsService {
     const started = Date.now();
     const { systemUnderTestId, testEnvironment, workload } = testRun;
     const runTags = testRun.tags ?? [];
-    const counts = { created: 0, merged: 0, rebuilt: 0, rewrote: 0, raced: 0, collided: 0, legacyDiffers: 0 };
+    const counts = { created: 0, merged: 0, rebuilt: 0, rewrote: 0, raced: 0, collided: 0, legacyDiffers: 0, removed: 0 };
     const guarded = new Map<string, number>();
     const ties = new Set<string>();
     const profileTies = new Set<string>();
@@ -678,7 +678,10 @@ export class TestRunsMetricsService {
     // purpose, and a single per-series tweak never blocks the panel's own template.
     const existingConfigs = await this.dsCompareConfigRepo.find({
       where: { system_under_test_id: systemUnderTestId, test_environment: testEnvironment, workload },
-      select: ['id', 'application_dashboard_id', 'panel_id', 'metric_name', 'config_data', 'updated_by', 'template_id', 'template_base'],
+      select: [
+        'id', 'application_dashboard_id', 'panel_id', 'metric_name', 'config_data', 'created_by', 'updated_by', 'template_id',
+        'template_base',
+      ],
     });
     const rowKey = (dashboardId: string, panelId: number, metricName?: string | null) =>
       `${dashboardId}|${panelId}|${metricName ?? ''}`;
@@ -834,6 +837,34 @@ export class TestRunsMetricsService {
           await updateRow(row, { template_base: current, template_id: winner?.id ?? null });
           continue;
         }
+        if (!winner && row.created_by === GOLDEN_PATH_ACTOR && isDeepStrictEqual(row.template_base, cloneJson(INSERT_BASE))) {
+          // The applier inserted this row for a template that no longer wins it: a deleted template,
+          // or a profile template on a run whose tags do not match. Rebuilding it from INSERT_BASE
+          // would leave a row the panel never had (mean, `none`) where ADAPT otherwise uses its own
+          // default (median, unclassified), so untagged runs would silently switch aggregation after
+          // a single tagged one. Delete it instead, conditional on the author the snapshot saw, and
+          // mark its results stale by hand: a delete fires no `trigger_mark_stale_on_config_update`.
+          // eslint-disable-next-line audit-mutation-must-log
+          const removed = await this.dsCompareConfigRepo.delete({ id: row.id, updated_by: row.updated_by ?? IsNull() });
+          if (removed?.affected === 0) {
+            counts.raced++;
+            continue;
+          }
+          counts.removed++;
+          await this.dsCompareConfigRepo.query(
+            `UPDATE ds_adapt_results
+                SET is_stale = true, stale_reason = 'Configuration removed', stale_at = NOW()
+              WHERE EXISTS (SELECT 1 FROM test_runs tr
+                             WHERE tr.test_run_id = ds_adapt_results.test_run_id
+                               AND tr.system_under_test_id = $1 AND tr.test_environment = $2 AND tr.workload = $3)
+                AND application_dashboard_id = $4
+                AND panel_id = $5
+                AND ($6::text IS NULL OR metric_name = $6)
+                AND is_stale = false`,
+            [systemUnderTestId, testEnvironment, workload, row.application_dashboard_id, row.panel_id, row.metric_name ?? null],
+          );
+          continue;
+        }
         const data = rebuildConfig(row.template_base, winner);
         const patch: ConfigPatch = {};
         if (!isDeepStrictEqual(data, row.config_data)) patch.config_data = data;
@@ -856,6 +887,9 @@ export class TestRunsMetricsService {
       ...(ties.size > 0 ? [`decided by template id: ${[...ties].join(', ')}`] : []),
       ...(counts.legacyDiffers > 0
         ? [`${counts.legacyDiffers} pre-v0.2.97.54 row(s) left alone because their template would change them (possibly a hand edit)`]
+        : []),
+      ...(counts.removed > 0
+        ? [`${counts.removed} applier-inserted row(s) removed: no template wins them now, so ADAPT's default applies`]
         : []),
       ...(counts.raced > 0 ? [`${counts.raced} row(s) skipped: edited while this ran`] : []),
       ...(counts.collided > 0 ? [`${counts.collided} insert(s) skipped: row created concurrently`] : []),

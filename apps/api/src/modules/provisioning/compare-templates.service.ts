@@ -75,6 +75,12 @@ export function describeTemplateKey(v: Partial<KeyFields>): string {
 /** The entity's optional columns read as the codec's nullable ones. */
 const asColumns = (row: ProvisionedTemplateDsCompareConfig): ExportRow => row as unknown as ExportRow;
 
+/**
+ * Caller-supplied text (a dashboard uid, panel title or metric name, a profile name) is logged
+ * without CR/LF, so a value cannot forge a log line. The codec only requires it to be non-blank.
+ */
+const forLog = (value: string): string => value.replace(/[\r\n]/g, '');
+
 const profileRef = (profile: Profile): TemplateProfileRef => ({ id: profile.id, organizationId: profile.organizationId });
 
 /**
@@ -175,7 +181,9 @@ export class CompareTemplatesService {
     this.auditService.logCreate(saved as unknown as OwnedResource, {
       organizationIdOverride: saved.organization_id ?? undefined,
     });
-    this.logger.log(`Compare-config template ${saved.id} created in ${scopeLabel} by ${userId}: ${describeTemplateKey(values)}`);
+    this.logger.log(
+      `Compare-config template ${saved.id} created in ${forLog(scopeLabel)} by ${userId}: ${forLog(describeTemplateKey(values))}`,
+    );
     return this.toDto(saved, resolved.profile);
   }
 
@@ -231,7 +239,7 @@ export class CompareTemplatesService {
     this.auditService.logDelete(snapshot as unknown as OwnedResource, {
       organizationIdOverride: (profile ? profile.organizationId : snapshot.organization_id) ?? undefined,
     });
-    this.logger.log(`Compare-config template ${row.id} deleted by ${userId}: ${describeTemplateKey(asColumns(row))}`);
+    this.logger.log(`Compare-config template ${row.id} deleted by ${userId}: ${forLog(describeTemplateKey(asColumns(row)))}`);
   }
 
   /**
@@ -387,7 +395,8 @@ export class CompareTemplatesService {
     const notFound = new NotFoundException(`Compare-config template ${id} not found`);
     const row = await withRequestEm(this.templateRepo).findOne({ where: { id, system_under_test_id: IsNull() } });
     if (!row) throw notFound;
-    if (profileId !== undefined && row.profile_id !== profileId) throw notFound;
+    // ParseUUIDPipe accepts an upper-case uuid; Postgres returns the column lower-case.
+    if (profileId !== undefined && row.profile_id?.toLowerCase() !== profileId.toLowerCase()) throw notFound;
     let profile: Profile | null = null;
     let organizationId = row.organization_id ?? null;
     if (row.profile_id) {
