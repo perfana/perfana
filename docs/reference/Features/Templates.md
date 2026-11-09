@@ -28,6 +28,8 @@ Profile
 
 A `ProfileBenchmark` normally points at one `ProfileGrafanaDashboard` and is provisioned onto the application dashboards created from that template. With `source: performance-metrics` (v0.2.96.6) it points at no profile dashboard: `dashboard_uid` holds a regex over the worker-written `Performance test metrics <scenario>` dashboard uids (default `^performance-test-metrics-(?!all-aggregated$|default$)`), and grafana-sync fans it out over every matching scenario dashboard of the system. In the profile SLO dialog this is the **Performance test metrics — every scenario** entry; the same shape works from YAML provisioning (`source: performance-metrics`, `dashboardUid` optional). Mechanics in [[Grafana Sync Overview]] → Auto-Configuration.
 
+With `source: dynatrace-hosts` (v0.2.97.61) the same shape targets the Dynatrace host dashboards the API writes when a host is mapped: `dashboard_uid` is a regex over the `dynatrace-dynatrace-host-metrics-<host>` uids (default `^dynatrace-dynatrace-host-metrics-`) and the SLO lands on every mapped host, including hosts mapped later. In the profile SLO dialog this is the **Dynatrace — all hosts** entry. A host's panel id is hashed per host, so `panelId` is one of the fixed ids in `DYNATRACE_HOST_PROFILE_PANELS` (`@perfana/shared/constants`) and grafana-sync resolves each host's real panel by title; YAML provisioning skips an item whose panel id is not in that list. Like `performance-metrics`, the per-host SLOs are written once: editing or deleting the profile SLO does not reach them (TODOS.md, "Profile SLOs").
+
 ### Dashboard Templates
 
 Grafana dashboard templates that can be propagated across multiple systems:

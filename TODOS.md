@@ -300,6 +300,37 @@ comments in 1799 and in "The consolidated schema's policy loops…" below that a
 
 ---
 
+## Profile SLOs
+
+### Profile SLOs are write-once, and "Dynatrace — all hosts" multiplies the stale rows (P2)
+
+**Priority:** P2. **Origin:** /ship red-team review of perfana/perfana#730 (v0.2.97.61).
+
+`BenchmarkProcessorService.createBenchmarkIfNotExists` skips any `benchmarks` row already keyed on
+`(application_dashboard_id, generic_check_id, workload)`, and nothing in grafana-sync, the API or
+the worker updates or deletes benchmarks by `generic_check_id`. `ProfilesService.deleteBenchmark`
+removes only the profile row. So for a `dynatrace-hosts` profile SLO:
+
+- changing its panel, threshold or operator leaves every host judging the old one;
+- switching its source to `grafana` leaves N enabled per-host `dynatrace` SLOs beside the new ones;
+- deleting it leaves them all evaluating forever.
+
+The provisioned rows carry `source = 'dynatrace'`, so `generic_check_id` is the only marker that
+they are profile-owned. Perf-test (`performance-metrics`) profile SLOs have the same behaviour, but
+one host profile row creates hosts x workloads rows.
+
+A related silent case: `DynatraceRepository.updateQuery` regenerates `panel_id` when a query's panel
+title or dashboard label is renamed, so a provisioned host SLO keeps the old `configuration.id`,
+finds no statistics, reports "No targets found" (`meets_requirement` NULL, counted as a pass) and is
+never re-provisioned. Unmapping a host (`deleteHostMetricQueries`) leaves its SLOs behind the same way.
+
+Options: have `ProfilesService.updateBenchmark`/`deleteBenchmark` disable `benchmarks WHERE
+generic_check_id = :id` in the same transaction, or have the processor re-sync existing rows
+(threshold, panel, evaluate type) and disable rows whose host no longer matches. Pin host-query
+panel titles to `HOST_METRICS`, or carry the panel id forward on rename.
+
+---
+
 ## System under test deletion
 
 ### The dashboard delete still writes a non-segmentby `ds_metrics` predicate (P2)
