@@ -918,7 +918,7 @@ row it touches look machine-seeded again.
 ### The ADAPT template dialog sends only the fields that are ticked
 
 `/settings/profiles/adapt-templates` (v0.2.97.55) manages organization and install-wide compare-config
-templates, and the profile page's **ADAPT templates** tab (v0.2.97.56) a profile's; both render
+templates, and the profile page's **ADAPT templates** tab (v0.2.97.57) a profile's; both render
 `adapt-templates/components/AdaptTemplatesPanel.tsx`. The dialog is
 `adapt-templates/components/CompareTemplateDialog.tsx`, its state mapping `adapt-templates/template-form.ts`.
 A definition never carries its scope (`organizationId` or `profile`): the panel's scope names the

@@ -4377,8 +4377,27 @@ re-inserted, or stop marking metric-level-governed series stale when a panel-lev
 workload (the trigger's own predicate), and re-inserting it on the next tagged run marks nothing and
 un-stales nothing (`trigger_mark_stale_on_config_update` is AFTER UPDATE only). A workload whose runs
 alternate tags accumulates stale flags on runs nobody re-analyses; `auto_mark_fresh_on_analysis` clears a
-run's flags when it is re-analysed and its results change. Cosmetic today: no API, web or MCP reader
-consults `ds_adapt_results.is_stale`. Raised by the /ship adversarial review of PR #716.
+run's flags when it is re-analysed and its results change. No verdict reads the flag, but users see it:
+`test-runs-anomaly.service.ts` counts it into the anomaly card's "N outdated results" badge and returns
+the stale row's compare config, so those runs show a re-analyse prompt that a re-analyse may not need.
+Raised by the /ship adversarial review of PR #716.
+
+**Effort:** S **Priority:** P3 **Depends on:** nothing.
+
+### The applier's one-failure bound on stale marking: three gaps (P3)
+
+**What:** In `applyGoldenPathClassifications` (`test-runs-metrics.service.ts`), `staleMarkingFailed`
+stops the hand-written `UPDATE ds_adapt_results` after the first failure in a pass. Three gaps remain:
+(1) it does not cover the stale marking `trigger_mark_stale_on_config_update` does inside each rebuild
+`updateRow`, which runs in the same request and is unbounded per row; (2) any error sets the flag,
+including a one-off that a retry would clear, so one transient failure leaves every later removal in
+the pass unmarked (counted as `staleUnmarked`, never retried); (3) the spec for the bound checks that one
+UPDATE is issued and the error is logged, but not the `staleUnmarked` count in the summary line.
+
+**Why:** The bound was added to keep a slow or locked `ds_adapt_results` from stalling a completion request
+once per removed row. Gap 1 is the same cost on the rebuild path; gap 2 trades accuracy of the
+re-analyse badge for that bound; gap 3 means the summary count can regress unnoticed. Raised by the
+/ship adversarial review of PR #716, after the fix cycles the user authorized.
 
 **Effort:** S **Priority:** P3 **Depends on:** nothing.
 
@@ -4453,7 +4472,7 @@ golden path for that run's tags under the `sut:env:workload` scope lock before A
 **Why:** Profile templates are chosen by the completing run's tags but stored per workload in
 `ds_compare_config`, and ADAPT reads them when the run's analysis starts (`CompareConfigCache`), which
 can wait as Queued behind `HeavyStageMutex`. A differently tagged completion of the same workload in
-between, or a re-evaluate of an older run, judges that run on the other set. Before v0.2.97.56 the set
+between, or a re-evaluate of an older run, judges that run on the other set. Before v0.2.97.57 the set
 changed only when a template was edited, so ordering did not matter. Raised by the /ship red-team
 review of PR #716 (2026-11-09); documented as a caveat in the reference page and apps/api/CLAUDE.md.
 
@@ -4465,7 +4484,7 @@ review of PR #716 (2026-11-09); documented as a caveat in the reference page and
 organization (or key it on organization plus name).
 
 **Why:** `provisionProfiles` upserts by name and overwrites `organizationId`
-(`provisioning.service.ts`). Since v0.2.97.56 a profile's ADAPT templates follow its current
+(`provisioning.service.ts`). Since v0.2.97.57 a profile's ADAPT templates follow its current
 organization, so a `profiles.yaml` entry whose name collides with another tenant's UI profile now moves
 that tenant's templates too, along with its dashboards and SLOs as before. Raised by the /ship red-team
 review of PR #716. The adversarial review raised it to P1 because it is also a deliberate route, not
@@ -4481,7 +4500,7 @@ on A's runs.
 **What:** Make `update-test-run.handler.ts` keep the stored `tags` when the update payload omits them
 (today `tags: data.tags || []`), or confirm the CLI sends tags on every update.
 
-**Why:** Pre-existing, but since v0.2.97.56 the completing run's tags choose its profile ADAPT templates,
+**Why:** Pre-existing, but since v0.2.97.57 the completing run's tags choose its profile ADAPT templates,
 so a completion call without tags reverts every profile-owned row of the workload (and with the applier's
 delete, removes the rows it inserted) and fires the stale trigger. Raised by the /ship adversarial review
 of PR #716.
@@ -4496,7 +4515,7 @@ of PR #716.
 **Why:** `grafana_instances.label` has no unique constraint and duplicate labels across organizations are
 required (root CLAUDE.md, "The first-row class"), so these `findOne`/`find` by label can match another
 tenant's instance: an org admin who guesses a dashboard uid and label can validate against it and read
-its name and tags back. Left out of the v0.2.97.56 profile-scoping fix because it assumes a profile's
+its name and tags back. Left out of the v0.2.97.57 profile-scoping fix because it assumes a profile's
 organization always equals its Grafana instance's, which was not verified against provisioned data; if
 that is wrong, scoping breaks dashboard creation. grafana-sync already resolves the label in the run's
 organization (`dashboard-finder.service.ts`). Also: profile names are unique install-wide, so create and

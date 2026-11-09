@@ -504,7 +504,7 @@ from the body in these places; the code, `apps/api/CLAUDE.md` and
 
 ## Implementation deviations (PR 2b, profile templates, 2026-11-09)
 
-PR 2b (v0.2.97.56) ships the profile half of "Next Steps" item 2 that PR 2 deviation 1 split out. It
+PR 2b (v0.2.97.57) ships the profile half of "Next Steps" item 2 that PR 2 deviation 1 split out. It
 differs from the body in these places; the code, `apps/api/CLAUDE.md` and
 `docs/reference/Features/Compare Config Templates.md` describe what shipped.
 

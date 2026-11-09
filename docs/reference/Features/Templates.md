@@ -46,6 +46,7 @@ Accessible at `/settings/profiles`:
   - Dashboard configuration tab
   - SLO/benchmark configuration tab
   - Deep links configuration tab
+  - ADAPT templates tab (`?tab=adapt-templates`, v0.2.97.57): the profile's compare-config templates, applied only to runs whose tags match the profile. See [[Compare Config Templates]]
 
 ### Template Section Builder
 

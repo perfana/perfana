@@ -869,7 +869,7 @@ fields the current winning template names. Eight things that are easy to undo:
 4. **A template reaches only rows of its own `metric_name` (NULL to NULL)**, so a panel template never
    claims a series-grouping derived row such as `api (sum)`, and an organization template only
    dashboards of its own organization (read from the dashboard, not from the optional `TestRun` field).
-   A profile template (v0.2.97.56) reaches a dashboard only when `profileMatchesRun`
+   A profile template (v0.2.97.57) reaches a dashboard only when `profileMatchesRun`
    (`@perfana/shared/utils/profile-match`, the same rule grafana-sync uses) matches the profile against
    the completing run's tags and the DASHBOARD's organization, and it fails closed on a missing
    organization on either side. Profiles are read with one query, and only when a profile template
@@ -942,7 +942,7 @@ ignores both halves of such a template.
 
 `/compare-templates` (CRUD) and `GET /provisioning/compare-templates/export` (v0.2.97.55) live in
 `modules/provisioning/compare-templates.{controller,service}.ts`, beside the codec they share with
-provisioning, and `/profiles/:id/compare-templates` (v0.2.97.56, `ProfileCompareTemplatesController` in
+provisioning, and `/profiles/:id/compare-templates` (v0.2.97.57, `ProfileCompareTemplatesController` in
 the same file, the same service with a `profile` scope). Seven things to keep:
 
 1. **A definition goes through `parseTemplateItem`, never a validator of its own.** The body is one file
@@ -993,7 +993,7 @@ organization counts towards the file-level `organizationId` decision (a file-lev
 in would skip the item on the next boot), and the item is written as `profile: <name>`, plus its
 profile's `organizationId` when the file spans several organizations. That second half is what stops a
 profile name re-created in another organization from claiming the template: profile names are one
-install-wide namespace, and without a stated organization the mismatch check never runs (v0.2.97.56,
+install-wide namespace, and without a stated organization the mismatch check never runs (v0.2.97.57,
 /ship review). On the provisioning side, `profileId`, `profileName` and `profiles` are refused rather than
 warned about, since ignoring a misspelt scope key widens the template, and such an item is unidentified
 (no key), so it stops the whole prune that boot. Do not report it as an unresolved profile: that spares

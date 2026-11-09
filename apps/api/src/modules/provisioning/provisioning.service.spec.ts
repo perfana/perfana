@@ -1013,7 +1013,7 @@ describe('ProvisioningService', () => {
        * Value: protects=a misspelt profile key neither widens its item nor prunes the template it provisioned;
        *   fails_when=the item is provisioned without its profile, or reported as an unresolved profile, so a
        *   correctly spelt item for the same profile marks it reached and its stored template is pruned;
-       *   why_new=the scope-key refusal is new at v0.2.97.56 review; seam=none; no_claim=the boot log text.
+       *   why_new=the scope-key refusal is new at v0.2.97.57 review; seam=none; no_claim=the boot log text.
        */
       it('refuses an item with a misspelt profile key and prunes nothing that boot, even beside resolved items', async () => {
         templateRepo.find.mockResolvedValue([

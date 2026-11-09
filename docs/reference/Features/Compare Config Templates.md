@@ -21,7 +21,7 @@ saved by hand in the anomaly card are never touched. Design:
 Since v0.2.97.55 templates can also be created, edited and deleted in the UI, and exported back to
 this file ([Managing templates in the UI](#managing-templates-in-the-ui)).
 
-Since v0.2.97.56 a template can belong to a **profile**, and then applies only to runs whose tags match
+Since v0.2.97.57 a template can belong to a **profile**, and then applies only to runs whose tags match
 that profile ([Profile templates](#profile-templates)).
 
 ## The file
@@ -219,8 +219,11 @@ the copy cannot go into the same scope, where it would have the same identity as
 Once a file declares a template a UI copy holds, the next boot takes the copy over and it becomes
 locked too.
 
-Deleting a UI template hands the panels it configured to the next matching template, or rebuilds them
-from their own base configuration, on each workload's next completed run.
+Deleting a UI template hands the panels it configured to the next matching template on each workload's
+next completed run. With none, a row the template system inserted (since v0.2.97.54) is removed, so
+ADAPT's default applies again, and any other row is rebuilt from its own base configuration, which for a
+row from before v0.2.97.54 keeps the template's values (see the table under
+[When templates are applied](#when-templates-are-applied)).
 
 ### The API
 
@@ -243,8 +246,9 @@ is provisioned. The list carries `canWrite`, whether the caller may change that 
 
 The API refuses what the file only warns about: an unknown field (with the same hint the file's
 warning gives, `absoluteThreshold` pointing at `absThreshold`), and a `minSampleCount` that is not a whole
-number of at least 1 (the file floors and clamps it). A body that names `organizationId` is refused
-too. Writes are audit-logged as `provisioned-template-ds-compare-configs`.
+number of at least 1 (the file floors and clamps it). A body that names `organizationId` or `profile` is
+refused too, and so is one that names `profileId`, `profileName` or `profiles`, as in the file. Writes
+are audit-logged as `provisioned-template-ds-compare-configs`.
 
 ### Exporting the file
 
@@ -317,11 +321,11 @@ Golden-path applied for SUT <id>/<env>/<workload>: 3 compare configs created (1 
 
 It is logged at warn when the applier takes over 5000 ms.
 
-## Upgrading to v0.2.97.56
+## Upgrading to v0.2.97.57
 
 - **Migration 1823** adds `profile_id` and rebuilds the unique index with the profile in its scope term.
   No existing template changes identity, so it needs no clean-up first and is safe to re-run.
-- **Do not roll back below v0.2.97.56 while profile templates exist.** An older API knows nothing of
+- **Do not roll back below v0.2.97.57 while profile templates exist.** An older API knows nothing of
   `profile_id`: it reads a profile template as a template of the profile's organization, applies it to
   every run there and lists it with the organization's templates. Migration 1823's `down()` deletes
   profile templates before restoring the old index. **Remove every `profile:` item from
@@ -334,7 +338,7 @@ It is logged at warn when the applier takes over 5000 ms.
   profile's page answers 404 (Profile not found), `/api/compare-templates` and `classify-metric` answer
   500, template provisioning fails, and the golden-path applier is skipped on each completion (logged at
   error). The pages and the applier recover once the migration has run; template provisioning runs only at
-  API start, so restart the API after the migration (the usual deploy order) or file templates stay
+  API start, so restart the API after the migration (nothing orders the API behind it) or file templates stay
   unapplied until the next restart.
 - **grafana-sync's profile matching fails closed** on a missing organization, as the template applier's
   does. Both organization columns are NOT NULL, so no real run or profile is affected.
