@@ -257,7 +257,7 @@ describe('BenchmarkFormDialog', () => {
         />
       );
 
-      // 2 profile dashboards + the synthetic "every scenario" entry.
+      // 2 profile dashboards + the two synthetic entries (every scenario, all Dynatrace hosts).
       expect(screen.getByText(/4 available/i)).toBeInTheDocument();
     });
 

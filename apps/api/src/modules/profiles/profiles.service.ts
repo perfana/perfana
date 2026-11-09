@@ -1101,6 +1101,15 @@ export class ProfilesService {
       // values, so a PUT that switches source cannot leave a Grafana template on a perf-test
       // row or strip the template from a Grafana one. Only touched when one of them is sent.
       const source = updateDto.source ?? benchmark.source;
+      // resolveDashboardColumns checks the synthetic host panel id, but a PUT that sends only
+      // `panelId` never reaches it.
+      if (
+        source === DYNATRACE_HOSTS_PROFILE_SOURCE &&
+        updateDto.panelId !== undefined &&
+        !DYNATRACE_HOST_PROFILE_PANELS.some((p) => p.id === updateDto.panelId)
+      ) {
+        throw new BadRequestException(`panelId ${updateDto.panelId} is not a Dynatrace host panel`);
+      }
       if (
         updateDto.source !== undefined ||
         updateDto.profileDashboardId !== undefined ||

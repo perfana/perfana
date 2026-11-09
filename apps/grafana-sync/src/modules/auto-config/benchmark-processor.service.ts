@@ -242,7 +242,7 @@ export class BenchmarkProcessorService {
         panel,
       );
       this.logger.log(
-        `Created benchmark for profile benchmark ${profileBenchmark.panel_title || profileBenchmark.id}`,
+        `Created benchmark for profile benchmark ${panel?.panelTitle ?? (profileBenchmark.panel_title || profileBenchmark.id)} on dashboard ${applicationDashboard.id}`,
       );
     } else {
       this.logger.debug(

@@ -329,8 +329,9 @@ export class DashboardFinderService {
       string,
       { applicationDashboard: ApplicationDashboard; panelId: number }
     >();
+    const entityById = new Map(entities.map((e) => [e.id, e]));
     raw.forEach((row: { ad_id?: string; dq_panel_id?: number | string }) => {
-      const applicationDashboard = entities.find((e) => e.id === row.ad_id);
+      const applicationDashboard = row.ad_id ? entityById.get(row.ad_id) : undefined;
       const panelId = Number(row.dq_panel_id);
       if (
         !applicationDashboard ||

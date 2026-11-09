@@ -128,3 +128,31 @@ it('keeps provisioning the other hosts when one insert fails', async () => {
 
   expect(updates.insertBenchmarkBasedOnProfileBenchmark).toHaveBeenCalledTimes(2);
 });
+
+it('falls back to the stored title for an id that is not a synthetic host panel', async () => {
+  const { service, finder } = build([]);
+
+  await service.processProfileBenchmarks(
+    testRun,
+    ['dynatrace'],
+    [pb({ panel_id: 999, panel_title: 'Disk Utilization' })],
+  );
+
+  expect(finder.findDynatraceHostPanelsByUidPattern.mock.calls[0][1]).toBe('Disk Utilization');
+});
+
+it('re-running a test run inserts only on hosts that do not have the SLO yet', async () => {
+  const { service, updates, testRunFinder } = build([
+    { applicationDashboard: { id: 'ad-host-a' }, panelId: 1 },
+    { applicationDashboard: { id: 'ad-host-b' }, panelId: 2 },
+  ]);
+  testRunFinder.findBenchmarkForApplicationDashboardOrNull.mockImplementation(async (ad: any) =>
+    ad.id === 'ad-host-a' ? { id: 'existing' } : null,
+  );
+
+  await service.processProfileBenchmarks(testRun, ['dynatrace'], [pb()]);
+
+  expect(
+    updates.insertBenchmarkBasedOnProfileBenchmark.mock.calls.map((c: any[]) => c[2].id),
+  ).toEqual(['ad-host-b']);
+});

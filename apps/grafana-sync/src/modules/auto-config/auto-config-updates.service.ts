@@ -451,7 +451,12 @@ export class AutoConfigUpdatesService {
           id: panelId?.toString(),
           dashboardUid: applicationDashboard.dashboardUid,
           type: isDynatraceHosts ? DYNATRACE_BENCHMARK_SOURCE : profileBenchmark.panel_type,
-          title: panelTitle,
+          // A hand-made Dynatrace SLO is titled '<dashboard label> - <panel title>' and the SUT
+          // edit dialog finds its dashboard and panel by splitting on ' - ', so match that shape.
+          title: isDynatraceHosts
+            ? `${applicationDashboard.dashboardLabel} - ${panelTitle}`
+            : panelTitle,
+          ...(isDynatraceHosts ? { yAxesFormat: profileBenchmark.metric_unit ?? null } : {}),
           evaluateType: profileBenchmark.evaluate_type,
           requirement: {
             operator: profileBenchmark.requirement_operator,

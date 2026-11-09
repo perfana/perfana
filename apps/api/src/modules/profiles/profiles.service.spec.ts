@@ -1373,6 +1373,46 @@ describe('ProfilesService', () => {
       expect(result.tags).toEqual(['updated', 'tag']);
     });
 
+    it('switching a grafana benchmark to dynatrace-hosts drops the template and stores the host regex', async () => {
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue({
+        ...mockProfileBenchmark,
+        source: 'grafana',
+        profile_dashboard_id: 'pd-1',
+        grafana_instance: 'main',
+        dashboard_uid: 'tmpl-uid',
+      } as any);
+      profileBenchmarkRepo.save.mockImplementation(async (b: any) => b);
+
+      await service.updateBenchmark(
+        'profile-uuid-1', 'benchmark-uuid-1', { source: 'dynatrace-hosts', panelId: 1 } as any, mockUserId, mockOrgScope,
+      );
+
+      expect(profileBenchmarkRepo.save).toHaveBeenCalledWith(expect.objectContaining({
+        source: 'dynatrace-hosts',
+        profile_dashboard_id: null,
+        grafana_instance: null,
+        dashboard_uid: '^dynatrace-dynatrace-host-metrics-',
+        panel_id: 1,
+      }));
+    });
+
+    it('rejects a panelId-only PUT that names a non-host panel on a dynatrace-hosts benchmark', async () => {
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.findOne.mockResolvedValue({
+        ...mockProfileBenchmark,
+        source: 'dynatrace-hosts',
+        profile_dashboard_id: null,
+        dashboard_uid: '^dynatrace-dynatrace-host-metrics-',
+        panel_id: 1,
+      } as any);
+
+      await expect(
+        service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { panelId: 105 } as any, mockUserId, mockOrgScope),
+      ).rejects.toThrow(/not a Dynatrace host panel/);
+      expect(profileBenchmarkRepo.save).not.toHaveBeenCalled();
+    });
+
     it('should throw NotFoundException when profile does not exist', async () => {
       // Arrange
       profileRepo.findOne.mockResolvedValue(null);

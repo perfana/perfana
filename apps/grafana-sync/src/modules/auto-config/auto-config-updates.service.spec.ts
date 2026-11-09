@@ -677,6 +677,7 @@ describe('AutoConfigUpdatesService', () => {
           panel_id: 1, // synthetic profile id, not the host's panel
           panel_title: 'CPU Usage',
           panel_type: 'dynatrace',
+          metric_unit: 'percent',
           requirement_operator: 'lt',
           requirement_value: 80,
           tags: [],
@@ -720,7 +721,9 @@ describe('AutoConfigUpdatesService', () => {
             configuration: expect.objectContaining({
               id: '41234',
               type: 'dynatrace',
-              title: 'CPU Usage',
+              // The hand-made shape the SUT edit dialog splits on ' - '.
+              title: 'Dynatrace host metrics host-a - CPU Usage',
+              yAxesFormat: 'percent',
             }),
           }),
         );
