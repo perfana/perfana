@@ -20,6 +20,18 @@ describe('CreateProfileDto', () => {
     expect(errors).toHaveLength(0);
   });
 
+  /**
+   * Value: protects=profile creation in the seeded Default Organization, which the web sends when it is selected;
+   *   fails_when=organizationId is validated as a strict RFC uuid, which 00000000-...-000000000001 is not;
+   *   why_new=the case above uses a v4 id; seam=none; no_claim=the service's membership check.
+   */
+  it('accepts the seeded Default Organization id, which is not a strict RFC uuid', async () => {
+    const errors = await validate(
+      plainToClass(CreateProfileDto, { name: 'jvm', organizationId: '00000000-0000-0000-0000-000000000001' }),
+    );
+    expect(errors).toHaveLength(0);
+  });
+
   it('rejects an organizationId that is not a uuid', async () => {
     const errors = await validate(plainToClass(CreateProfileDto, { name: 'jvm', organizationId: 'org-a' }));
     expect(errors).toHaveLength(1);

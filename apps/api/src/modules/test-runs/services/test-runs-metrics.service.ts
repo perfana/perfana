@@ -851,7 +851,10 @@ export class TestRunsMetricsService {
             continue;
           }
           counts.removed++;
-          await this.dsCompareConfigRepo.query(
+          // Advisory: nothing reads `is_stale` into a verdict, so a failure here warns and the rest of
+          // the workload's dashboards are still applied (the delete above has already committed).
+          try {
+            await this.dsCompareConfigRepo.query(
             `UPDATE ds_adapt_results
                 SET is_stale = true, stale_reason = 'Configuration removed', stale_at = NOW()
               WHERE EXISTS (SELECT 1 FROM test_runs tr
@@ -861,8 +864,13 @@ export class TestRunsMetricsService {
                 AND panel_id = $5
                 AND ($6::text IS NULL OR metric_name = $6)
                 AND is_stale = false`,
-            [systemUnderTestId, testEnvironment, workload, row.application_dashboard_id, row.panel_id, row.metric_name ?? null],
-          );
+              [systemUnderTestId, testEnvironment, workload, row.application_dashboard_id, row.panel_id, row.metric_name ?? null],
+            );
+          } catch (err) {
+            this.logger.warn(
+              `Golden-path: could not mark results stale after removing compare config ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
           continue;
         }
         const data = rebuildConfig(row.template_base, winner);

@@ -865,6 +865,27 @@ describe('TestRunsMetricsService', () => {
         );
       });
 
+      it('warns and carries on when marking results stale fails after the delete', async () => {
+        const base = {
+          thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
+          metricClassification: { classification: 'none', higherIsBetter: null },
+          defaultValueIfControlGroupMissing: 0,
+        };
+        const warnSpy = jest.spyOn((service as any).logger, 'warn');
+        templateRepo.find.mockResolvedValue([]);
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            id: 'cfg-ins', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null,
+            created_by: 'system:golden-path', updated_by: 'system:golden-path', template_base: base, template_id: 'gone', config_data: base,
+          },
+        ] as any);
+        compareConfigRepo.delete.mockResolvedValue({ affected: 1, raw: [] } as any);
+        compareConfigRepo.query.mockRejectedValue(new Error('canceling statement due to statement timeout'));
+
+        await expect(service.applyGoldenPathClassifications(testRunInput)).resolves.toEqual({ compareConfigsCreated: 0 });
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('could not mark results stale after removing compare config cfg-ins'));
+      });
+
       it('marks nothing stale when a user saved the row while the applier ran (the delete matched no row)', async () => {
         const base = {
           thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },

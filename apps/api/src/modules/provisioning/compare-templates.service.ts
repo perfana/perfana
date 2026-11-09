@@ -219,8 +219,9 @@ export class CompareTemplatesService {
   }
 
   /**
-   * Rows the template owned are rebuilt from their base config, or handed to the next matching
-   * template, on each workload's next completed run (design §2, Ownership).
+   * Rows the template owned are handed to the next matching template on each workload's next
+   * completed run; with none, a row the applier inserted is deleted (ADAPT's default applies again)
+   * and any other is rebuilt from its base config (design §2, Ownership; deviation 13).
    */
   async remove(
     id: string,

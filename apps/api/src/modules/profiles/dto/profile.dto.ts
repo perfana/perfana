@@ -15,7 +15,11 @@ export class CreateProfileDto {
     format: 'uuid',
   })
   @IsOptional()
-  @IsUUID()
+  // 'loose', not the strict default: the seeded Default Organization is
+  // 00000000-0000-0000-0000-000000000001, which has no RFC version or variant nibble, so the strict
+  // check would refuse profile creation for everyone working in it. ParseUUIDPipe and the template
+  // codec accept it too.
+  @IsUUID('loose')
   organizationId?: string;
 
   @ApiPropertyOptional({ description: 'Profile description' })
