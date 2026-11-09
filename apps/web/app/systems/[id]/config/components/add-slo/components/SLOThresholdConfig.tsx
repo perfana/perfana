@@ -145,7 +145,7 @@ export function SLOThresholdConfig({
           placeholder={getRequirementValuePlaceholder(sloFormData.selectedPanel)}
           helperText={
             validationErrors.requirementValue ||
-            getRequirementValueHelperText(sloFormData.requirementValue, sloFormData.selectedPanel)
+            getRequirementValueHelperText(sloFormData.requirementValue, sloFormData.selectedPanel, sloFormData.evaluateType)
           }
           InputProps={{
             endAdornment: (() => {

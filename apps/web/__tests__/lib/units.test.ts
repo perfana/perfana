@@ -8,7 +8,7 @@
  * Based on Grafana unit formats for consistency across performance metrics.
  */
 
-import { getUnit, formatValueWithUnit, toUnitScale, unitFactor, unitFamily, unitLabel } from '@/lib/units';
+import { getUnit, formatValueWithUnit, toUnitScale, unitFactor, unitFamily, unitLabel, convertThresholdToPanelUnit } from '@/lib/units';
 
 describe('Unit Utilities', () => {
   describe('getUnit()', () => {
@@ -501,5 +501,48 @@ describe('Unit Utilities', () => {
       expect(unitFactor('reqps')).toBe(1);
       expect(unitFactor('currencyUSD')).toBe(1);
     });
+  });
+});
+
+// #718: an SLO threshold typed in one unit is stored in the panel's unit.
+describe('convertThresholdToPanelUnit', () => {
+  it.each([
+    [500, 'ms', 's', 0.5],
+    [0.5, 's', 'ms', 500],
+    [2, 'm', 's', 120],
+    [1.5, 'h', 'm', 90],
+    [250, 'ms', 'dtdurations', 0.25],
+    [90, 'percent', 'percentunit', 0.9],
+    [90, 'percent', 'percent', 90],
+    [1, 'gb', 'mbytes', 1024],
+    [1, 'gb', 'decmbytes', 1000],
+    [512, 'kb', 'mbytes', 0.5],
+    [50, 'req_per_s', 'reqps', 50],
+  ])('%p %s on a %s panel -> %p', (value, typed, panel, expected) => {
+    expect(convertThresholdToPanelUnit(value, typed, panel)).toMatchObject({ value: expected });
+  });
+
+  it('rounds away float noise', () => {
+    expect(convertThresholdToPanelUnit(0.3, 's', 'ms')).toMatchObject({ value: 300 });
+    expect(convertThresholdToPanelUnit(110, 'percent', 'percentunit')).toMatchObject({ value: 1.1 });
+  });
+
+  it('scales a bare number on a percentunit panel to 0-1 and leaves other panels alone', () => {
+    expect(convertThresholdToPanelUnit(95, '', 'percentunit')).toEqual({ value: 0.95 });
+    expect(convertThresholdToPanelUnit(500, '', 'ms')).toEqual({ value: 500 });
+  });
+
+  it.each([
+    ['percent', 's'],
+    ['ms', 'percentunit'],
+    ['m', 'mbytes'],
+    ['req_per_s', 'ops'],
+    ['ms', 'reqps'],
+  ])('refuses %s on a %s panel', (typed, panel) => {
+    expect(convertThresholdToPanelUnit(1, typed, panel)).toHaveProperty('error');
+  });
+
+  it.each([undefined, 'none', 'short', 'currencyUSD'])('takes the number as typed when the panel unit is %p', (panel) => {
+    expect(convertThresholdToPanelUnit(500, 'ms', panel)).toEqual({ value: 500 });
   });
 });

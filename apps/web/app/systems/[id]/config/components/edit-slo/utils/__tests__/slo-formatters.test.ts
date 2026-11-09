@@ -270,6 +270,18 @@ describe('getRequirementValueHelperText', () => {
     expect(text).toMatch(/Unit:/i);
   });
 
+  it('shows the converted value when the typed unit differs from the panel unit (#718)', () => {
+    expect(getRequirementValueHelperText('500ms', { yAxesFormat: 's' })).toBe('500 ms = 0.5 s');
+  });
+
+  it('explains why a unit cannot be used (#718)', () => {
+    expect(getRequirementValueHelperText('90%', { yAxesFormat: 's' })).toMatch(/can't be compared/);
+  });
+
+  it('does not convert for a trend', () => {
+    expect(getRequirementValueHelperText('5%', { yAxesFormat: 's' }, 'trend')).not.toMatch(/can't be compared/);
+  });
+
   it('should return expected unit text when panel has a format but value has no unit', () => {
     const text = getRequirementValueHelperText('500', { yAxesFormat: 'ms' });
     // Should mention the expected unit

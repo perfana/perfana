@@ -188,3 +188,56 @@ export const formatValueWithUnit = (value: number | string | null | undefined, u
 
   return `${formattedValue} ${unit.format}`;
 };
+/**
+ * The suffix ids `parseValueWithUnit` (SLO dialogs) recognises, as codes in this table.
+ * A typed data size follows the panel's IEC/SI family: "500MB" on a `mbytes` panel means MiB.
+ */
+const TYPED_UNIT_CODES: Record<string, string | [iec: string, si: string]> = {
+  ms: 'ms',
+  s: 's',
+  m: 'm',
+  h: 'h',
+  percent: 'percent',
+  bytes: ['bytes', 'decbytes'],
+  kb: ['kbytes', 'deckbytes'],
+  mb: ['mbytes', 'decmbytes'],
+  gb: ['gbytes', 'decgbytes'],
+  req_per_s: 'reqps',
+  ops_per_s: 'ops',
+};
+
+export type ThresholdConversion =
+  | { value: number; from?: string; to?: string }
+  | { error: string };
+
+/** 0.1 * 3 style float noise would otherwise be stored and shown back as 0.30000000000000004. */
+const roundFloat = (n: number): number => Number(n.toPrecision(12));
+
+/**
+ * Convert an SLO threshold typed as `value` + suffix into the number stored for a panel in
+ * `panelUnit`, which is what the checks compare the panel's values against (#718).
+ *
+ * - No suffix: the number is already in the panel's display scale; `percentunit` stores 0-1.
+ * - Same family (ms→s, MB→GB, %→percentunit): converted, with `from`/`to` set for the UI.
+ * - Different family (% on a seconds panel): `error`, so the dialog can refuse to save.
+ * - Unknown or unitless panel (`none`, `short`, a code not in the table), or no `panelUnit`
+ *   (e.g. a trend SLO, which is %/h whatever the panel measures): nothing to convert
+ *   against, so the number is taken as typed.
+ */
+export const convertThresholdToPanelUnit = (
+  value: number,
+  typedUnitId: string,
+  panelUnit?: string | null,
+): ThresholdConversion => {
+  if (!typedUnitId) {
+    return { value: panelUnit === 'percentunit' ? roundFloat(value / 100) : value };
+  }
+  const codes = TYPED_UNIT_CODES[typedUnitId];
+  if (!panelUnit || !unitLabel(panelUnit) || !codes) return { value };
+
+  const from = Array.isArray(codes) ? codes[unitFamily(panelUnit) === 'data-si' ? 1 : 0] : codes;
+  if (unitFamily(from) !== unitFamily(panelUnit)) {
+    return { error: `${getUnit(from).name} can't be compared with this metric's unit, ${getUnit(panelUnit).name}` };
+  }
+  return { value: roundFloat((value * unitFactor(from)) / unitFactor(panelUnit)), from, to: panelUnit };
+};

@@ -9,6 +9,7 @@ import {
   validateSLOForm,
   isFormValid as checkFormValid,
   toStoredThresholdValue,
+  thresholdUnitFormat,
 } from '../utils/slo-validators';
 
 export function useAddSLOHandlers({
@@ -57,10 +58,9 @@ export function useAddSLOHandlers({
       const grafanaPanel = selPanel && !isDynatraceMetric(selPanel) ? selPanel : null;
       const dynMetric = selPanel && isDynatraceMetric(selPanel) ? selPanel : null;
 
-      // Strip the unit suffix and divide by 100 if the panel uses percentunit format.
-      // A trend threshold is %/h whatever the panel's unit, so the percentunit scaling must not touch it.
-      const unitFormat =
-        grafanaPanel?.yAxesFormat === 'percentunit' && sloFormData.evaluateType !== 'trend' ? 'percentunit' : undefined;
+      // Strip the unit suffix and convert it to the panel's unit (percentunit stores 0-1).
+      // The same unit validateSLOForm checked against, so what passed validation is what is stored.
+      const unitFormat = thresholdUnitFormat(sloFormData);
       const processedRequirementValue = toStoredThresholdValue(sloFormData.requirementValue, unitFormat);
       const processedDefaultValue = sloFormData.validateWithDefaultIfNoData
         ? toStoredThresholdValue(sloFormData.validateWithDefaultIfNoDataValue, unitFormat)
