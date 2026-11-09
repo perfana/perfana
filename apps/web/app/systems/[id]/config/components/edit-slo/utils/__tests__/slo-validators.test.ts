@@ -610,3 +610,14 @@ describe('storedThresholdUnit (#719)', () => {
     expect(Number(toStoredThresholdValue(convertDecimalToPercentageForDisplay(stored, unit), unit))).toBe(stored);
   });
 });
+
+// #721: Number() accepts hex, exponents and Infinity; a threshold is a plain decimal.
+describe('validateSLOForm accepts plain decimals only', () => {
+  it.each(['0x10', '1e3', 'Infinity', '1,5', '5 5'])('refuses %p', (requirementValue) => {
+    expect(validateSLOForm(makeFormData({ requirementValue })).requirementValue).toBe('Requirement value must be a valid number');
+  });
+
+  it.each(['5', '0.5', '.5', '-5', '500ms', '90%'])('accepts %p', (requirementValue) => {
+    expect(validateSLOForm(makeFormData({ requirementValue })).requirementValue).toBeUndefined();
+  });
+});

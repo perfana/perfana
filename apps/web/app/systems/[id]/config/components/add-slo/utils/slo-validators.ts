@@ -129,10 +129,13 @@ export function thresholdUnitFormat(sloFormData: Pick<SLOFormData, 'selectedPane
   return sloFormData.selectedPanel?.yAxesFormat || sloFormData.selectedPanel?.metricUnit || undefined;
 }
 
+const DECIMAL = /^-?(\d+(\.\d*)?|\.\d+)$/;
+
 /** Parse "500ms" and convert it to `unitFormat`; null when the input is not a number. */
 export function convertThresholdInput(value: string, unitFormat: string | undefined): ThresholdConversion | null {
   const parsed = parseValueWithUnit(value.trim());
-  if (parsed.value === '' || !Number.isFinite(Number(parsed.value))) return null;
+  // A plain decimal only: Number() also takes '0x10', '1e3' and 'Infinity' (#721).
+  if (!DECIMAL.test(parsed.value)) return null;
   return convertThresholdToPanelUnit(Number(parsed.value), parsed.unitId, unitFormat);
 }
 

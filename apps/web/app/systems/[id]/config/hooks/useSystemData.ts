@@ -243,6 +243,10 @@ export function useSystemData({
   // Tab change handler
   const handleTabChange = useCallback((newValue: TabId) => {
     setActiveTab(newValue);
+    // Keep the tab in the URL so a reload lands on it; ?tab= is read above (#721).
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', newValue);
+    window.history.replaceState(window.history.state, '', url);
   }, []);
 
   // Load SLO benchmarks whenever the SLO tab is active and scope is set.

@@ -147,13 +147,20 @@ export function getSourceOption(value: string): SourceOption | null {
 /**
  * Get placeholder text for requirement value input
  */
+/** A realistic threshold per panel unit; '500 s' or '500 %' on a 0-1 panel suggested nonsense (#721). */
+const PLACEHOLDER_VALUES: Record<string, string> = {
+  ns: '500000', 'µs': '500', ms: '500', dtdurationms: '500', s: '0.5', dtdurations: '0.5', m: '5', h: '1', d: '1',
+  percent: '90', percentunit: '90',
+  bytes: '1048576', decbytes: '1000000', kbytes: '512', deckbytes: '500', mbytes: '512', decmbytes: '500',
+  gbytes: '2', decgbytes: '2',
+};
+
 export function getRequirementValuePlaceholder(selectedPanel: SloPanel | null | undefined): string {
   const effectiveUnitFormat = selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
   if (effectiveUnitFormat) {
-    const unit = getUnit(effectiveUnitFormat);
-    return `e.g. 500${unit.format || ''}`;
+    return `e.g. ${PLACEHOLDER_VALUES[effectiveUnitFormat] ?? '100'} ${unitLabel(effectiveUnitFormat)}`.trim();
   }
-  return 'e.g. 500ms, 0.95%, 2GB, 50req/s';
+  return 'e.g. 500ms, 95%, 2GB, 50req/s';
 }
 
 /**

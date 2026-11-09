@@ -22,6 +22,12 @@ interface SLOSaveDialogProps {
   selectedOption: SaveDialogOption;
   onOptionChange: (option: SaveDialogOption) => void;
   loading: boolean;
+  /**
+   * Offer "Re-evaluate this test run". Only meaningful where a test run is open: the handler
+   * reads the run from the URL, so on the system config page it fetched /test-runs/<systemId>
+   * and failed after saving (#721).
+   */
+  showCurrentRun?: boolean;
 }
 
 export function SLOSaveDialog({
@@ -31,6 +37,7 @@ export function SLOSaveDialog({
   selectedOption,
   onOptionChange,
   loading,
+  showCurrentRun = true,
 }: SLOSaveDialogProps) {
   return (
     <Dialog
@@ -75,21 +82,23 @@ export function SLOSaveDialog({
             sx={{ mb: 2, alignItems: 'flex-start' }}
           />
 
-          <FormControlLabel
-            value="current"
-            control={<Radio />}
-            label={
-              <Box>
-                <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                  Re-evaluate this test run
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Re-evaluate this specific test run with the updated SLO configuration.
-                </Typography>
-              </Box>
-            }
-            sx={{ mb: 2, alignItems: 'flex-start' }}
-          />
+          {showCurrentRun && (
+            <FormControlLabel
+              value="current"
+              control={<Radio />}
+              label={
+                <Box>
+                  <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                    Re-evaluate this test run
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Re-evaluate this specific test run with the updated SLO configuration.
+                  </Typography>
+                </Box>
+              }
+              sx={{ mb: 2, alignItems: 'flex-start' }}
+            />
+          )}
 
           <FormControlLabel
             value="all"

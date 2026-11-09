@@ -22,6 +22,65 @@ import {
 import { Benchmark } from './types';
 import { getUnit } from '@/lib/units';
 
+/** "Maximum", "95th Percentile": how an SLO evaluates its metric. Shared by the table and the delete confirm. */
+export function sloEvaluationLabel(benchmark: Benchmark): string {
+  const evaluateTypeLabels: Record<string, string> = {
+    'avg': 'Average',
+    'max': 'Maximum',
+    'min': 'Minimum',
+    'last': 'Last Value',
+    'trend': 'Trend',
+    'q50': '50th Percentile',
+    'q90': '90th Percentile',
+    'q95': '95th Percentile',
+    'q99': '99th Percentile'
+  };
+  if (benchmark.benchmark_type === 'aggregated') {
+    return benchmark.aggregate_stat || 'N/A';
+  }
+  return evaluateTypeLabels[benchmark.evaluate_type || ''] || benchmark.evaluate_type || 'N/A';
+}
+
+/** "Less than 90 %": an SLO's requirement with its unit. Shared by the table and the delete confirm (#721). */
+export function sloRequirementLabel(benchmark: Benchmark): string {
+  // First check if requirement_value is a string with unit already included
+  const requirementValueStr = String(benchmark.requirement_value);
+  const parsedValue = parseValueWithUnit(requirementValueStr);
+  
+  let displayValue = requirementValueStr;
+  let unitSuffix = '';
+  
+  if (parsedValue.unit) {
+    // Unit is already in the requirement_value
+    displayValue = requirementValueStr;
+  } else if (benchmark.metric_unit) {
+    // Get unit from metric_unit
+    const unit = getUnit(benchmark.metric_unit);
+    // If unit has a format, use it (works for both known units and unknown fallback)
+    // For units like 'short' or 'none' with empty format, no suffix is added
+    if (unit.format) {
+      unitSuffix = ` ${unit.format}`;
+    }
+
+    // Handle percentunit conversion (0.0-1.0 to percentage)
+    if (benchmark.metric_unit === 'percentunit') {
+      displayValue = String(Math.round(Number(benchmark.requirement_value) * 10000) / 100);
+    }
+  }
+  
+  const finalValue = `${displayValue}${unitSuffix}`;
+  
+  switch (benchmark.requirement_operator) {
+    case 'lt': return `Less than ${finalValue}`;
+    case 'gt': return `Greater than ${finalValue}`;
+    case 'lte': return `Less than or equal ${finalValue}`;
+    case 'gte': return `Greater than or equal ${finalValue}`;
+    case 'eq': return `Equal to ${finalValue}`;
+    case 'ne': return `Not equal to ${finalValue}`;
+    default: return `${benchmark.requirement_operator} ${finalValue}`;
+  }
+}
+
 interface SLOTableProps {
   benchmarks: Benchmark[];
   searchText: string;
@@ -306,66 +365,13 @@ export default function SLOTable({
               </TableCell>
               <TableCell>
                 <Typography variant="body2">
-                  {(() => {
-                    const evaluateTypeLabels: Record<string, string> = {
-                      'avg': 'Average',
-                      'max': 'Maximum',
-                      'min': 'Minimum',
-                      'last': 'Last Value',
-                      'trend': 'Trend',
-                      'q50': '50th Percentile',
-                      'q90': '90th Percentile',
-                      'q95': '95th Percentile',
-                      'q99': '99th Percentile'
-                    };
-                    if (benchmark.benchmark_type === 'aggregated') {
-                      return benchmark.aggregate_stat || 'N/A';
-                    }
-                    return evaluateTypeLabels[benchmark.evaluate_type || ''] || benchmark.evaluate_type || 'N/A';
-                  })()}
+                  {sloEvaluationLabel(benchmark)}
                 </Typography>
               </TableCell>
               <TableCell>
                 {benchmark.requirement_operator && benchmark.requirement_value !== null ? (
                   <Typography variant="body2" fontWeight="medium">
-                    {(() => {
-                      // First check if requirement_value is a string with unit already included
-                      const requirementValueStr = String(benchmark.requirement_value);
-                      const parsedValue = parseValueWithUnit(requirementValueStr);
-                      
-                      let displayValue = requirementValueStr;
-                      let unitSuffix = '';
-                      
-                      if (parsedValue.unit) {
-                        // Unit is already in the requirement_value
-                        displayValue = requirementValueStr;
-                      } else if (benchmark.metric_unit) {
-                        // Get unit from metric_unit
-                        const unit = getUnit(benchmark.metric_unit);
-                        // If unit has a format, use it (works for both known units and unknown fallback)
-                        // For units like 'short' or 'none' with empty format, no suffix is added
-                        if (unit.format) {
-                          unitSuffix = ` ${unit.format}`;
-                        }
-
-                        // Handle percentunit conversion (0.0-1.0 to percentage)
-                        if (benchmark.metric_unit === 'percentunit') {
-                          displayValue = String(Math.round(Number(benchmark.requirement_value) * 10000) / 100);
-                        }
-                      }
-                      
-                      const finalValue = `${displayValue}${unitSuffix}`;
-                      
-                      switch (benchmark.requirement_operator) {
-                        case 'lt': return `Less than ${finalValue}`;
-                        case 'gt': return `Greater than ${finalValue}`;
-                        case 'lte': return `Less than or equal ${finalValue}`;
-                        case 'gte': return `Greater than or equal ${finalValue}`;
-                        case 'eq': return `Equal to ${finalValue}`;
-                        case 'ne': return `Not equal to ${finalValue}`;
-                        default: return `${benchmark.requirement_operator} ${finalValue}`;
-                      }
-                    })()}
+                    {sloRequirementLabel(benchmark)}
                   </Typography>
                 ) : (
                   <Typography variant="body2" color="text.secondary">
