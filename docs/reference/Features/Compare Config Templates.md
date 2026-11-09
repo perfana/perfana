@@ -95,17 +95,20 @@ attaching the template to the other organization's profile. The organization is 
 on every run and every request, so a profile moved to another organization takes its templates with it;
 it is not part of the template's identity.
 
-A profile that does not exist skips the item with a warning, and so does a misspelt `profile` key:
-`profileId`, `profileName` and `profiles` are refused rather than ignored like other unknown keys, because
-ignoring one would provision the item as an organization or install-wide template. While such an item is
-in the file, the prune spares the provisioned templates of every profile that no other item resolves,
-since the item may mean a renamed profile; an item whose organization is not its profile's spares them the
-same way. A profile the file still resolves by its current name is pruned as usual, and so are
+A profile that does not exist skips the item with a warning. While such an item is in the file, the
+prune spares the provisioned templates of every profile that no other item resolves, since the item may
+mean a renamed profile; an item whose organization is not its profile's spares them the same way. A
+misspelt `profile` key is stricter: `profileId`, `profileName` and `profiles` are refused rather than
+ignored like other unknown keys, because ignoring one would provision the item as an organization or
+install-wide template, and the item counts as unreadable, so nothing at all is pruned that boot. A profile the file still resolves by its current name is pruned as usual, and so are
 organization and install-wide templates. This lasts on every boot until the file is fixed.
 
 Deleting a profile deletes its templates, provisioned ones included (the profile page's delete
 confirmation says how many). A provisioned profile template comes back on the next boot only if the file
-still names the profile and a profile of that name exists again in the same organization.
+still names the profile and a profile of that name exists again. If the item or the file states an
+organization (an exported file spanning several organizations always does), only a profile in that
+organization qualifies; if neither does, a profile of that name in any organization takes it, so state
+`organizationId` on profile items in a hand-written multi-organization file.
 
 To reach every dashboard, leave `dashboardUid` out. Written with no value (`dashboardUid:`) it is
 an error rather than a wildcard, so a value deleted by accident cannot turn an exact template into
@@ -167,8 +170,9 @@ each one. Templates created in the UI are never pruned. Nothing is pruned when:
 - `items` is not a list (`items:` with nothing after it reads as null);
 - any item's identity cannot be read (for example, it has neither `panelId` nor `panelTitle`, or its
   `organizationId` is not a uuid);
+- any item misspells the `profile` key (`profileId`, `profileName`, `profiles`);
 - (profile templates only, and only those of profiles no other item resolves) an item names a profile
-  that does not exist, misspells the `profile` key, or names an organization that is not its profile's;
+  that does not exist, or names an organization that is not its profile's;
 - any template failed to write this boot.
 
 An explicit `items: []` is a declared empty state and prunes every provisioned template.
@@ -326,7 +330,8 @@ It is logged at warn when the applier takes over 5000 ms.
   install-wide one when the item and the file name none, and two profiles' templates for one panel
   collapse into one.
 - **The profiles pages need migration 1823.** `GET /api/profiles` and `GET /api/profiles/:id` read the new
-  column, so they answer 500 between the API starting and the migration running.
+  column, so between the API starting and the migration running the list answers 500 and a profile's page
+  answers 404 (Profile not found).
 - **grafana-sync's profile matching fails closed** on a missing organization, as the template applier's
   does. Both organization columns are NOT NULL, so no real run or profile is affected.
 

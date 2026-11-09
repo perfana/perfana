@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, Query, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
-import { ProfilesService } from './profiles.service';
+import { ProfilesService, forLog } from './profiles.service';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
 import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto } from './dto/profile-benchmark.dto';
@@ -67,7 +67,7 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
   async findOne(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     try {
-      this.logger.debug(`User ${ctx.userId} fetching profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} fetching profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
       const profile = await this.profilesService.findOne(id, ctx.userId, accessibleOrgIds);
       if (!profile) {
@@ -113,7 +113,7 @@ export class ProfilesController {
     @Body() updateDto: UpdateProfileDto,
     @UserCtx() ctx: UserContext,
   ) {
-    this.logger.debug(`User ${ctx.userId} updating profile ${id}`);
+    this.logger.debug(`User ${ctx.userId} updating profile ${forLog(id)}`);
     const accessibleOrgIds = await this.resolveOrgScope(ctx);
     return this.profilesService.updateProfile(id, updateDto, ctx.userId, accessibleOrgIds);
   }
@@ -129,7 +129,7 @@ export class ProfilesController {
     @Param('id') id: string,
     @UserCtx() ctx: UserContext,
   ) {
-    this.logger.debug(`User ${ctx.userId} deleting profile ${id}`);
+    this.logger.debug(`User ${ctx.userId} deleting profile ${forLog(id)}`);
     const accessibleOrgIds = await this.resolveOrgScope(ctx);
     await this.profilesService.deleteProfile(id, ctx.userId, accessibleOrgIds);
     return { message: 'Profile deleted successfully' };
@@ -141,7 +141,7 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
   async findDashboards(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     try {
-      this.logger.debug(`User ${ctx.userId} fetching dashboards for profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} fetching dashboards for profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
       const dashboards = await this.profilesService.findDashboardsByProfileId(id, ctx.userId, accessibleOrgIds);
       return dashboards;
@@ -170,7 +170,7 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     try {
-      this.logger.debug(`User ${ctx.userId} creating dashboard for profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} creating dashboard for profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
       return await this.profilesService.createDashboard(id, createDto, ctx.userId, accessibleOrgIds);
     } catch (error) {
@@ -202,7 +202,7 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     try {
-      this.logger.debug(`User ${ctx.userId} updating dashboard ${dashboardId} for profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} updating dashboard ${forLog(dashboardId)} for profile ${forLog(id)}`);
       this.logger.debug(`[Controller] Received updateDto: ${JSON.stringify(updateDto, null, 2)}`);
       this.logger.debug(`[Controller] setHardcodedValueForVariables type: ${Array.isArray(updateDto.setHardcodedValueForVariables) ? 'array' : typeof updateDto.setHardcodedValueForVariables}`);
       this.logger.debug(`[Controller] setHardcodedValueForVariables value: ${JSON.stringify(updateDto.setHardcodedValueForVariables)}`);
@@ -235,7 +235,7 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     try {
-      this.logger.debug(`User ${ctx.userId} deleting dashboard ${dashboardId} from profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} deleting dashboard ${forLog(dashboardId)} from profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
       await this.profilesService.deleteDashboard(id, dashboardId, ctx.userId, accessibleOrgIds);
       return { message: 'Dashboard association deleted successfully' };
@@ -260,7 +260,7 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
   async getProfileBenchmarks(@Param('id') id: string, @UserCtx() ctx: UserContext) {
     try {
-      this.logger.debug(`User ${ctx.userId} fetching benchmarks for profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} fetching benchmarks for profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
       return await this.profilesService.findBenchmarksByProfileId(id, ctx.userId, accessibleOrgIds);
     } catch (error) {
@@ -288,7 +288,7 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     try {
-      this.logger.debug(`User ${ctx.userId} creating benchmark for profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} creating benchmark for profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
       return await this.profilesService.createBenchmark(id, createDto, ctx.userId, accessibleOrgIds);
     } catch (error) {
@@ -320,7 +320,7 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     try {
-      this.logger.debug(`User ${ctx.userId} updating benchmark ${benchmarkId} for profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} updating benchmark ${forLog(benchmarkId)} for profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
       return await this.profilesService.updateBenchmark(id, benchmarkId, updateDto, ctx.userId, accessibleOrgIds);
     } catch (error) {
@@ -350,7 +350,7 @@ export class ProfilesController {
     @UserCtx() ctx: UserContext,
   ) {
     try {
-      this.logger.debug(`User ${ctx.userId} deleting benchmark ${benchmarkId} from profile ${id}`);
+      this.logger.debug(`User ${ctx.userId} deleting benchmark ${forLog(benchmarkId)} from profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
       await this.profilesService.deleteBenchmark(id, benchmarkId, ctx.userId, accessibleOrgIds);
       return { message: 'Benchmark deleted successfully' };

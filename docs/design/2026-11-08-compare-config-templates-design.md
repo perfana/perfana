@@ -553,7 +553,8 @@ Changed at /ship review (2026-11-09), each decided by the user:
     when another organization has taken its old name.
 11. **`profileId`, `profileName` and `profiles` are refused, not warned about.** Ignoring an unknown key is
     harmless for an override, but ignoring a misspelt scope key widens the template to its organization or
-    the install.
+    the install. Such an item is unidentified, so it stops the whole prune that boot (reporting it as an
+    unresolved profile would let a correctly spelt item for the same profile prune its template).
 12. **The profile routes were scoped to the caller's organizations in the same PR.** `GET/PUT/DELETE
     /profiles/:id` and the profile dashboard and SLO routes checked only "org admin in any organization";
     with the cascade and tag-driven selection added here, that let one tenant's admin delete or retarget

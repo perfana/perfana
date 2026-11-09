@@ -270,9 +270,10 @@ describe('compare-template codec', () => {
      *   why_new=unknown keys warn by design (a misspelt override forces nothing); scope keys are the exception;
      *   seam=none; no_claim=provisioning's count and log (pinned in provisioning.service.spec.ts).
      */
-    it.each(['profileId', 'profileName', 'profiles'])('refuses %s instead of ignoring it, as an unresolved profile', (field) => {
+    it.each(['profileId', 'profileName', 'profiles'])('refuses %s instead of ignoring it, as an unidentified item', (field) => {
       const parsed = parse({ [field]: 'jvm', panelId: 5, metricClassification: 'x' }, ORG_A);
-      expect(parsed).toMatchObject({ ok: false, key: null, unresolvedProfile: 'jvm' });
+      expect(parsed).toMatchObject({ ok: false, key: null });
+      expect(parsed).not.toHaveProperty('unresolvedProfile');
       if (!parsed.ok) expect(parsed.error).toMatch(new RegExp(`unknown field "${field}".*"profile"`));
     });
 

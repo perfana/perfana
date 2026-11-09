@@ -119,8 +119,9 @@ export type ParsedTemplateItem =
    * `key` is null when the item's identity could not be read, so nothing it names is declared.
    * `unresolvedProfile` names a profile that does not exist: such an item has no key either (a
    * profile template's key is its profile's id), so provisioning protects from the prune the
-   * templates of every profile no resolved item reaches. A misspelt `profile` key is reported the
-   * same way. `profileMismatch` names a profile item whose organization is not its profile's: it
+   * templates of every profile no resolved item reaches. A misspelt `profile` key has no key and no
+   * `unresolvedProfile`, so it counts as unidentified and nothing is pruned that boot.
+   * `profileMismatch` names a profile item whose organization is not its profile's: it
    * keeps its key, and provisioning protects that name's templates the same way.
    */
   | { ok: false; key: string | null; error: string; unresolvedProfile?: string; profileMismatch?: string };
@@ -186,6 +187,9 @@ export function parseTemplateItem(
   options: ParseTemplateOptions = {},
 ): ParsedTemplateItem {
   if (!isObject(item)) return { ok: false, key: null, error: 'item is not a mapping' };
+  // No key and no `unresolvedProfile`: an item whose scope cannot be read is unidentified, so nothing is
+  // pruned that boot. Reporting it as an unresolved profile would spare only unreached profiles, and a
+  // misspelt `profileName: jvm` beside correctly spelt `jvm` items would then prune its own template.
   const scopeMiss = SCOPE_NEAR_MISSES.find((k) => k in item);
   if (scopeMiss) {
     return {
@@ -195,7 +199,6 @@ export function parseTemplateItem(
         `unknown field "${scopeMiss}": a template's profile is named with "profile" in the file, or by the ` +
         `/profiles/:id route in the API. Refused rather than ignored: ignoring it would widen the template ` +
         `to its organization or the install`,
-      unresolvedProfile: String(item[scopeMiss]),
     };
   }
 

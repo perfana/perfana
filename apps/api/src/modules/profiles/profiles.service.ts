@@ -63,7 +63,7 @@ export interface ProfileDashboardResponse {
 }
 
 /** Strip CR/LF from a caller-supplied id before it reaches a log line (Express percent-decodes path segments). */
-const forLog = (value: string): string => value.replace(/[\r\n]/g, '');
+export const forLog = (value: string): string => value.replace(/[\r\n]/g, '');
 
 /**
  * Service responsible for managing profiles and their associated dashboards and benchmarks.
@@ -345,7 +345,7 @@ export class ProfilesService {
         updatedAt: profile.updatedAt.toISOString(),
       };
     } catch (error) {
-      this.logger.error(`Failed to fetch profile ${id}:`, error);
+      this.logger.error(`Failed to fetch profile ${forLog(id)}:`, error);
       return null;
     }
   }
@@ -436,7 +436,7 @@ export class ProfilesService {
         };
       });
     } catch (error) {
-      this.logger.error(`Failed to fetch dashboards for profile ${id}:`, error);
+      this.logger.error(`Failed to fetch dashboards for profile ${forLog(id)}:`, error);
       throw error;
     }
   }
@@ -528,7 +528,7 @@ export class ProfilesService {
         updatedAt: savedDashboard.updatedAt.toISOString(),
       };
     } catch (error) {
-      this.logger.error(`Failed to create dashboard for profile ${profileId}:`, error);
+      this.logger.error(`Failed to create dashboard for profile ${forLog(profileId)}:`, error);
       throw error;
     }
   }
@@ -710,7 +710,7 @@ export class ProfilesService {
         updatedAt: savedDashboard.updatedAt.toISOString(),
       };
     } catch (error) {
-      this.logger.error(`Failed to update dashboard ${dashboardId} for profile ${profileId}:`, error);
+      this.logger.error(`Failed to update dashboard ${forLog(dashboardId)} for profile ${forLog(profileId)}:`, error);
       throw error;
     }
   }
@@ -760,9 +760,9 @@ export class ProfilesService {
       // Delete the dashboard association
       await withRequestEm(this.profileDashboardRepo).remove(dashboard);
 
-      this.logger.debug(`Deleted dashboard association ${dashboardId} from profile ${profile.name}`);
+      this.logger.debug(`Deleted dashboard association ${forLog(dashboardId)} from profile ${profile.name}`);
     } catch (error) {
-      this.logger.error(`Failed to delete dashboard ${dashboardId} for profile ${profileId}:`, error);
+      this.logger.error(`Failed to delete dashboard ${forLog(dashboardId)} for profile ${forLog(profileId)}:`, error);
       throw error;
     }
   }
@@ -827,7 +827,7 @@ export class ProfilesService {
         updatedAt: benchmark.updatedAt.toISOString(),
       }));
     } catch (error) {
-      this.logger.error(`Failed to fetch benchmarks for profile ${profileId}:`, error);
+      this.logger.error(`Failed to fetch benchmarks for profile ${forLog(profileId)}:`, error);
       throw error;
     }
   }
@@ -985,7 +985,7 @@ export class ProfilesService {
         updatedAt: savedBenchmark.updatedAt.toISOString(),
       };
     } catch (error) {
-      this.logger.error(`Failed to create benchmark for profile ${profileId}:`, error);
+      this.logger.error(`Failed to create benchmark for profile ${forLog(profileId)}:`, error);
       throw error;
     }
   }
@@ -1156,7 +1156,7 @@ export class ProfilesService {
         updatedAt: savedBenchmark.updatedAt.toISOString(),
       };
     } catch (error) {
-      this.logger.error(`Failed to update benchmark ${benchmarkId} for profile ${profileId}:`, error);
+      this.logger.error(`Failed to update benchmark ${forLog(benchmarkId)} for profile ${forLog(profileId)}:`, error);
       throw error;
     }
   }
@@ -1205,9 +1205,9 @@ export class ProfilesService {
       // Delete the benchmark
       await withRequestEm(this.profileBenchmarkRepo).remove(benchmark);
 
-      this.logger.debug(`Deleted benchmark ${benchmarkId} from profile ${profile.name}`);
+      this.logger.debug(`Deleted benchmark ${forLog(benchmarkId)} from profile ${profile.name}`);
     } catch (error) {
-      this.logger.error(`Failed to delete benchmark ${benchmarkId} for profile ${profileId}:`, error);
+      this.logger.error(`Failed to delete benchmark ${forLog(benchmarkId)} for profile ${forLog(profileId)}:`, error);
       throw error;
     }
   }

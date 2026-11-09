@@ -989,8 +989,11 @@ profile's `organizationId` when the file spans several organizations. That secon
 profile name re-created in another organization from claiming the template: profile names are one
 install-wide namespace, and without a stated organization the mismatch check never runs (v0.2.97.56,
 /ship review). On the provisioning side, `profileId`, `profileName` and `profiles` are refused rather than
-warned about, since ignoring a misspelt scope key widens the template; and an unresolved or mismatched
-profile item spares from the prune only the templates of profiles that no resolved item reaches.
+warned about, since ignoring a misspelt scope key widens the template, and such an item is unidentified
+(no key), so it stops the whole prune that boot. Do not report it as an unresolved profile: that spares
+only profiles no resolved item reaches, and a `profileName: jvm` beside correctly spelt `jvm` items would
+prune its own template. An unresolved or mismatched profile item spares from the prune only the templates
+of profiles that no resolved item reaches.
 
 ### An artificial Dynatrace dashboard is per-workload, but its unique constraint is not
 

@@ -1009,15 +1009,28 @@ describe('ProvisioningService', () => {
         expect(result).toMatchObject({ skipped: 1, pruned: 1 });
       });
 
-      it('skips an item with a misspelt profile key rather than provisioning it without its profile', async () => {
-        templateRepo.find.mockResolvedValue([row({ id: 'jvm-row', profile_id: 'p-jvm', organization_id: ORG_A })]);
+      /**
+       * Value: protects=a misspelt profile key neither widens its item nor prunes the template it provisioned;
+       *   fails_when=the item is provisioned without its profile, or reported as an unresolved profile, so a
+       *   correctly spelt item for the same profile marks it reached and its stored template is pruned;
+       *   why_new=the scope-key refusal is new at v0.2.97.56 review; seam=none; no_claim=the boot log text.
+       */
+      it('refuses an item with a misspelt profile key and prunes nothing that boot, even beside resolved items', async () => {
+        templateRepo.find.mockResolvedValue([
+          row({ id: 'mistyped-row', profile_id: 'p-jvm', organization_id: ORG_A, panel_id: 5 }),
+          row({ id: 'org-row', organization_id: ORG_A, panel_id: 9 }),
+        ]);
         const result = await service.provisionMetricClassifications(
-          [{ profileId: 'jvm', panelId: 5, metricClassification: 'RED_rate' }],
-          ORG_A,
+          [
+            { profileName: 'jvm', panelId: 5, metricClassification: 'RED_rate' },
+            { profile: 'jvm', panelId: 6, metricClassification: 'RED_rate' },
+          ],
+          null,
         );
-        expect(templateRepo.insert).not.toHaveBeenCalled();
+        expect(templateRepo.insert).toHaveBeenCalledTimes(1);
+        expect(templateRepo.insert).toHaveBeenCalledWith(expect.objectContaining({ profile_id: 'p-jvm', panel_id: 6 }));
         expect(templateRepo.delete).not.toHaveBeenCalled();
-        expect(result).toEqual({ ...SUMMARY, skipped: 1 });
+        expect(result).toEqual({ ...SUMMARY, created: 1, errors: 1 });
       });
 
       it("spares a renamed profile's templates when its old name now resolves in another organization", async () => {
