@@ -1211,6 +1211,53 @@ describe('ProfilesService', () => {
       expect(result.source).toBe('performance-metrics');
     });
 
+    it('should create a dynatrace-hosts benchmark with no profile dashboard and the default host uid regex', async () => {
+      const dto: CreateProfileBenchmarkDto = {
+        source: 'dynatrace-hosts',
+        panelId: 1,
+        panelTitle: 'CPU Usage',
+        panelType: 'dynatrace',
+        requirementOperator: 'lt',
+        requirementValue: 80,
+      };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      profileBenchmarkRepo.create.mockReturnValue(mockProfileBenchmark as any);
+      profileBenchmarkRepo.save.mockResolvedValue(mockProfileBenchmark as any);
+
+      await service.createBenchmark('profile-uuid-1', dto, mockUserId, mockOrgScope);
+
+      expect(profileDashboardRepo.findOne).not.toHaveBeenCalled();
+      expect(profileBenchmarkRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile_dashboard_id: null,
+          source: 'dynatrace-hosts',
+          grafana_instance: undefined,
+          dashboard_uid: '^dynatrace-dynatrace-host-metrics-',
+          panel_id: 1,
+        })
+      );
+    });
+
+    it('should reject a dynatrace-hosts benchmark on a panel id that is not a host panel', async () => {
+      // A perf-test panel id is not a host panel; grafana-sync could never resolve it.
+      const dto: CreateProfileBenchmarkDto = { source: 'dynatrace-hosts', panelId: 105 };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+
+      await expect(
+        service.createBenchmark('profile-uuid-1', dto, mockUserId, mockOrgScope)
+      ).rejects.toThrow(/not a Dynatrace host panel/);
+      expect(profileBenchmarkRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject a dynatrace-hosts benchmark whose dashboardUid is not a valid regex', async () => {
+      const dto: CreateProfileBenchmarkDto = { source: 'dynatrace-hosts', dashboardUid: '^dynatrace-(', panelId: 1 };
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+
+      await expect(
+        service.createBenchmark('profile-uuid-1', dto, mockUserId, mockOrgScope)
+      ).rejects.toThrow(/dashboardUid must be a valid regex/);
+    });
+
     it('should keep a caller-supplied uid regex on a performance-metrics benchmark', async () => {
       // Arrange
       const perfTestDto: CreateProfileBenchmarkDto = {

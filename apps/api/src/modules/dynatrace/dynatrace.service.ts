@@ -68,7 +68,7 @@ function worseSeverity(current: string | null, candidate: string | null): string
  * `unit` here if it says MicroSecond. It only affects the axis suffix; a user can
  * also change it per query in the edit dialog.
  */
-const HOST_METRICS = [
+export const HOST_METRICS = [
   { key: 'cpu', name: 'CPU Usage', metric: 'builtin:host.cpu.usage', transform: 'avg', unit: 'percent' },
   { key: 'memory', name: 'Memory Usage', metric: 'builtin:host.mem.usage', transform: 'avg', unit: 'percent' },
   { key: 'diskReadTime', name: 'Disk Read Latency', metric: 'builtin:host.disk.readTime', transform: 'splitBy():avg', unit: 'ms' },

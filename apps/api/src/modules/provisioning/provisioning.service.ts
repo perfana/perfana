@@ -16,6 +16,9 @@ import { withRequestEm } from '../../common/db/request-em';
 import {
   PERF_TEST_PROFILE_SOURCE,
   PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT,
+  DYNATRACE_HOSTS_PROFILE_SOURCE,
+  DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT,
+  DYNATRACE_HOST_PROFILE_PANELS,
 } from '@perfana/shared/constants';
 import { validateRegexPattern } from '@perfana/shared/utils';
 import { PROFILE_BENCHMARK_SOURCES } from '../profiles/dto/profile-benchmark.dto';
@@ -400,7 +403,17 @@ export class ProvisioningService implements OnApplicationBootstrap {
           result.skipped++;
           continue;
         }
-        const isPerfTest = source === PERF_TEST_PROFILE_SOURCE;
+        // Both pattern sources target worker/API-written dashboards rather than a Grafana
+        // template: `dashboardUid` is a regex and there is no profile dashboard.
+        const isDynatraceHosts = source === DYNATRACE_HOSTS_PROFILE_SOURCE;
+        const isPerfTest = source === PERF_TEST_PROFILE_SOURCE || isDynatraceHosts;
+        if (isDynatraceHosts && !DYNATRACE_HOST_PROFILE_PANELS.some((p) => p.id === item.panel?.id)) {
+          this.logger.warn(
+            `Benchmark skipped: panel id ${item.panel?.id} is not a Dynatrace host panel for profile "${item.profile}"`,
+          );
+          result.skipped++;
+          continue;
+        }
         if (!isPerfTest && !item.dashboardUid) {
           this.logger.warn(`Benchmark skipped: dashboardUid missing for profile "${item.profile}"`);
           result.skipped++;
@@ -426,9 +439,11 @@ export class ProvisioningService implements OnApplicationBootstrap {
           }
           dashboardId = dashboard.id;
         }
-        const dashboardUid = isPerfTest
-          ? item.dashboardUid ?? PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT
-          : item.dashboardUid;
+        const dashboardUid = isDynatraceHosts
+          ? item.dashboardUid ?? DYNATRACE_HOST_DASHBOARD_UID_PATTERN_DEFAULT
+          : isPerfTest
+            ? item.dashboardUid ?? PERF_TEST_DASHBOARD_UID_PATTERN_DEFAULT
+            : item.dashboardUid;
         if (isPerfTest) {
           const check = validateRegexPattern(dashboardUid, { maxLength: 255 });
           if (!check.safe) {
