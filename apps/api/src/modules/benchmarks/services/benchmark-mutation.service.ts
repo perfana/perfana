@@ -217,6 +217,12 @@ export class BenchmarkMutationService {
       const tags = this.tagHelper.inheritTagsFromDashboard(dashboard, dto.tags);
       // The dashboard knows its instance; the client's value is a fallback ('Default' from the web form, #720).
       const grafanaInstance = dashboard?.grafanaInstance?.label || dto.grafanaInstance;
+      // An SLO's metrics source is its dashboard's. Any other id points at a row nothing here has
+      // authorized — another tenant's, whose delete the NO ACTION foreign key would then block, or
+      // one that does not exist — so all of them get one answer, and nothing is looked up to give it.
+      if (dto.metricsSourceId && dto.metricsSourceId !== dashboard?.metricsSourceId) {
+        throw new BadRequestException('metricsSourceId is not the metrics source of applicationDashboardId');
+      }
 
       const benchmark = this.benchmarkRepo.create({
         system_under_test_id: dto.systemUnderTestId,

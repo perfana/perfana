@@ -172,6 +172,31 @@ describe('benchmark dashboard lookups are scoped to the authorized system', () =
       expect(error).toBeInstanceOf(BadRequestException);
       expect(benchmarkRepo.save).not.toHaveBeenCalled();
     });
+
+    it('stores a metricsSourceId only when it is the metrics source of the SLO\'s own dashboard', async () => {
+      await service.create('user-a', [], { ...createBody(OWN.id), metricsSourceId: OWN.metricsSourceId });
+
+      expect(benchmarkRepo.create.mock.calls[0][0]).toMatchObject({ metrics_source_id: OWN.metricsSourceId });
+    });
+
+    // Stored as given, another tenant's id would be readable back, and the NO ACTION foreign key would
+    // refuse that tenant's delete of its own metrics source.
+    it('answers another tenant\'s metrics source exactly as it answers a missing one, and stores nothing', async () => {
+      const foreign = await refusal(
+        service.create('user-a', [], { ...createBody(OWN.id), metricsSourceId: FOREIGN.metricsSourceId }),
+      );
+      const missing = await refusal(
+        service.create('user-a', [], { ...createBody(OWN.id), metricsSourceId: 'ms-does-not-exist' }),
+      );
+      const withoutDashboard = await refusal(
+        service.create('user-a', [], { ...createBody(''), metricsSourceId: FOREIGN.metricsSourceId }),
+      );
+
+      expect(foreign).toBeInstanceOf(BadRequestException);
+      expect(foreign.message).toBe(missing.message);
+      expect(withoutDashboard.message).toBe(missing.message);
+      expect(benchmarkRepo.save).not.toHaveBeenCalled();
+    });
   });
 
   describe('update', () => {
