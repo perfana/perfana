@@ -228,10 +228,12 @@ describe('toStoredThresholdValue', () => {
   });
 
   // #717: the suffix used to reach the API, where Number('0.5s') stored NaN.
-  describe('Unit suffix is stripped', () => {
+  // #718: and it is converted to the panel's unit.
+  describe('Unit suffix is stripped and converted', () => {
     it.each([
       ['0.5s', 's', '0.5'],
-      ['500ms', 's', '500'],
+      ['500ms', 's', '0.5'],
+      ['2m', 'ms', '120000'],
       ['500 ms', undefined, '500'],
       [' 0.5 ', 's', '0.5'],
       ['90%', 'percentunit', '0.9'],
@@ -242,6 +244,9 @@ describe('toStoredThresholdValue', () => {
 
     it('leaves a non-numeric value for validation to reject', () => {
       expect(toStoredThresholdValue('abc', 's')).toBe('abc');
+    });
+    it('leaves an unconvertible unit for validation to reject', () => {
+      expect(toStoredThresholdValue('90%', 's')).toBe('90%');
     });
   });
 });
@@ -543,5 +548,39 @@ describe('isFormValid', () => {
         )
       ).toBe(true);
     });
+  });
+});
+
+describe('validateSLOForm unit check (#718)', () => {
+  it('refuses a unit that cannot be converted to the panel unit', () => {
+    const errors = validateSLOForm(
+      makeFormData({ requirementValue: '90%', selectedPanel: { id: 1, title: 'Latency', yAxesFormat: 's' } })
+    );
+    expect(errors.requirementValue).toMatch(/can't be compared/);
+  });
+
+  it('accepts a convertible unit', () => {
+    const errors = validateSLOForm(
+      makeFormData({ requirementValue: '500ms', selectedPanel: { id: 1, title: 'Latency', yAxesFormat: 's' } })
+    );
+    expect(errors.requirementValue).toBeUndefined();
+  });
+
+  it('does not check units for a trend, which is %/h whatever the panel measures', () => {
+    const errors = validateSLOForm(
+      makeFormData({ requirementValue: '5%', evaluateType: 'trend', selectedPanel: { id: 1, title: 'Latency', yAxesFormat: 's' } })
+    );
+    expect(errors.requirementValue).toBeUndefined();
+  });
+
+  it('checks the default value too', () => {
+    const errors = validateSLOForm(
+      makeFormData({
+        selectedPanel: { id: 1, title: 'Latency', yAxesFormat: 's' },
+        validateWithDefaultIfNoData: true,
+        validateWithDefaultIfNoDataValue: '1GB',
+      })
+    );
+    expect(errors.validateWithDefaultIfNoDataValue).toMatch(/can't be compared/);
   });
 });

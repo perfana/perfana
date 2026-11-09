@@ -1,7 +1,7 @@
 import { SloPanel } from '../types';
-import { getUnit } from '@/lib/units';
+import { getUnit, unitLabel } from '@/lib/units';
 import { EvaluateTypeOption, RequirementOperatorOption, SourceOption } from '../types';
-import { parseValueWithUnit } from './slo-validators';
+import { parseValueWithUnit, convertThresholdInput } from './slo-validators';
 
 /**
  * Source options for SLO configuration
@@ -159,9 +159,19 @@ export function getRequirementValuePlaceholder(selectedPanel: SloPanel | null | 
 /**
  * Get helper text for requirement value input
  */
-export function getRequirementValueHelperText(value: string, selectedPanel: SloPanel | null | undefined): string {
-  const detectedUnit = getDetectedUnit(value);
+export function getRequirementValueHelperText(
+  value: string,
+  selectedPanel: SloPanel | null | undefined,
+  evaluateType?: string
+): string {
   const effectiveUnitFormat = selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
+  // Say what will be stored when the typed unit differs from the panel's, or why it can't be.
+  const result = convertThresholdInput(value, evaluateType === 'trend' ? undefined : effectiveUnitFormat);
+  if (result && 'error' in result) return result.error;
+  if (result?.from && result.to && unitLabel(result.from) !== unitLabel(result.to)) {
+    return `${parseValueWithUnit(value.trim()).value} ${unitLabel(result.from)} = ${result.value} ${unitLabel(result.to)}`;
+  }
+  const detectedUnit = getDetectedUnit(value);
   const expectedUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;
 
   if (detectedUnit) {
