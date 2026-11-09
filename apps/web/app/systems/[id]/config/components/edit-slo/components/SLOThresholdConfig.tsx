@@ -23,7 +23,11 @@ import {
   getRequirementValueHelperText,
   getUnitChipLabel,
   isUnitChipPrimary,
+  getEffectiveUnitFormat,
 } from '../utils/slo-formatters';
+import { unitLabel } from '@/lib/units';
+
+const unitName = (code: string) => unitLabel(code) || code;
 
 interface SLOThresholdConfigProps {
   sloFormData: SLOFormData;
@@ -50,6 +54,14 @@ export function SLOThresholdConfig({
   if (!sloFormData.selectedPanel) {
     return null;
   }
+
+  // The threshold stays in the record's unit when the live panel's differs (adoptPanelUnit);
+  // say so rather than relabel a stored number.
+  const livePanelUnit = getEffectiveUnitFormat(sloFormData.selectedPanel);
+  const unitDrift = sloFormData.evaluateType !== 'trend' && livePanelUnit && sloFormData.thresholdUnit
+    && livePanelUnit !== sloFormData.thresholdUnit
+    ? `This panel now shows ${unitName(livePanelUnit)}; the threshold is still read and saved in ${unitName(sloFormData.thresholdUnit)}.`
+    : null;
 
   return (
     <>
@@ -142,14 +154,14 @@ export function SLOThresholdConfig({
           }}
           required
           error={!!validationErrors.requirementValue}
-          placeholder={getRequirementValuePlaceholder(sloFormData.selectedPanel)}
+          placeholder={getRequirementValuePlaceholder(sloFormData.thresholdUnit)}
           helperText={
             validationErrors.requirementValue ||
-            getRequirementValueHelperText(sloFormData.requirementValue, sloFormData.selectedPanel, sloFormData.evaluateType)
+            getRequirementValueHelperText(sloFormData.requirementValue, sloFormData.thresholdUnit, sloFormData.evaluateType)
           }
           InputProps={{
             endAdornment: (() => {
-              const chipLabel = getUnitChipLabel(sloFormData.requirementValue, sloFormData.selectedPanel, sloFormData.evaluateType);
+              const chipLabel = getUnitChipLabel(sloFormData.requirementValue, sloFormData.thresholdUnit, sloFormData.evaluateType);
               if (chipLabel) {
                 return (
                   <InputAdornment position="end">
@@ -166,6 +178,7 @@ export function SLOThresholdConfig({
             })(),
           }}
         />
+        {unitDrift && <FormHelperText sx={{ color: 'readable.warning' }}>{unitDrift}</FormHelperText>}
       </Grid>
 
       {/* Tags */}
@@ -315,7 +328,8 @@ export function SLOThresholdConfig({
               endAdornment: (() => {
                 const chipLabel = getUnitChipLabel(
                   sloFormData.validateWithDefaultIfNoDataValue,
-                  sloFormData.selectedPanel
+                  sloFormData.thresholdUnit,
+                  sloFormData.evaluateType
                 );
                 if (chipLabel) {
                   return (

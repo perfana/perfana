@@ -108,12 +108,12 @@ export function isFormValid(
 }
 
 /**
- * The unit an SLO's threshold is stored in: the panel's, except for a trend, which is
- * %/h whatever the panel measures and so has nothing to convert against.
+ * The unit the threshold field is converted against: the form's one `thresholdUnit`, except
+ * for a trend, which is %/h whatever the panel measures and so has nothing to convert against.
  */
-export function thresholdUnitFormat(sloFormData: Pick<SLOFormData, 'selectedPanel' | 'evaluateType'>): string | undefined {
+export function thresholdUnitFormat(sloFormData: Pick<SLOFormData, 'thresholdUnit' | 'evaluateType'>): string | undefined {
   if (sloFormData.evaluateType === 'trend') return undefined;
-  return sloFormData.selectedPanel?.yAxesFormat || sloFormData.selectedPanel?.metricUnit || undefined;
+  return sloFormData.thresholdUnit || undefined;
 }
 
 const DECIMAL = /^-?(\d+(\.\d*)?|\.\d+)$/;
@@ -138,21 +138,63 @@ export function toStoredThresholdValue(value: string, unitFormat: string | undef
   return result && !('error' in result) ? String(result.value) : value;
 }
 
+/** `metric_unit` of a trend SLO (benchmark-mutation.service.ts): a label, not a unit. */
+const TREND_UNIT = '%/h';
+
 /**
- * The unit an existing SLO's threshold is stored in. Edit both shows the value and saves it
- * through this one function, so opening and saving without a change keeps the number (#719).
- * It used to read `configuration` for display but the panel (which falls back to the
- * `metric_unit` column) for save, so a percentunit row whose unit lived only in the column
- * was shown as 0.9 and saved as 0.009, a hundred times smaller on every save. The panel
- * cannot be changed in Edit, so the SLO's own record is the source. A trend is %/h.
+ * The unit an existing SLO's threshold is stored in, read from its own record: Edit's
+ * `thresholdUnit` at open (#719 — display and save once read different fields and a
+ * percentunit SLO shrank 100x per save). '%/h' is skipped per candidate: it is the label the
+ * API writes into `metric_unit` for a trend, never a unit a value can be converted to, and a
+ * former trend keeps it after being edited to avg. The evaluate type is not consulted here;
+ * `thresholdUnitFormat` drops the unit for a trend.
  */
 export function storedThresholdUnit(benchmark: {
-  evaluate_type?: string;
   metric_unit?: string;
   configuration?: { yAxesFormat?: string; metricUnit?: string } | null;
 }): string | undefined {
-  if (benchmark.evaluate_type === 'trend') return undefined;
-  return benchmark.configuration?.yAxesFormat || benchmark.configuration?.metricUnit || benchmark.metric_unit || undefined;
+  return [benchmark.configuration?.yAxesFormat, benchmark.configuration?.metricUnit, benchmark.metric_unit]
+    .find((unit) => unit && unit !== TREND_UNIT) || undefined;
+}
+
+/**
+ * Take the live panel's (or Dynatrace metric's) unit as `thresholdUnit` when the record had
+ * none: a perf-test SLO saved before v0.2.97.58, a former trend. A record WITH a unit keeps it,
+ * even when the panel's has changed since: the number on screen and in the database is in the
+ * record's unit (the dialog warns about the difference instead of relabelling it).
+ *
+ * The one unit that changes how the value is shown is percentunit (0-1 stored, 0-100 shown).
+ * The field was filled showing the raw stored number, so it is re-shown scaled — but only while
+ * it still holds exactly that, and only when the record is not a trend (a trend's number is %/h,
+ * not a panel value). If the user already typed over it, the unit is not adopted: their bare
+ * number was entered against no unit and is saved as typed (#719, never scaled twice).
+ */
+export function adoptPanelUnit(
+  prev: SLOFormData,
+  liveUnit: string | undefined,
+  benchmark: {
+    evaluate_type?: string;
+    requirement_value?: number | string;
+    configuration?: { validateWithDefaultIfNoDataValue?: number | string | null } | null;
+  },
+): SLOFormData {
+  if (prev.thresholdUnit || !liveUnit || liveUnit === TREND_UNIT) return prev;
+  if (liveUnit !== 'percentunit' || benchmark.evaluate_type === 'trend') return { ...prev, thresholdUnit: liveUnit };
+  // Per field: still the raw stored number -> re-show it scaled; a typed suffix ("90%") is
+  // unambiguous and converts under the adopted unit as typed; a typed bare number blocks adoption.
+  const rescale = (shown: string, stored: number | string | undefined): string | null => {
+    if (shown === convertDecimalToPercentageForDisplay(stored, undefined)) {
+      return convertDecimalToPercentageForDisplay(stored, liveUnit);
+    }
+    return parseValueWithUnit(shown.trim()).unitId ? shown : null;
+  };
+  const requirementValue = rescale(prev.requirementValue, benchmark.requirement_value);
+  const validateWithDefaultIfNoDataValue = rescale(
+    prev.validateWithDefaultIfNoDataValue,
+    benchmark.configuration?.validateWithDefaultIfNoDataValue ?? undefined,
+  );
+  if (requirementValue === null || validateWithDefaultIfNoDataValue === null) return prev;
+  return { ...prev, thresholdUnit: liveUnit, requirementValue, validateWithDefaultIfNoDataValue };
 }
 
 /**

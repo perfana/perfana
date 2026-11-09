@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.60] - 2026-11-09
+
+### Fixed
+- **Editing an SLO saves its threshold in the same unit the dialog showed it in.** The Edit dialog showed the value in one unit, checked and converted it against another, and saved it under a third label, so a threshold could be stored in one unit and read in another: an SLO that always passes or always fails, with nothing logged. One unit now drives all of it. Cases this fixes:
+  - A Grafana panel whose unit changed after the SLO was made: the SLO keeps its own unit, and the dialog now says the panel shows something else.
+  - A former trend SLO edited as an average no longer keeps `%/h` as its unit, so a typed `0.5s` is converted again.
+  - **Duplicate** onto a different panel takes that panel's unit: `90` on a 0-1 percentage panel is saved as 0.9, not 90.
+  - A trend with no stored unit switched to an average on a 0-1 percentage panel is converted the same way.
+  - Dynatrace SLOs keep their unit whether or not the dialog finds their metric, so `1s` is still saved as 1000 ms.
+- **An SLO with no stored unit on a 0-1 percentage panel now opens as a percentage.** It used to show the raw 0.9; it shows 90 and saves 0.9, the same number, under the panel's unit. If you type over the value before the panel has loaded, your number is saved as typed, never scaled twice.
 ## [0.2.97.59] - 2026-11-09
 
 ### Security

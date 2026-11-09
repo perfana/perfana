@@ -48,6 +48,13 @@ export interface SLOFormData {
   validateWithDefaultIfNoDataValue: string;
   /** `benchmarks.enabled` — the checks pipeline skips a disabled SLO entirely. */
   enabled: boolean;
+  /**
+   * The ONE unit the threshold is shown in, validated and converted against, and saved as
+   * `configuration.yAxesFormat`. Never '%/h': a trend reads it as no unit through
+   * `thresholdUnitFormat`. Set at open from the record, then by `adoptPanelUnit` when the live
+   * panel arrives, and by the metric picker in Duplicate. Undefined means no unit.
+   */
+  thresholdUnit?: string;
 }
 
 /**
