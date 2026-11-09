@@ -15,6 +15,7 @@ import {
   isFormValid,
   toStoredThresholdValue,
   convertDecimalToPercentageForDisplay,
+  storedThresholdUnit,
   parseValueWithUnit,
   SUPPORTED_PANEL_TYPES,
 } from '../slo-validators';
@@ -169,9 +170,15 @@ describe('convertDecimalToPercentageForDisplay', () => {
       expect(convertDecimalToPercentageForDisplay(0.001, 'percentunit')).toBe('0.1');
     });
 
-    it('should not convert a value >= 1 when format is percentunit (already percentage)', () => {
-      // A stored value that is already >= 1 should be returned as-is
-      expect(convertDecimalToPercentageForDisplay(95, 'percentunit')).toBe('95');
+    // #719: a value >= 1 used to be shown as-is, so 1 (100%) displayed as "1" and saved as 0.01.
+    it('scales a value >= 1 too: 1 is 100%', () => {
+      expect(convertDecimalToPercentageForDisplay(1, 'percentunit')).toBe('100');
+      expect(convertDecimalToPercentageForDisplay(1.5, 'percentunit')).toBe('150');
+    });
+
+    it('drops float noise', () => {
+      expect(convertDecimalToPercentageForDisplay(0.009, 'percentunit')).toBe('0.9');
+      expect(convertDecimalToPercentageForDisplay(0.07, 'percentunit')).toBe('7');
     });
   });
 
@@ -582,5 +589,24 @@ describe('validateSLOForm unit check (#718)', () => {
       })
     );
     expect(errors.validateWithDefaultIfNoDataValue).toMatch(/can't be compared/);
+  });
+});
+
+describe('storedThresholdUnit (#719)', () => {
+  it.each([
+    [{ configuration: { yAxesFormat: 'percentunit' } }, 'percentunit'],
+    [{ configuration: { metricUnit: 'percentunit' } }, 'percentunit'],
+    [{ metric_unit: 'percentunit', configuration: {} }, 'percentunit'],
+    [{ metric_unit: 'percentunit', configuration: null }, 'percentunit'],
+    [{ configuration: { yAxesFormat: 's' }, metric_unit: 'percentunit' }, 's'],
+    [{ evaluate_type: 'trend', metric_unit: '%/h', configuration: { yAxesFormat: 'percentunit' } }, undefined],
+    [{}, undefined],
+  ])('%j -> %p', (benchmark, expected) => {
+    expect(storedThresholdUnit(benchmark)).toBe(expected);
+  });
+
+  it.each([0.9, 0.95, 1, 0.07, 0.001, 1.5])('display -> save round-trips %p on a percentunit SLO', (stored) => {
+    const unit = storedThresholdUnit({ metric_unit: 'percentunit' });
+    expect(Number(toStoredThresholdValue(convertDecimalToPercentageForDisplay(stored, unit), unit))).toBe(stored);
   });
 });

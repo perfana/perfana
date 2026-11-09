@@ -14,7 +14,7 @@ import {
   UseEditSLOFormReturn,
   initialSLOFormData,
 } from '../types';
-import { SUPPORTED_PANEL_TYPES, convertDecimalToPercentageForDisplay } from '../utils/slo-validators';
+import { SUPPORTED_PANEL_TYPES, convertDecimalToPercentageForDisplay, storedThresholdUnit } from '../utils/slo-validators';
 import { isPerformanceTest } from '@/lib/metrics-source-utils';
 
 export function useEditSLOForm({
@@ -173,11 +173,8 @@ export function useEditSLOForm({
       // here, a duplicate-target 409 raised on one SLO is still on screen when the user
       // reopens Edit on a different one.
       setValidationErrors({});
-      // Handle percentunit conversion for display - convert decimal back to percentage
-      // A trend threshold is stored as typed (%/h), never percentunit-scaled.
-      const effectiveUnitFormat = benchmark.evaluate_type === 'trend'
-        ? undefined
-        : benchmark.configuration?.yAxesFormat || benchmark.configuration?.metricUnit;
+      // Show a percentunit decimal as a percentage, in the same unit updateSlo saves in.
+      const effectiveUnitFormat = storedThresholdUnit(benchmark);
       const displayRequirementValue = convertDecimalToPercentageForDisplay(
         benchmark.requirement_value,
         effectiveUnitFormat

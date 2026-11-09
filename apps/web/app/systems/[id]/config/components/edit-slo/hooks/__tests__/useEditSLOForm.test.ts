@@ -17,7 +17,7 @@
 
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useEditSLOForm } from '../useEditSLOForm';
-import { isFormValid } from '../../utils/slo-validators';
+import { isFormValid, storedThresholdUnit, toStoredThresholdValue } from '../../utils/slo-validators';
 import { Benchmark } from '../../../types';
 import { UseEditSLOFormProps } from '../../types';
 
@@ -173,6 +173,20 @@ const BASE_CONTEXT = { systemId: 'sys-1', systemName: 'My System', environment: 
 const GRAFANA_PROPS: UseEditSLOFormProps = { open: true, benchmark: GRAFANA_BENCHMARK, ...BASE_CONTEXT };
 const DYNATRACE_PROPS: UseEditSLOFormProps = { open: true, benchmark: DYNATRACE_BENCHMARK, ...BASE_CONTEXT };
 const PERCENTUNIT_PROPS: UseEditSLOFormProps = { open: true, benchmark: PERCENTUNIT_BENCHMARK, ...BASE_CONTEXT };
+// #719: the seeded "HTTP connection pool in use" shape — percentunit only in the metric_unit column.
+const COLUMN_PERCENTUNIT_BENCHMARK: Benchmark = {
+  ...GRAFANA_BENCHMARK,
+  id: 'bench-column-percentunit',
+  requirement_value: 0.9,
+  metric_unit: 'percentunit',
+  configuration: { panelId: 1 },
+};
+const COLUMN_PERCENTUNIT_PROPS: UseEditSLOFormProps = { open: true, benchmark: COLUMN_PERCENTUNIT_BENCHMARK, ...BASE_CONTEXT };
+const HUNDRED_PERCENT_PROPS: UseEditSLOFormProps = {
+  open: true,
+  benchmark: { ...PERCENTUNIT_BENCHMARK, id: 'bench-100pct', requirement_value: 1 },
+  ...BASE_CONTEXT,
+};
 const CUSTOM_SOURCE_PROPS: UseEditSLOFormProps = { open: true, benchmark: CUSTOM_SOURCE_BENCHMARK, ...BASE_CONTEXT };
 const CLOSED_PROPS: UseEditSLOFormProps = { open: false, benchmark: GRAFANA_BENCHMARK, ...BASE_CONTEXT };
 const NULL_BENCHMARK_PROPS: UseEditSLOFormProps = { open: true, benchmark: null, ...BASE_CONTEXT };
@@ -368,6 +382,25 @@ describe('Percentunit conversion on init', () => {
     const { result, unmount } = renderHook(() => useEditSLOForm(PERCENTUNIT_PROPS));
 
     await waitFor(() => expect(result.current.sloFormData.requirementValue).toBe('95'));
+
+    unmount();
+  });
+
+  // #719: opening and saving without a change used to store 0.009 for 0.9.
+  it('round-trips a percentunit held only in the metric_unit column', async () => {
+    const { result, unmount } = renderHook(() => useEditSLOForm(COLUMN_PERCENTUNIT_PROPS));
+
+    await waitFor(() => expect(result.current.sloFormData.requirementValue).toBe('90'));
+    const saveUnit = storedThresholdUnit({ ...COLUMN_PERCENTUNIT_BENCHMARK, evaluate_type: result.current.sloFormData.evaluateType });
+    expect(toStoredThresholdValue(result.current.sloFormData.requirementValue, saveUnit)).toBe('0.9');
+
+    unmount();
+  });
+
+  it('shows a 100% threshold (stored as 1) as 100, not 1', async () => {
+    const { result, unmount } = renderHook(() => useEditSLOForm(HUNDRED_PERCENT_PROPS));
+
+    await waitFor(() => expect(result.current.sloFormData.requirementValue).toBe('100'));
 
     unmount();
   });

@@ -9,8 +9,7 @@ import {
   UseEditSLOHandlersProps,
   UseEditSLOHandlersReturn,
 } from '../types';
-import { validateSLOForm, isFormValid as checkFormValid, toStoredThresholdValue } from '../utils/slo-validators';
-import { getEffectiveUnitFormat } from '../utils/slo-formatters';
+import { validateSLOForm, isFormValid as checkFormValid, toStoredThresholdValue, storedThresholdUnit } from '../utils/slo-validators';
 
 export function useEditSLOHandlers({
   benchmark,
@@ -96,9 +95,9 @@ export function useEditSLOHandlers({
       try {
         setSloFormLoading(true);
 
-        // Handle percentunit conversion - divide by 100 if panel uses percentunit format
-        // A trend threshold is %/h whatever the panel's unit, so the percentunit scaling must not touch it.
-        const effectiveUnitFormat = sloFormData.evaluateType === 'trend' ? undefined : getEffectiveUnitFormat(sloFormData.selectedPanel);
+        // Strip/convert the suffix and scale percentunit back to 0-1, in the unit the dialog displayed
+        // the value in. The evaluate type is the edited one: a trend is %/h and is never scaled.
+        const effectiveUnitFormat = storedThresholdUnit({ ...benchmark, evaluate_type: sloFormData.evaluateType });
         const processedRequirementValue = toStoredThresholdValue(sloFormData.requirementValue, effectiveUnitFormat);
 
         // Handle percentunit conversion for default value too
