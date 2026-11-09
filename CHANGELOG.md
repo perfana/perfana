@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.58] - 2026-11-09
+
+### Fixed
+- **SLOs on performance-test panels show their unit in the SLO list.** An SLO created on a panel such as Request RT Avg read "Less than 0.5" with no unit, because the Add and Edit dialogs dropped the panel's unit. They now keep it, so the list reads "Less than 500 ms", and a threshold typed with a unit is converted to the panel's: `0.5s` on Request RT Avg is saved as 500 ms. Error-rate panels use percent (0-100), and a suffix that cannot apply (`5%` on a ms panel) is refused.
+- **Existing performance-test SLOs pick up their unit on the next save.** An SLO saved before this release has no unit stored. Open it with **Edit** and save: it takes the panel's unit, and a value typed with a unit is converted into it. The stored number is not changed by a save you make without retyping it, so check that the threshold still means what you intended (a value entered as `0.5` meaning seconds is 0.5 ms on a ms panel).
+- **Edit finds the right panel for SLOs created in the Add dialog.** It looked the panel up by a field the Add dialog never writes and fell back to matching titles, so a panel sharing a title could be picked. It now matches the panel id first.
+- **A typed `90%` is converted on a percentunit panel in Edit.** For an SLO with no stored unit it was saved as 90 against 0-1 data, an SLO that could never fail. A bare number on such a panel is still left as shown, so 0.9 is never saved as 0.009.
+
 ## [0.2.97.57] - 2026-11-09
 
 ### Added

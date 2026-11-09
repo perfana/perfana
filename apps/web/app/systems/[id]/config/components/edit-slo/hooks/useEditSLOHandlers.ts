@@ -9,7 +9,7 @@ import {
   UseEditSLOHandlersProps,
   UseEditSLOHandlersReturn,
 } from '../types';
-import { validateSLOForm, isFormValid as checkFormValid, toStoredThresholdValue, storedThresholdUnit } from '../utils/slo-validators';
+import { validateSLOForm, isFormValid as checkFormValid, toStoredThresholdValue, storedThresholdUnit, thresholdUnitFormat, parseValueWithUnit } from '../utils/slo-validators';
 
 export function useEditSLOHandlers({
   benchmark,
@@ -97,13 +97,27 @@ export function useEditSLOHandlers({
 
         // Strip/convert the suffix and scale percentunit back to 0-1, in the unit the dialog displayed
         // the value in. The evaluate type is the edited one: a trend is %/h and is never scaled.
-        const effectiveUnitFormat = storedThresholdUnit({ ...benchmark, evaluate_type: sloFormData.evaluateType });
-        const processedRequirementValue = toStoredThresholdValue(sloFormData.requirementValue, effectiveUnitFormat);
+        // A record with no unit (a perf-test SLO saved before its panel carried one) falls back to
+        // the panel's, the unit validation already checked against and the one this save stores.
+        // Except a bare number on a percentunit panel: the dialog displayed that record's raw 0-1
+        // value, and scaling it here would store 0.9 as 0.009 (#719). A typed "90%" is
+        // unambiguous and still converts, or it would be stored as 90 against 0-1 data.
+        const recordUnit = storedThresholdUnit({ ...benchmark, evaluate_type: sloFormData.evaluateType });
+        const panelUnit = thresholdUnitFormat(sloFormData);
+        const unitFor = (value: string): string | undefined => recordUnit
+          ?? (panelUnit === 'percentunit' && !parseValueWithUnit(value.trim()).unitId ? undefined : panelUnit);
+        const processedRequirementValue = toStoredThresholdValue(
+          sloFormData.requirementValue,
+          unitFor(sloFormData.requirementValue),
+        );
 
         // Handle percentunit conversion for default value too
         let processedDefaultValue = sloFormData.validateWithDefaultIfNoDataValue;
         if (sloFormData.validateWithDefaultIfNoData) {
-          processedDefaultValue = toStoredThresholdValue(sloFormData.validateWithDefaultIfNoDataValue, effectiveUnitFormat);
+          processedDefaultValue = toStoredThresholdValue(
+            sloFormData.validateWithDefaultIfNoDataValue,
+            unitFor(sloFormData.validateWithDefaultIfNoDataValue),
+          );
         }
 
         const payload = {

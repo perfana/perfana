@@ -2037,6 +2037,39 @@ expensive part (apps/worker/CLAUDE.md, "ADAPT's baseline depends on the `pct_agg
 
 ## SLO configuration
 
+### The Edit SLO dialog decides its unit in more than one place
+
+**What:** Give Edit one unit that it displays the stored value in, validates and converts against, and saves as `configuration.yAxesFormat`.
+
+**Why:** Today those can disagree, and when they do a threshold is stored in one unit and read in another, an SLO that always passes or always fails, with nothing logged.
+
+**Context:** Found by three adversarial passes during /ship on `claude/slo-list-unit-visibility-f9f6ab` (v0.2.97.58). A single-unit attempt (commit 48646fc6) was reverted because it regressed Dynatrace. The cases, all under `apps/web/app/systems/[id]/config/components/edit-slo/`:
+- Display uses the record's unit (`storedThresholdUnit`, `hooks/useEditSLOForm.ts` init). Validation and helper text use the selected panel's (`thresholdUnitFormat`). The save converts in the record's unit, else the panel's (`hooks/useEditSLOHandlers.ts` `unitFor`), and labels the result with the panel's (`configuration.yAxesFormat`). So a Grafana panel whose unit changed after the SLO was made converts into one unit and is labelled with another. The v0.2.97.58 id match (`configuration.panelId ?? configuration.id`) swaps in the live panel more often, so this is more reachable now.
+- A former trend SLO edited as avg: `metric_unit` is still `'%/h'`, so `storedThresholdUnit` returns it, nothing converts, and the helper text shows a converted value the save never stores.
+- **Duplicate** (`allowMetricChange`) to a percentunit panel: the #719 bare-number exception compares against the original record's unit, so `90` is stored unscaled under a percentunit label.
+- A trend record with no usable unit, switched to avg on a percentunit panel: same exception, and its premise ("the dialog showed a raw 0-1 value") does not hold.
+- Dynatrace: the synthetic panel carries no unit and the metric upgrade does not keep the record's. Any single-unit rule has to cover this first, or an unmatched metric converts with no unit (the reason for the revert).
+- `storedThresholdUnit` should filter `'%/h'` per candidate before the `||` chain, not after.
+- The upgrade can match an id-correct panel whose unit is a different family than the record's, a record corrupted by the old title matching. Prefer the live unit or warn.
+
+Start by deciding the one unit at dialog open and once more when the live panel arrives, then derive display scaling, validation, conversion and the saved label from that value alone.
+
+**Effort:** M
+**Priority:** P1
+**Depends on:** None
+
+### Perf-test panel units have no guard beyond the units table
+
+**What:** Add `count`, `threads` and `txn/s` to `apps/web/lib/units.ts`, and a drift test pinning `perfPanelUnitCode` against `METRIC_TYPE_PANEL_UNITS` in `apps/worker/src/constants/performance-metrics.ts`.
+
+**Why:** A unit code missing from the table converts nothing and rejects nothing, so `500ms` on Avg Active Threads is saved as 500. A new perf unit string added in the worker would reach `metric_unit` raw.
+
+**Context:** v0.2.97.58 started carrying these units onto perf-test panels. `unitLabel` returning `''` is what makes `convertThresholdToPanelUnit` pass the value through. Adding entries also gives those columns a unit in comparison tables, which `err/s` already does. `/metrics/ds-metrics/panels-by-dashboard` picks the unit with `MIN(s.unit)` across every run, so a legacy blank row hides the unit. That degrades safely, but taking the latest run's unit is more correct.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+
 ### `PUT /benchmarks/:id` takes an untyped inline body, so nothing validates it
 
 **Priority:** P2

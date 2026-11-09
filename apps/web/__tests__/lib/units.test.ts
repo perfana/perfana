@@ -8,7 +8,7 @@
  * Based on Grafana unit formats for consistency across performance metrics.
  */
 
-import { getUnit, formatValueWithUnit, toUnitScale, unitFactor, unitFamily, unitLabel, convertThresholdToPanelUnit } from '@/lib/units';
+import { getUnit, formatValueWithUnit, toUnitScale, unitFactor, unitFamily, unitLabel, convertThresholdToPanelUnit, perfPanelUnitCode } from '@/lib/units';
 
 describe('Unit Utilities', () => {
   describe('getUnit()', () => {
@@ -544,5 +544,16 @@ describe('convertThresholdToPanelUnit', () => {
 
   it.each([undefined, 'none', 'short', 'currencyUSD'])('takes the number as typed when the panel unit is %p', (panel) => {
     expect(convertThresholdToPanelUnit(500, 'ms', panel)).toEqual({ value: 500 });
+  });
+});
+
+describe('perfPanelUnitCode', () => {
+  it('maps the perf-test display units the SLO dialogs convert against', () => {
+    expect(perfPanelUnitCode('ms')).toBe('ms');
+    expect(perfPanelUnitCode('%')).toBe('percent');
+    expect(perfPanelUnitCode('req/s')).toBe('reqps');
+    expect(perfPanelUnitCode('threads')).toBe('threads');
+    expect(perfPanelUnitCode('')).toBeUndefined();
+    expect(perfPanelUnitCode(undefined)).toBeUndefined();
   });
 });
