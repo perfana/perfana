@@ -60,6 +60,27 @@ export class BenchmarkTagHelper {
   }
 
   /**
+   * The label of the Grafana instance an application dashboard lives on, or undefined when it has
+   * none (Dynatrace and performance-metrics dashboards) or the row is gone. `benchmarks.grafana_instance`
+   * is the label the SLO table shows; the web client has no label for a dashboard picked from the
+   * list (only `grafana_instance_id`), so it used to send 'Default' for every new SLO (#720).
+   */
+  async grafanaInstanceLabelOf(applicationDashboardId: string): Promise<string | undefined> {
+    // A display label is not worth failing the save over; fall back like tag inheritance does.
+    try {
+      const dashboard = await withRequestEm(this.appDashboardRepo).findOne({
+        where: { id: applicationDashboardId },
+        relations: { grafanaInstance: true },
+        select: { id: true, grafanaInstance: { id: true, label: true } },
+      });
+      return dashboard?.grafanaInstance?.label || undefined;
+    } catch (error) {
+      this.logger.warn('Failed to resolve the Grafana instance of an application dashboard:', error);
+      return undefined;
+    }
+  }
+
+  /**
    * Get inherited tags for update operation based on dashboard lookup
    */
   async getInheritedTagsForUpdate(

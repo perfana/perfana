@@ -111,7 +111,9 @@ export function useEditSLOHandlers({
           testEnvironment: environment,
           workload: workload,
           source: sloFormData.source,
-          grafanaInstance: sloFormData.selectedDashboard?.grafanaInstance?.label || 'Default',
+          // Dashboard and Metric are locked in Edit, so the Grafana instance, config title and panel
+          // title are not sent: the API keeps the stored ones. Rebuilding them here overwrote the
+          // instance with 'Default' (the real dashboard row has no label) and prefixed the title (#720).
           dashboardLabel:
             sloFormData.source === 'dynatrace'
               ? sloFormData.selectedDashboard?.dashboardLabel || ''
@@ -127,14 +129,6 @@ export function useEditSLOHandlers({
             sloFormData.source === 'dynatrace'
               ? sloFormData.selectedPanel?.applicationDashboardId || benchmark.application_dashboard_id || ''
               : sloFormData.selectedDashboard?.id || '',
-          configTitle:
-            sloFormData.source === 'dynatrace'
-              ? `${sloFormData.selectedDashboard?.dashboardLabel || 'Dashboard'} - ${sloFormData.selectedPanel?.panelTitle || 'Metric'}`
-              : `${sloFormData.selectedDashboard?.dashboard_label || 'Dashboard'} - ${sloFormData.selectedPanel?.title || 'Metric'}`,
-          panelTitle:
-            sloFormData.source === 'dynatrace'
-              ? sloFormData.selectedPanel?.panelTitle || ''
-              : sloFormData.selectedPanel?.title || '',
           evaluateType: sloFormData.evaluateType,
           requirementOperator: sloFormData.requirementOperator,
           requirementValue: processedRequirementValue,
