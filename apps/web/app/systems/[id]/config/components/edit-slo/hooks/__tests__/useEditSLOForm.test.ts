@@ -190,6 +190,15 @@ const HUNDRED_PERCENT_PROPS: UseEditSLOFormProps = {
 const CUSTOM_SOURCE_PROPS: UseEditSLOFormProps = { open: true, benchmark: CUSTOM_SOURCE_BENCHMARK, ...BASE_CONTEXT };
 const CLOSED_PROPS: UseEditSLOFormProps = { open: false, benchmark: GRAFANA_BENCHMARK, ...BASE_CONTEXT };
 const NULL_BENCHMARK_PROPS: UseEditSLOFormProps = { open: true, benchmark: null, ...BASE_CONTEXT };
+// A UI-created SLO: the Add dialog stores the panel id as `configuration.id`, never `panelId`.
+const ID_ONLY_BENCHMARK: Benchmark = {
+  ...GRAFANA_BENCHMARK,
+  id: 'bench-id-only',
+  source: 'performance-metrics',
+  configuration: { id: 201 },
+  panel_title: 'Request RT Avg',
+};
+const ID_ONLY_PROPS: UseEditSLOFormProps = { open: true, benchmark: ID_ONLY_BENCHMARK, ...BASE_CONTEXT };
 
 // The Enabled checkbox (v0.2.96.15). `duplicate()` clones an SLO disabled, so the dialog has
 // to load `false` faithfully; older rows may carry no value at all and must read as enabled.
@@ -870,6 +879,31 @@ describe('fetchPerfMetricsPanels carries the panel unit', () => {
 
     expect(result.current.availableOptions.availablePanels.map((p) => [p.id, p.yAxesFormat]))
       .toEqual([[1, 'percent'], [2, 'reqps'], [3, 'threads'], [4, undefined]]);
+    unmount();
+  });
+});
+
+// Value: protects=Edit upgrades a UI-created SLO's synthetic panel to the panel with the id the
+// Add dialog stored (configuration.id), so the unit the save converts against and stores is that
+// panel's; fails_when=the id match reads only configuration.panelId and a same-titled panel wins
+// the title match; why_new=every upgrade test used panelId; seam=none; no_claim=the title and
+// fuzzy fallbacks for SLOs that carry no id.
+describe('the panel upgrade matches the id the Add dialog stores', () => {
+  it('picks the panel by configuration.id over a panel with the same title', async () => {
+    mockAuthFetch.mockImplementation(async (url: RequestInfo | URL) => makeResponse(
+      String(url).includes('/metrics/ds-metrics/panels-by-dashboard')
+        ? [
+          { panel_id: 999, panel_title: 'Request RT Avg', unit: '%' },
+          { panel_id: 201, panel_title: 'Request RT Avg (renamed)', unit: 'ms' },
+        ]
+        : [],
+    ));
+    const { result, unmount } = renderHook(() => useEditSLOForm(ID_ONLY_PROPS));
+
+    await act(async () => { await result.current.fetchPerfMetricsPanels('app-dash-id'); });
+
+    await waitFor(() => expect((result.current.sloFormData.selectedPanel as { id?: number } | null)?.id).toBe(201));
+    expect((result.current.sloFormData.selectedPanel as { yAxesFormat?: string }).yAxesFormat).toBe('ms');
     unmount();
   });
 });

@@ -210,6 +210,21 @@ describe('a record with no unit converts in the panel unit', () => {
     expect(body.requirementValue).toBe('0.9');
   });
 
+  // An explicit "90%" is unambiguous: it converts to 0.9, the scale validation checked and the
+  // percentunit data uses. Stored as 90 it would make the SLO always pass.
+  it('converts a typed "90%" on a percentunit panel for a unit-less record', async () => {
+    mockFetch.mockResolvedValue(okResponse());
+
+    const pctPanel = { id: 7, title: 'Pool in use', yAxesFormat: 'percentunit' } as unknown as SLOFormData['selectedPanel'];
+    const { result } = setup({ ...formData, selectedPanel: pctPanel, requirementValue: '90%' });
+    await act(async () => {
+      result.current.handleSaveDialogConfirm('none');
+    });
+
+    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.requirementValue).toBe('0.9');
+  });
+
   it("keeps the record's own unit when it has one", async () => {
     mockFetch.mockResolvedValue(okResponse());
 

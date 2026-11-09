@@ -372,8 +372,11 @@ export function useEditSLOForm({
       let matchingPanel: unknown = null;
 
       // 1. Try to match by panel ID from configuration (most reliable)
-      if (benchmark.configuration?.panelId) {
-        const panelId = benchmark.configuration.panelId;
+      // The Add dialog stores the id as `configuration.id`, not `panelId`. Without it every
+      // UI-created SLO fell to title and fuzzy matching, and the matched panel's unit is now
+      // what the save converts against and stores.
+      const panelId = benchmark.configuration?.panelId ?? benchmark.configuration?.id;
+      if (panelId != null && panelId !== '') {
         matchingPanel = availablePanels.find((panel) => {
           const p = panel as GrafanaPanel;
           // Handle both string and number panel IDs
