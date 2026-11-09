@@ -940,8 +940,12 @@ row it touches look machine-seeded again.
 
 ### The ADAPT template dialog sends only the fields that are ticked
 
-`/settings/profiles/adapt-templates` (v0.2.97.55) manages compare-config templates; its dialog is
+`/settings/profiles/adapt-templates` (v0.2.97.55) manages organization and install-wide compare-config
+templates, and the profile page's **ADAPT templates** tab (v0.2.97.57) a profile's; both render
+`adapt-templates/components/AdaptTemplatesPanel.tsx`. The dialog is
 `adapt-templates/components/CompareTemplateDialog.tsx`, its state mapping `adapt-templates/template-form.ts`.
+A definition never carries its scope (`organizationId` or `profile`): the panel's scope names the
+collection, `toDto` strips the profile on the way out, and a copy POSTs the same definition to another scope.
 A template's meaning is which fields it names: a named field is forced onto every panel the template
 reaches, an absent one keeps each panel's own value. Three rules:
 

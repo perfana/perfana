@@ -5,7 +5,7 @@ import { ProvisionedTemplateDsCompareConfig } from '../../entities';
 import { Capability } from '../../constants/capabilities.constants';
 import { CompareTemplatesService, describeTemplateKey, isDuplicateTemplateKey } from './compare-templates.service';
 import { ProvisioningService } from './provisioning.service';
-import { templateKey, TemplateColumns } from './compare-template-codec';
+import { parseTemplateItem, templateKey, TemplateColumns } from './compare-template-codec';
 import type { CompareTemplateDefinitionDto } from './dto/compare-template.dto';
 
 /**
@@ -20,6 +20,22 @@ jest.mock('../../common/db/request-em', () => {
 const ORG_A = 'aaaaaaaa-0000-4000-8000-00000000000a';
 const ORG_B = 'bbbbbbbb-0000-4000-8000-00000000000b';
 const ORGS: Record<string, string> = { [ORG_A]: 'Acme', [ORG_B]: 'Bravo' };
+const P_JVM = 'dddddddd-0000-4000-8000-00000000000d';
+const P_DOTNET = 'eeeeeeee-0000-4000-8000-00000000000e';
+const P_OTHER = 'ffffffff-0000-4000-8000-00000000000f';
+/** Profiles by id. `readOnly` is a provisioned profile, which still takes UI templates. */
+const PROFILES: Record<string, { id: string; name: string; organizationId: string; readOnly?: boolean }> = {
+  [P_JVM]: { id: P_JVM, name: 'jvm', organizationId: ORG_A, readOnly: true },
+  [P_DOTNET]: { id: P_DOTNET, name: 'dotnet', organizationId: ORG_A },
+  [P_OTHER]: { id: P_OTHER, name: 'other', organizationId: ORG_B },
+};
+const profileRepo = {
+  findOne: jest.fn(async ({ where: { id } }: { where: { id: string } }) => PROFILES[id] ?? null),
+  find: jest.fn(async (opts: { where?: { id?: { value?: string[] } } } = {}) => {
+    const ids = opts.where?.id?.value;
+    return Object.values(PROFILES).filter((p) => !ids || ids.includes(p.id));
+  }),
+};
 
 const duplicateKey = () =>
   Object.assign(new Error('duplicate key value violates unique constraint "uq_provisioned_template_ds_compare_configs_key"'), {
@@ -72,6 +88,7 @@ function templateTable(initial: Array<Partial<ProvisionedTemplateDsCompareConfig
 
   const repo = {
     find: jest.fn(async (opts: { where?: Record<string, unknown> } = {}) => rows.filter((r) => matches(r, opts.where)).map(clone)),
+    count: jest.fn(async (opts: { where?: Record<string, unknown> } = {}) => rows.filter((r) => matches(r, opts.where)).length),
     findOne: jest.fn(async (opts: { where: Record<string, unknown> }) => {
       const row = rows.find((r) => matches(r, opts.where));
       return row ? clone(row) : null;
@@ -123,7 +140,13 @@ describe('CompareTemplatesService', () => {
     const organizationRepo = {
       findOne: jest.fn(async ({ where: { id } }: { where: { id: string } }) => (ORGS[id] ? { id, name: ORGS[id] } : null)),
     };
-    service = new CompareTemplatesService(table.repo as never, organizationRepo as never, audit as never, authz as never);
+    service = new CompareTemplatesService(
+      table.repo as never,
+      organizationRepo as never,
+      audit as never,
+      authz as never,
+      profileRepo as never,
+    );
   };
 
   beforeEach(() => {
@@ -433,11 +456,186 @@ describe('CompareTemplatesService', () => {
    *   why_new — the create path and the export route are new; PR 1 only round-tripped YAML to YAML.
    *   seam — both real services over one in-memory table; no_claim — Postgres itself.
    */
+  /**
+   * Profile templates (`/profiles/:id/compare-templates`). Their organization is the profile's, read
+   * from the profile on every request, and they are a scope of their own: never listed or keyed with
+   * their organization's templates.
+   */
+  describe('profile scope', () => {
+    const profileTemplate = (id: string, profileId: string, over: Partial<ProvisionedTemplateDsCompareConfig> = {}) => ({
+      id, profile_id: profileId, organization_id: PROFILES[profileId]!.organizationId, dashboard_uid: 'jvm-overview',
+      panel_id: 7, metric_classification: 'x', ...over,
+    });
+
+    it("lists only the profile's templates, and an organization's list leaves its profiles' out", async () => {
+      build([
+        profileTemplate('11111111-0000-4000-8000-000000000001', P_JVM),
+        profileTemplate('11111111-0000-4000-8000-000000000002', P_DOTNET),
+        { organization_id: ORG_A, panel_id: 7, metric_classification: 'x' },
+      ]);
+      const list = await service.list({ kind: 'profile', profileId: P_JVM }, 'member', ['user'], [ORG_A]);
+      expect(list).toMatchObject({ scope: 'profile', organizationId: ORG_A, profileId: P_JVM, profileName: 'jvm', canWrite: true });
+      expect(list.templates.map((t) => t.id)).toEqual(['11111111-0000-4000-8000-000000000001']);
+      expect(list.templates[0]).toMatchObject({ scope: 'profile', profileId: P_JVM, profileName: 'jvm' });
+      expect(list.templates[0]!.definition).not.toHaveProperty('profile');
+
+      const org = await service.list({ kind: 'organization', organizationId: ORG_A }, 'member', ['user'], [ORG_A]);
+      expect(org.templates).toHaveLength(1);
+      expect(org.templates[0]!.scope).toBe('organization');
+    });
+
+    it("answers 404 for a profile outside the caller's organizations, and for one that does not exist", async () => {
+      await expect(service.list({ kind: 'profile', profileId: P_OTHER }, 'member', ['user'], [ORG_A])).rejects.toThrow(NotFoundException);
+      await expect(service.list({ kind: 'profile', profileId: 'cccccccc-0000-4000-8000-00000000000c' }, 'admin', ['perfana-admin'], null))
+        .rejects.toThrow(NotFoundException);
+    });
+
+    it("creates under a provisioned profile, stores the profile and its organization, and audits in that organization", async () => {
+      const created = await service.create({ kind: 'profile', profileId: P_JVM }, def({ absThreshold: 3 }), 'member', ['user'], [ORG_A]);
+      expect(created).toMatchObject({ scope: 'profile', profileId: P_JVM, organizationId: ORG_A, readOnly: false });
+      expect(table.rows[0]).toMatchObject({ profile_id: P_JVM, organization_id: ORG_A, config_overrides: { absThreshold: 3 } });
+      expect(audit.logCreate).toHaveBeenCalledWith(expect.anything(), { organizationIdOverride: ORG_A });
+    });
+
+    it("needs benchmark:manage in the profile's organization", async () => {
+      await expect(service.create({ kind: 'profile', profileId: P_JVM }, def(), 'viewer', ['user'], [ORG_A])).rejects.toThrow(ForbiddenException);
+    });
+
+    it('refuses a body that names a profile or an organization: the route is the scope', async () => {
+      await expect(service.create({ kind: 'profile', profileId: P_JVM }, { ...def(), profile: 'dotnet' }, 'member', ['user'], [ORG_A]))
+        .rejects.toThrow(/profile is not part of a template definition/);
+      await expect(service.create({ kind: 'profile', profileId: P_JVM }, { ...def(), organizationId: ORG_A }, 'member', ['user'], [ORG_A]))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it("keys a profile's templates apart from its organization's and its sibling profiles'", async () => {
+      build([{ organization_id: ORG_A, dashboard_uid: 'jvm-overview', panel_id: 7, metric_classification: 'x' }]);
+      await service.create({ kind: 'profile', profileId: P_JVM }, def(), 'member', ['user'], [ORG_A]);
+      await service.create({ kind: 'profile', profileId: P_DOTNET }, def(), 'member', ['user'], [ORG_A]);
+      await expect(service.create({ kind: 'profile', profileId: P_JVM }, def(), 'member', ['user'], [ORG_A]))
+        .rejects.toThrow(/already a template for dashboard "jvm-overview", panel 7 in profile "jvm"/);
+    });
+
+    it("authorizes through the profile's current organization, not the stale copy on the row", async () => {
+      const id = '11111111-0000-4000-8000-000000000009';
+      // The row says ORG_B (the profile used to be there); the profile is in ORG_A now.
+      build([profileTemplate(id, P_JVM, { organization_id: ORG_B })]);
+      await expect(service.findOne(id, [ORG_A])).resolves.toMatchObject({ organizationId: ORG_A, profileName: 'jvm' });
+      await expect(service.findOne(id, [ORG_B])).rejects.toThrow(NotFoundException);
+    });
+
+    it('accepts the route profile id in upper case, as ParseUUIDPipe does', async () => {
+      const id = '11111111-0000-4000-8000-000000000016';
+      build([profileTemplate(id, P_JVM)]);
+      await expect(service.findOne(id, [ORG_A], P_JVM.toUpperCase())).resolves.toMatchObject({ id, profileId: P_JVM });
+    });
+
+    it("answers 404 when the route's profile is not the template's", async () => {
+      const id = '11111111-0000-4000-8000-000000000003';
+      build([profileTemplate(id, P_JVM), { id: '11111111-0000-4000-8000-000000000004', organization_id: ORG_A, panel_id: 1, metric_classification: 'x' }]);
+      await expect(service.findOne(id, [ORG_A], P_DOTNET)).rejects.toThrow(NotFoundException);
+      await expect(service.update(id, def(), 'member', ['user'], [ORG_A], P_DOTNET)).rejects.toThrow(NotFoundException);
+      await expect(service.remove(id, 'member', ['user'], [ORG_A], P_DOTNET)).rejects.toThrow(NotFoundException);
+      // An organization template is not any profile's.
+      await expect(service.remove('11111111-0000-4000-8000-000000000004', 'member', ['user'], [ORG_A], P_JVM)).rejects.toThrow(NotFoundException);
+      await service.remove(id, 'member', ['user'], [ORG_A], P_JVM);
+      expect(table.rows.map((r) => r.id)).toEqual(['11111111-0000-4000-8000-000000000004']);
+    });
+
+    it('updates in place, keeping the profile, and refuses a provisioned profile template with 409', async () => {
+      const id = '11111111-0000-4000-8000-000000000005';
+      build([profileTemplate(id, P_JVM), profileTemplate('11111111-0000-4000-8000-000000000006', P_JVM, { panel_id: 8, read_only: true })]);
+      const updated = await service.update(id, def({ iqrThreshold: 3 }), 'member', ['user'], [ORG_A], P_JVM);
+      expect(updated).toMatchObject({ profileId: P_JVM, definition: { iqrThreshold: 3 } });
+      expect(table.rows[0]).toMatchObject({ profile_id: P_JVM, organization_id: ORG_A });
+      await expect(service.update('11111111-0000-4000-8000-000000000006', def({ panelId: 8 }), 'member', ['user'], [ORG_A], P_JVM))
+        .rejects.toThrow(ConflictException);
+    });
+
+    it("exports profile templates after organizations, by profile name, naming the profile and, in a mixed file, its organization", async () => {
+      build([
+        profileTemplate('11111111-0000-4000-8000-000000000011', P_JVM),
+        profileTemplate('11111111-0000-4000-8000-000000000012', P_DOTNET),
+        { organization_id: ORG_B, panel_id: 1, metric_classification: 'x' },
+      ]);
+      expect(await service.exportYaml(null)).toBe(
+        [
+          'items:',
+          `  - organizationId: ${ORG_B}`,
+          '    panelId: 1',
+          '    metricClassification: x',
+          `  - organizationId: ${ORG_A}`,
+          '    profile: dotnet',
+          '    dashboardUid: jvm-overview',
+          '    panelId: 7',
+          '    metricClassification: x',
+          `  - organizationId: ${ORG_A}`,
+          '    profile: jvm',
+          '    dashboardUid: jvm-overview',
+          '    panelId: 7',
+          '    metricClassification: x',
+          '',
+        ].join('\n'),
+      );
+    });
+
+    /**
+     * Generated by the ship-workflow test coverage audit (PR #716).
+     * Value: protects=a write on a moved profile's template needs benchmark:manage in the profile's CURRENT org;
+     *   fails_when=remove/update authorize on the row's stale organization_id copy, letting a writer of the old org delete it;
+     *   why_new=the stale-copy case was pinned for findOne only, and remove builds its own scope expression;
+     *   seam=none; no_claim=the controller, RLS (the table has none), or Postgres.
+     */
+    it("authorizes a write on a moved profile's template in the profile's current organization, not the row's stale copy", async () => {
+      const id = '11111111-0000-4000-8000-000000000013';
+      // The row says ORG_B (the profile used to be there); the profile is in ORG_A now.
+      build([profileTemplate(id, P_JVM, { organization_id: ORG_B })]);
+      // Manages templates in ORG_B, the stale copy's organization; can only read in ORG_A.
+      caps[`mover:${ORG_B}`] = [Capability.BenchmarkManage];
+
+      // No profileId: the web edits and deletes through /compare-templates/:id.
+      await expect(service.remove(id, 'mover', ['user'], [ORG_A, ORG_B])).rejects.toThrow(ForbiddenException);
+      await expect(service.update(id, def({ iqrThreshold: 3 }), 'mover', ['user'], [ORG_A, ORG_B])).rejects.toThrow(ForbiddenException);
+      expect(table.rows).toHaveLength(1);
+
+      // A writer in the profile's current organization may, and the delete is audited there too,
+      // not under the row's stale copy.
+      await service.remove(id, 'member', ['user'], [ORG_A]);
+      expect(table.rows).toHaveLength(0);
+      expect(audit.logDelete).toHaveBeenCalledWith(expect.objectContaining({ id }), { organizationIdOverride: ORG_A });
+    });
+
+    /**
+     * Generated by the ship-workflow test coverage audit (PR #716).
+     * Value: protects=the export of a moved profile's template provisions cleanly on the next boot;
+     *   fails_when=exportYaml counts the row's stale organization copy, writing a file-level organizationId the profile is not in;
+     *   why_new=codec specs hand serializeTemplates correct rows; only the service joins the profile's current organization;
+     *   seam=none; no_claim=what a real Postgres join returns, or a profile deleted between the two reads.
+     */
+    it("exports a moved profile's template under its current organization, so the file parses back", async () => {
+      // Every row's copy says ORG_B, but the profile has moved to ORG_A.
+      build([
+        { organization_id: ORG_B, panel_id: 1, metric_classification: 'x' },
+        profileTemplate('11111111-0000-4000-8000-000000000014', P_JVM, { organization_id: ORG_B }),
+      ]);
+      const file = await service.exportYaml(null);
+      expect(file).not.toMatch(/^organizationId:/m);
+
+      const { organizationId, items } = yaml.load(file) as { organizationId?: string; items: unknown[] };
+      const byName = Object.fromEntries(Object.values(PROFILES).map((p) => [p.name, p]));
+      const parsed = items.map((item) =>
+        parseTemplateItem(item, organizationId ?? null, { resolveProfile: (name) => byName[name] }),
+      );
+      expect(parsed.map((p) => (p.ok ? 'ok' : p.error))).toEqual(['ok', 'ok']);
+      expect(parsed[1]).toMatchObject({ values: { profile_id: P_JVM, organization_id: ORG_A } });
+    });
+  });
+
   describe('round trip: create in the UI, export, commit, boot', () => {
     it('takes every UI template over unchanged, then reports nothing to do', async () => {
       const provisioning = new ProvisioningService(
         {} as never,
-        {} as never,
+        profileRepo as never,
         {} as never,
         {} as never,
         table.repo as never,
@@ -455,6 +653,7 @@ describe('CompareTemplatesService', () => {
         ...asAdmin,
       );
       await service.create({ kind: 'organization', organizationId: ORG_B }, def(), ...asAdmin);
+      await service.create({ kind: 'profile', profileId: P_OTHER }, def({ absThreshold: 7 }), ...asAdmin);
 
       // Every column the file decides, per row. Takeover is counted whatever it writes, so the
       // content has to be compared, not just the counts.
@@ -463,7 +662,7 @@ describe('CompareTemplatesService', () => {
           table.rows.map((r) => [
             r.id,
             {
-              organization_id: r.organization_id, dashboard_uid: r.dashboard_uid, regex: r.regex,
+              organization_id: r.organization_id, profile_id: r.profile_id, dashboard_uid: r.dashboard_uid, regex: r.regex,
               dashboard_label: r.dashboard_label, panel_id: r.panel_id, panel_title: r.panel_title,
               metric_name: r.metric_name, metric_classification: r.metric_classification,
               higher_is_better: r.higher_is_better, config_overrides: r.config_overrides,
@@ -476,11 +675,11 @@ describe('CompareTemplatesService', () => {
       const { organizationId, items } = yaml.load(file) as { organizationId?: string; items: unknown[] };
 
       const SUMMARY = { created: 0, updated: 0, unchanged: 0, takenOver: 0, pruned: 0, skipped: 0, errors: 0 };
-      expect(await provisioning.provisionMetricClassifications(items, organizationId ?? null)).toEqual({ ...SUMMARY, takenOver: 4 });
+      expect(await provisioning.provisionMetricClassifications(items, organizationId ?? null)).toEqual({ ...SUMMARY, takenOver: 5 });
       expect(table.rows.every((r) => r.read_only === true && r.updated_by === 'system:provisioning')).toBe(true);
       expect(decided()).toEqual(before);
 
-      expect(await provisioning.provisionMetricClassifications(items, organizationId ?? null)).toEqual({ ...SUMMARY, unchanged: 4 });
+      expect(await provisioning.provisionMetricClassifications(items, organizationId ?? null)).toEqual({ ...SUMMARY, unchanged: 5 });
       expect(await service.exportYaml(null)).toBe(file);
 
       // ...and the rows are now owned by the file.

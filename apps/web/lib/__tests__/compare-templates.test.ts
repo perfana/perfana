@@ -69,3 +69,16 @@ it('exports the file as text', async () => {
   expect(await exportCompareTemplatesYaml()).toBe('items: []\n');
   expect(fetchMock).toHaveBeenCalledWith('/provisioning/compare-templates/export', { cache: 'no-store' });
 });
+
+it("addresses a profile's templates under the profile, like its SLOs, and links to the profile's tab", async () => {
+  const PROFILE = 'dddddddd-0000-4000-8000-00000000000d';
+  fetchMock.mockResolvedValue(ok({ templates: [] }));
+  await fetchCompareTemplates({ kind: 'profile', profileId: PROFILE });
+  expect(fetchMock).toHaveBeenCalledWith(`/profiles/${PROFILE}/compare-templates`, { cache: 'no-store' });
+
+  fetchMock.mockResolvedValue(ok({ id: 't' }));
+  await createCompareTemplate({ kind: 'profile', profileId: PROFILE }, { panelId: 1, metricClassification: 'x' });
+  expect(fetchMock).toHaveBeenCalledWith(`/profiles/${PROFILE}/compare-templates`, expect.objectContaining({ method: 'POST' }));
+
+  expect(templatesPageHref({ kind: 'profile', profileId: PROFILE })).toBe(`/settings/profiles/${PROFILE}?tab=adapt-templates`);
+});

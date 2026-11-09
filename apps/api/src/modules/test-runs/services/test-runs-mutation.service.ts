@@ -422,6 +422,7 @@ export class TestRunsMutationService {
         systemUnderTestId: testRun.system_under_test_id,
         testEnvironment: testRun.test_environment,
         workload: testRun.workload,
+        tags: testRun.tags,
       });
       if (result.compareConfigsCreated > 0) {
         this.logger.log(

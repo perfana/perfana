@@ -931,6 +931,166 @@ describe('ProvisioningService', () => {
       expect(serializeTemplates(table)).toBe(canonical);
       expect(await service.provisionMetricClassifications(items, null)).toEqual({ ...SUMMARY, unchanged: 2 });
     });
+
+    describe('profile templates', () => {
+      const ORG_A = 'aaaaaaaa-0000-4000-8000-00000000000a';
+      const ORG_B = 'bbbbbbbb-0000-4000-8000-00000000000b';
+      beforeEach(() => {
+        profileRepo.find.mockResolvedValue([
+          { id: 'p-jvm', name: 'jvm', organizationId: ORG_A },
+          { id: 'p-dotnet', name: 'dotnet', organizationId: ORG_B },
+        ] as Profile[]);
+      });
+
+      it("resolves the profile by name and stores its id and organization", async () => {
+        const result = await service.provisionMetricClassifications(
+          [{ profile: 'jvm', panelId: 5, metricClassification: 'RED_rate' }],
+          null,
+        );
+        expect(result).toEqual({ ...SUMMARY, created: 1 });
+        expect(templateRepo.insert).toHaveBeenCalledWith(
+          expect.objectContaining({ profile_id: 'p-jvm', organization_id: ORG_A, panel_id: 5, read_only: true }),
+        );
+      });
+
+      it("keeps a profile's template apart from its organization's template for the same panel", async () => {
+        templateRepo.find.mockResolvedValue([row({ id: 'org-row', organization_id: ORG_A })]);
+        const result = await service.provisionMetricClassifications(
+          [
+            { organizationId: ORG_A, dashboardUid: 'jmeter-overview', panelId: 5, metricClassification: 'RED_rate' },
+            { profile: 'jvm', dashboardUid: 'jmeter-overview', panelId: 5, metricClassification: 'RED_rate' },
+          ],
+          null,
+        );
+        expect(result).toEqual({ ...SUMMARY, unchanged: 1, created: 1 });
+      });
+
+      /**
+       * Value: protects=a profile renamed or not yet provisioned does not delete every template of it;
+       * fails_when=an unresolved profile item counts as declaring nothing, so the profile templates
+       *   it means are pruned, or it suppresses every prune;
+       * why_new=the YAML profile field is new (design S14, R3-11).
+       */
+      it('an unresolved profile protects every profile template from the prune, and only those', async () => {
+        templateRepo.find.mockResolvedValue([
+          row({ id: 'profile-row', profile_id: 'p-jvm', organization_id: ORG_A }),
+          row({ id: 'org-row', organization_id: ORG_A, panel_id: 9 }),
+        ]);
+        const result = await service.provisionMetricClassifications(
+          [{ profile: 'jvmm', dashboardUid: 'jmeter-overview', panelId: 5, metricClassification: 'RED_rate' }],
+          null,
+        );
+        expect(templateRepo.delete).toHaveBeenCalledTimes(1);
+        expect(templateRepo.delete).toHaveBeenCalledWith('org-row');
+        expect(result).toEqual({ ...SUMMARY, skipped: 1, pruned: 1 });
+      });
+
+      /**
+       * Value: protects=one stale profile name spares only the profiles it could mean, not every profile's prune;
+       *   fails_when=an unresolved name suppresses the prune of a profile the file still resolves by its current name;
+       *   why_new=the case above has no resolved profile item beside the unresolved one;
+       *   seam=none; no_claim=a file naming one renamed profile under both names (its old-name rows are pruned).
+       */
+      it("prunes a resolved profile's dropped template while an unresolved name spares only the unreached profiles", async () => {
+        templateRepo.find.mockResolvedValue([
+          row({ id: 'jvm-stale', profile_id: 'p-jvm', organization_id: ORG_A, panel_id: 8 }),
+          row({ id: 'dotnet-dropped', profile_id: 'p-dotnet', organization_id: ORG_B, panel_id: 9 }),
+          row({ id: 'dotnet-kept', profile_id: 'p-dotnet', organization_id: ORG_B, dashboard_uid: null, panel_id: 3 }),
+        ]);
+        const result = await service.provisionMetricClassifications(
+          [
+            { profile: 'jvmm', panelId: 8, metricClassification: 'RED_rate' },
+            { profile: 'dotnet', panelId: 3, metricClassification: 'RED_rate' },
+          ],
+          null,
+        );
+        expect(templateRepo.delete).toHaveBeenCalledTimes(1);
+        expect(templateRepo.delete).toHaveBeenCalledWith('dotnet-dropped');
+        expect(result).toMatchObject({ skipped: 1, pruned: 1 });
+      });
+
+      /**
+       * Value: protects=a misspelt profile key neither widens its item nor prunes the template it provisioned;
+       *   fails_when=the item is provisioned without its profile, or reported as an unresolved profile, so a
+       *   correctly spelt item for the same profile marks it reached and its stored template is pruned;
+       *   why_new=the scope-key refusal is new at v0.2.97.57 review; seam=none; no_claim=the boot log text.
+       */
+      it('refuses an item with a misspelt profile key and prunes nothing that boot, even beside resolved items', async () => {
+        templateRepo.find.mockResolvedValue([
+          row({ id: 'mistyped-row', profile_id: 'p-jvm', organization_id: ORG_A, panel_id: 5 }),
+          row({ id: 'org-row', organization_id: ORG_A, panel_id: 9 }),
+        ]);
+        const result = await service.provisionMetricClassifications(
+          [
+            { profileName: 'jvm', panelId: 5, metricClassification: 'RED_rate' },
+            { profile: 'jvm', panelId: 6, metricClassification: 'RED_rate' },
+          ],
+          null,
+        );
+        expect(templateRepo.insert).toHaveBeenCalledTimes(1);
+        expect(templateRepo.insert).toHaveBeenCalledWith(expect.objectContaining({ profile_id: 'p-jvm', panel_id: 6 }));
+        expect(templateRepo.delete).not.toHaveBeenCalled();
+        expect(result).toEqual({ ...SUMMARY, created: 1, errors: 1 });
+      });
+
+      it("spares a renamed profile's templates when its old name now resolves in another organization", async () => {
+        // ORG_A renamed `jvm` (p-jvm-old, still holding a provisioned row); ORG_B created a new `jvm`.
+        profileRepo.find.mockResolvedValue([
+          { id: 'p-jvm-old', name: 'java', organizationId: ORG_A },
+          { id: 'p-jvm-new', name: 'jvm', organizationId: ORG_B },
+        ] as Profile[]);
+        templateRepo.find.mockResolvedValue([row({ id: 'renamed-row', profile_id: 'p-jvm-old', organization_id: ORG_A })]);
+        const result = await service.provisionMetricClassifications(
+          [{ organizationId: ORG_A, profile: 'jvm', dashboardUid: 'jmeter-overview', panelId: 5, metricClassification: 'RED_rate' }],
+          null,
+        );
+        expect(templateRepo.insert).not.toHaveBeenCalled();
+        expect(templateRepo.delete).not.toHaveBeenCalled();
+        expect(result).toEqual({ ...SUMMARY, errors: 1 });
+      });
+
+      it("skips an item whose organizationId is not its profile's, and keeps the template it provisioned", async () => {
+        templateRepo.find.mockResolvedValue([row({ id: 'profile-row', profile_id: 'p-jvm', organization_id: ORG_A })]);
+        const result = await service.provisionMetricClassifications(
+          [{ profile: 'jvm', organizationId: ORG_B, dashboardUid: 'jmeter-overview', panelId: 5, metricClassification: 'RED_errors' }],
+          null,
+        );
+        expect(templateRepo.delete).not.toHaveBeenCalled();
+        expect(templateRepo.update).not.toHaveBeenCalled();
+        expect(result).toEqual({ ...SUMMARY, errors: 1 });
+      });
+
+      it('prunes a provisioned profile template the file no longer declares', async () => {
+        templateRepo.find.mockResolvedValue([row({ id: 'profile-row', profile_id: 'p-jvm', organization_id: ORG_A })]);
+        const result = await service.provisionMetricClassifications([], null);
+        expect(templateRepo.delete).toHaveBeenCalledWith('profile-row');
+        expect(result).toEqual({ ...SUMMARY, pruned: 1 });
+      });
+
+      it('takes over a UI-created profile template, and a second boot reports nothing to do', async () => {
+        const realYaml = jest.requireActual('js-yaml') as typeof yaml;
+        mockedYaml.dump.mockImplementation(realYaml.dump);
+        const { serializeTemplates } = await import('./compare-template-codec');
+        // A UI row as CompareTemplatesService stores it: the same columns the item parses to.
+        const table: ProvisionedTemplateDsCompareConfig[] = [
+          row({ id: 'ui', profile_id: 'p-dotnet', organization_id: ORG_B, dashboard_uid: null, panel_id: 3, read_only: false,
+            config_overrides: { absThreshold: 5 } }),
+        ];
+        templateRepo.find.mockImplementation(async () => table.map((r) => ({ ...r })));
+        templateRepo.update.mockImplementation(async (id: any, v: any) => {
+          Object.assign(table.find((r) => r.id === id)!, v);
+          return undefined as any;
+        });
+        const exported = serializeTemplates(table.map((r) => ({ ...(r as any), profile_name: 'dotnet' })));
+        // One organization in the file (the profile's), so it is carried once at the top.
+        expect(exported).toBe(`organizationId: ${ORG_B}\nitems:\n  - profile: dotnet\n    panelId: 3\n    metricClassification: RED_rate\n    absThreshold: 5\n`);
+        const { items, organizationId } = realYaml.load(exported) as { items: unknown[]; organizationId: string };
+
+        expect(await service.provisionMetricClassifications(items, organizationId)).toEqual({ ...SUMMARY, takenOver: 1 });
+        expect(table[0]!.read_only).toBe(true);
+        expect(await service.provisionMetricClassifications(items, organizationId)).toEqual({ ...SUMMARY, unchanged: 1 });
+      });
+    });
   });
 
   describe('runProvisioning (integration)', () => {

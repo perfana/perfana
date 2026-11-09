@@ -26,6 +26,7 @@ export class ProvisionedTemplateDsCompareConfig {
     'metric_classification',
     'config_overrides',
     'read_only',
+    'profile_id',
   ] as const;
 
   @PrimaryGeneratedColumn('uuid')
@@ -88,6 +89,15 @@ export class ProvisionedTemplateDsCompareConfig {
    */
   @Column({ type: 'boolean', nullable: true, default: false })
   read_only?: boolean | null;
+
+  /**
+   * A profile template applies only to runs whose tags match this profile (migration 1823). Its
+   * scope is the profile alone: `organization_id` holds a copy of the profile's organization for the
+   * audit log, and is neither part of the key nor read for selection or access, which go through the
+   * profile. ON DELETE CASCADE: deleting a profile deletes its templates.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  profile_id?: string | null;
 
   @Column({ type: 'uuid', nullable: true })
   organization_id?: string;

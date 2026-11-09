@@ -502,6 +502,76 @@ from the body in these places; the code, `apps/api/CLAUDE.md` and
 7. **The export is admin-only twice**: `@AdminOnly()` at the guard and the service's global-admin check
    (`withOrgFilter` returning `null`), so neither alone is load-bearing.
 
+## Implementation deviations (PR 2b, profile templates, 2026-11-09)
+
+PR 2b (v0.2.97.57) ships the profile half of "Next Steps" item 2 that PR 2 deviation 1 split out. It
+differs from the body in these places; the code, `apps/api/CLAUDE.md` and
+`docs/reference/Features/Compare Config Templates.md` describe what shipped.
+
+1. **A new migration, 1823, rather than the "PR 2 migration" folded into another.** It swaps the unique
+   index in one plpgsql statement (drop and create inside a `DO` block, skipped when the index already
+   has the profile term), so it is atomic without the batch transaction (root CLAUDE.md #64), and it
+   needs no duplicate pre-check: every existing row has `profile_id` NULL and the old scope term maps
+   one-to-one onto `'org:' || …`. The key prefixes both scopes (`'profile:'`, `'org:'`) so an
+   organization id can never spell a profile scope. `down()` deletes profile templates before restoring
+   1822's index.
+2. **The profile matcher's organization is the dashboard's** (§2 Selection, extending D10): profile
+   templates follow the organization templates in reading each application dashboard's NOT NULL
+   `organizationId`, not the optional `TestRun` field. Only the run's tags come from the `TestRun`.
+3. **Step 4 ties are reported apart from step 5 ties.** A tie between two profiles reads `decided by
+   profile name: "a" over "b"` and an id tie keeps PR 1's exact `decided by template id:` text, so D11's
+   preserved spec case stays unedited.
+4. **An item whose `organizationId` contradicts its profile is an error with its key declared**, not a
+   warning (§3): the item is skipped and its stored template kept, the same rule as any other invalid
+   attribute. A file-level `organizationId` counts as stated, an absent one does not, so a multi-tenant
+   file writes profile items with no organization and the export never writes one on them.
+5. **Profile templates are counted towards the export's file-level organization** with their profile's
+   current organization (§4), so a file is never written with a file-level organization a profile item
+   would then contradict on the next boot.
+6. **The profile tab is the shared panel**, `AdaptTemplatesPanel`, which the organization and
+   install-wide page now render too; the Export YAML button moved from the page header into the panel's
+   toolbar. Copy targets list the caller's profiles first, by name.
+7. **The delete confirmation's count is read fresh when the dialog opens** (`GET /profiles/:id`, which
+   gained `adaptTemplateCount`), because templates can change on the tab in between.
+8. **Open Question 2 is taken as recommended**: a provisioned (read-only) profile takes UI templates.
+   Open Question 4 is answered in the tab's copy and the reference page: an untagged run gets only
+   organization and install-wide templates, and a workload whose runs are tagged inconsistently flips
+   between template sets on each completion, marking results stale when the effective config changes.
+
+Changed at /ship review (2026-11-09), each decided by the user:
+
+9. **The export pins a profile item to its organization in a mixed file**, reversing the "never writes
+   one on them" half of deviation 4. Profile names are one install-wide namespace, so a name deleted or
+   renamed in one organization and re-created in another would otherwise claim the template on the next
+   boot; with the organization written, the item fails deviation 4's mismatch check instead. A
+   single-organization file still carries it once at the top. An older API that ignores `profile` then
+   widens such an item only to its organization, never to the install.
+10. **A mismatched or unresolved profile item spares only unreached profiles from the prune.** S14's
+    suppression covered every profile template, on every boot until the file was fixed, so one stale name
+    froze every profile's prune install-wide. It now spares only the templates of profiles no resolved item
+    reaches; an organization mismatch counts as unresolved for this, so a renamed profile is protected even
+    when another organization has taken its old name.
+11. **`profileId`, `profileName` and `profiles` are refused, not warned about.** Ignoring an unknown key is
+    harmless for an override, but ignoring a misspelt scope key widens the template to its organization or
+    the install. Such an item is unidentified, so it stops the whole prune that boot (reporting it as an
+    unresolved profile would let a correctly spelt item for the same profile prune its template).
+12. **The profile routes were scoped to the caller's organizations in the same PR.** `GET/PUT/DELETE
+    /profiles/:id` and the profile dashboard and SLO routes checked only "org admin in any organization";
+    with the cascade and tag-driven selection added here, that let one tenant's admin delete or retarget
+    another's ADAPT templates.
+13. **A row the applier inserted is deleted when no template wins it, not rebuilt from `INSERT_BASE`**
+    (adversarial review, user decision). §2's "rebuild from base alone" left mean/`none` where ADAPT
+    otherwise applies its own default (median, unclassified); with profile templates every non-matching
+    run took that path, so untagged runs silently changed aggregation after one tagged run. The row is
+    deleted conditional on its author and its results marked stale explicitly. This supersedes the
+    "Delete an applier-inserted row" TODO.
+14. **A new profile can name its organization.** `CreateProfileDto.organizationId` (optional, validated:
+    one of the caller's, org admin there); without it the pick is sorted rather than cache-ordered,
+    because the profile's organization now decides which runs its templates reach.
+15. **Known residue (TODOS.md):** templates are stored per workload and ADAPT reads them when the run's
+    analysis starts, so a differently tagged completion in between, or a later re-evaluate, judges a run on
+    another set. Recording the run's matched profiles and re-applying under the scope lock is filed.
+
 ## Open Questions
 
 1. **`percentageThreshold` unit in YAML.** `config_data` stores a fraction (0.15), the form shows a

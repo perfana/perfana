@@ -514,6 +514,14 @@ export class ProvisioningService implements OnApplicationBootstrap {
    * write, so an item that fails to parse or write still declares its key and is not pruned. An
    * item whose key cannot be read at all suppresses the prune for this boot: it may be the edited
    * form of a template the file still means to keep.
+   *
+   * A `profile` is resolved by name, as `profile_benchmarks.yaml` does. An item naming a profile that
+   * does not exist has no key either (a profile template's key is the profile's id), but it can only
+   * be a profile template, so it spares from the prune the templates of every profile that no other
+   * item resolves (a profile still resolved by name cannot be what the stale name means). It lasts
+   * until the file is fixed, not one boot. An item whose `organizationId` is not its profile's is
+   * skipped with its key still declared, and spares its name's templates the same way: a renamed
+   * profile whose old name another organization has since taken reads exactly like that.
    */
   async provisionMetricClassifications(
     items: unknown[],
@@ -522,18 +530,38 @@ export class ProvisioningService implements OnApplicationBootstrap {
     const result = { created: 0, updated: 0, unchanged: 0, takenOver: 0, pruned: 0, skipped: 0, errors: 0 };
     const label = (index: number) => `template_ds_compare_configs.yaml item ${index + 1}`;
 
+    // Profiles are provisioned first (profiles.yaml), so a profile the same boot creates resolves here.
+    // Names are unique across the install (profiles.name), so a name is a whole reference.
+    const profiles = new Map(
+      (await withRequestEm(this.profileRepo).find({ select: ['id', 'name', 'organizationId'] })).map((p) => [p.name, p]),
+    );
+    const resolveProfile = (name: string) => profiles.get(name);
+
     const declared = new Set<string>();
     let unidentified = 0;
+    // Profile names the file means but that did not resolve to a profile in the stated organization,
+    // and the profiles that did resolve. The prune spares a profile template only when its profile is
+    // in neither sense accounted for: an unresolved name could be it, a resolved one cannot.
+    const unresolvedProfiles = new Set<string>();
+    const resolvedProfileIds = new Set<string>();
     const byKey = new Map<string, Array<{ index: number; values: TemplateColumns }>>();
     items.forEach((item, index) => {
-      const parsed = parseTemplateItem(item, organizationId ?? null);
+      const parsed = parseTemplateItem(item, organizationId ?? null, { resolveProfile });
+      if (!parsed.ok && parsed.unresolvedProfile !== undefined) {
+        this.logger.warn(`${label(index)}: ${parsed.error} — skipped`);
+        unresolvedProfiles.add(parsed.unresolvedProfile);
+        result.skipped++;
+        return;
+      }
       if (parsed.key) declared.add(parsed.key);
       else unidentified++;
       if (!parsed.ok) {
+        if (parsed.profileMismatch !== undefined) unresolvedProfiles.add(parsed.profileMismatch);
         this.logger.error(`${label(index)}: ${parsed.error} — skipped`);
         result.errors++;
         return;
       }
+      if (parsed.values.profile_id) resolvedProfileIds.add(parsed.values.profile_id);
       for (const warning of parsed.warnings) this.logger.warn(`${label(index)}: ${warning}`);
       byKey.set(parsed.key, [...(byKey.get(parsed.key) ?? []), { index, values: parsed.values }]);
     });
@@ -623,12 +651,18 @@ export class ProvisioningService implements OnApplicationBootstrap {
             `template_ds_compare_configs.yaml: ${unidentified} item(s) could not be identified and ${writeFailures} failed to write, so no provisioned template is pruned this boot`,
           );
         } else {
+          if (unresolvedProfiles.size > 0) {
+            this.logger.error(
+              `template_ds_compare_configs.yaml: profile(s) ${[...unresolvedProfiles].map((n) => `"${n}"`).join(', ')} could not be resolved, so the provisioned templates of every profile no other item resolves are not pruned, on every boot until the file is fixed`,
+            );
+          }
           for (const row of rows) {
             if (!row.read_only || declared.has(templateKey(row))) continue;
+            if (row.profile_id && unresolvedProfiles.size > 0 && !resolvedProfileIds.has(row.profile_id)) continue;
             try {
               await this.templateRepo.delete(row.id);
               this.logger.log(
-                `Pruned compare-config template ${row.id} (dashboard "${row.dashboard_uid ?? '*'}" panel ${row.panel_id ?? row.panel_title}${row.metric_name ? ` metric "${row.metric_name}"` : ''}): no longer in the file`,
+                `Pruned compare-config template ${row.id} (${row.profile_id ? `profile ${row.profile_id}, ` : ''}dashboard "${row.dashboard_uid ?? '*'}" panel ${row.panel_id ?? row.panel_title}${row.metric_name ? ` metric "${row.metric_name}"` : ''}): no longer in the file`,
               );
               result.pruned++;
             } catch (error) {
@@ -649,7 +683,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
 
     this.logger.log(
       `Metric classifications: ${result.created} created, ${result.updated} updated, ${result.unchanged} unchanged, ` +
-        `${result.takenOver} taken over, ${result.pruned} pruned, ${result.errors} errors`,
+        `${result.takenOver} taken over, ${result.pruned} pruned, ${result.skipped} skipped, ${result.errors} errors`,
     );
     return result;
   }

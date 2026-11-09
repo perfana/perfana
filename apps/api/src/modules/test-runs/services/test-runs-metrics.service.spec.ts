@@ -692,6 +692,240 @@ describe('TestRunsMetricsService', () => {
       expect(createdArg.config_data.defaultValueIfControlGroupMissing).toBe(0);
     });
 
+    /**
+     * Profile templates (migration 1823): selected by the completing run's tags, inside the profile's
+     * organization, which is read from the profile, not from the template row's copy.
+     */
+    describe('profile templates', () => {
+      const dashboard = {
+        id: 'dash-1', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production',
+        dashboardUid: 'jvm-prod-1', organizationId: 'org-a',
+      };
+      const tmpl = (over: Record<string, unknown>) => ({
+        id: 'tmpl', system_under_test_id: null, dashboard_uid: 'jvm-prod-1', regex: false, panel_id: 7,
+        panel_title: null, metric_name: null, organization_id: null, profile_id: null,
+        metric_classification: 'USE_saturation', higher_is_better: null, config_overrides: {}, ...over,
+      });
+      const profile = (id: string, name: string, tags: string[], organization_id = 'org-a') => ({ id, name, tags, organization_id });
+      /** The absThreshold the inserted row was built with: which template won. */
+      const insertedAbs = () =>
+        (compareConfigRepo.create.mock.calls[0]?.[0] as { config_data: { thresholds: { absoluteThreshold: unknown } } } | undefined)
+          ?.config_data.thresholds.absoluteThreshold;
+      const insertedTemplate = () => (compareConfigRepo.create.mock.calls[0]?.[0] as { template_id?: string } | undefined)?.template_id;
+
+      beforeEach(() => {
+        applicationDashboardRepo.find.mockResolvedValue([dashboard] as any);
+        compareConfigRepo.create.mockImplementation((data) => data as any);
+        compareConfigRepo.save.mockImplementation((data) => Promise.resolve({ id: 'new-id', ...data } as any));
+      });
+
+      it('applies a profile template only to a run whose tags match the profile', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ id: 'p-tmpl', profile_id: 'p-jvm', organization_id: 'org-a', config_overrides: { absThreshold: 3 } })] as any);
+        templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['dotnet'] });
+        expect(compareConfigRepo.create).not.toHaveBeenCalled();
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['jvm', 'nightly'] });
+        expect(insertedTemplate()).toBe('p-tmpl');
+        expect(insertedAbs()).toBe(3);
+        expect(templateRepo.query).toHaveBeenCalledWith(expect.stringContaining('FROM profiles WHERE id = ANY'), [['p-jvm']]);
+      });
+
+      it('applies no profile template to an untagged run', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ profile_id: 'p-jvm', organization_id: 'org-a' })] as any);
+        templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
+
+        await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(compareConfigRepo.create).not.toHaveBeenCalled();
+      });
+
+      it('never applies a profile of another organization, whatever the tags', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ profile_id: 'p-b', organization_id: 'org-a' })] as any);
+        // The template row's copy says org-a; the profile itself is in org-b, and the profile wins.
+        templateRepo.query.mockResolvedValue([profile('p-b', 'jvm', ['jvm'], 'org-b')]);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['jvm'] });
+
+        expect(compareConfigRepo.create).not.toHaveBeenCalled();
+      });
+
+      it("follows its profile into a new organization: the profile's, not the row's stale copy", async () => {
+        templateRepo.find.mockResolvedValue([tmpl({ profile_id: 'p-moved', organization_id: 'org-old' })] as any);
+        templateRepo.query.mockResolvedValue([profile('p-moved', 'jvm', ['jvm'], 'org-a')]);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['jvm'] });
+
+        expect(insertedTemplate()).toBe('tmpl');
+      });
+
+      it('ranks scope profile > organization > install-wide', async () => {
+        templateRepo.find.mockResolvedValue([
+          tmpl({ id: 'install', config_overrides: { absThreshold: 1 } }),
+          tmpl({ id: 'org', organization_id: 'org-a', config_overrides: { absThreshold: 2 } }),
+          tmpl({ id: 'profile', profile_id: 'p-jvm', organization_id: 'org-a', config_overrides: { absThreshold: 3 } }),
+        ] as any);
+        templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['jvm'] });
+        expect(insertedTemplate()).toBe('profile');
+
+        compareConfigRepo.create.mockClear();
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: [] });
+        expect(insertedTemplate()).toBe('org');
+      });
+
+      it('keeps dashboard match ahead of scope: an exact-uid organization template beats a wildcard profile one', async () => {
+        templateRepo.find.mockResolvedValue([
+          tmpl({ id: 'org-exact', organization_id: 'org-a' }),
+          tmpl({ id: 'profile-wild', dashboard_uid: null, profile_id: 'p-jvm', organization_id: 'org-a' }),
+        ] as any);
+        templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['jvm'] });
+
+        expect(insertedTemplate()).toBe('org-exact');
+      });
+
+      it('decides two matching profiles by profile name, before template id, and reports it once', async () => {
+        const logSpy = jest.spyOn((service as any).logger, 'log');
+        templateRepo.find.mockResolvedValue([
+          tmpl({ id: 'a-tomcat', profile_id: 'p-tomcat', organization_id: 'org-a' }),
+          tmpl({ id: 'z-jvm', profile_id: 'p-jvm', organization_id: 'org-a' }),
+        ] as any);
+        templateRepo.query.mockResolvedValue([profile('p-tomcat', 'tomcat', ['java']), profile('p-jvm', 'jvm', ['java'])]);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['java'] });
+
+        expect(insertedTemplate()).toBe('z-jvm');
+        const summary = logSpy.mock.calls.map(([m]) => String(m)).find((m) => m.startsWith('Golden-path applied'))!;
+        expect(summary).toContain('decided by profile name: "jvm" over "tomcat"');
+        expect(summary).not.toContain('decided by template id');
+      });
+
+      it("rebuilds a profile-owned row it merged from a machine seed from its base when the next run's tags do not match", async () => {
+        const base = {
+          thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
+          metricClassification: { classification: 'none', higherIsBetter: null },
+          defaultValueIfControlGroupMissing: 0,
+        };
+        templateRepo.find.mockResolvedValue([tmpl({ id: 'p-tmpl', profile_id: 'p-jvm', organization_id: 'org-a', config_overrides: { absThreshold: 3 } })] as any);
+        templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            // The worker seeded it (created_by), the template merged into it: its base is the seed.
+            id: 'cfg-1', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null,
+            created_by: 'worker-pipeline', updated_by: 'system:golden-path',
+            template_base: base, template_id: 'p-tmpl',
+            config_data: { ...base, thresholds: { ...base.thresholds, absoluteThreshold: 3 }, metricClassification: { classification: 'USE_saturation', higherIsBetter: null } },
+          },
+        ] as any);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['other'] });
+
+        expect(compareConfigRepo.update).toHaveBeenCalledWith(
+          { id: 'cfg-1', updated_by: 'system:golden-path' },
+          { config_data: base, template_id: null },
+        );
+        expect(compareConfigRepo.delete).not.toHaveBeenCalled();
+      });
+
+      /**
+       * Value: protects=an untagged run is compared on ADAPT's own default after a tagged one, not on the insert defaults;
+       *   fails_when=a row the applier inserted for a profile template is rebuilt to INSERT_BASE (mean) instead of removed,
+       *   or removed without marking its results stale;
+       *   why_new=the rebuild case above is a merged machine seed, whose base IS the panel's own config;
+       *   seam=none; no_claim=the stale UPDATE's effect on Postgres (SQL text asserted, not executed).
+       */
+      it("removes the row it inserted for a profile template once the run's tags no longer match, and marks its results stale", async () => {
+        const base = {
+          thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
+          metricClassification: { classification: 'none', higherIsBetter: null },
+          defaultValueIfControlGroupMissing: 0,
+        };
+        templateRepo.find.mockResolvedValue([tmpl({ id: 'p-tmpl', profile_id: 'p-jvm', organization_id: 'org-a', config_overrides: { absThreshold: 3 } })] as any);
+        templateRepo.query.mockResolvedValue([profile('p-jvm', 'jvm', ['jvm'])]);
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            id: 'cfg-ins', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null,
+            created_by: 'system:golden-path', updated_by: 'system:golden-path', template_base: base, template_id: 'p-tmpl',
+            config_data: { ...base, thresholds: { ...base.thresholds, absoluteThreshold: 3 } },
+          },
+        ] as any);
+        compareConfigRepo.delete.mockResolvedValue({ affected: 1, raw: [] } as any);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: [] });
+
+        expect(compareConfigRepo.delete).toHaveBeenCalledWith({ id: 'cfg-ins', updated_by: 'system:golden-path' });
+        expect(compareConfigRepo.update).not.toHaveBeenCalled();
+        expect(compareConfigRepo.query).toHaveBeenCalledWith(
+          expect.stringMatching(/UPDATE ds_adapt_results\s+SET is_stale = true/),
+          ['sut-uuid-1', 'production', 'loadTest', 'dash-1', 7, null],
+        );
+      });
+
+      /**
+       * Value: protects=a stale-marking failure neither aborts the rest of the pass nor repeats its wait per row;
+       *   fails_when=the catch returns or rethrows (later rows unapplied), or every later row retries the UPDATE;
+       *   why_new=the removal path is new; seam=none; no_claim=the real lock wait (the rejection stands in for it).
+       */
+      it('logs, keeps applying later rows, and stops marking after the first stale-marking failure', async () => {
+        const base = {
+          thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
+          metricClassification: { classification: 'none', higherIsBetter: null },
+          defaultValueIfControlGroupMissing: 0,
+        };
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+        templateRepo.find.mockResolvedValue([]);
+        const inserted = (id: string, panel_id: number) => ({
+          id, application_dashboard_id: 'dash-1', panel_id, metric_name: null,
+          created_by: 'system:golden-path', updated_by: 'system:golden-path', template_base: base, template_id: 'gone', config_data: base,
+        });
+        compareConfigRepo.find.mockResolvedValue([inserted('cfg-a', 7), inserted('cfg-b', 8)] as any);
+        compareConfigRepo.delete.mockResolvedValue({ affected: 1, raw: [] } as any);
+        compareConfigRepo.query.mockRejectedValue(new Error('canceling statement due to statement timeout'));
+
+        await expect(service.applyGoldenPathClassifications(testRunInput)).resolves.toEqual({ compareConfigsCreated: 0 });
+        // Both rows are still removed: the pass carries on after the failure.
+        expect(compareConfigRepo.delete).toHaveBeenCalledWith({ id: 'cfg-a', updated_by: 'system:golden-path' });
+        expect(compareConfigRepo.delete).toHaveBeenCalledWith({ id: 'cfg-b', updated_by: 'system:golden-path' });
+        // Only one wait: the second row does not retry the UPDATE.
+        expect(compareConfigRepo.query).toHaveBeenCalledTimes(1);
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('could not mark results stale after removing the compare config for SUT sut-uuid-1/production/loadTest, dashboard dash-1, panel 7'));
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('panel 8 (skipped after an earlier failure)'));
+      });
+
+      it('marks nothing stale when a user saved the row while the applier ran (the delete matched no row)', async () => {
+        const base = {
+          thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
+          metricClassification: { classification: 'none', higherIsBetter: null },
+          defaultValueIfControlGroupMissing: 0,
+        };
+        templateRepo.find.mockResolvedValue([]);
+        compareConfigRepo.find.mockResolvedValue([
+          {
+            id: 'cfg-ins', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null,
+            created_by: 'system:golden-path', updated_by: 'system:golden-path', template_base: base, template_id: 'gone', config_data: base,
+          },
+        ] as any);
+        compareConfigRepo.delete.mockResolvedValue({ affected: 0, raw: [] } as any);
+
+        await service.applyGoldenPathClassifications(testRunInput);
+
+        expect(compareConfigRepo.delete).toHaveBeenCalledTimes(1);
+        expect(compareConfigRepo.query).not.toHaveBeenCalled();
+      });
+
+      it('reads no profiles when no template belongs to one', async () => {
+        templateRepo.find.mockResolvedValue([tmpl({})] as any);
+
+        await service.applyGoldenPathClassifications({ ...testRunInput, tags: ['jvm'] });
+
+        expect(templateRepo.query).not.toHaveBeenCalled();
+      });
+    });
+
     describe('template ownership and re-merge (migration 1822)', () => {
       const dashboard = {
         id: 'dash-1', systemUnderTestId: 'sut-uuid-1', testEnvironment: 'production',
