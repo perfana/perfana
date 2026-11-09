@@ -260,6 +260,39 @@ describe('compare-template codec', () => {
       expect(parsed.ok).toBe(false);
       expect(parsed.key).toBe(templateKey({ profile_id: 'p-jvm', panel_id: 5 }));
       if (!parsed.ok) expect(parsed.error).toMatch(/is not the organization of profile "jvm"/);
+      // Provisioning spares that name's templates from the prune, as for a profile not found.
+      expect(parsed).toMatchObject({ profileMismatch: 'jvm' });
+    });
+
+    /**
+     * Value: protects=a misspelt profile key never widens a template to its organization or the install;
+     *   fails_when=profileId/profileName/profiles is only warned about, so the item provisions without a profile;
+     *   why_new=unknown keys warn by design (a misspelt override forces nothing); scope keys are the exception;
+     *   seam=none; no_claim=provisioning's count and log (pinned in provisioning.service.spec.ts).
+     */
+    it.each(['profileId', 'profileName', 'profiles'])('refuses %s instead of ignoring it, as an unresolved profile', (field) => {
+      const parsed = parse({ [field]: 'jvm', panelId: 5, metricClassification: 'x' }, ORG_A);
+      expect(parsed).toMatchObject({ ok: false, key: null, unresolvedProfile: 'jvm' });
+      if (!parsed.ok) expect(parsed.error).toMatch(new RegExp(`unknown field "${field}".*"profile"`));
+    });
+
+    /**
+     * Value: protects=a profile name another organization takes later cannot claim an exported template;
+     *   fails_when=the export writes a mixed file's profile item without its organization, so the name alone decides;
+     *   why_new=profile names are install-wide and a deleted or renamed one can be re-created in any organization;
+     *   seam=none; no_claim=what provisioning then prunes (provisioning.service.spec.ts).
+     */
+    it("refuses an exported profile item once its name belongs to a profile in another organization", () => {
+      const file = serializeTemplates([
+        { organization_id: null, panel_id: 1, regex: false, metric_classification: 'x' },
+        { organization_id: ORG_A, profile_id: 'p-jvm', profile_name: 'jvm', panel_id: 5, regex: false, metric_classification: 'x' },
+      ]);
+      const { organizationId, items } = yaml.load(file) as { organizationId?: string; items: unknown[] };
+      expect(organizationId).toBeUndefined();
+      // `jvm` was deleted in ORG_A and re-created in ORG_B.
+      const regrabbed = parseTemplateItem(items[1], null, { resolveProfile: (n) => (n === 'jvm' ? { id: 'p-new', organizationId: ORG_B } : null) });
+      expect(regrabbed).toMatchObject({ ok: false, profileMismatch: 'jvm' });
+      if (!regrabbed.ok) expect(regrabbed.error).toMatch(/is not the organization of profile "jvm"/);
     });
 
     it('fails an unknown profile with no key, naming it as unresolved', () => {
@@ -294,16 +327,19 @@ describe('compare-template codec', () => {
         `  - organizationId: ${ORG_A}`,
         '    panelId: 1',
         '    metricClassification: RED_rate',
-        '  - profile: dotnet',
+        `  - organizationId: ${ORG_A}`,
+        '    profile: dotnet',
         '    panelId: 1',
         '    metricClassification: RED_rate',
         '    absThreshold: 5',
-        '  - profile: jvm',
+        `  - organizationId: ${ORG_A}`,
+        '    profile: jvm',
         '    dashboardUid: ^jvm-',
         '    regex: true',
         '    panelTitle: Heap.*',
         '    metricClassification: USE_saturation',
-        '  - profile: other',
+        `  - organizationId: ${ORG_B}`,
+        '    profile: other',
         '    panelId: 1',
         '    metricClassification: RED_rate',
         '',

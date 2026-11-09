@@ -985,6 +985,57 @@ describe('ProvisioningService', () => {
         expect(result).toEqual({ ...SUMMARY, skipped: 1, pruned: 1 });
       });
 
+      /**
+       * Value: protects=one stale profile name spares only the profiles it could mean, not every profile's prune;
+       *   fails_when=an unresolved name suppresses the prune of a profile the file still resolves by its current name;
+       *   why_new=the case above has no resolved profile item beside the unresolved one;
+       *   seam=none; no_claim=a file naming one renamed profile under both names (its old-name rows are pruned).
+       */
+      it("prunes a resolved profile's dropped template while an unresolved name spares only the unreached profiles", async () => {
+        templateRepo.find.mockResolvedValue([
+          row({ id: 'jvm-stale', profile_id: 'p-jvm', organization_id: ORG_A, panel_id: 8 }),
+          row({ id: 'dotnet-dropped', profile_id: 'p-dotnet', organization_id: ORG_B, panel_id: 9 }),
+          row({ id: 'dotnet-kept', profile_id: 'p-dotnet', organization_id: ORG_B, dashboard_uid: null, panel_id: 3 }),
+        ]);
+        const result = await service.provisionMetricClassifications(
+          [
+            { profile: 'jvmm', panelId: 8, metricClassification: 'RED_rate' },
+            { profile: 'dotnet', panelId: 3, metricClassification: 'RED_rate' },
+          ],
+          null,
+        );
+        expect(templateRepo.delete).toHaveBeenCalledTimes(1);
+        expect(templateRepo.delete).toHaveBeenCalledWith('dotnet-dropped');
+        expect(result).toMatchObject({ skipped: 1, pruned: 1 });
+      });
+
+      it('skips an item with a misspelt profile key rather than provisioning it without its profile', async () => {
+        templateRepo.find.mockResolvedValue([row({ id: 'jvm-row', profile_id: 'p-jvm', organization_id: ORG_A })]);
+        const result = await service.provisionMetricClassifications(
+          [{ profileId: 'jvm', panelId: 5, metricClassification: 'RED_rate' }],
+          ORG_A,
+        );
+        expect(templateRepo.insert).not.toHaveBeenCalled();
+        expect(templateRepo.delete).not.toHaveBeenCalled();
+        expect(result).toEqual({ ...SUMMARY, skipped: 1 });
+      });
+
+      it("spares a renamed profile's templates when its old name now resolves in another organization", async () => {
+        // ORG_A renamed `jvm` (p-jvm-old, still holding a provisioned row); ORG_B created a new `jvm`.
+        profileRepo.find.mockResolvedValue([
+          { id: 'p-jvm-old', name: 'java', organizationId: ORG_A },
+          { id: 'p-jvm-new', name: 'jvm', organizationId: ORG_B },
+        ] as Profile[]);
+        templateRepo.find.mockResolvedValue([row({ id: 'renamed-row', profile_id: 'p-jvm-old', organization_id: ORG_A })]);
+        const result = await service.provisionMetricClassifications(
+          [{ organizationId: ORG_A, profile: 'jvm', dashboardUid: 'jmeter-overview', panelId: 5, metricClassification: 'RED_rate' }],
+          null,
+        );
+        expect(templateRepo.insert).not.toHaveBeenCalled();
+        expect(templateRepo.delete).not.toHaveBeenCalled();
+        expect(result).toEqual({ ...SUMMARY, errors: 1 });
+      });
+
       it("skips an item whose organizationId is not its profile's, and keeps the template it provisioned", async () => {
         templateRepo.find.mockResolvedValue([row({ id: 'profile-row', profile_id: 'p-jvm', organization_id: ORG_A })]);
         const result = await service.provisionMetricClassifications(

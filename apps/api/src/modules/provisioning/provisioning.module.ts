@@ -31,6 +31,5 @@ import {
   ],
   controllers: [CompareTemplatesController, ProfileCompareTemplatesController, ProvisioningExportController],
   providers: [ProvisioningService, CompareTemplatesService],
-  exports: [CompareTemplatesService],
 })
 export class ProvisioningModule {}

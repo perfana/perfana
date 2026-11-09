@@ -28,12 +28,25 @@ const KINDS: Record<
   },
 };
 
-/** Tells the three kinds of template apart wherever templates are listed. */
+/**
+ * Tells the three kinds of template apart wherever templates are listed.
+ *
+ * An outlined chip draws its label in `<color>.main`, and `success.main` is 3.3:1 on white, below
+ * AA at this size; label, border and icon take the mode-aware `readable.<color>` shade instead.
+ */
 export function ScopeBadge({ kind }: { kind: CompareTemplateScopeKind }) {
   const k = KINDS[kind];
+  const ink = `readable.${k.color}`;
   return (
     <Tooltip title={k.tooltip}>
-      <Chip size="small" variant="outlined" color={k.color} icon={k.icon} label={k.label} sx={{ fontWeight: 600 }} />
+      <Chip
+        size="small"
+        variant="outlined"
+        color={k.color}
+        icon={k.icon}
+        label={k.label}
+        sx={{ fontWeight: 600, color: ink, borderColor: ink, '& .MuiChip-icon': { color: 'inherit' } }}
+      />
     </Tooltip>
   );
 }

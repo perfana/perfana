@@ -44,6 +44,9 @@ export function parseTemplateScope(organizationId?: string, scope?: string): Com
 
 /**
  * Compare-config (ADAPT) templates created in the UI. Provisioned ones are listed too, read-only.
+ * The list and create routes address organization and install-wide templates; `GET/PUT/DELETE /:id`
+ * address any template by id, a profile's included (authorized through the profile's current
+ * organization, as `/profiles/:id/compare-templates` is).
  * File format and precedence: docs/reference/Features/Compare Config Templates.md.
  *
  * No try/catch here on purpose: the service throws HttpExceptions, and a catch that wrapped
@@ -132,8 +135,8 @@ export class CompareTemplatesController {
   @ApiParam({ name: 'id' })
   @ApiBody({ type: CompareTemplateDefinitionDto })
   @ApiResponse({ status: 200, type: CompareTemplateResponseDto })
-  @ApiResponse({ status: 400, description: 'Invalid definition, or one that names organizationId or a field the format does not know' })
-  @ApiResponse({ status: 403, description: 'Missing benchmark:manage in the organization, or not a global admin for an install-wide template' })
+  @ApiResponse({ status: 400, description: 'Invalid definition, or one that names organizationId, profile or a field the format does not know' })
+  @ApiResponse({ status: 403, description: "Missing benchmark:manage in the template's organization (a profile template's is its profile's), or not a global admin for an install-wide template" })
   @ApiResponse({ status: 404, description: 'Not found, or outside your organizations' })
   @ApiResponse({
     status: 409,
@@ -157,9 +160,9 @@ export class CompareTemplatesController {
   })
   @ApiParam({ name: 'id' })
   @ApiResponse({ status: 204 })
-  @ApiResponse({ status: 403, description: 'Missing benchmark:manage in the organization, or not a global admin for an install-wide template' })
+  @ApiResponse({ status: 403, description: "Missing benchmark:manage in the template's organization (a profile template's is its profile's), or not a global admin for an install-wide template" })
   @ApiResponse({ status: 404, description: 'Not found, or outside your organizations' })
-  @ApiResponse({ status: 409, description: 'Provisioned from template_ds_compare_configs.yaml: remove it from the file instead' })
+  @ApiResponse({ status: 409, description: 'Provisioned from template_ds_compare_configs.yaml: remove it from the file instead. A hard refusal with no resource body (not the idempotent-provisioning 409).' })
   async remove(@Param('id', ParseUUIDPipe) id: string, @UserCtx() ctx: UserContext): Promise<void> {
     await this.service.remove(id, ctx.userId, ctx.roles, await this.orgScope(ctx));
   }
@@ -261,7 +264,7 @@ export class ProfileCompareTemplatesController {
   @ApiResponse({ status: 204 })
   @ApiResponse({ status: 403, description: "Missing benchmark:manage in the profile's organization" })
   @ApiResponse({ status: 404, description: "Not found, not this profile's, or outside your organizations" })
-  @ApiResponse({ status: 409, description: 'Provisioned from template_ds_compare_configs.yaml: remove it from the file instead' })
+  @ApiResponse({ status: 409, description: 'Provisioned from template_ds_compare_configs.yaml: remove it from the file instead. A hard refusal with no resource body (not the idempotent-provisioning 409).' })
   async remove(
     @Param('profileId', ParseUUIDPipe) profileId: string,
     @Param('templateId', ParseUUIDPipe) templateId: string,

@@ -42,7 +42,7 @@ interface ResolvedScope {
   label: string;
 }
 
-/** Migration 1822's unique index over `templateKey()`'s five terms. */
+/** The unique index over `templateKey()`'s five terms: migration 1823's, rebuilt from 1822's. */
 export const COMPARE_TEMPLATE_KEY_INDEX = 'uq_provisioned_template_ds_compare_configs_key';
 
 /**
@@ -73,10 +73,7 @@ export function describeTemplateKey(v: Partial<KeyFields>): string {
 }
 
 /** The entity's optional columns read as the codec's nullable ones. */
-const asColumns = (row: ProvisionedTemplateDsCompareConfig, profileName?: string | null): ExportRow =>
-  profileName === undefined
-    ? (row as unknown as ExportRow)
-    : ({ ...(row as unknown as ExportRow), profile_name: profileName } as ExportRow);
+const asColumns = (row: ProvisionedTemplateDsCompareConfig): ExportRow => row as unknown as ExportRow;
 
 const profileRef = (profile: Profile): TemplateProfileRef => ({ id: profile.id, organizationId: profile.organizationId });
 
@@ -229,8 +226,10 @@ export class CompareTemplatesService {
     this.assertEditable(row);
     const snapshot = Object.assign(new ProvisionedTemplateDsCompareConfig(), row);
     await withRequestEm(this.templateRepo).delete(row.id);
+    // A profile template is audited in its profile's CURRENT organization, as it was authorized:
+    // the row's copy goes stale when the profile moves.
     this.auditService.logDelete(snapshot as unknown as OwnedResource, {
-      organizationIdOverride: snapshot.organization_id ?? undefined,
+      organizationIdOverride: (profile ? profile.organizationId : snapshot.organization_id) ?? undefined,
     });
     this.logger.log(`Compare-config template ${row.id} deleted by ${userId}: ${describeTemplateKey(asColumns(row))}`);
   }
@@ -257,11 +256,6 @@ export class CompareTemplatesService {
     });
     this.logger.log(`Exported ${rows.length} compare-config template(s) as template_ds_compare_configs.yaml`);
     return serializeTemplates(exportRows);
-  }
-
-  /** How many templates a profile holds, provisioned ones included: what deleting it cascades to (D14). */
-  async countForProfile(profileId: string): Promise<number> {
-    return withRequestEm(this.templateRepo).count({ where: { system_under_test_id: IsNull(), profile_id: profileId } });
   }
 
   // ------------------------------------------------------------------------------------------

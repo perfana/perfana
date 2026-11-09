@@ -78,8 +78,6 @@ interface AdaptTemplatesPanelProps {
   scope: CompareTemplateScope;
   /** How the dialog names the scope, e.g. "All runs in Acme" or "Profile jvm". */
   scopeName: string;
-  /** Notified after a create or delete, so a host can refresh a count it shows (the profile page). */
-  onChanged?: () => void;
 }
 
 /**
@@ -87,7 +85,7 @@ interface AdaptTemplatesPanelProps {
  * on the install-wide scope for a global admin, Export YAML. Shared by the organization and install-wide
  * page (`/settings/profiles/adapt-templates`) and the profile page's ADAPT templates tab.
  */
-export function AdaptTemplatesPanel({ scope, scopeName, onChanged }: AdaptTemplatesPanelProps) {
+export function AdaptTemplatesPanel({ scope, scopeName }: AdaptTemplatesPanelProps) {
   const { organizations, isAdmin, currentOrganizationId } = useOrganizationContext();
 
   const [list, setList] = useState<CompareTemplateList | null>(null);
@@ -140,7 +138,6 @@ export function AdaptTemplatesPanel({ scope, scopeName, onChanged }: AdaptTempla
     if (editing.mode === 'new') {
       await createCompareTemplate(scope, definition);
       setToast({ message: 'Template created. It applies on the next completed run of matching workloads.', severity: 'success' });
-      onChanged?.();
     } else {
       await updateCompareTemplate(editing.template.id, definition);
       setToast({ message: 'Template saved. It applies on the next completed run of matching workloads.', severity: 'success' });
@@ -163,7 +160,6 @@ export function AdaptTemplatesPanel({ scope, scopeName, onChanged }: AdaptTempla
       await deleteCompareTemplate(deleting.id);
       setDeleting(null);
       setToast({ message: 'Template deleted.', severity: 'success' });
-      onChanged?.();
       await load();
     } catch (err) {
       setToast({ message: message(err, 'Failed to delete the template'), severity: 'error' });

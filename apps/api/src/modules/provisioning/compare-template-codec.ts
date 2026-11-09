@@ -39,6 +39,9 @@ export interface MetricClassificationYaml {
    * A profile's name: the template applies only to runs whose tags match that profile, in its
    * organization. Resolved by name, like `profile_benchmarks.yaml`. The organization is the
    * profile's; an `organizationId` that names another one (on the item or the file) skips the item.
+   * The export names it on the item in a file spanning several organizations, so a profile name
+   * another organization takes later cannot claim the template. `profileId`, `profileName` and
+   * `profiles` are refused, not ignored.
    */
   profile?: string;
   /** Omit to apply the template to every dashboard carrying the panel. */
@@ -115,10 +118,12 @@ export type ParsedTemplateItem =
   /**
    * `key` is null when the item's identity could not be read, so nothing it names is declared.
    * `unresolvedProfile` names a profile that does not exist: such an item has no key either (a
-   * profile template's key is its profile's id), so provisioning protects every profile template
-   * from the prune on that boot instead.
+   * profile template's key is its profile's id), so provisioning protects from the prune the
+   * templates of every profile no resolved item reaches. A misspelt `profile` key is reported the
+   * same way. `profileMismatch` names a profile item whose organization is not its profile's: it
+   * keeps its key, and provisioning protects that name's templates the same way.
    */
-  | { ok: false; key: string | null; error: string; unresolvedProfile?: string };
+  | { ok: false; key: string | null; error: string; unresolvedProfile?: string; profileMismatch?: string };
 
 /** A profile as the parser needs it. */
 export interface TemplateProfileRef {
@@ -138,6 +143,12 @@ const KNOWN_KEYS = new Set<string>([
 ]);
 /** The config_data spellings an operator copies from a stored row, mapped to the file's own. */
 const NEAR_MISSES: Record<string, string> = { absoluteThreshold: 'absThreshold', higherIsbetter: 'higherIsBetter' };
+/**
+ * Misspellings of `profile`, two of them the API response's own field names. Unlike a misspelt
+ * override, which forces nothing, ignoring one of these WIDENS the template from a profile to its
+ * organization or the whole install, so the item is refused rather than warned about.
+ */
+const SCOPE_NEAR_MISSES = ['profileId', 'profileName', 'profiles'] as const;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
@@ -175,6 +186,18 @@ export function parseTemplateItem(
   options: ParseTemplateOptions = {},
 ): ParsedTemplateItem {
   if (!isObject(item)) return { ok: false, key: null, error: 'item is not a mapping' };
+  const scopeMiss = SCOPE_NEAR_MISSES.find((k) => k in item);
+  if (scopeMiss) {
+    return {
+      ok: false,
+      key: null,
+      error:
+        `unknown field "${scopeMiss}": a template's profile is named with "profile" in the file, or by the ` +
+        `/profiles/:id route in the API. Refused rather than ignored: ignoring it would widen the template ` +
+        `to its organization or the install`,
+      unresolvedProfile: String(item[scopeMiss]),
+    };
+  }
 
   // ---- identity
   const statedOrganization = 'organizationId' in item || fileOrganizationId != null;
@@ -227,7 +250,10 @@ export function parseTemplateItem(
   };
   const key = templateKey(identity);
   const fail = (error: string): ParsedTemplateItem => ({ ok: false, key, error });
-  if (organizationMismatch) return fail(organizationMismatch);
+  // The profile the file means (this name, in that organization) is not there: a renamed profile
+  // whose name another organization now holds reads exactly like this, so provisioning protects
+  // that name's templates from the prune as it does for a profile that is not found.
+  if (organizationMismatch) return { ok: false, key, error: organizationMismatch, profileMismatch: item.profile as string };
 
   // ---- attributes
   const dashboardLabel = optionalText(item, 'dashboardLabel');
@@ -310,13 +336,16 @@ export type ExportRow = Partial<TemplateColumns> & { profile_name?: string | nul
 
 /**
  * Row -> item. A key is written exactly when it is present on the row, never dropped for equalling a
- * default. A profile template names its profile and never an organization: the profile's is implied,
- * and writing it would only be one more thing to contradict.
+ * default. A profile template names its profile, and in a file spanning several organizations also
+ * its profile's organization: profile names are one install-wide namespace, so without it a name
+ * another organization later takes would claim the template on the next boot. With it, that item
+ * fails the organization check instead (and an older API that ignores `profile` widens it only to
+ * that organization, never to the install).
  */
 export function rowToItem(row: ExportRow, withOrganization: boolean): MetricClassificationYaml {
   const item: Record<string, unknown> = {};
+  if (withOrganization) item.organizationId = row.organization_id ?? null;
   if (row.profile_id) item.profile = row.profile_name ?? row.profile_id;
-  else if (withOrganization) item.organizationId = row.organization_id ?? null;
   if (row.dashboard_uid != null) item.dashboardUid = row.dashboard_uid;
   if (row.regex) item.regex = true;
   if (row.dashboard_label != null) item.dashboardLabel = row.dashboard_label;
@@ -370,7 +399,7 @@ export function compareTemplateRows(a: KeyColumns, b: KeyColumns): number {
  * none); otherwise each organization or install-wide item names its own, `null` for install-wide.
  * A profile template's row must carry its profile's CURRENT organization (the caller joins it): it
  * counts towards that decision, because a file-level organizationId the profile is not in would
- * skip the item on the next boot. It never names one itself.
+ * skip the item on the next boot, and in a mixed file the item names it beside its profile.
  */
 export function serializeTemplates(rows: ExportRow[]): string {
   const sorted = [...rows].sort(compareTemplateRows);

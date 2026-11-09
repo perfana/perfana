@@ -26,9 +26,20 @@ const ADD_BUTTON_SX = {
   '&:hover': { background: 'linear-gradient(135deg, rgba(25, 118, 210, 1) 0%, rgba(30, 136, 229, 1) 100%)' },
 };
 
-/** Tab index of each `?tab=` value, so a link (a template's scope) can open the right tab. */
-const TAB_PARAM: Record<string, number> = { dashboards: 0, slos: 1, 'deep-links': 2, 'adapt-templates': 3 };
 const ADAPT_TEMPLATES_TAB = 3;
+
+/**
+ * Tab index of each `?tab=` value, so a link (a template's scope) can open the right tab. A Map, not an
+ * object literal: `?tab=constructor` must not resolve to `Object.prototype.constructor`.
+ */
+const TAB_PARAM = new Map<string, number>([
+  ['dashboards', 0],
+  ['slos', 1],
+  ['deep-links', 2],
+  ['adapt-templates', ADAPT_TEMPLATES_TAB],
+]);
+
+const tabFromParam = (value: string | null | undefined): number => TAB_PARAM.get(value ?? '') ?? 0;
 
 export default function ProfileDetailsPage() {
   const router = useRouter();
@@ -36,9 +47,11 @@ export default function ProfileDetailsPage() {
   const searchParams = useSearchParams();
   const profileId = params.id as string;
 
-  const [activeTab, setActiveTab] = useState(() => TAB_PARAM[searchParams?.get('tab') ?? ''] ?? 0);
+  const [activeTab, setActiveTab] = useState(() => tabFromParam(searchParams?.get('tab')));
   // Read fresh when the delete confirmation opens: templates can change on the tab in between.
   const [templateCount, setTemplateCount] = useState<number | undefined>(undefined);
+  // Delete stays disabled until that fresh count has landed, so the warning is seen before confirming.
+  const [countLoading, setCountLoading] = useState(false);
   const [snackbar, setSnackbar] = useState<SnackbarState>({ open: false, message: '', severity: 'success' });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -63,10 +76,13 @@ export default function ProfileDetailsPage() {
 
   const openDeleteDialog = () => {
     setTemplateCount(profile?.adaptTemplateCount);
+    setCountLoading(true);
     setDeleteDialogOpen(true);
+    // On failure the seeded count stays, and the dialog is usable again.
     fetchProfile(profileId)
       .then((fresh) => setTemplateCount(fresh.adaptTemplateCount))
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setCountLoading(false));
   };
 
   const handleBack = () => router.push('/settings/profiles');
@@ -142,6 +158,7 @@ export default function ProfileDetailsPage() {
       <Card>
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} aria-label="profile tabs"
+            variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile
             sx={{ px: 2, '& .MuiTab-root': { textTransform: 'none', fontSize: '1rem', fontWeight: 500, minHeight: 64 }, '& .MuiTabs-indicator': { height: 3, borderRadius: '3px 3px 0 0' } }}>
             <Tab label="Dashboards" id="profile-tab-0" aria-controls="profile-tabpanel-0" />
             <Tab label="Service Level Objectives" id="profile-tab-1" aria-controls="profile-tabpanel-1" />
@@ -179,16 +196,16 @@ export default function ProfileDetailsPage() {
           </TabPanel>
           <TabPanel value={activeTab} index={ADAPT_TEMPLATES_TAB}>
             <Box mb={1}><ScopeBadge kind="profile" /></Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1, maxWidth: 900 }}>
               Templates here set ADAPT&rsquo;s comparison settings for matching panels on runs whose tags match this profile
               {profile.tags?.length ? ` (${profile.tags.join(', ')})` : ''}, in the profile&rsquo;s organization. They come before the
               organization&rsquo;s and the install-wide templates for the same dashboard match. {TEMPLATE_REACH}
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: 900 }}>
               A run with no matching tag gets only the organization&rsquo;s and install-wide templates, so a workload whose runs are tagged
               differently from one run to the next switches between the two sets.
             </Typography>
-            <AdaptTemplatesPanel scope={templateScope} scopeName={`Profile ${profile.name}`} />
+            <AdaptTemplatesPanel scope={templateScope} scopeName={profile.name} />
           </TabPanel>
         </CardContent>
       </Card>
@@ -214,7 +231,7 @@ export default function ProfileDetailsPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleDeleteProfile} color="error" variant="contained" disabled={deleting}>
+          <Button onClick={handleDeleteProfile} color="error" variant="contained" disabled={deleting || countLoading}>
             {deleting ? 'Deleting...' : 'Delete'}
           </Button>
         </DialogActions>

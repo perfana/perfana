@@ -66,4 +66,17 @@ describe('ProfileCompareTemplates (1823)', () => {
     expect(sql[1]).not.toContain('profile_id::text');
     expect(sql.join('\n')).toMatch(/DROP COLUMN IF EXISTS profile_id/);
   });
+
+  /**
+   * Value: protects=down() actually restores 1822's key before dropping profile_id;
+   *   fails_when=the swap's condition is inverted, so it is skipped on a 1823-shaped index and DROP COLUMN
+   *   silently drops the key index with it (Postgres drops an index whose expression uses the column);
+   *   why_new=the down() case above checks the CREATE text, which is present whichever way the IF points;
+   *   seam=none; no_claim=a live run (the /ship QA probe ran up/down/up on Postgres in a rolled-back transaction).
+   */
+  it('down() swaps only when the index HAS the profile term', async () => {
+    const swap = (await run('down')).find((q) => q.includes('CREATE UNIQUE INDEX'))!;
+    expect(swap).toMatch(/IF EXISTS \(SELECT 1 FROM pg_indexes/);
+    expect(swap).not.toMatch(/IF NOT EXISTS \(SELECT 1 FROM pg_indexes/);
+  });
 });
