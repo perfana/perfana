@@ -6,6 +6,7 @@ import EditDashboardDialog from './EditDashboardDialog';
 import DeleteConfirmationDialog from './DeleteConfirmationDialog';
 import AddSLODialog from './AddSLODialog';
 import EditSLODialog from './EditSLODialog';
+import { sloEvaluationLabel, sloRequirementLabel } from './SLOTable';
 import { Benchmark, GrafanaDashboard, VariableValue } from './types';
 
 interface DeleteInfo {
@@ -147,7 +148,7 @@ export default function ConfigDialogs({
         onConfirm={onDeleteSloConfirm}
         title="Delete SLO"
         message="Are you sure you want to delete this service level objective? This action cannot be undone."
-        itemName={slo.deletingSlo?.config_title || slo.deletingSlo?.metric_name}
+        itemName={slo.deletingSlo ? describeSloForDelete(slo.deletingSlo) : undefined}
         loading={slo.deleteSloLoading}
         error={slo.deleteSloError}
       />
@@ -175,4 +176,15 @@ export default function ConfigDialogs({
       />
     </>
   );
+}
+
+/**
+ * Title plus how it is evaluated and its threshold: two SLOs on one panel share a title, and the
+ * confirm used to show only that, so it did not say which one was about to go (#721).
+ */
+function describeSloForDelete(b: Benchmark): string | undefined {
+  const title = b.config_title || b.metric_name;
+  const hasRequirement = b.requirement_operator && b.requirement_value !== null && b.requirement_value !== undefined;
+  const detail = [sloEvaluationLabel(b), hasRequirement ? sloRequirementLabel(b) : null].filter(Boolean).join(' · ');
+  return title ? `${title} (${detail})` : detail;
 }
