@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Upgrade notes.**
   - **Migration 1823** adds `profile_id` to the template table and rebuilds its unique index with the profile in the key. It needs no data fix-up: no existing template changes identity.
   - **Do not roll back below this version while profile templates exist.** An older API reads a profile template as an organization template of the profile's organization and applies it to every run there. Migration 1823's `down()` deletes profile templates before restoring the old index. **Remove every `profile:` item from `template_ds_compare_configs.yaml` before rolling back**, with or without `down()`: an older API ignores the key and provisions the item for its stated organization, or for the whole install when none is named.
-  - **The profiles pages need migration 1823.** `GET /api/profiles` and `GET /api/profiles/:id` read the new column, so until the migration has run the list answers 500 and a profile's page answers 404 (Profile not found).
+  - **The profiles pages and every template read need migration 1823.** Until it has run, the profile list and the template pages answer 500, a profile's page answers 404 (Profile not found), template provisioning fails that boot, and completed runs skip the template applier. All of it heals once the migration has run.
 
 ## [0.2.97.55] - 2026-11-08
 

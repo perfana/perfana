@@ -329,9 +329,11 @@ It is logged at warn when the applier takes over 5000 ms.
   `profile` key with a warning and provisions the item as a template of its stated organization, or as an
   install-wide one when the item and the file name none, and two profiles' templates for one panel
   collapse into one.
-- **The profiles pages need migration 1823.** `GET /api/profiles` and `GET /api/profiles/:id` read the new
-  column, so between the API starting and the migration running the list answers 500 and a profile's page
-  answers 404 (Profile not found).
+- **The profiles pages and every template read need migration 1823.** The template entity declares
+  `profile_id`, so between the API starting and the migration running `GET /api/profiles` answers 500, a
+  profile's page answers 404 (Profile not found), `/api/compare-templates` answers 500, template
+  provisioning fails that boot, and the golden-path applier is skipped on each completion (logged at error).
+  All of it heals once the migration has run.
 - **grafana-sync's profile matching fails closed** on a missing organization, as the template applier's
   does. Both organization columns are NOT NULL, so no real run or profile is affected.
 

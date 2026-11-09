@@ -4361,9 +4361,37 @@ says so explicitly (for example `pruneAll: true`), and log what was held back.
 Helm default or an empty ConfigMap produces exactly that file, and the consequence is wide: on each
 workload's next completion every template-owned row reverts to its base, and restoring the file
 recreates the templates under new ids, so every row is rewritten again. Raised by the /ship
-adversarial review (2026-11-08).
+adversarial review (2026-11-08). Worse since v0.2.97.57: rows the applier inserted are now DELETED when
+no template wins them, so an accidental `items: []` also removes those rows at each workload's next
+completion, marks that panel's ADAPT history stale and moves the panels to ADAPT's default aggregation
+(median). Restoring the file re-inserts them on the next completion.
 
 **Depends on:** nothing.
+
+### Stale flags from the applier's row removal are never cleared (P3)
+
+**What:** Clear (or re-key) `ds_adapt_results.is_stale` when a removed compare-config row is
+re-inserted, or stop marking metric-level-governed series stale when a panel-level row is removed.
+
+**Why:** Removing a panel-level row marks every metric of that panel stale in every historical run of the
+workload (the trigger's own predicate), and re-inserting it on the next tagged run marks nothing and
+un-stales nothing (`trigger_mark_stale_on_config_update` is AFTER UPDATE only). A workload whose runs
+alternate tags ends with its whole ADAPT history flagged stale. Cosmetic today: the conclusion SQL and the
+read path ignore `is_stale`. Raised by the /ship adversarial review of PR #716.
+
+**Effort:** S **Priority:** P3 **Depends on:** nothing.
+
+### A profile created without an organization lands in the Default Organization for its admins (P3)
+
+**What:** Prefer a non-default organization in `resolveCreateOrganization`'s sorted fallback, or require
+`organizationId` when the caller administers more than one organization.
+
+**Why:** The fallback sorts the caller's organizations for determinism, and the seeded Default
+Organization (`00000000-0000-0000-0000-000000000001`) sorts first, so an API or CLI caller who omits
+`organizationId` and administers it always creates the profile there. The web sends the selected
+organization, so only direct API callers hit it. Raised by the /ship adversarial review of PR #716.
+
+**Effort:** XS **Priority:** P3 **Depends on:** nothing.
 
 ### Runs closed by stale detection never run the golden-path applier (P3)
 
