@@ -4376,8 +4376,9 @@ re-inserted, or stop marking metric-level-governed series stale when a panel-lev
 **Why:** Removing a panel-level row marks every metric of that panel stale in every historical run of the
 workload (the trigger's own predicate), and re-inserting it on the next tagged run marks nothing and
 un-stales nothing (`trigger_mark_stale_on_config_update` is AFTER UPDATE only). A workload whose runs
-alternate tags ends with its whole ADAPT history flagged stale. Cosmetic today: the conclusion SQL and the
-read path ignore `is_stale`. Raised by the /ship adversarial review of PR #716.
+alternate tags accumulates stale flags on runs nobody re-analyses; `auto_mark_fresh_on_analysis` clears a
+run's flags when it is re-analysed and its results change. Cosmetic today: no API, web or MCP reader
+consults `ds_adapt_results.is_stale`. Raised by the /ship adversarial review of PR #716.
 
 **Effort:** S **Priority:** P3 **Depends on:** nothing.
 
@@ -4392,6 +4393,21 @@ Organization (`00000000-0000-0000-0000-000000000001`) sorts first, so an API or 
 organization, so only direct API callers hit it. Raised by the /ship adversarial review of PR #716.
 
 **Effort:** XS **Priority:** P3 **Depends on:** nothing.
+
+### Strict `@IsUUID()` refuses the Default Organization in six more DTOs (P2)
+
+**What:** Use `@IsUUID('loose')` (as `CreateProfileDto.organizationId` does since v0.2.97.57) for every
+organization or team id validated with the strict default: `teams/dto/team.dto.ts`
+(`CreateTeamDto.organization_id`, required), `api-keys/dto/create-api-key.dto.ts`,
+`alerts/dto/alert-tag-filter.dto.ts`, `audit/dto/audit-filter.dto.ts`, `events/dto/event.dto.ts`, and the
+metrics-sources create/update DTOs (`organizationId`, `teamId`).
+
+**Why:** The seeded Default Organization is `00000000-0000-0000-0000-000000000001`, which has no RFC
+version or variant nibble, so class-validator's strict `isUUID` refuses it: creating a team in the Default
+Organization answers 400, and so does any of the others that names it. `ParseUUIDPipe` and the template
+codec are already loose. Found by the /ship adversarial review of PR #716, outside its scope.
+
+**Effort:** XS (human ~1h / CC ~10min) **Priority:** P2 **Depends on:** nothing.
 
 ### Runs closed by stale detection never run the golden-path applier (P3)
 

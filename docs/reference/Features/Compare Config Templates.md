@@ -331,9 +331,11 @@ It is logged at warn when the applier takes over 5000 ms.
   collapse into one.
 - **The profiles pages and every template read need migration 1823.** The template entity declares
   `profile_id`, so between the API starting and the migration running `GET /api/profiles` answers 500, a
-  profile's page answers 404 (Profile not found), `/api/compare-templates` answers 500, template
-  provisioning fails that boot, and the golden-path applier is skipped on each completion (logged at error).
-  All of it heals once the migration has run.
+  profile's page answers 404 (Profile not found), `/api/compare-templates` and `classify-metric` answer
+  500, template provisioning fails, and the golden-path applier is skipped on each completion (logged at
+  error). The pages and the applier recover once the migration has run; template provisioning runs only at
+  API start, so restart the API after the migration (the usual deploy order) or file templates stay
+  unapplied until the next restart.
 - **grafana-sync's profile matching fails closed** on a missing organization, as the template applier's
   does. Both organization columns are NOT NULL, so no real run or profile is affected.
 

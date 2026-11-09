@@ -156,7 +156,7 @@ export class CompareTemplatesController {
   @ApiOperation({
     summary: 'Delete a compare-config template',
     description:
-      "Rows it owned go to the next matching template on each workload's next completed run; with none, a row the template system inserted is removed (ADAPT's defaults apply again) and any other is rebuilt from its own base config.",
+      "Rows it owned go to the next matching template on each workload's next completed run; with none, a row the template system inserted (since v0.2.97.54) is removed, so ADAPT's defaults apply again, and any other is rebuilt from its own base config, which for a row from before v0.2.97.54 keeps the template's values.",
   })
   @ApiParam({ name: 'id' })
   @ApiResponse({ status: 204 })

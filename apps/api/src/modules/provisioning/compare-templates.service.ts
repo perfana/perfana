@@ -220,8 +220,10 @@ export class CompareTemplatesService {
 
   /**
    * Rows the template owned are handed to the next matching template on each workload's next
-   * completed run; with none, a row the applier inserted is deleted (ADAPT's default applies again)
-   * and any other is rebuilt from its base config (design §2, Ownership; deviation 13).
+   * completed run; with none, a row the applier inserted since migration 1822 (its base is
+   * `INSERT_BASE`) is deleted, so ADAPT's default applies again, and any other is rebuilt from its base
+   * config. A row inserted before 1822 adopted its current config as its base, so it keeps the template's
+   * values (design §2, Ownership; deviation 13).
    */
   async remove(
     id: string,
