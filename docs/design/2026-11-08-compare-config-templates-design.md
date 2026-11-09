@@ -465,6 +465,43 @@ golden-path row is adopted only when its winner would not change it (§2, Field 
 is recorded only here: every applier write is conditional on the author it read, so a save that lands
 while the applier runs wins and the row is skipped that time (`apps/api/CLAUDE.md` rule 8).
 
+## Implementation deviations (PR 2, 2026-11-08)
+
+PR 2 as built (v0.2.97.55) is the UI and export half of "Next Steps" item 2, plus D7 and D8. It differs
+from the body in these places; the code, `apps/api/CLAUDE.md` and
+`docs/reference/Features/Compare Config Templates.md` describe what shipped.
+
+1. **Profile templates are split out (decided by the user at the start of PR 2).** PR 2 ships the
+   organization and install-wide scopes only: the `/compare-templates` CRUD API (D7), the export route
+   (D8) and the UI. Everything that needs `profile_id` moves to its own PR: the PR 2 migration (§1), the
+   shared fail-closed tag matcher with grafana-sync switched to it, applier selection by run tags and
+   precedence steps 2 and 4 for profiles (§2), the YAML `profile` field (§3), `/profiles/:id/compare-templates`
+   (§5), the profile-delete template count (D14), and S14's three items. Filed in TODOS.md.
+2. **The UI is a page, not yet a profile tab** (§5). With no profile templates, a fourth tab on
+   `/settings/profiles/[id]` would be empty, so the two pinned entries open
+   `/settings/profiles/adapt-templates?scope=install` or `?organizationId=<uuid>`. The tab arrives with
+   profile templates and can reuse the same table and dialog.
+3. **The dialog shares `MetricConfigForm`'s option lists, not the component** (§5). That form writes
+   every field on every save, and a template's meaning is which fields it names; it also cannot express
+   "no direction" (`higherIsBetter: null`). The template dialog ticks each forced field separately. The
+   classification and aggregation lists moved to `apps/web/lib/compare-config-options.ts`, which both
+   import.
+4. **The API validates through the codec.** A definition is one file item (`MetricClassificationYaml`,
+   without `organizationId`) and goes through `parseTemplateItem`, so the API cannot accept what the file
+   would refuse and a UI row is stored exactly as the item describing it would be. That is what makes
+   takeover a no-op on content. Where the file warns, the API refuses (an unknown field, a non-integer
+   `minSampleCount`), because it can ask the user. The body reaches the service raw: the global
+   `ValidationPipe` strips undeclared keys, which would turn a misspelt override into a template that
+   forces nothing.
+5. **Scope is the collection's, and fixed.** `POST` takes `?organizationId=` or `?scope=install`; a
+   body that names an organization is refused. `PUT` replaces the whole definition and cannot move a template;
+   moving is a copy (the design's "Copy to editable" covers provisioned rows and UI rows alike).
+6. **The list is an envelope** (`{ scope, organizationId, canWrite, templates }`), so the page can hide
+   writes the caller would be refused. An API key may write organization templates, as with series
+   grouping rules and SLOs.
+7. **The export is admin-only twice**: `@AdminOnly()` at the guard and the service's global-admin check
+   (`withOrgFilter` returning `null`), so neither alone is load-bearing.
+
 ## Open Questions
 
 1. **`percentageThreshold` unit in YAML.** `config_data` stores a fraction (0.15), the form shows a

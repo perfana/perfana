@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.55] - 2026-11-08
+
+### Added
+- **Manage ADAPT (anomaly detection) templates in the UI.** Settings → Profiles has two new entries at the top: **All runs in &lt;organization&gt;** and **All runs on this install**. Each opens a page listing that scope's templates with what each one forces, and lets you add, edit, copy and delete them. A template applies on the next completed run of matching workloads, to panels nobody has edited by hand. In the dialog you tick each field the template should force; a field left unticked keeps each panel's own value, and direction can be set to "no direction". Organization templates can be changed by org admins and members; install-wide ones by global admins. The reference page "Compare Config Templates" describes both.
+- **Export the templates as `template_ds_compare_configs.yaml`.** Global admins get **Export YAML** on the install-wide page. It produces the whole provisioning file, every template in every organization, ready to commit in place of the installed one. After the commit, the next restart takes the templates created in the UI over as provisioned (read-only), and a second restart changes nothing.
+- **Templates from the provisioning file are shown locked.** They can be viewed and copied to another scope for editing, but not changed or deleted in the UI; change them in the file.
+- **`/api/compare-templates` and `/api/provisioning/compare-templates/export`.** CRUD for organization (`?organizationId=`) and install-wide (`?scope=install`) templates, in the YAML item's own shape, validated by the same rules as the file. A duplicate answers 409 naming the template it collides with. Writes are audit-logged.
+
+### Changed
+- **Profile-scoped templates are not in this release.** The design's per-profile templates (a template that applies only to runs whose tags match a profile) follow in a later release.
+
 ## [0.2.97.54] - 2026-11-08
 
 ### Added

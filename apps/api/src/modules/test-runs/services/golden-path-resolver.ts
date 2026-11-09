@@ -20,14 +20,14 @@ export interface GoldenPathTemplate {
 export const dashboardTier = (t: GoldenPathTemplate): number => (!t.dashboard_uid ? 2 : t.regex ? 1 : 0);
 /** 0 panel id, 1 literal title, 2 regex title. */
 export const panelTier = (t: GoldenPathTemplate): number => (t.panel_id != null ? 0 : t.regex ? 2 : 1);
-/** 0 organization, 1 install-wide. PR 2 puts profile templates in front. */
+/** 0 organization, 1 install-wide. Profile templates (a later PR, TODOS.md) go in front. */
 const scopeTier = (t: GoldenPathTemplate): number => (t.organization_id ? 0 : 1);
 
 const rank = (t: GoldenPathTemplate): number[] => [dashboardTier(t), scopeTier(t), panelTier(t)];
 
 /**
  * The most specific candidate, by dashboard match, then scope, then panel match, then template id.
- * (PR 2 adds profile name between panel match and id.) Two candidates still level after the panel
+ * (Profile templates add the profile name between panel match and id.) Two candidates still level after the panel
  * step tie, and only the id decides them: stable, but arbitrary, so the tie is returned for the run's
  * summary line. Overlapping regexes (`^jvm-.*`, `^jvm-prod.*`) are the usual way to get one.
  *

@@ -18,6 +18,7 @@ import {
   Grid
 } from '@mui/material';
 import {} from '@/lib/api';
+import { AGGREGATION_OPTIONS, CLASSIFICATION_OPTIONS } from '@/lib/compare-config-options';
 import type { ConfigScope } from '../anomaly-detection/types';
 
 export interface MetricConfigData {
@@ -67,33 +68,9 @@ interface MetricConfigFormProps {
   onCancel: () => void;
 }
 
-const classificationOptions = [
-  { value: 'unclassified', label: 'Unclassified' },
-  { value: 'RED_duration', label: 'RED Duration' },
-  { value: 'RED_rate', label: 'RED Rate' },
-  { value: 'RED_errors', label: 'RED Errors' },
-  { value: 'USE_saturation', label: 'USE Saturation' },
-  { value: 'USE_utilization', label: 'USE Utilization' },
-  { value: 'USE_errors', label: 'USE Errors' },
-  { value: 'business_metric', label: 'Business Metric' },
-  { value: 'infrastructure_metric', label: 'Infrastructure Metric' },
-  { value: 'application_metric', label: 'Application Metric' },
-  { value: 'custom', label: 'Custom' },
-];
-
-const aggregationOptions = [
-  { value: 'mean', label: 'Mean' },
-  { value: 'median', label: 'Median' },
-  { value: 'min', label: 'Minimum' },
-  { value: 'max', label: 'Maximum' },
-  { value: 'last', label: 'Last Value' },
-  { value: 'q10', label: '10th Percentile' },
-  { value: 'q25', label: '25th Percentile' },
-  { value: 'q75', label: '75th Percentile' },
-  { value: 'q90', label: '90th Percentile' },
-  { value: 'q95', label: '95th Percentile' },
-  { value: 'q99', label: '99th Percentile' },
-];
+// Shared with the ADAPT template dialog (settings/profiles/adapt-templates), so both offer one list.
+const classificationOptions = CLASSIFICATION_OPTIONS;
+const aggregationOptions = AGGREGATION_OPTIONS;
 
 
 export default function MetricConfigForm({

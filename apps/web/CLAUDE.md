@@ -915,6 +915,23 @@ save (`updateDsCompareConfig` since v0.2.95.42, the insert in `createOrUpdateDsC
 v0.2.97.54). A save path that bypassed both methods and also skipped `source` would still make every
 row it touches look machine-seeded again.
 
+### The ADAPT template dialog sends only the fields that are ticked
+
+`/settings/profiles/adapt-templates` (v0.2.97.55) manages compare-config templates; its dialog is
+`adapt-templates/components/CompareTemplateDialog.tsx`, its state mapping `adapt-templates/template-form.ts`.
+A template's meaning is which fields it names: a named field is forced onto every panel the template
+reaches, an absent one keeps each panel's own value. Three rules:
+
+- **Do not swap in `MetricConfigForm`.** It writes every field on every save and has no "no direction",
+  so every template saved through it would force every field. Only the option lists are shared, from
+  `@/lib/compare-config-options`, which both import; add a classification or aggregation there.
+- **`null` is a value only for `higherIsBetter` and `absThreshold`.** Every other field is omitted, never
+  sent as `null`: the API holds a definition to the YAML file's rules, and `dashboardUid: null` is an
+  error there, not a wildcard.
+- **An untouched number is sent back as stored.** The percentage is shown as a percent and stored as a
+  fraction; re-deriving the stored value from the displayed text would rewrite a provisioned
+  `0.1234567890123456` on a copy. `toDefinition` keeps the original while the text is unchanged.
+
 ### Series grouping in the web: where a group's badge comes from, and what the dialog fetches
 
 Series grouping (v0.2.97.43; design in `docs/design/2026-11-01-series-grouping-design.md`) has
