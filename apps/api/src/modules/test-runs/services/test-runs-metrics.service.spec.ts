@@ -865,25 +865,35 @@ describe('TestRunsMetricsService', () => {
         );
       });
 
-      it('warns and carries on when marking results stale fails after the delete', async () => {
+      /**
+       * Value: protects=a stale-marking failure neither aborts the rest of the pass nor repeats its wait per row;
+       *   fails_when=the catch returns or rethrows (later rows unapplied), or every later row retries the UPDATE;
+       *   why_new=the removal path is new; seam=none; no_claim=the real lock wait (the rejection stands in for it).
+       */
+      it('logs, keeps applying later rows, and stops marking after the first stale-marking failure', async () => {
         const base = {
           thresholds: { aggregation: 'mean', iqrThreshold: 2, absoluteThreshold: null, percentageThreshold: 0.15 },
           metricClassification: { classification: 'none', higherIsBetter: null },
           defaultValueIfControlGroupMissing: 0,
         };
-        const warnSpy = jest.spyOn((service as any).logger, 'warn');
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
         templateRepo.find.mockResolvedValue([]);
-        compareConfigRepo.find.mockResolvedValue([
-          {
-            id: 'cfg-ins', application_dashboard_id: 'dash-1', panel_id: 7, metric_name: null,
-            created_by: 'system:golden-path', updated_by: 'system:golden-path', template_base: base, template_id: 'gone', config_data: base,
-          },
-        ] as any);
+        const inserted = (id: string, panel_id: number) => ({
+          id, application_dashboard_id: 'dash-1', panel_id, metric_name: null,
+          created_by: 'system:golden-path', updated_by: 'system:golden-path', template_base: base, template_id: 'gone', config_data: base,
+        });
+        compareConfigRepo.find.mockResolvedValue([inserted('cfg-a', 7), inserted('cfg-b', 8)] as any);
         compareConfigRepo.delete.mockResolvedValue({ affected: 1, raw: [] } as any);
         compareConfigRepo.query.mockRejectedValue(new Error('canceling statement due to statement timeout'));
 
         await expect(service.applyGoldenPathClassifications(testRunInput)).resolves.toEqual({ compareConfigsCreated: 0 });
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('could not mark results stale after removing compare config cfg-ins'));
+        // Both rows are still removed: the pass carries on after the failure.
+        expect(compareConfigRepo.delete).toHaveBeenCalledWith({ id: 'cfg-a', updated_by: 'system:golden-path' });
+        expect(compareConfigRepo.delete).toHaveBeenCalledWith({ id: 'cfg-b', updated_by: 'system:golden-path' });
+        // Only one wait: the second row does not retry the UPDATE.
+        expect(compareConfigRepo.query).toHaveBeenCalledTimes(1);
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('could not mark results stale after removing the compare config for SUT sut-uuid-1/production/loadTest, dashboard dash-1, panel 7'));
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('panel 8 (skipped after an earlier failure)'));
       });
 
       it('marks nothing stale when a user saved the row while the applier ran (the delete matched no row)', async () => {

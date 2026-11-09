@@ -554,7 +554,13 @@ export class TestRunsMetricsService {
     const started = Date.now();
     const { systemUnderTestId, testEnvironment, workload } = testRun;
     const runTags = testRun.tags ?? [];
-    const counts = { created: 0, merged: 0, rebuilt: 0, rewrote: 0, raced: 0, collided: 0, legacyDiffers: 0, removed: 0 };
+    const counts = {
+      created: 0, merged: 0, rebuilt: 0, rewrote: 0, raced: 0, collided: 0, legacyDiffers: 0, removed: 0, staleUnmarked: 0,
+    };
+    // Set after the first stale-marking failure in this pass. The UPDATE has no lock_timeout, so under
+    // lock contention each attempt can wait out the pool's statement timeout; skipping the rest bounds
+    // the completion request to one such wait, as before the marking was made non-fatal.
+    let staleMarkingFailed = false;
     const guarded = new Map<string, number>();
     const ties = new Set<string>();
     const profileTies = new Set<string>();
@@ -851,8 +857,17 @@ export class TestRunsMetricsService {
             continue;
           }
           counts.removed++;
-          // Advisory: nothing reads `is_stale` into a verdict, so a failure here warns and the rest of
-          // the workload's dashboards are still applied (the delete above has already committed).
+          // Advisory: nothing reads `is_stale` into a verdict, so a failure here is logged and the rest
+          // of the workload's dashboards are still applied (the delete above has already committed).
+          // After one failure the remaining rows of this pass are not marked (see staleMarkingFailed).
+          const target =
+            `SUT ${systemUnderTestId}/${testEnvironment}/${workload}, dashboard ${row.application_dashboard_id}, ` +
+            `panel ${row.panel_id}${row.metric_name ? `, metric "${row.metric_name.replace(/[\r\n]/g, '')}"` : ''}`;
+          if (staleMarkingFailed) {
+            counts.staleUnmarked++;
+            this.logger.error(`Golden-path: results not marked stale after removing the compare config for ${target} (skipped after an earlier failure)`);
+            continue;
+          }
           try {
             await this.dsCompareConfigRepo.query(
             `UPDATE ds_adapt_results
@@ -867,8 +882,10 @@ export class TestRunsMetricsService {
               [systemUnderTestId, testEnvironment, workload, row.application_dashboard_id, row.panel_id, row.metric_name ?? null],
             );
           } catch (err) {
-            this.logger.warn(
-              `Golden-path: could not mark results stale after removing compare config ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+            staleMarkingFailed = true;
+            counts.staleUnmarked++;
+            this.logger.error(
+              `Golden-path: could not mark results stale after removing the compare config for ${target}: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
           continue;
@@ -899,6 +916,7 @@ export class TestRunsMetricsService {
       ...(counts.removed > 0
         ? [`${counts.removed} applier-inserted row(s) removed: no template wins them now, so ADAPT's default applies`]
         : []),
+      ...(counts.staleUnmarked > 0 ? [`${counts.staleUnmarked} removal(s) whose ADAPT results were not marked stale (see errors above)`] : []),
       ...(counts.raced > 0 ? [`${counts.raced} row(s) skipped: edited while this ran`] : []),
       ...(counts.collided > 0 ? [`${counts.collided} insert(s) skipped: row created concurrently`] : []),
     ];
