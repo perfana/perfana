@@ -1095,3 +1095,31 @@ Four things fail silently when undone:
    that inserts, removes or moves a section has to edit both. Index keys handed a card's expanded
    state and form state to whichever section landed at its position, which a drop into the middle
    of the list does on every add.
+
+### The report builder asks before a template's changes are lost
+
+Since v0.2.97.56 `GenerateReportDialog` compares the builder's sections with the template they were
+loaded from and, when they differ, routes every exit through `requestExit` to
+`SaveTemplateChangesDialog`: Generate, Cancel, Escape, a backdrop click, **Back to Template** and the
+browser's Back button. Saving is a `PUT /report-templates/:id` with the sections, before the report
+is queued. Four things fail silently when undone:
+
+1. **The comparison is a fingerprint, not a dirty flag** (`template-changes.ts`). A flag set by the
+   edit handlers would fire for a form that rewrites its config on mount and for an edit that is
+   put back. The fingerprint reads array position rather than the stored `order`, a blank title as
+   none, the text through `getSectionText` and `{}` as no config, so a template loaded and left
+   alone matches itself. A new section-level field the template stores has to be added there, or a
+   change to it is never offered for saving.
+2. **The shared baseline counts as a change.** Picking a baseline run for comparison sections writes
+   `baselineTestRunId` into them, so an unpinned template is offered for saving on every report that
+   needs one. That is the honest answer, since saving would pin the run, and *Generate without
+   saving* is one click.
+3. **The browser Back guard is one extra history entry** (`useHistoryBackGuard.ts`). Its state
+   spreads the current one so Next's App Router finds its own keys and treats the pop as a same-page
+   no-op; a pop onto anything but this guard's own entry (per-arming token) re-arms and opens the
+   prompt. On release it calls `history.back()` only while its entry is still current, so a
+   navigation away is not undone. A router `replaceState` while the dialog is open overwrites the
+   entry and leaves one duplicate entry behind, which is harmless.
+4. **jsdom queues `history.back()` in two stages**, so in tests it lands in whichever test is
+   running by then. The tests dispatch `popstate` themselves and spy on `history.back`.
+

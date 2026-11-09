@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.56] - 2026-11-09
+
+### Added
+- **The report builder offers to save your changes back to the template.** When a report started from a template has sections added, removed, moved, retitled or reconfigured, **Generate Report** first asks whether to save those changes to the template: *Save and generate*, *Generate without saving*, or *Keep editing*. The template is saved before the report is queued, so a failed save (no permission, say) leaves you in the builder with the error and nothing generated. Turning on **Save as template** skips the question, since the report is being saved as a new template.
+- **Leaving the builder with unsaved template changes asks first.** Cancel, Escape, a click outside the dialog, **Back to Template** and the browser's Back button all show the same question, with *Save to template*, *Discard changes* or *Keep editing*. A reload or tab close gets the browser's own "leave site?" prompt. A change that is put back counts as no change, and a report started from scratch is never asked about.
+
 ## [0.2.97.55] - 2026-11-08
 
 ### Added
