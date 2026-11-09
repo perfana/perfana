@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
+import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
+import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
 import { ProfilesController } from './profiles.controller';
 import { ProfilesService, ProfileResponse, ProfileDashboardResponse } from './profiles.service';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
@@ -287,6 +289,15 @@ describe('ProfilesController', () => {
       expect(service.deleteDashboard).toHaveBeenCalledWith(id, 'd', mockUserContext.userId, orgs);
       expect(service.findBenchmarksByProfileId).toHaveBeenCalledWith(id, mockUserContext.userId, orgs);
       expect(service.deleteBenchmark).toHaveBeenCalledWith(id, 'b', mockUserContext.userId, orgs);
+    });
+
+    it('hands a named organizationId to the service in the DTO, beside the caller\'s organizations', async () => {
+      asMemberOf('org-123', 'org-456');
+      const dto = { name: 'n', organizationId: '7f0c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f' };
+
+      await controller.create(dto, mockUserContext);
+
+      expect(service.createProfile).toHaveBeenCalledWith(dto, mockUserContext.userId, ['org-123', 'org-456']);
     });
 
     it('turns an out-of-scope profile (null from the service) into the same 404 as a missing one', async () => {
@@ -1025,17 +1036,45 @@ describe('ProfilesController', () => {
       expect(service.createDashboard).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, null);
     });
 
-    it('should handle special characters in profile IDs', async () => {
-      // Arrange
-      const specialId = '550e8400-e29b-41d4-a716-446655440000%20%23';
-      mockProfilesService.findOne.mockResolvedValue(mockProfile);
+    // A direct call skips the pipes, so this reads the route metadata: without the pipe a non-uuid
+    // id reached Postgres as a uuid parameter and the 22P02 answered 500.
+    it('validates every profile, dashboard and benchmark id with ParseUUIDPipe, so a non-uuid id is a 400', async () => {
+      const prototype = ProfilesController.prototype as unknown as Record<string, unknown>;
+      const uuidParams: string[] = [];
+      const unpiped: string[] = [];
+      for (const method of Object.getOwnPropertyNames(prototype)) {
+        const args = (Reflect.getMetadata(ROUTE_ARGS_METADATA, ProfilesController, method) ?? {}) as Record<
+          string,
+          { data?: string; pipes?: unknown[] }
+        >;
+        for (const [key, arg] of Object.entries(args)) {
+          if (!key.startsWith(`${RouteParamtypes.PARAM}:`)) continue;
+          (arg.pipes?.includes(ParseUUIDPipe) ? uuidParams : unpiped).push(`${method}(${arg.data})`);
+        }
+      }
 
-      // Act
-      const result = await controller.findOne(specialId, mockUserContext);
+      expect(unpiped).toEqual([]);
+      expect(uuidParams).toHaveLength(15);
+      expect(uuidParams).toEqual(expect.arrayContaining([
+        'findOne(id)', 'updateDashboard(dashboardId)', 'deleteProfileBenchmark(benchmarkId)',
+      ]));
+      await expect(
+        new ParseUUIDPipe().transform('550e8400-e29b-41d4-a716-446655440000%20%23', { type: 'param', data: 'id' }),
+      ).rejects.toThrow(BadRequestException);
+    });
 
-      // Assert
-      expect(result).toEqual(mockProfile);
-      expect(service.findOne).toHaveBeenCalledWith(specialId, mockUserContext.userId, null);
+    it('validates the optional ?organizationId= on the list as a uuid', async () => {
+      const args = Reflect.getMetadata(ROUTE_ARGS_METADATA, ProfilesController, 'findAll') as Record<
+        string,
+        { data?: string; pipes?: unknown[] }
+      >;
+      const query = Object.entries(args).find(([key]) => key.startsWith(`${RouteParamtypes.QUERY}:`))?.[1];
+      const pipe = query?.pipes?.find((p): p is ParseUUIDPipe => p instanceof ParseUUIDPipe);
+
+      expect(query?.data).toBe('organizationId');
+      expect(pipe).toBeDefined();
+      await expect(pipe!.transform(undefined as unknown as string, { type: 'query', data: 'organizationId' })).resolves.toBeUndefined();
+      await expect(pipe!.transform('org-a', { type: 'query', data: 'organizationId' })).rejects.toThrow(BadRequestException);
     });
   });
 });

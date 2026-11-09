@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenEx
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import {
+  Organization,
   Profile,
   ProfileGrafanaDashboard,
   ProfileBenchmark,
@@ -101,6 +102,8 @@ export class ProfilesService {
     private readonly auditService: AuditService,
     @InjectRepository(ProvisionedTemplateDsCompareConfig)
     private compareTemplateRepo: Repository<ProvisionedTemplateDsCompareConfig>,
+    @InjectRepository(Organization)
+    private organizationRepo: Repository<Organization>,
   ) {}
 
   /**
@@ -161,21 +164,36 @@ export class ProfilesService {
   }
 
   /**
-   * The organization a new profile is created in. `CreateProfileDto` names none, so it is one
-   * of the caller's own: for a global admin the first accessible one (as before), for anyone
-   * else the first one in which they are org-admin. Taking the first accessible organization
-   * and checking admin there would refuse an admin of org B whose org-A membership happens to
-   * be listed first, and the old any-org check would have created the profile in org A, where
-   * they are not an admin.
+   * The organization a new profile is created in. It decides which runs the profile's ADAPT
+   * templates reach, so the caller should name it (`dto.organizationId`):
+   *
+   * - **Named.** A global admin (`accessibleOrgIds === null`) may name any organization that
+   *   exists: `profiles.organization_id` has no foreign key, so a missing one would otherwise be
+   *   stored as an orphan, and it answers 404. Anyone else must belong to it AND be org-admin
+   *   there. The membership half is not optional: RLS does not backstop a caller-named
+   *   `organization_id` on create (the insert policy's `created_by` fallback admits any row the
+   *   caller writes; apps/api/CLAUDE.md). Both refusals answer the same 403, so it does not
+   *   reveal whether the caller belongs to the organization or whether it exists.
+   * - **Omitted.** One of the caller's own: a global admin's first accessible organization, for
+   *   anyone else the first in which they are org-admin. Taking the first accessible one and
+   *   checking admin there would refuse an admin of org B whose org-A membership is listed first.
    */
   private async resolveCreateOrganization(
     userId: string,
     accessibleOrgIds: string[] | null,
+    requestedOrganizationId: string | undefined,
   ): Promise<string> {
-    const candidates = accessibleOrgIds ?? (await this.authzService.getAccessibleOrganizations(userId)) ?? [];
-    if (candidates.length === 0) {
+    if (requestedOrganizationId !== undefined) {
+      return this.resolveNamedCreateOrganization(userId, accessibleOrgIds, requestedOrganizationId);
+    }
+    const accessible = accessibleOrgIds ?? (await this.authzService.getAccessibleOrganizations(userId)) ?? [];
+    if (accessible.length === 0) {
       throw new ForbiddenException('No accessible organization found for user');
     }
+    // `getAccessibleOrganizations` has no ORDER BY and is Redis-cached, so its order is whatever
+    // the membership query returned when the cache was last filled, and can change once it
+    // expires. Sorted, a caller with several organizations always lands in the same one.
+    const candidates = [...accessible].sort();
     if (accessibleOrgIds === null) {
       return candidates[0]!;
     }
@@ -185,6 +203,38 @@ export class ProfilesService {
       }
     }
     throw new ForbiddenException('Organization admin privileges required to manage profiles');
+  }
+
+  /** {@link resolveCreateOrganization} for an organization the request named. */
+  private async resolveNamedCreateOrganization(
+    userId: string,
+    accessibleOrgIds: string[] | null,
+    requestedOrganizationId: string,
+  ): Promise<string> {
+    // `@IsUUID()` accepts upper-case hex; Postgres hands ids back lower-case, and the membership
+    // list below holds them in that form.
+    const organizationId = requestedOrganizationId.trim().toLowerCase();
+    if (accessibleOrgIds === null) {
+      const organization = await withRequestEm(this.organizationRepo).findOne({ where: { id: organizationId } });
+      if (!organization) {
+        throw new NotFoundException(`Organization ${forLog(organizationId)} not found`);
+      }
+      return organization.id;
+    }
+    const refused = new ForbiddenException('Organization admin privileges required in the named organization');
+    if (!accessibleOrgIds.some((id) => id.toLowerCase() === organizationId)) {
+      this.logger.warn(
+        `Profile create in organization ${forLog(organizationId)} refused for user ${forLog(userId)}: not a member`,
+      );
+      throw refused;
+    }
+    if (!(await this.authzService.isOrganizationAdmin(userId, organizationId))) {
+      this.logger.warn(
+        `Profile create in organization ${forLog(organizationId)} refused for user ${forLog(userId)}: not an org-admin`,
+      );
+      throw refused;
+    }
+    return organizationId;
   }
 
   /**
@@ -1215,13 +1265,14 @@ export class ProfilesService {
   // ─── Profile CRUD ───────────────────────────────────────────────────
 
   /**
-   * Create a profile in one of the caller's own organizations (see `resolveCreateOrganization`;
-   * the DTO cannot name one). The organization is resolved, and org-admin there checked, before
-   * the name lookup, so a caller who may not create learns nothing about which names exist.
+   * Create a profile in the organization `dto.organizationId` names, or in one of the caller's
+   * own when it names none (see `resolveCreateOrganization`). The organization is resolved, and
+   * org-admin there checked, before the name lookup, so a caller who may not create learns
+   * nothing about which names exist.
    */
   async createProfile(dto: CreateProfileDto, userId: string, accessibleOrgIds: string[] | null): Promise<ProfileResponse> {
-    // Profile.organization_id is NOT NULL (UI does not currently expose org selection).
-    const organizationId = await this.resolveCreateOrganization(userId, accessibleOrgIds);
+    // Profile.organization_id is NOT NULL; the web app sends the organization the user is working in.
+    const organizationId = await this.resolveCreateOrganization(userId, accessibleOrgIds, dto.organizationId);
 
     // Check uniqueness. `profiles_name_key` is install-wide, not per organization, and
     // `profile_grafana_dashboards.profile` keys on the name, so this cannot be scoped.

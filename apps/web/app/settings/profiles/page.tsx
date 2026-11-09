@@ -139,9 +139,12 @@ export default function ProfilesPage() {
     if (!newProfileName.trim()) return;
     try {
       setCreating(true);
+      // Create in the organization the list above is showing, so the new profile appears in it and
+      // its ADAPT templates reach that organization's runs. With none selected the API picks one.
       await createProfile({
         name: newProfileName.trim(),
         description: newProfileDescription.trim() || undefined,
+        organizationId: currentOrganizationId || undefined,
       });
       setCreateDialogOpen(false);
       setNewProfileName('');

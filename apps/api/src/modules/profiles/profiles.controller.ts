@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, Query, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, ParseUUIDPipe, Body, Query, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { ProfilesService, forLog } from './profiles.service';
 import { CreateProfileDto, UpdateProfileDto } from './dto/profile.dto';
@@ -33,7 +33,12 @@ export class ProfilesController {
   @Get()
   @ApiOperation({ summary: 'Get all profiles' })
   @ApiResponse({ status: 200, description: 'Return all profiles' })
-  async findAll(@UserCtx() ctx: UserContext, @Query('organizationId') organizationId?: string) {
+  @ApiResponse({ status: 400, description: 'organizationId is not a uuid' })
+  async findAll(
+    @UserCtx() ctx: UserContext,
+    // A global admin's value goes straight into `organization_id IN (...)`, where a non-uuid is a 22P02.
+    @Query('organizationId', new ParseUUIDPipe({ optional: true })) organizationId?: string,
+  ) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching all profiles (organizationId=${organizationId})`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
@@ -42,9 +47,9 @@ export class ProfilesController {
       // that organization's profiles. A global admin may name any organization.
       let organizationIds = accessibleOrgIds;
       if (organizationId) {
-        organizationIds = accessibleOrgIds === null || accessibleOrgIds.includes(organizationId)
-          ? [organizationId]
-          : [];
+        // ParseUUIDPipe accepts upper case; memberships come back from Postgres lower case.
+        const named = organizationId.toLowerCase();
+        organizationIds = accessibleOrgIds === null || accessibleOrgIds.includes(named) ? [named] : [];
         if (organizationIds.length === 0) {
           this.logger.warn(
             `Profile list for organization ${organizationId.replace(/[\r\n]/g, '')} refused for user ${ctx.userId}: not a member`,
@@ -65,7 +70,7 @@ export class ProfilesController {
   @ApiOperation({ summary: 'Get a single profile by ID' })
   @ApiResponse({ status: 200, description: 'Return the profile' })
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
-  async findOne(@Param('id') id: string, @UserCtx() ctx: UserContext) {
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
@@ -89,9 +94,15 @@ export class ProfilesController {
   @Post()
   @ApiOperation({ summary: 'Create a new profile' })
   @ApiResponse({ status: 201, description: 'Profile created successfully' })
-  @ApiResponse({ status: 400, description: 'Validation error or duplicate name' })
+  @ApiResponse({ status: 400, description: 'Validation error (including a non-uuid organizationId) or duplicate name' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: "Not an org-admin in any of the caller's organizations" })
+  @ApiResponse({
+    status: 403,
+    description:
+      'organizationId named: not an org-admin there (a non-member gets the same answer). Omitted: not an ' +
+      "org-admin in any of the caller's organizations",
+  })
+  @ApiResponse({ status: 404, description: 'A global admin named an organization that does not exist' })
   async create(
     @Body() createDto: CreateProfileDto,
     @UserCtx() ctx: UserContext,
@@ -109,7 +120,7 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
   @ApiResponse({ status: 403, description: "Not an org-admin in the profile's organization" })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateDto: UpdateProfileDto,
     @UserCtx() ctx: UserContext,
   ) {
@@ -126,7 +137,7 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
   @ApiResponse({ status: 403, description: "Not an org-admin in the profile's organization" })
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @UserCtx() ctx: UserContext,
   ) {
     this.logger.debug(`User ${ctx.userId} deleting profile ${forLog(id)}`);
@@ -139,7 +150,7 @@ export class ProfilesController {
   @ApiOperation({ summary: 'Get all auto-configuration dashboards for a profile' })
   @ApiResponse({ status: 200, description: 'Return dashboards for the profile' })
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
-  async findDashboards(@Param('id') id: string, @UserCtx() ctx: UserContext) {
+  async findDashboards(@Param('id', ParseUUIDPipe) id: string, @UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching dashboards for profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
@@ -165,7 +176,7 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
   @ApiResponse({ status: 403, description: "Not an org-admin in the profile's organization" })
   async createDashboard(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() createDto: CreateProfileDashboardDto,
     @UserCtx() ctx: UserContext,
   ) {
@@ -196,8 +207,8 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile or dashboard not found, or in an organization the caller does not belong to' })
   @ApiResponse({ status: 403, description: "Not an org-admin in the profile's organization" })
   async updateDashboard(
-    @Param('id') id: string,
-    @Param('dashboardId') dashboardId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('dashboardId', ParseUUIDPipe) dashboardId: string,
     @Body() updateDto: UpdateProfileDashboardDto,
     @UserCtx() ctx: UserContext,
   ) {
@@ -230,8 +241,8 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile or dashboard not found, or in an organization the caller does not belong to' })
   @ApiResponse({ status: 403, description: "Not an org-admin in the profile's organization" })
   async deleteDashboard(
-    @Param('id') id: string,
-    @Param('dashboardId') dashboardId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('dashboardId', ParseUUIDPipe) dashboardId: string,
     @UserCtx() ctx: UserContext,
   ) {
     try {
@@ -258,7 +269,7 @@ export class ProfilesController {
   @ApiParam({ name: 'id', description: 'Profile UUID' })
   @ApiResponse({ status: 200, description: 'Return benchmarks for the profile' })
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
-  async getProfileBenchmarks(@Param('id') id: string, @UserCtx() ctx: UserContext) {
+  async getProfileBenchmarks(@Param('id', ParseUUIDPipe) id: string, @UserCtx() ctx: UserContext) {
     try {
       this.logger.debug(`User ${ctx.userId} fetching benchmarks for profile ${forLog(id)}`);
       const accessibleOrgIds = await this.resolveOrgScope(ctx);
@@ -283,7 +294,7 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile not found, or in an organization the caller does not belong to' })
   @ApiResponse({ status: 403, description: "Not an org-admin in the profile's organization" })
   async createProfileBenchmark(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() createDto: CreateProfileBenchmarkDto,
     @UserCtx() ctx: UserContext,
   ) {
@@ -314,8 +325,8 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile or benchmark not found, or in an organization the caller does not belong to' })
   @ApiResponse({ status: 403, description: "Not an org-admin in the profile's organization" })
   async updateProfileBenchmark(
-    @Param('id') id: string,
-    @Param('benchmarkId') benchmarkId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('benchmarkId', ParseUUIDPipe) benchmarkId: string,
     @Body() updateDto: UpdateProfileBenchmarkDto,
     @UserCtx() ctx: UserContext,
   ) {
@@ -345,8 +356,8 @@ export class ProfilesController {
   @ApiResponse({ status: 404, description: 'Profile or benchmark not found, or in an organization the caller does not belong to' })
   @ApiResponse({ status: 403, description: "Not an org-admin in the profile's organization" })
   async deleteProfileBenchmark(
-    @Param('id') id: string,
-    @Param('benchmarkId') benchmarkId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('benchmarkId', ParseUUIDPipe) benchmarkId: string,
     @UserCtx() ctx: UserContext,
   ) {
     try {

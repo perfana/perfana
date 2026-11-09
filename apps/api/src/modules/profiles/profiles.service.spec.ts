@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import {
+  Organization,
   Profile,
   ProfileGrafanaDashboard,
   ProfileBenchmark,
@@ -28,6 +29,7 @@ describe('ProfilesService', () => {
   let authzService: ReturnType<typeof createAuthorizationServiceMock>;
   let auditService: jest.Mocked<AuditService>;
   let mockCompareTemplateRepo: { count: jest.Mock; createQueryBuilder: jest.Mock };
+  let organizationRepo: { findOne: jest.Mock };
 
   const mockDate = new Date('2024-01-15T10:00:00.000Z');
 
@@ -208,6 +210,8 @@ describe('ProfilesService', () => {
       })),
     };
 
+    organizationRepo = { findOne: jest.fn().mockResolvedValue(null) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProfilesService,
@@ -238,6 +242,10 @@ describe('ProfilesService', () => {
         {
           provide: getRepositoryToken(ProvisionedTemplateDsCompareConfig),
           useValue: mockCompareTemplateRepo,
+        },
+        {
+          provide: getRepositoryToken(Organization),
+          useValue: organizationRepo,
         },
         {
           provide: AuthorizationService,
@@ -2177,11 +2185,83 @@ describe('ProfilesService', () => {
         expect(profileRepo.save).not.toHaveBeenCalled();
       });
 
-      it('creates in a global admin\'s first accessible organization without an org-admin lookup', async () => {
+      // getAccessibleOrganizations has no ORDER BY and is Redis-cached: the list arrives in reverse
+      // order here, and the pick must not follow it.
+      it('creates in a global admin\'s first accessible organization by id, without an org-admin lookup', async () => {
         authzService.getAccessibleOrganizations.mockResolvedValue([ORG_B, ORG_A]);
         await service.createProfile({ name: 'New' }, mockUserId, null);
-        expect(profileRepo.create).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_B }));
+        expect(profileRepo.create).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_A }));
         expect(authzService.isOrganizationAdmin).not.toHaveBeenCalled();
+      });
+
+      it('picks the first administered organization by id when none is named, whatever order the list arrives in', async () => {
+        adminOf(ORG_A, ORG_B);
+        await service.createProfile({ name: 'New' }, mockUserId, [ORG_B, ORG_A]);
+        expect(profileRepo.create).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_A }));
+      });
+
+      it('creates in the only organization of a single-org admin when none is named, as before', async () => {
+        adminOf(ORG_A);
+        await service.createProfile({ name: 'New' }, mockUserId, [ORG_A]);
+        expect(profileRepo.create).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_A }));
+        expect(organizationRepo.findOne).not.toHaveBeenCalled();
+      });
+
+      describe('with an organizationId in the request', () => {
+        const refusal = new ForbiddenException('Organization admin privileges required in the named organization');
+
+        it('creates in the named organization when the caller is org-admin there, not in the default pick', async () => {
+          adminOf(ORG_A, ORG_B);
+          await service.createProfile({ name: 'New', organizationId: ORG_B }, mockUserId, [ORG_A, ORG_B]);
+          expect(profileRepo.create).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_B }));
+          expect(authzService.isOrganizationAdmin).toHaveBeenCalledWith(mockUserId, ORG_B);
+          expect(profileRepo.save).toHaveBeenCalled();
+        });
+
+        it('matches an upper-case spelling of the id against the caller\'s organizations', async () => {
+          adminOf(ORG_B);
+          await service.createProfile({ name: 'New', organizationId: ORG_B.toUpperCase() }, mockUserId, [ORG_A, ORG_B]);
+          expect(profileRepo.create).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_B }));
+        });
+
+        // The admin lookup would say yes; the membership list is what refuses. RLS would not: its
+        // insert policy admits any row the caller creates (apps/api/CLAUDE.md).
+        it('is forbidden for an organization the caller does not belong to, before the name lookup', async () => {
+          adminOf(ORG_B);
+          await expect(
+            service.createProfile({ name: 'New', organizationId: ORG_B }, mockUserId, [ORG_A]),
+          ).rejects.toThrow(refusal);
+          expect(profileRepo.findOne).not.toHaveBeenCalled();
+          expect(profileRepo.save).not.toHaveBeenCalled();
+          expect(auditService.logCreate).not.toHaveBeenCalled();
+        });
+
+        it('is forbidden, with the same answer, for a member who is not org-admin there, and never falls back', async () => {
+          adminOf(ORG_A);
+          await expect(
+            service.createProfile({ name: 'New', organizationId: ORG_B }, mockUserId, [ORG_A, ORG_B]),
+          ).rejects.toThrow(refusal);
+          expect(authzService.isOrganizationAdmin).toHaveBeenCalledWith(mockUserId, ORG_B);
+          expect(profileRepo.create).not.toHaveBeenCalled();
+          expect(profileRepo.save).not.toHaveBeenCalled();
+        });
+
+        it('lets a global admin name an organization that exists, without an org-admin lookup', async () => {
+          organizationRepo.findOne.mockResolvedValue({ id: ORG_B, name: 'B' });
+          await service.createProfile({ name: 'New', organizationId: ORG_B }, mockUserId, null);
+          expect(organizationRepo.findOne).toHaveBeenCalledWith({ where: { id: ORG_B } });
+          expect(profileRepo.create).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORG_B }));
+          expect(authzService.isOrganizationAdmin).not.toHaveBeenCalled();
+        });
+
+        it('is a 404 for a global admin naming an organization that does not exist, and saves nothing', async () => {
+          organizationRepo.findOne.mockResolvedValue(null);
+          await expect(
+            service.createProfile({ name: 'New', organizationId: ORG_B }, mockUserId, null),
+          ).rejects.toThrow(NotFoundException);
+          expect(profileRepo.findOne).not.toHaveBeenCalled();
+          expect(profileRepo.save).not.toHaveBeenCalled();
+        });
       });
     });
   });

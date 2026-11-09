@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProfilesController } from './profiles.controller';
 import { ProfilesService } from './profiles.service';
 import {
+  Organization,
   Profile,
   ProfileGrafanaDashboard,
   ProfileBenchmark,
@@ -18,6 +19,7 @@ import { AuditResourceRegistry } from '../audit/audit-resource-registry';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      Organization, // existence check for a global admin naming an organization on create
       Profile,
       ProfileGrafanaDashboard,
       ProfileBenchmark,
