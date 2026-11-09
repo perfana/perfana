@@ -195,6 +195,21 @@ describe('a record with no unit converts in the panel unit', () => {
     expect(body.configuration).toMatchObject({ yAxesFormat: 'ms', requirement: { value: '500' } });
   });
 
+  // A unit-less record on a percentunit panel was displayed as its raw 0-1 value, so the save
+  // must not scale it again (#719): 0.9 stays 0.9, never 0.009.
+  it('does not rescale a unit-less record on a percentunit panel', async () => {
+    mockFetch.mockResolvedValue(okResponse());
+
+    const pctPanel = { id: 7, title: 'Pool in use', yAxesFormat: 'percentunit' } as unknown as SLOFormData['selectedPanel'];
+    const { result } = setup({ ...formData, selectedPanel: pctPanel, requirementValue: '0.9' });
+    await act(async () => {
+      result.current.handleSaveDialogConfirm('none');
+    });
+
+    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.requirementValue).toBe('0.9');
+  });
+
   it("keeps the record's own unit when it has one", async () => {
     mockFetch.mockResolvedValue(okResponse());
 

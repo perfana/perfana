@@ -99,8 +99,11 @@ export function useEditSLOHandlers({
         // the value in. The evaluate type is the edited one: a trend is %/h and is never scaled.
         // A record with no unit (a perf-test SLO saved before its panel carried one) falls back to
         // the panel's, the unit validation already checked against and the one this save stores.
+        // Not percentunit: the dialog displayed that record's raw 0-1 value, and scaling it here
+        // would store 0.9 as 0.009 (#719).
+        const panelUnit = thresholdUnitFormat(sloFormData);
         const effectiveUnitFormat = storedThresholdUnit({ ...benchmark, evaluate_type: sloFormData.evaluateType })
-          ?? thresholdUnitFormat(sloFormData);
+          ?? (panelUnit === 'percentunit' ? undefined : panelUnit);
         const processedRequirementValue = toStoredThresholdValue(sloFormData.requirementValue, effectiveUnitFormat);
 
         // Handle percentunit conversion for default value too
