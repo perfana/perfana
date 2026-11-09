@@ -21,6 +21,7 @@ import { AuditService } from '../../audit/audit.service';
 // rewrites it to 'metric'/'panel'. Shared so the writer and this reader cannot drift apart.
 import { DYNATRACE_HOST_COMPARE_SOURCE } from '../../../constants/ds-compare-config.constants';
 import { validateRegexPattern } from '@perfana/shared/utils';
+import { profileMatchesRun } from '@perfana/shared/utils/profile-match';
 import { isDeepStrictEqual } from 'util';
 import { cloneJson, GoldenPathTemplate, INSERT_BASE, rebuildConfig, selectWinner } from './golden-path-resolver';
 
@@ -522,7 +523,10 @@ export class TestRunsMetricsService {
    * exact `dashboard_uid`, by regex when `regex = true`, or all of them when `dashboard_uid IS NULL`,
    * and its panel by `panel_id` or, when that is NULL, by `panel_title`, resolved per dashboard
    * against the panels `ds_panels` recorded for the SUT's recent completed runs. An organization
-   * template only reaches dashboards of its own organization.
+   * template only reaches dashboards of its own organization. A profile template only reaches them
+   * when the completing run's tags match its profile and the profile is in the dashboard's
+   * organization (`profileMatchesRun`, which fails closed); its organization is read from the profile
+   * now, never from the copy on the template row.
    *
    * Every row a template could reach goes to one winner (`selectWinner`). What happens next depends
    * on who last wrote the row:
@@ -544,12 +548,22 @@ export class TestRunsMetricsService {
     systemUnderTestId: string;
     testEnvironment: string;
     workload: string;
+    /** The completing run's tags: they choose which profile templates apply. None means none do. */
+    tags?: readonly string[] | null;
   }): Promise<{ compareConfigsCreated: number }> {
     const started = Date.now();
     const { systemUnderTestId, testEnvironment, workload } = testRun;
-    const counts = { created: 0, merged: 0, rebuilt: 0, rewrote: 0, raced: 0, collided: 0, legacyDiffers: 0 };
+    const runTags = testRun.tags ?? [];
+    const counts = {
+      created: 0, merged: 0, rebuilt: 0, rewrote: 0, raced: 0, collided: 0, legacyDiffers: 0, removed: 0, staleUnmarked: 0,
+    };
+    // Set after the first stale-marking failure in this pass. The UPDATE has no lock_timeout, so under
+    // lock contention each attempt can wait out the pool's statement timeout; skipping the rest bounds
+    // the completion request to one such wait, as before the marking was made non-fatal.
+    let staleMarkingFailed = false;
     const guarded = new Map<string, number>();
     const ties = new Set<string>();
+    const profileTies = new Set<string>();
 
     // 1. Load application dashboards for this SUT + environment
     const dashboards = await withRequestEm(this.applicationDashboardRepo).find({
@@ -584,7 +598,27 @@ export class TestRunsMetricsService {
         return null;
       }
     };
-    for (const template of await this.templateRepo.find({ where: { system_under_test_id: IsNull() } })) {
+    const storedTemplates = await this.templateRepo.find({ where: { system_under_test_id: IsNull() } });
+    // Profile templates take their profile's name (precedence step 4), tags and organization from the
+    // profile itself: a profile moved to another organization moves its templates with it.
+    const profileIds = [...new Set(storedTemplates.map((t) => t.profile_id).filter((id): id is string => !!id))];
+    const profiles = new Map<string, { name: string; tags: string[] | null; organizationId: string | null }>();
+    if (profileIds.length > 0) {
+      const rows: Array<{ id: string; name: string; tags: string[] | null; organization_id: string | null }> =
+        await this.templateRepo.query(
+          `SELECT id, name, tags, organization_id FROM profiles WHERE id = ANY($1::uuid[])`,
+          [profileIds],
+        );
+      for (const r of rows) profiles.set(r.id, { name: r.name, tags: r.tags, organizationId: r.organization_id });
+    }
+    for (const stored of storedTemplates) {
+      let template = stored as GoldenPathTemplate;
+      if (stored.profile_id) {
+        const profile = profiles.get(stored.profile_id);
+        // Deleted between the two reads (the FK cascades): its templates are going too.
+        if (!profile) continue;
+        template = { ...template, organization_id: profile.organizationId, profile_name: profile.name };
+      }
       if (template.panel_id == null) {
         if (!template.panel_title) {
           this.logger.warn(`Skipping golden-path template ${template.id}: neither panel_id nor panel_title set`);
@@ -602,8 +636,22 @@ export class TestRunsMetricsService {
         if (!pattern) continue;
         uidPatterns.set(template.id, pattern);
       }
-      templates.push(template as GoldenPathTemplate);
+      templates.push(template);
     }
+    // Which profiles the run matches, per organization (dashboards carry theirs, NOT NULL).
+    const matchedProfiles = new Map<string, Set<string>>();
+    const profilesMatching = (organizationId: string): Set<string> => {
+      let ids = matchedProfiles.get(organizationId);
+      if (!ids) {
+        ids = new Set(
+          [...profiles]
+            .filter(([, p]) => profileMatchesRun(p, { tags: runTags, organizationId }))
+            .map(([id]) => id),
+        );
+        matchedProfiles.set(organizationId, ids);
+      }
+      return ids;
+    };
 
     const titleTemplateIds = new Set(templates.filter((t) => t.panel_id == null).map((t) => t.id));
 
@@ -636,7 +684,10 @@ export class TestRunsMetricsService {
     // purpose, and a single per-series tweak never blocks the panel's own template.
     const existingConfigs = await this.dsCompareConfigRepo.find({
       where: { system_under_test_id: systemUnderTestId, test_environment: testEnvironment, workload },
-      select: ['id', 'application_dashboard_id', 'panel_id', 'metric_name', 'config_data', 'updated_by', 'template_id', 'template_base'],
+      select: [
+        'id', 'application_dashboard_id', 'panel_id', 'metric_name', 'config_data', 'created_by', 'updated_by', 'template_id',
+        'template_base',
+      ],
     });
     const rowKey = (dashboardId: string, panelId: number, metricName?: string | null) =>
       `${dashboardId}|${panelId}|${metricName ?? ''}`;
@@ -673,7 +724,9 @@ export class TestRunsMetricsService {
       const panels = panelsByDashboard.get(dashboard.id) ?? [];
       const onDashboard = templates.filter(
         (t) =>
-          (!t.organization_id || t.organization_id === dashboard.organizationId) &&
+          (t.profile_id
+            ? profilesMatching(dashboard.organizationId).has(t.profile_id)
+            : !t.organization_id || t.organization_id === dashboard.organizationId) &&
           (!t.dashboard_uid || (t.regex ? uidPatterns.get(t.id)!.test(uid) : t.dashboard_uid === uid)),
       );
 
@@ -695,7 +748,13 @@ export class TestRunsMetricsService {
       const winners = new Map<string, GoldenPathTemplate>();
       for (const [key, { list }] of candidates) {
         const { winner, tiedWith } = selectWinner(list);
-        if (tiedWith) ties.add(`${winner!.id} over ${tiedWith.id}`);
+        if (tiedWith) {
+          if (winner!.profile_name && tiedWith.profile_name && winner!.profile_name !== tiedWith.profile_name) {
+            profileTies.add(`"${winner!.profile_name}" over "${tiedWith.profile_name}"`);
+          } else {
+            ties.add(`${winner!.id} over ${tiedWith.id}`);
+          }
+        }
         winners.set(key, winner!);
       }
 
@@ -784,6 +843,53 @@ export class TestRunsMetricsService {
           await updateRow(row, { template_base: current, template_id: winner?.id ?? null });
           continue;
         }
+        if (!winner && row.created_by === GOLDEN_PATH_ACTOR && isDeepStrictEqual(row.template_base, cloneJson(INSERT_BASE))) {
+          // The applier inserted this row for a template that no longer wins it: a deleted template,
+          // or a profile template on a run whose tags do not match. Rebuilding it from INSERT_BASE
+          // would leave a row the panel never had (mean, `none`) where ADAPT otherwise uses its own
+          // default (median, unclassified), so untagged runs would silently switch aggregation after
+          // a single tagged one. Delete it instead, conditional on the author the snapshot saw, and
+          // mark its results stale by hand: a delete fires no `trigger_mark_stale_on_config_update`.
+          // eslint-disable-next-line audit-mutation-must-log
+          const removed = await this.dsCompareConfigRepo.delete({ id: row.id, updated_by: row.updated_by ?? IsNull() });
+          if (removed?.affected === 0) {
+            counts.raced++;
+            continue;
+          }
+          counts.removed++;
+          // Advisory: nothing reads `is_stale` into a verdict, so a failure here is logged and the rest
+          // of the workload's dashboards are still applied (the delete above has already committed).
+          // After one failure the remaining rows of this pass are not marked (see staleMarkingFailed).
+          const target =
+            `SUT ${systemUnderTestId}/${testEnvironment}/${workload}, dashboard ${row.application_dashboard_id}, ` +
+            `panel ${row.panel_id}${row.metric_name ? `, metric "${row.metric_name.replace(/[\r\n]/g, '')}"` : ''}`;
+          if (staleMarkingFailed) {
+            counts.staleUnmarked++;
+            this.logger.error(`Golden-path: results not marked stale after removing the compare config for ${target} (skipped after an earlier failure)`);
+            continue;
+          }
+          try {
+            await this.dsCompareConfigRepo.query(
+            `UPDATE ds_adapt_results
+                SET is_stale = true, stale_reason = 'Configuration removed', stale_at = NOW()
+              WHERE EXISTS (SELECT 1 FROM test_runs tr
+                             WHERE tr.test_run_id = ds_adapt_results.test_run_id
+                               AND tr.system_under_test_id = $1 AND tr.test_environment = $2 AND tr.workload = $3)
+                AND application_dashboard_id = $4
+                AND panel_id = $5
+                AND ($6::text IS NULL OR metric_name = $6)
+                AND is_stale = false`,
+              [systemUnderTestId, testEnvironment, workload, row.application_dashboard_id, row.panel_id, row.metric_name ?? null],
+            );
+          } catch (err) {
+            staleMarkingFailed = true;
+            counts.staleUnmarked++;
+            this.logger.error(
+              `Golden-path: could not mark results stale after removing the compare config for ${target}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+          continue;
+        }
         const data = rebuildConfig(row.template_base, winner);
         const patch: ConfigPatch = {};
         if (!isDeepStrictEqual(data, row.config_data)) patch.config_data = data;
@@ -802,10 +908,15 @@ export class TestRunsMetricsService {
       ...(guarded.size > 0
         ? [`left alone for a collection gap: ${[...guarded].map(([uid, n]) => `${uid} (${n})`).join(', ')}`]
         : []),
+      ...(profileTies.size > 0 ? [`decided by profile name: ${[...profileTies].join(', ')}`] : []),
       ...(ties.size > 0 ? [`decided by template id: ${[...ties].join(', ')}`] : []),
       ...(counts.legacyDiffers > 0
         ? [`${counts.legacyDiffers} pre-v0.2.97.54 row(s) left alone because their template would change them (possibly a hand edit)`]
         : []),
+      ...(counts.removed > 0
+        ? [`${counts.removed} applier-inserted row(s) removed: no template wins them now, so ADAPT's default applies`]
+        : []),
+      ...(counts.staleUnmarked > 0 ? [`${counts.staleUnmarked} removal(s) whose ADAPT results were not marked stale (see errors above)`] : []),
       ...(counts.raced > 0 ? [`${counts.raced} row(s) skipped: edited while this ran`] : []),
       ...(counts.collided > 0 ? [`${counts.collided} insert(s) skipped: row created concurrently`] : []),
     ];

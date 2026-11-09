@@ -4267,36 +4267,6 @@ the first customer leaves provisioning.
 (`/settings/profiles/adapt-templates`) and the `/compare-templates` API. The action belongs in its
 table, beside the lock.
 
-### Profile-scoped compare-config templates: the rest of the design's PR 2 (P2)
-
-**What:** Templates that belong to a profile and apply only to runs whose tags match it. Everything in
-"Next Steps" item 2 of `docs/design/2026-11-08-compare-config-templates-design.md` that v0.2.97.55 did
-not ship (its "Implementation deviations (PR 2)" item 1):
-
-- The PR 2 migration: `profile_id uuid NULL REFERENCES profiles(id) ON DELETE CASCADE`, and the unique
-  index's scope term replaced with `CASE WHEN profile_id IS NOT NULL THEN 'profile:' || profile_id ELSE
-  'org:' || COALESCE(organization_id::text, 'install') END`. `templateKey()` and its parity spec move with
-  it, and `profile_id` joins `auditableFields`.
-- The fail-closed profile matcher in `packages/shared` (declared in its `exports` map), extracted from
-  `apps/grafana-sync/src/modules/auto-config/auto-config.service.ts`, with grafana-sync switched to it.
-- Applier selection by run tags, and the precedence steps for profiles (scope: profile before
-  organization; profile name before template id).
-- The YAML `profile` field, resolved by name; an unresolved profile item suppresses the prune of all
-  profile templates. A profile template's organization is read from its profile (a join), not copied.
-- `GET/POST/PUT/DELETE /profiles/:id/compare-templates`, mirroring `/profiles/:id/benchmarks`.
-- The "ADAPT templates" tab on `/settings/profiles/[id]`, reusing the table and dialog under
-  `apps/web/app/settings/profiles/adapt-templates/`, and a third `ScopeBadge` kind.
-- The profile delete confirmation names how many templates the cascade deletes (D14).
-
-**Why:** Organization templates cannot give JVM and .NET services different template sets inside one
-organization, which is what profiles were chosen for (design, "Approaches Considered").
-
-**Context:** Split out of PR 2 at the user's request, to keep that PR to the UI and the export. The
-export's order already reserves profiles a place (scope: install-wide, organizations, then profiles by
-name), and nothing in v0.2.97.55 writes `profile_id`.
-
-**Depends on:** nothing.
-
 ### `ignoreMeanDiffSmallerThan` and `defaultValueIfControlGroupMissing` are written into compare configs and nothing reads them (P3)
 
 **What:** Either make ADAPT honour `config_data.ignoreMeanDiffSmallerThan` and
@@ -4391,9 +4361,72 @@ says so explicitly (for example `pruneAll: true`), and log what was held back.
 Helm default or an empty ConfigMap produces exactly that file, and the consequence is wide: on each
 workload's next completion every template-owned row reverts to its base, and restoring the file
 recreates the templates under new ids, so every row is rewritten again. Raised by the /ship
-adversarial review (2026-11-08).
+adversarial review (2026-11-08). Worse since v0.2.97.57: rows the applier inserted are now DELETED when
+no template wins them, so an accidental `items: []` also removes those rows at each workload's next
+completion, marks that panel's ADAPT history stale and moves the panels to ADAPT's default aggregation
+(median). Restoring the file re-inserts them on the next completion.
 
 **Depends on:** nothing.
+
+### Stale flags from the applier's row removal are never cleared (P3)
+
+**What:** Clear (or re-key) `ds_adapt_results.is_stale` when a removed compare-config row is
+re-inserted, or stop marking metric-level-governed series stale when a panel-level row is removed.
+
+**Why:** Removing a panel-level row marks every metric of that panel stale in every historical run of the
+workload (the trigger's own predicate), and re-inserting it on the next tagged run marks nothing and
+un-stales nothing (`trigger_mark_stale_on_config_update` is AFTER UPDATE only). A workload whose runs
+alternate tags accumulates stale flags on runs nobody re-analyses; `auto_mark_fresh_on_analysis` clears a
+run's flags when it is re-analysed and its results change. No verdict reads the flag, but users see it:
+`test-runs-anomaly.service.ts` counts it into the anomaly card's "N outdated results" badge and returns
+the stale row's compare config, so those runs show a re-analyse prompt that a re-analyse may not need.
+Raised by the /ship adversarial review of PR #716.
+
+**Effort:** S **Priority:** P3 **Depends on:** nothing.
+
+### The applier's one-failure bound on stale marking: three gaps (P3)
+
+**What:** In `applyGoldenPathClassifications` (`test-runs-metrics.service.ts`), `staleMarkingFailed`
+stops the hand-written `UPDATE ds_adapt_results` after the first failure in a pass. Three gaps remain:
+(1) it does not cover the stale marking `trigger_mark_stale_on_config_update` does inside each rebuild
+`updateRow`, which runs in the same request and is unbounded per row; (2) any error sets the flag,
+including a one-off that a retry would clear, so one transient failure leaves every later removal in
+the pass unmarked (counted as `staleUnmarked`, never retried); (3) the spec for the bound checks that one
+UPDATE is issued and the error is logged, but not the `staleUnmarked` count in the summary line.
+
+**Why:** The bound was added to keep a slow or locked `ds_adapt_results` from stalling a completion request
+once per removed row. Gap 1 is the same cost on the rebuild path; gap 2 trades accuracy of the
+re-analyse badge for that bound; gap 3 means the summary count can regress unnoticed. Raised by the
+/ship adversarial review of PR #716, after the fix cycles the user authorized.
+
+**Effort:** S **Priority:** P3 **Depends on:** nothing.
+
+### A profile created without an organization lands in the Default Organization for its admins (P3)
+
+**What:** Prefer a non-default organization in `resolveCreateOrganization`'s sorted fallback, or require
+`organizationId` when the caller administers more than one organization.
+
+**Why:** The fallback sorts the caller's organizations for determinism, and the seeded Default
+Organization (`00000000-0000-0000-0000-000000000001`) sorts first, so an API or CLI caller who omits
+`organizationId` and administers it always creates the profile there. The web sends the selected
+organization, so only direct API callers hit it. Raised by the /ship adversarial review of PR #716.
+
+**Effort:** XS **Priority:** P3 **Depends on:** nothing.
+
+### Strict `@IsUUID()` refuses the Default Organization in six more DTOs (P2)
+
+**What:** Use `@IsUUID('loose')` (as `CreateProfileDto.organizationId` does since v0.2.97.57) for every
+organization or team id validated with the strict default: `teams/dto/team.dto.ts`
+(`CreateTeamDto.organization_id`, required), `api-keys/dto/create-api-key.dto.ts`,
+`alerts/dto/alert-tag-filter.dto.ts`, `audit/dto/audit-filter.dto.ts`, `events/dto/event.dto.ts`, and the
+metrics-sources create/update DTOs (`organizationId`, `teamId`).
+
+**Why:** The seeded Default Organization is `00000000-0000-0000-0000-000000000001`, which has no RFC
+version or variant nibble, so class-validator's strict `isUUID` refuses it: creating a team in the Default
+Organization answers 400, and so does any of the others that names it. `ParseUUIDPipe` and the template
+codec are already loose. Found by the /ship adversarial review of PR #716, outside its scope.
+
+**Effort:** XS (human ~1h / CC ~10min) **Priority:** P2 **Depends on:** nothing.
 
 ### Runs closed by stale detection never run the golden-path applier (P3)
 
@@ -4431,22 +4464,108 @@ lets the prune run. The failure is safe today, just noisy. Raised by the /ship a
 
 **Depends on:** nothing.
 
-### Delete an applier-inserted row when its template is gone (P3)
+### Judge a run on the profile templates its own tags chose (P2)
 
-**What:** When a template-owned row has no winner and was inserted by the applier
-(`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`), delete it instead of rewriting it
-to the defaults, and mark that panel's ADAPT results stale explicitly (a delete fires no update
-trigger).
+**What:** Record the profiles a completing run matched, and have analyze and re-evaluate re-apply the
+golden path for that run's tags under the `sut:env:workload` scope lock before ADAPT reads the config.
 
-**Why:** "Rebuild from base alone" leaves a defaults row (mean, 15 %, no `minSampleCount`) where there
-was no row before the template. It shadows `DEFAULT_COMPARE_CONFIG` (median) and occupies the unique
-slot, so the worker's later `ON CONFLICT DO NOTHING` seed (`minSampleCount: 1` on the perf-test
-scenario panels) never lands. Raised by the red-team review (2026-11-08); the approved design chose
-rebuild-to-base, so this is a design change.
+**Why:** Profile templates are chosen by the completing run's tags but stored per workload in
+`ds_compare_config`, and ADAPT reads them when the run's analysis starts (`CompareConfigCache`), which
+can wait as Queued behind `HeavyStageMutex`. A differently tagged completion of the same workload in
+between, or a re-evaluate of an older run, judges that run on the other set. Before v0.2.97.57 the set
+changed only when a template was edited, so ordering did not matter. Raised by the /ship red-team
+review of PR #716 (2026-11-09); documented as a caveat in the reference page and apps/api/CLAUDE.md.
 
-**Depends on:** nothing.
+**Effort:** M (human ~2d / CC ~1h) **Priority:** P2 **Depends on:** nothing.
+
+### `profiles.yaml` upserts a profile by name across organizations (P1)
+
+**What:** Make profile provisioning refuse, rather than take over, a profile of the same name in another
+organization (or key it on organization plus name).
+
+**Why:** `provisionProfiles` upserts by name and overwrites `organizationId`
+(`provisioning.service.ts`). Since v0.2.97.57 a profile's ADAPT templates follow its current
+organization, so a `profiles.yaml` entry whose name collides with another tenant's UI profile now moves
+that tenant's templates too, along with its dashboards and SLOs as before. Raised by the /ship red-team
+review of PR #716. The adversarial review raised it to P1 because it is also a deliberate route, not
+only an accident: an org-B admin can create a profile under a name about to be added to `profiles.yaml`
+(file-level organization A), attach templates (`ignore: true`, a large `absThreshold`) to key panels,
+and on the next boot the profile moves to A with the file's tags and B's templates suppress regressions
+on A's runs.
+
+**Effort:** S (human ~4h / CC ~20min) **Priority:** P1 **Depends on:** nothing.
+
+### A completion call that omits tags wipes the run's tags, and now its profile templates (P2)
+
+**What:** Make `update-test-run.handler.ts` keep the stored `tags` when the update payload omits them
+(today `tags: data.tags || []`), or confirm the CLI sends tags on every update.
+
+**Why:** Pre-existing, but since v0.2.97.57 the completing run's tags choose its profile ADAPT templates,
+so a completion call without tags reverts every profile-owned row of the workload (and with the applier's
+delete, removes the rows it inserted) and fires the stale trigger. Raised by the /ship adversarial review
+of PR #716.
+
+**Effort:** S (human ~2h / CC ~15min) **Priority:** P2 **Depends on:** nothing.
+
+### Profile dashboards resolve a Grafana instance by label across organizations (P2)
+
+**What:** Scope the `grafanaInstanceRepo` lookups by label in `ProfilesService.createDashboard`,
+`updateDashboard` and `findDashboardsByProfileId` to the profile's organization.
+
+**Why:** `grafana_instances.label` has no unique constraint and duplicate labels across organizations are
+required (root CLAUDE.md, "The first-row class"), so these `findOne`/`find` by label can match another
+tenant's instance: an org admin who guesses a dashboard uid and label can validate against it and read
+its name and tags back. Left out of the v0.2.97.57 profile-scoping fix because it assumes a profile's
+organization always equals its Grafana instance's, which was not verified against provisioned data; if
+that is wrong, scoping breaks dashboard creation. grafana-sync already resolves the label in the run's
+organization (`dashboard-finder.service.ts`). Also: profile names are unique install-wide, so create and
+rename answer "already exists" for a name another tenant holds (a schema change, since
+`profile_grafana_dashboards.profile` is keyed on the name).
+
+**Effort:** S (human ~4h / CC ~25min) **Priority:** P2 **Depends on:** confirming profile org = instance org.
+
+### ADAPT templates: label profile copy targets with their organization (P3)
+
+**What:** In the panel's Copy dialog, show `Profile jvm · Acme` and list the template's own organization's
+profiles first, as organization targets already name their organization.
+
+**Why:** `fetchProfiles()` is unfiltered, so a global admin sees every profile on the install and a member
+of several organizations all of theirs; copying to "Profile jvm" gives no hint which tenant receives the
+template. Raised by the /ship red-team review of PR #716.
+
+**Effort:** S (human ~2h / CC ~15min) **Priority:** P3 **Depends on:** nothing.
+
+### ADAPT templates tab polish and a component test for the panel (P3)
+
+**What:** From the /ship design review of PR #716, left out as polish: the panel's nested Card inside the
+tab Card (two borders), its Add button on the right while the sibling tabs lead with theirs on the left,
+its own filled Snackbar beside the page's standard one, the empty state's `<h6>` and "in this scope" copy,
+a first-load error with no Retry and an empty Card under it, the read-only view drawn as a disabled form
+(about 2.7:1), the profile badge above the tab copy repeating what the page already says, the long
+delete-confirmation sentence, the tab label's casing ("ADAPT templates" beside Title Case siblings), the
+hard-coded gradient on the page's other Add buttons, and `GET /profiles` fetched on every panel mount for
+copy targets alone. Also the one coverage gap the /ship audit left: `AdaptTemplatesPanel`'s save, copy,
+delete and load-error handlers have no component test (they moved out of the page untested).
+
+**Effort:** S (human ~1d / CC ~45min) **Priority:** P3 **Depends on:** nothing.
+
+### No CHECK keeps `profile_id` NULL on system-scoped template rows (P3)
+
+**What:** Add `CHECK (system_under_test_id IS NULL OR profile_id IS NULL)` to
+`provisioned_template_ds_compare_configs`, beside 1822's `ck_..._panel`.
+
+**Why:** Only system-scoped rows travel in a SUT bundle (`bySut`), and no writer sets `profile_id` on them
+today, but nothing enforces it: a system-scoped row carrying a `profile_id` would FK-fail (23503) and abort
+an import into an environment without that profile. Raised by the /ship data-migration review of PR #716.
+
+**Effort:** XS **Priority:** P3 **Depends on:** a new migration.
 
 ## Completed
+
+- **Delete an applier-inserted row when its template is gone** — **Completed:** v0.2.97.57 (2026-11-09).
+  A row the golden path inserted (`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`) that
+  no template wins any more is deleted and its ADAPT results marked stale, so ADAPT's own default applies
+  again. Raised to a merge blocker by the /ship adversarial review: profile tags made it normal operation.
 
 ### A landed card-link could not be recovered after a tab switch, and its key omitted the run
 

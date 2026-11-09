@@ -323,6 +323,22 @@ describe('TestRunsMutationService', () => {
       expect(bullmqClientService.analyzeTest).toHaveBeenCalledWith(mockNewTestRun.test_run_id, { adapt: true, benchmarksOnly: false });
     });
 
+    it("hands the completing run's tags to the golden-path applier, which picks profile templates by them", async () => {
+      const updateDto = { ...createMockUpdateDto(), completed: true };
+      const mockNewTestRun = createMockTestRun(createMockTestRunEntity({ completed: true }));
+      lookupService.findOrCreateSystemUnderTest.mockResolvedValue({ id: 'sys-123', name: 'PaymentService' });
+      lookupService.findOrCreateTestEnvironment.mockResolvedValue({ id: 'env-123', name: 'production' });
+      lookupService.findOrCreateWorkload.mockResolvedValue({ id: 'work-123', name: 'loadTest' });
+      testRunRepo.findOne.mockResolvedValue(null);
+      createTestRunHandler.execute.mockResolvedValue({ success: true, data: mockNewTestRun, testRunId: mockNewTestRun.test_run_id, isNew: true });
+      bullmqClientService.analyzeTest.mockResolvedValue({ jobId: 'job-123' });
+
+      await service.updateRunningTest(updateDto, mockUserId, mockRoles, mockOrganizationId);
+
+      const metrics = (service as unknown as { metricsService: { applyGoldenPathClassifications: jest.Mock } }).metricsService;
+      expect(metrics.applyGoldenPathClassifications).toHaveBeenCalledWith(expect.objectContaining({ tags: ['performance'] }));
+    });
+
     it('should not break flow if ADAPT analysis fails', async () => {
       const updateDto = { ...createMockUpdateDto(), completed: true };
       const mockSystem = { id: 'sys-123', name: 'PaymentService', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };

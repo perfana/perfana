@@ -855,7 +855,13 @@ fields the current winning template names. Eight things that are easy to undo:
    machine-seeded row gets its seeded config on its first merge; a row written before 1822 takes its
    current config, but only when its winner would not change it (rule 7). A field the template stops
    naming reverts to the base, and a
-   row nothing matches any more is rebuilt from the base alone, with `template_id` cleared.
+   row nothing matches any more is rebuilt from the base alone, with `template_id` cleared, unless the
+   applier inserted it itself (`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`): that
+   row is deleted, conditional on the author read, and its `ds_adapt_results` marked stale by hand,
+   since a delete fires no `trigger_mark_stale_on_config_update`. Rebuilding it would leave a row the
+   panel never had (`INSERT_BASE`: mean, `none`) where ADAPT otherwise applies `DEFAULT_COMPARE_CONFIG`
+   (median, unclassified), so after one tagged run every untagged run of that workload would silently
+   switch aggregation (v0.2.97.57). A merged machine seed is still rebuilt: its base IS the panel's.
 3. **Only a difference is written.** `trigger_mark_stale_on_config_update` fires on any `config_data`
    change, so the applier compares first; `template_id` and `template_base` sit outside `config_data`
    and never fire it. The comparison deep-copies through JSON, not `structuredClone`: under Jest the
@@ -863,6 +869,19 @@ fields the current winning template names. Eight things that are easy to undo:
 4. **A template reaches only rows of its own `metric_name` (NULL to NULL)**, so a panel template never
    claims a series-grouping derived row such as `api (sum)`, and an organization template only
    dashboards of its own organization (read from the dashboard, not from the optional `TestRun` field).
+   A profile template (v0.2.97.57) reaches a dashboard only when `profileMatchesRun`
+   (`@perfana/shared/utils/profile-match`, the same rule grafana-sync uses) matches the profile against
+   the completing run's tags and the DASHBOARD's organization, and it fails closed on a missing
+   organization on either side. Profiles are read with one query, and only when a profile template
+   exists. Because the run's tags choose the winner and owned rows are rebuilt on every completion, a
+   workload whose runs carry different tags flips between template sets, and each flip that changes the
+   config fires the stale trigger; that is the profile's contract (design Open Question 4), not a bug to
+   guard against. What is NOT the contract: the result is stored per workload and ADAPT reads it when
+   the run's analysis starts (`CompareConfigCache`, possibly Queued behind `HeavyStageMutex`), so a
+   differently tagged completion in between, or a re-evaluate of an older run, judges that run on the
+   other set; recording each run's matched profiles is filed in TODOS.md. A tie between two profiles is
+   decided by profile name and reported apart from id ties (`decided by profile name:`), leaving the
+   existing `decided by template id:` text untouched.
 5. **`higherIsBetter` is named through `config_overrides` first.** A template that omits it leaves the
    row's own direction, where the merge used to write `null`. The `higher_is_better` column still
    counts when set and the key is missing, and that fallback is load-bearing, not a leftover: it is
@@ -923,8 +942,8 @@ ignores both halves of such a template.
 
 `/compare-templates` (CRUD) and `GET /provisioning/compare-templates/export` (v0.2.97.55) live in
 `modules/provisioning/compare-templates.{controller,service}.ts`, beside the codec they share with
-provisioning. Organization and install-wide templates only; profile templates are filed in TODOS.md.
-Six things to keep:
+provisioning, and `/profiles/:id/compare-templates` (v0.2.97.57, `ProfileCompareTemplatesController` in
+the same file, the same service with a `profile` scope). Seven things to keep:
 
 1. **A definition goes through `parseTemplateItem`, never a validator of its own.** The body is one file
    item; the service hands it to the codec with the scope's organization and stores `parsed.values`.
@@ -958,9 +977,29 @@ Six things to keep:
    `uq_provisioned_template_ds_compare_configs_key` and is mapped to 409 by `isDuplicateTemplateKey`.
    Nothing runs after a refused write, so no SAVEPOINT is needed (CODING_RULES.md).
 
+7. **A profile template's organization is its profile's, read at request time, never the row's copy.**
+   `organization_id` on a profile template is written from the profile for the audit log and goes stale
+   when the profile moves; `loadAuthorized`, the applier and the export all join the profile instead.
+   The scope is a profile OR an organization, never both: an organization's list and key check must say
+   `profile_id IS NULL`, or its profiles' templates show up as organization templates and collide with
+   them (`scopeWhere`). A profile template is parsed as the file item `profile: <name>` would be, with a
+   resolver that knows only the scope's profile, so takeover sees the same columns; the body may not name
+   `profile` itself. A read-only (provisioned) profile still takes UI templates (design Open Question 2).
+
 The export is `serializeTemplates` over every template row, so it is the whole file; committing a partial
 one would prune what it leaves out. It is admin-only at the guard (`@AdminOnly()`) and again in the
-service.
+service. Profile rows are handed to it with their profile's current organization and name: the
+organization counts towards the file-level `organizationId` decision (a file-level one the profile is not
+in would skip the item on the next boot), and the item is written as `profile: <name>`, plus its
+profile's `organizationId` when the file spans several organizations. That second half is what stops a
+profile name re-created in another organization from claiming the template: profile names are one
+install-wide namespace, and without a stated organization the mismatch check never runs (v0.2.97.57,
+/ship review). On the provisioning side, `profileId`, `profileName` and `profiles` are refused rather than
+warned about, since ignoring a misspelt scope key widens the template, and such an item is unidentified
+(no key), so it stops the whole prune that boot. Do not report it as an unresolved profile: that spares
+only profiles no resolved item reaches, and a `profileName: jvm` beside correctly spelt `jvm` items would
+prune its own template. An unresolved or mismatched profile item spares from the prune only the templates
+of profiles that no resolved item reaches.
 
 ### An artificial Dynatrace dashboard is per-workload, but its unique constraint is not
 

@@ -27,14 +27,15 @@ truth:
 @perfana/shared/repositories                // Custom repository classes
 @perfana/shared/database                    // Database utilities
 @perfana/shared/database/data-source-system // System-role DataSource
+@perfana/shared/database/run-window         // Run-window bounds for raw-hypertable reads
 @perfana/shared/database/system-connection  // System-role connection helper
 @perfana/shared/realtime                    // Real-time/Pub-Sub exports
 @perfana/shared/constants                   // Constants
-@perfana/shared/constants/dynatrace-metrics // Dynatrace metric constants
 @perfana/shared/services/grafana            // Grafana service
 @perfana/shared/services/metrics-source-upsert // Metrics-source upsert service
 @perfana/shared/services/proxy              // Proxy/NO_PROXY helpers
 @perfana/shared/utils                       // Utility functions
+@perfana/shared/utils/profile-match         // Which profiles a test run matches (tags + organization)
 @perfana/shared/security                    // Security helpers
 ```
 
@@ -131,6 +132,7 @@ truth:
 | `url-validator.ts` | Deep-link URL validation |
 | `markdown.ts` | Markdown subset renderer for report text blocks (`renderMarkdown`, `renderPlainText`, `RenderMarkdownOptions`, `TEXT_BLOCK_MARKDOWN_DEFAULT`) |
 | `report-variables.ts` | `{perfana-*}` placeholders a report's prose can use (`REPORT_VARIABLES`, `buildReportVariableValues`, `buildPreviousRunVariableValues`, `substituteReportVariables`, `escapeMarkdownValue`) |
+| `profile-match.ts` | The one rule for which profiles a test run matches (`profileMatchesRun`, `matchProfilesForRun`): a shared tag and the same organization, failing closed when either side has no organization. Used by grafana-sync's auto-config and the API's golden-path applier for profile compare-config templates (v0.2.97.57). Imported as `@perfana/shared/utils/profile-match` |
 
 > [!note] Why `markdown.ts` lives in shared
 > Two places must agree on the output structure: the API renders text blocks into

@@ -30,6 +30,21 @@ describe('golden-path resolver', () => {
         t({ id: 'a', panel_id: 7 }),
       ],
       [
+        'profile over organization, before panel match',
+        t({ id: 'z', profile_id: 'p', profile_name: 'z-profile', organization_id: 'org-a', panel_id: null, panel_title: 'Heap' }),
+        t({ id: 'a', organization_id: 'org-a', panel_id: 7 }),
+      ],
+      [
+        'exact uid over regex uid, before profile scope',
+        t({ id: 'z', dashboard_uid: 'jvm' }),
+        t({ id: 'a', dashboard_uid: '^jvm', regex: true, profile_id: 'p', profile_name: 'a', organization_id: 'org-a' }),
+      ],
+      [
+        'panel id over title, before profile name',
+        t({ id: 'z', profile_id: 'p2', profile_name: 'zz', panel_id: 7 }),
+        t({ id: 'a', profile_id: 'p1', profile_name: 'aa', panel_id: null, panel_title: 'Heap' }),
+      ],
+      [
         'panel id over literal title, before id',
         t({ id: 'z', panel_id: 7 }),
         t({ id: 'a', panel_id: null, panel_title: 'Heap' }),
@@ -50,6 +65,13 @@ describe('golden-path resolver', () => {
 
       expect(selectWinner([broad, narrow])).toEqual({ winner: narrow, tiedWith: broad });
       expect(selectWinner([narrow, broad])).toEqual({ winner: narrow, tiedWith: broad });
+    });
+
+    // Steps 4 and 5 are reached only by candidates level on steps 1-3, so they are ties by definition.
+    it('reports two profiles a run matches as a tie, decided by profile name before template id', () => {
+      const jvm = t({ id: 'z', profile_id: 'p1', profile_name: 'jvm' });
+      const tomcat = t({ id: 'a', profile_id: 'p2', profile_name: 'tomcat' });
+      expect(selectWinner([tomcat, jvm])).toEqual({ winner: jvm, tiedWith: tomcat });
     });
 
     it('has no winner without candidates', () => {

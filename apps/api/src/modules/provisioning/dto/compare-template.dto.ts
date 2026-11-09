@@ -32,8 +32,8 @@ const INT4_MAX = 2147483647;
  * ("no direction") and `absThreshold` (no absolute threshold); everywhere else it is refused, as in
  * the file.
  *
- * The scope (organization or install-wide) is not part of the definition: it is chosen by the
- * collection a template is created in, and never changes.
+ * The scope (profile, organization or install-wide) is not part of the definition: it is chosen by
+ * the collection a template is created in, and never changes.
  */
 export class CompareTemplateDefinitionDto {
   @ApiPropertyOptional({ description: 'Omit to apply to every dashboard carrying the panel. A regular expression when regex is true.' })
@@ -125,13 +125,17 @@ export class CompareTemplateDefinitionDto {
   defaultValueIfControlGroupMissing?: number;
 }
 
-export type CompareTemplateScopeKind = 'organization' | 'install';
+export type CompareTemplateScopeKind = 'profile' | 'organization' | 'install';
 
 export class CompareTemplateResponseDto {
   @ApiProperty() id!: string;
-  @ApiProperty({ enum: ['organization', 'install'] }) scope!: CompareTemplateScopeKind;
-  @ApiProperty({ nullable: true, type: String, description: 'null for an install-wide template' })
+  @ApiProperty({ enum: ['profile', 'organization', 'install'] }) scope!: CompareTemplateScopeKind;
+  @ApiProperty({ nullable: true, type: String, description: "null for an install-wide template; a profile template's is its profile's" })
   organizationId!: string | null;
+  @ApiProperty({ nullable: true, type: String, description: 'Set for a profile template: it applies only to runs whose tags match this profile' })
+  profileId!: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  profileName!: string | null;
   @ApiProperty({ description: 'Provisioned from template_ds_compare_configs.yaml: edit the file, not the template.' })
   readOnly!: boolean;
   @ApiProperty({ type: CompareTemplateDefinitionDto })
@@ -143,8 +147,10 @@ export class CompareTemplateResponseDto {
 }
 
 export class CompareTemplateListDto {
-  @ApiProperty({ enum: ['organization', 'install'] }) scope!: CompareTemplateScopeKind;
+  @ApiProperty({ enum: ['profile', 'organization', 'install'] }) scope!: CompareTemplateScopeKind;
   @ApiProperty({ nullable: true, type: String }) organizationId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) profileId!: string | null;
+  @ApiProperty({ nullable: true, type: String }) profileName!: string | null;
   @ApiProperty({ description: 'Whether the caller may create, edit and delete templates in this scope.' })
   canWrite!: boolean;
   @ApiProperty({ type: [CompareTemplateResponseDto], description: 'In the order the export writes them.' })
