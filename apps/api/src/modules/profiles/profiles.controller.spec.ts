@@ -11,6 +11,7 @@ import { createAuthorizationServiceMock } from '../../../test/mocks/authorizatio
 describe('ProfilesController', () => {
   let controller: ProfilesController;
   let service: ProfilesService;
+  let authzService: ReturnType<typeof createAuthorizationServiceMock>;
 
   const mockUserContext: UserContext = {
     userId: 'test-user-123',
@@ -175,6 +176,7 @@ describe('ProfilesController', () => {
 
     controller = module.get<ProfilesController>(ProfilesController);
     service = module.get<ProfilesService>(ProfilesService);
+    authzService = module.get(AuthorizationService);
   });
 
   afterEach(() => {
@@ -226,6 +228,78 @@ describe('ProfilesController', () => {
     });
   });
 
+  /**
+   * The controller resolves the caller's organizations once and hands them to the service;
+   * the service scopes every by-id route to them. These pin the controller half.
+   */
+  describe('tenant scope', () => {
+    const asMemberOf = (...orgs: string[]) => {
+      authzService.isGlobalAdmin.mockReturnValue(false);
+      authzService.getAccessibleOrganizations.mockResolvedValue(orgs);
+    };
+
+    it('lists nothing when a non-member names another organization in ?organizationId=', async () => {
+      asMemberOf('org-123');
+      mockProfilesService.findAll.mockResolvedValue([]);
+
+      await controller.findAll(mockUserContext, 'org-other');
+
+      expect(service.findAll).toHaveBeenCalledWith([]);
+    });
+
+    it('narrows to a named organization the caller belongs to', async () => {
+      asMemberOf('org-123', 'org-456');
+      mockProfilesService.findAll.mockResolvedValue([]);
+
+      await controller.findAll(mockUserContext, 'org-456');
+
+      expect(service.findAll).toHaveBeenCalledWith(['org-456']);
+    });
+
+    it('lets a global admin name any organization', async () => {
+      mockProfilesService.findAll.mockResolvedValue([]);
+
+      await controller.findAll(mockUserContext, 'org-other');
+
+      expect(service.findAll).toHaveBeenCalledWith(['org-other']);
+    });
+
+    it('passes a non-admin caller\'s organizations to every by-id route', async () => {
+      asMemberOf('org-123');
+      const id = '550e8400-e29b-41d4-a716-446655440000';
+      const orgs = ['org-123'];
+      mockProfilesService.findOne.mockResolvedValue(mockProfile);
+
+      await controller.findOne(id, mockUserContext);
+      await controller.create({ name: 'n' }, mockUserContext);
+      await controller.update(id, { tags: [] }, mockUserContext);
+      await controller.remove(id, mockUserContext);
+      await controller.findDashboards(id, mockUserContext);
+      await controller.deleteDashboard(id, 'd', mockUserContext);
+      await controller.getProfileBenchmarks(id, mockUserContext);
+      await controller.deleteProfileBenchmark(id, 'b', mockUserContext);
+
+      expect(service.findOne).toHaveBeenCalledWith(id, mockUserContext.userId, orgs);
+      expect(service.createProfile).toHaveBeenCalledWith({ name: 'n' }, mockUserContext.userId, orgs);
+      expect(service.updateProfile).toHaveBeenCalledWith(id, { tags: [] }, mockUserContext.userId, orgs);
+      expect(service.deleteProfile).toHaveBeenCalledWith(id, mockUserContext.userId, orgs);
+      expect(service.findDashboardsByProfileId).toHaveBeenCalledWith(id, mockUserContext.userId, orgs);
+      expect(service.deleteDashboard).toHaveBeenCalledWith(id, 'd', mockUserContext.userId, orgs);
+      expect(service.findBenchmarksByProfileId).toHaveBeenCalledWith(id, mockUserContext.userId, orgs);
+      expect(service.deleteBenchmark).toHaveBeenCalledWith(id, 'b', mockUserContext.userId, orgs);
+    });
+
+    it('turns an out-of-scope profile (null from the service) into the same 404 as a missing one', async () => {
+      asMemberOf('org-123');
+      mockProfilesService.findOne.mockResolvedValue(null);
+
+      const err = await controller.findOne('550e8400-e29b-41d4-a716-446655440000', mockUserContext).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(HttpException);
+      expect((err as HttpException).getStatus()).toBe(HttpStatus.NOT_FOUND);
+    });
+  });
+
   describe('findOne', () => {
     const profileId = '550e8400-e29b-41d4-a716-446655440000';
 
@@ -238,7 +312,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfile);
-      expect(service.findOne).toHaveBeenCalledWith(profileId, mockUserContext.userId, true);
+      expect(service.findOne).toHaveBeenCalledWith(profileId, mockUserContext.userId, null);
       expect(service.findOne).toHaveBeenCalledTimes(1);
     });
 
@@ -295,7 +369,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileDashboards);
-      expect(service.findDashboardsByProfileId).toHaveBeenCalledWith(profileId, mockUserContext.userId, true);
+      expect(service.findDashboardsByProfileId).toHaveBeenCalledWith(profileId, mockUserContext.userId, null);
       expect(service.findDashboardsByProfileId).toHaveBeenCalledTimes(1);
     });
 
@@ -308,7 +382,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual([]);
-      expect(service.findDashboardsByProfileId).toHaveBeenCalledWith(profileId, mockUserContext.userId, true);
+      expect(service.findDashboardsByProfileId).toHaveBeenCalledWith(profileId, mockUserContext.userId, null);
     });
 
     it('should preserve HttpException from service', async () => {
@@ -358,7 +432,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileDashboard);
-      expect(service.createDashboard).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, true);
+      expect(service.createDashboard).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, null);
       expect(service.createDashboard).toHaveBeenCalledTimes(1);
     });
 
@@ -376,7 +450,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(minimalResponse);
-      expect(service.createDashboard).toHaveBeenCalledWith(profileId, minimalDto, mockUserContext.userId, true);
+      expect(service.createDashboard).toHaveBeenCalledWith(profileId, minimalDto, mockUserContext.userId, null);
     });
 
     it('should preserve HttpException from service', async () => {
@@ -441,7 +515,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(updatedDashboard);
-      expect(service.updateDashboard).toHaveBeenCalledWith(profileId, dashboardId, updateDto, mockUserContext.userId, true);
+      expect(service.updateDashboard).toHaveBeenCalledWith(profileId, dashboardId, updateDto, mockUserContext.userId, null);
       expect(service.updateDashboard).toHaveBeenCalledTimes(1);
     });
 
@@ -457,7 +531,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileDashboard);
-      expect(service.updateDashboard).toHaveBeenCalledWith(profileId, dashboardId, partialDto, mockUserContext.userId, true);
+      expect(service.updateDashboard).toHaveBeenCalledWith(profileId, dashboardId, partialDto, mockUserContext.userId, null);
     });
 
     it('should preserve HttpException from service', async () => {
@@ -512,7 +586,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual({ message: 'Dashboard association deleted successfully' });
-      expect(service.deleteDashboard).toHaveBeenCalledWith(profileId, dashboardId, mockUserContext.userId, true);
+      expect(service.deleteDashboard).toHaveBeenCalledWith(profileId, dashboardId, mockUserContext.userId, null);
       expect(service.deleteDashboard).toHaveBeenCalledTimes(1);
     });
 
@@ -567,7 +641,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileBenchmarks);
-      expect(service.findBenchmarksByProfileId).toHaveBeenCalledWith(profileId, mockUserContext.userId, true);
+      expect(service.findBenchmarksByProfileId).toHaveBeenCalledWith(profileId, mockUserContext.userId, null);
       expect(service.findBenchmarksByProfileId).toHaveBeenCalledTimes(1);
     });
 
@@ -580,7 +654,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual([]);
-      expect(service.findBenchmarksByProfileId).toHaveBeenCalledWith(profileId, mockUserContext.userId, true);
+      expect(service.findBenchmarksByProfileId).toHaveBeenCalledWith(profileId, mockUserContext.userId, null);
     });
 
     it('should preserve HttpException from service', async () => {
@@ -644,7 +718,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileBenchmark);
-      expect(service.createBenchmark).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, true);
+      expect(service.createBenchmark).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, null);
       expect(service.createBenchmark).toHaveBeenCalledTimes(1);
     });
 
@@ -661,7 +735,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(minimalBenchmark);
-      expect(service.createBenchmark).toHaveBeenCalledWith(profileId, minimalDto, mockUserContext.userId, true);
+      expect(service.createBenchmark).toHaveBeenCalledWith(profileId, minimalDto, mockUserContext.userId, null);
     });
 
     it('should create benchmark with optional fields', async () => {
@@ -680,7 +754,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileBenchmark);
-      expect(service.createBenchmark).toHaveBeenCalledWith(profileId, optionalDto, mockUserContext.userId, true);
+      expect(service.createBenchmark).toHaveBeenCalledWith(profileId, optionalDto, mockUserContext.userId, null);
     });
 
     it('should preserve HttpException from service', async () => {
@@ -744,7 +818,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(updatedBenchmark);
-      expect(service.updateBenchmark).toHaveBeenCalledWith(profileId, benchmarkId, updateDto, mockUserContext.userId, true);
+      expect(service.updateBenchmark).toHaveBeenCalledWith(profileId, benchmarkId, updateDto, mockUserContext.userId, null);
       expect(service.updateBenchmark).toHaveBeenCalledTimes(1);
     });
 
@@ -760,7 +834,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileBenchmark);
-      expect(service.updateBenchmark).toHaveBeenCalledWith(profileId, benchmarkId, partialDto, mockUserContext.userId, true);
+      expect(service.updateBenchmark).toHaveBeenCalledWith(profileId, benchmarkId, partialDto, mockUserContext.userId, null);
     });
 
     it('should update benchmark with multiple fields', async () => {
@@ -780,7 +854,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileBenchmark);
-      expect(service.updateBenchmark).toHaveBeenCalledWith(profileId, benchmarkId, multipleFieldsDto, mockUserContext.userId, true);
+      expect(service.updateBenchmark).toHaveBeenCalledWith(profileId, benchmarkId, multipleFieldsDto, mockUserContext.userId, null);
     });
 
     it('should preserve HttpException from service', async () => {
@@ -835,7 +909,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual({ message: 'Benchmark deleted successfully' });
-      expect(service.deleteBenchmark).toHaveBeenCalledWith(profileId, benchmarkId, mockUserContext.userId, true);
+      expect(service.deleteBenchmark).toHaveBeenCalledWith(profileId, benchmarkId, mockUserContext.userId, null);
       expect(service.deleteBenchmark).toHaveBeenCalledTimes(1);
     });
 
@@ -909,7 +983,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileDashboard);
-      expect(service.updateDashboard).toHaveBeenCalledWith(profileId, dashboardId, {}, mockUserContext.userId, true);
+      expect(service.updateDashboard).toHaveBeenCalledWith(profileId, dashboardId, {}, mockUserContext.userId, null);
     });
 
     it('should handle very large metadata objects in benchmark creation', async () => {
@@ -930,7 +1004,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileBenchmark);
-      expect(service.createBenchmark).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, true);
+      expect(service.createBenchmark).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, null);
     });
 
     it('should handle empty arrays in setHardcodedValueForVariables', async () => {
@@ -948,7 +1022,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfileDashboard);
-      expect(service.createDashboard).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, true);
+      expect(service.createDashboard).toHaveBeenCalledWith(profileId, createDto, mockUserContext.userId, null);
     });
 
     it('should handle special characters in profile IDs', async () => {
@@ -961,7 +1035,7 @@ describe('ProfilesController', () => {
 
       // Assert
       expect(result).toEqual(mockProfile);
-      expect(service.findOne).toHaveBeenCalledWith(specialId, mockUserContext.userId, true);
+      expect(service.findOne).toHaveBeenCalledWith(specialId, mockUserContext.userId, null);
     });
   });
 });

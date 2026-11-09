@@ -62,16 +62,23 @@ export interface ProfileDashboardResponse {
   updatedAt: string;
 }
 
+/** Strip CR/LF from a caller-supplied id before it reaches a log line (Express percent-decodes path segments). */
+const forLog = (value: string): string => value.replace(/[\r\n]/g, '');
+
 /**
  * Service responsible for managing profiles and their associated dashboards and benchmarks.
  *
- * Authorization:
- * - Methods accept userId and a pre-resolved isAdmin boolean (resolved at the
- *   controller boundary via `withOrgFilter`). The service no longer calls
- *   `authzService.isGlobalAdmin` directly — Phase 3c C33 boundary push.
- * - Currently Profile entity does not have organization_id, so all data is treated as legacy
- * - When organization_id is added to Profile (Phase 4), authorization checks will be enabled
- * - Global admins bypass all authorization checks
+ * Authorization — there is no RLS backstop on a default deploy (`DB_ENABLE_RLS_ROLE` is off),
+ * so this service is the tenant boundary:
+ * - Every by-id method takes `accessibleOrgIds`, resolved once per request at the controller
+ *   via `withOrgFilter` (`null` = global admin). It is REQUIRED on purpose: an optional one
+ *   silently restores the cross-tenant behaviour when a caller forgets it.
+ * - A profile outside those organizations answers exactly like a missing one — 404, or `null`
+ *   from `findOne` — because a 403 would confirm the id exists in another tenant.
+ * - Writes (the profile, its dashboards, its benchmarks) need org-admin in the PROFILE'S OWN
+ *   organization, not in any organization. Global admins bypass.
+ * - Child rows are always read through their scoped parent (`profile` name for dashboards,
+ *   `profile_id` for benchmarks), so a child id from another profile is a 404 too.
  */
 @Injectable()
 export class ProfilesService {
@@ -97,20 +104,87 @@ export class ProfilesService {
   ) {}
 
   /**
-   * Check if user is org-admin in any of their organizations
-   * @throws Error if user is not an org-admin
+   * Load a profile the caller may see, or `null` when it does not exist OR belongs to an
+   * organization outside `accessibleOrgIds`. The two are indistinguishable to the caller on
+   * purpose; only the server log tells them apart.
    */
-  private async requireOrgAdmin(userId: string, isAdmin: boolean): Promise<void> {
-    // Global admins always have access
-    if (isAdmin) {
+  private async findScopedProfile(
+    id: string,
+    userId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<Profile | null> {
+    const profile = await withRequestEm(this.profileRepo).findOne({ where: { id } });
+    if (!profile) {
+      return null;
+    }
+    if (accessibleOrgIds !== null && !accessibleOrgIds.includes(profile.organizationId)) {
+      this.logger.warn(`Cross-tenant access refused for profile ${forLog(id)} (user ${forLog(userId)})`);
+      return null;
+    }
+    return profile;
+  }
+
+  /** {@link findScopedProfile}, answering 404 for a missing or out-of-scope profile. */
+  private async requireScopedProfile(
+    id: string,
+    userId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<Profile> {
+    const profile = await this.findScopedProfile(id, userId, accessibleOrgIds);
+    if (!profile) {
+      throw new NotFoundException(`Profile ${forLog(id)} not found`);
+    }
+    return profile;
+  }
+
+  /**
+   * Require org-admin in `organizationId` — the organization of the profile being written —
+   * unless the caller is a global admin (`accessibleOrgIds === null`).
+   *
+   * `isOrganizationAdmin` reads `organization_members` only, like the
+   * `isOrgAdminInAnyOrganization` check it replaced, so an `api-key:` principal without a
+   * membership row is refused here exactly as it was before; one carrying a global-admin
+   * role still bypasses through `withOrgFilter`.
+   */
+  private async requireOrgAdmin(
+    userId: string,
+    organizationId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<void> {
+    if (accessibleOrgIds === null) {
       return;
     }
-
-    // Check if user is org-admin in any organization
-    const isOrgAdmin = await this.authzService.isOrgAdminInAnyOrganization(userId);
+    const isOrgAdmin = await this.authzService.isOrganizationAdmin(userId, organizationId);
     if (!isOrgAdmin) {
       throw new ForbiddenException('Organization admin privileges required to manage profiles');
     }
+  }
+
+  /**
+   * The organization a new profile is created in. `CreateProfileDto` names none, so it is one
+   * of the caller's own: for a global admin the first accessible one (as before), for anyone
+   * else the first one in which they are org-admin. Taking the first accessible organization
+   * and checking admin there would refuse an admin of org B whose org-A membership happens to
+   * be listed first, and the old any-org check would have created the profile in org A, where
+   * they are not an admin.
+   */
+  private async resolveCreateOrganization(
+    userId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<string> {
+    const candidates = accessibleOrgIds ?? (await this.authzService.getAccessibleOrganizations(userId)) ?? [];
+    if (candidates.length === 0) {
+      throw new ForbiddenException('No accessible organization found for user');
+    }
+    if (accessibleOrgIds === null) {
+      return candidates[0]!;
+    }
+    for (const organizationId of candidates) {
+      if (await this.authzService.isOrganizationAdmin(userId, organizationId)) {
+        return organizationId;
+      }
+    }
+    throw new ForbiddenException('Organization admin privileges required to manage profiles');
   }
 
   /**
@@ -118,9 +192,10 @@ export class ProfilesService {
    *
    * @param organizationIds - Pre-resolved by the controller. `null` = global admin
    *   without an explicit org filter (return all). Empty array = non-admin with no
-   *   accessible orgs (return nothing). Non-empty array = filter `organization_id IN (...) OR IS NULL`.
-   *   The controller collapses the explicit `?organizationId=` query param into a
-   *   single-element array so this method does not branch on it.
+   *   accessible orgs (return nothing). Non-empty array = filter `organization_id IN (...)`.
+   *   The controller intersects an explicit `?organizationId=` with the caller's own
+   *   organizations before it gets here, so this method does not branch on it — and must
+   *   never be handed a caller-named organization unchecked.
    */
   async findAll(organizationIds: string[] | null): Promise<ProfileResponse[]> {
     try {
@@ -223,26 +298,19 @@ export class ProfilesService {
    * Find a single profile by ID
    *
    * @param id - The profile ID
-   * @param userId - The user ID for authorization
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
-   *
-   * Note: Profile entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
+   * @param userId - The user ID, for the refusal log
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
+   * @returns `null` when the profile does not exist or is outside `accessibleOrgIds` — the
+   *   controller turns both into the same 404
    */
-  async findOne(id: string, userId: string, isAdmin: boolean): Promise<ProfileResponse | null> {
+  async findOne(id: string, userId: string, accessibleOrgIds: string[] | null): Promise<ProfileResponse | null> {
     try {
-      this.logger.debug(`findOne: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findOne: id=${forLog(id)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id },
-      });
-
+      const profile = await this.findScopedProfile(id, userId, accessibleOrgIds);
       if (!profile) {
         return null;
       }
-
-      // NOTE: Access permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are accessible (treated as legacy data)
 
       // Get dashboard count for this profile
       const dashboardCount = await withRequestEm(this.profileDashboardRepo).count({
@@ -286,28 +354,20 @@ export class ProfilesService {
    * Find all dashboards for a profile
    *
    * @param id - The profile ID
-   * @param userId - The user ID for authorization
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
-   *
-   * Note: Profile entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
+   * @param userId - The user ID, for the refusal log
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
+   * @throws NotFoundException when the profile does not exist or is outside `accessibleOrgIds`
    */
-  async findDashboardsByProfileId(id: string, userId: string, isAdmin: boolean): Promise<ProfileDashboardResponse[]> {
+  async findDashboardsByProfileId(
+    id: string,
+    userId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<ProfileDashboardResponse[]> {
     try {
-      this.logger.debug(`findDashboardsByProfileId: id=${id}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findDashboardsByProfileId: id=${forLog(id)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
       // First, get the profile to get its name
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id },
-      });
-
-      if (!profile) {
-        this.logger.warn(`Profile ${id} not found`);
-        return [];
-      }
-
-      // NOTE: Access permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are accessible (treated as legacy data)
+      const profile = await this.requireScopedProfile(id, userId, accessibleOrgIds);
 
       this.logger.debug(`Fetching dashboards for profile: ${profile.name}`);
 
@@ -386,36 +446,24 @@ export class ProfilesService {
    *
    * @param profileId - The profile ID
    * @param createDto - The dashboard creation DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
+   * @param userId - The user ID for authorization
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
    *
-   * Note: Profile entity does not have organization_id or created_by/updated_by yet,
-   * so ownership tracking is not applied. Full ownership assignment will be enabled when
-   * Phase 4 adds the ownership columns.
+   * The new row inherits the profile's organization and team. Requires org-admin in the
+   * profile's organization; a profile outside `accessibleOrgIds` is a 404.
    */
   async createDashboard(
     profileId: string,
     createDto: CreateProfileDashboardDto,
     userId: string,
-    isAdmin: boolean,
+    accessibleOrgIds: string[] | null,
   ): Promise<ProfileDashboardResponse> {
     try {
-      this.logger.debug(`createDashboard: profileId=${profileId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`createDashboard: profileId=${forLog(profileId)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
-      // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, isAdmin);
-
-      // Get the profile to retrieve its name
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id: profileId },
-      });
-
-      if (!profile) {
-        throw new NotFoundException(`Profile ${profileId} not found`);
-      }
-
-      // NOTE: Permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are modifiable (treated as legacy data)
+      // Get the profile to retrieve its name — scoped first, so a foreign profile is a 404, not a 403
+      const profile = await this.requireScopedProfile(profileId, userId, accessibleOrgIds);
+      await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
 
       // Validate that the Grafana dashboard exists
       const grafanaInstance = await withRequestEm(this.grafanaInstanceRepo).findOne({
@@ -491,38 +539,27 @@ export class ProfilesService {
    * @param profileId - The profile ID
    * @param dashboardId - The dashboard ID
    * @param updateDto - The dashboard update DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
+   * @param userId - The user ID for authorization
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
    *
-   * Note: Profile entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
+   * Requires org-admin in the profile's organization. The dashboard is looked up under the
+   * scoped profile, so another profile's dashboard id is a 404.
    */
   async updateDashboard(
     profileId: string,
     dashboardId: string,
     updateDto: UpdateProfileDashboardDto,
     userId: string,
-    isAdmin: boolean,
+    accessibleOrgIds: string[] | null,
   ): Promise<ProfileDashboardResponse> {
     try {
-      this.logger.debug(`updateDashboard: profileId=${profileId}, dashboardId=${dashboardId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`updateDashboard: profileId=${forLog(profileId)}, dashboardId=${forLog(dashboardId)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
-      // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, isAdmin);
+      // Get the profile to retrieve its name — scoped first, so a foreign profile is a 404, not a 403
+      const profile = await this.requireScopedProfile(profileId, userId, accessibleOrgIds);
+      await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
 
-      // Get the profile to retrieve its name
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id: profileId },
-      });
-
-      if (!profile) {
-        throw new NotFoundException(`Profile ${profileId} not found`);
-      }
-
-      // NOTE: Permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are modifiable (treated as legacy data)
-
-      // Get the existing dashboard association
+      // Get the existing dashboard association — only one that belongs to this profile
       const dashboard = await withRequestEm(this.profileDashboardRepo).findOne({
         where: { id: dashboardId, profile: profile.name },
       });
@@ -684,31 +721,25 @@ export class ProfilesService {
    * @param profileId - The profile ID
    * @param dashboardId - The dashboard ID
    * @param userId - The user ID for authorization
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
    *
-   * Note: Profile entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
+   * Requires org-admin in the profile's organization. The dashboard is looked up under the
+   * scoped profile, so another profile's dashboard id is a 404.
    */
-  async deleteDashboard(profileId: string, dashboardId: string, userId: string, isAdmin: boolean): Promise<void> {
+  async deleteDashboard(
+    profileId: string,
+    dashboardId: string,
+    userId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<void> {
     try {
-      this.logger.debug(`deleteDashboard: profileId=${profileId}, dashboardId=${dashboardId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`deleteDashboard: profileId=${forLog(profileId)}, dashboardId=${forLog(dashboardId)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
-      // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, isAdmin);
+      // Get the profile to retrieve its name — scoped first, so a foreign profile is a 404, not a 403
+      const profile = await this.requireScopedProfile(profileId, userId, accessibleOrgIds);
+      await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
 
-      // Get the profile to retrieve its name
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id: profileId },
-      });
-
-      if (!profile) {
-        throw new NotFoundException(`Profile ${profileId} not found`);
-      }
-
-      // NOTE: Delete permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are deletable (treated as legacy data)
-
-      // Get the dashboard association
+      // Get the dashboard association — only one that belongs to this profile
       const dashboard = await withRequestEm(this.profileDashboardRepo).findOne({
         where: { id: dashboardId, profile: profile.name },
       });
@@ -740,28 +771,20 @@ export class ProfilesService {
    * Find all benchmarks for a profile
    *
    * @param profileId - The profile ID
-   * @param userId - The user ID for authorization
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
-   *
-   * Note: Profile entity does not have organization_id yet, so access checks are not applied.
-   * Full access permission checks will be enabled when Phase 4 adds organization_id column.
+   * @param userId - The user ID, for the refusal log
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
+   * @throws NotFoundException when the profile does not exist or is outside `accessibleOrgIds`
    */
-  async findBenchmarksByProfileId(profileId: string, userId: string, isAdmin: boolean): Promise<ProfileBenchmarkResponse[]> {
+  async findBenchmarksByProfileId(
+    profileId: string,
+    userId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<ProfileBenchmarkResponse[]> {
     try {
-      this.logger.debug(`findBenchmarksByProfileId: profileId=${profileId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`findBenchmarksByProfileId: profileId=${forLog(profileId)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
-      // Get the profile to validate it exists
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id: profileId },
-      });
-
-      if (!profile) {
-        this.logger.warn(`Profile ${profileId} not found`);
-        return [];
-      }
-
-      // NOTE: Access permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are accessible (treated as legacy data)
+      // Get the profile to validate it exists and is in scope
+      const profile = await this.requireScopedProfile(profileId, userId, accessibleOrgIds);
 
       this.logger.debug(`Fetching benchmarks for profile: ${profile.name}`);
 
@@ -869,36 +892,24 @@ export class ProfilesService {
    *
    * @param profileId - The profile ID
    * @param createDto - The benchmark creation DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
+   * @param userId - The user ID for authorization
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
    *
-   * Note: Profile entity does not have organization_id or created_by/updated_by yet,
-   * so ownership tracking is not applied. Full ownership assignment will be enabled when
-   * Phase 4 adds the ownership columns.
+   * The new row inherits the profile's organization and team. Requires org-admin in the
+   * profile's organization; a profile outside `accessibleOrgIds` is a 404.
    */
   async createBenchmark(
     profileId: string,
     createDto: CreateProfileBenchmarkDto,
     userId: string,
-    isAdmin: boolean,
+    accessibleOrgIds: string[] | null,
   ): Promise<ProfileBenchmarkResponse> {
     try {
-      this.logger.debug(`createBenchmark: profileId=${profileId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`createBenchmark: profileId=${forLog(profileId)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
-      // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, isAdmin);
-
-      // Get the profile to validate it exists
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id: profileId },
-      });
-
-      if (!profile) {
-        throw new NotFoundException(`Profile ${profileId} not found`);
-      }
-
-      // NOTE: Permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are modifiable (treated as legacy data)
+      // Get the profile — scoped first, so a foreign profile is a 404, not a 403
+      const profile = await this.requireScopedProfile(profileId, userId, accessibleOrgIds);
+      await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
 
       const source = createDto.source || 'grafana';
       const dashboardColumns = await this.resolveDashboardColumns(source, createDto, profile.name);
@@ -985,38 +996,27 @@ export class ProfilesService {
    * @param profileId - The profile ID
    * @param benchmarkId - The benchmark ID
    * @param updateDto - The benchmark update DTO
-   * @param userId - The user ID for authorization and ownership tracking
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
+   * @param userId - The user ID for authorization
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
    *
-   * Note: Profile entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
+   * Requires org-admin in the profile's organization. The benchmark is looked up under the
+   * scoped profile, so another profile's benchmark id is a 404.
    */
   async updateBenchmark(
     profileId: string,
     benchmarkId: string,
     updateDto: UpdateProfileBenchmarkDto,
     userId: string,
-    isAdmin: boolean,
+    accessibleOrgIds: string[] | null,
   ): Promise<ProfileBenchmarkResponse> {
     try {
-      this.logger.debug(`updateBenchmark: profileId=${profileId}, benchmarkId=${benchmarkId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`updateBenchmark: profileId=${forLog(profileId)}, benchmarkId=${forLog(benchmarkId)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
-      // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, isAdmin);
+      // Get the profile — scoped first, so a foreign profile is a 404, not a 403
+      const profile = await this.requireScopedProfile(profileId, userId, accessibleOrgIds);
+      await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
 
-      // Get the profile to validate it exists
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id: profileId },
-      });
-
-      if (!profile) {
-        throw new NotFoundException(`Profile ${profileId} not found`);
-      }
-
-      // NOTE: Permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are modifiable (treated as legacy data)
-
-      // Get the existing benchmark
+      // Get the existing benchmark — only one that belongs to this profile
       const benchmark = await withRequestEm(this.profileBenchmarkRepo).findOne({
         where: { id: benchmarkId, profile_id: profileId },
       });
@@ -1167,31 +1167,25 @@ export class ProfilesService {
    * @param profileId - The profile ID
    * @param benchmarkId - The benchmark ID
    * @param userId - The user ID for authorization
-   * @param isAdmin - Whether the caller is a global admin (resolved at controller boundary)
+   * @param accessibleOrgIds - The caller's organizations (`null` = global admin), resolved at the controller
    *
-   * Note: Profile entity does not have organization_id yet, so permission checks are not applied.
-   * Full permission checks will be enabled when Phase 4 adds organization_id column.
+   * Requires org-admin in the profile's organization. The benchmark is looked up under the
+   * scoped profile, so another profile's benchmark id is a 404.
    */
-  async deleteBenchmark(profileId: string, benchmarkId: string, userId: string, isAdmin: boolean): Promise<void> {
+  async deleteBenchmark(
+    profileId: string,
+    benchmarkId: string,
+    userId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<void> {
     try {
-      this.logger.debug(`deleteBenchmark: profileId=${profileId}, benchmarkId=${benchmarkId}, userId=${userId}, isGlobalAdmin=${isAdmin}`);
+      this.logger.debug(`deleteBenchmark: profileId=${forLog(profileId)}, benchmarkId=${forLog(benchmarkId)}, userId=${forLog(userId)}, globalAdmin=${accessibleOrgIds === null}`);
 
-      // Check if user is org-admin in any organization
-      await this.requireOrgAdmin(userId, isAdmin);
+      // Get the profile — scoped first, so a foreign profile is a 404, not a 403
+      const profile = await this.requireScopedProfile(profileId, userId, accessibleOrgIds);
+      await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
 
-      // Get the profile to validate it exists
-      const profile = await withRequestEm(this.profileRepo).findOne({
-        where: { id: profileId },
-      });
-
-      if (!profile) {
-        throw new NotFoundException(`Profile ${profileId} not found`);
-      }
-
-      // NOTE: Delete permission check will be added here when Profile entity has organization_id
-      // For now, all profiles are deletable (treated as legacy data)
-
-      // Get the benchmark
+      // Get the benchmark — only one that belongs to this profile
       const benchmark = await withRequestEm(this.profileBenchmarkRepo).findOne({
         where: { id: benchmarkId, profile_id: profileId },
       });
@@ -1220,21 +1214,20 @@ export class ProfilesService {
 
   // ─── Profile CRUD ───────────────────────────────────────────────────
 
-  async createProfile(dto: CreateProfileDto, userId: string, isAdmin: boolean): Promise<ProfileResponse> {
-    await this.requireOrgAdmin(userId, isAdmin);
+  /**
+   * Create a profile in one of the caller's own organizations (see `resolveCreateOrganization`;
+   * the DTO cannot name one). The organization is resolved, and org-admin there checked, before
+   * the name lookup, so a caller who may not create learns nothing about which names exist.
+   */
+  async createProfile(dto: CreateProfileDto, userId: string, accessibleOrgIds: string[] | null): Promise<ProfileResponse> {
+    // Profile.organization_id is NOT NULL (UI does not currently expose org selection).
+    const organizationId = await this.resolveCreateOrganization(userId, accessibleOrgIds);
 
-    // Check uniqueness
+    // Check uniqueness. `profiles_name_key` is install-wide, not per organization, and
+    // `profile_grafana_dashboards.profile` keys on the name, so this cannot be scoped.
     const existing = await withRequestEm(this.profileRepo).findOne({ where: { name: dto.name } });
     if (existing) {
       throw new BadRequestException(`Profile with name '${dto.name}' already exists`);
-    }
-
-    // Profile.organization_id is NOT NULL — default to the caller's first
-    // accessible org (UI does not currently expose org selection).
-    const orgs = await this.authzService.getAccessibleOrganizations(userId);
-    const organizationId = orgs?.[0];
-    if (!organizationId) {
-      throw new ForbiddenException('No accessible organization found for user');
     }
 
     const profile = this.profileRepo.create({
@@ -1272,13 +1265,19 @@ export class ProfilesService {
     };
   }
 
-  async updateProfile(id: string, dto: UpdateProfileDto, userId: string, isAdmin: boolean): Promise<ProfileResponse> {
-    await this.requireOrgAdmin(userId, isAdmin);
-
-    const profile = await withRequestEm(this.profileRepo).findOne({ where: { id } });
-    if (!profile) {
-      throw new NotFoundException(`Profile not found: ${id}`);
-    }
+  /**
+   * Update a profile. Requires org-admin in the profile's own organization; a profile outside
+   * `accessibleOrgIds` is a 404. A tags edit decides which runs the profile's ADAPT templates
+   * reach, so this check is what keeps another tenant from steering them.
+   */
+  async updateProfile(
+    id: string,
+    dto: UpdateProfileDto,
+    userId: string,
+    accessibleOrgIds: string[] | null,
+  ): Promise<ProfileResponse> {
+    const profile = await this.requireScopedProfile(id, userId, accessibleOrgIds);
+    await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
 
     if (profile.readOnly) {
       throw new BadRequestException('Cannot update a read-only profile');
@@ -1312,17 +1311,18 @@ export class ProfilesService {
     this.logger.log(`Profile '${saved.name}' updated by ${userId}`);
 
     // Re-fetch counts
-    const full = await this.findOne(id, userId, isAdmin);
+    const full = await this.findOne(id, userId, accessibleOrgIds);
     return full!;
   }
 
-  async deleteProfile(id: string, userId: string, isAdmin: boolean): Promise<void> {
-    await this.requireOrgAdmin(userId, isAdmin);
-
-    const profile = await withRequestEm(this.profileRepo).findOne({ where: { id } });
-    if (!profile) {
-      throw new NotFoundException(`Profile not found: ${id}`);
-    }
+  /**
+   * Delete a profile. Requires org-admin in the profile's own organization; a profile outside
+   * `accessibleOrgIds` is a 404. The delete cascades to the profile's dashboards, benchmarks
+   * and ADAPT templates (`provisioned_template_ds_compare_configs.profile_id` ON DELETE CASCADE).
+   */
+  async deleteProfile(id: string, userId: string, accessibleOrgIds: string[] | null): Promise<void> {
+    const profile = await this.requireScopedProfile(id, userId, accessibleOrgIds);
+    await this.requireOrgAdmin(userId, profile.organizationId, accessibleOrgIds);
 
     if (profile.readOnly) {
       throw new BadRequestException('Cannot delete a read-only profile');
