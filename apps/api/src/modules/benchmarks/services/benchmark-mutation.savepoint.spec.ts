@@ -108,9 +108,9 @@ describe('BenchmarkMutationService copyToScope — SAVEPOINT guard', () => {
         {
           provide: BenchmarkTagHelper,
           useValue: {
-            inheritTagsFromDashboard: jest.fn().mockResolvedValue([]),
+            findInScope: jest.fn().mockResolvedValue(null),
+            inheritTagsFromDashboard: jest.fn().mockReturnValue([]),
             getInheritedTagsForUpdate: jest.fn().mockResolvedValue([]),
-            metricsSourceIdOf: jest.fn().mockResolvedValue('ms-new'),
           },
         },
         {

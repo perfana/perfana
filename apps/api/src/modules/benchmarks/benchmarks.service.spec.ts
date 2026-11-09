@@ -91,8 +91,11 @@ describe('BenchmarksService', () => {
     } as any,
   } as any as BenchmarkEntity;
 
+  // A real uuid: findInScope refuses anything else before it reaches Postgres.
+  const DASHBOARD_ID = '6f1c2d3e-4a5b-4c6d-8e7f-901234567890';
+
   const mockApplicationDashboard: ApplicationDashboardEntity = {
-    id: 'dashboard-uuid',
+    id: DASHBOARD_ID,
     dashboardLabel: 'Test Dashboard',
     tags: ['dashboard-tag-1', 'dashboard-tag-2', 'perfana-system-tag'],
   } as ApplicationDashboardEntity;
@@ -359,7 +362,7 @@ describe('BenchmarksService', () => {
           testEnvironment: 'production',
           workload: 'load-test',
           source: 'grafana',
-          applicationDashboardId: 'dashboard-uuid',
+          applicationDashboardId: DASHBOARD_ID,
           configTitle: 'Test Benchmark',
           panelTitle: 'Response Time',
           evaluateType: 'mean',
@@ -376,10 +379,12 @@ describe('BenchmarksService', () => {
         await service.create(mockUserId, mockRoles, createDto);
 
         // Assert
-        expect(appDashboardRepo.findOne).toHaveBeenCalledWith({
-          where: { id: 'dashboard-uuid' },
-          select: ['id', 'tags'],
-        });
+        // Scoped to the system and environment the create was authorized for, never the id alone.
+        expect(appDashboardRepo.findOne).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: DASHBOARD_ID, systemUnderTestId: 'system-uuid', testEnvironment: 'production' },
+          }),
+        );
         expect(mergeAndFilterTags).toHaveBeenCalledWith(
           mockApplicationDashboard.tags,
           ['user-tag']
@@ -422,7 +427,7 @@ describe('BenchmarksService', () => {
           testEnvironment: 'production',
           workload: 'load-test',
           source: 'grafana',
-          applicationDashboardId: 'dashboard-uuid',
+          applicationDashboardId: DASHBOARD_ID,
           configTitle: 'Test Benchmark',
           panelTitle: 'Response Time',
           evaluateType: 'mean',
@@ -449,14 +454,16 @@ describe('BenchmarksService', () => {
         );
       });
 
-      it('should handle dashboard fetch failure gracefully', async () => {
+      // The lookup decides whether the SLO may reference the dashboard at all, so an error fails
+      // the create instead of storing a reference nobody checked.
+      it('fails closed when the dashboard lookup errors', async () => {
         // Arrange
         const createDto = {
           systemUnderTestId: 'system-uuid',
           testEnvironment: 'production',
           workload: 'load-test',
           source: 'grafana',
-          applicationDashboardId: 'dashboard-uuid',
+          applicationDashboardId: DASHBOARD_ID,
           configTitle: 'Test Benchmark',
           panelTitle: 'Response Time',
           evaluateType: 'mean',
@@ -469,15 +476,8 @@ describe('BenchmarksService', () => {
         benchmarkRepo.create.mockReturnValue(mockBenchmark);
         benchmarkRepo.save.mockResolvedValue(mockBenchmark);
 
-        // Act
-        await service.create(mockUserId, mockRoles, createDto);
-
-        // Assert
-        expect(benchmarkRepo.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            tags: ['user-tag'],
-          })
-        );
+        await expect(service.create(mockUserId, mockRoles, createDto)).rejects.toThrow('Database error');
+        expect(benchmarkRepo.save).not.toHaveBeenCalled();
       });
 
       it('should extract metric unit from yAxesFormat', async () => {
