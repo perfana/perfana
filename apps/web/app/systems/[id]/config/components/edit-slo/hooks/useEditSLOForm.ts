@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { SUPPORTED_PANEL_TYPES, convertDecimalToPercentageForDisplay, storedThresholdUnit } from '../utils/slo-validators';
 import { isPerformanceTest } from '@/lib/metrics-source-utils';
+import { perfPanelUnitCode } from '@/lib/units';
 
 export function useEditSLOForm({
   open,
@@ -152,6 +153,7 @@ export function useEditSLOForm({
           id: row.panel_id,
           title: row.panel_title,
           type: 'timeseries',
+          yAxesFormat: perfPanelUnitCode(row.unit),
         }));
         setAvailablePanels(panels);
       } else {
@@ -370,8 +372,11 @@ export function useEditSLOForm({
       let matchingPanel: unknown = null;
 
       // 1. Try to match by panel ID from configuration (most reliable)
-      if (benchmark.configuration?.panelId) {
-        const panelId = benchmark.configuration.panelId;
+      // The Add dialog stores the id as `configuration.id`, not `panelId`. Without it every
+      // UI-created SLO fell to title and fuzzy matching, and the matched panel's unit is now
+      // what the save converts against and stores.
+      const panelId = benchmark.configuration?.panelId ?? benchmark.configuration?.id;
+      if (panelId != null && panelId !== '') {
         matchingPanel = availablePanels.find((panel) => {
           const p = panel as GrafanaPanel;
           // Handle both string and number panel IDs

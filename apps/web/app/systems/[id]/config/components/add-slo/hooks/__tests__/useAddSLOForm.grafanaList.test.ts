@@ -52,3 +52,31 @@ it('keeps every source group after a pick and clears only the panel lists', asyn
   expect(result.current.availableOptions.availablePanels).toEqual([]);
   expect(result.current.availableOptions.availablePerfMetricsPanels).toEqual([]);
 });
+
+// Value: protects=the perf-test panel's unit reaching the Add SLO form as yAxesFormat (so the
+// threshold is converted and metric_unit is saved); fails_when=fetchPerfMetricsPanels drops
+// row.unit or stops mapping it through perfPanelUnitCode; why_new=only the helper was tested,
+// the hook's mapping was not; seam=none; no_claim=does not cover the save payload or the
+// SLO list rendering of the unit.
+it('carries the perf-test panel unit onto the panel as a unit code', async () => {
+  (authenticatedFetch as jest.Mock).mockImplementation(async (url: string) => ({
+    ok: true,
+    json: async () => (url.includes('/metrics/ds-metrics/panels-by-dashboard')
+      ? [
+        { panel_id: 1, panel_title: 'Error rate', unit: '%' },
+        { panel_id: 2, panel_title: 'Throughput', unit: 'req/s' },
+        { panel_id: 3, panel_title: 'Response time', unit: 'ms' },
+        { panel_id: 4, panel_title: 'No unit', unit: '' },
+      ]
+      : dashboards),
+  }));
+  const { result } = renderHook(() => useAddSLOForm({
+    open: true, systemId: 'sut-1', systemName: 'SONAR', environment: 'acc', workload: 'load',
+  }));
+  await waitFor(() => expect(result.current.availableOptions.availablePerfMetricsDashboards).toHaveLength(1));
+
+  await act(async () => { await result.current.fetchPerfMetricsPanels('perf-1'); });
+
+  expect(result.current.availableOptions.availablePerfMetricsPanels.map((p) => [p.id, p.yAxesFormat]))
+    .toEqual([[1, 'percent'], [2, 'reqps'], [3, 'ms'], [4, undefined]]);
+});

@@ -850,6 +850,29 @@ bars.
 user, and the pipeline's own words go underneath as supporting text, capped at `60ch` so an
 arbitrary-length message is not set as one centred line across the chart.
 
+### A perf-test panel's unit arrives as a display string, and the SLO dialogs store codes
+
+`GET /metrics/ds-metrics/panels-by-dashboard` answers each performance-test panel's unit the way
+the worker writes it (`METRIC_TYPE_PANEL_UNITS` in `apps/worker/src/constants/performance-metrics.ts`):
+`'ms'`, `'%'`, `'req/s'`, `'threads'`, `''`. The SLO dialogs convert thresholds and save
+`configuration.yAxesFormat` (which the API copies into `metric_unit`) as unit **codes** from
+`lib/units.ts`. `perfPanelUnitCode` maps the two that differ: `'%'` to `'percent'` (perf error
+rates are 0-100, never `percentunit`) and `'req/s'` to `'reqps'`. Until v0.2.97.58 both dialogs
+dropped the unit altogether, so a perf-test SLO was saved with `metric_unit` NULL: its threshold
+was never converted and the SLO list showed a bare number. Rows saved before then keep NULL until
+someone saves them in Edit.
+
+Two things to keep:
+
+- **The Add dialog stores the panel id as `configuration.id`, never `panelId`.** Edit's panel
+  upgrade matches `configuration.panelId ?? configuration.id`. Matching `panelId` alone sent every
+  UI-created SLO to title and fuzzy matching, and the matched panel's unit is what the save uses.
+- **Edit decides its unit in more than one place.** The display reads the record's unit, while
+  validation and the stored label read the selected panel's. They can disagree, which is a P1 in
+  TODOS.md ("The Edit SLO dialog decides its unit in more than one place"). A single-unit attempt
+  was reverted on the v0.2.97.58 branch because Dynatrace SLOs have no unit on their synthetic
+  panel. Cover that case first.
+
 ### The error rate has one threshold and one set of formatters
 
 `ERROR_RATE_WARN_PCT` (5), `computeErrorRate`, `errorRateSeverity` and `formatErrorRate` live
