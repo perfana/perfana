@@ -4267,36 +4267,6 @@ the first customer leaves provisioning.
 (`/settings/profiles/adapt-templates`) and the `/compare-templates` API. The action belongs in its
 table, beside the lock.
 
-### Profile-scoped compare-config templates: the rest of the design's PR 2 (P2)
-
-**What:** Templates that belong to a profile and apply only to runs whose tags match it. Everything in
-"Next Steps" item 2 of `docs/design/2026-11-08-compare-config-templates-design.md` that v0.2.97.55 did
-not ship (its "Implementation deviations (PR 2)" item 1):
-
-- The PR 2 migration: `profile_id uuid NULL REFERENCES profiles(id) ON DELETE CASCADE`, and the unique
-  index's scope term replaced with `CASE WHEN profile_id IS NOT NULL THEN 'profile:' || profile_id ELSE
-  'org:' || COALESCE(organization_id::text, 'install') END`. `templateKey()` and its parity spec move with
-  it, and `profile_id` joins `auditableFields`.
-- The fail-closed profile matcher in `packages/shared` (declared in its `exports` map), extracted from
-  `apps/grafana-sync/src/modules/auto-config/auto-config.service.ts`, with grafana-sync switched to it.
-- Applier selection by run tags, and the precedence steps for profiles (scope: profile before
-  organization; profile name before template id).
-- The YAML `profile` field, resolved by name; an unresolved profile item suppresses the prune of all
-  profile templates. A profile template's organization is read from its profile (a join), not copied.
-- `GET/POST/PUT/DELETE /profiles/:id/compare-templates`, mirroring `/profiles/:id/benchmarks`.
-- The "ADAPT templates" tab on `/settings/profiles/[id]`, reusing the table and dialog under
-  `apps/web/app/settings/profiles/adapt-templates/`, and a third `ScopeBadge` kind.
-- The profile delete confirmation names how many templates the cascade deletes (D14).
-
-**Why:** Organization templates cannot give JVM and .NET services different template sets inside one
-organization, which is what profiles were chosen for (design, "Approaches Considered").
-
-**Context:** Split out of PR 2 at the user's request, to keep that PR to the UI and the export. The
-export's order already reserves profiles a place (scope: install-wide, organizations, then profiles by
-name), and nothing in v0.2.97.55 writes `profile_id`.
-
-**Depends on:** nothing.
-
 ### `ignoreMeanDiffSmallerThan` and `defaultValueIfControlGroupMissing` are written into compare configs and nothing reads them (P3)
 
 **What:** Either make ADAPT honour `config_data.ignoreMeanDiffSmallerThan` and

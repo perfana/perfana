@@ -12,6 +12,8 @@ export interface Profile {
   dashboardCount: number;
   sloCount: number;
   deepLinksCount: number;
+  /** ADAPT templates of this profile, provisioned ones included: deleting the profile deletes them. */
+  adaptTemplateCount?: number;
   createdAt: string;
   updatedAt: string;
 }

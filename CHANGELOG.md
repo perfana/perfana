@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.56] - 2026-11-09
+
+### Added
+- **ADAPT (anomaly detection) templates on a profile.** A profile's page has a new **ADAPT templates** tab. A template there applies only to runs whose tags match the profile, in the profile's organization, so JVM and .NET services in one organization can get different template sets. For the same dashboard match it comes before the organization's and the install-wide templates; two matching profiles are decided by profile name. A run with no matching tag gets only the organization and install-wide templates, so a workload whose runs carry different tags from one run to the next switches between the two sets. Templates can be added under a provisioned (read-only) profile too. Templates of every scope now carry a **Profile**, **Organization** or **Install-wide** badge, and **Copy to another scope** offers your profiles as targets.
+- **`profile` in `template_ds_compare_configs.yaml`.** An item with `profile: <name>` is a profile template, resolved by name like `profile_benchmarks.yaml`. An item naming a profile that does not exist is skipped with a warning, and no provisioned profile template is pruned on that boot. An item whose `organizationId` (on the item or the file) is not its profile's is skipped and its template kept. **Export YAML** writes profile templates last, by profile name, as `profile: <name>`.
+- **`/api/profiles/:id/compare-templates`.** List, create, replace and delete a profile's templates, with the same rules as `/api/compare-templates`: the body is one file item, validated by the file's own parser; a profile outside your organizations answers 404; changing templates needs the SLO management permission in the profile's organization; a provisioned template answers 409 on edit and delete. Writes are audit-logged. `GET /api/profiles` and `GET /api/profiles/:id` report `adaptTemplateCount`.
+
+### Changed
+- **Deleting a profile deletes its ADAPT templates, and the confirmation says how many.** That includes templates provisioned from the file; they come back on the next boot only if the file still names the profile and the profile exists.
+- **grafana-sync matches profiles to runs with the same rule as the template applier, which fails closed on a missing organization.** A profile with no organization no longer matches every organization's runs, and a run with no organization no longer matches every profile. Both columns are NOT NULL in the database, so no real row changes behaviour.
+- **Upgrade notes.**
+  - **Migration 1823** adds `profile_id` to the template table and rebuilds its unique index with the profile in the key. It needs no data fix-up: no existing template changes identity.
+  - **Do not roll back below this version while profile templates exist.** An older API reads a profile template as an organization template of the profile's organization and applies it to every run there. Migration 1823's `down()` deletes profile templates before restoring the old index.
+
 ## [0.2.97.55] - 2026-11-08
 
 ### Added

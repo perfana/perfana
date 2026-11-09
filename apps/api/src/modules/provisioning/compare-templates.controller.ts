@@ -166,6 +166,112 @@ export class CompareTemplatesController {
 }
 
 /**
+ * A profile's compare-config (ADAPT) templates: they apply only to runs whose tags match the profile,
+ * inside its organization. Mirrors `/profiles/:id/benchmarks`, with the rules of `/compare-templates`:
+ * the body is one file item (no `profile`, no `organizationId`; the route names the scope), 404 for a
+ * profile or template outside the caller's organizations, `benchmark:manage` in the profile's
+ * organization to write, 409 on a provisioned template and on a key another template of the profile
+ * holds. A provisioned (read-only) profile still takes UI templates (design Open Question 2).
+ */
+@ApiTags('compare-templates')
+@ApiBearerAuth()
+@Controller('profiles/:profileId/compare-templates')
+export class ProfileCompareTemplatesController {
+  constructor(
+    private readonly service: CompareTemplatesService,
+    private readonly authzService: AuthorizationService,
+  ) {}
+
+  private orgScope(ctx: UserContext): Promise<string[] | null> {
+    return withOrgFilter(ctx.userId, ctx.roles, this.authzService);
+  }
+
+  @Get()
+  @ApiOperation({
+    summary: "List a profile's compare-config templates",
+    description: "Members of the profile's organization. In the order the YAML export writes them; `canWrite` says whether the caller may change them.",
+  })
+  @ApiParam({ name: 'profileId' })
+  @ApiResponse({ status: 200, type: CompareTemplateListDto })
+  @ApiResponse({ status: 404, description: 'Profile not found, or not in one of your organizations' })
+  async list(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @UserCtx() ctx: UserContext,
+  ): Promise<CompareTemplateListDto> {
+    return this.service.list({ kind: 'profile', profileId }, ctx.userId, ctx.roles, await this.orgScope(ctx));
+  }
+
+  @Get(':templateId')
+  @ApiOperation({ summary: "Get one of a profile's compare-config templates" })
+  @ApiResponse({ status: 200, type: CompareTemplateResponseDto })
+  @ApiResponse({ status: 404, description: 'Not found, not this profile\'s, or outside your organizations' })
+  async findOne(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @Param('templateId', ParseUUIDPipe) templateId: string,
+    @UserCtx() ctx: UserContext,
+  ): Promise<CompareTemplateResponseDto> {
+    return this.service.findOne(templateId, await this.orgScope(ctx), profileId);
+  }
+
+  @Post()
+  @ApiOperation({
+    summary: 'Create a compare-config template for a profile',
+    description:
+      "Applies on the next completed run, of a workload in the profile's organization whose run tags match the profile, to panels nobody has hand-edited. " +
+      'If template_ds_compare_configs.yaml later declares the same template (`profile: <name>`), provisioning takes it over and it becomes read-only.',
+  })
+  @ApiBody({ type: CompareTemplateDefinitionDto })
+  @ApiResponse({ status: 201, type: CompareTemplateResponseDto })
+  @ApiResponse({ status: 400, description: 'Invalid definition (the YAML file\'s rules; an unknown field, a profile or an organizationId in the body is refused)' })
+  @ApiResponse({ status: 403, description: "Missing benchmark:manage in the profile's organization" })
+  @ApiResponse({ status: 404, description: 'Profile not found, or not in one of your organizations' })
+  @ApiResponse({
+    status: 409,
+    description: 'The profile already has a template with this dashboard, panel and metric. A constraint violation the user has to act on, with no resource body.',
+  })
+  async create(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    // `unknown`, not the DTO: the global pipe's whitelist would strip a misspelt key silently.
+    @Body() dto: unknown,
+    @UserCtx() ctx: UserContext,
+  ): Promise<CompareTemplateResponseDto> {
+    return this.service.create({ kind: 'profile', profileId }, dto, ctx.userId, ctx.roles, await this.orgScope(ctx));
+  }
+
+  @Put(':templateId')
+  @ApiOperation({ summary: "Replace one of a profile's compare-config templates", description: 'Replaces the whole definition: a field left out stops being forced.' })
+  @ApiBody({ type: CompareTemplateDefinitionDto })
+  @ApiResponse({ status: 200, type: CompareTemplateResponseDto })
+  @ApiResponse({ status: 400, description: 'Invalid definition' })
+  @ApiResponse({ status: 403, description: "Missing benchmark:manage in the profile's organization" })
+  @ApiResponse({ status: 404, description: "Not found, not this profile's, or outside your organizations" })
+  @ApiResponse({ status: 409, description: 'Provisioned from template_ds_compare_configs.yaml, or another template of the profile has this key. A hard refusal with no resource body.' })
+  async update(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @Param('templateId', ParseUUIDPipe) templateId: string,
+    @Body() dto: unknown,
+    @UserCtx() ctx: UserContext,
+  ): Promise<CompareTemplateResponseDto> {
+    return this.service.update(templateId, dto, ctx.userId, ctx.roles, await this.orgScope(ctx), profileId);
+  }
+
+  @Delete(':templateId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: "Delete one of a profile's compare-config templates" })
+  @ApiResponse({ status: 204 })
+  @ApiResponse({ status: 403, description: "Missing benchmark:manage in the profile's organization" })
+  @ApiResponse({ status: 404, description: "Not found, not this profile's, or outside your organizations" })
+  @ApiResponse({ status: 409, description: 'Provisioned from template_ds_compare_configs.yaml: remove it from the file instead' })
+  async remove(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @Param('templateId', ParseUUIDPipe) templateId: string,
+    @UserCtx() ctx: UserContext,
+  ): Promise<void> {
+    await this.service.remove(templateId, ctx.userId, ctx.roles, await this.orgScope(ctx), profileId);
+  }
+}
+
+/**
  * The provisioning file, generated from the database. A drop-in replacement for the install's one
  * `template_ds_compare_configs.yaml`.
  */

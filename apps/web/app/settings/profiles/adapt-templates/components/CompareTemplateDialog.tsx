@@ -28,7 +28,7 @@ import {
 } from '@mui/material';
 import { ExpandMore, Lock } from '@mui/icons-material';
 import { AGGREGATION_OPTIONS, CLASSIFICATION_OPTIONS } from '@/lib/compare-config-options';
-import type { CompareTemplateDefinition } from '@/lib/compare-templates';
+import type { CompareTemplateDefinition, CompareTemplateScopeKind } from '@/lib/compare-templates';
 import { toDefinition, toFormState, type Direction, type TemplateFormErrors, type TemplateFormState } from '../template-form';
 import { ScopeBadge } from './ScopeBadge';
 
@@ -37,7 +37,7 @@ export const TEMPLATE_REACH =
 
 interface CompareTemplateDialogProps {
   open: boolean;
-  scopeKind: 'organization' | 'install';
+  scopeKind: CompareTemplateScopeKind;
   scopeName: string;
   /** The template to edit or view; absent for a new one. */
   initial?: CompareTemplateDefinition;

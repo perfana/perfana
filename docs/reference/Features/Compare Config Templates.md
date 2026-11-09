@@ -21,6 +21,9 @@ saved by hand in the anomaly card are never touched. Design:
 Since v0.2.97.55 templates can also be created, edited and deleted in the UI, and exported back to
 this file ([Managing templates in the UI](#managing-templates-in-the-ui)).
 
+Since v0.2.97.56 a template can belong to a **profile**, and then applies only to runs whose tags match
+that profile ([Profile templates](#profile-templates)).
+
 ## The file
 
 The API reads `template_ds_compare_configs.yaml` from `PROVISIONING_DIR` (default
@@ -47,6 +50,11 @@ items:
     metricClassification: USE_saturation
     aggregation: q95
     minSampleCount: 3
+  - profile: jvm                  # only runs whose tags match the jvm profile
+    dashboardUid: jvm-overview
+    panelId: 7
+    metricClassification: USE_saturation
+    absThreshold: 50
 ```
 
 A panel id is unique only within one dashboard. A template with a `panelId` and no `dashboardUid`
@@ -60,7 +68,7 @@ A template is identified by five things, and two items with the same five are re
 
 | Field | Meaning |
 |---|---|
-| `organizationId` | a uuid; the item's own, else the file's; `null` means install-wide |
+| `profile`, or else `organizationId` | a profile's name: the template belongs to that profile, whatever its organization; otherwise the organization uuid, the item's own, else the file's, and `null` means install-wide |
 | `dashboardUid` | omit for every dashboard; a regular expression when `regex: true` |
 | `regex` | `true` makes `dashboardUid` and `panelTitle` regular expressions |
 | `panelId`, or `panelTitle` when there is no `panelId` | beside a `panelId`, `panelTitle` is only a label |
@@ -68,6 +76,28 @@ A template is identified by five things, and two items with the same five are re
 
 `dashboardLabel` is a label too. Changing a label updates the template; changing an identity field
 makes it a different template (the old one is pruned, the new one created).
+
+### Profile templates
+
+`profile` names a profile by its name, which is unique across the install, the way
+`profile_benchmarks.yaml` does; `profiles.yaml` is read first, so a profile the same boot creates
+resolves. A profile template applies only to a run whose tags share at least one tag with the profile,
+in the profile's own organization: a run with no organization matches no profile, and a profile with no
+organization matches no run.
+
+Its organization is the profile's. An `organizationId` on the item, or on the file, that names another
+organization (an explicit `null` included) skips the item with an error and keeps the template it
+already provisioned, because such a template could never reach the runs it names. Leave it out. The
+organization is read from the profile on every run and every request, so a profile moved to another
+organization takes its templates with it; it is not part of the template's identity.
+
+A profile that does not exist skips the item with a warning, and no provisioned **profile** template is
+pruned on that boot, since the item may be a renamed profile's. Organization and install-wide templates
+are pruned as usual.
+
+Deleting a profile deletes its templates, provisioned ones included (the profile page's delete
+confirmation says how many). A provisioned profile template comes back on the next boot only if the file
+still names the profile and the profile exists again.
 
 To reach every dashboard, leave `dashboardUid` out. Written with no value (`dashboardUid:`) it is
 an error rather than a wildcard, so a value deleted by accident cannot turn an exact template into
@@ -129,6 +159,7 @@ each one. Templates created in the UI are never pruned. Nothing is pruned when:
 - `items` is not a list (`items:` with nothing after it reads as null);
 - any item's identity cannot be read (for example, it has neither `panelId` nor `panelTitle`, or its
   `organizationId` is not a uuid);
+- (profile templates only) an item names a profile that does not exist;
 - any template failed to write this boot.
 
 An explicit `items: []` is a declared empty state and prunes every provisioned template.
@@ -148,7 +179,13 @@ row becomes read-only and gets the file's values. It is counted as `taken over`,
 - **All runs on this install**: install-wide templates. They apply to every run in every organization.
   Anyone signed in can read them; only a global admin can change them.
 
-Each opens `/settings/profiles/adapt-templates` for that scope: a table of its templates in the order
+A profile's own templates are the **ADAPT templates** tab on that profile's page
+(`/settings/profiles/<id>?tab=adapt-templates`), with the same table and dialog. Members of the profile's
+organization can read them; changing them needs `benchmark:manage` there. A provisioned (read-only)
+profile still takes templates created in the UI, so a team that provisions its profiles need not use the
+file for every tweak.
+
+Each pinned entry opens `/settings/profiles/adapt-templates` for that scope: a table of its templates in the order
 the export writes them, with what each one forces. The edit dialog asks which panels the template
 reaches (dashboard UID, regex, panel id or title, metric), the classification, and then each field it
 forces, ticked one by one. A field left unticked is left out of the template and keeps each panel's own
@@ -160,8 +197,11 @@ A template created in the UI follows the same rules as a file item, because the 
 the same parser. It applies on the next completed run of matching workloads, to panels nobody has
 hand-edited.
 
+Every template carries a badge for its scope: **Profile**, **Organization** or **Install-wide**.
+
 **Provisioned templates are locked.** They show a lock, can be viewed but not edited or deleted (the API
-answers 409), and are changed in the file. **Copy to another scope** makes an editable copy elsewhere;
+answers 409), and are changed in the file. **Copy to another scope** makes an editable copy elsewhere (a
+profile, an organization, or install-wide for a global admin);
 the copy cannot go into the same scope, where it would have the same identity as the provisioned one.
 Once a file declares a template a UI copy holds, the next boot takes the copy over and it becomes
 locked too.
@@ -176,11 +216,13 @@ from their own base configuration, on each workload's next completed run.
 | `GET /api/compare-templates?organizationId=<uuid>` | members of the organization |
 | `GET /api/compare-templates?scope=install` | anyone signed in |
 | `POST` the same two | `benchmark:manage` in the organization; a global admin for `scope=install` |
-| `GET`, `PUT`, `DELETE /api/compare-templates/:id` | as above for the template's own scope |
+| `GET`, `PUT`, `DELETE /api/compare-templates/:id` | as above for the template's own scope, a profile template's included |
+| `GET`, `POST /api/profiles/:id/compare-templates` | members of the profile's organization; `benchmark:manage` there to create |
+| `GET`, `PUT`, `DELETE /api/profiles/:id/compare-templates/:templateId` | as above; a template of another scope answers 404 |
 | `GET /api/provisioning/compare-templates/export` | global admin |
 
 A list or create names exactly one scope. The body of `POST` and `PUT` is one item of the file, without
-`organizationId`: the scope comes from the collection and never changes, so moving a template means
+`organizationId` or `profile`: the scope comes from the collection and never changes, so moving a template means
 copying it. `PUT` replaces the whole definition, so a field left out stops being forced. A template or
 organization outside the caller's organizations answers 404. A second template with the same identity
 in the same scope answers 409 with a message naming the scope and the identity, and whether the holder
@@ -195,10 +237,12 @@ too. Writes are audit-logged as `provisioned-template-ds-compare-configs`.
 
 **Export YAML** on the install-wide page (global admins) shows and downloads
 `template_ds_compare_configs.yaml`, generated from the database. It is the whole file: every template,
-provisioned or created in the UI, in every organization. Commit it in place of the installed file; a
-partial file would make the next boot prune the provisioned templates it leaves out. When every
-template shares one scope the file carries it once at the top, otherwise each item names its own
-(`null` for install-wide).
+provisioned or created in the UI, in every organization and profile. Commit it in place of the installed
+file; a partial file would make the next boot prune the provisioned templates it leaves out. The order is
+install-wide, then organizations by id, then profiles by name. A profile template is written as
+`profile: <name>` and never names an organization. When every template, profile templates counted with
+their profile's organization, shares one organization the file carries it once at the top; otherwise each
+organization or install-wide item names its own (`null` for install-wide).
 
 The round trip, verified on a local stack:
 
@@ -218,10 +262,18 @@ client never posted completion, skips the applier (filed in TODOS.md). For each 
 template can reach, the most specific template wins:
 
 1. Dashboard match: exact `dashboardUid`, then regex, then no `dashboardUid`.
-2. Scope: organization, then install-wide.
+2. Scope: a profile the run matches, then the organization, then install-wide.
 3. Panel match: `panelId`, then a literal `panelTitle`, then a regex `panelTitle`.
-4. Template id. Two templates still level here (overlapping regexes such as `^jvm-.*` and
-   `^jvm-prod.*`) are reported once in the run's summary line.
+4. Profile name, between two profiles the run matches.
+5. Template id. Two templates still level after step 3 (overlapping regexes such as `^jvm-.*` and
+   `^jvm-prod.*`, or a run tagged for two profiles) are reported once in the run's summary line
+   (`decided by profile name: …` or `decided by template id: …`).
+
+Profile templates are chosen by the **completing run's** tags. A template-owned row is rebuilt on every
+completion from the winner for that run, so a workload whose runs are tagged differently from one run to
+the next switches between the profile's template and the organization's or install-wide one (or its own
+base) each time, and every switch that changes the configuration marks earlier ADAPT results stale. Tag a
+workload's runs consistently.
 
 What happens to the row depends on who last wrote it:
 
@@ -247,6 +299,17 @@ Golden-path applied for SUT <id>/<env>/<workload>: 3 compare configs created (1 
 ```
 
 It is logged at warn when the applier takes over 5000 ms.
+
+## Upgrading to v0.2.97.56
+
+- **Migration 1823** adds `profile_id` and rebuilds the unique index with the profile in its scope term.
+  No existing template changes identity, so it needs no clean-up first and is safe to re-run.
+- **Do not roll back below v0.2.97.56 while profile templates exist.** An older API knows nothing of
+  `profile_id`: it reads a profile template as a template of the profile's organization, applies it to
+  every run there and lists it with the organization's templates. Migration 1823's `down()` deletes
+  profile templates before restoring the old index.
+- **grafana-sync's profile matching fails closed** on a missing organization, as the template applier's
+  does. Both organization columns are NOT NULL, so no real run or profile is affected.
 
 ## Upgrading to v0.2.97.54
 

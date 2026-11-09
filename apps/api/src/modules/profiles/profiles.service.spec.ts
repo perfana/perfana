@@ -10,6 +10,7 @@ import {
   GrafanaInstance,
   GrafanaDashboard,
   GenericDeepLink,
+  ProvisionedTemplateDsCompareConfig,
 } from '../../entities';
 import { CreateProfileDashboardDto, UpdateProfileDashboardDto } from './dto/profile-dashboard.dto';
 import { CreateProfileBenchmarkDto, UpdateProfileBenchmarkDto } from './dto/profile-benchmark.dto';
@@ -26,6 +27,7 @@ describe('ProfilesService', () => {
   let grafanaDashboardRepo: jest.Mocked<Repository<GrafanaDashboard>>;
   let authzService: ReturnType<typeof createAuthorizationServiceMock>;
   let auditService: jest.Mocked<AuditService>;
+  let mockCompareTemplateRepo: { count: jest.Mock; createQueryBuilder: jest.Mock };
 
   const mockDate = new Date('2024-01-15T10:00:00.000Z');
 
@@ -196,6 +198,17 @@ describe('ProfilesService', () => {
       })),
     };
 
+    mockCompareTemplateRepo = {
+      count: jest.fn().mockResolvedValue(0),
+      createQueryBuilder: jest.fn(() => ({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      })),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProfilesService,
@@ -222,6 +235,10 @@ describe('ProfilesService', () => {
         {
           provide: getRepositoryToken(GenericDeepLink),
           useValue: mockGenericDeepLinkRepo,
+        },
+        {
+          provide: getRepositoryToken(ProvisionedTemplateDsCompareConfig),
+          useValue: mockCompareTemplateRepo,
         },
         {
           provide: AuthorizationService,
@@ -287,6 +304,7 @@ describe('ProfilesService', () => {
         dashboardCount: 3,
         sloCount: expect.any(Number),
         deepLinksCount: expect.any(Number),
+        adaptTemplateCount: expect.any(Number),
         createdAt: mockDate.toISOString(),
         updatedAt: mockDate.toISOString(),
       });
@@ -376,6 +394,7 @@ describe('ProfilesService', () => {
         dashboardCount: 5,
         sloCount: expect.any(Number),
         deepLinksCount: expect.any(Number),
+        adaptTemplateCount: expect.any(Number),
         createdAt: mockDate.toISOString(),
         updatedAt: mockDate.toISOString(),
       });
@@ -384,6 +403,18 @@ describe('ProfilesService', () => {
       });
       expect(profileDashboardRepo.count).toHaveBeenCalledWith({
         where: { profile: 'Test Profile' },
+      });
+    });
+
+    it('counts the ADAPT templates deleting the profile would cascade to (D14)', async () => {
+      profileRepo.findOne.mockResolvedValue(mockProfile);
+      mockCompareTemplateRepo.count.mockResolvedValue(3);
+
+      const result = await service.findOne('profile-uuid-1', mockUserId, mockIsAdmin);
+
+      expect(result?.adaptTemplateCount).toBe(3);
+      expect(mockCompareTemplateRepo.count).toHaveBeenCalledWith({
+        where: { profile_id: 'profile-uuid-1', system_under_test_id: expect.anything() },
       });
     });
 

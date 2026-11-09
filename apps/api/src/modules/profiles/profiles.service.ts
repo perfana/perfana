@@ -1,7 +1,15 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Profile, ProfileGrafanaDashboard, ProfileBenchmark, GrafanaInstance, GrafanaDashboard, GenericDeepLink } from '../../entities';
+import { IsNull, Repository } from 'typeorm';
+import {
+  Profile,
+  ProfileGrafanaDashboard,
+  ProfileBenchmark,
+  GrafanaInstance,
+  GrafanaDashboard,
+  GenericDeepLink,
+  ProvisionedTemplateDsCompareConfig,
+} from '../../entities';
 import { withRequestEm } from '../../common/db/request-em';
 import { OwnedResource } from '@perfana/shared/entities';
 import {
@@ -25,6 +33,11 @@ export interface ProfileResponse {
   dashboardCount: number;
   sloCount: number;
   deepLinksCount: number;
+  /**
+   * ADAPT (compare-config) templates of this profile, provisioned ones included. Deleting the profile
+   * deletes them too (`profile_id` ON DELETE CASCADE), which is what the delete confirmation names.
+   */
+  adaptTemplateCount: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -79,6 +92,8 @@ export class ProfilesService {
     private genericDeepLinkRepo: Repository<GenericDeepLink>,
     private readonly authzService: AuthorizationService,
     private readonly auditService: AuditService,
+    @InjectRepository(ProvisionedTemplateDsCompareConfig)
+    private compareTemplateRepo: Repository<ProvisionedTemplateDsCompareConfig>,
   ) {}
 
   /**
@@ -160,6 +175,15 @@ export class ProfilesService {
         .groupBy('deepLink.profile')
         .getRawMany();
 
+      const adaptTemplateCounts: Array<{ profile_id: string; count: string }> = await withRequestEm(this.compareTemplateRepo)
+        .createQueryBuilder('template')
+        .select('template.profile_id', 'profile_id')
+        .addSelect('COUNT(*)', 'count')
+        .where('template.profile_id IS NOT NULL AND template.system_under_test_id IS NULL')
+        .groupBy('template.profile_id')
+        .getRawMany();
+      const adaptTemplateCountMap = new Map(adaptTemplateCounts.map((r) => [r.profile_id, parseInt(r.count, 10)]));
+
       // Create maps for counts
       const dashboardCountMap = new Map<string, number>();
       dashboardCounts.forEach((item) => {
@@ -185,6 +209,7 @@ export class ProfilesService {
         dashboardCount: dashboardCountMap.get(profile.name) || 0,
         sloCount: benchmarkCountMap.get(profile.id) || 0,
         deepLinksCount: deepLinkCountMap.get(profile.name) || 0,
+        adaptTemplateCount: adaptTemplateCountMap.get(profile.id) || 0,
         createdAt: profile.createdAt.toISOString(),
         updatedAt: profile.updatedAt.toISOString(),
       }));
@@ -234,6 +259,10 @@ export class ProfilesService {
         where: { profile: profile.name },
       });
 
+      const adaptTemplateCount = await withRequestEm(this.compareTemplateRepo).count({
+        where: { profile_id: profile.id, system_under_test_id: IsNull() },
+      });
+
       return {
         id: profile.id,
         name: profile.name,
@@ -243,6 +272,7 @@ export class ProfilesService {
         dashboardCount,
         sloCount,
         deepLinksCount,
+        adaptTemplateCount,
         createdAt: profile.createdAt.toISOString(),
         updatedAt: profile.updatedAt.toISOString(),
       };
@@ -1236,6 +1266,7 @@ export class ProfilesService {
       dashboardCount: 0,
       sloCount: 0,
       deepLinksCount: 0,
+      adaptTemplateCount: 0,
       createdAt: saved.createdAt.toISOString(),
       updatedAt: saved.updatedAt.toISOString(),
     };
@@ -1299,8 +1330,10 @@ export class ProfilesService {
 
     // Phase 5a — log DELETE before mutation so the audit row captures the
     // pre-delete state. Cascaded child rows (ProfileGrafanaDashboard,
-    // ProfileBenchmark) are intentionally not individually audited — they
-    // are implied by the Profile-DELETE row.
+    // ProfileBenchmark, and since migration 1823 the profile's compare-config
+    // templates, provisioned ones included) are intentionally not
+    // individually audited — they are implied by the Profile-DELETE row. The
+    // web's delete confirmation names how many templates go with it (D14).
     this.auditService.logDelete(profile as unknown as OwnedResource, {
       organizationIdOverride: profile.organizationId,
     });

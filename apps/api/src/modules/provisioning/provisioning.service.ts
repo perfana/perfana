@@ -514,6 +514,11 @@ export class ProvisioningService implements OnApplicationBootstrap {
    * write, so an item that fails to parse or write still declares its key and is not pruned. An
    * item whose key cannot be read at all suppresses the prune for this boot: it may be the edited
    * form of a template the file still means to keep.
+   *
+   * A `profile` is resolved by name, as `profile_benchmarks.yaml` does. An item naming a profile that
+   * does not exist has no key either (a profile template's key is the profile's id), but it can only
+   * be a profile template, so it suppresses the prune of profile templates alone. An item whose
+   * `organizationId` is not its profile's is skipped with its key still declared.
    */
   async provisionMetricClassifications(
     items: unknown[],
@@ -522,11 +527,25 @@ export class ProvisioningService implements OnApplicationBootstrap {
     const result = { created: 0, updated: 0, unchanged: 0, takenOver: 0, pruned: 0, skipped: 0, errors: 0 };
     const label = (index: number) => `template_ds_compare_configs.yaml item ${index + 1}`;
 
+    // Profiles are provisioned first (profiles.yaml), so a profile the same boot creates resolves here.
+    // Names are unique across the install (profiles.name), so a name is a whole reference.
+    const profiles = new Map(
+      (await withRequestEm(this.profileRepo).find({ select: ['id', 'name', 'organizationId'] })).map((p) => [p.name, p]),
+    );
+    const resolveProfile = (name: string) => profiles.get(name);
+
     const declared = new Set<string>();
     let unidentified = 0;
+    const unresolvedProfiles = new Set<string>();
     const byKey = new Map<string, Array<{ index: number; values: TemplateColumns }>>();
     items.forEach((item, index) => {
-      const parsed = parseTemplateItem(item, organizationId ?? null);
+      const parsed = parseTemplateItem(item, organizationId ?? null, { resolveProfile });
+      if (!parsed.ok && parsed.unresolvedProfile !== undefined) {
+        this.logger.warn(`${label(index)}: profile "${parsed.unresolvedProfile}" not found — skipped`);
+        unresolvedProfiles.add(parsed.unresolvedProfile);
+        result.skipped++;
+        return;
+      }
       if (parsed.key) declared.add(parsed.key);
       else unidentified++;
       if (!parsed.ok) {
@@ -623,12 +642,18 @@ export class ProvisioningService implements OnApplicationBootstrap {
             `template_ds_compare_configs.yaml: ${unidentified} item(s) could not be identified and ${writeFailures} failed to write, so no provisioned template is pruned this boot`,
           );
         } else {
+          if (unresolvedProfiles.size > 0) {
+            this.logger.error(
+              `template_ds_compare_configs.yaml: profile(s) ${[...unresolvedProfiles].map((n) => `"${n}"`).join(', ')} not found, so no provisioned profile template is pruned this boot`,
+            );
+          }
           for (const row of rows) {
             if (!row.read_only || declared.has(templateKey(row))) continue;
+            if (row.profile_id && unresolvedProfiles.size > 0) continue;
             try {
               await this.templateRepo.delete(row.id);
               this.logger.log(
-                `Pruned compare-config template ${row.id} (dashboard "${row.dashboard_uid ?? '*'}" panel ${row.panel_id ?? row.panel_title}${row.metric_name ? ` metric "${row.metric_name}"` : ''}): no longer in the file`,
+                `Pruned compare-config template ${row.id} (${row.profile_id ? `profile ${row.profile_id}, ` : ''}dashboard "${row.dashboard_uid ?? '*'}" panel ${row.panel_id ?? row.panel_title}${row.metric_name ? ` metric "${row.metric_name}"` : ''}): no longer in the file`,
               );
               result.pruned++;
             } catch (error) {
@@ -649,7 +674,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
 
     this.logger.log(
       `Metric classifications: ${result.created} created, ${result.updated} updated, ${result.unchanged} unchanged, ` +
-        `${result.takenOver} taken over, ${result.pruned} pruned, ${result.errors} errors`,
+        `${result.takenOver} taken over, ${result.pruned} pruned, ${result.skipped} skipped, ${result.errors} errors`,
     );
     return result;
   }

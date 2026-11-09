@@ -21,6 +21,7 @@ import { AuditService } from '../../audit/audit.service';
 // rewrites it to 'metric'/'panel'. Shared so the writer and this reader cannot drift apart.
 import { DYNATRACE_HOST_COMPARE_SOURCE } from '../../../constants/ds-compare-config.constants';
 import { validateRegexPattern } from '@perfana/shared/utils';
+import { profileMatchesRun } from '@perfana/shared/utils/profile-match';
 import { isDeepStrictEqual } from 'util';
 import { cloneJson, GoldenPathTemplate, INSERT_BASE, rebuildConfig, selectWinner } from './golden-path-resolver';
 
@@ -522,7 +523,10 @@ export class TestRunsMetricsService {
    * exact `dashboard_uid`, by regex when `regex = true`, or all of them when `dashboard_uid IS NULL`,
    * and its panel by `panel_id` or, when that is NULL, by `panel_title`, resolved per dashboard
    * against the panels `ds_panels` recorded for the SUT's recent completed runs. An organization
-   * template only reaches dashboards of its own organization.
+   * template only reaches dashboards of its own organization. A profile template only reaches them
+   * when the completing run's tags match its profile and the profile is in the dashboard's
+   * organization (`profileMatchesRun`, which fails closed); its organization is read from the profile
+   * now, never from the copy on the template row.
    *
    * Every row a template could reach goes to one winner (`selectWinner`). What happens next depends
    * on who last wrote the row:
@@ -544,12 +548,16 @@ export class TestRunsMetricsService {
     systemUnderTestId: string;
     testEnvironment: string;
     workload: string;
+    /** The completing run's tags: they choose which profile templates apply. None means none do. */
+    tags?: readonly string[] | null;
   }): Promise<{ compareConfigsCreated: number }> {
     const started = Date.now();
     const { systemUnderTestId, testEnvironment, workload } = testRun;
+    const runTags = testRun.tags ?? [];
     const counts = { created: 0, merged: 0, rebuilt: 0, rewrote: 0, raced: 0, collided: 0, legacyDiffers: 0 };
     const guarded = new Map<string, number>();
     const ties = new Set<string>();
+    const profileTies = new Set<string>();
 
     // 1. Load application dashboards for this SUT + environment
     const dashboards = await withRequestEm(this.applicationDashboardRepo).find({
@@ -584,7 +592,27 @@ export class TestRunsMetricsService {
         return null;
       }
     };
-    for (const template of await this.templateRepo.find({ where: { system_under_test_id: IsNull() } })) {
+    const storedTemplates = await this.templateRepo.find({ where: { system_under_test_id: IsNull() } });
+    // Profile templates take their profile's name (precedence step 4), tags and organization from the
+    // profile itself: a profile moved to another organization moves its templates with it.
+    const profileIds = [...new Set(storedTemplates.map((t) => t.profile_id).filter((id): id is string => !!id))];
+    const profiles = new Map<string, { name: string; tags: string[] | null; organizationId: string | null }>();
+    if (profileIds.length > 0) {
+      const rows: Array<{ id: string; name: string; tags: string[] | null; organization_id: string | null }> =
+        await this.templateRepo.query(
+          `SELECT id, name, tags, organization_id FROM profiles WHERE id = ANY($1::uuid[])`,
+          [profileIds],
+        );
+      for (const r of rows) profiles.set(r.id, { name: r.name, tags: r.tags, organizationId: r.organization_id });
+    }
+    for (const stored of storedTemplates) {
+      let template = stored as GoldenPathTemplate;
+      if (stored.profile_id) {
+        const profile = profiles.get(stored.profile_id);
+        // Deleted between the two reads (the FK cascades): its templates are going too.
+        if (!profile) continue;
+        template = { ...template, organization_id: profile.organizationId, profile_name: profile.name };
+      }
       if (template.panel_id == null) {
         if (!template.panel_title) {
           this.logger.warn(`Skipping golden-path template ${template.id}: neither panel_id nor panel_title set`);
@@ -602,8 +630,22 @@ export class TestRunsMetricsService {
         if (!pattern) continue;
         uidPatterns.set(template.id, pattern);
       }
-      templates.push(template as GoldenPathTemplate);
+      templates.push(template);
     }
+    // Which profiles the run matches, per organization (dashboards carry theirs, NOT NULL).
+    const matchedProfiles = new Map<string, Set<string>>();
+    const profilesMatching = (organizationId: string): Set<string> => {
+      let ids = matchedProfiles.get(organizationId);
+      if (!ids) {
+        ids = new Set(
+          [...profiles]
+            .filter(([, p]) => profileMatchesRun(p, { tags: runTags, organizationId }))
+            .map(([id]) => id),
+        );
+        matchedProfiles.set(organizationId, ids);
+      }
+      return ids;
+    };
 
     const titleTemplateIds = new Set(templates.filter((t) => t.panel_id == null).map((t) => t.id));
 
@@ -673,7 +715,9 @@ export class TestRunsMetricsService {
       const panels = panelsByDashboard.get(dashboard.id) ?? [];
       const onDashboard = templates.filter(
         (t) =>
-          (!t.organization_id || t.organization_id === dashboard.organizationId) &&
+          (t.profile_id
+            ? profilesMatching(dashboard.organizationId).has(t.profile_id)
+            : !t.organization_id || t.organization_id === dashboard.organizationId) &&
           (!t.dashboard_uid || (t.regex ? uidPatterns.get(t.id)!.test(uid) : t.dashboard_uid === uid)),
       );
 
@@ -695,7 +739,13 @@ export class TestRunsMetricsService {
       const winners = new Map<string, GoldenPathTemplate>();
       for (const [key, { list }] of candidates) {
         const { winner, tiedWith } = selectWinner(list);
-        if (tiedWith) ties.add(`${winner!.id} over ${tiedWith.id}`);
+        if (tiedWith) {
+          if (winner!.profile_name && tiedWith.profile_name && winner!.profile_name !== tiedWith.profile_name) {
+            profileTies.add(`"${winner!.profile_name}" over "${tiedWith.profile_name}"`);
+          } else {
+            ties.add(`${winner!.id} over ${tiedWith.id}`);
+          }
+        }
         winners.set(key, winner!);
       }
 
@@ -802,6 +852,7 @@ export class TestRunsMetricsService {
       ...(guarded.size > 0
         ? [`left alone for a collection gap: ${[...guarded].map(([uid, n]) => `${uid} (${n})`).join(', ')}`]
         : []),
+      ...(profileTies.size > 0 ? [`decided by profile name: ${[...profileTies].join(', ')}`] : []),
       ...(ties.size > 0 ? [`decided by template id: ${[...ties].join(', ')}`] : []),
       ...(counts.legacyDiffers > 0
         ? [`${counts.legacyDiffers} pre-v0.2.97.54 row(s) left alone because their template would change them (possibly a hand edit)`]

@@ -50,13 +50,14 @@ describe('AutoConfigService', () => {
     endTime: new Date('2024-01-02T00:00:00.000Z'),
     tags: ['profile-1', 'profile-2'],
     variables: [{ name: 'service', value: 'api' }],
-    organizationId: undefined,
+    organizationId: 'org-123',
   };
 
   const mockProfile = {
     id: 'profile-1',
     name: 'Production Profile',
     tags: ['profile-1'],
+    organizationId: 'org-123',
     createdAt: new Date(),
     updatedAt: new Date(),
   } as any;
@@ -405,12 +406,13 @@ describe('AutoConfigService', () => {
         // Act
         await service.processAutoConfigDashboards();
 
-        // Assert - should only include profiles in same org or with null org
-        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`matched 2 profiles`));
+        // Assert - only the profile in the run's own organization: the shared matcher fails closed,
+        // so a profile with no organization no longer matches every organization's runs.
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`matched 1 profiles`));
         expect(dashboardConfiguratorService.processAutoConfigDashboard).toHaveBeenCalled();
       });
 
-      it('should include all profiles when test run has no organizationId', async () => {
+      it('should match no profile when test run has no organizationId', async () => {
         // Arrange
         const testRunWithoutOrg: any = {
           ...mockTestRun,
@@ -445,8 +447,9 @@ describe('AutoConfigService', () => {
         // Act
         await service.processAutoConfigDashboards();
 
-        // Assert - should include both profiles (backward compatibility)
-        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`matched 2 profiles`));
+        // Assert - fails closed (packages/shared utils/profile-match): a run with no organization
+        // matches no profile, where it used to match every organization's.
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`matched 0 profiles`));
       });
     });
 

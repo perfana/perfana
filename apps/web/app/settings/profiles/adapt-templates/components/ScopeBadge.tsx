@@ -1,30 +1,39 @@
 'use client';
 
 import { Chip, Tooltip } from '@mui/material';
-import { Business, Public } from '@mui/icons-material';
+import { Business, Public, Tune } from '@mui/icons-material';
+import type { CompareTemplateScopeKind } from '@/lib/compare-templates';
 
-/**
- * Tells an organization template from an install-wide one wherever templates are listed. The design
- * adds a third kind, profile templates, in a later PR.
- */
-export function ScopeBadge({ kind }: { kind: 'organization' | 'install' }) {
-  const install = kind === 'install';
+const KINDS: Record<
+  CompareTemplateScopeKind,
+  { label: string; tooltip: string; color: 'success' | 'primary' | 'secondary'; icon: React.ReactElement }
+> = {
+  profile: {
+    label: 'Profile',
+    tooltip: "Profile: applies to runs whose tags match the profile, in the profile's organization",
+    color: 'success',
+    icon: <Tune fontSize="small" />,
+  },
+  organization: {
+    label: 'Organization',
+    tooltip: 'Organization: applies to every run in this organization',
+    color: 'primary',
+    icon: <Business fontSize="small" />,
+  },
+  install: {
+    label: 'Install-wide',
+    tooltip: 'Install-wide: applies to every run on this install, in every organization',
+    color: 'secondary',
+    icon: <Public fontSize="small" />,
+  },
+};
+
+/** Tells the three kinds of template apart wherever templates are listed. */
+export function ScopeBadge({ kind }: { kind: CompareTemplateScopeKind }) {
+  const k = KINDS[kind];
   return (
-    <Tooltip
-      title={
-        install
-          ? 'Install-wide: applies to every run on this install, in every organization'
-          : 'Organization: applies to every run in this organization'
-      }
-    >
-      <Chip
-        size="small"
-        variant="outlined"
-        color={install ? 'secondary' : 'primary'}
-        icon={install ? <Public fontSize="small" /> : <Business fontSize="small" />}
-        label={install ? 'Install-wide' : 'Organization'}
-        sx={{ fontWeight: 600 }}
-      />
+    <Tooltip title={k.tooltip}>
+      <Chip size="small" variant="outlined" color={k.color} icon={k.icon} label={k.label} sx={{ fontWeight: 600 }} />
     </Tooltip>
   );
 }

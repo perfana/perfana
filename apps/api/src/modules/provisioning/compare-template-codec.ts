@@ -35,6 +35,12 @@ export type OverrideKey = (typeof OVERRIDE_KEYS)[number];
 export interface MetricClassificationYaml {
   /** Overrides the file-level `organizationId`. `null` means install-wide. */
   organizationId?: string | null;
+  /**
+   * A profile's name: the template applies only to runs whose tags match that profile, in its
+   * organization. Resolved by name, like `profile_benchmarks.yaml`. The organization is the
+   * profile's; an `organizationId` that names another one (on the item or the file) skips the item.
+   */
+  profile?: string;
   /** Omit to apply the template to every dashboard carrying the panel. */
   dashboardUid?: string;
   /** `true`: `dashboardUid` and `panelTitle` are regular expressions. */
@@ -64,7 +70,9 @@ export interface MetricClassificationYaml {
 
 /** The template-table columns the file decides. */
 export interface TemplateColumns {
+  /** A profile template's organization is a copy of its profile's, for the audit log; never key. */
   organization_id: string | null;
+  profile_id: string | null;
   dashboard_uid: string | null;
   regex: boolean;
   dashboard_label: string | null;
@@ -77,16 +85,24 @@ export interface TemplateColumns {
 }
 
 type KeyColumns = Partial<
-  Pick<TemplateColumns, 'organization_id' | 'dashboard_uid' | 'regex' | 'panel_id' | 'panel_title' | 'metric_name'>
->;
+  Pick<
+    TemplateColumns,
+    'organization_id' | 'profile_id' | 'dashboard_uid' | 'regex' | 'panel_id' | 'panel_title' | 'metric_name'
+  >
+> & {
+  /** A profile template's profile name: orders profiles in the export (names are unique). Not key. */
+  profile_name?: string | null;
+};
 
 /**
- * A template's identity: the same five terms as `COMPARE_TEMPLATE_KEY_SQL` in migration 1822, whose
- * unique index enforces it. Encoded as JSON so a `|` inside a uid cannot make two keys collide.
+ * A template's identity: the same five terms as `COMPARE_TEMPLATE_KEY_SQL` in migration 1823, whose
+ * unique index enforces it. A profile template's scope is its profile alone; everything else is
+ * scoped by organization, or install-wide. Encoded as JSON so a `|` inside a uid cannot make two
+ * keys collide.
  */
 export function templateKey(row: KeyColumns): string {
   return JSON.stringify([
-    row.organization_id ?? 'install',
+    row.profile_id ? `profile:${row.profile_id}` : `org:${row.organization_id ?? 'install'}`,
     row.dashboard_uid ?? '',
     row.regex ?? false,
     row.panel_id != null ? String(row.panel_id) : `title:${row.panel_title}`,
@@ -96,12 +112,28 @@ export function templateKey(row: KeyColumns): string {
 
 export type ParsedTemplateItem =
   | { ok: true; key: string; values: TemplateColumns; warnings: string[] }
-  /** `key` is null when the item's identity could not be read, so nothing it names is declared. */
-  | { ok: false; key: string | null; error: string };
+  /**
+   * `key` is null when the item's identity could not be read, so nothing it names is declared.
+   * `unresolvedProfile` names a profile that does not exist: such an item has no key either (a
+   * profile template's key is its profile's id), so provisioning protects every profile template
+   * from the prune on that boot instead.
+   */
+  | { ok: false; key: string | null; error: string; unresolvedProfile?: string };
+
+/** A profile as the parser needs it. */
+export interface TemplateProfileRef {
+  id: string;
+  organizationId: string;
+}
+
+export interface ParseTemplateOptions {
+  /** Resolves an item's `profile` by name. Without it, an item naming a profile fails. */
+  resolveProfile?: (name: string) => TemplateProfileRef | null | undefined;
+}
 
 /** Every key an item may carry. Anything else is reported: a misspelt override forces nothing. */
 const KNOWN_KEYS = new Set<string>([
-  'organizationId', 'dashboardUid', 'regex', 'dashboardLabel', 'panelId', 'panelTitle', 'metricName',
+  'organizationId', 'profile', 'dashboardUid', 'regex', 'dashboardLabel', 'panelId', 'panelTitle', 'metricName',
   'metricClassification', ...OVERRIDE_KEYS,
 ]);
 /** The config_data spellings an operator copies from a stored row, mapped to the file's own. */
@@ -137,12 +169,26 @@ const optionalText = (item: Record<string, unknown>, field: string): string | nu
  * Identity is read first, so an item failing on any other field still declares its key and the
  * template it already provisioned survives the prune.
  */
-export function parseTemplateItem(item: unknown, fileOrganizationId: string | null): ParsedTemplateItem {
+export function parseTemplateItem(
+  item: unknown,
+  fileOrganizationId: string | null,
+  options: ParseTemplateOptions = {},
+): ParsedTemplateItem {
   if (!isObject(item)) return { ok: false, key: null, error: 'item is not a mapping' };
 
   // ---- identity
-  const organizationId = canonicalOrganizationId('organizationId' in item ? item.organizationId : fileOrganizationId);
+  const statedOrganization = 'organizationId' in item || fileOrganizationId != null;
+  let organizationId = canonicalOrganizationId('organizationId' in item ? item.organizationId : fileOrganizationId);
   if (organizationId instanceof Error) return { ok: false, key: null, error: organizationId.message };
+  let profile: TemplateProfileRef | null = null;
+  if ('profile' in item && item.profile !== undefined) {
+    if (!isText(item.profile)) return { ok: false, key: null, error: 'profile must be a non-empty string' };
+    if (!options.resolveProfile) return { ok: false, key: null, error: 'profile is not accepted here' };
+    profile = options.resolveProfile(item.profile) ?? null;
+    if (!profile) {
+      return { ok: false, key: null, error: `profile "${item.profile}" not found`, unresolvedProfile: item.profile };
+    }
+  }
   const dashboardUid = optionalText(item, 'dashboardUid');
   const panelTitle = optionalText(item, 'panelTitle');
   const metricName = optionalText(item, 'metricName');
@@ -159,8 +205,20 @@ export function parseTemplateItem(item: unknown, fileOrganizationId: string | nu
   if (panelId == null && panelTitle == null) {
     return { ok: false, key: null, error: 'panelId or panelTitle is required' };
   }
+  // A profile template's organization is its profile's. A stated one that differs is a contradiction
+  // the file cannot mean (the template would never reach the runs it names), so the item is skipped;
+  // its key is still declared below, so the template it already provisioned is not pruned.
+  let organizationMismatch: string | null = null;
+  if (profile) {
+    const profileOrganization = profile.organizationId.toLowerCase();
+    if (statedOrganization && organizationId !== profileOrganization) {
+      organizationMismatch = `organizationId ${organizationId ?? 'null (install-wide)'} is not the organization of profile "${item.profile as string}" (${profileOrganization})`;
+    }
+    organizationId = profileOrganization;
+  }
   const identity = {
     organization_id: organizationId,
+    profile_id: profile?.id ?? null,
     dashboard_uid: dashboardUid as string | null,
     regex: (item.regex as boolean | undefined) ?? false,
     panel_id: panelId,
@@ -169,6 +227,7 @@ export function parseTemplateItem(item: unknown, fileOrganizationId: string | nu
   };
   const key = templateKey(identity);
   const fail = (error: string): ParsedTemplateItem => ({ ok: false, key, error });
+  if (organizationMismatch) return fail(organizationMismatch);
 
   // ---- attributes
   const dashboardLabel = optionalText(item, 'dashboardLabel');
@@ -246,10 +305,18 @@ export function parseTemplateItem(item: unknown, fileOrganizationId: string | nu
   };
 }
 
-/** Row -> item. A key is written exactly when it is present on the row, never dropped for equalling a default. */
-export function rowToItem(row: Partial<TemplateColumns>, withOrganization: boolean): MetricClassificationYaml {
+/** A row as the exporter reads it: the columns, plus a profile template's profile name. */
+export type ExportRow = Partial<TemplateColumns> & { profile_name?: string | null };
+
+/**
+ * Row -> item. A key is written exactly when it is present on the row, never dropped for equalling a
+ * default. A profile template names its profile and never an organization: the profile's is implied,
+ * and writing it would only be one more thing to contradict.
+ */
+export function rowToItem(row: ExportRow, withOrganization: boolean): MetricClassificationYaml {
   const item: Record<string, unknown> = {};
-  if (withOrganization) item.organizationId = row.organization_id ?? null;
+  if (row.profile_id) item.profile = row.profile_name ?? row.profile_id;
+  else if (withOrganization) item.organizationId = row.organization_id ?? null;
   if (row.dashboard_uid != null) item.dashboardUid = row.dashboard_uid;
   if (row.regex) item.regex = true;
   if (row.dashboard_label != null) item.dashboardLabel = row.dashboard_label;
@@ -272,13 +339,21 @@ const byText = (a: string | null | undefined, b: string | null | undefined): num
   return a < b ? -1 : a > b ? 1 : 0; // code-unit order: locale-independent, so byte-stable
 };
 
+/** 0 install-wide, 1 organization, 2 profile. */
+const scopeRank = (r: KeyColumns): number => (r.profile_id ? 2 : r.organization_id ? 1 : 0);
+
 /**
- * The export's total order over the key: scope (install-wide, then organizations by id), uid
- * (absent first), regex (false first), panel (ids ascending before titles), metric (absent first).
+ * The export's total order over the key: scope (install-wide, then organizations by id, then
+ * profiles by name), uid (absent first), regex (false first), panel (ids ascending before titles),
+ * metric (absent first).
  */
 export function compareTemplateRows(a: KeyColumns, b: KeyColumns): number {
+  const scope = scopeRank(a) - scopeRank(b);
+  if (scope !== 0) return scope;
   return (
-    byText(a.organization_id, b.organization_id) ||
+    (a.profile_id
+      ? byText(a.profile_name ?? a.profile_id, b.profile_name ?? b.profile_id) || byText(a.profile_id, b.profile_id)
+      : byText(a.organization_id, b.organization_id)) ||
     byText(a.dashboard_uid, b.dashboard_uid) ||
     Number(a.regex ?? false) - Number(b.regex ?? false) ||
     Number(a.panel_id == null) - Number(b.panel_id == null) ||
@@ -291,10 +366,13 @@ export function compareTemplateRows(a: KeyColumns, b: KeyColumns): number {
 /**
  * The whole `template_ds_compare_configs.yaml`, ready to commit in place of the installed one. Its
  * caller is `GET /provisioning/compare-templates/export` (`CompareTemplatesService.exportYaml`).
- * When every row shares one scope the file carries it once (and an install-wide file carries none);
- * otherwise each item names its own, `null` for install-wide.
+ * When every row shares one organization the file carries it once (and an install-wide file carries
+ * none); otherwise each organization or install-wide item names its own, `null` for install-wide.
+ * A profile template's row must carry its profile's CURRENT organization (the caller joins it): it
+ * counts towards that decision, because a file-level organizationId the profile is not in would
+ * skip the item on the next boot. It never names one itself.
  */
-export function serializeTemplates(rows: Array<Partial<TemplateColumns>>): string {
+export function serializeTemplates(rows: ExportRow[]): string {
   const sorted = [...rows].sort(compareTemplateRows);
   const scopes = new Set(sorted.map((r) => r.organization_id ?? null));
   const mixed = scopes.size > 1;

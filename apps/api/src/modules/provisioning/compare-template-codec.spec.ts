@@ -23,12 +23,12 @@ const roundTrip = (canonical: string): string => {
 };
 
 describe('compare-template codec', () => {
-  describe('templateKey parity with migration 1822', () => {
+  describe('templateKey parity with migration 1823', () => {
     // apps/api cannot import a migration from packages/shared (not a declared export), so this reads
     // the file the way chart-tokens.spec.ts reads the web tokens, and evaluates its key terms.
     const file = path.resolve(
       __dirname,
-      '../../../../../packages/shared/src/database/migrations/1822000000000-CompareTemplateOwnership.ts',
+      '../../../../../packages/shared/src/database/migrations/1823000000000-ProfileCompareTemplates.ts',
     );
 
     it('found the migration file', () => {
@@ -44,7 +44,10 @@ describe('compare-template codec', () => {
       return JSON.stringify(
         body.split(',\n').map((raw) => {
           const term = raw.trim();
-          let m = /^COALESCE\((\w+)(?:::text)?, '([^']*)' \|\| (\w+)\)$/.exec(term);
+          let m =
+            /^\(CASE WHEN (\w+) IS NOT NULL THEN '([^']*)' \|\| \w+::text ELSE '([^']*)' \|\| COALESCE\((\w+)::text, '([^']*)'\) END\)$/.exec(term);
+          if (m) return row[m[1]] != null ? m[2] + text(row[m[1]]) : m[3] + (text(row[m[4]]) ?? m[5]);
+          m = /^COALESCE\((\w+)(?:::text)?, '([^']*)' \|\| (\w+)\)$/.exec(term);
           if (m) return text(row[m[1]]) ?? (row[m[3]] == null ? null : m[2] + row[m[3]]);
           m = /^COALESCE\((\w+)(?:::text)?, '([^']*)'\)$/.exec(term);
           if (m) return text(row[m[1]]) ?? m[2];
@@ -66,6 +69,10 @@ describe('compare-template codec', () => {
       { panel_title: '5' }, // a title that reads like an id is still a title
       { dashboard_uid: 'a|b', panel_id: 1 },
       { dashboard_uid: 'a', panel_id: 1, metric_name: 'b' },
+      { panel_id: 5, profile_id: 'p-1' },
+      { panel_id: 5, profile_id: 'p-1', organization_id: 'org-a' }, // same key: a profile's organization is not key
+      { panel_id: 5, profile_id: 'p-2', organization_id: 'org-a' },
+      { panel_id: 5, organization_id: 'p-1' }, // an organization id equal to a profile id is still another scope
     ];
 
     it('agrees with the SQL key on which rows collide', () => {
@@ -86,7 +93,7 @@ describe('compare-template codec', () => {
         metricName: 'api', metricClassification: 'RED_errors',
       });
       expect(values).toEqual({
-        organization_id: null, dashboard_uid: 'jmeter', regex: false, dashboard_label: 'JMeter',
+        organization_id: null, profile_id: null, dashboard_uid: 'jmeter', regex: false, dashboard_label: 'JMeter',
         panel_id: 5, panel_title: 'Errors', metric_name: 'api', metric_classification: 'RED_errors',
         higher_is_better: null, config_overrides: {},
       });
@@ -220,6 +227,115 @@ describe('compare-template codec', () => {
     });
   });
 
+  describe('profile templates', () => {
+    const ORG_A = 'aaaaaaaa-0000-4000-8000-00000000000a';
+    const ORG_B = 'bbbbbbbb-0000-4000-8000-00000000000b';
+    const profiles: Record<string, { id: string; organizationId: string }> = {
+      jvm: { id: 'p-jvm', organizationId: ORG_A },
+      dotnet: { id: 'p-dotnet', organizationId: ORG_A },
+      other: { id: 'p-other', organizationId: ORG_B },
+    };
+    const resolveProfile = (name: string) => profiles[name];
+    const parse = (item: unknown, fileOrg: string | null = null) => parseTemplateItem(item, fileOrg, { resolveProfile });
+
+    it("keys a profile item on its profile, and takes the profile's organization", () => {
+      const parsed = parse({ profile: 'jvm', panelId: 5, metricClassification: 'RED_rate' });
+      expect(parsed).toMatchObject({ ok: true, values: { profile_id: 'p-jvm', organization_id: ORG_A } });
+      expect(parsed.key).toBe(templateKey({ profile_id: 'p-jvm', panel_id: 5 }));
+      // Not the organization's own template for the same panel.
+      expect(parsed.key).not.toBe(templateKey({ organization_id: ORG_A, panel_id: 5 }));
+    });
+
+    it('accepts an organizationId that names the profile’s own organization, on the item or the file', () => {
+      expect(parse({ profile: 'jvm', organizationId: ORG_A.toUpperCase(), panelId: 5, metricClassification: 'x' }).ok).toBe(true);
+      expect(parse({ profile: 'jvm', panelId: 5, metricClassification: 'x' }, ORG_A).ok).toBe(true);
+    });
+
+    it.each([
+      ['on the item', { organizationId: ORG_B }, null],
+      ['on the file', {}, ORG_B],
+      ['as an explicit install-wide null', { organizationId: null }, ORG_A],
+    ])('skips an item whose organizationId %s is not its profile’s, keeping its key declared', (_l, over, fileOrg) => {
+      const parsed = parse({ profile: 'jvm', panelId: 5, metricClassification: 'x', ...over }, fileOrg);
+      expect(parsed.ok).toBe(false);
+      expect(parsed.key).toBe(templateKey({ profile_id: 'p-jvm', panel_id: 5 }));
+      if (!parsed.ok) expect(parsed.error).toMatch(/is not the organization of profile "jvm"/);
+    });
+
+    it('fails an unknown profile with no key, naming it as unresolved', () => {
+      expect(parse({ profile: 'nope', panelId: 5, metricClassification: 'x' })).toMatchObject({
+        ok: false, key: null, unresolvedProfile: 'nope',
+      });
+    });
+
+    it('refuses a profile where no resolver is given, and a blank profile', () => {
+      expect(parseTemplateItem({ profile: 'jvm', panelId: 5, metricClassification: 'x' }, null)).toMatchObject({ ok: false, key: null });
+      expect(parse({ profile: '', panelId: 5, metricClassification: 'x' })).toMatchObject({ ok: false, key: null });
+    });
+
+    /** YAML -> rows -> YAML with profiles, the export joining each profile's name back in. */
+    const profileRoundTrip = (canonical: string): string => {
+      const doc = yaml.load(canonical) as { organizationId?: string; items: unknown[] };
+      const names = Object.fromEntries(Object.entries(profiles).map(([name, p]) => [p.id, name]));
+      const rows = doc.items.map((item) => {
+        const parsed = parse(item, doc.organizationId ?? null);
+        if (!parsed.ok) throw new Error(parsed.error);
+        return { ...parsed.values, profile_name: parsed.values.profile_id ? names[parsed.values.profile_id] : null };
+      });
+      return serializeTemplates(rows);
+    };
+
+    it('round-trips a file mixing scopes: install-wide, organizations by id, then profiles by name', () => {
+      const canonical = [
+        'items:',
+        '  - organizationId: null',
+        '    panelId: 1',
+        '    metricClassification: RED_rate',
+        `  - organizationId: ${ORG_A}`,
+        '    panelId: 1',
+        '    metricClassification: RED_rate',
+        '  - profile: dotnet',
+        '    panelId: 1',
+        '    metricClassification: RED_rate',
+        '    absThreshold: 5',
+        '  - profile: jvm',
+        '    dashboardUid: ^jvm-',
+        '    regex: true',
+        '    panelTitle: Heap.*',
+        '    metricClassification: USE_saturation',
+        '  - profile: other',
+        '    panelId: 1',
+        '    metricClassification: RED_rate',
+        '',
+      ].join('\n');
+      expect(profileRoundTrip(canonical)).toBe(canonical);
+    });
+
+    it("counts a profile template's organization towards the file-level one, which then holds for it too", () => {
+      // Every item, profile ones included, is in ORG_A: one file-level organizationId, and the
+      // profile item still parses under it.
+      const canonical = [
+        `organizationId: ${ORG_A}`,
+        'items:',
+        '  - panelId: 1',
+        '    metricClassification: RED_rate',
+        '  - profile: jvm',
+        '    panelId: 1',
+        '    metricClassification: RED_rate',
+        '',
+      ].join('\n');
+      expect(profileRoundTrip(canonical)).toBe(canonical);
+    });
+
+    it('never writes a file-level organization a profile template is not in', () => {
+      // ORG_A's own template plus a profile in ORG_B: the file cannot carry ORG_A at the top.
+      const out = profileRoundTrip(`items:\n  - organizationId: ${ORG_A}\n    panelId: 1\n    metricClassification: x\n  - profile: other\n    panelId: 1\n    metricClassification: x\n`);
+      expect(out).not.toMatch(/^organizationId/);
+      expect(out).toContain(`organizationId: ${ORG_A}`);
+      expect(profileRoundTrip(out)).toBe(out);
+    });
+  });
+
   describe('serializeTemplates', () => {
     it('round-trips a canonical install-wide file byte for byte', () => {
       const canonical = [
@@ -295,6 +411,8 @@ describe('compare-template codec', () => {
     const base: Partial<TemplateColumns> = { panel_id: 1 };
     it.each([
       ['scope', { organization_id: null }, { organization_id: 'org-a' }],
+      ['scope, organizations before profiles', { organization_id: 'org-z' }, { organization_id: 'org-a', profile_id: 'p', profile_name: 'a' }],
+      ['profile name', { profile_id: 'p-2', profile_name: 'a' }, { profile_id: 'p-1', profile_name: 'b' }],
       ['organization id', { organization_id: 'org-a' }, { organization_id: 'org-b' }],
       ['dashboard uid, absent first', { dashboard_uid: null }, { dashboard_uid: 'a' }],
       ['dashboard uid', { dashboard_uid: 'a' }, { dashboard_uid: 'b' }],

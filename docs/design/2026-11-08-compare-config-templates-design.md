@@ -502,6 +502,42 @@ from the body in these places; the code, `apps/api/CLAUDE.md` and
 7. **The export is admin-only twice**: `@AdminOnly()` at the guard and the service's global-admin check
    (`withOrgFilter` returning `null`), so neither alone is load-bearing.
 
+## Implementation deviations (PR 2b, profile templates, 2026-11-09)
+
+PR 2b (v0.2.97.56) ships the profile half of "Next Steps" item 2 that PR 2 deviation 1 split out. It
+differs from the body in these places; the code, `apps/api/CLAUDE.md` and
+`docs/reference/Features/Compare Config Templates.md` describe what shipped.
+
+1. **A new migration, 1823, rather than the "PR 2 migration" folded into another.** It swaps the unique
+   index in one plpgsql statement (drop and create inside a `DO` block, skipped when the index already
+   has the profile term), so it is atomic without the batch transaction (root CLAUDE.md #64), and it
+   needs no duplicate pre-check: every existing row has `profile_id` NULL and the old scope term maps
+   one-to-one onto `'org:' || …`. The key prefixes both scopes (`'profile:'`, `'org:'`) so an
+   organization id can never spell a profile scope. `down()` deletes profile templates before restoring
+   1822's index.
+2. **The profile matcher's organization is the dashboard's** (§2 Selection, extending D10): profile
+   templates follow the organization templates in reading each application dashboard's NOT NULL
+   `organizationId`, not the optional `TestRun` field. Only the run's tags come from the `TestRun`.
+3. **Step 4 ties are reported apart from step 5 ties.** A tie between two profiles reads `decided by
+   profile name: "a" over "b"` and an id tie keeps PR 1's exact `decided by template id:` text, so D11's
+   preserved spec case stays unedited.
+4. **An item whose `organizationId` contradicts its profile is an error with its key declared**, not a
+   warning (§3): the item is skipped and its stored template kept, the same rule as any other invalid
+   attribute. A file-level `organizationId` counts as stated, an absent one does not, so a multi-tenant
+   file writes profile items with no organization and the export never writes one on them.
+5. **Profile templates are counted towards the export's file-level organization** with their profile's
+   current organization (§4), so a file is never written with a file-level organization a profile item
+   would then contradict on the next boot.
+6. **The profile tab is the shared panel**, `AdaptTemplatesPanel`, which the organization and
+   install-wide page now render too; the Export YAML button moved from the page header into the panel's
+   toolbar. Copy targets list the caller's profiles first, by name.
+7. **The delete confirmation's count is read fresh when the dialog opens** (`GET /profiles/:id`, which
+   gained `adaptTemplateCount`), because templates can change on the tab in between.
+8. **Open Question 2 is taken as recommended**: a provisioned (read-only) profile takes UI templates.
+   Open Question 4 is answered in the tab's copy and the reference page: an untagged run gets only
+   organization and install-wide templates, and a workload whose runs are tagged inconsistently flips
+   between template sets on each completion, marking results stale when the effective config changes.
+
 ## Open Questions
 
 1. **`percentageThreshold` unit in YAML.** `config_data` stores a fraction (0.15), the form shows a

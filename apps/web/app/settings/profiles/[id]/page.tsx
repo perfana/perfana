@@ -1,14 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
   Box, Typography, Card, CardContent, Divider, CircularProgress,
   Alert, Tabs, Tab, Button, Snackbar, Dialog, DialogTitle, DialogContent,
   DialogContentText, DialogActions,
 } from '@mui/material';
 import { Tune, ArrowBack, Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
-import { deleteProfile } from '@/lib/profiles';
+import { deleteProfile, fetchProfile } from '@/lib/profiles';
+import type { CompareTemplateScope } from '@/lib/compare-templates';
+import { AdaptTemplatesPanel } from '../adapt-templates/components/AdaptTemplatesPanel';
+import { TEMPLATE_REACH } from '../adapt-templates/components/CompareTemplateDialog';
+import { ScopeBadge } from '../adapt-templates/components/ScopeBadge';
+import { cascadeTemplatesSentence } from './utils/cascade-templates';
 import { SnackbarState } from './types';
 import { useProfileData, useGrafanaData, useDashboards, useBenchmarks } from './hooks';
 import {
@@ -21,12 +26,19 @@ const ADD_BUTTON_SX = {
   '&:hover': { background: 'linear-gradient(135deg, rgba(25, 118, 210, 1) 0%, rgba(30, 136, 229, 1) 100%)' },
 };
 
+/** Tab index of each `?tab=` value, so a link (a template's scope) can open the right tab. */
+const TAB_PARAM: Record<string, number> = { dashboards: 0, slos: 1, 'deep-links': 2, 'adapt-templates': 3 };
+const ADAPT_TEMPLATES_TAB = 3;
+
 export default function ProfileDetailsPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const profileId = params.id as string;
 
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(() => TAB_PARAM[searchParams?.get('tab') ?? ''] ?? 0);
+  // Read fresh when the delete confirmation opens: templates can change on the tab in between.
+  const [templateCount, setTemplateCount] = useState<number | undefined>(undefined);
   const [snackbar, setSnackbar] = useState<SnackbarState>({ open: false, message: '', severity: 'success' });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -46,6 +58,16 @@ export default function ProfileDetailsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, profile]);
+
+  const templateScope = useMemo<CompareTemplateScope>(() => ({ kind: 'profile', profileId }), [profileId]);
+
+  const openDeleteDialog = () => {
+    setTemplateCount(profile?.adaptTemplateCount);
+    setDeleteDialogOpen(true);
+    fetchProfile(profileId)
+      .then((fresh) => setTemplateCount(fresh.adaptTemplateCount))
+      .catch(() => undefined);
+  };
 
   const handleBack = () => router.push('/settings/profiles');
   const handleSnackbarClose = () => setSnackbar(prev => ({ ...prev, open: false }));
@@ -99,7 +121,7 @@ export default function ProfileDetailsPage() {
             variant="outlined"
             color="error"
             startIcon={<DeleteIcon />}
-            onClick={() => setDeleteDialogOpen(true)}
+            onClick={openDeleteDialog}
           >
             Delete Profile
           </Button>
@@ -124,6 +146,7 @@ export default function ProfileDetailsPage() {
             <Tab label="Dashboards" id="profile-tab-0" aria-controls="profile-tabpanel-0" />
             <Tab label="Service Level Objectives" id="profile-tab-1" aria-controls="profile-tabpanel-1" />
             <Tab label="Deep Links" id="profile-tab-2" aria-controls="profile-tabpanel-2" />
+            <Tab label="ADAPT templates" id="profile-tab-3" aria-controls="profile-tabpanel-3" />
           </Tabs>
         </Box>
         <CardContent>
@@ -154,6 +177,19 @@ export default function ProfileDetailsPage() {
               </Typography>
             </Box>
           </TabPanel>
+          <TabPanel value={activeTab} index={ADAPT_TEMPLATES_TAB}>
+            <Box mb={1}><ScopeBadge kind="profile" /></Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Templates here set ADAPT&rsquo;s comparison settings for matching panels on runs whose tags match this profile
+              {profile.tags?.length ? ` (${profile.tags.join(', ')})` : ''}, in the profile&rsquo;s organization. They come before the
+              organization&rsquo;s and the install-wide templates for the same dashboard match. {TEMPLATE_REACH}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              A run with no matching tag gets only the organization&rsquo;s and install-wide templates, so a workload whose runs are tagged
+              differently from one run to the next switches between the two sets.
+            </Typography>
+            <AdaptTemplatesPanel scope={templateScope} scopeName={`Profile ${profile.name}`} />
+          </TabPanel>
         </CardContent>
       </Card>
 
@@ -172,7 +208,8 @@ export default function ProfileDetailsPage() {
         <DialogTitle>Delete Profile</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to delete the profile <strong>{profile.name}</strong>? This will also remove all associated dashboards, SLOs, and deep links. This action cannot be undone.
+            Are you sure you want to delete the profile <strong>{profile.name}</strong>? This will also remove all associated dashboards, SLOs, and deep links.
+            {cascadeTemplatesSentence(templateCount)} This action cannot be undone.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
