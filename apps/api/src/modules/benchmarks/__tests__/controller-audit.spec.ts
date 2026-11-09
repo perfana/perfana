@@ -123,7 +123,8 @@ describe('BenchmarksController — audit chain (Phase 5a, PR18)', () => {
         {
           provide: BenchmarkTagHelper,
           useValue: {
-            inheritTagsFromDashboard: jest.fn().mockResolvedValue([]),
+            findInScope: jest.fn().mockResolvedValue(null),
+            inheritTagsFromDashboard: jest.fn().mockReturnValue([]),
             getInheritedTagsForUpdate: jest.fn().mockResolvedValue([]),
           },
         },

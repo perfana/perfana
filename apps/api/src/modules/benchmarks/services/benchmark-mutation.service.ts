@@ -4,7 +4,7 @@ import { FindOptionsWhere, Repository } from 'typeorm';
 import { Benchmark as BenchmarkEntity, SystemUnderTest } from '../../../entities';
 import { getRequestEm, withRequestEm } from '../../../common/db/request-em';
 import { BenchmarkQueryService } from './benchmark-query.service';
-import { BenchmarkTagHelper } from './benchmark-tag.helper';
+import { BenchmarkTagHelper, type DashboardScope } from './benchmark-tag.helper';
 import { BenchmarkMapper } from './benchmark.mapper';
 import { AuthorizationService } from '../../../common/services/authorization.service';
 import type { OwnedResource } from '@perfana/shared';
@@ -158,28 +158,39 @@ export class BenchmarkMutationService {
    * Callers use the returned system to inherit organizationId/teamId onto the
    * benchmark — Benchmark.organization_id is NOT NULL (Phase 4) and the benchmark
    * lives under the same org/team as its parent SUT.
-   * @throws ForbiddenException if user doesn't have access
+   * @throws ForbiddenException if user doesn't have access. A missing system gets the same
+   * answer, so the refusal never confirms that another tenant's system id exists.
    */
   private async validateSystemAccess(
     systemId: string,
     userId: string,
     roles: string[],
   ): Promise<SystemUnderTest> {
+    const refusal = () => new ForbiddenException(`You do not have access to system under test ${systemId}`);
     const system = await withRequestEm(this.systemRepo).findOne({ where: { id: systemId } });
-    if (!system) {
-      throw new ForbiddenException(`System under test ${systemId} not found`);
-    }
+    if (!system) throw refusal();
 
     const result = await this.authzService.canAccessResource(userId, roles, {
       organization_id: system.organization_id,
       created_by: system.created_by ?? '',
     } as OwnedResource);
 
-    if (!result.allowed) {
-      throw new ForbiddenException('You do not have access to this system');
-    }
+    if (!result.allowed) throw refusal();
 
     return system;
+  }
+
+  /**
+   * The dashboard an SLO names, looked up only inside the system and environment the request was
+   * authorized for. A foreign id and a missing one get the same 400, so the answer never confirms
+   * that another tenant's dashboard exists — and the SLO never stores a reference to it.
+   */
+  private async requireDashboardInScope(applicationDashboardId: string, scope: DashboardScope) {
+    const dashboard = await this.tagHelper.findInScope(applicationDashboardId, scope);
+    if (!dashboard) {
+      throw new BadRequestException('applicationDashboardId is not a dashboard of this system and environment');
+    }
+    return dashboard;
   }
 
   /**
@@ -197,14 +208,21 @@ export class BenchmarkMutationService {
       // Validate user has access to the system and capture it to inherit org/team
       const system = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
 
-      const tags = await this.tagHelper.inheritTagsFromDashboard(
-        dto.applicationDashboardId,
-        dto.tags,
-      );
+      const dashboard = dto.applicationDashboardId
+        ? await this.requireDashboardInScope(dto.applicationDashboardId, {
+            systemUnderTestId: dto.systemUnderTestId,
+            testEnvironment: dto.testEnvironment,
+          })
+        : undefined;
+      const tags = this.tagHelper.inheritTagsFromDashboard(dashboard, dto.tags);
       // The dashboard knows its instance; the client's value is a fallback ('Default' from the web form, #720).
-      const grafanaInstance =
-        (dto.applicationDashboardId && (await this.tagHelper.grafanaInstanceLabelOf(dto.applicationDashboardId))) ||
-        dto.grafanaInstance;
+      const grafanaInstance = dashboard?.grafanaInstance?.label || dto.grafanaInstance;
+      // An SLO's metrics source is its dashboard's. Any other id points at a row nothing here has
+      // authorized — another tenant's, whose delete the NO ACTION foreign key would then block, or
+      // one that does not exist — so all of them get one answer, and nothing is looked up to give it.
+      if (dto.metricsSourceId && dto.metricsSourceId !== dashboard?.metricsSourceId) {
+        throw new BadRequestException('metricsSourceId is not the metrics source of applicationDashboardId');
+      }
 
       const benchmark = this.benchmarkRepo.create({
         system_under_test_id: dto.systemUnderTestId,
@@ -215,7 +233,7 @@ export class BenchmarkMutationService {
         dashboard_label: dto.dashboardLabel,
         dashboard_id: dto.dashboardId,
         dashboard_uid: dto.dashboardUid,
-        application_dashboard_id: dto.applicationDashboardId || undefined,
+        application_dashboard_id: dashboard?.id,
         metrics_source_id: dto.metricsSourceId || undefined,
         panel_title: dto.panelTitle,
         config_title: dto.configTitle,
@@ -298,6 +316,14 @@ export class BenchmarkMutationService {
       // for AuditService.dispatch to resolve auditableFields against.
       const beforeEntity = Object.assign(new BenchmarkEntity(), existing);
 
+      // The body may move the SLO to another system. Authorize that one as well, or the dashboard
+      // lookups below would be scoped to whichever system the caller chose to name.
+      const systemUnderTestId = dto.systemUnderTestId ?? existing.system_under_test_id;
+      const movedTo =
+        systemUnderTestId !== existing.system_under_test_id
+          ? await this.validateSystemAccess(systemUnderTestId, userId, roles)
+          : undefined;
+
       const tags = await this.tagHelper.getInheritedTagsForUpdate(
         dto.dashboardUid,
         dto.systemUnderTestId,
@@ -309,14 +335,23 @@ export class BenchmarkMutationService {
       const updateData = this.buildUpdateData(dto, existing, tags);
       // Track who updated the resource
       updateData.updated_by = userId;
+      // A moved SLO lives under its new system's organization and team, as a created one does.
+      if (movedTo) {
+        updateData.organizationId = movedTo.organization_id;
+        updateData.teamId = movedTo.team_id;
+      }
 
       // The edit dialog (and a duplicate being turned into a variant) may re-point the SLO
       // at another dashboard. The checks pipeline matches on application_dashboard_id and
       // the edit form re-matches on metrics_source_id, so both move together.
       if (dto.applicationDashboardId && dto.applicationDashboardId !== existing.application_dashboard_id) {
-        updateData.application_dashboard_id = dto.applicationDashboardId;
-        updateData.metrics_source_id = await this.tagHelper.metricsSourceIdOf(dto.applicationDashboardId);
-        const grafanaInstance = await this.tagHelper.grafanaInstanceLabelOf(dto.applicationDashboardId);
+        const dashboard = await this.requireDashboardInScope(dto.applicationDashboardId, {
+          systemUnderTestId,
+          testEnvironment: dto.testEnvironment ?? existing.test_environment,
+        });
+        updateData.application_dashboard_id = dashboard.id;
+        updateData.metrics_source_id = dashboard.metricsSourceId ?? undefined;
+        const grafanaInstance = dashboard.grafanaInstance?.label;
         if (grafanaInstance) updateData.grafana_instance = grafanaInstance;
       }
 
