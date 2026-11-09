@@ -34,10 +34,10 @@ const formData: SLOFormData = {
   requirementValue: '5',
 };
 
-function setup(sloFormData: SLOFormData) {
+function setup(sloFormData: SLOFormData, bm: Benchmark = benchmark) {
   const setValidationErrors = jest.fn();
   const props: UseEditSLOHandlersProps = {
-    benchmark,
+    benchmark: bm,
     systemId: 'sut-1',
     environment: 'production',
     workload: 'loadTest',
@@ -171,5 +171,40 @@ describe('fields Edit cannot change are left to the server', () => {
     expect(body).not.toHaveProperty('configTitle');
     expect(body).not.toHaveProperty('panelTitle');
     expect(body).toMatchObject({ requirementValue: '5', applicationDashboardId: expect.any(String) });
+  });
+});
+
+// Value: protects=a threshold edited on an SLO whose record has no unit (a perf-test SLO saved
+// before its panel carried one) is converted to the panel's unit, the unit the save now stores;
+// fails_when=updateSlo converts only in the record's unit, so "0.5s" on a ms panel is stored as
+// 0.5 and labelled ms; why_new=no handler test covered a unit-less record; seam=none;
+// no_claim=the API turning configuration.yAxesFormat into metric_unit (covered server-side).
+describe('a record with no unit converts in the panel unit', () => {
+  const perfPanel = { id: 201, title: 'Request RT Avg', yAxesFormat: 'ms' } as unknown as SLOFormData['selectedPanel'];
+
+  it('stores "0.5s" as 500 on a ms panel when the record has no unit', async () => {
+    mockFetch.mockResolvedValue(okResponse());
+
+    const { result } = setup({ ...formData, source: 'performance-metrics', selectedPanel: perfPanel, requirementValue: '0.5s' });
+    await act(async () => {
+      result.current.handleSaveDialogConfirm('none');
+    });
+
+    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.requirementValue).toBe('500');
+    expect(body.configuration).toMatchObject({ yAxesFormat: 'ms', requirement: { value: '500' } });
+  });
+
+  it("keeps the record's own unit when it has one", async () => {
+    mockFetch.mockResolvedValue(okResponse());
+
+    const withUnit = { ...benchmark, metric_unit: 's' } as unknown as Benchmark;
+    const { result } = setup({ ...formData, source: 'performance-metrics', selectedPanel: perfPanel, requirementValue: '0.5s' }, withUnit);
+    await act(async () => {
+      result.current.handleSaveDialogConfirm('none');
+    });
+
+    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.requirementValue).toBe('0.5');
   });
 });

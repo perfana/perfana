@@ -76,6 +76,16 @@ const units: Unit[] = [
   { name: 'miles/hour (mph)', id: 'velocitymph', format: 'mph' },
 ];
 
+/**
+ * `panels-by-dashboard` answers a perf-test panel's unit as a display string ('ms', '%',
+ * 'req/s', 'threads'). The SLO dialogs convert and store unit CODES, so map the two that
+ * differ; the rest are already codes or are shown verbatim by `getUnit`'s fallback.
+ */
+export const perfPanelUnitCode = (unit?: string | null): string | undefined => {
+  if (!unit) return undefined;
+  return ({ '%': 'percent', 'req/s': 'reqps' } as Record<string, string>)[unit] ?? unit;
+};
+
 export const getUnit = (id?: string): Unit => {
   if (!id) {
     return { name: '', id: '', format: '' };

@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { SUPPORTED_PANEL_TYPES, convertDecimalToPercentageForDisplay, storedThresholdUnit } from '../utils/slo-validators';
 import { isPerformanceTest } from '@/lib/metrics-source-utils';
+import { perfPanelUnitCode } from '@/lib/units';
 
 export function useEditSLOForm({
   open,
@@ -152,6 +153,7 @@ export function useEditSLOForm({
           id: row.panel_id,
           title: row.panel_title,
           type: 'timeseries',
+          yAxesFormat: perfPanelUnitCode(row.unit),
         }));
         setAvailablePanels(panels);
       } else {

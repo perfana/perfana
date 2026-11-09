@@ -842,3 +842,34 @@ describe('enabled loads from the benchmark', () => {
     unmount();
   });
 });
+
+// ===========================================================================
+// Perf-test panels carry their unit
+// ===========================================================================
+
+// Value: protects=the perf-test panel's unit reaching the Edit SLO form as yAxesFormat (so a
+// re-picked panel converts the threshold and saves metric_unit); fails_when=the edit hook's
+// fetchPerfMetricsPanels drops row.unit or stops mapping it through perfPanelUnitCode;
+// why_new=only the helper was tested, the hook's mapping was not; seam=none; no_claim=does not
+// cover the save payload or the SLO list rendering of the unit.
+describe('fetchPerfMetricsPanels carries the panel unit', () => {
+  it('maps the display unit to a unit code on each panel', async () => {
+    mockAuthFetch.mockImplementation(async (url: RequestInfo | URL) => makeResponse(
+      String(url).includes('/metrics/ds-metrics/panels-by-dashboard')
+        ? [
+          { panel_id: 1, panel_title: 'Error rate', unit: '%' },
+          { panel_id: 2, panel_title: 'Throughput', unit: 'req/s' },
+          { panel_id: 3, panel_title: 'Active threads', unit: 'threads' },
+          { panel_id: 4, panel_title: 'No unit', unit: '' },
+        ]
+        : [],
+    ));
+    const { result, unmount } = renderHook(() => useEditSLOForm(NULL_BENCHMARK_PROPS));
+
+    await act(async () => { await result.current.fetchPerfMetricsPanels('perf-app-dash'); });
+
+    expect(result.current.availableOptions.availablePanels.map((p) => [p.id, p.yAxesFormat]))
+      .toEqual([[1, 'percent'], [2, 'reqps'], [3, 'threads'], [4, undefined]]);
+    unmount();
+  });
+});
