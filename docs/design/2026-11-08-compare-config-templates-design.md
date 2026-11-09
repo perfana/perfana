@@ -559,7 +559,16 @@ Changed at /ship review (2026-11-09), each decided by the user:
     /profiles/:id` and the profile dashboard and SLO routes checked only "org admin in any organization";
     with the cascade and tag-driven selection added here, that let one tenant's admin delete or retarget
     another's ADAPT templates.
-13. **Known residue (TODOS.md):** templates are stored per workload and ADAPT reads them when the run's
+13. **A row the applier inserted is deleted when no template wins it, not rebuilt from `INSERT_BASE`**
+    (adversarial review, user decision). §2's "rebuild from base alone" left mean/`none` where ADAPT
+    otherwise applies its own default (median, unclassified); with profile templates every non-matching
+    run took that path, so untagged runs silently changed aggregation after one tagged run. The row is
+    deleted conditional on its author and its results marked stale explicitly. This supersedes the
+    "Delete an applier-inserted row" TODO.
+14. **A new profile can name its organization.** `CreateProfileDto.organizationId` (optional, validated:
+    one of the caller's, org admin there); without it the pick is sorted rather than cache-ordered,
+    because the profile's organization now decides which runs its templates reach.
+15. **Known residue (TODOS.md):** templates are stored per workload and ADAPT reads them when the run's
     analysis starts, so a differently tagged completion in between, or a later re-evaluate, judges a run on
     another set. Recording the run's matched profiles and re-applying under the scope lock is filed.
 

@@ -298,7 +298,7 @@ What happens to the row depends on who last wrote it:
 |---|---|
 | none yet | inserts one from the defaults plus the template |
 | seeded by the worker or the Dynatrace host mapping, untouched | merges into it once; from then on it is template-owned |
-| template-owned | rebuilds it from its base config plus the current winner; with no winner, from the base alone |
+| template-owned | rebuilds it from its base config plus the current winner; with no winner, from the base alone, except a row the applier inserted itself, which is removed (ADAPT's default applies again) and its results marked stale |
 | template-owned, written before v0.2.97.54 | adopts it (its config becomes its base) only if the winner would not change it; otherwise leaves it alone |
 | saved by a user | nothing, ever |
 

@@ -855,7 +855,13 @@ fields the current winning template names. Eight things that are easy to undo:
    machine-seeded row gets its seeded config on its first merge; a row written before 1822 takes its
    current config, but only when its winner would not change it (rule 7). A field the template stops
    naming reverts to the base, and a
-   row nothing matches any more is rebuilt from the base alone, with `template_id` cleared.
+   row nothing matches any more is rebuilt from the base alone, with `template_id` cleared, unless the
+   applier inserted it itself (`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`): that
+   row is deleted, conditional on the author read, and its `ds_adapt_results` marked stale by hand,
+   since a delete fires no `trigger_mark_stale_on_config_update`. Rebuilding it would leave a row the
+   panel never had (`INSERT_BASE`: mean, `none`) where ADAPT otherwise applies `DEFAULT_COMPARE_CONFIG`
+   (median, unclassified), so after one tagged run every untagged run of that workload would silently
+   switch aggregation (v0.2.97.57). A merged machine seed is still rebuilt: its base IS the panel's.
 3. **Only a difference is written.** `trigger_mark_stale_on_config_update` fires on any `config_data`
    change, so the applier compares first; `template_id` and `template_base` sit outside `config_data`
    and never fire it. The comparison deep-copies through JSON, not `structuredClone`: under Jest the

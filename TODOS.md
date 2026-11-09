@@ -4401,21 +4401,6 @@ lets the prune run. The failure is safe today, just noisy. Raised by the /ship a
 
 **Depends on:** nothing.
 
-### Delete an applier-inserted row when its template is gone (P3)
-
-**What:** When a template-owned row has no winner and was inserted by the applier
-(`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`), delete it instead of rewriting it
-to the defaults, and mark that panel's ADAPT results stale explicitly (a delete fires no update
-trigger).
-
-**Why:** "Rebuild from base alone" leaves a defaults row (mean, 15 %, no `minSampleCount`) where there
-was no row before the template. It shadows `DEFAULT_COMPARE_CONFIG` (median) and occupies the unique
-slot, so the worker's later `ON CONFLICT DO NOTHING` seed (`minSampleCount: 1` on the perf-test
-scenario panels) never lands. Raised by the red-team review (2026-11-08); the approved design chose
-rebuild-to-base, so this is a design change.
-
-**Depends on:** nothing.
-
 ### Judge a run on the profile templates its own tags chose (P2)
 
 **What:** Record the profiles a completing run matched, and have analyze and re-evaluate re-apply the
@@ -4430,7 +4415,7 @@ review of PR #716 (2026-11-09); documented as a caveat in the reference page and
 
 **Effort:** M (human ~2d / CC ~1h) **Priority:** P2 **Depends on:** nothing.
 
-### `profiles.yaml` upserts a profile by name across organizations (P2)
+### `profiles.yaml` upserts a profile by name across organizations (P1)
 
 **What:** Make profile provisioning refuse, rather than take over, a profile of the same name in another
 organization (or key it on organization plus name).
@@ -4439,9 +4424,25 @@ organization (or key it on organization plus name).
 (`provisioning.service.ts`). Since v0.2.97.56 a profile's ADAPT templates follow its current
 organization, so a `profiles.yaml` entry whose name collides with another tenant's UI profile now moves
 that tenant's templates too, along with its dashboards and SLOs as before. Raised by the /ship red-team
-review of PR #716.
+review of PR #716. The adversarial review raised it to P1 because it is also a deliberate route, not
+only an accident: an org-B admin can create a profile under a name about to be added to `profiles.yaml`
+(file-level organization A), attach templates (`ignore: true`, a large `absThreshold`) to key panels,
+and on the next boot the profile moves to A with the file's tags and B's templates suppress regressions
+on A's runs.
 
-**Effort:** S (human ~4h / CC ~20min) **Priority:** P2 **Depends on:** nothing.
+**Effort:** S (human ~4h / CC ~20min) **Priority:** P1 **Depends on:** nothing.
+
+### A completion call that omits tags wipes the run's tags, and now its profile templates (P2)
+
+**What:** Make `update-test-run.handler.ts` keep the stored `tags` when the update payload omits them
+(today `tags: data.tags || []`), or confirm the CLI sends tags on every update.
+
+**Why:** Pre-existing, but since v0.2.97.56 the completing run's tags choose its profile ADAPT templates,
+so a completion call without tags reverts every profile-owned row of the workload (and with the applier's
+delete, removes the rows it inserted) and fires the stale trigger. Raised by the /ship adversarial review
+of PR #716.
+
+**Effort:** S (human ~2h / CC ~15min) **Priority:** P2 **Depends on:** nothing.
 
 ### Profile dashboards resolve a Grafana instance by label across organizations (P2)
 
@@ -4497,6 +4498,11 @@ an import into an environment without that profile. Raised by the /ship data-mig
 **Effort:** XS **Priority:** P3 **Depends on:** a new migration.
 
 ## Completed
+
+- **Delete an applier-inserted row when its template is gone** — **Completed:** v0.2.97.57 (2026-11-09).
+  A row the golden path inserted (`created_by = 'system:golden-path'`, base equal to `INSERT_BASE`) that
+  no template wins any more is deleted and its ADAPT results marked stale, so ADAPT's own default applies
+  again. Raised to a merge blocker by the /ship adversarial review: profile tags made it normal operation.
 
 ### A landed card-link could not be recovered after a tab switch, and its key omitted the run
 
