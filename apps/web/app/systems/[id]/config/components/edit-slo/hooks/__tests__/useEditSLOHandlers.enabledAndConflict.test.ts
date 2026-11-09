@@ -225,16 +225,20 @@ describe('a record with no unit converts in the panel unit', () => {
     expect(body.requirementValue).toBe('0.9');
   });
 
-  it("keeps the record's own unit when it has one", async () => {
+  // The unit converted into is the unit stored: whatever the selected panel carries (the
+  // record's own unit, once useEditSLOForm has kept it) is both, never one each.
+  it('labels the saved value with the unit it was converted into', async () => {
     mockFetch.mockResolvedValue(okResponse());
 
+    const sPanel = { id: 201, title: 'Request RT Avg', yAxesFormat: 's' } as unknown as SLOFormData['selectedPanel'];
     const withUnit = { ...benchmark, metric_unit: 's' } as unknown as Benchmark;
-    const { result } = setup({ ...formData, source: 'performance-metrics', selectedPanel: perfPanel, requirementValue: '0.5s' }, withUnit);
+    const { result } = setup({ ...formData, source: 'performance-metrics', selectedPanel: sPanel, requirementValue: '500ms' }, withUnit);
     await act(async () => {
       result.current.handleSaveDialogConfirm('none');
     });
 
     const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
     expect(body.requirementValue).toBe('0.5');
+    expect(body.configuration.yAxesFormat).toBe('s');
   });
 });

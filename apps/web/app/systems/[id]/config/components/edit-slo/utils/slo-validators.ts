@@ -152,7 +152,10 @@ export function storedThresholdUnit(benchmark: {
   configuration?: { yAxesFormat?: string; metricUnit?: string } | null;
 }): string | undefined {
   if (benchmark.evaluate_type === 'trend') return undefined;
-  return benchmark.configuration?.yAxesFormat || benchmark.configuration?.metricUnit || benchmark.metric_unit || undefined;
+  const unit = benchmark.configuration?.yAxesFormat || benchmark.configuration?.metricUnit || benchmark.metric_unit;
+  // A trend stores metric_unit '%/h' (the API forces it). Once the type is no longer trend that
+  // says nothing about the panel, and converting into it converts nothing.
+  return unit && unit !== '%/h' ? unit : undefined;
 }
 
 /**

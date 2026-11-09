@@ -600,6 +600,9 @@ describe('storedThresholdUnit (#719)', () => {
     [{ metric_unit: 'percentunit', configuration: null }, 'percentunit'],
     [{ configuration: { yAxesFormat: 's' }, metric_unit: 'percentunit' }, 's'],
     [{ evaluate_type: 'trend', metric_unit: '%/h', configuration: { yAxesFormat: 'percentunit' } }, undefined],
+    // A former trend SLO now edited as avg: '%/h' says nothing about the panel.
+    [{ evaluate_type: 'avg', metric_unit: '%/h', configuration: {} }, undefined],
+    [{ evaluate_type: 'avg', metric_unit: '%/h', configuration: { yAxesFormat: 'ms' } }, 'ms'],
     [{}, undefined],
   ])('%j -> %p', (benchmark, expected) => {
     expect(storedThresholdUnit(benchmark)).toBe(expected);

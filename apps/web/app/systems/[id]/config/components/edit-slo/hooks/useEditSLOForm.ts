@@ -222,8 +222,9 @@ export function useEditSLOForm({
             id: rawPanelId != null ? Number(rawPanelId) : undefined,
             title: panelTitle,
             type: 'timeseries',
-            yAxesFormat: benchmark.configuration?.yAxesFormat,
-            metricUnit: benchmark.configuration?.metricUnit || benchmark.metric_unit,
+            // The SLO's own unit, '%/h' excluded (see storedThresholdUnit), as one field so
+            // the panel upgrade below can keep it.
+            yAxesFormat: storedThresholdUnit({ configuration: benchmark.configuration, metric_unit: benchmark.metric_unit }),
           };
 
       setSloFormData({
@@ -415,9 +416,15 @@ export function useEditSLOForm({
       }
 
       if (matchingPanel) {
+        // Keep the SLO's own unit when it has one. Validation, the helper text, the save's
+        // conversion and the stored label all read the selected panel's unit, and the value on
+        // screen was shown in the record's unit: a live panel whose unit changed since would
+        // otherwise convert into one unit and label the result with another.
+        const recordUnit = storedThresholdUnit({ configuration: benchmark.configuration, metric_unit: benchmark.metric_unit });
+        const upgraded = recordUnit ? { ...(matchingPanel as object), yAxesFormat: recordUnit } : matchingPanel;
         // Only upgrade the synthetic panel. After the user re-points the dashboard the
         // panel is null on purpose, and the benchmark's old title must not re-select one.
-        setSloFormData((prev) => (prev.selectedPanel ? { ...prev, selectedPanel: matchingPanel } : prev));
+        setSloFormData((prev) => (prev.selectedPanel ? { ...prev, selectedPanel: upgraded as typeof prev.selectedPanel } : prev));
       }
     }
   }, [availablePanels, benchmark]);
