@@ -857,7 +857,7 @@ the worker writes it (`METRIC_TYPE_PANEL_UNITS` in `apps/worker/src/constants/pe
 `'ms'`, `'%'`, `'req/s'`, `'threads'`, `''`. The SLO dialogs convert thresholds and save
 `configuration.yAxesFormat` (which the API copies into `metric_unit`) as unit **codes** from
 `lib/units.ts`. `perfPanelUnitCode` maps the two that differ: `'%'` to `'percent'` (perf error
-rates are 0-100, never `percentunit`) and `'req/s'` to `'reqps'`. Until v0.2.97.57 both dialogs
+rates are 0-100, never `percentunit`) and `'req/s'` to `'reqps'`. Until v0.2.97.58 both dialogs
 dropped the unit altogether, so a perf-test SLO was saved with `metric_unit` NULL: its threshold
 was never converted and the SLO list showed a bare number. Rows saved before then keep NULL until
 someone saves them in Edit.
@@ -870,7 +870,7 @@ Two things to keep:
 - **Edit decides its unit in more than one place.** The display reads the record's unit, while
   validation and the stored label read the selected panel's. They can disagree, which is a P1 in
   TODOS.md ("The Edit SLO dialog decides its unit in more than one place"). A single-unit attempt
-  was reverted on the v0.2.97.57 branch because Dynatrace SLOs have no unit on their synthetic
+  was reverted on the v0.2.97.58 branch because Dynatrace SLOs have no unit on their synthetic
   panel. Cover that case first.
 
 ### The error rate has one threshold and one set of formatters

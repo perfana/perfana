@@ -2043,8 +2043,8 @@ expensive part (apps/worker/CLAUDE.md, "ADAPT's baseline depends on the `pct_agg
 
 **Why:** Today those can disagree, and when they do a threshold is stored in one unit and read in another, an SLO that always passes or always fails, with nothing logged.
 
-**Context:** Found by three adversarial passes during /ship on `claude/slo-list-unit-visibility-f9f6ab` (v0.2.97.57). A single-unit attempt (commit 48646fc6) was reverted because it regressed Dynatrace. The cases, all under `apps/web/app/systems/[id]/config/components/edit-slo/`:
-- Display uses the record's unit (`storedThresholdUnit`, `hooks/useEditSLOForm.ts` init). Validation and helper text use the selected panel's (`thresholdUnitFormat`). The save converts in the record's unit, else the panel's (`hooks/useEditSLOHandlers.ts` `unitFor`), and labels the result with the panel's (`configuration.yAxesFormat`). So a Grafana panel whose unit changed after the SLO was made converts into one unit and is labelled with another. The v0.2.97.57 id match (`configuration.panelId ?? configuration.id`) swaps in the live panel more often, so this is more reachable now.
+**Context:** Found by three adversarial passes during /ship on `claude/slo-list-unit-visibility-f9f6ab` (v0.2.97.58). A single-unit attempt (commit 48646fc6) was reverted because it regressed Dynatrace. The cases, all under `apps/web/app/systems/[id]/config/components/edit-slo/`:
+- Display uses the record's unit (`storedThresholdUnit`, `hooks/useEditSLOForm.ts` init). Validation and helper text use the selected panel's (`thresholdUnitFormat`). The save converts in the record's unit, else the panel's (`hooks/useEditSLOHandlers.ts` `unitFor`), and labels the result with the panel's (`configuration.yAxesFormat`). So a Grafana panel whose unit changed after the SLO was made converts into one unit and is labelled with another. The v0.2.97.58 id match (`configuration.panelId ?? configuration.id`) swaps in the live panel more often, so this is more reachable now.
 - A former trend SLO edited as avg: `metric_unit` is still `'%/h'`, so `storedThresholdUnit` returns it, nothing converts, and the helper text shows a converted value the save never stores.
 - **Duplicate** (`allowMetricChange`) to a percentunit panel: the #719 bare-number exception compares against the original record's unit, so `90` is stored unscaled under a percentunit label.
 - A trend record with no usable unit, switched to avg on a percentunit panel: same exception, and its premise ("the dialog showed a raw 0-1 value") does not hold.
@@ -2064,7 +2064,7 @@ Start by deciding the one unit at dialog open and once more when the live panel 
 
 **Why:** A unit code missing from the table converts nothing and rejects nothing, so `500ms` on Avg Active Threads is saved as 500. A new perf unit string added in the worker would reach `metric_unit` raw.
 
-**Context:** v0.2.97.57 started carrying these units onto perf-test panels. `unitLabel` returning `''` is what makes `convertThresholdToPanelUnit` pass the value through. Adding entries also gives those columns a unit in comparison tables, which `err/s` already does. `/metrics/ds-metrics/panels-by-dashboard` picks the unit with `MIN(s.unit)` across every run, so a legacy blank row hides the unit. That degrades safely, but taking the latest run's unit is more correct.
+**Context:** v0.2.97.58 started carrying these units onto perf-test panels. `unitLabel` returning `''` is what makes `convertThresholdToPanelUnit` pass the value through. Adding entries also gives those columns a unit in comparison tables, which `err/s` already does. `/metrics/ds-metrics/panels-by-dashboard` picks the unit with `MIN(s.unit)` across every run, so a legacy blank row hides the unit. That degrades safely, but taking the latest run's unit is more correct.
 
 **Effort:** S
 **Priority:** P3
