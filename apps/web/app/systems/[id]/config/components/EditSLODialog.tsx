@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { usePathname } from 'next/navigation';
 import {
   Dialog,
   DialogTitle,
@@ -34,6 +35,9 @@ export default function EditSLODialog({
   workload,
   onSLOUpdated,
 }: EditSLODialogProps) {
+  // The save dialog's "this test run" option reads the run from the URL (useEditSLOHandlers).
+  const onTestRunPage = usePathname()?.startsWith('/test-runs/') ?? false;
+
   // Form state hook
   const {
     sloFormData,
@@ -153,6 +157,7 @@ export default function EditSLODialog({
       {/* Save Configuration Dialog */}
       <SLOSaveDialog
         open={showSaveDialog}
+        showCurrentRun={onTestRunPage}
         onClose={() => setShowSaveDialog(false)}
         onConfirm={handleSaveDialogConfirm}
         selectedOption={saveDialogOption}

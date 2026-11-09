@@ -252,6 +252,18 @@ describe('getRequirementValuePlaceholder', () => {
     const placeholder = getRequirementValuePlaceholder({ yAxesFormat: 'ms' });
     expect(placeholder).toMatch(/^e\.g\. 500/);
   });
+
+  // #721: 'e.g. 500s' and 'e.g. 500%' (on a 0-1 panel) suggested values nobody means.
+  it.each([
+    ['ms', 'e.g. 500 ms'],
+    ['s', 'e.g. 0.5 s'],
+    ['percentunit', 'e.g. 90 %'],
+    ['percent', 'e.g. 90 %'],
+    ['short', 'e.g. 100'],
+    ['currencyUSD', 'e.g. 100'],
+  ])('suggests a realistic value for a %s panel', (yAxesFormat, expected) => {
+    expect(getRequirementValuePlaceholder({ yAxesFormat })).toBe(expected);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -268,6 +280,18 @@ describe('getRequirementValueHelperText', () => {
     const text = getRequirementValueHelperText('500ms', null);
     // The text should mention "Unit:" with some label
     expect(text).toMatch(/Unit:/i);
+  });
+
+  it('shows the converted value when the typed unit differs from the panel unit (#718)', () => {
+    expect(getRequirementValueHelperText('500ms', { yAxesFormat: 's' })).toBe('500 ms = 0.5 s');
+  });
+
+  it('explains why a unit cannot be used (#718)', () => {
+    expect(getRequirementValueHelperText('90%', { yAxesFormat: 's' })).toMatch(/can't be compared/);
+  });
+
+  it('does not convert for a trend', () => {
+    expect(getRequirementValueHelperText('5%', { yAxesFormat: 's' }, 'trend')).not.toMatch(/can't be compared/);
   });
 
   it('should return expected unit text when panel has a format but value has no unit', () => {

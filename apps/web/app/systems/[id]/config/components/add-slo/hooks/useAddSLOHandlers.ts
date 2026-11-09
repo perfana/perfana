@@ -8,7 +8,8 @@ import {  UseAddSLOHandlersProps, UseAddSLOHandlersReturn } from '../types';
 import {
   validateSLOForm,
   isFormValid as checkFormValid,
-  parseValueWithUnit,
+  toStoredThresholdValue,
+  thresholdUnitFormat,
 } from '../utils/slo-validators';
 
 export function useAddSLOHandlers({
@@ -57,18 +58,13 @@ export function useAddSLOHandlers({
       const grafanaPanel = selPanel && !isDynatraceMetric(selPanel) ? selPanel : null;
       const dynMetric = selPanel && isDynatraceMetric(selPanel) ? selPanel : null;
 
-      // Handle percentunit conversion - divide by 100 if panel uses percentunit format
-      let processedRequirementValue = sloFormData.requirementValue;
-      // A trend threshold is %/h whatever the panel's unit, so the percentunit scaling must not touch it.
-      if (grafanaPanel?.yAxesFormat === 'percentunit' && sloFormData.evaluateType !== 'trend') {
-        const parsedValue = parseValueWithUnit(sloFormData.requirementValue);
-        if (parsedValue.value && !isNaN(Number(parsedValue.value))) {
-          processedRequirementValue = String(Number(parsedValue.value) / 100);
-          if (parsedValue.unit) {
-            processedRequirementValue += parsedValue.unit;
-          }
-        }
-      }
+      // Strip the unit suffix and convert it to the panel's unit (percentunit stores 0-1).
+      // The same unit validateSLOForm checked against, so what passed validation is what is stored.
+      const unitFormat = thresholdUnitFormat(sloFormData);
+      const processedRequirementValue = toStoredThresholdValue(sloFormData.requirementValue, unitFormat);
+      const processedDefaultValue = sloFormData.validateWithDefaultIfNoData
+        ? toStoredThresholdValue(sloFormData.validateWithDefaultIfNoDataValue, unitFormat)
+        : null;
 
       // Build payload based on source
       let payload;
@@ -106,9 +102,7 @@ export function useAddSLOHandlers({
             matchPattern: sloFormData.matchPattern,
             invertMatchPattern: sloFormData.invertMatchPattern,
             validateWithDefaultIfNoData: sloFormData.validateWithDefaultIfNoData,
-            validateWithDefaultIfNoDataValue: sloFormData.validateWithDefaultIfNoData
-              ? sloFormData.validateWithDefaultIfNoDataValue
-              : null,
+            validateWithDefaultIfNoDataValue: processedDefaultValue,
           },
         };
       } else {
@@ -147,9 +141,7 @@ export function useAddSLOHandlers({
             matchPattern: sloFormData.matchPattern,
             invertMatchPattern: sloFormData.invertMatchPattern,
             validateWithDefaultIfNoData: sloFormData.validateWithDefaultIfNoData,
-            validateWithDefaultIfNoDataValue: sloFormData.validateWithDefaultIfNoData
-              ? sloFormData.validateWithDefaultIfNoDataValue
-              : null,
+            validateWithDefaultIfNoDataValue: processedDefaultValue,
           },
         };
       }

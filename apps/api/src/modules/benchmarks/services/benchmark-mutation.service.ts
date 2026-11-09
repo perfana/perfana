@@ -41,6 +41,21 @@ export type {
  */
 const isDuplicateTarget = isDuplicateSloTargetError;
 
+/**
+ * The DTO types `requirementValue` as a number but nothing validates it, and the web form used to post
+ * the threshold with its unit suffix ("500ms"). `Number()` turned that into NaN, Postgres `numeric`
+ * stored it, and the SLO could never be evaluated (#717). Refuse anything that is not a finite number.
+ */
+function assertFiniteRequirementValue(value: unknown): void {
+  if (value === undefined || value === null) return;
+  if (typeof value === 'string' && value.trim() === '') {
+    throw new BadRequestException('requirementValue must be a finite number');
+  }
+  if (!Number.isFinite(Number(value))) {
+    throw new BadRequestException('requirementValue must be a finite number');
+  }
+}
+
 /** The body is an untyped inline DTO, so the range check lives here beside minApdexScore's. `null` means reset to the default. The controller rethrows HttpExceptions as-is. */
 function assertApdexMinSamples(value: number | null | undefined): void {
   if (value === undefined || value === null) return;
@@ -177,6 +192,7 @@ export class BenchmarkMutationService {
    * Validates user has access to the system_under_test before creating.
    */
   async create(userId: string, roles: string[], dto: CreateBenchmarkDto): Promise<Benchmark> {
+    assertFiniteRequirementValue(dto.requirementValue);
     try {
       // Validate user has access to the system and capture it to inherit org/team
       const system = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
@@ -185,13 +201,17 @@ export class BenchmarkMutationService {
         dto.applicationDashboardId,
         dto.tags,
       );
+      // The dashboard knows its instance; the client's value is a fallback ('Default' from the web form, #720).
+      const grafanaInstance =
+        (dto.applicationDashboardId && (await this.tagHelper.grafanaInstanceLabelOf(dto.applicationDashboardId))) ||
+        dto.grafanaInstance;
 
       const benchmark = this.benchmarkRepo.create({
         system_under_test_id: dto.systemUnderTestId,
         test_environment: dto.testEnvironment,
         workload: dto.workload,
         source: dto.source,
-        grafana_instance: dto.grafanaInstance,
+        grafana_instance: grafanaInstance,
         dashboard_label: dto.dashboardLabel,
         dashboard_id: dto.dashboardId,
         dashboard_uid: dto.dashboardUid,
@@ -263,6 +283,7 @@ export class BenchmarkMutationService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async update(id: string, userId: string, roles: string[], dto: UpdateBenchmarkDto): Promise<Benchmark | null> {
+    assertFiniteRequirementValue(dto.requirementValue);
     try {
       const existing = await this.queryService.findOne(id, userId, roles);
       if (!existing) return null;
@@ -295,6 +316,8 @@ export class BenchmarkMutationService {
       if (dto.applicationDashboardId && dto.applicationDashboardId !== existing.application_dashboard_id) {
         updateData.application_dashboard_id = dto.applicationDashboardId;
         updateData.metrics_source_id = await this.tagHelper.metricsSourceIdOf(dto.applicationDashboardId);
+        const grafanaInstance = await this.tagHelper.grafanaInstanceLabelOf(dto.applicationDashboardId);
+        if (grafanaInstance) updateData.grafana_instance = grafanaInstance;
       }
 
       await withRequestEm(this.benchmarkRepo).update(id, updateData as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);

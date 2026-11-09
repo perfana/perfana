@@ -154,3 +154,22 @@ describe('updateSlo surfaces a server refusal', () => {
     expect(submittedError(setValidationErrors as jest.Mock)).toBe('Failed to fetch');
   });
 });
+
+// #720: a no-change save set grafana_instance to 'Default' and prefixed the title with the
+// dashboard label. Dashboard and Metric are locked in Edit, so those fields are not sent at all.
+describe('fields Edit cannot change are left to the server', () => {
+  it.each(['grafana', 'dynatrace'])('omits grafanaInstance, configTitle and panelTitle for a %s SLO', async (source) => {
+    mockFetch.mockResolvedValue(okResponse());
+
+    const { result } = setup({ ...formData, source, enabled: true });
+    await act(async () => {
+      result.current.handleSaveDialogConfirm('none');
+    });
+
+    const body = JSON.parse((mockFetch.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body).not.toHaveProperty('grafanaInstance');
+    expect(body).not.toHaveProperty('configTitle');
+    expect(body).not.toHaveProperty('panelTitle');
+    expect(body).toMatchObject({ requirementValue: '5', applicationDashboardId: expect.any(String) });
+  });
+});

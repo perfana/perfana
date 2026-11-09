@@ -1,7 +1,7 @@
 import { SloPanel } from '../types';
-import { getUnit } from '@/lib/units';
+import { getUnit, unitLabel } from '@/lib/units';
 import { EvaluateTypeOption, RequirementOperatorOption, SourceOption } from '../types';
-import { parseValueWithUnit } from './slo-validators';
+import { parseValueWithUnit, convertThresholdInput } from './slo-validators';
 
 /**
  * Source options for SLO configuration
@@ -147,21 +147,38 @@ export function getSourceOption(value: string): SourceOption | null {
 /**
  * Get placeholder text for requirement value input
  */
+/** A realistic threshold per panel unit; '500 s' or '500 %' on a 0-1 panel suggested nonsense (#721). */
+const PLACEHOLDER_VALUES: Record<string, string> = {
+  ns: '500000', 'µs': '500', ms: '500', dtdurationms: '500', s: '0.5', dtdurations: '0.5', m: '5', h: '1', d: '1',
+  percent: '90', percentunit: '90',
+  bytes: '1048576', decbytes: '1000000', kbytes: '512', deckbytes: '500', mbytes: '512', decmbytes: '500',
+  gbytes: '2', decgbytes: '2',
+};
+
 export function getRequirementValuePlaceholder(selectedPanel: SloPanel | null | undefined): string {
   const effectiveUnitFormat = selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
   if (effectiveUnitFormat) {
-    const unit = getUnit(effectiveUnitFormat);
-    return `e.g. 500${unit.format || ''}`;
+    return `e.g. ${PLACEHOLDER_VALUES[effectiveUnitFormat] ?? '100'} ${unitLabel(effectiveUnitFormat)}`.trim();
   }
-  return 'e.g. 500ms, 0.95%, 2GB, 50req/s';
+  return 'e.g. 500ms, 95%, 2GB, 50req/s';
 }
 
 /**
  * Get helper text for requirement value input
  */
-export function getRequirementValueHelperText(value: string, selectedPanel: SloPanel | null | undefined): string {
-  const detectedUnit = getDetectedUnit(value);
+export function getRequirementValueHelperText(
+  value: string,
+  selectedPanel: SloPanel | null | undefined,
+  evaluateType?: string
+): string {
   const effectiveUnitFormat = selectedPanel?.yAxesFormat || selectedPanel?.metricUnit;
+  // Say what will be stored when the typed unit differs from the panel's, or why it can't be.
+  const result = convertThresholdInput(value, evaluateType === 'trend' ? undefined : effectiveUnitFormat);
+  if (result && 'error' in result) return result.error;
+  if (result?.from && result.to && unitLabel(result.from) !== unitLabel(result.to)) {
+    return `${parseValueWithUnit(value.trim()).value} ${unitLabel(result.from)} = ${result.value} ${unitLabel(result.to)}`;
+  }
+  const detectedUnit = getDetectedUnit(value);
   const expectedUnit = effectiveUnitFormat ? getUnit(effectiveUnitFormat) : null;
 
   if (detectedUnit) {

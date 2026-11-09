@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.97.56] - 2026-11-09
+## [0.2.97.57] - 2026-11-09
 
 ### Added
 - **ADAPT (anomaly detection) templates on a profile.** A profile's page has a new **ADAPT templates** tab. A template there applies only to runs whose tags match the profile, in the profile's organization, so JVM and .NET services in one organization can get different template sets. For the same dashboard match it comes before the organization's and the install-wide templates; two matching profiles are decided by profile name. A run with no matching tag gets only the organization and install-wide templates, so a workload whose runs carry different tags from one run to the next switches between the two sets. Templates can be added under a provisioned (read-only) profile too. Templates of every scope now carry a **Profile**, **Organization** or **Install-wide** badge, and **Copy to another scope** offers your profiles as targets.
@@ -19,7 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Upgrade notes.**
   - **Migration 1823** adds `profile_id` to the template table and rebuilds its unique index with the profile in the key. It needs no data fix-up: no existing template changes identity.
   - **Do not roll back below this version while profile templates exist.** An older API reads a profile template as an organization template of the profile's organization and applies it to every run there. Migration 1823's `down()` deletes profile templates before restoring the old index. **Remove every `profile:` item from `template_ds_compare_configs.yaml` before rolling back**, with or without `down()`: an older API ignores the key and provisions the item for its stated organization, or for the whole install when none is named.
-  - **The profiles pages and every template read need migration 1823.** Until it has run, the profile list and the template pages answer 500, a profile's page answers 404 (Profile not found), template provisioning fails that boot, and completed runs skip the template applier. All of it heals once the migration has run.
+  - **The profiles pages and every template read need migration 1823.** Until it has run, the profile list, the template pages and `classify-metric` answer 500, a profile's page answers 404 (Profile not found), template provisioning fails, and completed runs skip the template applier. The pages and the applier recover once the migration has run; template provisioning runs only at API start, so restart the API after the migration (the usual deploy order) or file templates stay unapplied until the next restart.
+
+## [0.2.97.56] - 2026-11-09
+
+### Added
+- **The report builder offers to save your changes back to the template.** When a report started from a template has sections added, removed, moved, retitled or reconfigured, **Generate Report** first asks whether to save those changes to the template: *Save and generate*, *Generate without saving*, or *Keep editing*. The template is saved before the report is queued, so a failed save (no permission, say) leaves you in the builder with the error and nothing generated. Turning on **Save as template** skips the question, since the report is being saved as a new template.
+- **Leaving the builder with unsaved template changes asks first.** Cancel, Escape, a click outside the dialog, **Back to Template** and the browser's Back button all show the same question, with *Save to template*, *Discard changes* or *Keep editing*. A reload or tab close gets the browser's own "leave site?" prompt. A change that is put back counts as no change, and a report started from scratch is never asked about.
 
 ## [0.2.97.55] - 2026-11-08
 

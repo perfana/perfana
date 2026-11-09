@@ -9,8 +9,7 @@ import {
   UseEditSLOHandlersProps,
   UseEditSLOHandlersReturn,
 } from '../types';
-import { validateSLOForm, isFormValid as checkFormValid, processPercentunitValue } from '../utils/slo-validators';
-import { getEffectiveUnitFormat } from '../utils/slo-formatters';
+import { validateSLOForm, isFormValid as checkFormValid, toStoredThresholdValue, storedThresholdUnit } from '../utils/slo-validators';
 
 export function useEditSLOHandlers({
   benchmark,
@@ -96,15 +95,15 @@ export function useEditSLOHandlers({
       try {
         setSloFormLoading(true);
 
-        // Handle percentunit conversion - divide by 100 if panel uses percentunit format
-        // A trend threshold is %/h whatever the panel's unit, so the percentunit scaling must not touch it.
-        const effectiveUnitFormat = sloFormData.evaluateType === 'trend' ? undefined : getEffectiveUnitFormat(sloFormData.selectedPanel);
-        const processedRequirementValue = processPercentunitValue(sloFormData.requirementValue, effectiveUnitFormat);
+        // Strip/convert the suffix and scale percentunit back to 0-1, in the unit the dialog displayed
+        // the value in. The evaluate type is the edited one: a trend is %/h and is never scaled.
+        const effectiveUnitFormat = storedThresholdUnit({ ...benchmark, evaluate_type: sloFormData.evaluateType });
+        const processedRequirementValue = toStoredThresholdValue(sloFormData.requirementValue, effectiveUnitFormat);
 
         // Handle percentunit conversion for default value too
         let processedDefaultValue = sloFormData.validateWithDefaultIfNoDataValue;
         if (sloFormData.validateWithDefaultIfNoData) {
-          processedDefaultValue = processPercentunitValue(sloFormData.validateWithDefaultIfNoDataValue, effectiveUnitFormat);
+          processedDefaultValue = toStoredThresholdValue(sloFormData.validateWithDefaultIfNoDataValue, effectiveUnitFormat);
         }
 
         const payload = {
@@ -112,7 +111,9 @@ export function useEditSLOHandlers({
           testEnvironment: environment,
           workload: workload,
           source: sloFormData.source,
-          grafanaInstance: sloFormData.selectedDashboard?.grafanaInstance?.label || 'Default',
+          // Dashboard and Metric are locked in Edit, so the Grafana instance, config title and panel
+          // title are not sent: the API keeps the stored ones. Rebuilding them here overwrote the
+          // instance with 'Default' (the real dashboard row has no label) and prefixed the title (#720).
           dashboardLabel:
             sloFormData.source === 'dynatrace'
               ? sloFormData.selectedDashboard?.dashboardLabel || ''
@@ -128,14 +129,6 @@ export function useEditSLOHandlers({
             sloFormData.source === 'dynatrace'
               ? sloFormData.selectedPanel?.applicationDashboardId || benchmark.application_dashboard_id || ''
               : sloFormData.selectedDashboard?.id || '',
-          configTitle:
-            sloFormData.source === 'dynatrace'
-              ? `${sloFormData.selectedDashboard?.dashboardLabel || 'Dashboard'} - ${sloFormData.selectedPanel?.panelTitle || 'Metric'}`
-              : `${sloFormData.selectedDashboard?.dashboard_label || 'Dashboard'} - ${sloFormData.selectedPanel?.title || 'Metric'}`,
-          panelTitle:
-            sloFormData.source === 'dynatrace'
-              ? sloFormData.selectedPanel?.panelTitle || ''
-              : sloFormData.selectedPanel?.title || '',
           evaluateType: sloFormData.evaluateType,
           requirementOperator: sloFormData.requirementOperator,
           requirementValue: processedRequirementValue,

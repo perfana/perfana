@@ -1,5 +1,5 @@
 import { SloPanel } from '../types';
-import { getUnit } from '@/lib/units';
+import { getUnit, convertThresholdToPanelUnit, type ThresholdConversion } from '@/lib/units';
 import { SLOFormData, ValidationErrors, ParsedValueWithUnit } from '../types';
 
 /**
@@ -71,9 +71,11 @@ export function validateSLOForm(sloFormData: SLOFormData): ValidationErrors {
     errors.requirementValue = 'Requirement value is required';
   } else {
     // Validate requirement value is numeric (with optional unit)
-    const parsedValue = parseValueWithUnit(sloFormData.requirementValue);
-    if (!parsedValue.value || isNaN(Number(parsedValue.value))) {
+    const result = convertThresholdInput(sloFormData.requirementValue, thresholdUnitFormat(sloFormData));
+    if (!result) {
       errors.requirementValue = 'Requirement value must be a valid number';
+    } else if ('error' in result) {
+      errors.requirementValue = result.error;
     }
   }
 
@@ -83,9 +85,11 @@ export function validateSLOForm(sloFormData: SLOFormData): ValidationErrors {
       errors.validateWithDefaultIfNoDataValue = 'Default value is required when "Use Default If No Data" is enabled';
     } else {
       // Validate that default value is also numeric if it contains a value
-      const parsedDefaultValue = parseValueWithUnit(sloFormData.validateWithDefaultIfNoDataValue);
-      if (!parsedDefaultValue.value || isNaN(Number(parsedDefaultValue.value))) {
+      const result = convertThresholdInput(sloFormData.validateWithDefaultIfNoDataValue, thresholdUnitFormat(sloFormData));
+      if (!result) {
         errors.validateWithDefaultIfNoDataValue = 'Default value must be a valid number';
+      } else if ('error' in result) {
+        errors.validateWithDefaultIfNoDataValue = result.error;
       }
     }
   }
@@ -117,24 +121,34 @@ export function isFormValid(
 }
 
 /**
- * Process requirement value for percentunit format
- * Converts percentage to decimal (e.g., 95 -> 0.95)
+ * The unit an SLO's threshold is stored in: the panel's, except for a trend, which is
+ * %/h whatever the panel measures and so has nothing to convert against.
  */
-export function processPercentunitValue(value: string, unitFormat: string | undefined): string {
-  if (unitFormat !== 'percentunit') {
-    return value;
-  }
+export function thresholdUnitFormat(sloFormData: Pick<SLOFormData, 'selectedPanel' | 'evaluateType'>): string | undefined {
+  if (sloFormData.evaluateType === 'trend') return undefined;
+  return sloFormData.selectedPanel?.yAxesFormat || sloFormData.selectedPanel?.metricUnit || undefined;
+}
 
-  const parsedValue = parseValueWithUnit(value);
-  if (parsedValue.value && !isNaN(Number(parsedValue.value))) {
-    // Convert percentage (e.g., 95) to decimal (e.g., 0.95) for percentunit
-    let processedValue = String(Number(parsedValue.value) / 100);
-    if (parsedValue.unit) {
-      processedValue += parsedValue.unit;
-    }
-    return processedValue;
-  }
-  return value;
+const DECIMAL = /^-?(\d+(\.\d*)?|\.\d+)$/;
+
+/** Parse "500ms" and convert it to `unitFormat`; null when the input is not a number. */
+export function convertThresholdInput(value: string, unitFormat: string | undefined): ThresholdConversion | null {
+  const parsed = parseValueWithUnit(value.trim());
+  // A plain decimal only: Number() also takes '0x10', '1e3' and 'Infinity' (#721).
+  if (!DECIMAL.test(parsed.value)) return null;
+  return convertThresholdToPanelUnit(Number(parsed.value), parsed.unitId, unitFormat);
+}
+
+/**
+ * Turn what the user typed into the number the API stores: the suffix is stripped (the API
+ * coerces with Number(), so "500ms" used to be saved as NaN, #717) and converted to the
+ * panel's unit (#718), so "500ms" on a seconds panel is stored as 0.5 and 95 on a
+ * percentunit panel as 0.95. Input that is not a number, or whose unit cannot be converted,
+ * is returned unchanged for validation and the API to reject.
+ */
+export function toStoredThresholdValue(value: string, unitFormat: string | undefined): string {
+  const result = convertThresholdInput(value, unitFormat);
+  return result && !('error' in result) ? String(result.value) : value;
 }
 
 /**
