@@ -201,13 +201,17 @@ export class BenchmarkMutationService {
         dto.applicationDashboardId,
         dto.tags,
       );
+      // The dashboard knows its instance; the client's value is a fallback ('Default' from the web form, #720).
+      const grafanaInstance =
+        (dto.applicationDashboardId && (await this.tagHelper.grafanaInstanceLabelOf(dto.applicationDashboardId))) ||
+        dto.grafanaInstance;
 
       const benchmark = this.benchmarkRepo.create({
         system_under_test_id: dto.systemUnderTestId,
         test_environment: dto.testEnvironment,
         workload: dto.workload,
         source: dto.source,
-        grafana_instance: dto.grafanaInstance,
+        grafana_instance: grafanaInstance,
         dashboard_label: dto.dashboardLabel,
         dashboard_id: dto.dashboardId,
         dashboard_uid: dto.dashboardUid,
@@ -312,6 +316,8 @@ export class BenchmarkMutationService {
       if (dto.applicationDashboardId && dto.applicationDashboardId !== existing.application_dashboard_id) {
         updateData.application_dashboard_id = dto.applicationDashboardId;
         updateData.metrics_source_id = await this.tagHelper.metricsSourceIdOf(dto.applicationDashboardId);
+        const grafanaInstance = await this.tagHelper.grafanaInstanceLabelOf(dto.applicationDashboardId);
+        if (grafanaInstance) updateData.grafana_instance = grafanaInstance;
       }
 
       await withRequestEm(this.benchmarkRepo).update(id, updateData as unknown as Parameters<typeof this.benchmarkRepo.update>[1]);
