@@ -870,8 +870,12 @@ fields the current winning template names. Eight things that are easy to undo:
    exists. Because the run's tags choose the winner and owned rows are rebuilt on every completion, a
    workload whose runs carry different tags flips between template sets, and each flip that changes the
    config fires the stale trigger; that is the profile's contract (design Open Question 4), not a bug to
-   guard against. A tie between two profiles is decided by profile name and reported apart from id ties
-   (`decided by profile name:`), leaving the existing `decided by template id:` text untouched.
+   guard against. What is NOT the contract: the result is stored per workload and ADAPT reads it when
+   the run's analysis starts (`CompareConfigCache`, possibly Queued behind `HeavyStageMutex`), so a
+   differently tagged completion in between, or a re-evaluate of an older run, judges that run on the
+   other set; recording each run's matched profiles is filed in TODOS.md. A tie between two profiles is
+   decided by profile name and reported apart from id ties (`decided by profile name:`), leaving the
+   existing `decided by template id:` text untouched.
 5. **`higherIsBetter` is named through `config_overrides` first.** A template that omits it leaves the
    row's own direction, where the merge used to write `null`. The `higher_is_better` column still
    counts when set and the key is missing, and that fallback is load-bearing, not a leftover: it is
@@ -980,8 +984,13 @@ The export is `serializeTemplates` over every template row, so it is the whole f
 one would prune what it leaves out. It is admin-only at the guard (`@AdminOnly()`) and again in the
 service. Profile rows are handed to it with their profile's current organization and name: the
 organization counts towards the file-level `organizationId` decision (a file-level one the profile is not
-in would skip the item on the next boot), and the item is written as `profile: <name>` with no
-organization of its own.
+in would skip the item on the next boot), and the item is written as `profile: <name>`, plus its
+profile's `organizationId` when the file spans several organizations. That second half is what stops a
+profile name re-created in another organization from claiming the template: profile names are one
+install-wide namespace, and without a stated organization the mismatch check never runs (v0.2.97.56,
+/ship review). On the provisioning side, `profileId`, `profileName` and `profiles` are refused rather than
+warned about, since ignoring a misspelt scope key widens the template; and an unresolved or mismatched
+profile item spares from the prune only the templates of profiles that no resolved item reaches.
 
 ### An artificial Dynatrace dashboard is per-workload, but its unique constraint is not
 

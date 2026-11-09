@@ -4416,6 +4416,86 @@ rebuild-to-base, so this is a design change.
 
 **Depends on:** nothing.
 
+### Judge a run on the profile templates its own tags chose (P2)
+
+**What:** Record the profiles a completing run matched, and have analyze and re-evaluate re-apply the
+golden path for that run's tags under the `sut:env:workload` scope lock before ADAPT reads the config.
+
+**Why:** Profile templates are chosen by the completing run's tags but stored per workload in
+`ds_compare_config`, and ADAPT reads them when the run's analysis starts (`CompareConfigCache`), which
+can wait as Queued behind `HeavyStageMutex`. A differently tagged completion of the same workload in
+between, or a re-evaluate of an older run, judges that run on the other set. Before v0.2.97.56 the set
+changed only when a template was edited, so ordering did not matter. Raised by the /ship red-team
+review of PR #716 (2026-11-09); documented as a caveat in the reference page and apps/api/CLAUDE.md.
+
+**Effort:** M (human ~2d / CC ~1h) **Priority:** P2 **Depends on:** nothing.
+
+### `profiles.yaml` upserts a profile by name across organizations (P2)
+
+**What:** Make profile provisioning refuse, rather than take over, a profile of the same name in another
+organization (or key it on organization plus name).
+
+**Why:** `provisionProfiles` upserts by name and overwrites `organizationId`
+(`provisioning.service.ts`). Since v0.2.97.56 a profile's ADAPT templates follow its current
+organization, so a `profiles.yaml` entry whose name collides with another tenant's UI profile now moves
+that tenant's templates too, along with its dashboards and SLOs as before. Raised by the /ship red-team
+review of PR #716.
+
+**Effort:** S (human ~4h / CC ~20min) **Priority:** P2 **Depends on:** nothing.
+
+### Profile dashboards resolve a Grafana instance by label across organizations (P2)
+
+**What:** Scope the `grafanaInstanceRepo` lookups by label in `ProfilesService.createDashboard`,
+`updateDashboard` and `findDashboardsByProfileId` to the profile's organization.
+
+**Why:** `grafana_instances.label` has no unique constraint and duplicate labels across organizations are
+required (root CLAUDE.md, "The first-row class"), so these `findOne`/`find` by label can match another
+tenant's instance: an org admin who guesses a dashboard uid and label can validate against it and read
+its name and tags back. Left out of the v0.2.97.56 profile-scoping fix because it assumes a profile's
+organization always equals its Grafana instance's, which was not verified against provisioned data; if
+that is wrong, scoping breaks dashboard creation. grafana-sync already resolves the label in the run's
+organization (`dashboard-finder.service.ts`). Also: profile names are unique install-wide, so create and
+rename answer "already exists" for a name another tenant holds (a schema change, since
+`profile_grafana_dashboards.profile` is keyed on the name).
+
+**Effort:** S (human ~4h / CC ~25min) **Priority:** P2 **Depends on:** confirming profile org = instance org.
+
+### ADAPT templates: label profile copy targets with their organization (P3)
+
+**What:** In the panel's Copy dialog, show `Profile jvm · Acme` and list the template's own organization's
+profiles first, as organization targets already name their organization.
+
+**Why:** `fetchProfiles()` is unfiltered, so a global admin sees every profile on the install and a member
+of several organizations all of theirs; copying to "Profile jvm" gives no hint which tenant receives the
+template. Raised by the /ship red-team review of PR #716.
+
+**Effort:** S (human ~2h / CC ~15min) **Priority:** P3 **Depends on:** nothing.
+
+### ADAPT templates tab polish and a component test for the panel (P3)
+
+**What:** From the /ship design review of PR #716, left out as polish: the panel's nested Card inside the
+tab Card (two borders), its Add button on the right while the sibling tabs lead with theirs on the left,
+its own filled Snackbar beside the page's standard one, the empty state's `<h6>` and "in this scope" copy,
+a first-load error with no Retry and an empty Card under it, the read-only view drawn as a disabled form
+(about 2.7:1), the profile badge above the tab copy repeating what the page already says, the long
+delete-confirmation sentence, the tab label's casing ("ADAPT templates" beside Title Case siblings), the
+hard-coded gradient on the page's other Add buttons, and `GET /profiles` fetched on every panel mount for
+copy targets alone. Also the one coverage gap the /ship audit left: `AdaptTemplatesPanel`'s save, copy,
+delete and load-error handlers have no component test (they moved out of the page untested).
+
+**Effort:** S (human ~1d / CC ~45min) **Priority:** P3 **Depends on:** nothing.
+
+### No CHECK keeps `profile_id` NULL on system-scoped template rows (P3)
+
+**What:** Add `CHECK (system_under_test_id IS NULL OR profile_id IS NULL)` to
+`provisioned_template_ds_compare_configs`, beside 1822's `ck_..._panel`.
+
+**Why:** Only system-scoped rows travel in a SUT bundle (`bySut`), and no writer sets `profile_id` on them
+today, but nothing enforces it: a system-scoped row carrying a `profile_id` would FK-fail (23503) and abort
+an import into an environment without that profile. Raised by the /ship data-migration review of PR #716.
+
+**Effort:** XS **Priority:** P3 **Depends on:** a new migration.
+
 ## Completed
 
 ### A landed card-link could not be recovered after a tab switch, and its key omitted the run

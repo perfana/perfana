@@ -538,6 +538,30 @@ differs from the body in these places; the code, `apps/api/CLAUDE.md` and
    organization and install-wide templates, and a workload whose runs are tagged inconsistently flips
    between template sets on each completion, marking results stale when the effective config changes.
 
+Changed at /ship review (2026-11-09), each decided by the user:
+
+9. **The export pins a profile item to its organization in a mixed file**, reversing the "never writes
+   one on them" half of deviation 4. Profile names are one install-wide namespace, so a name deleted or
+   renamed in one organization and re-created in another would otherwise claim the template on the next
+   boot; with the organization written, the item fails deviation 4's mismatch check instead. A
+   single-organization file still carries it once at the top. An older API that ignores `profile` then
+   widens such an item only to its organization, never to the install.
+10. **A mismatched or unresolved profile item spares only unreached profiles from the prune.** S14's
+    suppression covered every profile template, on every boot until the file was fixed, so one stale name
+    froze every profile's prune install-wide. It now spares only the templates of profiles no resolved item
+    reaches; an organization mismatch counts as unresolved for this, so a renamed profile is protected even
+    when another organization has taken its old name.
+11. **`profileId`, `profileName` and `profiles` are refused, not warned about.** Ignoring an unknown key is
+    harmless for an override, but ignoring a misspelt scope key widens the template to its organization or
+    the install.
+12. **The profile routes were scoped to the caller's organizations in the same PR.** `GET/PUT/DELETE
+    /profiles/:id` and the profile dashboard and SLO routes checked only "org admin in any organization";
+    with the cascade and tag-driven selection added here, that let one tenant's admin delete or retarget
+    another's ADAPT templates.
+13. **Known residue (TODOS.md):** templates are stored per workload and ADAPT reads them when the run's
+    analysis starts, so a differently tagged completion in between, or a later re-evaluate, judges a run on
+    another set. Recording the run's matched profiles and re-applying under the scope lock is filed.
+
 ## Open Questions
 
 1. **`percentageThreshold` unit in YAML.** `config_data` stores a fraction (0.15), the form shows a

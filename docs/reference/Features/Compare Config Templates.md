@@ -87,17 +87,25 @@ organization matches no run.
 
 Its organization is the profile's. An `organizationId` on the item, or on the file, that names another
 organization (an explicit `null` included) skips the item with an error and keeps the template it
-already provisioned, because such a template could never reach the runs it names. Leave it out. The
-organization is read from the profile on every run and every request, so a profile moved to another
-organization takes its templates with it; it is not part of the template's identity.
+already provisioned, because such a template could never reach the runs it names. In a hand-written
+file you may leave it out; an exported file that spans several organizations writes it on every profile
+item, because profile names are one install-wide namespace: if the profile is deleted or renamed and
+another organization later creates a profile of that name, the item fails this check instead of
+attaching the template to the other organization's profile. The organization is read from the profile
+on every run and every request, so a profile moved to another organization takes its templates with it;
+it is not part of the template's identity.
 
-A profile that does not exist skips the item with a warning, and no provisioned **profile** template is
-pruned on that boot, since the item may be a renamed profile's. Organization and install-wide templates
-are pruned as usual.
+A profile that does not exist skips the item with a warning, and so does a misspelt `profile` key:
+`profileId`, `profileName` and `profiles` are refused rather than ignored like other unknown keys, because
+ignoring one would provision the item as an organization or install-wide template. While such an item is
+in the file, the prune spares the provisioned templates of every profile that no other item resolves,
+since the item may mean a renamed profile; an item whose organization is not its profile's spares them the
+same way. A profile the file still resolves by its current name is pruned as usual, and so are
+organization and install-wide templates. This lasts on every boot until the file is fixed.
 
 Deleting a profile deletes its templates, provisioned ones included (the profile page's delete
 confirmation says how many). A provisioned profile template comes back on the next boot only if the file
-still names the profile and the profile exists again.
+still names the profile and a profile of that name exists again in the same organization.
 
 To reach every dashboard, leave `dashboardUid` out. Written with no value (`dashboardUid:`) it is
 an error rather than a wildcard, so a value deleted by accident cannot turn an exact template into
@@ -159,7 +167,8 @@ each one. Templates created in the UI are never pruned. Nothing is pruned when:
 - `items` is not a list (`items:` with nothing after it reads as null);
 - any item's identity cannot be read (for example, it has neither `panelId` nor `panelTitle`, or its
   `organizationId` is not a uuid);
-- (profile templates only) an item names a profile that does not exist;
+- (profile templates only, and only those of profiles no other item resolves) an item names a profile
+  that does not exist, misspells the `profile` key, or names an organization that is not its profile's;
 - any template failed to write this boot.
 
 An explicit `items: []` is a declared empty state and prunes every provisioned template.
@@ -240,9 +249,9 @@ too. Writes are audit-logged as `provisioned-template-ds-compare-configs`.
 provisioned or created in the UI, in every organization and profile. Commit it in place of the installed
 file; a partial file would make the next boot prune the provisioned templates it leaves out. The order is
 install-wide, then organizations by id, then profiles by name. A profile template is written as
-`profile: <name>` and never names an organization. When every template, profile templates counted with
-their profile's organization, shares one organization the file carries it once at the top; otherwise each
-organization or install-wide item names its own (`null` for install-wide).
+`profile: <name>`. When every template, profile templates counted with their profile's organization,
+shares one organization the file carries it once at the top; otherwise every item names its own (`null`
+for install-wide), a profile item its profile's organization beside its name.
 
 The round trip, verified on a local stack:
 
@@ -257,7 +266,9 @@ export once; from then on export, provision, export is byte-identical.
 ## When templates are applied
 
 On every completed test run, inside the completion request and before ADAPT is queued, so the
-completing run is the first one judged on the result. A run closed by stale detection, because its
+completing run is normally the first one judged on the result. The result is stored per workload and ADAPT
+reads it when the run's analysis starts, which can wait behind other analyses, so with profile templates
+see the caveat below. A run closed by stale detection, because its
 client never posted completion, skips the applier (filed in TODOS.md). For each panel and metric a
 template can reach, the most specific template wins:
 
@@ -272,8 +283,10 @@ template can reach, the most specific template wins:
 Profile templates are chosen by the **completing run's** tags. A template-owned row is rebuilt on every
 completion from the winner for that run, so a workload whose runs are tagged differently from one run to
 the next switches between the profile's template and the organization's or install-wide one (or its own
-base) each time, and every switch that changes the configuration marks earlier ADAPT results stale. Tag a
-workload's runs consistently.
+base) each time, and every switch that changes the configuration marks earlier ADAPT results stale. Because
+the configuration is the workload's, not the run's, a run is judged on whatever set is in place when its
+analysis reads it: if a differently tagged run of the same workload completes before that, or you
+re-evaluate an older run later, it is judged on the other set. Tag a workload's runs consistently.
 
 What happens to the row depends on who last wrote it:
 
@@ -307,7 +320,13 @@ It is logged at warn when the applier takes over 5000 ms.
 - **Do not roll back below v0.2.97.56 while profile templates exist.** An older API knows nothing of
   `profile_id`: it reads a profile template as a template of the profile's organization, applies it to
   every run there and lists it with the organization's templates. Migration 1823's `down()` deletes
-  profile templates before restoring the old index.
+  profile templates before restoring the old index. **Remove every `profile:` item from
+  `template_ds_compare_configs.yaml` first**, whether or not `down()` runs: an older API ignores the
+  `profile` key with a warning and provisions the item as a template of its stated organization, or as an
+  install-wide one when the item and the file name none, and two profiles' templates for one panel
+  collapse into one.
+- **The profiles pages need migration 1823.** `GET /api/profiles` and `GET /api/profiles/:id` read the new
+  column, so they answer 500 between the API starting and the migration running.
 - **grafana-sync's profile matching fails closed** on a missing organization, as the template applier's
   does. Both organization columns are NOT NULL, so no real run or profile is affected.
 
