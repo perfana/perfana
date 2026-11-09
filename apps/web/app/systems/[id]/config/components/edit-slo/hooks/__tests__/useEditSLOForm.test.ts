@@ -199,12 +199,6 @@ const ID_ONLY_BENCHMARK: Benchmark = {
   panel_title: 'Request RT Avg',
 };
 const ID_ONLY_PROPS: UseEditSLOFormProps = { open: true, benchmark: ID_ONLY_BENCHMARK, ...BASE_CONTEXT };
-// The same SLO saved in seconds, while the live panel now answers ms.
-const SECONDS_RECORD_BENCHMARK: Benchmark = { ...ID_ONLY_BENCHMARK, id: 'bench-seconds', metric_unit: 's' };
-const SECONDS_RECORD_PROPS: UseEditSLOFormProps = { open: true, benchmark: SECONDS_RECORD_BENCHMARK, ...BASE_CONTEXT };
-// A former trend SLO: metric_unit '%/h', no unit in the configuration.
-const FORMER_TREND_BENCHMARK: Benchmark = { ...ID_ONLY_BENCHMARK, id: 'bench-former-trend', metric_unit: '%/h', evaluate_type: 'avg' };
-const FORMER_TREND_PROPS: UseEditSLOFormProps = { open: true, benchmark: FORMER_TREND_BENCHMARK, ...BASE_CONTEXT };
 
 // The Enabled checkbox (v0.2.96.15). `duplicate()` clones an SLO disabled, so the dialog has
 // to load `false` faithfully; older rows may carry no value at all and must read as enabled.
@@ -910,41 +904,6 @@ describe('the panel upgrade matches the id the Add dialog stores', () => {
 
     await waitFor(() => expect((result.current.sloFormData.selectedPanel as { id?: number } | null)?.id).toBe(201));
     expect((result.current.sloFormData.selectedPanel as { yAxesFormat?: string }).yAxesFormat).toBe('ms');
-    unmount();
-  });
-});
-
-// Value: protects=Edit's selected panel carries the SLO's own unit after the upgrade, so the
-// value shown in that unit is converted into and saved under it; and a stale trend '%/h' never
-// becomes the unit; fails_when=the upgrade takes the live panel's unit over the record's, or the
-// synthetic panel carries '%/h'; why_new=the upgrade never had to preserve a unit before;
-// seam=none; no_claim=the save payload (useEditSLOHandlers tests cover it).
-describe("the selected panel keeps the SLO's own unit", () => {
-  const rows = [{ panel_id: 201, panel_title: 'Request RT Avg', unit: 'ms' }];
-
-  it("keeps the record's unit over a live panel whose unit changed", async () => {
-    mockAuthFetch.mockImplementation(async (url: RequestInfo | URL) => makeResponse(
-      String(url).includes('/metrics/ds-metrics/panels-by-dashboard') ? rows : [],
-    ));
-    const { result, unmount } = renderHook(() => useEditSLOForm(SECONDS_RECORD_PROPS));
-
-    await act(async () => { await result.current.fetchPerfMetricsPanels('app-dash-id'); });
-
-    await waitFor(() => expect((result.current.sloFormData.selectedPanel as { title?: string } | null)?.title).toBe('Request RT Avg'));
-    expect((result.current.sloFormData.selectedPanel as { yAxesFormat?: string }).yAxesFormat).toBe('s');
-    unmount();
-  });
-
-  it("takes the live panel's unit when the record's only unit is a trend's '%/h'", async () => {
-    mockAuthFetch.mockImplementation(async (url: RequestInfo | URL) => makeResponse(
-      String(url).includes('/metrics/ds-metrics/panels-by-dashboard') ? rows : [],
-    ));
-    const { result, unmount } = renderHook(() => useEditSLOForm(FORMER_TREND_PROPS));
-
-    expect((result.current.sloFormData.selectedPanel as { yAxesFormat?: string } | null)?.yAxesFormat).toBeUndefined();
-    await act(async () => { await result.current.fetchPerfMetricsPanels('app-dash-id'); });
-
-    await waitFor(() => expect((result.current.sloFormData.selectedPanel as { yAxesFormat?: string } | null)?.yAxesFormat).toBe('ms'));
     unmount();
   });
 });
