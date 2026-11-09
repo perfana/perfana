@@ -2093,3 +2093,13 @@ What is **not** closed: nothing stops the seventh site. The lint rule that would
 class, and the two unique indexes (`grafana_instances(organization_id, label)`,
 `dynatrace_queries(application_dashboard_id, label)`) that would make most of it
 unrepresentable, are filed in TODOS.md.
+
+**A child id in the request body is the same class one level down** (v0.2.97.59). An SLO's
+`applicationDashboardId` was resolved by id alone and its Grafana instance label, tags and metrics
+source copied into the SLO, while only `systemUnderTestId` had been authorized.
+`BenchmarkTagHelper.findInScope` now puts the authorized system **and** environment in the `where`,
+and a foreign id gets the same 400 as a missing one. Two details carry over to any such lookup: guard
+every scope value before the query, because TypeORM drops an undefined key and the lookup quietly
+widens to every system; and an update that may move the parent (`systemUnderTestId` on
+`PUT /benchmarks/:id`) has to authorize the new parent first, or the scope is the caller's choice.
+`benchmark-dashboard-scope.spec.ts` covers both and fails if either guard is removed.
