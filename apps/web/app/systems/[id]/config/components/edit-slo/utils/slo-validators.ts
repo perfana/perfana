@@ -136,7 +136,26 @@ export function toStoredThresholdValue(value: string, unitFormat: string | undef
 }
 
 /**
- * Convert decimal to percentage for display (e.g., 0.95 -> 95)
+ * The unit an existing SLO's threshold is stored in. Edit both shows the value and saves it
+ * through this one function, so opening and saving without a change keeps the number (#719).
+ * It used to read `configuration` for display but the panel (which falls back to the
+ * `metric_unit` column) for save, so a percentunit row whose unit lived only in the column
+ * was shown as 0.9 and saved as 0.009, a hundred times smaller on every save. The panel
+ * cannot be changed in Edit, so the SLO's own record is the source. A trend is %/h.
+ */
+export function storedThresholdUnit(benchmark: {
+  evaluate_type?: string;
+  metric_unit?: string;
+  configuration?: { yAxesFormat?: string; metricUnit?: string } | null;
+}): string | undefined {
+  if (benchmark.evaluate_type === 'trend') return undefined;
+  return benchmark.configuration?.yAxesFormat || benchmark.configuration?.metricUnit || benchmark.metric_unit || undefined;
+}
+
+/**
+ * Convert a stored percentunit decimal to the percentage the user edits (0.95 -> 95), the
+ * inverse of toStoredThresholdValue. Every value is scaled, 1 (100%) and above included:
+ * the checks compare the panel's 0-1 values against it, so nothing is stored as 0-100.
  */
 export function convertDecimalToPercentageForDisplay(
   value: number | string | undefined,
@@ -147,8 +166,7 @@ export function convertDecimalToPercentageForDisplay(
   }
 
   const numValue = Number(value);
-  if (!isNaN(numValue) && numValue < 1) {
-    return (numValue * 100).toString();
-  }
-  return value.toString();
+  if (!Number.isFinite(numValue)) return value.toString();
+  // toPrecision drops float noise: 0.009 * 100 is 0.8999999999999999.
+  return String(Number((numValue * 100).toPrecision(12)));
 }
