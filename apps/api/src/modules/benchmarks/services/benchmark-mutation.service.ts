@@ -41,6 +41,21 @@ export type {
  */
 const isDuplicateTarget = isDuplicateSloTargetError;
 
+/**
+ * The DTO types `requirementValue` as a number but nothing validates it, and the web form used to post
+ * the threshold with its unit suffix ("500ms"). `Number()` turned that into NaN, Postgres `numeric`
+ * stored it, and the SLO could never be evaluated (#717). Refuse anything that is not a finite number.
+ */
+function assertFiniteRequirementValue(value: unknown): void {
+  if (value === undefined || value === null) return;
+  if (typeof value === 'string' && value.trim() === '') {
+    throw new BadRequestException('requirementValue must be a finite number');
+  }
+  if (!Number.isFinite(Number(value))) {
+    throw new BadRequestException('requirementValue must be a finite number');
+  }
+}
+
 /** The body is an untyped inline DTO, so the range check lives here beside minApdexScore's. `null` means reset to the default. The controller rethrows HttpExceptions as-is. */
 function assertApdexMinSamples(value: number | null | undefined): void {
   if (value === undefined || value === null) return;
@@ -177,6 +192,7 @@ export class BenchmarkMutationService {
    * Validates user has access to the system_under_test before creating.
    */
   async create(userId: string, roles: string[], dto: CreateBenchmarkDto): Promise<Benchmark> {
+    assertFiniteRequirementValue(dto.requirementValue);
     try {
       // Validate user has access to the system and capture it to inherit org/team
       const system = await this.validateSystemAccess(dto.systemUnderTestId, userId, roles);
@@ -263,6 +279,7 @@ export class BenchmarkMutationService {
    * Full permission checks will be enabled when Phase 4 adds organization_id column.
    */
   async update(id: string, userId: string, roles: string[], dto: UpdateBenchmarkDto): Promise<Benchmark | null> {
+    assertFiniteRequirementValue(dto.requirementValue);
     try {
       const existing = await this.queryService.findOne(id, userId, roles);
       if (!existing) return null;

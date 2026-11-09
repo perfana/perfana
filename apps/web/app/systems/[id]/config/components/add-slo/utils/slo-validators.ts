@@ -117,24 +117,19 @@ export function isFormValid(
 }
 
 /**
- * Process requirement value for percentunit format
- * Converts percentage to decimal (e.g., 95 -> 0.95)
+ * Turn what the user typed into the number the API stores.
+ * Strips a unit suffix ("500ms" -> "500"): the API coerces with Number(), so a suffix
+ * used to be saved as NaN (#717). A percentunit panel stores 0-1, so 95 -> 0.95.
+ * The suffix is not converted to the panel's unit; a non-numeric input is returned
+ * unchanged so validation/the API can reject it.
  */
-export function processPercentunitValue(value: string, unitFormat: string | undefined): string {
-  if (unitFormat !== 'percentunit') {
+export function toStoredThresholdValue(value: string, unitFormat: string | undefined): string {
+  const parsed = parseValueWithUnit(value.trim());
+  if (parsed.value === '' || !Number.isFinite(Number(parsed.value))) {
     return value;
   }
-
-  const parsedValue = parseValueWithUnit(value);
-  if (parsedValue.value && !isNaN(Number(parsedValue.value))) {
-    // Convert percentage (e.g., 95) to decimal (e.g., 0.95) for percentunit
-    let processedValue = String(Number(parsedValue.value) / 100);
-    if (parsedValue.unit) {
-      processedValue += parsedValue.unit;
-    }
-    return processedValue;
-  }
-  return value;
+  const n = Number(parsed.value);
+  return String(unitFormat === 'percentunit' ? n / 100 : n);
 }
 
 /**

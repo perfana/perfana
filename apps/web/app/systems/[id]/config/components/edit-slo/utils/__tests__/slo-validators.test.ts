@@ -4,7 +4,7 @@
  * Tests:
  * - validateSLOForm: validation of the SLO form data
  * - isFormValid: boolean validity check for form submission
- * - processPercentunitValue: converts display percentage to stored decimal
+ * - toStoredThresholdValue: converts display percentage to stored decimal
  * - convertDecimalToPercentageForDisplay: converts stored decimal to display percentage
  * - parseValueWithUnit: parses numeric values with optional unit strings
  * - SUPPORTED_PANEL_TYPES: constant export
@@ -13,7 +13,7 @@
 import {
   validateSLOForm,
   isFormValid,
-  processPercentunitValue,
+  toStoredThresholdValue,
   convertDecimalToPercentageForDisplay,
   parseValueWithUnit,
   SUPPORTED_PANEL_TYPES,
@@ -195,35 +195,53 @@ describe('convertDecimalToPercentageForDisplay', () => {
 });
 
 // ---------------------------------------------------------------------------
-// processPercentunitValue
+// toStoredThresholdValue
 // ---------------------------------------------------------------------------
 
-describe('processPercentunitValue', () => {
+describe('toStoredThresholdValue', () => {
   describe('Happy Path Scenarios — percentunit format', () => {
     it('should convert "95" to "0.95" for percentunit format', () => {
-      expect(processPercentunitValue('95', 'percentunit')).toBe('0.95');
+      expect(toStoredThresholdValue('95', 'percentunit')).toBe('0.95');
     });
 
     it('should convert "50" to "0.5" for percentunit format', () => {
-      expect(processPercentunitValue('50', 'percentunit')).toBe('0.5');
+      expect(toStoredThresholdValue('50', 'percentunit')).toBe('0.5');
     });
 
     it('should convert "100" to "1" for percentunit format', () => {
-      expect(processPercentunitValue('100', 'percentunit')).toBe('1');
+      expect(toStoredThresholdValue('100', 'percentunit')).toBe('1');
     });
   });
 
   describe('Non-percentunit formats', () => {
     it('should return the original value unchanged for ms format', () => {
-      expect(processPercentunitValue('500', 'ms')).toBe('500');
+      expect(toStoredThresholdValue('500', 'ms')).toBe('500');
     });
 
     it('should return the original value unchanged when format is undefined', () => {
-      expect(processPercentunitValue('500', undefined)).toBe('500');
+      expect(toStoredThresholdValue('500', undefined)).toBe('500');
     });
 
     it('should return the original value unchanged when format is empty string', () => {
-      expect(processPercentunitValue('500', '')).toBe('500');
+      expect(toStoredThresholdValue('500', '')).toBe('500');
+    });
+  });
+
+  // #717: the suffix used to reach the API, where Number('0.5s') stored NaN.
+  describe('Unit suffix is stripped', () => {
+    it.each([
+      ['0.5s', 's', '0.5'],
+      ['500ms', 's', '500'],
+      ['500 ms', undefined, '500'],
+      [' 0.5 ', 's', '0.5'],
+      ['90%', 'percentunit', '0.9'],
+      ['95 percent', 'percentunit', '0.95'],
+    ])('%s on a %s panel -> %s', (input, format, expected) => {
+      expect(toStoredThresholdValue(input, format)).toBe(expected);
+    });
+
+    it('leaves a non-numeric value for validation to reject', () => {
+      expect(toStoredThresholdValue('abc', 's')).toBe('abc');
     });
   });
 });

@@ -8,7 +8,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Repository } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { BenchmarkMutationService } from './benchmark-mutation.service';
 import { BenchmarkQueryService } from './benchmark-query.service';
 import { BenchmarkTagHelper } from './benchmark-tag.helper';
@@ -430,6 +430,36 @@ describe('BenchmarkMutationService', () => {
 
       const [, data] = (benchmarkRepo.update as jest.Mock).mock.calls[0];
       expect(data).not.toHaveProperty('enabled');
+    });
+  });
+
+  // #717: the web form posted "500ms"; Number() made it NaN and Postgres numeric stored it.
+  describe('requirementValue must be finite', () => {
+    const base = { systemUnderTestId: 'sut-1', testEnvironment: 'production', workload: 'loadTest', evaluateType: 'avg' };
+
+    it.each(['500ms', '0.5s', 'abc', '', NaN, Infinity])('create() refuses %p with 400 and writes nothing', async (value) => {
+      await expect(service.create(userId, roles, { ...base, requirementValue: value } as never)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(benchmarkRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('update() refuses "500ms" with 400 and writes nothing', async () => {
+      await expect(service.update('bm-x', userId, roles, { requirementValue: '500ms' } as never)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(benchmarkRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('create() still accepts a numeric string', async () => {
+      const created = buildEntity({ id: 'bm-num' });
+      benchmarkRepo.create.mockReturnValue(created);
+      benchmarkRepo.save.mockResolvedValue(created);
+
+      await service.create(userId, roles, { ...base, requirementValue: '0.5' } as never);
+
+      const [payload] = (benchmarkRepo.create as jest.Mock).mock.calls[0];
+      expect(payload).toMatchObject({ requirement_value: 0.5 });
     });
   });
 
