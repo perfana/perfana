@@ -180,7 +180,9 @@ describe('TestRunsMetricsService', () => {
       );
     });
 
-    it('should apply ignore and ignoreMeanDiffSmallerThan overrides', async () => {
+    // ignoreMeanDiffSmallerThan was retired in v0.2.97.64 (ADAPT never read it): a template that still
+    // carries it in config_overrides no longer writes it into config_data.
+    it('should apply the ignore override, and no longer the retired ignoreMeanDiffSmallerThan', async () => {
       const dashboard = {
         id: 'dash-1',
         systemUnderTestId: 'sut-uuid-1',
@@ -211,12 +213,10 @@ describe('TestRunsMetricsService', () => {
 
       expect(compareConfigRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          config_data: expect.objectContaining({
-            ignore: true,
-            ignoreMeanDiffSmallerThan: 10,
-          }),
+          config_data: expect.objectContaining({ ignore: true }),
         }),
       );
+      expect(compareConfigRepo.create.mock.calls[0][0].config_data).not.toHaveProperty('ignoreMeanDiffSmallerThan');
     });
 
     it('should skip creating config when it already exists', async () => {

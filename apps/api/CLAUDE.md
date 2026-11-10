@@ -881,7 +881,10 @@ fields the current winning template names. Eight things that are easy to undo:
    differently tagged completion in between, or a re-evaluate of an older run, judges that run on the
    other set; recording each run's matched profiles is filed in TODOS.md. A tie between two profiles is
    decided by profile name and reported apart from id ties (`decided by profile name:`), leaving the
-   existing `decided by template id:` text untouched.
+   existing `decided by template id:` text untouched. A completion call that omits `tags` keeps the run's stored
+   tags (v0.2.97.63): `UpdateTestRunHandler` used to write `data.tags || []`, which reverted every
+   profile-owned row of the workload on a CI step that did not repeat its tags. Keep the omission an
+   omission end to end; only an explicit `[]` clears them.
 5. **`higherIsBetter` is named through `config_overrides` first.** A template that omits it leaves the
    row's own direction, where the merge used to write `null`. The `higher_is_better` column still
    counts when set and the key is missing, and that fallback is load-bearing, not a leftover: it is
@@ -926,6 +929,13 @@ The applier runs inside the completion request, before ADAPT is queued, so the c
 first one judged on the re-merged config. Its summary line carries `rewrote=<rows> in <ms>ms` and is
 logged at warn past 5000 ms; each rewritten row fires the stale trigger, whose cost on a large install
 has not been measured.
+
+**`provisionProfiles` refuses a same-name profile in another organization than the file's** (v0.2.97.62),
+and the refused name is threaded through the rest of the boot (`refusedProfiles`): dashboards and SLOs
+skip it (both also compare the resolved profile's organization with their own file's), and the template
+resolver reads it as unresolved. Do not drop the threading because the profile step "already refused":
+a later file without `organizationId` would otherwise resolve the name straight to the other tenant's
+profile. A file with no organization still takes a profile over by name and leaves its organization be.
 
 On the provisioning side, three rules keep the prune from deleting templates the file still means:
 the organization id is validated as a uuid and lowercased before it enters the key (Postgres returns

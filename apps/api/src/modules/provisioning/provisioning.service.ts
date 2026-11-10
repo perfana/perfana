@@ -103,6 +103,17 @@ interface BenchmarkYaml {
   };
 }
 
+/**
+ * Whether a stored profile belongs to an organization other than the one a provisioning file names.
+ * A file with no organization names none, so nothing is "other" to it. Compared case-insensitively:
+ * Postgres returns a uuid lowercase and an operator may not have written it that way.
+ */
+const inOtherOrganization = (
+  profile: { organizationId?: string | null },
+  fileOrganizationId: string | null | undefined,
+): boolean =>
+  !!fileOrganizationId && (profile.organizationId ?? '').toLowerCase() !== fileOrganizationId.trim().toLowerCase();
+
 @Injectable()
 export class ProvisioningService implements OnApplicationBootstrap {
   private readonly logger = new Logger(ProvisioningService.name);
@@ -153,6 +164,10 @@ export class ProvisioningService implements OnApplicationBootstrap {
 
   async runProvisioning(dir: string): Promise<void> {
     const summary = { created: 0, updated: 0, skipped: 0, errors: 0 };
+    // Names profiles.yaml declares but refused to take over, because another organization owns a
+    // profile of that name. Nothing later in this boot may attach the file's dashboards, SLOs or
+    // templates to that other organization's profile.
+    const refusedProfiles = new Set<string>();
 
     // 1. Profiles (no dependencies)
     const profiles = this.loadYamlFile<ProfileYaml>(dir, 'profiles.yaml');
@@ -160,6 +175,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
       const result = await this.provisionProfiles(
         profiles.items,
         profiles.organizationId,
+        refusedProfiles,
       );
       this.mergeSummary(summary, result);
     }
@@ -173,6 +189,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
       const result = await this.provisionProfileDashboards(
         dashboards.items,
         dashboards.organizationId,
+        refusedProfiles,
       );
       this.mergeSummary(summary, result);
     }
@@ -186,6 +203,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
       const result = await this.provisionProfileBenchmarks(
         benchmarks.items,
         benchmarks.organizationId,
+        refusedProfiles,
       );
       this.mergeSummary(summary, result);
     }
@@ -199,6 +217,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
       const result = await this.provisionMetricClassifications(
         classifications.items,
         classifications.organizationId,
+        refusedProfiles,
       );
       this.mergeSummary(summary, result);
     }
@@ -259,9 +278,22 @@ export class ProvisioningService implements OnApplicationBootstrap {
     }
   }
 
+  /**
+   * Creates or takes over each profile the file declares, matched by name (unique across the
+   * install).
+   *
+   * A profile of that name in ANOTHER organization than the file's is refused, never taken over.
+   * Taking it over used to move it into the file's organization with the file's tags, and its
+   * dashboards, SLOs and ADAPT templates with it: an admin of organization B could create a profile
+   * under a name about to be added to the file for organization A, attach templates that suppress
+   * regressions, and on the next boot have them applied to A's runs. The refused name is added to
+   * `refusedProfiles` so the later files of the same boot do not attach anything to that profile.
+   * Renaming one of the two is the way out.
+   */
   async provisionProfiles(
     items: ProfileYaml[],
     organizationId?: string | null,
+    refusedProfiles: Set<string> = new Set(),
   ): Promise<{ created: number; updated: number; skipped: number; errors: number }> {
     const result = { created: 0, updated: 0, skipped: 0, errors: 0 };
 
@@ -270,6 +302,17 @@ export class ProvisioningService implements OnApplicationBootstrap {
         const existing = await withRequestEm(this.profileRepo).findOne({
           where: { name: item.name },
         });
+
+        if (existing && inOtherOrganization(existing, organizationId)) {
+          this.logger.error(
+            `Profile "${item.name}" not provisioned: a profile of that name already exists in organization ${existing.organizationId}, ` +
+              `not ${organizationId}. Profile names are unique across the install, so rename one of them. ` +
+              `Its dashboards, SLOs and ADAPT templates from the provisioning files are skipped this boot.`,
+          );
+          refusedProfiles.add(item.name);
+          result.errors++;
+          continue;
+        }
 
         if (existing) {
           await withRequestEm(this.profileRepo).update(existing.id, {
@@ -302,7 +345,8 @@ export class ProvisioningService implements OnApplicationBootstrap {
     }
 
     this.logger.log(
-      `Profiles: ${result.created} created, ${result.updated} updated, ${result.errors} errors`,
+      `Profiles: ${result.created} created, ${result.updated} updated, ${result.errors} errors` +
+        (refusedProfiles.size > 0 ? ` (refused, owned by another organization: ${[...refusedProfiles].map((n) => `"${n}"`).join(', ')})` : ''),
     );
     return result;
   }
@@ -310,10 +354,28 @@ export class ProvisioningService implements OnApplicationBootstrap {
   async provisionProfileDashboards(
     items: DashboardYaml[],
     organizationId?: string | null,
+    refusedProfiles: ReadonlySet<string> = new Set(),
   ): Promise<{ created: number; updated: number; skipped: number; errors: number }> {
     const result = { created: 0, updated: 0, skipped: 0, errors: 0 };
+    // A dashboard refers to its profile by name only. One in another organization than this file's
+    // must not receive the file's dashboard (stamped with this file's organization, at that).
+    const otherOrganization = organizationId
+      ? new Set(
+          (await withRequestEm(this.profileRepo).find({ select: ['name', 'organizationId'] }))
+            .filter((p) => inOtherOrganization(p, organizationId))
+            .map((p) => p.name),
+        )
+      : new Set<string>();
 
     for (const item of items) {
+      if (refusedProfiles.has(item.profile) || otherOrganization.has(item.profile)) {
+        this.logger.error(
+          `Dashboard "${item.dashboardName}" skipped: profile "${item.profile}" belongs to another organization than ` +
+            (otherOrganization.has(item.profile) ? `${organizationId}, which this file names` : 'the one profiles.yaml names'),
+        );
+        result.skipped++;
+        continue;
+      }
       try {
         const grafanaLabel = item.grafana ?? 'Default';
 
@@ -378,6 +440,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
   async provisionProfileBenchmarks(
     items: BenchmarkYaml[],
     organizationId?: string | null,
+    refusedProfiles: ReadonlySet<string> = new Set(),
   ): Promise<{ created: number; updated: number; skipped: number; errors: number }> {
     const result = { created: 0, updated: 0, skipped: 0, errors: 0 };
 
@@ -392,6 +455,15 @@ export class ProvisioningService implements OnApplicationBootstrap {
         if (!profile) {
           this.logger.warn(
             `Benchmark skipped: profile "${item.profile}" not found`,
+          );
+          result.skipped++;
+          continue;
+        }
+        // The SLO would be written under this file's organization onto another organization's profile.
+        if (refusedProfiles.has(item.profile) || inOtherOrganization(profile, organizationId)) {
+          this.logger.error(
+            `Benchmark skipped: profile "${item.profile}" belongs to organization ${profile.organizationId}, not ` +
+              (inOtherOrganization(profile, organizationId) ? `${organizationId}, which this file names` : 'the one profiles.yaml names'),
           );
           result.skipped++;
           continue;
@@ -541,6 +613,7 @@ export class ProvisioningService implements OnApplicationBootstrap {
   async provisionMetricClassifications(
     items: unknown[],
     organizationId?: string | null,
+    refusedProfiles: ReadonlySet<string> = new Set(),
   ): Promise<TemplateProvisioningSummary> {
     const result = { created: 0, updated: 0, unchanged: 0, takenOver: 0, pruned: 0, skipped: 0, errors: 0 };
     const label = (index: number) => `template_ds_compare_configs.yaml item ${index + 1}`;
@@ -550,7 +623,9 @@ export class ProvisioningService implements OnApplicationBootstrap {
     const profiles = new Map(
       (await withRequestEm(this.profileRepo).find({ select: ['id', 'name', 'organizationId'] })).map((p) => [p.name, p]),
     );
-    const resolveProfile = (name: string) => profiles.get(name);
+    // A name profiles.yaml refused this boot belongs to another organization's profile: an item
+    // naming it reads as unresolved, so it is skipped and the prune spares that name's templates.
+    const resolveProfile = (name: string) => (refusedProfiles.has(name) ? undefined : profiles.get(name));
 
     const declared = new Set<string>();
     let unidentified = 0;

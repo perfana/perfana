@@ -304,7 +304,7 @@ comments in 1799 and in "The consolidated schema's policy loops…" below that a
 
 ### A retargeted profile SLO goes unevaluated until the next sweep (P3)
 
-**Origin:** v0.2.97.62, propagating profile SLO edits.
+**Origin:** v0.2.97.65, propagating profile SLO edits.
 
 A source, uid-pattern or workload-pattern change cannot be applied in place, because which
 dashboards a profile SLO covers is decided by grafana-sync's sweep. `ProfilesService` disables the
@@ -987,7 +987,7 @@ that is a delete+insert on a compressed chunk, not an in-place update.
 **Priority:** P3
 **Origin:** red-team review on `feat/profile-perf-test-slos` (2026-09-22, v0.2.96.6). Both
 pre-existing for Grafana templates; a perf-test row fans out to N scenarios, so both now scale
-with scenario count. Edits and deletes of the profile SLO itself propagate since v0.2.97.62.
+with scenario count. Edits and deletes of the profile SLO itself propagate since v0.2.97.65.
 **Why:** (1) a row deleted in the SUT SLO table is re-created within 2 min while any run of the
 workload is inside the auto-config window (disabling it instead is the supported way out), and
 provisioned rows are not marked read-only in the SUT UI, so a person's edit silently takes the row
@@ -4298,23 +4298,47 @@ the first customer leaves provisioning.
 (`/settings/profiles/adapt-templates`) and the `/compare-templates` API. The action belongs in its
 table, beside the lock.
 
-### `ignoreMeanDiffSmallerThan` and `defaultValueIfControlGroupMissing` are written into compare configs and nothing reads them (P3)
+### Implement `defaultValueIfControlGroupMissing` in ADAPT, the anomaly card and the template dialog (P1)
 
-**What:** Either make ADAPT honour `config_data.ignoreMeanDiffSmallerThan` and
-`config_data.defaultValueIfControlGroupMissing`, or stop accepting them in
-`template_ds_compare_configs.yaml` and drop them from the applier.
+**What:** When a series has no control data (`control_exists` false in the ADAPT results CTE, so the
+result is `incomparable` today), and its compare config sets `defaultValueIfControlGroupMissing`, judge
+the run against that value as the control statistic instead. Record it in the result: the
+`ds_adapt_results.uses_default_value` and `default_value` columns already exist and are written as
+`false` / `NULL`. Expose the field in the anomaly card's settings form
+(`apps/web/app/test-runs/[id]/components/configuration-comparison/MetricConfigForm.tsx`) and move it out
+of the template dialog's "Stored but not yet read by ADAPT" section (`CompareTemplateDialog.tsx`), and
+show in the anomaly table and the report when a verdict was reached against the default rather than a
+real baseline.
 
-**Why:** The provisioning YAML, the golden-path applier and the anomaly card all carry both fields.
-`apps/worker/src` has no reference to `ignoreMeanDiffSmallerThan` at all, and both ADAPT result
-builders hard-code `false as uses_default_value, NULL as default_value` instead of reading the
-other, so an operator who sets either gets no effect and no warning. Pre-existing on main; found
-during the PR 1 coverage audit and the API contract review (2026-11-08).
+**Why:** Decided by the product owner (2026-11-10): the field is useful, unlike
+`ignoreMeanDiffSmallerThan`, which was removed in v0.2.97.64 because `absThreshold` covers it. Today the
+YAML, the applier and the anomaly card carry it and ADAPT ignores it, so a new series, or one whose
+baseline runs lack it, can never fail a run however far it moves.
 
-**Context:** `docs/reference/Features/Compare Config Templates.md` marks both as stored but unread.
-The closest existing behaviour is `absoluteThreshold`, which ADAPT does apply.
+**Context, three things to settle before writing the SQL:**
+1. **`0` is written everywhere as "unset", so the feature cannot read `0` as "set to 0".** The anomaly
+   card's save writes `defaultValueIfControlGroupMissing: configData.defaultValueIfControlGroupMissing || 0`
+   (`anomaly-detection/hooks/useAnomalyDetection.ts`), the golden-path applier's `INSERT_BASE` carries `0`
+   (`golden-path-resolver.ts`), and the worker seeds `DEFAULT_VALUE_IF_CONTROL_GROUP_MISSING = 0`
+   (`constants/performance-metrics.ts`, `metrics-builder.ts`). Honouring them as written would turn every
+   `incomparable` result on those rows into a comparison against zero, and most into regressions. Make
+   absent/`null` the "off" state, stop the three writers from defaulting to `0`, and decide what existing
+   rows mean: a migration that strips a stored `0` (and fires `trigger_mark_stale_on_config_update` on
+   every row it touches, so batch it and say so in the CHANGELOG), or a new key with the old one retired
+   the way `ignoreMeanDiffSmallerThan` was. Templates have the same question: only an explicit
+   `defaultValueIfControlGroupMissing` in a file or a UI template names it.
+2. **Where it plugs in.** `control_exists` folds in the sample floor (`ADAPT_MIN_SAMPLE_COUNT`, root
+   CLAUDE.md), so "missing" covers both no control row and too few samples; decide whether the default
+   applies to the second. Every threshold check and the conclusion label key on `control_exists`
+   (`apps/worker/src/pipelines/helpers/adapt/results/sql-fragments.ts`), and the tracked-results builder
+   has its own copy (`tracked-results-sql-builder.ts`); both need it. A percentage or IQR check against a
+   default has no control spread, so decide which checks are valid against a constant (absolute and
+   percentage are, IQR is not).
+3. **The run verdict.** A regression judged against a default can fail a run; say so in the result's
+   reason so nobody chases a baseline that does not exist, and pin it in the ADAPT golden files
+   (`apps/worker/src/test/golden-files/`).
 
-**Depends on:** nothing.
-
+**Effort:** M (human ~2d / CC ~1.5h) **Priority:** P1 **Depends on:** nothing.
 ### Retire `POST /test-runs/:testRunId/classify-metric` and its system-scoped template rows (P3)
 
 **What:** Remove the classify-metric endpoint (`test-runs-analysis.controller.ts:370`,
@@ -4444,21 +4468,6 @@ organization, so only direct API callers hit it. Raised by the /ship adversarial
 
 **Effort:** XS **Priority:** P3 **Depends on:** nothing.
 
-### Strict `@IsUUID()` refuses the Default Organization in six more DTOs (P2)
-
-**What:** Use `@IsUUID('loose')` (as `CreateProfileDto.organizationId` does since v0.2.97.57) for every
-organization or team id validated with the strict default: `teams/dto/team.dto.ts`
-(`CreateTeamDto.organization_id`, required), `api-keys/dto/create-api-key.dto.ts`,
-`alerts/dto/alert-tag-filter.dto.ts`, `audit/dto/audit-filter.dto.ts`, `events/dto/event.dto.ts`, and the
-metrics-sources create/update DTOs (`organizationId`, `teamId`).
-
-**Why:** The seeded Default Organization is `00000000-0000-0000-0000-000000000001`, which has no RFC
-version or variant nibble, so class-validator's strict `isUUID` refuses it: creating a team in the Default
-Organization answers 400, and so does any of the others that names it. `ParseUUIDPipe` and the template
-codec are already loose. Found by the /ship adversarial review of PR #716, outside its scope.
-
-**Effort:** XS (human ~1h / CC ~10min) **Priority:** P2 **Depends on:** nothing.
-
 ### Runs closed by stale detection never run the golden-path applier (P3)
 
 **What:** Call `applyGoldenPathClassifications` from `TestRunsStaleDetectionService` before it enqueues
@@ -4509,34 +4518,6 @@ review of PR #716 (2026-11-09); documented as a caveat in the reference page and
 
 **Effort:** M (human ~2d / CC ~1h) **Priority:** P2 **Depends on:** nothing.
 
-### `profiles.yaml` upserts a profile by name across organizations (P1)
-
-**What:** Make profile provisioning refuse, rather than take over, a profile of the same name in another
-organization (or key it on organization plus name).
-
-**Why:** `provisionProfiles` upserts by name and overwrites `organizationId`
-(`provisioning.service.ts`). Since v0.2.97.57 a profile's ADAPT templates follow its current
-organization, so a `profiles.yaml` entry whose name collides with another tenant's UI profile now moves
-that tenant's templates too, along with its dashboards and SLOs as before. Raised by the /ship red-team
-review of PR #716. The adversarial review raised it to P1 because it is also a deliberate route, not
-only an accident: an org-B admin can create a profile under a name about to be added to `profiles.yaml`
-(file-level organization A), attach templates (`ignore: true`, a large `absThreshold`) to key panels,
-and on the next boot the profile moves to A with the file's tags and B's templates suppress regressions
-on A's runs.
-
-**Effort:** S (human ~4h / CC ~20min) **Priority:** P1 **Depends on:** nothing.
-
-### A completion call that omits tags wipes the run's tags, and now its profile templates (P2)
-
-**What:** Make `update-test-run.handler.ts` keep the stored `tags` when the update payload omits them
-(today `tags: data.tags || []`), or confirm the CLI sends tags on every update.
-
-**Why:** Pre-existing, but since v0.2.97.57 the completing run's tags choose its profile ADAPT templates,
-so a completion call without tags reverts every profile-owned row of the workload (and with the applier's
-delete, removes the rows it inserted) and fires the stale trigger. Raised by the /ship adversarial review
-of PR #716.
-
-**Effort:** S (human ~2h / CC ~15min) **Priority:** P2 **Depends on:** nothing.
 
 ### Profile dashboards resolve a Grafana instance by label across organizations (P2)
 
@@ -4592,6 +4573,28 @@ an import into an environment without that profile. Raised by the /ship data-mig
 **Effort:** XS **Priority:** P3 **Depends on:** a new migration.
 
 ## Completed
+
+- **Remove `ignoreMeanDiffSmallerThan` from compare-config templates** — **Completed:** v0.2.97.64 (2026-11-10).
+  ADAPT never read it and `absThreshold` covers it (product owner, 2026-11-10). The template codec, the
+  applier and the template dialog no longer carry it; a file item that still names it is provisioned with
+  a warning pointing at `absThreshold`, and the API refuses it in a body. `defaultValueIfControlGroupMissing`,
+  filed with it in the same P3, is now its own P1 above.
+
+- **A completion call that omits tags wipes the run's tags, and now its profile templates** — **Completed:** v0.2.97.63 (2026-11-10).
+  An update that leaves `tags` out keeps the stored ones (`TestRunsMutationService` passes it through as
+  omitted, `UpdateTestRunHandler` falls back to the row's tags); an explicit `[]` still clears them. A create
+  still starts with none.
+
+- **Strict `@IsUUID()` refuses the Default Organization in six more DTOs** — **Completed:** v0.2.97.63 (2026-11-10).
+  Every organization and team id validated with the strict default is `@IsUUID('loose')`: the six the item
+  named plus `CreateSystemUnderTestDto`, found by sweeping the API for the same shape.
+  `src/common/validation/default-organization-uuid.spec.ts` pins all of them.
+
+- **`profiles.yaml` upserts a profile by name across organizations** — **Completed:** v0.2.97.62 (2026-11-10).
+  `provisionProfiles` refuses a same-name profile in another organization than the file's instead of
+  moving it, and the refused name is skipped by the dashboard, SLO and template files for the rest of the
+  boot. Keying profiles on organization plus name was not done: `profiles.name` stays install-wide unique.
+  A file without `organizationId` still takes a profile over by name, leaving its organization alone.
 
 - **The Edit SLO dialog decides its unit in more than one place** — **Completed:** v0.2.97.60 (2026-11-09).
   Edit holds one `thresholdUnit`, set from the record at open, from the live panel only when the

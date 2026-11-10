@@ -393,7 +393,7 @@ Two bugs came out with it. `insertBenchmarkBasedOnProfileBenchmark` never wrote
 (12 `max` SLOs on the dev DB); migration 1810 backfills it and verdicts may change on the next
 evaluation. And `mapAggregationTypeToField` had no `q50` key while both SLO dialogs offer it.
 
-Since v0.2.97.62 an edit or delete of the profile SLO reaches the rows it provisioned
+Since v0.2.97.65 an edit or delete of the profile SLO reaches the rows it provisioned
 (`ProfilesService.propagateToProvisioned` / `disableProvisioned`), with one ownership rule: a row
 is still the profile's while `updated_by IS NULL` — grafana-sync never sets it and every API write
 does, so a person's tweak wins and is never overwritten or switched off — and to rows in the profile's own

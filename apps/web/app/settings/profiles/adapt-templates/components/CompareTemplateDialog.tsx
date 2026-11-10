@@ -95,7 +95,7 @@ export function CompareTemplateDialog({
   }, [open, initial]);
 
   const patch = (p: Partial<TemplateFormState>) => setState((s) => ({ ...s, ...p }));
-  const numberField = (key: 'percentageThreshold' | 'iqrThreshold' | 'minSampleCount' | 'ignoreMeanDiffSmallerThan' | 'defaultValueIfControlGroupMissing') => ({
+  const numberField = (key: 'percentageThreshold' | 'iqrThreshold' | 'minSampleCount' | 'defaultValueIfControlGroupMissing') => ({
     set: state[key].set,
     onSet: (set: boolean) => patch({ [key]: { ...state[key], set } } as Partial<TemplateFormState>),
     text: state[key].text,
@@ -377,7 +377,7 @@ export function CompareTemplateDialog({
           <Accordion
             disableGutters
             elevation={0}
-            defaultExpanded={state.ignoreMeanDiffSmallerThan.set || state.defaultValueIfControlGroupMissing.set}
+            defaultExpanded={state.defaultValueIfControlGroupMissing.set}
             sx={{ mt: 1, '&:before': { display: 'none' }, border: 1, borderColor: 'divider', borderRadius: 1 }}
             slotProps={{ transition: { unmountOnExit: true } }}
           >
@@ -386,16 +386,8 @@ export function CompareTemplateDialog({
             </AccordionSummary>
             <AccordionDetails>
               <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 1 }}>
-                Kept so a template round-trips through the YAML file unchanged. ADAPT ignores both today.
+                Kept so a template round-trips through the YAML file unchanged. ADAPT does not apply it yet.
               </Typography>
-              {(() => {
-                const f = numberField('ignoreMeanDiffSmallerThan');
-                return (
-                  <OverrideRow label="Ignore mean difference below" set={f.set} disabled={locked} onSet={f.onSet}>
-                    {numberInput(f, 'Difference', errors.ignoreMeanDiffSmallerThan)}
-                  </OverrideRow>
-                );
-              })()}
               {(() => {
                 const f = numberField('defaultValueIfControlGroupMissing');
                 return (

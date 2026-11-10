@@ -384,7 +384,12 @@ export class TestRunsMutationService {
       completed: d.completed,
       ciBuildResultsUrl: d.CIBuildResultsUrl || d.buildResultsUrl,
       annotations: d.annotations ? [d.annotations] : [],
-      tags: d.tags || [],
+      // Omitted is not empty. An update that leaves `tags` out keeps the stored ones (the update
+      // handler falls back to them); a create starts with none. Since v0.2.97.57 the completing run's
+      // tags choose its profile ADAPT templates, so turning an omission into [] reverted every
+      // profile-owned compare config of the workload on a completion call that simply did not
+      // repeat its tags. An explicit [] still clears them.
+      tags: existingTestRun ? d.tags : d.tags || [],
       abort: d.abort || false,
       variables: d.variables || [],
       // Ownership tracking (use API key's organization)

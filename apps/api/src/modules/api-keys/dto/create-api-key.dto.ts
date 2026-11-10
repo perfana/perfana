@@ -39,7 +39,7 @@ export class CreateApiKeyDto {
     required: false,
   })
   @IsOptional()
-  @IsUUID()
+  @IsUUID('loose')
   organizationId?: string;
 }
 

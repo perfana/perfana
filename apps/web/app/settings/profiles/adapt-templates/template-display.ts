@@ -47,7 +47,6 @@ export function forcedFields(d: CompareTemplateDefinition): string[] {
   }
   if (has('absThreshold')) out.push(d.absThreshold === null ? 'No absolute threshold' : `Absolute threshold ${d.absThreshold}`);
   if (has('ignore')) out.push(d.ignore ? 'Ignored' : 'Not ignored');
-  if (has('ignoreMeanDiffSmallerThan')) out.push(`Ignore mean difference < ${d.ignoreMeanDiffSmallerThan}`);
   if (has('percentageThreshold')) out.push(`Percentage ${percent(d.percentageThreshold!)}`);
   if (has('iqrThreshold')) out.push(`IQR × ${d.iqrThreshold}`);
   if (has('aggregation')) out.push(optionLabel(AGGREGATION_OPTIONS, d.aggregation!));

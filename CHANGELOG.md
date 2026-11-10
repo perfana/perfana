@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.2.97.62] - 2026-11-10
+## [0.2.97.65] - 2026-11-10
 
 ### Fixed
 - **Editing a profile SLO now changes the SLOs it created.** Profile SLOs ("every scenario", "Dynatrace — all hosts" and Grafana templates) used to be written once: after a change to the profile SLO, every system kept judging the old panel or threshold. A change to the threshold, operator, aggregation, unit, match pattern or panel is now written to those SLOs straight away. For "Dynatrace — all hosts", each host gets its own panel for the new metric, and a host without that panel has its SLO switched off.
@@ -18,6 +18,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Known limitations
 - The system's SLO list does not show which SLOs come from a profile, and does not warn that editing one stops it following the profile.
 - A changed source or pattern takes effect from the next test run. Until then that profile SLO is not evaluated on the dashboards it covered.
+
+## [0.2.97.64] - 2026-11-10
+
+### Removed
+- **`ignoreMeanDiffSmallerThan` is gone from ADAPT templates.** ADAPT never read it, and an absolute threshold (`absThreshold`) is how a small mean difference is ignored. The template dialog no longer offers "Ignore mean difference below", and the API refuses the field with a message naming `absThreshold`. In `template_ds_compare_configs.yaml` an item that still sets it is provisioned without it and the API logs a warning, so existing files keep loading; delete the line to silence the warning. Templates that set it stop writing it into the panels' anomaly detection configs, so on the next completed run those panels' configs change once and their earlier ADAPT results are marked stale. Verdicts do not change, since nothing read the value.
+
+## [0.2.97.63] - 2026-11-10
+
+### Fixed
+- **A completion call that leaves out `tags` no longer clears the run's tags.** The test-run update endpoint (`POST /api/test`) treated a missing `tags` field as an empty list, so a CI step that posted `completed: true` without repeating the tags wiped them. Since v0.2.97.57 the completing run's tags choose its profile ADAPT templates, so such a call also reverted every profile-configured panel of the workload and marked its earlier results stale. An omitted `tags` now keeps the stored tags; sending `"tags": []` still clears them.
+- **The Default Organization can be named when creating a team, an API key, a system under test, a metrics source, an event or an alert tag filter, and in the audit log filter.** Its seeded id (`00000000-0000-0000-0000-000000000001`) is not a version-4 UUID, and these fields used the strict UUID check, so naming it answered 400. Organization and team ids are now checked the loose way, as profiles already were.
+
+## [0.2.97.62] - 2026-11-10
+
+### Security
+- **`profiles.yaml` no longer takes over a profile that belongs to another organization.** Provisioning matched profiles by name alone and, when the file named an organization, moved an existing profile of that name into it with the file's tags. Its dashboards, SLOs and, since v0.2.97.57, its ADAPT templates moved with it, so an admin of one organization could create a profile under a name about to be added to the file for another organization, attach templates that hide regressions, and have them applied to the other organization's runs after the next restart. Such a profile is now left alone and the API logs an error naming both organizations. For the rest of that boot, the files' dashboards, SLOs and templates for that name are skipped too, rather than being attached to the other organization's profile. Rename one of the two profiles to resolve it. A `profiles.yaml` without `organizationId` still takes a profile over by name and leaves it in its own organization.
 
 ## [0.2.97.61] - 2026-11-09
 
