@@ -24,6 +24,7 @@ import { isDuplicateSloTargetError } from '@perfana/shared/utils';
 import {
   DYNATRACE_HOSTS_PROFILE_SOURCE,
   DYNATRACE_BENCHMARK_SOURCE,
+  PROVISIONED_SLO_AUTO_DISABLED_KEY,
 } from '@perfana/shared/constants';
 import { GrafanaSyncAuditService } from '../audit/grafana-sync-audit.service';
 import { DashboardVariable } from './types';
@@ -497,8 +498,13 @@ export class AutoConfigUpdatesService {
         // Snapshot the pre-save state so the audit diff sees a faithful before
         // row resolved against Benchmark.auditableFields.
         const beforeSnapshot = Object.assign(new Benchmark(), existingBenchmark);
+        // Reached only for a row the system switched off (see BenchmarkProcessorService):
+        // switching it back on drops the marker.
+        const { [PROVISIONED_SLO_AUTO_DISABLED_KEY]: _autoDisabled, ...metadata } =
+          existingBenchmark.metadata ?? {};
         savedBenchmark = await this.benchmarkRepo.save({
           ...benchmarkData,
+          metadata,
           id: existingBenchmark.id,
         });
         wasCreated = false;
