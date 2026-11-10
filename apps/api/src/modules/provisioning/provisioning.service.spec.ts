@@ -1132,6 +1132,114 @@ describe('ProvisioningService', () => {
     });
   });
 
+  /**
+   * TODOS.md P1, "profiles.yaml upserts a profile by name across organizations".
+   * Value: protects=a profile another organization owns is never moved into the file's organization,
+   *   and nothing the provisioning files declare for that name is attached to it;
+   * fails_when=provisionProfiles takes the profile over by name (it moved with its dashboards, SLOs and
+   *   ADAPT templates, so another tenant's templates reached the file organization's runs), or a later
+   *   file resolves the refused name to the other organization's profile;
+   * why_new=nothing compared the stored profile's organization with the file's; seam=service, mocked repos.
+   */
+  describe('a profile name owned by another organization', () => {
+    const ORG_A = 'aaaaaaaa-0000-4000-8000-00000000000a';
+    const ORG_B = 'bbbbbbbb-0000-4000-8000-00000000000b';
+    const bProfile = { id: 'p-b', name: 'jvm', organizationId: ORG_B } as Profile;
+
+    it('refuses the takeover, leaves the profile untouched and records the name', async () => {
+      profileRepo.findOne.mockResolvedValue(bProfile);
+      const refused = new Set<string>();
+
+      const result = await service.provisionProfiles([{ name: 'jvm', tags: ['jvm'] }], ORG_A, refused);
+
+      expect(result).toEqual({ created: 0, updated: 0, skipped: 0, errors: 1 });
+      expect(profileRepo.update).not.toHaveBeenCalled();
+      expect(profileRepo.insert).not.toHaveBeenCalled();
+      expect([...refused]).toEqual(['jvm']);
+    });
+
+    it("still takes over its own organization's profile, whatever the uuid's case", async () => {
+      profileRepo.findOne.mockResolvedValue({ id: 'p-a', name: 'jvm', organizationId: ORG_A } as Profile);
+      const refused = new Set<string>();
+
+      const result = await service.provisionProfiles([{ name: 'jvm', tags: ['jvm'] }], ORG_A.toUpperCase(), refused);
+
+      expect(result).toEqual({ created: 0, updated: 1, skipped: 0, errors: 0 });
+      expect(profileRepo.update).toHaveBeenCalledWith('p-a', expect.objectContaining({ readOnly: true }));
+      expect(refused.size).toBe(0);
+    });
+
+    it('a file that names no organization keeps taking over by name, as before', async () => {
+      profileRepo.findOne.mockResolvedValue(bProfile);
+      const result = await service.provisionProfiles([{ name: 'jvm' }], null);
+      expect(result).toEqual({ created: 0, updated: 1, skipped: 0, errors: 0 });
+      expect(profileRepo.update).toHaveBeenCalledWith('p-b', expect.not.objectContaining({ organizationId: expect.anything() }));
+    });
+
+    it("writes none of the file's dashboards onto that profile", async () => {
+      profileRepo.find.mockResolvedValue([bProfile]);
+      const item = { profile: 'jvm', dashboardName: 'JVM', dashboardUid: 'jvm-uid' };
+
+      const result = await service.provisionProfileDashboards([item], ORG_A);
+      const refusedOnly = await service.provisionProfileDashboards([item], null, new Set(['jvm']));
+
+      expect(result).toEqual({ created: 0, updated: 0, skipped: 1, errors: 0 });
+      expect(refusedOnly).toEqual({ created: 0, updated: 0, skipped: 1, errors: 0 });
+      expect(dashboardRepo.insert).not.toHaveBeenCalled();
+      expect(dashboardRepo.update).not.toHaveBeenCalled();
+    });
+
+    it("writes none of the file's SLOs onto that profile", async () => {
+      profileRepo.findOne.mockResolvedValue(bProfile);
+      const item = { profile: 'jvm', dashboardUid: 'jvm-uid', panel: { id: 1 } };
+
+      const result = await service.provisionProfileBenchmarks([item], ORG_A);
+      const refusedOnly = await service.provisionProfileBenchmarks([item], null, new Set(['jvm']));
+
+      expect(result).toEqual({ created: 0, updated: 0, skipped: 1, errors: 0 });
+      expect(refusedOnly).toEqual({ created: 0, updated: 0, skipped: 1, errors: 0 });
+      expect(benchmarkRepo.insert).not.toHaveBeenCalled();
+      expect(dashboardRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('reads a template naming the refused profile as unresolved: skipped, and its templates kept', async () => {
+      profileRepo.find.mockResolvedValue([bProfile]);
+      // The template file names no organization, so without the refusal the item would resolve to
+      // organization B's profile and be written there.
+      templateRepo.find.mockResolvedValue([
+        { id: 'b-tmpl', profile_id: 'p-b', organization_id: ORG_B, dashboard_uid: 'jmeter-overview', regex: false,
+          panel_id: 9, metric_classification: 'x', config_overrides: {}, read_only: true } as unknown as ProvisionedTemplateDsCompareConfig,
+      ]);
+
+      const result = await service.provisionMetricClassifications(
+        [{ profile: 'jvm', dashboardUid: 'jmeter-overview', panelId: 5, metricClassification: 'RED_rate' }],
+        null,
+        new Set(['jvm']),
+      );
+
+      expect(templateRepo.insert).not.toHaveBeenCalled();
+      expect(templateRepo.delete).not.toHaveBeenCalled();
+      expect(result).toEqual({ created: 0, updated: 0, unchanged: 0, takenOver: 0, pruned: 0, skipped: 1, errors: 0 });
+    });
+
+    it('carries the refusal from profiles.yaml through the rest of the boot', async () => {
+      mockedFs.existsSync.mockImplementation((p: fs.PathLike) => /profiles\.yaml$|profile_benchmarks\.yaml$/.test(String(p)));
+      mockedFs.readFileSync.mockImplementation(((p: fs.PathLike) => String(p)) as never);
+      mockedYaml.load.mockImplementation(((content: string) =>
+        content.endsWith('profiles.yaml')
+          ? { organizationId: ORG_A, items: [{ name: 'jvm' }] }
+          : { items: [{ profile: 'jvm', dashboardUid: 'jvm-uid', panel: { id: 1 } }] }) as never);
+      profileRepo.findOne.mockResolvedValue(bProfile);
+
+      // The benchmarks file names no organization, so only the refusal can stop it.
+      await service.runProvisioning('/test');
+
+      expect(profileRepo.update).not.toHaveBeenCalled();
+      expect(benchmarkRepo.insert).not.toHaveBeenCalled();
+      expect(benchmarkRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('runProvisioning (integration)', () => {
     it('should process all YAML files in order', async () => {
       // Make directory exist

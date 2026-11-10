@@ -4521,23 +4521,6 @@ review of PR #716 (2026-11-09); documented as a caveat in the reference page and
 
 **Effort:** M (human ~2d / CC ~1h) **Priority:** P2 **Depends on:** nothing.
 
-### `profiles.yaml` upserts a profile by name across organizations (P1)
-
-**What:** Make profile provisioning refuse, rather than take over, a profile of the same name in another
-organization (or key it on organization plus name).
-
-**Why:** `provisionProfiles` upserts by name and overwrites `organizationId`
-(`provisioning.service.ts`). Since v0.2.97.57 a profile's ADAPT templates follow its current
-organization, so a `profiles.yaml` entry whose name collides with another tenant's UI profile now moves
-that tenant's templates too, along with its dashboards and SLOs as before. Raised by the /ship red-team
-review of PR #716. The adversarial review raised it to P1 because it is also a deliberate route, not
-only an accident: an org-B admin can create a profile under a name about to be added to `profiles.yaml`
-(file-level organization A), attach templates (`ignore: true`, a large `absThreshold`) to key panels,
-and on the next boot the profile moves to A with the file's tags and B's templates suppress regressions
-on A's runs.
-
-**Effort:** S (human ~4h / CC ~20min) **Priority:** P1 **Depends on:** nothing.
-
 ### A completion call that omits tags wipes the run's tags, and now its profile templates (P2)
 
 **What:** Make `update-test-run.handler.ts` keep the stored `tags` when the update payload omits them
@@ -4604,6 +4587,12 @@ an import into an environment without that profile. Raised by the /ship data-mig
 **Effort:** XS **Priority:** P3 **Depends on:** a new migration.
 
 ## Completed
+
+- **`profiles.yaml` upserts a profile by name across organizations** — **Completed:** v0.2.97.62 (2026-11-10).
+  `provisionProfiles` refuses a same-name profile in another organization than the file's instead of
+  moving it, and the refused name is skipped by the dashboard, SLO and template files for the rest of the
+  boot. Keying profiles on organization plus name was not done: `profiles.name` stays install-wide unique.
+  A file without `organizationId` still takes a profile over by name, leaving its organization alone.
 
 - **The Edit SLO dialog decides its unit in more than one place** — **Completed:** v0.2.97.60 (2026-11-09).
   Edit holds one `thresholdUnit`, set from the record at open, from the live panel only when the

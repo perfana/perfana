@@ -927,6 +927,13 @@ first one judged on the re-merged config. Its summary line carries `rewrote=<row
 logged at warn past 5000 ms; each rewritten row fires the stale trigger, whose cost on a large install
 has not been measured.
 
+**`provisionProfiles` refuses a same-name profile in another organization than the file's** (v0.2.97.62),
+and the refused name is threaded through the rest of the boot (`refusedProfiles`): dashboards and SLOs
+skip it (both also compare the resolved profile's organization with their own file's), and the template
+resolver reads it as unresolved. Do not drop the threading because the profile step "already refused":
+a later file without `organizationId` would otherwise resolve the name straight to the other tenant's
+profile. A file with no organization still takes a profile over by name and leaves its organization be.
+
 On the provisioning side, three rules keep the prune from deleting templates the file still means:
 the organization id is validated as a uuid and lowercased before it enters the key (Postgres returns
 it lowercase, so an upper-case spelling never matched its own row and flapped between insert and
