@@ -396,7 +396,8 @@ evaluation. And `mapAggregationTypeToField` had no `q50` key while both SLO dial
 Since v0.2.97.62 an edit or delete of the profile SLO reaches the rows it provisioned
 (`ProfilesService.propagateToProvisioned` / `disableProvisioned`), with one ownership rule: a row
 is still the profile's while `updated_by IS NULL` — grafana-sync never sets it and every API write
-does, so a person's tweak wins and is never overwritten or switched off. A delete disables (never
+does, so a person's tweak wins and is never overwritten or switched off — and to rows in the profile's own
+organization, since provisioning matches profiles by name across tenants. A delete disables (never
 deletes: the check results are run history); a threshold, evaluate-type, unit or panel change is
 written in place; a source, uid-pattern or workload-pattern change disables the rows with
 `metadata.autoDisabled` and the next sweep re-enables and re-syncs the ones still matched — the only
