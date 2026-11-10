@@ -49,7 +49,7 @@ export class CreateEventDto {
 
   @ApiPropertyOptional({ description: 'Organization ID to assign this event to' })
   @IsOptional()
-  @IsUUID()
+  @IsUUID('loose')
   organizationId?: string;
 }
 

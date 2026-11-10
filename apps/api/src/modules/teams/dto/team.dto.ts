@@ -4,7 +4,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class CreateTeamDto {
   @ApiProperty({ description: 'Organization ID this team belongs to' })
   @IsNotEmpty()
-  @IsUUID()
+  @IsUUID('loose')
   organization_id!: string;
 
   @ApiProperty({ description: 'Team name', example: 'Backend Team' })
@@ -35,7 +35,7 @@ export class UpdateTeamDto {
 
   @ApiPropertyOptional({ description: 'Organization ID' })
   @IsOptional()
-  @IsUUID()
+  @IsUUID('loose')
   organization_id?: string;
 
   @ApiPropertyOptional({ description: 'Restrict resource visibility to team members only' })

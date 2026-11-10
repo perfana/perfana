@@ -4456,21 +4456,6 @@ organization, so only direct API callers hit it. Raised by the /ship adversarial
 
 **Effort:** XS **Priority:** P3 **Depends on:** nothing.
 
-### Strict `@IsUUID()` refuses the Default Organization in six more DTOs (P2)
-
-**What:** Use `@IsUUID('loose')` (as `CreateProfileDto.organizationId` does since v0.2.97.57) for every
-organization or team id validated with the strict default: `teams/dto/team.dto.ts`
-(`CreateTeamDto.organization_id`, required), `api-keys/dto/create-api-key.dto.ts`,
-`alerts/dto/alert-tag-filter.dto.ts`, `audit/dto/audit-filter.dto.ts`, `events/dto/event.dto.ts`, and the
-metrics-sources create/update DTOs (`organizationId`, `teamId`).
-
-**Why:** The seeded Default Organization is `00000000-0000-0000-0000-000000000001`, which has no RFC
-version or variant nibble, so class-validator's strict `isUUID` refuses it: creating a team in the Default
-Organization answers 400, and so does any of the others that names it. `ParseUUIDPipe` and the template
-codec are already loose. Found by the /ship adversarial review of PR #716, outside its scope.
-
-**Effort:** XS (human ~1h / CC ~10min) **Priority:** P2 **Depends on:** nothing.
-
 ### Runs closed by stale detection never run the golden-path applier (P3)
 
 **What:** Call `applyGoldenPathClassifications` from `TestRunsStaleDetectionService` before it enqueues
@@ -4521,17 +4506,6 @@ review of PR #716 (2026-11-09); documented as a caveat in the reference page and
 
 **Effort:** M (human ~2d / CC ~1h) **Priority:** P2 **Depends on:** nothing.
 
-### A completion call that omits tags wipes the run's tags, and now its profile templates (P2)
-
-**What:** Make `update-test-run.handler.ts` keep the stored `tags` when the update payload omits them
-(today `tags: data.tags || []`), or confirm the CLI sends tags on every update.
-
-**Why:** Pre-existing, but since v0.2.97.57 the completing run's tags choose its profile ADAPT templates,
-so a completion call without tags reverts every profile-owned row of the workload (and with the applier's
-delete, removes the rows it inserted) and fires the stale trigger. Raised by the /ship adversarial review
-of PR #716.
-
-**Effort:** S (human ~2h / CC ~15min) **Priority:** P2 **Depends on:** nothing.
 
 ### Profile dashboards resolve a Grafana instance by label across organizations (P2)
 
@@ -4587,6 +4561,16 @@ an import into an environment without that profile. Raised by the /ship data-mig
 **Effort:** XS **Priority:** P3 **Depends on:** a new migration.
 
 ## Completed
+
+- **A completion call that omits tags wipes the run's tags, and now its profile templates** — **Completed:** v0.2.97.63 (2026-11-10).
+  An update that leaves `tags` out keeps the stored ones (`TestRunsMutationService` passes it through as
+  omitted, `UpdateTestRunHandler` falls back to the row's tags); an explicit `[]` still clears them. A create
+  still starts with none.
+
+- **Strict `@IsUUID()` refuses the Default Organization in six more DTOs** — **Completed:** v0.2.97.63 (2026-11-10).
+  Every organization and team id validated with the strict default is `@IsUUID('loose')`: the six the item
+  named plus `CreateSystemUnderTestDto`, found by sweeping the API for the same shape.
+  `src/common/validation/default-organization-uuid.spec.ts` pins all of them.
 
 - **`profiles.yaml` upserts a profile by name across organizations** — **Completed:** v0.2.97.62 (2026-11-10).
   `provisionProfiles` refuses a same-name profile in another organization than the file's instead of
