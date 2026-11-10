@@ -1758,7 +1758,8 @@ describe('ProfilesService', () => {
   });
 
   describe('provisioned SLO propagation', () => {
-    const base = (over: Partial<ProfileBenchmark> = {}) => ({ ...mockProfileBenchmark, ...over }) as ProfileBenchmark;
+    const base = (over: Partial<ProfileBenchmark> = {}) =>
+      ({ ...mockProfileBenchmark, organizationId: 'org-a', ...over }) as ProfileBenchmark;
     const perfTest = () => base({
       source: 'performance-metrics', profile_dashboard_id: undefined, grafana_instance: undefined,
       dashboard_uid: '^performance-test-metrics-', panel_id: 201, panel_title: 'Request RT Avg', panel_type: 'graph',
@@ -1782,8 +1783,8 @@ describe('ProfilesService', () => {
 
       const [sql, params] = dbQuery.mock.calls[0];
       expect(sql).toMatch(/SET enabled = false/);
-      expect(sql).toMatch(/generic_check_id = \$1 AND updated_by IS NULL AND enabled/);
-      expect(params).toEqual(['benchmark-uuid-1', 'autoDisabled', 'profile-slo-deleted']);
+      expect(sql).toMatch(/generic_check_id = \$1 AND organization_id = \$4 AND updated_by IS NULL AND enabled/);
+      expect(params).toEqual(['benchmark-uuid-1', 'autoDisabled', 'profile-slo-deleted', 'org-a']);
       expect(profileBenchmarkRepo.remove).toHaveBeenCalled();
     });
 
@@ -1797,7 +1798,7 @@ describe('ProfilesService', () => {
       await service.updateBenchmark('profile-uuid-1', 'benchmark-uuid-1', { ...dto, requirementValue: 1 } as any, mockUserId, mockOrgScope);
 
       expect(dbQuery).toHaveBeenCalledTimes(1);
-      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'autoDisabled', 'profile-slo-retargeted']);
+      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'autoDisabled', 'profile-slo-retargeted', 'org-a']);
     });
 
     it('a threshold, operator or evaluate-type change rewrites the untouched provisioned SLOs in place', async () => {
@@ -1812,7 +1813,8 @@ describe('ProfilesService', () => {
       expect(dbQuery).toHaveBeenCalledTimes(1);
       const [sql, params] = dbQuery.mock.calls[0];
       expect(sql).toMatch(/SET requirement_operator = \$2::text/);
-      expect(sql).toMatch(/WHERE generic_check_id = \$1 AND updated_by IS NULL$/m);
+      expect(sql).toMatch(/WHERE generic_check_id = \$1 AND organization_id = \$11 AND updated_by IS NULL$/m);
+      expect(params[10]).toBe('org-a');
       expect(params.slice(0, 6)).toEqual(['benchmark-uuid-1', 'gt', 5, 'max', mockProfileBenchmark.metric_unit ?? null, null]);
       // the profile row is saved after the provisioned rows are moved
       expect(dbQuery.mock.invocationCallOrder[0]).toBeLessThan(profileBenchmarkRepo.save.mock.invocationCallOrder[0]);
@@ -1827,7 +1829,7 @@ describe('ProfilesService', () => {
 
       expect(sqls()).toHaveLength(1);
       expect(sqls()[0]).toMatch(/SET panel_title = \$2::text, configuration = configuration \|\| jsonb_build_object\('id', \$3::text/);
-      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'Request Error Rate', '205', 'graph']);
+      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'Request Error Rate', '205', 'graph', 'org-a']);
     });
 
     it('a panel change on a dynatrace-hosts SLO reads each host\'s panel id and disables hosts without it', async () => {
@@ -1841,10 +1843,10 @@ describe('ProfilesService', () => {
       expect(sqls()).toHaveLength(2);
       expect(sqls()[0]).toMatch(/FROM dynatrace_queries dq/);
       expect(sqls()[0]).toMatch(/dq\.panel_title = \$2::text AND dq\.enabled/);
-      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'Memory Usage']);
+      expect(dbQuery.mock.calls[0][1]).toEqual(['benchmark-uuid-1', 'Memory Usage', 'org-a']);
       expect(sqls()[1]).toMatch(/SET enabled = false/);
       expect(sqls()[1]).toMatch(/panel_title IS DISTINCT FROM \$2::text/);
-      expect(dbQuery.mock.calls[1][1]).toEqual(['benchmark-uuid-1', 'Memory Usage', 'autoDisabled']);
+      expect(dbQuery.mock.calls[1][1]).toEqual(['benchmark-uuid-1', 'Memory Usage', 'autoDisabled', 'org-a']);
     });
 
     it('a move onto a panel that already has an enabled SLO is a 409 and the profile row is not saved', async () => {

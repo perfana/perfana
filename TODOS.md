@@ -312,9 +312,10 @@ provisioned rows (`metadata.autoDisabled`) and the sweep re-enables the still-ma
 run of that workload ends inside its 5-minute window — which can be after that run's
 `checks-evaluation`, so the first run after the change may carry no verdict for it. Two smaller
 residues: a re-enable refused by `uq_benchmarks_active_metric_target` is retried (and warned about)
-on every sweep while the row keeps its marker; and propagation is not scoped to the profile's
-organization, because provisioning matches profiles by name across organizations and
-`generic_check_id` is the only ownership key. Fix the first by having the API enqueue a sweep for
+on every sweep while the row keeps its marker; and propagation is scoped to the profile's
+organization (an org admin's request must not write another tenant's rows), while provisioning
+matches profiles by name across organizations — so rows a profile provisioned into another
+organization's runs stay write-once. Fix the first by having the API enqueue a sweep for
 the affected workloads after commit (`runAfterRequestCommit`).
 
 ---
