@@ -979,6 +979,21 @@ reaches, an absent one keeps each panel's own value. Three rules:
   fraction; re-deriving the stored value from the displayed text would rewrite a provisioned
   `0.1234567890123456` on a copy. `toDefinition` keeps the original while the text is unchanged.
 
+### "Save as template" on the anomaly card builds a definition, it does not save the row
+
+`MetricConfigForm` shows **Save as template** when given `onTemplateSaved` (v0.2.97.67). It opens
+`configuration-comparison/PromoteTemplateDialog.tsx`, which POSTs the definition built by
+`buildPromotedDefinition` (`promote-template.ts`) to an existing template collection. Three rules:
+
+- **The row is never saved by it.** Promotion must not change the workload it came from; `onSave` is not
+  called. The definition is built from the form's current values, so unsaved edits go into the template.
+- **A title template carries no panel id or uid**, and a uid template carries both. A panel id is unique only
+  within one dashboard (root CLAUDE.md #43), so `panelId` without `dashboardUid` would reach every dashboard
+  of the workload that happens to have that id.
+- **The default target is derived, not stored.** The profiles load after the dialog opens; a `useEffect` that
+  picked `targets[0]` stuck on the organization because it was still valid when the matching profile arrived.
+  `targetKey` falls back to `targets[0]` until the user picks.
+
 ### Series grouping in the web: where a group's badge comes from, and what the dialog fetches
 
 Series grouping (v0.2.97.43; design in `docs/design/2026-11-01-series-grouping-design.md`) has

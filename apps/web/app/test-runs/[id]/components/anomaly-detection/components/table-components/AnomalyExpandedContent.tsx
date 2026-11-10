@@ -406,6 +406,9 @@ export function AnomalyExpandedContent({
                     panelTitle: row.panel_title || 'Unknown Panel',
                     metricName: row.metric_name,
                     dashboardLabel: row.dashboard_label || 'Unknown Dashboard',
+                    dashboardUid: row.dashboard_uid,
+                    organizationId: testRun?.organizationId ?? testRun?.organization_id ?? testRun?.system_under_test?.organization_id ?? null,
+                    runTags: testRun?.tags,
                     currentConfig: (() => {
                       const drawerRecord = drawerData;
                       type NestedConfig = Record<string, unknown>;
@@ -435,6 +438,7 @@ export function AnomalyExpandedContent({
                   }}
                   onSave={onConfigSave}
                   onCancel={onConfigFormToggle}
+                  onTemplateSaved={showToast ?? (() => undefined)}
                 />
               ) : (
                 <StatisticalDrawerContent

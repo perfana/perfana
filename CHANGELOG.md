@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.67] - 2026-11-10
+
+### Added
+- **Save as template from the anomaly card.** The ADAPT settings form of an anomaly-card row (the gear, **Configure Metric**) has a **Save as template** button. It makes the values in the form an ADAPT template, so a panel you tuned on one run is judged the same way on every workload that has it, from that workload's next completed run. Choose where it goes (a profile this run matches, all runs in the run's organization, or, for a global admin, the whole install) and which dashboards it reaches: this dashboard, or every dashboard with a panel of this title, which is the default for Dynatrace host and performance-test scenario dashboards because those have a dashboard per host or scenario. On a row with a series name you also choose between the whole panel and that one series. The row itself is not changed and stays a hand edit.
+
 ## [0.2.97.66] - 2026-11-10
 
 ### Added
