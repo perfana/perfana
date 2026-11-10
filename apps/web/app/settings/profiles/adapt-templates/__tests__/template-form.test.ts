@@ -17,7 +17,6 @@ const full: CompareTemplateDefinition = {
   higherIsBetter: null,
   absThreshold: null,
   ignore: false,
-  ignoreMeanDiffSmallerThan: 0,
   percentageThreshold: 0.15,
   iqrThreshold: 2,
   aggregation: 'q95',

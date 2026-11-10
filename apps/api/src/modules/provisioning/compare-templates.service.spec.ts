@@ -294,6 +294,7 @@ describe('CompareTemplatesService', () => {
       // The global ValidationPipe would strip it silently; the controller passes the body raw so the
       // codec sees it, and a template that would force nothing is refused with the codec's hint.
       ['a misspelt field', { absoluteThreshold: 5 } as never, /unknown field "absoluteThreshold" ignored \(did you mean "absThreshold"\?\)/],
+      ['the retired ignoreMeanDiffSmallerThan', { ignoreMeanDiffSmallerThan: 5 } as never, /field "ignoreMeanDiffSmallerThan" ignored: .*use absThreshold/],
       ['a value too long for its column', { dashboardUid: 'x'.repeat(256) }, /dashboardUid must be shorter than or equal to 255 characters/],
       ['a string where a number belongs', { panelId: '7' as never }, /panelId must be an integer number/],
     ])('refuses %s with 400', async (_label, over, message) => {
@@ -648,7 +649,7 @@ describe('CompareTemplatesService', () => {
         { kind: 'organization', organizationId: ORG_A },
         def({
           dashboardLabel: 'JVM', panelTitle: 'Heap', metricName: 'heap used', higherIsBetter: true, ignore: false,
-          ignoreMeanDiffSmallerThan: 0, iqrThreshold: 2, aggregation: 'q95', minSampleCount: 3, defaultValueIfControlGroupMissing: 0,
+          iqrThreshold: 2, aggregation: 'q95', minSampleCount: 3, defaultValueIfControlGroupMissing: 0,
         }),
         ...asAdmin,
       );

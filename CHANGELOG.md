@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.64] - 2026-11-10
+
+### Removed
+- **`ignoreMeanDiffSmallerThan` is gone from ADAPT templates.** ADAPT never read it, and an absolute threshold (`absThreshold`) is how a small mean difference is ignored. The template dialog no longer offers "Ignore mean difference below", and the API refuses the field with a message naming `absThreshold`. In `template_ds_compare_configs.yaml` an item that still sets it is provisioned without it and the API logs a warning, so existing files keep loading; delete the line to silence the warning. Templates that set it stop writing it into the panels' anomaly detection configs, so on the next completed run those panels' configs change once and their earlier ADAPT results are marked stale. Verdicts do not change, since nothing read the value.
+
 ## [0.2.97.63] - 2026-11-10
 
 ### Fixed

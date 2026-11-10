@@ -152,7 +152,7 @@ describe('golden-path resolver', () => {
      *   without the resolver mapping it;
      * why_new=the cases above name 5 of the 9 keys and nothing ties the resolver to the codec's list;
      * seam=none;
-     * no_claim=that the worker reads each key (ignoreMeanDiffSmallerThan has no worker reader); pure
+     * no_claim=that the worker reads each key (defaultValueIfControlGroupMissing has no worker reader yet); pure
      *   functions, unit only
      */
     describe('agrees with the codec on every override key', () => {
@@ -161,7 +161,6 @@ describe('golden-path resolver', () => {
         higherIsBetter: { value: false, at: ['metricClassification', 'higherIsBetter'] },
         absThreshold: { value: 123, at: ['thresholds', 'absoluteThreshold'] },
         ignore: { value: true, at: ['ignore'] },
-        ignoreMeanDiffSmallerThan: { value: 7, at: ['ignoreMeanDiffSmallerThan'] },
         percentageThreshold: { value: 0.42, at: ['thresholds', 'percentageThreshold'] },
         iqrThreshold: { value: 9, at: ['thresholds', 'iqrThreshold'] },
         aggregation: { value: 'q99', at: ['thresholds', 'aggregation'] },

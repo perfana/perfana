@@ -23,7 +23,6 @@ export const OVERRIDE_KEYS = [
   'higherIsBetter',
   'absThreshold',
   'ignore',
-  'ignoreMeanDiffSmallerThan',
   'percentageThreshold',
   'iqrThreshold',
   'aggregation',
@@ -61,7 +60,6 @@ export interface MetricClassificationYaml {
   higherIsBetter?: boolean | null;
   absThreshold?: number | null;
   ignore?: boolean;
-  ignoreMeanDiffSmallerThan?: number;
   /** A fraction, as stored: 0.15 is 15 %. */
   percentageThreshold?: number;
   iqrThreshold?: number;
@@ -144,6 +142,16 @@ const KNOWN_KEYS = new Set<string>([
 ]);
 /** The config_data spellings an operator copies from a stored row, mapped to the file's own. */
 const NEAR_MISSES: Record<string, string> = { absoluteThreshold: 'absThreshold', higherIsbetter: 'higherIsBetter' };
+/**
+ * Fields the format used to accept and no longer does, with what to use instead. They are reported
+ * like an unknown field (a warning in the file, a 400 from the API), with a reason rather than a
+ * near-miss hint. `ignoreMeanDiffSmallerThan` was stored for years and never read by ADAPT, and an
+ * absolute threshold (`absThreshold`) is how a small mean difference is ignored (v0.2.97.64).
+ */
+const RETIRED: Record<string, string> = {
+  ignoreMeanDiffSmallerThan:
+    'is no longer supported (ADAPT never read it); use absThreshold, the absolute threshold ADAPT applies, to ignore a small difference',
+};
 /**
  * Misspellings of `profile`, two of them the API response's own field names. Unlike a misspelt
  * override, which forces nothing, ignoring one of these WIDENS the template from a profile to its
@@ -278,7 +286,11 @@ export function parseTemplateItem(
   const overrides: Record<string, unknown> = {};
   const warnings: string[] = Object.keys(item)
     .filter((k) => !KNOWN_KEYS.has(k))
-    .map((k) => `unknown field "${k}" ignored${Object.hasOwn(NEAR_MISSES, k) ? ` (did you mean "${NEAR_MISSES[k]}"?)` : ''}`);
+    .map((k) =>
+      Object.hasOwn(RETIRED, k)
+        ? `field "${k}" ignored: it ${RETIRED[k]}`
+        : `unknown field "${k}" ignored${Object.hasOwn(NEAR_MISSES, k) ? ` (did you mean "${NEAR_MISSES[k]}"?)` : ''}`,
+    );
   for (const field of OVERRIDE_KEYS) {
     if (!(field in item) || item[field] === undefined) continue;
     const v = item[field];
@@ -297,7 +309,6 @@ export function parseTemplateItem(
         if (!isFiniteNumber(v) || v < 0 || v > 1) return fail('percentageThreshold must be a fraction from 0 to 1 (0.15 is 15 %)');
         break;
       case 'iqrThreshold':
-      case 'ignoreMeanDiffSmallerThan':
         if (!isFiniteNumber(v) || v < 0) return fail(`${field} must be a number of at least 0`);
         break;
       case 'aggregation':

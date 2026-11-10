@@ -35,7 +35,6 @@ export interface CompareTemplateDefinition {
   higherIsBetter?: boolean | null;
   absThreshold?: number | null;
   ignore?: boolean;
-  ignoreMeanDiffSmallerThan?: number;
   /** A fraction, as stored: 0.15 is 15 %. */
   percentageThreshold?: number;
   iqrThreshold?: number;
