@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.62] - 2026-11-10
+
+### Fixed
+- **Editing a profile SLO now changes the SLOs it created.** Profile SLOs ("every scenario", "Dynatrace — all hosts" and Grafana templates) used to be written once: after a change to the profile SLO, every system kept judging the old panel or threshold. A change to the threshold, operator, aggregation, unit, match pattern or panel is now written to those SLOs straight away. For "Dynatrace — all hosts", each host gets its own panel for the new metric, and a host without that panel has its SLO switched off.
+- **Deleting a profile SLO switches off the SLOs it created.** They used to keep evaluating forever. They are disabled, not deleted, so past results stay readable.
+- **Changing what a profile SLO covers** (its source, dashboard pattern or workload pattern) switches its SLOs off. Each one is switched back on, with the new settings, the next time a test run of that workload finishes and the profile still covers that dashboard.
+- **An SLO you edited by hand stays yours.** None of the above touches an SLO someone has saved in the system's SLO list since it was created: it keeps its values and stays on, even when the profile SLO is deleted.
+- **Renaming a Dynatrace query no longer leaves its SLOs with nothing to evaluate.** A rename gives the query a new panel id. Its SLOs and ADAPT settings now move to that id with it. Previously they read "No targets found", which counts as a pass.
+- **Unmapping a Dynatrace host, or deleting one of its queries, switches off the SLOs on it.** If the host is mapped again, its profile SLOs come back on the next run.
+- **A profile SLO change that would put a second enabled SLO on a panel is refused with a 409**, and nothing is saved. Change the match pattern or disable the other SLO first.
+
+### Known limitations
+- The system's SLO list does not show which SLOs come from a profile, and does not warn that editing one stops it following the profile.
+- A changed source or pattern takes effect from the next test run. Until then that profile SLO is not evaluated on the dashboards it covered.
+
 ## [0.2.97.61] - 2026-11-09
 
 ### Added

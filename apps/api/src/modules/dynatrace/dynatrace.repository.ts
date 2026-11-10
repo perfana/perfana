@@ -14,6 +14,7 @@ import { UpdateDynatraceQueryDto } from './dto/update-dynatrace-query.dto';
 import { CreateEntityMappingDto } from './dto/create-entity-mapping.dto';
 import { generateDeterministicUuid } from '../../utils/uuid-generator';
 import { DYNATRACE_HOST_COMPARE_SOURCE } from '../../constants/ds-compare-config.constants';
+import { PROVISIONED_SLO_AUTO_DISABLED_KEY } from '@perfana/shared/constants';
 
 /**
  * The dashboard a host's four metric queries hang off. This string is the ONLY
@@ -346,9 +347,11 @@ export class DynatraceRepository {
     if (dto.metricName !== undefined) updateData.metricName = dto.metricName;
     if (dto.enabled !== undefined) updateData.enabled = dto.enabled;
 
+    const renamed = dto.dashboardLabel !== undefined || dto.panelTitle !== undefined;
+    const current = renamed || dto.panelId !== undefined ? await this.findQueryById(id) : null;
+
     // If dashboardLabel or panelTitle are being updated but panelId is not explicitly provided, regenerate it
-    if ((dto.dashboardLabel !== undefined || dto.panelTitle !== undefined) && dto.panelId === undefined) {
-      const current = await this.findQueryById(id);
+    if (renamed && dto.panelId === undefined) {
       if (current) {
         const finalDashboardLabel = dto.dashboardLabel !== undefined ? dto.dashboardLabel : current.dashboardLabel;
         const finalPanelTitle = dto.panelTitle !== undefined ? dto.panelTitle : current.panelTitle;
@@ -362,11 +365,67 @@ export class DynatraceRepository {
     if (!result) {
       throw new NotFoundException(`Query with id ${id} not found after update`);
     }
+    if (current?.applicationDashboardId && updateData.panelId !== undefined && updateData.panelId !== current.panelId) {
+      await this.carryPanelIdForward(current.applicationDashboardId, current.panelId, result);
+    }
     return this.mapEntityToDtoFields(result);
   }
 
+  /**
+   * A renamed query gets a new panel id (generatePanelId hashes label + title), and its new data
+   * lands under that id. SLOs and ADAPT compare configs on the old id would find no statistics
+   * from then on — an SLO reports "No targets found", which counts as a pass — and a
+   * profile-provisioned SLO is never re-provisioned, because its row still exists. So move
+   * them with the query. Touches every SLO on the panel, hand-made ones included, and leaves
+   * `updated_by` alone so a profile SLO stays profile-owned.
+   */
+  private async carryPanelIdForward(applicationDashboardId: string, oldPanelId: number, query: DynatraceQuery) {
+    const em = withRequestQuery(this.dataSource);
+    await em.query(
+      `UPDATE benchmarks
+          SET panel_title = $4::text,
+              configuration = configuration
+                || jsonb_build_object('id', $3::text, 'title', $5::text || ' - ' || $4::text),
+              updated_at = now()
+        WHERE application_dashboard_id = $1 AND configuration->>'id' = $2::text`,
+      [applicationDashboardId, String(oldPanelId), String(query.panelId), query.panelTitle, query.dashboardLabel],
+    );
+    await em.query(
+      `UPDATE ds_compare_config c SET panel_id = $3
+        WHERE c.application_dashboard_id = $1 AND c.panel_id = $2
+          AND NOT EXISTS (SELECT 1 FROM ds_compare_config n WHERE n.application_dashboard_id = $1 AND n.panel_id = $3)`,
+      [applicationDashboardId, oldPanelId, query.panelId],
+    );
+  }
+
   async deleteQuery(id: string) {
+    const current = await withRequestEm(this.queryRepo).findOne({ where: { id } });
     await withRequestEm(this.queryRepo).delete(id);
+    if (current?.applicationDashboardId) {
+      await this.disableSlosWithoutQuery(current.applicationDashboardId, current.panelId, 'dynatrace-query-deleted');
+    }
+  }
+
+  /**
+   * Switch off the SLOs on an artificial Dynatrace dashboard whose panel no longer has a query
+   * behind it (all panels when `panelId` is null): they can never see data again. Disabled,
+   * not deleted, so their check results stay. The marker lets grafana-sync switch a
+   * profile-provisioned one back on if the host is mapped again; a hand-made one stays off.
+   */
+  private async disableSlosWithoutQuery(applicationDashboardId: string, panelId: number | null, reason: string) {
+    await withRequestQuery(this.dataSource).query(
+      `UPDATE benchmarks b
+          SET enabled = false,
+              metadata = COALESCE(b.metadata, '{}'::jsonb) || jsonb_build_object($3::text, $4::text),
+              updated_at = now()
+        WHERE b.application_dashboard_id = $1 AND b.enabled
+          AND ($2::text IS NULL OR b.configuration->>'id' = $2::text)
+          AND NOT EXISTS (
+            SELECT 1 FROM dynatrace_queries dq
+             WHERE dq.application_dashboard_id = $1 AND dq.panel_id::text = b.configuration->>'id'
+          )`,
+      [applicationDashboardId, panelId === null ? null : String(panelId), PROVISIONED_SLO_AUTO_DISABLED_KEY, reason],
+    );
   }
 
   /**
@@ -729,6 +788,7 @@ export class DynatraceRepository {
       `DELETE FROM ds_compare_config WHERE application_dashboard_id = $1`,
       [applicationDashboardId],
     );
+    await this.disableSlosWithoutQuery(applicationDashboardId, null, 'dynatrace-host-unmapped');
     return affected ?? 0;
   }
 

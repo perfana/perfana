@@ -302,32 +302,20 @@ comments in 1799 and in "The consolidated schema's policy loops…" below that a
 
 ## Profile SLOs
 
-### Profile SLOs are write-once, and "Dynatrace — all hosts" multiplies the stale rows (P2)
+### A retargeted profile SLO goes unevaluated until the next sweep (P3)
 
-**Priority:** P2. **Origin:** /ship red-team review of perfana/perfana#730 (v0.2.97.61).
+**Origin:** v0.2.97.62, propagating profile SLO edits.
 
-`BenchmarkProcessorService.createBenchmarkIfNotExists` skips any `benchmarks` row already keyed on
-`(application_dashboard_id, generic_check_id, workload)`, and nothing in grafana-sync, the API or
-the worker updates or deletes benchmarks by `generic_check_id`. `ProfilesService.deleteBenchmark`
-removes only the profile row. So for a `dynatrace-hosts` profile SLO:
-
-- changing its panel, threshold or operator leaves every host judging the old one;
-- switching its source to `grafana` leaves N enabled per-host `dynatrace` SLOs beside the new ones;
-- deleting it leaves them all evaluating forever.
-
-The provisioned rows carry `source = 'dynatrace'`, so `generic_check_id` is the only marker that
-they are profile-owned. Perf-test (`performance-metrics`) profile SLOs have the same behaviour, but
-one host profile row creates hosts x workloads rows.
-
-A related silent case: `DynatraceRepository.updateQuery` regenerates `panel_id` when a query's panel
-title or dashboard label is renamed, so a provisioned host SLO keeps the old `configuration.id`,
-finds no statistics, reports "No targets found" (`meets_requirement` NULL, counted as a pass) and is
-never re-provisioned. Unmapping a host (`deleteHostMetricQueries`) leaves its SLOs behind the same way.
-
-Options: have `ProfilesService.updateBenchmark`/`deleteBenchmark` disable `benchmarks WHERE
-generic_check_id = :id` in the same transaction, or have the processor re-sync existing rows
-(threshold, panel, evaluate type) and disable rows whose host no longer matches. Pin host-query
-panel titles to `HOST_METRICS`, or carry the panel id forward on rename.
+A source, uid-pattern or workload-pattern change cannot be applied in place, because which
+dashboards a profile SLO covers is decided by grafana-sync's sweep. `ProfilesService` disables the
+provisioned rows (`metadata.autoDisabled`) and the sweep re-enables the still-matched ones when a
+run of that workload ends inside its 5-minute window — which can be after that run's
+`checks-evaluation`, so the first run after the change may carry no verdict for it. Two smaller
+residues: a re-enable refused by `uq_benchmarks_active_metric_target` is retried (and warned about)
+on every sweep while the row keeps its marker; and propagation is not scoped to the profile's
+organization, because provisioning matches profiles by name across organizations and
+`generic_check_id` is the only ownership key. Fix the first by having the API enqueue a sweep for
+the affected workloads after commit (`runAfterRequestCommit`).
 
 ---
 
@@ -993,22 +981,21 @@ that is a delete+insert on a compressed chunk, not an in-place update.
 
 ---
 
-### Profile-provisioned SLOs are write-once and can miss a scenario dashboard created late
+### Profile-provisioned SLOs come back after a delete, and can miss a scenario dashboard created late
 
 **Priority:** P3
 **Origin:** red-team review on `feat/profile-perf-test-slos` (2026-09-22, v0.2.96.6). Both
 pre-existing for Grafana templates; a perf-test row fans out to N scenarios, so both now scale
-with scenario count.
-**Why:** (1) `createBenchmarkIfNotExists` only inserts; editing the profile benchmark never
-propagates to the rows it provisioned, `ProfilesService.deleteBenchmark` leaves them behind
-(`benchmarks.generic_check_id` has no FK), and a row deleted in the SUT SLO table is re-created
-within 2 min while any run of the workload is inside the auto-config window. (2) That window is
+with scenario count. Edits and deletes of the profile SLO itself propagate since v0.2.97.62.
+**Why:** (1) a row deleted in the SUT SLO table is re-created within 2 min while any run of the
+workload is inside the auto-config window (disabling it instead is the supported way out), and
+provisioned rows are not marked read-only in the SUT UI, so a person's edit silently takes the row
+out of profile propagation (`updated_by` is set). (2) That window is
 `end_time >= now - 5 min`; a scenario dashboard written only by the analyze full pass (SUT import,
 force re-fetch, a scenario first seen in the final tick) can land after the window closes when
 analyze parks behind `HeavyStageMutex`, so that SUT/env/workload has no SLO until a later run.
-**What:** (1) use the existing update branch of `insertBenchmarkBasedOnProfileBenchmark` when the
-profile row's `updated_at` is newer, cascade `deleteBenchmark` by `generic_check_id`, and mark
-provisioned rows read-only in the SUT UI. (2) also select runs whose `application_dashboards`
+**What:** (1) show provisioned rows as profile-owned in the SUT UI, and say there that an edit
+detaches the row from its profile. (2) also select runs whose `application_dashboards`
 rows were created in the last N minutes, or have `DashboardManager` enqueue auto-config after it
 creates a scenario dashboard.
 

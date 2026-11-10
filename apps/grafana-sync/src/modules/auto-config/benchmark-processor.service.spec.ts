@@ -208,3 +208,50 @@ it('skips a perf-test benchmark whose workload pattern does not match, before an
   expect(finder.findApplicationDashboardsByUidPattern).not.toHaveBeenCalled();
   expect(updates.insertBenchmarkBasedOnProfileBenchmark).not.toHaveBeenCalled();
 });
+
+describe('a row the system switched off', () => {
+  const pb: any = {
+    id: 'pb-1',
+    profile: { name: 'jmeter' },
+    source: 'performance-metrics',
+    workload_pattern: '.*',
+  };
+
+  it('is re-synced and switched back on when its profile SLO still matches the dashboard', async () => {
+    const { service, updates } = build();
+    (service as any).testRunFinderService.findBenchmarkForApplicationDashboardOrNull
+      .mockResolvedValueOnce({
+        id: 'b1',
+        enabled: false,
+        metadata: { autoDisabled: 'profile-slo-retargeted' },
+      })
+      .mockResolvedValueOnce({ id: 'b2', enabled: true, metadata: {} });
+
+    await service.processProfileBenchmarks(testRun, ['jmeter'], [pb]);
+
+    expect(updates.insertBenchmarkBasedOnProfileBenchmark).toHaveBeenCalledTimes(1);
+    expect(updates.insertBenchmarkBasedOnProfileBenchmark.mock.calls[0][2]).toEqual({
+      id: 'ad-scen-1',
+    });
+  });
+
+  it.each([
+    ['a person disabled it', { enabled: false, metadata: {} }],
+    [
+      'a person edited it after the system did',
+      { enabled: false, updated_by: 'u1', metadata: { autoDisabled: 'x' } },
+    ],
+  ])('stays as it is when %s', async (_label, row) => {
+    const { service, updates } = build();
+    (
+      service as any
+    ).testRunFinderService.findBenchmarkForApplicationDashboardOrNull.mockResolvedValue({
+      id: 'b',
+      ...row,
+    });
+
+    await service.processProfileBenchmarks(testRun, ['jmeter'], [pb]);
+
+    expect(updates.insertBenchmarkBasedOnProfileBenchmark).not.toHaveBeenCalled();
+  });
+});
