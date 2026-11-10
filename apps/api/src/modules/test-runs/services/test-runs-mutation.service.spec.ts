@@ -323,6 +323,21 @@ describe('TestRunsMutationService', () => {
       expect(bullmqClientService.analyzeTest).toHaveBeenCalledWith(mockNewTestRun.test_run_id, { adapt: true, benchmarksOnly: false });
     });
 
+    it('passes an omitted tags field to the update handler as omitted, never as an empty list', async () => {
+      const updateDto = { ...createMockUpdateDto(), completed: true, tags: undefined };
+      const existing = createMockTestRunEntity({ completed: false });
+      lookupService.findOrCreateSystemUnderTest.mockResolvedValue({ id: 'sys-123', name: 'PaymentService' });
+      lookupService.findOrCreateTestEnvironment.mockResolvedValue({ id: 'env-123', name: 'production' });
+      lookupService.findOrCreateWorkload.mockResolvedValue({ id: 'work-123', name: 'loadTest' });
+      testRunRepo.findOne.mockResolvedValue(existing);
+      updateTestRunHandler.execute.mockResolvedValue({ success: true, data: createMockTestRun(createMockTestRunEntity({ completed: true })) });
+      bullmqClientService.analyzeTest.mockResolvedValue({ jobId: 'job-123' });
+
+      await service.updateRunningTest(updateDto, mockUserId, mockRoles, mockOrganizationId);
+
+      expect(updateTestRunHandler.execute.mock.calls[0][0].data.tags).toBeUndefined();
+    });
+
     it("hands the completing run's tags to the golden-path applier, which picks profile templates by them", async () => {
       const updateDto = { ...createMockUpdateDto(), completed: true };
       const mockNewTestRun = createMockTestRun(createMockTestRunEntity({ completed: true }));

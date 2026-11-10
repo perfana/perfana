@@ -881,7 +881,10 @@ fields the current winning template names. Eight things that are easy to undo:
    differently tagged completion in between, or a re-evaluate of an older run, judges that run on the
    other set; recording each run's matched profiles is filed in TODOS.md. A tie between two profiles is
    decided by profile name and reported apart from id ties (`decided by profile name:`), leaving the
-   existing `decided by template id:` text untouched.
+   existing `decided by template id:` text untouched. A completion call that omits `tags` keeps the run's stored
+   tags (v0.2.97.63): `UpdateTestRunHandler` used to write `data.tags || []`, which reverted every
+   profile-owned row of the workload on a CI step that did not repeat its tags. Keep the omission an
+   omission end to end; only an explicit `[]` clears them.
 5. **`higherIsBetter` is named through `config_overrides` first.** A template that omits it leaves the
    row's own direction, where the merge used to write `null`. The `higher_is_better` column still
    counts when set and the key is missing, and that fallback is load-bearing, not a leftover: it is

@@ -40,7 +40,7 @@ export class CreateSystemUnderTestDto {
   description?: string;
 
   @ApiProperty({ description: 'Organization ID (UUID)', example: '550e8400-e29b-41d4-a716-446655440000' })
-  @IsUUID('4')
+  @IsUUID('loose')
   @IsNotEmpty()
   organizationId!: string;
 
@@ -49,7 +49,7 @@ export class CreateSystemUnderTestDto {
     example: '550e8400-e29b-41d4-a716-446655440001',
   })
   @IsOptional()
-  @IsUUID('4')
+  @IsUUID('loose')
   teamId?: string;
 
   @ApiPropertyOptional({

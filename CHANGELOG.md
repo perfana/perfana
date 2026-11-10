@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.97.63] - 2026-11-10
+
+### Fixed
+- **A completion call that leaves out `tags` no longer clears the run's tags.** The test-run update endpoint (`POST /api/test`) treated a missing `tags` field as an empty list, so a CI step that posted `completed: true` without repeating the tags wiped them. Since v0.2.97.57 the completing run's tags choose its profile ADAPT templates, so such a call also reverted every profile-configured panel of the workload and marked its earlier results stale. An omitted `tags` now keeps the stored tags; sending `"tags": []` still clears them.
+- **The Default Organization can be named when creating a team, an API key, a system under test, a metrics source, an event or an alert tag filter, and in the audit log filter.** Its seeded id (`00000000-0000-0000-0000-000000000001`) is not a version-4 UUID, and these fields used the strict UUID check, so naming it answered 400. Organization and team ids are now checked the loose way, as profiles already were.
+
 ## [0.2.97.62] - 2026-11-10
 
 ### Security
